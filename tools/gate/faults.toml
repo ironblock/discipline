@@ -7017,6 +7017,62 @@ failure_class = "drive.canned-registry-scan-reads-nothing"
 migrated = false
 
 [[fault]]
+id = "drive.session-drops-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-drops-timings"
+failure_class = "drive.session-drops-timings"
+migrated = false
+
+[[fault]]
+id = "drive.session-response-reasoning-dropped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-response-reasoning-dropped"
+failure_class = "drive.session-response-reasoning-dropped"
+migrated = false
+
+[[fault]]
+id = "drive.session-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-drops-progress"
+failure_class = "drive.session-drops-progress"
+migrated = false
+
+[[fault]]
+id = "drive.session-overflow-logged-as-server"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-overflow-logged-as-server"
+failure_class = "drive.session-overflow-logged-as-server"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-timings-line-drops-the-cache-count"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-timings-line-drops-the-cache-count"
+failure_class = "drive.session-a-timings-line-drops-the-cache-count"
+migrated = false
+
+[[fault]]
+id = "drive.session-logs-progress-after-the-end"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-logs-progress-after-the-end"
+failure_class = "drive.session-logs-progress-after-the-end"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-timings-line-drops-a-draft-count"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-timings-line-drops-a-draft-count"
+failure_class = "drive.session-a-timings-line-drops-a-draft-count"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"

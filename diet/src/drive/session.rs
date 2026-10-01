@@ -42,8 +42,8 @@
 //! is logged in the same critical section, so the log never says less than
 //! the state.
 //!
-//! **What this does not do yet**, and says: no timings or cache telemetry on
-//! a turn (R3), no fork in the capture gap (R4), no patches (R5), and no
+//! **What this does not do yet**, and says: no fork in the capture gap (R4),
+//! no patches (R5), and no
 //! seam -- [`Session::declare_seam`] is refused as [`Refusal::SeamNotBuilt`]
 //! until R6, so the command exists for the surface to wire and answers
 //! truthfully meanwhile. The log is in memory. It is a format,
@@ -57,7 +57,9 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::client::shape::{Message, RequestShape, Role};
-use crate::client::stream::{Cancel, Ended as StreamEnded, Piece, Streaming};
+use crate::client::stream::{
+    Cancel, Ended as StreamEnded, Piece, Progress, Rejection, Streaming, Timings,
+};
 use crate::client::transport::TransportFailure;
 use crate::client::vocabulary;
 use crate::formats::log;
@@ -245,6 +247,14 @@ pub enum Event {
         /// The piece, as the server sent it.
         text: String,
     },
+    /// The server's count of the call's prompt, prefilled so far (#117 R3):
+    /// one per frame it streams, before the call's first piece.
+    Progress {
+        /// The sequence number of the [`Event::Requested`] it counts.
+        request: u64,
+        /// The frame, as the server sent it.
+        progress: Progress,
+    },
     /// A piece of the trunk's answer arrived.
     Delta {
         /// The sequence number of the [`Event::Requested`] it answers.
@@ -269,6 +279,11 @@ pub enum Event {
         text: String,
         /// Why the server stopped, as it spelled it, if it said.
         finish_reason: Option<String>,
+        /// The whole reasoning: every [`Event::Reasoning`] of this turn, in
+        /// order, byte for byte -- the same string the trunk carries.
+        reasoning: Option<String>,
+        /// What the server measured of the call, as it reported it.
+        timings: Option<Timings>,
     },
     /// The turn was stopped. Neither its ask nor `partial` is on the trunk.
     Cancelled {
@@ -286,6 +301,9 @@ pub enum Event {
         status: u16,
         /// What the server said.
         body: String,
+        /// What kind of refusal its typed field says it is, if one this
+        /// client names.
+        class: Option<Rejection>,
         /// What arrived before the refusal.
         partial: String,
     },
@@ -865,13 +883,21 @@ pub fn line_of(logged: &Logged) -> log::Line {
             request,
             text,
             finish_reason,
+            reasoning,
+            timings,
         } => log::Event::Response {
             to_request: *request,
             text: text.clone(),
             finish_reason: finish_reason.clone(),
-            // R3.4 carries these; log v1 only makes room for them.
-            reasoning: None,
-            timings: None,
+            reasoning: reasoning.clone(),
+            timings: timings.as_ref().map(timings_line),
+        },
+        Event::Progress { request, progress } => log::Event::Progress {
+            request: *request,
+            total: progress.total,
+            cache: progress.cache,
+            processed: progress.processed,
+            time_ms: progress.time_ms,
         },
         Event::Cancelled { request, partial } => log::Event::Cancelled {
             request: *request,
@@ -881,10 +907,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
             request,
             status,
             body,
+            class,
             partial,
         } => log::Event::RequestFailed {
             request: *request,
-            reason: log::FailReason::Server,
+            reason: match class {
+                Some(Rejection::ContextOverflow) => log::FailReason::ContextOverflow,
+                None => log::FailReason::Server,
+            },
             message: body.clone(),
             status: Some(*status),
             partial: arrived(partial),
@@ -923,6 +953,23 @@ pub fn line_of(logged: &Logged) -> log::Line {
 #[must_use]
 pub fn render(logged: &Logged) -> String {
     log::render(&line_of(logged))
+}
+
+/// A call's timings as the log carries them: the same keys, the
+/// milliseconds as the digits the server wrote.
+fn timings_line(timings: &Timings) -> log::Timings {
+    let millis = |ms: &Option<crate::client::stream::Millis>| {
+        ms.as_ref().and_then(|ms| log::Millis::new(ms.as_str()))
+    };
+    log::Timings {
+        prompt_n: timings.prompt_n,
+        cache_n: timings.cache_n,
+        prompt_ms: millis(&timings.prompt_ms),
+        predicted_n: timings.predicted_n,
+        predicted_ms: millis(&timings.predicted_ms),
+        draft_n: timings.draft_n,
+        draft_n_accepted: timings.draft_n_accepted,
+    }
 }
 
 /// A failed call's line: a timeout is `timeout`, every other transport
@@ -1040,8 +1087,7 @@ fn call<S: Streaming>(
                         text: text.to_owned(),
                     }
                 }
-                // Not logged yet: log v1's `progress` line is R3.4's.
-                Piece::Progress(_) => return,
+                Piece::Progress(progress) => Event::Progress { request, progress },
             };
             shared.lock().push(event);
             shared.changed.notify_all();
@@ -1050,19 +1096,26 @@ fn call<S: Streaming>(
     let mut state = shared.lock();
     state.flight = None;
     match result {
-        Ok(StreamEnded::Finished { finish_reason, .. }) => {
+        Ok(StreamEnded::Finished {
+            finish_reason,
+            timings,
+        }) => {
             state.trunk.push(Message::new(Role::User, ask));
             // The reasoning goes back with the answer, byte for byte and
             // untrimmed: measured on e7051ef (#117, Q10), dropping it
             // diverges the next prompt at this turn, and a stray newline
-            // diverges it inside this turn.
+            // diverges it inside this turn. ONE binding feeds the trunk and
+            // the response line, so the two cannot differ (R3.4).
+            let reasoning = (!reasoning.is_empty()).then_some(reasoning);
             let mut answer = Message::new(Role::Assistant, partial.clone());
-            answer.reasoning = (!reasoning.is_empty()).then_some(reasoning);
+            answer.reasoning.clone_from(&reasoning);
             state.trunk.push(answer);
             state.push(Event::Answered {
                 request,
                 text: partial,
                 finish_reason,
+                reasoning,
+                timings,
             });
             state.push(Event::TurnSettled {
                 turn,
@@ -1081,11 +1134,16 @@ fn call<S: Streaming>(
             });
             state.move_to(Settlement::Awaiting);
         }
-        Ok(StreamEnded::Rejected { status, body, .. }) => {
+        Ok(StreamEnded::Rejected {
+            status,
+            body,
+            class,
+        }) => {
             state.push(Event::Rejected {
                 request,
                 status,
                 body,
+                class,
                 partial,
             });
             state.push(Event::TurnSettled {
@@ -1277,7 +1335,9 @@ pub(in crate::drive) mod tests {
                 Event::Answered {
                     request: 3,
                     text: "Hello!".to_owned(),
-                    finish_reason: Some("stop".to_owned())
+                    finish_reason: Some("stop".to_owned()),
+                    reasoning: None,
+                    timings: None,
                 },
                 Event::TurnSettled {
                     turn: 1,
@@ -1493,6 +1553,7 @@ pub(in crate::drive) mod tests {
                 request: 3,
                 status: 503,
                 body: "busy".to_owned(),
+                class: None,
                 partial: "par".to_owned()
             }));
         assert!(
@@ -1500,6 +1561,154 @@ pub(in crate::drive) mod tests {
                 .any(|logged| matches!(logged.event, Event::Answered { .. })),
             "a refusal was logged as an answer"
         );
+        assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
+    }
+
+    /// The session's whole log so far, as the log format reads it.
+    fn whole_log(session: &Session<Canned>) -> Vec<log::Line> {
+        let document: String = session
+            .events_from(0)
+            .iter()
+            .map(|logged| render(logged) + "\n")
+            .collect();
+        log::parse(&document).expect("the session's log is a log the format reads")
+    }
+
+    #[test]
+    fn a_finished_turns_response_carries_the_servers_timings() {
+        let measured = Timings {
+            prompt_n: Some(18),
+            cache_n: Some(160),
+            prompt_ms: crate::client::stream::Millis::new("225.217"),
+            predicted_n: Some(66),
+            predicted_ms: crate::client::stream::Millis::new("557.106"),
+            draft_n: Some(72),
+            draft_n_accepted: Some(44),
+        };
+        let canned = Canned::new([vec![
+            Step::Delta("ok".to_owned()),
+            Step::Timings(measured.clone()),
+        ]]);
+        let session = Session::open(canned, template());
+        session.ask("first", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::Answered { timings: Some(timings), .. } if *timings == measured
+            )),
+            "the response dropped the server's timings"
+        );
+        let response = whole_log(&session)
+            .into_iter()
+            .find_map(|line| match line.event {
+                log::Event::Response { timings, .. } => Some(timings),
+                _ => None,
+            })
+            .expect("a response line");
+        assert_eq!(
+            response,
+            Some(log::Timings {
+                prompt_n: Some(18),
+                cache_n: Some(160),
+                prompt_ms: log::Millis::new("225.217"),
+                predicted_n: Some(66),
+                predicted_ms: log::Millis::new("557.106"),
+                draft_n: Some(72),
+                draft_n_accepted: Some(44),
+            }),
+            "every key, as the server sent it"
+        );
+    }
+
+    #[test]
+    fn the_responses_reasoning_is_its_deltas_byte_for_byte() {
+        let canned = Canned::new([vec![
+            Step::Reasoning("weighing\n".to_owned()),
+            Step::Reasoning(" it up \n".to_owned()),
+            Step::Delta("ok".to_owned()),
+        ]]);
+        let session = Session::open(canned, template());
+        session.ask("first", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let whole = "weighing\n it up \n".to_owned();
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::Answered { reasoning: Some(reasoning), .. } if *reasoning == whole
+            )),
+            "the response's reasoning is not its deltas, untrimmed"
+        );
+        assert_eq!(
+            session.trunk().last().and_then(|m| m.reasoning.clone()),
+            Some(whole),
+            "and it is the trunk's"
+        );
+    }
+
+    #[test]
+    fn progress_is_logged_before_the_first_delta_and_never_after_the_end() {
+        let frame = |processed| Progress {
+            total: 9276,
+            cache: 0,
+            processed,
+            time_ms: processed / 2,
+        };
+        let canned = Canned::new([vec![
+            Step::Progress(frame(1066)),
+            Step::Progress(frame(9276)),
+            Step::Delta("ok".to_owned()),
+        ]]);
+        let session = Session::open(canned, template());
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        let lines = whole_log(&session);
+        let at = |kind: fn(&log::Event) -> bool| -> Vec<usize> {
+            lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| kind(&line.event))
+                .map(|(index, _)| index)
+                .collect()
+        };
+        let progress = at(|e| matches!(e, log::Event::Progress { .. }));
+        let first_delta = at(|e| matches!(e, log::Event::Delta { .. }))[0];
+        let response = at(|e| matches!(e, log::Event::Response { .. }))[0];
+        assert_eq!(progress.len(), 2, "one line per frame: {lines:?}");
+        assert!(
+            progress
+                .iter()
+                .all(|index| *index < first_delta && *index < response),
+            "a progress line after the answer began: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn an_overflow_is_request_failed_context_overflow_and_the_turn_failed() {
+        let overflow = r#"{"error":{"code":400,"message":"request (262149 tokens) exceeds the available context size (262144 tokens), try increasing it","type":"exceed_context_size_error","n_prompt_tokens":262149,"n_ctx":262144}}"#;
+        let canned = Canned::new([vec![Step::Reject(400, overflow.to_owned())]]);
+        let session = Session::open(canned, template());
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        let lines = whole_log(&session);
+        assert!(
+            lines.iter().any(|line| matches!(
+                line.event,
+                log::Event::RequestFailed {
+                    reason: log::FailReason::ContextOverflow,
+                    status: Some(400),
+                    ..
+                }
+            )),
+            "the overflow was not `context_overflow`: {lines:?}"
+        );
+        assert!(lines.iter().any(|line| matches!(
+            line.event,
+            log::Event::TurnSettled {
+                reason: log::SettleReason::Failed,
+                ..
+            }
+        )));
         assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
     }
 
@@ -2040,6 +2249,15 @@ pub(in crate::drive) mod tests {
                 because: Refusal::Stale,
                 during: Settlement::Turn,
             },
+            Event::Progress {
+                request: 3,
+                progress: Progress {
+                    total: 9276,
+                    cache: 0,
+                    processed: 1066,
+                    time_ms: 721,
+                },
+            },
             Event::Reasoning {
                 request: 3,
                 text: "thinking\n".to_owned(),
@@ -2053,6 +2271,16 @@ pub(in crate::drive) mod tests {
                 request: 3,
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
+                reasoning: Some("thinking\n".to_owned()),
+                timings: Some(Timings {
+                    prompt_n: Some(89),
+                    cache_n: Some(0),
+                    prompt_ms: crate::client::stream::Millis::new("297.198"),
+                    predicted_n: Some(312),
+                    predicted_ms: crate::client::stream::Millis::new("2591"),
+                    draft_n: Some(312),
+                    draft_n_accepted: Some(207),
+                }),
             },
             Event::Cancelled {
                 request: 3,
@@ -2062,7 +2290,15 @@ pub(in crate::drive) mod tests {
                 request: 3,
                 status: 503,
                 body: "busy".to_owned(),
+                class: None,
                 partial: "Hel".to_owned(),
+            },
+            Event::Rejected {
+                request: 3,
+                status: 400,
+                body: "too long".to_owned(),
+                class: Some(Rejection::ContextOverflow),
+                partial: String::new(),
             },
             Event::Crashed {
                 request: 3,
@@ -2108,9 +2344,10 @@ pub(in crate::drive) mod tests {
                 Event::Failed { .. } => 12,
                 Event::TurnSettled { .. } => 13,
                 Event::IdleGap(_) => 14,
+                Event::Progress { .. } => 15,
             });
         }
-        assert_eq!(kinds.len(), 15, "a variant has no sample");
+        assert_eq!(kinds.len(), 16, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -2153,6 +2390,13 @@ pub(in crate::drive) mod tests {
                 because: log::Refusal::Stale,
                 during: log::State::Turn,
             },
+            log::Event::Progress {
+                request: 3,
+                total: 9276,
+                cache: 0,
+                processed: 1066,
+                time_ms: 721,
+            },
             log::Event::Delta {
                 request: 3,
                 piece: log::Piece::Reasoning("thinking\n".to_owned()),
@@ -2166,8 +2410,16 @@ pub(in crate::drive) mod tests {
                 to_request: 3,
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
-                reasoning: None,
-                timings: None,
+                reasoning: Some("thinking\n".to_owned()),
+                timings: Some(log::Timings {
+                    prompt_n: Some(89),
+                    cache_n: Some(0),
+                    prompt_ms: log::Millis::new("297.198"),
+                    predicted_n: Some(312),
+                    predicted_ms: log::Millis::new("2591"),
+                    draft_n: Some(312),
+                    draft_n_accepted: Some(207),
+                }),
             },
             log::Event::Cancelled {
                 request: 3,
@@ -2179,6 +2431,13 @@ pub(in crate::drive) mod tests {
                 message: "busy".to_owned(),
                 status: Some(503),
                 partial: Some("Hel".to_owned()),
+            },
+            log::Event::RequestFailed {
+                request: 3,
+                reason: log::FailReason::ContextOverflow,
+                message: "too long".to_owned(),
+                status: Some(400),
+                partial: None,
             },
             // Nothing arrived before this crash: no `partial` at all.
             log::Event::RequestFailed {
@@ -2250,7 +2509,7 @@ pub(in crate::drive) mod tests {
     }
 
     #[test]
-    fn a_real_sessions_whole_log_is_a_v0_log() {
+    fn a_real_sessions_whole_log_is_a_log_the_format_reads() {
         // Every rule that spans lines included: an answer, a cancel, a
         // failure, a refusal by the server.
         let gate = Gate::new();
