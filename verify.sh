@@ -6330,9 +6330,16 @@ prove_mechanics() {
 
   # ...but an ordinary binary must not trip the loose heuristics. Over-strict
   # is a failure too: a gate that cries wolf on every binary gets switched off.
+  #
+  # The arbitrary bytes are FIXED, not drawn from /dev/urandom (#233): a fresh
+  # random 64 KiB made this verdict a lottery -- one shard of twenty read
+  # exit 1 on 2c97097 while the other nineteen passed the same case. A SHA-256
+  # counter stream is the same bytes on every machine and every Python, and is
+  # still a binary nothing in the tree resembles.
   mkdir -p "${box}/bin-clean"
   cp "$(command -v git)" "${box}/bin-clean/git.bin"
-  head -c 65536 /dev/urandom > "${box}/bin-clean/random.bin"
+  python3 -c 'import hashlib, sys; sys.stdout.buffer.write(b"".join(hashlib.sha256(b"#233 an ordinary binary %d" % i).digest() for i in range(2048)))' \
+    > "${box}/bin-clean/random.bin"
   expect_exit "an ordinary binary does not false-positive" 0 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-clean"
 
