@@ -667,9 +667,15 @@ catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_canned_stream_held_mid_answer_is_woken_by_a_cancel_and_says_so",
     "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
-    "client::stream::tests::a_timings_chunk_before_a_cancel_is_not_a_finished_call",
     "client::stream::tests::asking_runs_every_stopper_once_and_asking_again_runs_none",
 ]
+# Not `a_timings_chunk_before_a_cancel_is_not_a_finished_call` (#92's review):
+# its stub writes the timings chunk separately, and when that chunk lands on a
+# read AFTER the cancel, the post-read flag check returns `Cancelled` without a
+# stopper (stream.rs's `if cancel.is_asked()` after a read). It catches this
+# fault only when both chunks arrive in one read -- a property of TCP's split,
+# not of the code. It missed once in track three's run; it stays a catcher of
+# what it tests, which is not the stopper.
 
 [[fault]]
 id = "client.cancel-misses-a-late-stopper"
