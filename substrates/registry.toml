@@ -381,6 +381,41 @@ effort = "n/a (template has no levels)"
 effort_is = "every level tried returns HTTP 200 and renders identically: the template reads no reasoning_effort key, so every level is a silent no-op (substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/raw/refusal.json, raw/kw.json). Eligibility is on the rendered state (planning, #143, comment 5885752512): a claim that declares effort n/a is eligible here; a claim that requests a level is ineligible, because its regime would name an instruction the head never carried"
 reasoning_strength = "ignored"
 reasoning_strength_is = "the template reads no reasoning_strength key: a silent no-op"
+engine_libraries_read = "process"
+engine_libraries_is = "read from the running production process on 2026-10-01T05:12Z, minutes after its restore (started 05:05:20Z): the same 29 files and fingerprint as the directory read from disk, and all of them equal to the members of the pinned release tarball (engine_release_tarball_sha256; measurements/2026-10-01-engine-libraries/tie.py). The process maps 9 of the 29 (ggml loads its backends by dlopen; libggml-cpu-haswell.so is this CPU's variant), each the same inode it hashed; measurements/2026-10-01-engine-libraries/beellama-floor-process.json"
+engine_fingerprint = "8973ae1c11282f4c9ffc81f6e7821b0dcf14599a630ffe3812d6d7e24ba528a4"
+engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+
+[substrate.accel24-beellama-qwen27b-q4kxl.engine_libraries]
+"libggml-base.so.0.14.0" = "8afbf3aad3719a82b0bba029720cef5845e6a2c75afe00cc878804940c9f2851"
+"libggml-cpu-alderlake.so" = "6cc32a538c2cb6be5fdbf7d39c937344460901333da71a689609263a37345958"
+"libggml-cpu-cannonlake.so" = "1de6990a63c40803a6afff27c05315be97bc5f368aeb432173e4b296142ba5ee"
+"libggml-cpu-cascadelake.so" = "6be2a69c936770030652db0ac7df6eb6e14ccaf940f7f6f927a286ff54bf3d23"
+"libggml-cpu-cooperlake.so" = "762024e308364c28d78f327bb68611d2a9c74178db6954f43e16a1d5f882c75a"
+"libggml-cpu-haswell.so" = "50773265344bf787ec6c7ea5770ba200c3e60c589d526db56ada776b7db8c2d8"
+"libggml-cpu-icelake.so" = "6b60a5122197a1e5fa1102d13260c28d51608eb27e1508715a84d1ebe91dca2a"
+"libggml-cpu-ivybridge.so" = "5e40164bff7a7be2b77dac6ced91ba4e06c068755153ddf860eab5091309eb4f"
+"libggml-cpu-piledriver.so" = "792c9daad04dc884674a0fcdf9abf5644641475fa0a3e5bbc04cf257b090363c"
+"libggml-cpu-sandybridge.so" = "9960a277dcf71fa84b7edf4e33a3696717f65b23090aa18cd6f206d159a9f482"
+"libggml-cpu-sapphirerapids.so" = "0a3cf09ea1dd8affb95607f143bcbf76723bcc38912d05008ef8c86729f589a8"
+"libggml-cpu-skylakex.so" = "e8de371975fa4d85f17e26e46e0c68dcbecaf15c21009594ee492499c1983b05"
+"libggml-cpu-sse42.so" = "e3fe06af7d8b0fee4d1eb12b3be46f0b8784cf5ff170225dfbf06d6810045fec"
+"libggml-cpu-x64.so" = "2ca00ffc8965e066c5ea9305b48dfb14f2427d52e632880c24283f1a16d7ca93"
+"libggml-cpu-zen4.so" = "db3ff59100c4c178f5d1d9341dd809a142bb7a9725e1f78f7921700e07f5d960"
+"libggml-cuda.so" = "6755a40e4124dc36262679046b69046f6e851160fa1e67023add7ba423bff119"
+"libggml-rpc.so" = "10c133788abb6ec22c39cbf5e176afa55ab9189871db3bb39e2ea82932bec68b"
+"libggml.so.0.14.0" = "fb2e6306a0857b436140a4f1bc722e060c4ccb1435b6e6214f01b9f643f4a154"
+"libllama-batched-bench-impl.so" = "18d3e1ef8329da83b51018089201482a74d7d2a13393e3d33cc48d7106c3cfc6"
+"libllama-bench-impl.so" = "334071339659359930364aaa5d11f983767f96bb2b638f3f70d240f5777f4090"
+"libllama-cli-impl.so" = "e988433b0f9fc817fd948e0a8a688a1be79d2217055fcc27cdcf45866935d69d"
+"libllama-common.so.0.0.0" = "61ddd8d654bcc7ae5c7eec29e5f6e371e1326f7bf993758f5487afac932e6e64"
+"libllama-completion-impl.so" = "09c5f1a4894879cf170dac2f7151118ada20275605c921b1d30ad5ab2795238f"
+"libllama-fit-params-impl.so" = "d0f67848a73d828e2d1e34a1271ac9833a3fa0d86c7e20cf4427fb109e819ce4"
+"libllama-perplexity-impl.so" = "038f7100b7313acbc263886bdf7c3d5baa246bd3ebb74416a7f0bf88b5a5f393"
+"libllama-quantize-impl.so" = "26be9f37915a260442242c507073d83e84c42865956840b274eead41b6520daa"
+"libllama-server-impl.so" = "32f1fec7e018503c06753be5535ba5d243d68166c767d1e1fc2d3b1db63d753c"
+"libllama.so.0.0.0" = "3f3c3064c789be7cca53ac9bd5bb358f06d6a04c7bb000b13ab92443f03be73a"
+"libmtmd.so.0.0.0" = "4f7a9e19465395461ac83dbdb131e19217fad491f88a78e5982d88669b3c513e"
 
 [[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
 id = "2026-07-25"
@@ -501,7 +536,7 @@ pinned = true
 
 engine_name = "llama.cpp (ggml-org mainline)"
 engine_identity = "865044a2bf2d56856f843b7cf080faf519030e338d8b75d366270b5b9d2b5511"
-engine_identity_is = "sha256 of the llama-server binary, read through /proc/<pid>/exe of every candidate server on 2026-09-29; a thin launcher, so the build's shared libraries and the container's resolved libraries are hashed in substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/raw/engine-manifest.txt, whose sha256 is the fingerprint's engine component"
+engine_identity_is = "sha256 of the llama-server binary, read through /proc/<pid>/exe of every candidate server on 2026-09-29; a thin launcher, so the build's shared libraries and the container's resolved libraries are hashed in substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/raw/engine-manifest.txt, whose sha256 is the admission record's engine component (that record's fingerprint.json); the registry's own engine_fingerprint, over the exe and every library in the build directory, is a different digest"
 engine_commit = "4ceb1719101f32637b841206c172f3f058ffc182"
 engine_commit_is = "the build checkout's HEAD, clean tree, read 2026-09-29; the binary self-reports 0.4.1-dev (build 1, commit 4ceb171)"
 engine_container_image = "sha256:1e8ac7a54c184a1af8ef2167f28fa98281892a835c981ebcddb1fad04bdd452d"
@@ -529,6 +564,27 @@ reasoning_strength_is = "the template reads no reasoning_strength key: every lev
 headroom = "1,966 MiB free with both slots prefilled to 114,122 tokens (peak 22,610 of 24,576 MiB), against the floor's 1,208 under Q9 as amended"
 hazards = "speculation (MTP) is not bit-exact with the spec-off path: on #161's prompt at greedy decoding, every on/off pair first differs at token 55; spec-off is bitwise reproducible within a process and across two, and spec-on with itself (833 drafted in every rep). The margins at the divergence are unmeasured. A hybrid recurrent model. Nothing may be gated on token identity"
 admission = "cells in substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/ (2026-09-29); not admitted: the depth probe and the parity fire have not run on this line"
+engine_libraries_read = "disk"
+engine_libraries_is = "read from disk, not from a process, on 2026-10-01T05:12Z: nothing serves this substrate between windows. Tied to the instance by its own read: the exe and the 8 libraries the 2026-09-29 engine manifest hashed (engine_identity_is) are equal on disk (measurements/2026-10-01-engine-libraries/tie.py); the other 7 are the build's tool libraries, which the server does not load and the manifest did not hash; measurements/2026-10-01-engine-libraries/accel24-llamacpp-candidate-disk.json"
+engine_fingerprint = "2c2bbdfd05dd5d3224b4ec8546c3fbe942de769e01527f08bb891e4b99bcaf99"
+engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+
+[substrate.accel24-llamacpp-qwen38-27b-iq3s.engine_libraries]
+"libggml-base.so.0.24.0" = "76fccaca96c6b39ef6a70b77923929501a5f54966c007f73cf253f80ddb68dcd"
+"libggml-cpu.so.0.24.0" = "046fa0ca6467d75ab4980fe49583f1cb88fc586e7fca0f4790195bfbffa27899"
+"libggml-cuda.so.0.24.0" = "b502c27d9c58e68ae23083ca1d9f8c8db36eb804ea97025da1a5d9389c965516"
+"libggml.so.0.24.0" = "2ac057a878de41ee228d829a920086f6a8bf4b630ba146ac1a30a0f8267232c5"
+"libllama-batched-bench-impl.so" = "d70f238faccf2b2749df3a4fba38a897ac697b99f10d0cdbf9f3230e593cb7ef"
+"libllama-bench-impl.so" = "6c021a165c4da9dac8d0d3f78749448b7a0156b39e9f795047409a50403506cc"
+"libllama-cli-impl.so" = "adbade76d415c4c1d41028e1caacde2aa762b4b6ba8cbe19a8b44973d43fc468"
+"libllama-common.so.0.4.1" = "27a4450b9fd5755662227509b68156e095f9953f78f623d7c41847cec4438ee0"
+"libllama-completion-impl.so" = "77ea4e55bf766cdf1cf0f593a56b81ae9dd88ff184bf012937e1ff68e75d7981"
+"libllama-fit-params-impl.so" = "d9fbda37da707f20e65c76b407639685c3067a414de28b35a6dfab09f259b999"
+"libllama-perplexity-impl.so" = "e94c77049649ab8163fa8aaf2711c975d0a815e39e4b265f185fc92768564cf9"
+"libllama-quantize-impl.so" = "af2bd4f98327bbcc88baf5a8536600287385638df3a91a269159bc883c5114ad"
+"libllama-server-impl.so" = "33b77954e65ba5a8763664dc4d93764971151c32e90f90213ad8fa09562245d5"
+"libllama.so.0.4.1" = "75ee69002de615f4d54b4d20ce613c7088972cc4f62819fbd9b72306f30e8c38"
+"libmtmd.so.0.4.1" = "b51513377dea9e25bc33fd94bda3cea64549a589e368f02208e79a82c147c1b7"
 
 [[substrate.accel24-llamacpp-qwen38-27b-iq3s.instance]]
 id = "2026-09-29"
@@ -562,6 +618,41 @@ The launch line of the research program's provisioning script as it stood on \
 the running process's command line and environment at launch, not from the \
 script."""
 sampler_card = "none on the serving line; a fire's requests set it"
+engine_libraries_read = "disk"
+engine_libraries_is = "read from disk: the same release directory as accel24-beellama-qwen27b-q4kxl, whose process read it equals, tied to the pinned release tarball (tie.py); the seat-B server ran this executable on the CPU and is not running between fires; measurements/2026-10-01-engine-libraries/beellama-preview-v0.3.2-disk.json"
+engine_fingerprint = "8973ae1c11282f4c9ffc81f6e7821b0dcf14599a630ffe3812d6d7e24ba528a4"
+engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+
+[substrate.cpu-beellama-qwen3-1p7b-q4km.engine_libraries]
+"libggml-base.so.0.14.0" = "8afbf3aad3719a82b0bba029720cef5845e6a2c75afe00cc878804940c9f2851"
+"libggml-cpu-alderlake.so" = "6cc32a538c2cb6be5fdbf7d39c937344460901333da71a689609263a37345958"
+"libggml-cpu-cannonlake.so" = "1de6990a63c40803a6afff27c05315be97bc5f368aeb432173e4b296142ba5ee"
+"libggml-cpu-cascadelake.so" = "6be2a69c936770030652db0ac7df6eb6e14ccaf940f7f6f927a286ff54bf3d23"
+"libggml-cpu-cooperlake.so" = "762024e308364c28d78f327bb68611d2a9c74178db6954f43e16a1d5f882c75a"
+"libggml-cpu-haswell.so" = "50773265344bf787ec6c7ea5770ba200c3e60c589d526db56ada776b7db8c2d8"
+"libggml-cpu-icelake.so" = "6b60a5122197a1e5fa1102d13260c28d51608eb27e1508715a84d1ebe91dca2a"
+"libggml-cpu-ivybridge.so" = "5e40164bff7a7be2b77dac6ced91ba4e06c068755153ddf860eab5091309eb4f"
+"libggml-cpu-piledriver.so" = "792c9daad04dc884674a0fcdf9abf5644641475fa0a3e5bbc04cf257b090363c"
+"libggml-cpu-sandybridge.so" = "9960a277dcf71fa84b7edf4e33a3696717f65b23090aa18cd6f206d159a9f482"
+"libggml-cpu-sapphirerapids.so" = "0a3cf09ea1dd8affb95607f143bcbf76723bcc38912d05008ef8c86729f589a8"
+"libggml-cpu-skylakex.so" = "e8de371975fa4d85f17e26e46e0c68dcbecaf15c21009594ee492499c1983b05"
+"libggml-cpu-sse42.so" = "e3fe06af7d8b0fee4d1eb12b3be46f0b8784cf5ff170225dfbf06d6810045fec"
+"libggml-cpu-x64.so" = "2ca00ffc8965e066c5ea9305b48dfb14f2427d52e632880c24283f1a16d7ca93"
+"libggml-cpu-zen4.so" = "db3ff59100c4c178f5d1d9341dd809a142bb7a9725e1f78f7921700e07f5d960"
+"libggml-cuda.so" = "6755a40e4124dc36262679046b69046f6e851160fa1e67023add7ba423bff119"
+"libggml-rpc.so" = "10c133788abb6ec22c39cbf5e176afa55ab9189871db3bb39e2ea82932bec68b"
+"libggml.so.0.14.0" = "fb2e6306a0857b436140a4f1bc722e060c4ccb1435b6e6214f01b9f643f4a154"
+"libllama-batched-bench-impl.so" = "18d3e1ef8329da83b51018089201482a74d7d2a13393e3d33cc48d7106c3cfc6"
+"libllama-bench-impl.so" = "334071339659359930364aaa5d11f983767f96bb2b638f3f70d240f5777f4090"
+"libllama-cli-impl.so" = "e988433b0f9fc817fd948e0a8a688a1be79d2217055fcc27cdcf45866935d69d"
+"libllama-common.so.0.0.0" = "61ddd8d654bcc7ae5c7eec29e5f6e371e1326f7bf993758f5487afac932e6e64"
+"libllama-completion-impl.so" = "09c5f1a4894879cf170dac2f7151118ada20275605c921b1d30ad5ab2795238f"
+"libllama-fit-params-impl.so" = "d0f67848a73d828e2d1e34a1271ac9833a3fa0d86c7e20cf4427fb109e819ce4"
+"libllama-perplexity-impl.so" = "038f7100b7313acbc263886bdf7c3d5baa246bd3ebb74416a7f0bf88b5a5f393"
+"libllama-quantize-impl.so" = "26be9f37915a260442242c507073d83e84c42865956840b274eead41b6520daa"
+"libllama-server-impl.so" = "32f1fec7e018503c06753be5535ba5d243d68166c767d1e1fc2d3b1db63d753c"
+"libllama.so.0.0.0" = "3f3c3064c789be7cca53ac9bd5bb358f06d6a04c7bb000b13ab92443f03be73a"
+"libmtmd.so.0.0.0" = "4f7a9e19465395461ac83dbdb131e19217fad491f88a78e5982d88669b3c513e"
 
 [[substrate.cpu-beellama-qwen3-1p7b-q4km.instance]]
 id = "2026-09-25"
@@ -596,6 +687,20 @@ serving_flags_are = "read off the running process's command line on 2026-09-28 a
 hazards = "greedy output with the MTP draft is not bit-exact with the spec-off path on this hybrid architecture: on five prompts, 36 of 2,327 positions (1.5%) disagree, the first between tokens 21 and 101, and every disagreement is a flip to the spec-off path's second-ranked token at a top-2 margin of 0.007-0.320 logits; which side of a near-tie is taken depends on the verify schedule (substrates/measurements/2026-09-29-ada-invariance/ and 2026-09-29-ada-invariance-ground-truth/). Acceptance at greedy is exact equality with the verify batch's argmax by source (e7051ef common/sampling.cpp:678-706); this build fills no probs on speculated tokens, so the verify batch's logits are unmeasured. Spec-off greedy output was bitwise reproducible within and across processes, and spec-on across processes on one prompt. Separately, with the draft off a same-binary teacher-forced rerun disagrees with a prior run's logits on the top token at about 2.1-2.4% of positions (the inference seat's measurement). Concurrency is untested. Nothing may be gated on token identity. A hybrid recurrent model, so warm reuse after a divergence depends on where checkpoints land"
 hazards_corrected = "an earlier text gave 'the argmax flips about 2% per step, measured by the inference seat'; that figure was another team's vLLM measurement, not this machine's, corrected by the inference seat 2026-09-28; the 2026-09-28 text then read 'run-to-run nondeterminism of the same order exists here without speculation ... the speculation-specific component is unmeasured', replaced 2026-09-29 by the on/off/off measurement; the 2026-09-29 text first read 'speculation is not output-invariant here', re-worded the same day after the ground-truth reads showed every divergence to be a near-tie flipped to the runner-up"
 dialect_sampler_echo = "none on the chat endpoint: /v1/chat/completions replies carry no generation_settings (or other sampler echo) in any committed capture -- R3.0's unstreamed reply, diet/client/fixtures/llama-server-e7051ef-unstreamed.http, sha256 d9d2e92ee5c067736d60da5baf56edc71e14c3de4a5965e1e7a89eaa895b4727, and the streamed captures -- and no request flag that might add one was tried. So the llama.cpp dialect declares no echo site here, and a sampler pin sent to this endpoint is unverified by echo (#159; what a record does with that is #143's cell rule). The native /completion reply did carry generation_settings in a probe on 2026-09-29; that reply was not captured"
+engine_libraries_read = "disk"
+engine_libraries_is = "read from disk, not from a process, on 2026-10-01T04:52Z: the host no longer runs this build; it runs a different line the maintainer is testing, a substrate in flux and not an instance of this one (#202). The disk read shows only that the registered checkout's exe still hashes to engine_identity, and the files' modification times (2026-09-26T01:11-01:14Z, in the read) precede the 2026-09-28 pin; neither proves these library bytes were the ones mapped on 2026-09-28, which no read of that date recorded; measurements/2026-10-01-engine-libraries/ada48-2026-09-28-build-disk.json"
+engine_fingerprint = "a08e5511390e70f9b92401284a5587a20163a9528a14982ecf8589d88290dea4"
+engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+
+[substrate.ada48-llamacpp-qwen38flashnext-q20.engine_libraries]
+"libggml-base.so.0.24.0" = "2002376d7915eb8dc201babcbfc6f9c44687080fd19483da8a538cc6126e421c"
+"libggml-cpu.so.0.24.0" = "f9960dd7d5e4593f93487253946f4c6b8560987e78aed220fc99a95299350408"
+"libggml-cuda.so.0.24.0" = "24ab8ce0f363870f41a3fcfac476813fe5fa6802e10476e05b6571fbe8eba99f"
+"libggml.so.0.24.0" = "f6eac071174bf8496e8ab0383c85c7c3aca4601ddaac1f3c647c22f0d7f3f7ce"
+"libllama-common.so.0.4.1" = "8c190d27eb88ba4d0f788b36589f70fef6a957ae7f14f3683bd9e8ebe16051ab"
+"libllama-server-impl.so" = "21bf075bfcb588a924fdf05d330f10ceefe9b919c7430b5d63cb364e55d056e2"
+"libllama.so.0.4.1" = "8a5f48903ad9fd0819aaf1ac47618f21e4b895ae72c4f968171bccc3f5ad61cb"
+"libmtmd.so.0.4.1" = "d212c7914885b838d01028f6b5460a747b04a38f26f0df4d63ebf7071714240b"
 
 [[substrate.ada48-llamacpp-qwen38flashnext-q20.instance]]
 id = "2026-09-28"
@@ -616,6 +721,7 @@ weights_kind = "canned"
 weights_acts_sha256 = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
 reproducible_by_config = true
 reproducible_because = "replay the acts and the same bytes play again; exact match, no band. Gate 1 compares a canned run exactly rather than re-firing it within a band meant for sampling and hardware that cannot move here."
+engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
 
 [substrate.canned-cache-n]
 equipment = "canned-loopback-cache-n"
@@ -628,6 +734,7 @@ weights_kind = "canned"
 weights_acts_sha256 = "188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
 reproducible_by_config = true
 reproducible_because = "as for `canned`: replay the acts and the same bytes play again; exact match, no band"
+engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
 
 # The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
 # not a served model: no server, no sampler, a pinned library on this host's
@@ -639,7 +746,6 @@ reproducible_because = "as for `canned`: replay the acts and the same bytes play
 # the caches were committed to the research archive from it on 2026-09-04.
 # Each cell is pinned the way its cache meta pins it: hub revision, the digest
 # of the weights file that was loaded, pooling, prefixes, and the library.
-
 [substrate.all-MiniLM-L6-v2]
 equipment = "mac-pro-2019"
 description = "sentence-transformers/all-MiniLM-L6-v2, the bakeoff's declared floor, run on the host's CPU by sentence-transformers 3.0.1"

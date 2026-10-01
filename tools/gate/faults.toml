@@ -3728,6 +3728,30 @@ failure_class = "admission.rule-broken"
 legacy_signature = "FAIL  derive: a refuted parity fire bars"
 migrated = false
 [[fault]]
+id = "admission.admission_engine_library_changed"
+kind = "seeded-gate"
+check = "admission"
+label = "an engine library changed under a held exe"
+failure_class = "admission.engine-fingerprint-changed"
+legacy_signature = "ada48-llamacpp-qwen38flashnext-q20: engine_fingerprint changed"
+migrated = false
+[[fault]]
+id = "admission.admission_engine_recipe_exe_only"
+kind = "seeded-gate"
+check = "admission"
+label = "the engine recipe narrowed to the exe"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: a library changed with the exe held changes the fingerprint"
+migrated = false
+[[fault]]
+id = "admission.admission_engine_pattern_narrowed"
+kind = "seeded-gate"
+check = "admission"
+label = "the engine recipe's library pattern narrowed"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included"
+migrated = false
+[[fault]]
 id = "admission.admission_constitutional_unrequired"
 kind = "seeded-gate"
 check = "admission"
