@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 141
+mechanics_assertions = 142
 unseedable_guards = 2
 migrated = 0
 
@@ -1676,6 +1676,15 @@ legacy_signature = ""
 migrated = false
 
 [[fault]]
+id = "mech.post-hoc-is-derived-from-the-two-times-both-ways"
+kind = "mechanics"
+check = "results"
+label = "post-hoc is derived from the two times, both ways"
+failure_class = "results.clean"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
 id = "mech.a-pinned-diet-bin-is-the-binary-that-is-used"
 kind = "mechanics"
 check = "regimen"
@@ -3060,6 +3069,69 @@ check = "results"
 label = "a consumed digest gone stale"
 failure_class = "results.provenance-unchecked"
 legacy_signature = "but the committed file hashes to"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_field_undeclared"
+kind = "seeded-gate"
+check = "results"
+label = "a claim field neither given nor absent"
+failure_class = "results.claim-field-undeclared"
+legacy_signature = "neither gives .claim_issue. nor declares it in .absent.*\\[results\\.claim-field-undeclared\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_issue_not_digits"
+kind = "seeded-gate"
+check = "results"
+label = "an issue number with a leading zero"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".claim_issue. is .0114.; an issue number is a string of digits.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_field_both"
+kind = "seeded-gate"
+check = "results"
+label = "a claim field given and absent"
+failure_class = "results.claim-field-both"
+legacy_signature = ".claim_issue. is both given and declared absent.*\\[results\\.claim-field-both\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_window_start_unsourced"
+kind = "seeded-gate"
+check = "results"
+label = "a window start with no source"
+failure_class = "results.window-start-unsourced"
+legacy_signature = ".window_start. gives no .window_start_from.*\\[results\\.window-start-unsourced\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_rule_ratified_at_malformed"
+kind = "seeded-gate"
+check = "results"
+label = "a ratification time not in UTC"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".rule_ratified\\.at. is .2026-09-25 03:29., not an ISO-8601 UTC time.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_rule_ratified_of_missing"
+kind = "seeded-gate"
+check = "results"
+label = "a ratification of a file not here"
+failure_class = "results.claim-field-malformed"
+legacy_signature = "is of .nowhere\\.toml., which is not a file here.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_provenance_nested"
+kind = "seeded-gate"
+check = "results"
+label = "a provenance key in the wrong table"
+failure_class = "results.claim-field-nested"
+legacy_signature = ".derivation\\.rule_ratified_note.: .rule_ratified_note. belongs at the top level.*\\[results\\.claim-field-nested\\]"
 migrated = false
 
 [[fault]]

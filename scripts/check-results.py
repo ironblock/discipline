@@ -139,6 +139,19 @@ HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 TEMPLATE_DIR = "_template"
 
 
+# THE CLAIM'S PROVENANCE, AS FIELDS (#32, ruled on the thread; written into
+# every directory by #245). Each of these four is either present at the top
+# level of the front-matter or named in `absent = { field = "reason" }` --
+# never both, never neither: an absence is declared, not inferred.
+CLAIM_FIELDS = ("claim_issue", "supersedes", "rule_ratified", "window_start")
+# Free text that rides beside them, top level only: where `window_start` was
+# read from (required with it), and a caveat on the ratification.
+CLAIM_PROVENANCE = ("window_start_from", "rule_ratified_note")
+DIGIT_ID = re.compile(r"[1-9][0-9]*")
+UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+DEFAULT_RULE_FILE = "decision-rule.toml"
+
+
 class Unreadable(Exception):
     """A file that cannot be decoded. Reported, never raised out of a lint."""
 
@@ -739,9 +752,109 @@ def check_run(directory: pathlib.Path) -> list[str]:
             f"README.md sections are {headings!r}, expected exactly {SECTIONS!r} in order"
         )
 
+    # --- the claim's provenance fields (#32) ---------------------------------
+    post_hoc = check_claim_fields(directory, front, fail) if name != TEMPLATE_DIR else None
+
     if LEDGER is not None and not failures and name != TEMPLATE_DIR:
-        LEDGER.append(ledger_row(directory, front, claims))
+        row = ledger_row(directory, front, claims)
+        row["provenance"] = {
+            **{key: front[key] for key in (*CLAIM_FIELDS, *CLAIM_PROVENANCE) if key in front},
+            "absent": front.get("absent", {}),
+            # Derived, never written: a rule ratified after its window opened
+            # is a post-hoc rule, whatever a note says about it.
+            "post_hoc": post_hoc,
+        }
+        LEDGER.append(row)
     return failures
+
+
+def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str, str], None]) -> bool | None:
+    """The four provenance fields, their absences and their free text, as
+    ruled on #32. Returns whether the rule was ratified after its window
+    opened -- None when either time is absent."""
+    absent = front.get("absent", {})
+    if not isinstance(absent, dict):
+        fail("results.claim-field-malformed", "front-matter `absent` is not a table of field = \"reason\"")
+        absent = {}
+    for key, reason in absent.items():
+        if key not in CLAIM_FIELDS:
+            fail("results.claim-field-malformed", f"`absent` names `{key}`, which is none of {', '.join(CLAIM_FIELDS)}")
+        elif not isinstance(reason, str) or not reason.strip():
+            fail("results.claim-field-malformed", f"`absent.{key}` gives no reason; an absence is declared with why")
+    for key in CLAIM_FIELDS:
+        if key in front and key in absent:
+            fail("results.claim-field-both", f"`{key}` is both given and declared absent")
+        elif key not in front and key not in absent:
+            fail(
+                "results.claim-field-undeclared",
+                f"front-matter neither gives `{key}` nor declares it in `absent`; an absence is declared, not inferred (#32)",
+            )
+
+    # Top level only: the same key inside `[regime]` or `[derivation]` is a
+    # field nobody reads, looking like one somebody does.
+    for table, value in front.items():
+        if isinstance(value, dict) and table not in ("absent", "rule_ratified"):
+            for key in (*CLAIM_FIELDS, *CLAIM_PROVENANCE):
+                if key in value:
+                    fail("results.claim-field-nested", f"`{table}.{key}`: `{key}` belongs at the top level of the front-matter")
+
+    issue = front.get("claim_issue")
+    if issue is not None and not (isinstance(issue, str) and DIGIT_ID.fullmatch(issue)):
+        fail("results.claim-field-malformed", f"`claim_issue` is {issue!r}; an issue number is a string of digits with no leading zero")
+    supersedes = front.get("supersedes")
+    if supersedes is not None and not (isinstance(supersedes, str) and SHA256.fullmatch(supersedes)):
+        fail("results.claim-field-malformed", "`supersedes` is not the 64-hex digest of the product it replaces")
+    window = front.get("window_start")
+    if window is not None and not (isinstance(window, str) and UTC.fullmatch(window)):
+        fail("results.claim-field-malformed", f"`window_start` is {window!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
+    source = front.get("window_start_from")
+    if window is not None and not (isinstance(source, str) and source.strip()):
+        fail("results.window-start-unsourced", "`window_start` gives no `window_start_from`; a time with no source is an invented number (#32)")
+    if window is None and "window_start_from" in front:
+        fail("results.claim-field-malformed", "`window_start_from` names the source of a `window_start` this directory does not give")
+
+    ratified = front.get("rule_ratified")
+    note = front.get("rule_ratified_note")
+    if note is not None and not (isinstance(note, str) and note.strip()):
+        fail("results.claim-field-malformed", "`rule_ratified_note` is not free text")
+    if ratified is None:
+        if note is not None:
+            fail("results.claim-field-malformed", "`rule_ratified_note` caveats a ratification this directory does not give")
+        return None
+    if not isinstance(ratified, dict):
+        fail("results.claim-field-malformed", "`rule_ratified` is not a table of comment, at, digest and an optional of")
+        return None
+    extra = sorted(set(ratified) - {"comment", "at", "digest", "of"})
+    missing = sorted({"comment", "at", "digest"} - set(ratified))
+    if extra or missing:
+        fail(
+            "results.claim-field-malformed",
+            f"`rule_ratified` carries {', '.join(extra) or 'nothing extra'} and lacks "
+            f"{', '.join(missing) or 'nothing'}; it is comment, at, digest and an optional of",
+        )
+    comment, at, digest = ratified.get("comment"), ratified.get("at"), ratified.get("digest")
+    if "comment" in ratified and not (isinstance(comment, str) and DIGIT_ID.fullmatch(comment)):
+        fail("results.claim-field-malformed", f"`rule_ratified.comment` is {comment!r}; a comment id is a string of digits")
+    if "at" in ratified and not (isinstance(at, str) and UTC.fullmatch(at)):
+        fail("results.claim-field-malformed", f"`rule_ratified.at` is {at!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
+    if "digest" in ratified and not (isinstance(digest, str) and SHA256.fullmatch(digest)):
+        fail("results.claim-field-malformed", "`rule_ratified.digest` is not 64 lowercase hex characters")
+    # `of` names the file the digest is of -- the rule file by default, the
+    # applier where the ratification pinned that (ruled on #32, 5945384945).
+    # Shape only: whether the digest matches the file as it was at the pinned
+    # commit is the migration's measurement, cited in its values file.
+    of = ratified.get("of", DEFAULT_RULE_FILE)
+    parts = pathlib.PurePosixPath(of).parts if isinstance(of, str) else ()
+    if not isinstance(of, str) or not of or of.startswith("/") or ".." in parts:
+        fail("results.claim-field-malformed", f"`rule_ratified.of` is {of!r}; it is a path inside this directory")
+    elif not (directory / of).is_file():
+        fail(
+            "results.claim-field-malformed",
+            f"`rule_ratified` is of `{of}`, which is not a file here; the digest is of the file `of` names",
+        )
+    if isinstance(at, str) and UTC.fullmatch(at) and isinstance(window, str) and UTC.fullmatch(window):
+        return at > window
+    return None
 
 
 # Each directory this run passed, as the results page draws it (--ledger), or
