@@ -1,0 +1,22 @@
+{
+ "verdict": {
+  "question_tokens": 28,
+  "option_tokens": [
+   35,
+   38,
+   38,
+   15
+  ],
+  "head_part": 158,
+  "head_total": 161
+ },
+ "edit": {
+  "question_tokens": 20,
+  "option_tokens": [
+   27,
+   47
+  ],
+  "head_part": 96,
+  "head_total": 99
+ }
+}
