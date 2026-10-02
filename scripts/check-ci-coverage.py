@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import collections
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -91,15 +92,25 @@ STEP_TIMEOUT = re.compile(r"^\s+timeout-minutes:\s*\d+\s*$")
 BUDGET = pathlib.Path(__file__).resolve().parent.parent / ".github" / "gate-budget.tsv"
 SECONDS_TABLE = pathlib.Path(__file__).resolve().parent.parent / ".github" / "check-seconds.tsv"
 
-# Each check a declared split may name, and how to ask it which members one
-# shard runs (#262). Asked of the check's own script with `--names`, so the
-# proof that the shards are complete goes through the same filter the check
-# runs, not through a second copy of it.
-SHARDABLE = {
-    "injections": ["scripts/check-injections.py", ".", "--names"],
-    "bsd": ["scripts/check-injections.py", ".", "--names"],
-    "recompute": ["scripts/check-recompute.py", "--root", "results", "--names"],
-}
+# Each check a declared split may name (#262). Its members are asked of
+# verify.sh itself -- `VERIFY_LIST_MEMBERS=1 VERIFY_CHECK_SHARD=K/N
+# ./verify.sh --only CHECK` -- through the same check function and helper
+# a CI job runs, so the proof that the shards are complete covers the wiring
+# from the job's env to the script, not only the script's own filter.
+SHARDABLE = ("injections", "bsd", "recompute")
+
+SHARD_MATRIX = re.compile(r"^\s+shard:\s*\$\{\{\s*fromJSON\(needs\.plan\.outputs\.shards\)\s*\}\}\s*$", re.M)
+
+
+def owner_reads(owner: str) -> re.Pattern[str]:
+    """The plan job's line reading `owner`'s shard count out of check-owners.tsv."""
+    return re.compile(
+        r"awk -F'\\t' -v pkg=" + re.escape(owner) + r" '!/\^#/ && NF>=3 && \$2 == pkg \{ print \$3 \}' \.github/check-owners\.tsv"
+    )
+
+
+# A check's declared shard count, from check-owners.tsv's third column.
+SHARDS: dict[str, int] = {}
 
 # How a sharded package's job tells its check which shard it is: the matrix
 # entry over the count the plan job read from check-owners.tsv.
@@ -125,6 +136,21 @@ def declared_checks(failures: list[str]) -> list[str]:
         failures.append(f"{VERIFY}: cannot list checks: {err}")
         return []
     return [line.strip() for line in done.stdout.split("\n") if line.strip()]
+
+
+def members_listed(output: str, check: str) -> list[str]:
+    """The member names a check printed between verify.sh's `=== check ===`
+    and `--- check:` lines, under VERIFY_LIST_MEMBERS: one name per line,
+    each a bare identifier, so the check's own diagnostics are not counted."""
+    inside, names = False, []
+    for line in output.splitlines():
+        if line.strip() == f"=== {check} ===":
+            inside = True
+        elif line.startswith(f"--- {check}:"):
+            inside = False
+        elif inside and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", line.strip()):
+            names.append(line.strip())
+    return names
 
 
 def owners(failures: list[str]) -> dict[str, str]:
@@ -798,6 +824,11 @@ def main() -> int:
         live = "\n".join(l for l in wf.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#")) if wf.is_file() else ""
         if wf.is_file() and not SHARD_ENV.search(live):
             failures.append(f"{wf.name}: `{check}` is sharded and the workflow never passes VERIFY_CHECK_SHARD, so every job would run all of it")
+        # And the shards it starts are the table's: the matrix is the plan
+        # job's reading of this check's own row, so no shard can be left out
+        # of the matrix while every rule above still reads the table.
+        if wf.is_file() and not (SHARD_MATRIX.search(live) and owner_reads(owner).search(live)):
+            failures.append(f"{wf.name}: `{check}`'s matrix is not the plan job's reading of its shard count from {OWNERS.name}, so the shards CI starts may not be the shards declared")
 
     # 13. a declared split is complete: every member runs in exactly one shard
     #
@@ -810,13 +841,19 @@ def main() -> int:
             continue
         listed = []
         for part in [None, *range(1, count + 1)]:
-            argv = [sys.executable, *SHARDABLE[check]] + ([] if part is None else ["--shard", f"{part}/{count}"])
-            done = subprocess.run(argv, cwd=WORKFLOWS.parent.parent, capture_output=True, text=True)
+            env = {k: v for k, v in os.environ.items() if k not in ("VERIFY_CHECK_SHARD", "VERIFY_INJECTION_SCOPE")}
+            env["VERIFY_LIST_MEMBERS"] = "1"
+            if part is not None:
+                env["VERIFY_CHECK_SHARD"] = f"{part}/{count}"
+            done = subprocess.run(
+                ["bash", str(VERIFY), "--only", check], cwd=VERIFY.parent, env=env, capture_output=True, text=True
+            )
+            shown = f"VERIFY_CHECK_SHARD={part}/{count} " if part else ""
             if done.returncode != 0:
-                failures.append(f"`{check}`: {' '.join(argv[1:])} exited {done.returncode}: {done.stderr.strip()[:200]}")
+                failures.append(f"`{check}`: {shown}verify.sh --only {check} listing its members exited {done.returncode}: {(done.stdout + done.stderr).strip()[-200:]}")
                 listed = []
                 break
-            listed.append([line for line in done.stdout.splitlines() if line.strip()])
+            listed.append(members_listed(done.stdout, check))
         if not listed:
             continue
         whole, parts = listed[0], listed[1:]

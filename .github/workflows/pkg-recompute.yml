@@ -4,7 +4,7 @@ name: pkg-recompute
 # .github/check-owners.tsv says this package owns -- derived, never named
 # here, so the table and the workflow cannot drift apart.
 #
-# SHARDED. `recompute` re-derives every results directory from its own artefacts. At 324 s it is past the 300 s budget on its own, so it is a package of its own, split by directory name (#262). Three directories' recompute.sh run `diet`, so the pinned toolchain is resolved first.
+# SHARDED. `recompute` re-derives every results directory from its own artefacts. At 324 s it is past the 300 s budget on its own, so it is a package of its own, split by directory name (#262).
 # The shard count is the table's third column, read here into a matrix: the
 # table is the one place the split is declared, and every shard runs the one
 # check with VERIFY_CHECK_SHARD=K/N. scripts/check-ci-coverage.py proves the
@@ -47,13 +47,6 @@ jobs:
         shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     steps:
       - uses: actions/checkout@v5
-
-      # Invoking cargo resolves rust-toolchain.toml, so rustup installs the
-      # pinned toolchain here rather than in the middle of a check.
-      - name: Resolve the pinned toolchain
-        run: |
-          cargo --version
-          rustc --version
 
       - name: Run the checks this package owns, one shard
         env:

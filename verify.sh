@@ -338,8 +338,13 @@ check_regimen() {
 # --root is the check's own parameter and `results` is its default; it is
 # spelled out because a seeded case below depends on this being the root the
 # check reads.
+# VERIFY_LIST_MEMBERS makes each check that can be sharded print the members
+# it would run and run none (#262): scripts/check-ci-coverage.py asks THIS
+# function, under VERIFY_CHECK_SHARD, so the wiring from the job's env to the
+# script is on the path it proves complete, not beside it.
 check_recompute() {
-  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"}
+  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} \
+    ${VERIFY_LIST_MEMBERS:+--names}
 }
 
 # A rung's admission word, derived from its admission directory rather than trusted as written (#183): the
@@ -519,7 +524,7 @@ check_history() {
 VERIFY_INJECTION_SCOPE=""
 check_injections() {
   python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"} \
-    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"}
+    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} ${VERIFY_LIST_MEMBERS:+--names}
 }
 
 # The same applier run with a BSD-shaped `sed` first on PATH (#75): the
@@ -527,7 +532,7 @@ check_injections() {
 # the one spelling left, `edit_in_place`, portable by execution.
 check_bsd() {
   bash scripts/check-bsd-sed.sh . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"} \
-    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"}
+    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} ${VERIFY_LIST_MEMBERS:+--names}
 }
 
 # The merge resolver, exercised on fixtures before it is trusted to resolve a
@@ -4227,6 +4232,37 @@ old = 'recompute\trecompute\t3\n'
 if source.count(old) != 1:
     raise SystemExit(f"the anchor appears {source.count(old)} times")
 path.write_text(source.replace(old, 'recompute\trecompute\t1\n', 1), encoding="utf-8")
+EOF
+}
+
+# A sharded job's matrix hardcoded: shards 2 and 3 never start, every rule still reading the table (#268's review).
+inject_ci_sharded_matrix_not_the_table() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/pkg-recompute.yml')
+source = path.read_text(encoding="utf-8")
+old = 'shard: ${{ fromJSON(needs.plan.outputs.shards) }}'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'shard: [1]', 1), encoding="utf-8")
+EOF
+}
+
+# A check function that runs shard 1 whatever its job is told: two thirds of the directories run nowhere (#268's review).
+inject_ci_check_runs_one_shard() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+# Anchored on the function's own line break, which the quoted copy below
+# spells as an escape, so the anchor names the function and not this body.
+old = 'check_recompute() {\n  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"}'
+new = 'check_recompute() {\n  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "1/${VERIFY_CHECK_SHARD#*/}"}'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
@@ -8088,6 +8124,10 @@ selftest() {
     'pkg-injections\.yml: `injections` is sharded and the workflow never passes VERIFY_CHECK_SHARD'
   seeded_case "a split into one shard"                 ci inject_ci_shard_count_one \
     '.recompute..s shard count is .1., not a whole number of 2 or more'
+  seeded_case "a sharded matrix that is not the table" ci inject_ci_sharded_matrix_not_the_table \
+    'pkg-recompute\.yml: .recompute..s matrix is not the plan job.s reading of its shard count'
+  seeded_case "a check that runs one shard whatever"   ci inject_ci_check_runs_one_shard \
+    '.recompute..s 3 shards run none of 10 member\(s\), so nothing runs them'
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \

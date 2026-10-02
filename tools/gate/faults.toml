@@ -4038,6 +4038,22 @@ failure_class = "wiring.shard-count"
 legacy_signature = ".recompute..s shard count is .1., not a whole number of 2 or more"
 migrated = false
 [[fault]]
+id = "ci.ci_sharded_matrix_not_the_table"
+kind = "seeded-gate"
+check = "ci"
+label = "a sharded matrix that is not the table"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml: .recompute..s matrix is not the plan job.s reading of its shard count"
+migrated = false
+[[fault]]
+id = "ci.ci_check_runs_one_shard"
+kind = "seeded-gate"
+check = "ci"
+label = "a check that runs one shard whatever"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of 10 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
 check = "ci"

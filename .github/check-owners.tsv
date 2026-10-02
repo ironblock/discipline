@@ -59,8 +59,8 @@ parity	repo
 bsd	bsd	2
 
 # --- injections and recompute: each past the budget on its own, so each is
-# a package of its own, split by name (#262). recompute's job resolves the
-# toolchain, since three directories' recompute.sh run `diet`. ---
+# a package of its own, split by name (#262). No recompute.sh runs `diet`
+# (#268's review), so recompute's job needs no toolchain. ---
 injections	injections	2
 recompute	recompute	3
 
