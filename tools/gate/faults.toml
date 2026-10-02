@@ -4097,6 +4097,15 @@ legacy_signature = "pages.yml: the site is not checked against the sha that run 
 migrated = false
 
 [[fault]]
+id = "ci.ci_pages_condition_outside_its_braces"
+kind = "seeded-gate"
+check = "ci"
+label = "the condition with text outside its braces"
+failure_class = "wiring.pages-condition"
+legacy_signature = "pages.yml: the deploy's condition has text outside its"
+migrated = false
+
+[[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
 check = "ci"

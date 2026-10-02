@@ -4016,6 +4016,12 @@ inject_ci_pages_checkout_not_the_run() {
   edit_in_place 's/^          ref: \${{ github.event.workflow_run.head_sha }}$/          ref: main/' .github/workflows/pages.yml
 }
 
+# #258's third review: the job's condition with text outside its `${{ }}` --
+# here a leading space -- is a non-empty string to GitHub, always true.
+inject_ci_pages_condition_outside_its_braces() {
+  edit_in_place 's/^    if: \(github\.event\.workflow_run\.conclusion.*\)$/    if: " ${{ \1 }}"/' .github/workflows/pages.yml
+}
+
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
   edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
@@ -7832,6 +7838,8 @@ selftest() {
     "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
   seeded_case "the checkout not the run's sha" ci inject_ci_pages_checkout_not_the_run \
     "pages.yml: the site is not checked against the sha that run built"
+  seeded_case "the condition with text outside its braces" ci inject_ci_pages_condition_outside_its_braces \
+    "pages.yml: the deploy's condition has text outside its"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \

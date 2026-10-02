@@ -605,9 +605,16 @@ def main() -> int:
             "github.event.workflow_run.head_repository.full_name == github.repository": "pages.yml: deploys a run of a fork's code",
         }
         condition = deploy.get("if") if isinstance(deploy.get("if"), str) else ""
-        # `${{ ... }}` around a whole `if:` is the same expression to GitHub.
-        wrapped = re.fullmatch(r"\s*\$\{\{(.*)\}\}\s*", condition, re.S)
-        condition = wrapped.group(1).strip() if wrapped else condition.strip()
+        # `${{ ... }}` around the WHOLE `if:` is the same expression to
+        # GitHub; any text outside it -- a space, or the newline a `|` or `>`
+        # scalar ends with -- makes the value a non-empty string, which is
+        # true whatever the guards say (#258's third review).
+        wrapped = re.fullmatch(r"\$\{\{(.*)\}\}", condition, re.S)
+        if wrapped:
+            condition = wrapped.group(1).strip()
+        elif "${{" in condition:
+            failures.append(f"pages.yml: the deploy's condition has text outside its ${{{{ }}}}, which GitHub reads as a string, always true (found {condition!r})")
+            condition = ""
         clauses = [c.strip() for c in condition.split("&&")] if condition else []
         for guard, message in guards.items():
             if guard not in clauses:
@@ -632,7 +639,12 @@ def main() -> int:
         # that sha's, and so are the admissions and tables it is checked
         # against (#258's review).
         checkouts = [i for i, u in enumerate(uses) if u == "actions/checkout"]
-        if len(checkouts) != 1 or (check is not None and checkouts[0] > check) or steps[checkouts[0]].get("with") != {"ref": "${{ github.event.workflow_run.head_sha }}"}:
+        checked_out = steps[checkouts[0]].get("with") if len(checkouts) == 1 else None
+        if (
+            len(checkouts) != 1 or (check is not None and checkouts[0] > check) or not isinstance(checked_out, dict)
+            or checked_out.get("ref") != "${{ github.event.workflow_run.head_sha }}"
+            or {k: v for k, v in checked_out.items() if k != "ref"} not in ({}, {"persist-credentials": "false"})
+        ):
             failures.append("pages.yml: the site is not checked against the sha that run built (one actions/checkout, ref: the run's head_sha, before the check)")
         # Nothing between the check and the upload writes to the site: only
         # configure-pages may stand there (#258's review).
@@ -689,7 +701,7 @@ def main() -> int:
         if "continue-on-error" in deploy or any("continue-on-error" in st for st in steps):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
         uploaded_path = steps[upload]["with"].get("path") if uploads and isinstance(steps[upload].get("with"), dict) else None
-        if uploads and uploaded_path != "_site":
+        if uploads and str(uploaded_path).rstrip("/") not in ("_site", "./_site"):
             failures.append("pages.yml: uploads something other than the _site it checked")
         uploaded = "".join((WORKFLOWS / wf).read_text(encoding="utf-8") for wf in sorted(gating) if (WORKFLOWS / wf).is_file())
         for part in ("site-replay", "site-ledger"):
