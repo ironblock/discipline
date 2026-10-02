@@ -603,7 +603,7 @@ def main() -> int:
     if shard is not None:
         applied = [name for name in applied if gatelib.in_shard(name, *shard)]
     if names_only:
-        print("\n".join(applied))
+        print("\n".join([gatelib.LISTING, *applied]))
         return 0
 
     tracked = tracked_files(root)

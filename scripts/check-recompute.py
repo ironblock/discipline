@@ -250,7 +250,7 @@ def main(argv: list[str]) -> int:
     if shard is not None:
         directories = [p for p in directories if gatelib.in_shard(p.name, *shard)]
     if args.names:
-        print("\n".join(p.name for p in directories))
+        print("\n".join([gatelib.LISTING, *(p.name for p in directories)]))
         return 0
     # Each directory's own seconds (#262): a split by name balances counts,
     # not cost, and this is what a re-balance is read from. Printed as the

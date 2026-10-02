@@ -4054,6 +4054,22 @@ failure_class = "wiring.shard-incomplete"
 legacy_signature = ".recompute..s 3 shards run none of 10 member\\(s\\), so nothing runs them"
 migrated = false
 [[fault]]
+id = "ci.ci_sharded_workflow_line_separator"
+kind = "seeded-gate"
+check = "ci"
+label = "a line separator YAML does not split on"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
+migrated = false
+[[fault]]
+id = "ci.ci_listing_unmarked"
+kind = "seeded-gate"
+check = "ci"
+label = "a listing with no line of its own"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute.: verify\\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED"
+migrated = false
+[[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
 check = "ci"

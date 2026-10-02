@@ -44,6 +44,8 @@ import subprocess
 import sys
 import tempfile
 
+import gatelib
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
 OWNERS = ROOT / ".github" / "check-owners.tsv"
@@ -99,21 +101,6 @@ SECONDS_TABLE = pathlib.Path(__file__).resolve().parent.parent / ".github" / "ch
 # from the job's env to the script, not only the script's own filter.
 SHARDABLE = ("injections", "bsd", "recompute")
 
-SHARD_MATRIX = re.compile(r"^\s+shard:\s*\$\{\{\s*fromJSON\(needs\.plan\.outputs\.shards\)\s*\}\}\s*$", re.M)
-
-
-def owner_reads(owner: str) -> re.Pattern[str]:
-    """The plan job's line reading `owner`'s shard count out of check-owners.tsv."""
-    return re.compile(
-        r"awk -F'\\t' -v pkg=" + re.escape(owner) + r" '!/\^#/ && NF>=3 && \$2 == pkg \{ print \$3 \}' \.github/check-owners\.tsv"
-    )
-
-
-# A check's declared shard count, from check-owners.tsv's third column.
-SHARDS: dict[str, int] = {}
-
-# How a sharded package's job tells its check which shard it is: the matrix
-# entry over the count the plan job read from check-owners.tsv.
 # A run of verify.sh that listed members and ran nothing (verify.sh's EXIT_LISTED).
 EXIT_LISTED = 3
 
@@ -177,16 +164,6 @@ jobs:
 
 # A check's declared shard count, from check-owners.tsv's third column.
 SHARDS: dict[str, int] = {}
-
-# How a sharded package's job tells its check which shard it is: the matrix
-# entry over the count the plan job read from check-owners.tsv.
-SHARD_ENV = re.compile(
-    r"^\s+VERIFY_CHECK_SHARD:\s*\$\{\{\s*matrix\.shard\s*\}\}/\$\{\{\s*needs\.plan\.outputs\.count\s*\}\}\s*$",
-    re.M,
-)
-
-# A check's declared shard count, from check-owners.tsv's third column.
-SHARDS: dict[str, int] = {}
 CANCEL_IN_PROGRESS = re.compile(r"^\s*cancel-in-progress:\s*(.+?)\s*$", re.MULTILINE)
 EVENT = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_]*):")
 BRANCH_FILTER = re.compile(r"^ {4,}branches(-ignore)?:")
@@ -205,21 +182,26 @@ def declared_checks(failures: list[str]) -> list[str]:
 
 
 def members_listed(output: str, check: str) -> list[str] | None:
-    """The members a check printed between verify.sh's `=== check ===` and
-    its `--- check: LISTED` line: every non-empty line, so no name a pattern
-    would reject falls out of the proof (#268's second review). None when
-    the run did not end in LISTED -- a listing that passed or failed is not
-    a listing."""
-    inside, names, listed = False, [], False
-    for line in output.splitlines():
+    """The members a check printed after its own `gatelib.LISTING` line and
+    before verify.sh's `--- check: LISTED` line: every non-empty line, so no
+    name a pattern would reject falls out of the proof (#268's second
+    review). None when the run did not end in LISTED, or when the check
+    printed no LISTING line of its own -- verify.sh says LISTED for any
+    check that exits 0 under VERIFY_LIST_MEMBERS, and a check that ignored
+    `--names` and ran must not pass for one that listed (#268's third)."""
+    inside, names, listed, marked = False, [], False, 0
+    for line in output.split("\n"):
         if line.strip() == f"=== {check} ===":
             inside = True
         elif line.startswith(f"--- {check}:"):
             inside = False
             listed = line.startswith(f"--- {check}: LISTED")
-        elif inside and line.strip():
+        elif inside and line.strip() == gatelib.LISTING:
+            marked += 1
+            names = []
+        elif inside and marked and line.strip():
             names.append(line.strip())
-    return names if listed else None
+    return names if listed and marked == 1 else None
 
 
 def owners(failures: list[str]) -> dict[str, str]:
@@ -894,9 +876,30 @@ def main() -> int:
         # declared, or none, while every pinned line held. So a sharded
         # package's workflow, read without its comments, is exactly one form
         # with the package's name in it.
-        if wf.is_file():
-            found = [l for l in wf.read_text(encoding="utf-8").splitlines() if l.strip() and not l.lstrip().startswith("#")]
-            wanted = [l for l in SHARDED_WORKFLOW.format(pkg=owner).splitlines() if l.strip()]
+        #
+        # READ AS YAML SPLITS IT (#268's third review): `str.splitlines()`
+        # also breaks on U+2028, NEL and \x1c, which YAML does not, so
+        # `#` U+2028 `./verify.sh` read as a comment here and as one bash
+        # comment line to the runner -- a shard green having run nothing.
+        # So the file is printable ASCII, it is split on `\n` alone, and a
+        # comment is dropped only at column 0 in the header before `on:`; a
+        # comment anywhere else is script text and is compared like any line.
+        if not wf.is_file():
+            failures.append(f"{OWNERS.name}: `{check}` is sharded, and its package's workflow {wf.name} does not exist")
+        else:
+            text = wf.read_text(encoding="utf-8")
+            stray = next((i for i, ch in enumerate(text) if not (ch in "\t\n" or " " <= ch <= "~")), None)
+            if stray is not None:
+                line = text.count("\n", 0, stray) + 1
+                failures.append(
+                    f"{wf.name}:{line}: `{check}` is sharded, and its workflow carries {text[stray]!r}; a sharded "
+                    f"workflow is printable ASCII, so this check reads its lines as YAML does (#262)"
+                )
+                continue
+            lines = text.split("\n")
+            body = next((i for i, l in enumerate(lines) if l.startswith("on:")), len(lines))
+            found = [l for i, l in enumerate(lines) if l.strip() and not (i < body and l.startswith("#"))]
+            wanted = [l for l in SHARDED_WORKFLOW.format(pkg=owner).split("\n") if l.strip()]
             if found != wanted:
                 at = next((i for i, (a, b) in enumerate(zip(found, wanted)) if a != b), min(len(found), len(wanted)))
                 failures.append(

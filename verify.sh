@@ -4217,6 +4217,37 @@ path.write_text(source.replace(old, 'directories = [p for p in directories if ga
 EOF
 }
 
+# A line separator YAML does not split on (#268's third review): the run
+# step's last line a bash comment to the runner, two lines to a reader that
+# splits as Python does -- a shard green having run nothing.
+inject_ci_sharded_workflow_line_separator() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/pkg-recompute.yml')
+source = path.read_text(encoding="utf-8")
+old = '          ./verify.sh "${args[@]}"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '          #\u2028' + old, 1), encoding="utf-8")
+EOF
+}
+
+# A listing with no LISTING line of its own: what a check that ignored
+# `--names` and ran would print, which verify.sh still calls LISTED.
+inject_ci_listing_unmarked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = 'print("\\n".join([gatelib.LISTING, *(p.name for p in directories)]))'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'print("\\n".join(p.name for p in directories))', 1), encoding="utf-8")
+EOF
+}
+
 # A sharded package whose workflow never passes the shard: every job runs all of it.
 inject_ci_sharded_workflow_without_shard() {
   python3 - <<'EOF'
@@ -8138,6 +8169,10 @@ selftest() {
     'pkg-recompute\.yml: .recompute. is sharded, and its workflow is not the sharded form'
   seeded_case "a check that runs one shard whatever"   ci inject_ci_check_runs_one_shard \
     '.recompute..s 3 shards run none of 10 member\(s\), so nothing runs them'
+  seeded_case "a line separator YAML does not split on" ci inject_ci_sharded_workflow_line_separator \
+    "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
+  seeded_case "a listing with no line of its own"      ci inject_ci_listing_unmarked \
+    '.recompute.: verify\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED'
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
@@ -9588,8 +9623,16 @@ done
 
 echo
 if [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then
-  printf 'verify: VERIFY_LIST_MEMBERS is set, so %d check(s) listed their members and none ran\n' "${#selected[@]}"
-  exit "$EXIT_LISTED"
+  # A check that FAILED under the listing keeps its failure's exit (#268's
+  # third review): exit 3 says every selected check listed, and nothing else.
+  listed=0
+  for failure in "${FAILED[@]}"; do
+    case "$failure" in *"(listed its members, ran nothing)") listed=$(( listed + 1 )) ;; esac
+  done
+  if [ "$listed" -eq "${#FAILED[@]}" ]; then
+    printf 'verify: VERIFY_LIST_MEMBERS is set, so %d check(s) listed their members and none ran\n' "${#selected[@]}"
+    exit "$EXIT_LISTED"
+  fi
 fi
 if [ "${#FAILED[@]}" -gt 0 ]; then
   printf 'verify: %d of %d check(s) failed:\n' "${#FAILED[@]}" "${#selected[@]}"

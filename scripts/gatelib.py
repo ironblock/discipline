@@ -81,6 +81,12 @@ def seeded_cases(text: str) -> list[Case]:
     return found
 
 
+# The line a check's `--names` mode prints before its members (#268's third
+# review): the members are the lines after it, and a check that ignored
+# `--names` and ran prints none, so it cannot pass for a listing.
+LISTING = "members (listed, none run):"
+
+
 def in_shard(name: str, index: int, count: int) -> bool:
     """Whether `name` belongs to shard `index` of `count` (#262): a stable hash
     of the name, so a check split across jobs never depends on order or on run,
