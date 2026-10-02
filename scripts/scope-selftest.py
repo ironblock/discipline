@@ -100,6 +100,10 @@ CHECK_INPUTS = {
     "results": {"results/"},
     "recompute": {"results/"},
     "admission": {"substrates/admission/", "results/"},
+    # `check_bsd` names only its script; the shim and the applier it runs
+    # under the shim are reached through it, so a change to either would
+    # otherwise inherit the last red (#260's review).
+    "bsd": {"scripts/bsd-sed/", "scripts/check-injections.py"},
 }
 
 
@@ -292,7 +296,15 @@ def dependencies(root: pathlib.Path, text: str) -> dict[str, tuple[set[str], set
         files = check_scripts(bodies, check) | CHECK_INPUTS.get(check, set())
         if check == "test":
             files |= scope_files(scope, root)
-        deps[ident] = (files, {inject, f"case:{ident}"} | check_units(bodies, check))
+        units = {inject, f"case:{ident}"} | check_units(bodies, check)
+        # An `injections` or `bsd` case scoped to one injection applies only
+        # that one, so its verdict depends on it as much as on its own
+        # injection: a scoped injection rewritten so it no longer calls what
+        # the fault breaks would read not-red while the plan inherited the
+        # last red (#260's second review).
+        if check in ("injections", "bsd") and scope:
+            units.add(scope)
+        deps[ident] = (files, units)
 
     for manifest in sorted(root.glob("diet/*/gate.toml")):
         lane = tomllib.loads(manifest.read_text(encoding="utf-8"))
