@@ -3882,6 +3882,20 @@ inject_ci_pages_newest_run_compared_backwards() {
   edit_in_place 's/\[ "\$newest" -le "\$RUN_NUMBER" \]/[ "$newest" -ge "$RUN_NUMBER" ]/' .github/workflows/pages.yml
 }
 
+# #244 (track five's faults, ruled with the PR): the deploy's concurrency group
+# where a skipped run reaches it, and no group at all.
+
+# The group at the workflow level, beside the job's: a run whose deploy is
+# skipped enters it and cancels a deploy waiting there (measured on #244).
+inject_ci_pages_concurrency_at_workflow_level() {
+  edit_in_place '/^  id-token: write$/{n;s/^$/concurrency: pages/;}' .github/workflows/pages.yml
+}
+
+# The deploy job's group gone: two deploys may run at once.
+inject_ci_pages_deploys_not_serialized() {
+  edit_in_place '/^      group: pages$/d' .github/workflows/pages.yml
+}
+
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
   edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
@@ -7666,6 +7680,10 @@ selftest() {
     "pages.yml: publishes without checking that no later verify run on main has passed"
   seeded_case "the newest-run comparison turned round" ci inject_ci_pages_newest_run_compared_backwards \
     "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
+  seeded_case "the deploy's group at the workflow level" ci inject_ci_pages_concurrency_at_workflow_level \
+    "pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters"
+  seeded_case "the deploy job's group gone" ci inject_ci_pages_deploys_not_serialized \
+    "pages.yml: the deploy job holds no .pages. concurrency group"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \

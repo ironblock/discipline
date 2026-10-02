@@ -525,6 +525,13 @@ def main() -> int:
         # has, or when the answer is empty. Rule 10's text
         # checks above cannot see a comparison turned round; this can.
         failures += newest_run_step_verdicts(live)
+        # Deploys one at a time, through a group on the deploy JOB (#244): a
+        # workflow-level group admits the runs whose job is skipped, and one
+        # of those cancels a deploy waiting in it.
+        if re.search(r"^concurrency:", live, re.M):
+            failures.append("pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters, cancelling a waiting deploy (#244)")
+        if not re.search(r"^    concurrency:\s*\n      group: pages\s*\n      cancel-in-progress: false\s*$", live, re.M):
+            failures.append("pages.yml: the deploy job holds no `pages` concurrency group with cancel-in-progress false, so deploys can overlap or cancel a running one")
         if re.search(r"^\s+continue-on-error:", live, re.M):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
         uploaded_path = re.search(r"actions/upload-pages-artifact@\S+\s*\n\s+with:\s*\n\s+path: (\S+)", live)
