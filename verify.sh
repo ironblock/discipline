@@ -3571,7 +3571,6 @@ path.write_text(source.replace(old, '', 1), encoding="utf-8")
 EOF
 }
 
-# An issue number with a leading zero: a second spelling of one id.
 # A supersession that names no product (#271, ruling (a)): a digest of the
 # right shape that no directory beside this one declares.
 inject_results_supersedes_dangling() {
@@ -3587,6 +3586,7 @@ path.write_text(source.replace(old, 'supersedes = "' + "a" * 64 + '"', 1), encod
 EOF
 }
 
+# An issue number with a leading zero: a second spelling of one id.
 inject_results_claim_issue_not_digits() {
   python3 - <<'EOF'
 import pathlib

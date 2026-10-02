@@ -3098,6 +3098,7 @@ label = "a supersession that names no product"
 failure_class = "results.claim-field-malformed"
 legacy_signature = ".supersedes. is a{64}, which 0 directory\\(ies\\) beside this one declare.*\\[results\\.claim-field-malformed\\]"
 migrated = false
+
 [[fault]]
 id = "results.results_claim_issue_not_digits"
 kind = "seeded-gate"

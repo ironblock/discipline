@@ -167,19 +167,12 @@ def is_utc(value: object) -> bool:
 
 
 DEFAULT_RULE_FILE = "decision-rule.toml"
-# What a reader cannot see and is neither whitespace nor a control character.
-# diet's assembler (`INVISIBLE` in capture/bakeoff.rs) holds the same list, so
-# a reason it writes is a reason this reads (#271's second review).
-INVISIBLE = frozenset(map(chr, (0x00AD, 0x061C, 0x180E, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x2066, 0x2067, 0x2068, 0x2069, 0xFEFF)))
-
-
 def has_text(value: object) -> bool:
-    """A string with something a reader can see in it."""
-    import unicodedata
-
-    return isinstance(value, str) and any(
-        not (ch.isspace() or unicodedata.category(ch) == "Cc" or ch in INVISIBLE) for ch in value
-    )
+    """A string a reader can read: at least one ASCII letter or digit. diet's
+    assembler (`has_text` in capture/bakeoff.rs) states the same rule, so a
+    reason it writes is a reason this reads (#271's third review: a list of
+    invisible code points kept growing)."""
+    return isinstance(value, str) and any(ch.isascii() and ch.isalnum() for ch in value)
 
 
 def named_exactly(directory: pathlib.Path, path: str) -> bool:
@@ -822,7 +815,9 @@ def sibling_products(directory: pathlib.Path) -> dict[str, list[str]]:
     against (#271, Dispatch's ruling (a)). A sibling whose front-matter cannot
     be read declares nothing here; its own lint says why."""
     products: dict[str, list[str]] = {}
-    for sibling in sorted(p for p in directory.parent.iterdir() if p.is_dir() and p != directory):
+    for sibling in sorted(
+        p for p in directory.parent.iterdir() if p.is_dir() and p != directory and p.name != TEMPLATE_DIR
+    ):
         try:
             source, _, _, _ = split_front_matter(read_text(sibling / "README.md"))
             sha = tomllib.loads(source or "").get("product_sha256")

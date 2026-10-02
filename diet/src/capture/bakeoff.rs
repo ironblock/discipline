@@ -1652,20 +1652,53 @@ fn is_utc(value: &str) -> bool {
         && number(17, 19) < 60
 }
 
-/// The code points a reader cannot see that are neither whitespace nor
-/// control characters. `check-results.py` holds the same list, so a reason
-/// the assembler writes is a reason the linter reads (#271's second review).
-const INVISIBLE: &[u32] = &[
-    0x00AD, 0x061C, 0x180E, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D,
-    0x202E, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x2066, 0x2067, 0x2068, 0x2069, 0xFEFF,
-];
-
-/// Whether `text` carries something a reader can see: a character that is
-/// not whitespace, not a control character, and not in [`INVISIBLE`]. Not
-/// `trim()`: U+001C..U+001F are not whitespace to Rust and are to Python.
+/// Whether `text` carries something a reader can read: at least one ASCII
+/// letter or digit. `check-results.py`'s `has_text` is the same rule, stated
+/// the same way, so a reason the assembler writes is one the linter reads
+/// (#271's third review: a list of invisible code points kept growing, and a
+/// Hangul filler or a braille blank was still "text").
 fn has_text(text: &str) -> bool {
-    text.chars()
-        .any(|c| !(c.is_whitespace() || c.is_control() || INVISIBLE.contains(&u32::from(c))))
+    text.chars().any(|c| c.is_ascii_alphanumeric())
+}
+
+/// The `product_sha256` each directory beside `into` declares in its
+/// README's front-matter, `into` itself and the template excepted -- what a
+/// `supersedes` digest resolves against, read the way `check-results.py`'s
+/// `sibling_products` reads it. A sibling whose front-matter carries none
+/// declares nothing.
+fn sibling_products(into: &Path) -> Vec<String> {
+    let Some(parent) = into.parent() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    let mut products = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_dir()
+            || path.file_name() == into.file_name()
+            || path.file_name().is_some_and(|name| name == "_template")
+        {
+            continue;
+        }
+        let Ok(readme) = std::fs::read_to_string(path.join("README.md")) else {
+            continue;
+        };
+        let mut lines = readme.lines();
+        if lines.next() != Some("+++") {
+            continue;
+        }
+        for line in lines.take_while(|line| *line != "+++") {
+            if let Some(sha) = line
+                .strip_prefix("product_sha256 = \"")
+                .and_then(|rest| rest.strip_suffix('"'))
+            {
+                products.push(sha.to_owned());
+            }
+        }
+    }
+    products
 }
 
 /// A relative path spelled one way: no empty, `.` or `..` part, so no
@@ -1836,12 +1869,33 @@ impl Provenance {
     /// the README that states the digest -- whose bytes hash to its digest.
     /// Asked of `carried`, the bytes before any is written, so a refusal
     /// leaves no directory behind.
-    fn held_to(&self, product_sha256: &str, carried: &[(&str, &[u8])]) -> Result<(), RunError> {
+    fn held_to(
+        &self,
+        product_sha256: &str,
+        carried: &[(&str, &[u8])],
+        into: &Path,
+    ) -> Result<(), RunError> {
         if self.supersedes == Declared::Given(product_sha256.to_owned()) {
             return Err(RunError::Undeclared(format!(
                 "`supersedes` is {product_sha256}, this run's own product; a claim does not \
                  supersede itself"
             )));
+        }
+        // RESOLVED AS THE LINTER RESOLVES IT (#271, ruling (a); its third
+        // review): the product of exactly one directory beside the one being
+        // written, the template not among them.
+        if let Declared::Given(digest) = &self.supersedes {
+            let named = sibling_products(into)
+                .iter()
+                .filter(|sha| *sha == digest)
+                .count();
+            if named != 1 {
+                return Err(RunError::Undeclared(format!(
+                    "`supersedes` is {digest}, which {named} directory(ies) beside the one being \
+                     written declare as their `product_sha256`; a supersession names exactly one \
+                     product"
+                )));
+            }
         }
         let Declared::Given(ratified) = &self.rule_ratified else {
             return Ok(());
@@ -1973,9 +2027,10 @@ pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Val
             ("run.jsonl", rendered_record.as_bytes()),
             ("report.json", product.as_bytes()),
             ("regimen.toml", regimen.as_bytes()),
+            ("recompute.sh", RECOMPUTE.as_bytes()),
         ])
         .collect();
-    provenance.held_to(&product_sha256, &carried)?;
+    provenance.held_to(&product_sha256, &carried, into)?;
 
     if into.join("README.md").exists() {
         return Err(RunError::Occupied {
@@ -2686,6 +2741,45 @@ mod tests {
         );
     }
 
+    /// A SECOND RECORD SUPERSEDES THE FIRST (ruling (a); #271's third
+    /// review), in a root of its own where each product is declared once:
+    /// the first record's directory, then a record with one more cache
+    /// consumed -- so another product -- whose `supersedes` resolves to it.
+    /// Returns the root, for the gates to lint.
+    fn assemble_a_supersession(base: &Path) -> PathBuf {
+        fn unchanged(_: &str) -> Option<Vec<f64>> {
+            None
+        }
+        let root = base.with_file_name("bakeoff-superseding");
+        let _ = std::fs::remove_dir_all(&root);
+        let first = write_run(&base.with_file_name("bakeoff-superseding-first-input"));
+        let answer = assemble(&first, &root.join("2026-01-01-the-first"), &declared())
+            .unwrap_or_else(|err| panic!("the first assembly failed: {err}"));
+        let Value::String(product) = field(&answer, "product_sha256") else {
+            panic!("the answer names the product's digest")
+        };
+        let second = write_run_with(
+            &base.with_file_name("bakeoff-superseding-second-input"),
+            &[("again", unchanged)],
+        );
+        let successor = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--supersedes",
+            product,
+            "--absent",
+            "rule_ratified=the bakeoff applies no rule; its endpoints are pre-registered",
+        ]))
+        .expect("a supersession");
+        assemble(
+            &second,
+            &root.join("2026-01-02-supersedes-the-first"),
+            &successor,
+        )
+        .unwrap_or_else(|err| panic!("the superseding assembly failed: {err}"));
+        root
+    }
+
     /// Beside the first assembly: one with every field given, one with
     /// reasons a caller might type, and the run-bound refusals, which write
     /// no README. The two that land are linted with the first.
@@ -2723,30 +2817,38 @@ mod tests {
             ),
             (
                 "a".repeat(64),
-                ratified(&pre_registration),
-                "does not carry",
+                ratified(&format!("{pre_registration},pre-registration.json")),
+                "names exactly one product",
             ),
+            (String::new(), ratified(&pre_registration), "does not carry"),
             (
-                "a".repeat(64),
+                String::new(),
                 ratified(&format!("{pre_registration},README.md")),
                 "does not carry",
             ),
             (
-                "a".repeat(64),
+                String::new(),
                 ratified(&format!("{pre_registration},./pre-registration.json")),
                 "spelled plainly",
             ),
             (
-                "a".repeat(64),
+                String::new(),
                 ratified(&format!("{},pre-registration.json", "c".repeat(64))),
                 "other bytes",
             ),
         ] {
+            // An empty `supersedes` here is one declared absent, so the case
+            // is refused for its own reason, not for a dangling digest.
+            let declared = if supersedes.is_empty() {
+                ["--absent", "supersedes=nothing replaced"]
+            } else {
+                ["--supersedes", supersedes.as_str()]
+            };
             let refused = Provenance::from_flags(&flags(&[
                 "--claim-issue",
                 "24",
-                "--supersedes",
-                &supersedes,
+                declared[0],
+                declared[1],
                 "--rule-ratified",
                 &rule,
             ]))
@@ -2849,25 +2951,29 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             return;
         }
-        for (script, what) in [
-            ("scripts/check-results.py", "the directory linter"),
-            ("scripts/check-recompute.py", "gate 0"),
-        ] {
-            let out = std::process::Command::new("python3")
-                .arg(root.join(script))
-                .arg("--root")
-                .arg(&dir)
-                .current_dir(&root)
-                .output()
-                .unwrap_or_else(|err| panic!("{what} could not be run: {err}"));
-            assert!(
-                out.status.success(),
-                "{what} refused the assembled directory:\n{}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr),
-            );
+        let superseding = assemble_a_supersession(&dir);
+        for lint_root in [&dir, &superseding] {
+            for (script, what) in [
+                ("scripts/check-results.py", "the directory linter"),
+                ("scripts/check-recompute.py", "gate 0"),
+            ] {
+                let out = std::process::Command::new("python3")
+                    .arg(root.join(script))
+                    .arg("--root")
+                    .arg(lint_root)
+                    .current_dir(&root)
+                    .output()
+                    .unwrap_or_else(|err| panic!("{what} could not be run: {err}"));
+                assert!(
+                    out.status.success(),
+                    "{what} refused the assembled directory:\n{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr),
+                );
+            }
         }
         let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&superseding);
     }
 
     /// A cache the record consumed and that is not beside it is a REFUSAL
