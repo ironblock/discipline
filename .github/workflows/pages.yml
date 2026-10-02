@@ -10,8 +10,11 @@ name: pages
 # matches a branch NAME, so a pull request from a fork's `main` matches it
 # too: the event and repository guards are what keep a pull request's code --
 # a fork's above all, run here with `pages: write` -- from publishing. And it
-# publishes only the sha that is still the tip of main: a re-run of an older
-# push run must not deploy that older sha over a newer one.
+# publishes only the newest site the gate has passed: if a later `verify` run
+# on main has already succeeded, this one -- a re-run of an older push run, or
+# one that finished late -- must not deploy its older sha over that newer one.
+# A later run that is still running, or that failed, does not stop it: the
+# last good site is published, and a busy main is not a red deploy.
 #
 # It builds nothing: that very run's `exercise` job built the replay and its
 # `diet` job (the `results` check) the ledger, and uploaded them as artifacts
@@ -67,16 +70,22 @@ jobs:
           pattern: site-*
           path: _artifacts
 
-      # Only the tip of main is published. A re-run of an older push run
-      # completes too, and would otherwise put its older site over a newer one;
-      # if main has moved on, the run for the newer sha publishes instead.
-      - name: Publish only the tip of main
+      # Only the newest site the gate passed is published. A re-run of an
+      # older push run completes too, and would otherwise put its older site
+      # over a newer one; so this refuses only if a LATER verify run on main
+      # (a higher run number; a re-run keeps its number) has already
+      # succeeded -- that run publishes instead. A later run still running, or
+      # failed, does not block this one (#32; superseding #215's tip-of-main
+      # test, which refused whenever main moved during a run).
+      - name: Publish only the newest run the gate passed
         env:
-          SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
         run: |
           set -euo pipefail
-          tip="$(git ls-remote origin refs/heads/main | cut -f1)"
-          [ "$tip" = "$SHA" ] || { echo "::error::this run checked ${SHA}, but main is now ${tip}; its run publishes, not this one"; exit 1; }
+          newest="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/verify.yml/runs?branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].run_number')"
+          [ -n "$newest" ] || { echo "::error::no successful verify run on main is listed, not even this one; publishing nothing"; exit 1; }
+          [ "$newest" -le "$RUN_NUMBER" ] || { echo "::error::verify run ${newest} on main has passed since this one (${RUN_NUMBER}); it publishes, not this one"; exit 1; }
 
       - name: Assemble the site
         run: |

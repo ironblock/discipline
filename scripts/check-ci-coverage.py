@@ -434,9 +434,10 @@ def main() -> int:
     #
     #    pages.yml runs downstream of a `verify` run and publishes only when
     #    that run SUCCEEDED, was a PUSH and ran this repository's code -- a
-    #    branch filter matches a fork's `main` by name -- and only the sha still
-    #    at main's tip, so a re-run of an older push run cannot deploy over a
-    #    newer one. It checks the site with `./verify.sh --site _site` before
+    #    branch filter matches a fork's `main` by name -- and only when no
+    #    LATER verify run on main has passed (by run number, read through the
+    #    API), so a re-run of an older push run cannot deploy over a newer one,
+    #    while a later run still running does not block it. It checks the site with `./verify.sh --site _site` before
     #    it uploads, nothing lets a step fail and the job go on, and what it
     #    uploads is the site it checked. Read from the lines that are not
     #    comments: a guard commented out is no guard. And the two parts it
@@ -464,9 +465,10 @@ def main() -> int:
         check = re.search(r"^\s+run: \./verify\.sh --site _site\s*$", live, re.M)
         if upload_at != -1 and (not check or check.start() > upload_at):
             failures.append("pages.yml: upload-pages-artifact is not preceded by ./verify.sh --site _site")
-        tip = live.find("git ls-remote origin refs/heads/main")
-        if upload_at != -1 and (tip == -1 or tip > upload_at):
-            failures.append("pages.yml: publishes a sha without checking it is still main's tip")
+        newest = live.find("actions/workflows/verify.yml/runs?branch=main&event=push&status=success")
+        number = live.find("RUN_NUMBER: ${{ github.event.workflow_run.run_number }}")
+        if upload_at != -1 and (newest == -1 or newest > upload_at or number == -1 or number > upload_at):
+            failures.append("pages.yml: publishes without checking that no later verify run on main has passed")
         if re.search(r"^\s+continue-on-error:", live, re.M):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
         uploaded_path = re.search(r"actions/upload-pages-artifact@\S+\s*\n\s+with:\s*\n\s+path: (\S+)", live)

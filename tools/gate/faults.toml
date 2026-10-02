@@ -3871,9 +3871,9 @@ migrated = false
 id = "ci.ci_pages_publishes_an_older_sha"
 kind = "seeded-gate"
 check = "ci"
-label = "the site published at a sha not main's tip"
+label = "the site published though a later run passed"
 failure_class = "wiring.pages-older-sha"
-legacy_signature = "pages.yml: publishes a sha without checking it is still main's tip"
+legacy_signature = "pages.yml: publishes without checking that no later verify run on main has passed"
 migrated = false
 [[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
