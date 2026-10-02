@@ -3504,6 +3504,45 @@ readme.write_text(source.replace(row, "", 1), encoding="utf-8")
 EOF
 }
 
+# FIGURES ARE REFERENCES (#63). Each case copies the one synthetic
+# `referenced` directory into results/ and breaks one thing, so the fixture's
+# text has one source and each case is the fixture plus its fault.
+inject_results_figure_typed_in_conclusion() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  edit_in_place "s/the product's own\\./the product's own, 0.142 of it./" \
+    results/2026-10-03-figures-referenced/README.md
+}
+
+inject_results_figure_typed_in_test() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  edit_in_place 's/nothing was fired$/nothing was fired 3 times/' \
+    results/2026-10-03-figures-referenced/README.md
+}
+
+inject_results_figure_uncited_in_conclusion() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  edit_in_place "s/the product's own\\./the product's own [uncited: a guess, 3]./" \
+    results/2026-10-03-figures-referenced/README.md
+}
+
+inject_results_reference_unresolved() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  edit_in_place 's/{{product\.of_steps}}/{{product.of_stepz}}/' \
+    results/2026-10-03-figures-referenced/README.md
+}
+
+# The value a headline figure references, altered: the product no longer
+# hashes to `product_sha256`, so no figure can be rendered from it.
+inject_results_referenced_product_altered() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  edit_in_place 's/0\.142/0.241/' results/2026-10-03-figures-referenced/report.json
+}
+
+inject_results_figures_undeclared() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  edit_in_place '/^figures = "referenced"$/d' results/2026-10-03-figures-referenced/README.md
+}
+
 # A consumed digest that no longer matches its file. The claim then cites
 # evidence it never read, which reads exactly like evidence it did.
 inject_results_consumed_digest_stale() {
@@ -7767,6 +7806,18 @@ selftest() {
     'the template declares .historical-observation.'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
+  seeded_case "a figure typed in Conclusion"          results  inject_results_figure_typed_in_conclusion \
+    "the Conclusion section types the figure\\(s\\) '0\\.142'.*\\[results\\.figure-typed\\]"
+  seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \
+    "the Test section types the figure\\(s\\) '3'.*\\[results\\.figure-typed\\]"
+  seeded_case "an uncited figure in Conclusion"       results  inject_results_figure_uncited_in_conclusion \
+    'the Conclusion section declares a figure .*\[results\.figure-typed\]'
+  seeded_case "a reference to a field not there"      results  inject_results_reference_unresolved \
+    'names .product\.of_stepz., which product does not carry.*\[results\.reference-unresolved\]'
+  seeded_case "a referenced product value altered"    results  inject_results_referenced_product_altered \
+    '0 file\(s\) here hash to .product_sha256.*\[results\.reference-unresolved\]'
+  seeded_case "a new directory declaring no figures"  results  inject_results_figures_undeclared \
+    'declares no .figures., and a directory dated after.*\[results\.figures-undeclared\]'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing  exit=' inject_that_changes_nothing
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
@@ -8465,6 +8516,19 @@ prove_selftest_mechanics() {
   local relay; scratch; relay="$SCRATCH"
   cp -r "${ROOT}/results/_template" "${relay}/2026-01-30-no-substrate"
   strip_substrates "${relay}/2026-01-30-no-substrate/run.jsonl"
+  # FIGURES ARE REFERENCES (#63): the synthetic `referenced` directory passes,
+  # and `--render` prints its figures from the data -- `pct()` of the
+  # product's 0.142 is 14.2% -- with nothing else on stdout. And the template,
+  # which shows references inside code spans, passes as `referenced`: a
+  # reference in code is text, not a figure.
+  expect_exit "a referenced report passes and renders its figures from the data" 0 \
+    bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
+      && python3 scripts/check-results.py tests/fixtures/results-referenced/2026-10-03-figures-referenced \
+      && out=\$(python3 scripts/check-results.py --render tests/fixtures/results-referenced/2026-10-03-figures-referenced 2>/dev/null) \
+      && grep -qF '14.2% at one place' <<<\"\$out\" && ! grep -q '{{' <<<\"\$out\""
+  expect_exit "and a reference inside code is text, not a figure" 0 \
+    bash -c "cd '${ROOT}' && python3 scripts/check-results.py results/_template"
+
   expect_exit "a record diet refuses gets no verdict from the linter" 0 \
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
       && out=\$(python3 scripts/check-results.py '${relay}/2026-01-30-no-substrate' 2>&1; true) \

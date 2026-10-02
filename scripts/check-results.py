@@ -69,6 +69,7 @@ from collections.abc import Callable
 
 import argparse
 import datetime
+import decimal
 import hashlib
 import json
 import pathlib
@@ -137,6 +138,42 @@ HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 # The one directory under results/ that is an example rather than a run, and so
 # the one exempt from the YYYY-MM-DD-<slug> rule.
 TEMPLATE_DIR = "_template"
+
+
+# FIGURES ARE REFERENCES, NOT DIGITS (#63, ruled 2026-10-02). Every directory
+# declares `figures`: `referenced` -- its body's numbers are `{{...}}`
+# references, resolved from the product, the front-matter and the record's
+# summary row at check time, and a typed figure is refused -- or `typed`, not
+# linted, its `known_defects` the disclosure. A directory dated after
+# FIGURES_LANDED must say `referenced`. On or before it, a missing key reads as
+# `typed` until the data seat's pass writes the key on every directory; that
+# pass makes a missing key a refusal by deleting this allowance.
+FIGURES = ("referenced", "typed")
+FIGURES_LANDED = "2026-10-02"
+
+# The sections that may carry no typed figure at all, and the ones that may
+# carry one only inside an `[uncited: <reason>]` marker, which declares it.
+FIGURES_NEVER_TYPED = ("Results", "Conclusion")
+UNCITED = re.compile(r"\[uncited:[^\]]*\]")
+REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
+# What a typed figure is: an ISO date, as ONE token (#63's measurement: a
+# date tokenised as three numbers made every Conclusion unmigratable), or a
+# number standing on its own -- not a digit inside a word (`v2`, `sha256`)
+# and not an issue or ordinal reference (`#63`).
+TYPED_FIGURE = re.compile(
+    r"(?<![\w#.])(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![\w])"
+)
+INLINE_CODE = re.compile(r"(`+)(?:.|\n)*?(?<!`)\1(?!`)")
+LINK_TARGET = re.compile(r"\]\([^)]*\)")
+# `ns.key.key[0]`, or one of three functions over one: the whole grammar.
+REF_PATH = re.compile(r"(product|front|summary)((?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])+)")
+REF_CALL = re.compile(r"(count|round|pct)\(\s*([^,()]+?)\s*(?:,\s*(\d+)\s*)?\)")
+REF_STEP = re.compile(r"\.([A-Za-z_][A-Za-z0-9_-]*)|\[(\d+)\]")
+
+
+class Written(str):
+    """A JSON number as it was written, so a rendered figure is the product's
+    own digits and not a float's re-spelling of them."""
 
 
 class Unreadable(Exception):
@@ -378,6 +415,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
     # --- run.jsonl: diet's verdict, relayed ------------------------------
     verdict = record_verdict(directory / "run.jsonl")
     summary: dict | None = None
+    written_summary: dict | None = None
     recorded_regime: dict | None = None
     claims: list[dict] = []
     recorded_source: dict | None = None
@@ -398,6 +436,10 @@ def check_run(directory: pathlib.Path) -> list[str]:
             fail("results.summary-record-count", f"run.jsonl holds {len(summaries)} summary rows, expected exactly 1")
         else:
             summary = summaries[0]
+            written_summary = next(
+                written for line in value.get("canonical", "").splitlines()
+                if line.strip() and (written := as_written(line)).get("record") == "summary"
+            )
         recorded_regime = value.get("regime")
         claims = [r for r in rows if r.get("record") == "claim"]
         recorded_source = value.get("source")
@@ -739,14 +781,231 @@ def check_run(directory: pathlib.Path) -> list[str]:
             f"README.md sections are {headings!r}, expected exactly {SECTIONS!r} in order"
         )
 
+    # --- figures (#63) ---------------------------------------------------
+    figures = figures_declared(name, front, fail)
+    rendered = None
+    if figures == "referenced":
+        rendered = lint_figures(directory, front, body, written_summary, fail)
+    if RENDERED is not None and rendered is not None:
+        RENDERED[directory.resolve()] = rendered
+    if FIGURES_SEEN is not None and figures in FIGURES:
+        FIGURES_SEEN[figures] += 1
+
     if LEDGER is not None and not failures and name != TEMPLATE_DIR:
-        LEDGER.append(ledger_row(directory, front, claims))
+        row = ledger_row(directory, front, claims)
+        row["figures"] = figures
+        if rendered is not None:
+            row["report"] = rendered
+        LEDGER.append(row)
     return failures
+
+
+def as_written(text: str) -> dict:
+    """JSON with every number kept as the digits it was written in."""
+    return json.loads(text, parse_float=Written, parse_int=Written)
+
+
+def figures_declared(name: str, front: dict, fail: Callable[[str, str], None]) -> str | None:
+    """The directory's `figures` word, or None when it declares none it may."""
+    dated = DIR_NAME.fullmatch(name)
+    after = bool(dated) and dated.group(1) > FIGURES_LANDED
+    word = front.get("figures")
+    if word is None:
+        if after:
+            fail(
+                "results.figures-undeclared",
+                f"front-matter declares no `figures`, and a directory dated after "
+                f"{FIGURES_LANDED} must declare `figures = \"referenced\"` (#63)",
+            )
+            return None
+        return "typed"
+    if word not in FIGURES:
+        fail("results.figures-undeclared", f"front-matter `figures` is {word!r}, which is neither {' nor '.join(FIGURES)}")
+        return None
+    if word == "typed" and after:
+        fail(
+            "results.figures-undeclared",
+            f"front-matter `figures` is \"typed\", and a directory dated after "
+            f"{FIGURES_LANDED} must be `referenced` (#63)",
+        )
+        return None
+    return word
+
+
+def sections_of(body: str) -> dict[str, str]:
+    """Each level-2 section's text, fenced code blocks and HTML comments removed."""
+    body = HTML_COMMENT.sub("", body)
+    found: dict[str, list[str]] = {}
+    current: str | None = None
+    fence: str | None = None
+    for line in body.split("\n"):
+        opener = CODE_FENCE.match(line)
+        if fence is None:
+            if opener:
+                fence = opener.group(1)
+                continue
+            heading = HEADING.match(line)
+            if heading:
+                current = heading.group(1)
+                found.setdefault(current, [])
+            elif current is not None:
+                found[current].append(line)
+            continue
+        if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence):
+            if line.strip().strip(fence[0]) == "":
+                fence = None
+    return {name: "\n".join(lines) for name, lines in found.items()}
+
+
+def code_ranges(body: str) -> list[tuple[int, int]]:
+    """Where `body` holds code: each fenced block, whole, and each inline span
+    outside one, as (start, end) offsets."""
+    ranges: list[tuple[int, int]] = []
+    fence: str | None = None
+    start = offset = 0
+    for line in body.split("\n"):
+        opener = CODE_FENCE.match(line)
+        if fence is None and opener:
+            fence, start = opener.group(1), offset
+        elif fence is not None and opener and opener.group(1)[0] == fence[0] \
+                and len(opener.group(1)) >= len(fence) and line.strip().strip(fence[0]) == "":
+            ranges.append((start, offset + len(line)))
+            fence = None
+        offset += len(line) + 1
+    if fence is not None:
+        ranges.append((start, len(body)))
+    for span in INLINE_CODE.finditer(body):
+        if not any(a <= span.start() < b for a, b in ranges):
+            ranges.append(span.span())
+    return ranges
+
+
+def the_product(directory: pathlib.Path, front: dict) -> tuple[dict | None, str | None]:
+    """The one file here whose SHA-256 is `product_sha256`, read as JSON with
+    its numbers as written -- or why there is none."""
+    sha = front.get("product_sha256")
+    if not isinstance(sha, str):
+        return None, "front-matter carries no `product_sha256`"
+    matches = sorted(p for p in directory.iterdir() if p.is_file() and digest_of(p) == sha)
+    if len(matches) != 1:
+        return None, (
+            f"{len(matches)} file(s) here hash to `product_sha256` {sha}; a reference "
+            f"resolves against exactly one product"
+        )
+    try:
+        product = as_written(matches[0].read_text(encoding="utf-8"))
+    except (ValueError, OSError) as err:
+        return None, f"the product, `{matches[0].name}`, is not JSON: {err}"
+    return (product, None) if isinstance(product, dict) else (None, f"the product, `{matches[0].name}`, is not a JSON object")
+
+
+def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None, str | None]:
+    """One `{{...}}` reference rendered, or why it cannot be."""
+    text = text.strip()
+    call = REF_CALL.fullmatch(text)
+    target, function, places = (call.group(2), call.group(1), call.group(3)) if call else (text, None, None)
+    path = REF_PATH.fullmatch(target)
+    if not path:
+        return None, f"`{{{{{text}}}}}` is not a reference: want product., front. or summary. and a path, or count(), round() or pct() of one"
+    scope = scopes.get(path.group(1))
+    if isinstance(scope, str):
+        return None, f"`{{{{{text}}}}}`: {scope}"
+    steps: tuple[object, ...] = tuple(
+        int(index) if index else key for key, index in REF_STEP.findall(path.group(2))
+    )
+    found, value = resolve(scope, steps)
+    if not found:
+        return None, f"`{{{{{text}}}}}` names `{target}`, which {path.group(1)} does not carry"
+    if function == "count":
+        if isinstance(value, (list, dict)):
+            return str(len(value)), None
+        return None, f"`{{{{{text}}}}}` counts `{target}`, which is not a list or a table"
+    if isinstance(value, bool):
+        shown = "true" if value else "false"
+    elif isinstance(value, (Written, str, int, float, datetime.date)):
+        shown = str(value)
+    else:
+        return None, f"`{{{{{text}}}}}` names `{target}`, which is not one value"
+    if function in ("round", "pct"):
+        try:
+            number = decimal.Decimal(shown)
+        except decimal.InvalidOperation:
+            return None, f"`{{{{{text}}}}}` rounds `{target}`, which is not a number"
+        if function == "pct":
+            number *= 100
+        number = number.quantize(decimal.Decimal(1).scaleb(-int(places or 0)), rounding=decimal.ROUND_HALF_EVEN)
+        shown = f"{number}%" if function == "pct" else str(number)
+    return shown, None
+
+
+def lint_figures(
+    directory: pathlib.Path, front: dict, body: str, summary: dict | None, fail: Callable[[str, str], None]
+) -> str | None:
+    """A `referenced` directory's body: no typed figure where none may stand,
+    every reference resolved. Returns the rendered body, or None if it fails."""
+    clean = True
+    for section, text in sections_of(body).items():
+        uncited = UNCITED.findall(text)
+        if uncited and section in FIGURES_NEVER_TYPED:
+            clean = False
+            fail(
+                "results.figure-typed",
+                f"the {section} section declares a figure `{uncited[0]}`; {section} carries "
+                f"no typed figure, cited or not -- reference the field instead (#63)",
+            )
+        bare = REFERENCE.sub(" ", UNCITED.sub(" ", LINK_TARGET.sub("]", INLINE_CODE.sub(" ", text))))
+        typed = TYPED_FIGURE.findall(bare)
+        if typed:
+            clean = False
+            where = "may carry one only inside `[uncited: <reason>]`" if section not in FIGURES_NEVER_TYPED else "carries none"
+            fail(
+                "results.figure-typed",
+                f"the {section} section types the figure(s) {', '.join(repr(t) for t in typed[:5])}; "
+                f"{section} {where} -- reference the product, front-matter or summary field (#63)",
+            )
+
+    # A reference inside code -- a span or a fenced block -- is text about
+    # references, as Markdown shows it, not a figure; it is left as written.
+    code = code_ranges(body)
+    references = [m for m in REFERENCE.finditer(body) if not any(a <= m.start() < b for a, b in code)]
+    needs_product = any("product." in m.group(1) for m in references)
+    product, why = the_product(directory, front) if needs_product else (None, "no reference names the product")
+    scopes: dict[str, object] = {
+        "product": product if product is not None else why,
+        "front": front,
+        "summary": summary if summary is not None else "the record's summary row could not be read",
+    }
+    rendered: list[str] = []
+    at = 0
+    unreadable: set[str] = set()
+    for match in references:
+        shown, problem = resolve_reference(match.group(1), scopes)
+        if problem:
+            clean = False
+            # A scope that cannot be read is said once, not once per figure.
+            scope = next((n for n, v in scopes.items() if isinstance(v, str) and problem.endswith(v)), None)
+            if scope is None or scope not in unreadable:
+                fail("results.reference-unresolved", problem)
+            if scope is not None:
+                unreadable.add(scope)
+            continue
+        rendered.append(body[at : match.start()])
+        rendered.append(shown or "")
+        at = match.end()
+    rendered.append(body[at:])
+    return "".join(rendered) if clean else None
 
 
 # Each directory this run passed, as the results page draws it (--ledger), or
 # None when no ledger was asked for.
 LEDGER: list[dict] | None = None
+
+# A referenced directory's rendered body, for `--render` (#63).
+RENDERED: dict[pathlib.Path, str] | None = None
+
+# How many directories declared each `figures` word, printed so a reader of
+# the gate sees how many are still typed (#63).
+FIGURES_SEEN: dict[str, int] | None = None
 
 # The rule a claim was decided by: a pre-registered decision rule it consumed,
 # by any name the directories have used (`decision-rule.toml`,
@@ -919,6 +1178,12 @@ def main(argv: list[str]) -> int:
         help="write the results ledger here if every directory passes (#32 I2)",
     )
     parser.add_argument(
+        "--render",
+        type=pathlib.Path,
+        metavar="DIR",
+        help="lint one directory and print its report with every figure rendered (#63)",
+    )
+    parser.add_argument(
         "directories",
         nargs="*",
         type=pathlib.Path,
@@ -927,12 +1192,18 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.render is not None:
+        if args.root or args.directories or args.ledger is not None:
+            parser.error("--render takes one directory and nothing else")
+        args.directories = [args.render]
     if not args.root and not args.directories:
         parser.error("nothing to lint: pass --root DIR or one or more run directories")
 
-    global DIET, LEDGER
+    global DIET, LEDGER, RENDERED, FIGURES_SEEN
     if args.ledger is not None:
         LEDGER = []
+    RENDERED = {}
+    FIGURES_SEEN = dict.fromkeys(FIGURES, 0)
     resolved = resolve_diet()
     if resolved is None:
         print(
@@ -942,7 +1213,11 @@ def main(argv: list[str]) -> int:
         )
         return 2
     DIET, sha = resolved
-    print(f"check-results: record verdicts from {DIET} sha256={sha}")
+    # To stderr under --render, whose stdout is the report and nothing else.
+    print(
+        f"check-results: record verdicts from {DIET} sha256={sha}",
+        file=sys.stderr if args.render is not None else sys.stdout,
+    )
 
     targets: list[pathlib.Path] = []
     failures: list[str] = []
@@ -990,7 +1265,17 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"check-results: {checked} directory(ies) pass")
+    if args.render is not None:
+        rendered = RENDERED.get(args.render.resolve())
+        if rendered is None:
+            print(f"check-results: {args.render} declares `figures = \"typed\"`; there is nothing to render", file=sys.stderr)
+            return 1
+        sys.stdout.write(rendered)
+        return 0
+    print(
+        f"check-results: {checked} directory(ies) pass; figures referenced in "
+        f"{FIGURES_SEEN['referenced']}, still typed in {FIGURES_SEEN['typed']} (#63)"
+    )
     if args.ledger is not None:
         args.ledger.write_text(json.dumps({"version": 1, "directories": LEDGER}, indent=1) + "\n", encoding="utf-8")
         print(f"check-results: the ledger, {len(LEDGER)} directory(ies), to {args.ledger}")
