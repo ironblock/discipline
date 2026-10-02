@@ -797,6 +797,19 @@ engine_single_digest_suffices = "the digest is of the acts, not of an executable
 # the caches were committed to the research archive from it on 2026-09-04.
 # Each cell is pinned the way its cache meta pins it: hub revision, the digest
 # of the weights file that was loaded, pooling, prefixes, and the library.
+[substrate.laya-tokenizer]
+equipment = "mac-pro-2019"
+description = "the tokenizer laya and laya-typed-decisions ship (ModernBERT's BPE), run on the host's CPU by the tokenizers library to count text in laya's own tokens; it embeds and classifies nothing (#165's length measurement)"
+pinned = true
+engine_name = "tokenizers"
+engine_identity = "0.23.2"
+engine_identity_is = "the library version; python 3.12.13"
+hub_id = "convaiinnovations/laya"
+hub_revision = "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
+weights_main = "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30"
+weights_main_file = "tokenizer/tokenizer.json, byte-identical in convaiinnovations/laya-typed-decisions at 1a793eb568e6718f15941d08f85432581df534e3 (Sidekick's manifests, relayed by Dispatch 2026-10-02); Apache-2.0"
+sampler_card = "none: counting only, each fragment tokenized alone without special tokens"
+
 [substrate.all-MiniLM-L6-v2]
 equipment = "mac-pro-2019"
 description = "sentence-transformers/all-MiniLM-L6-v2, the bakeoff's declared floor, run on the host's CPU by sentence-transformers 3.0.1"
