@@ -3932,6 +3932,13 @@ inject_ci_pages_deploy_group_quoted_key() {
       'queue': max" .github/workflows/pages.yml
 }
 
+# A second `concurrency` key in the deploy job, spelled with a tag: YAML keeps
+# the last of two, so this one -- `queue: max` in it -- is the group (#251).
+inject_ci_pages_deploy_second_group_tagged() {
+  edit_in_place '/^    runs-on: ubuntu-latest$/a\
+    !!str concurrency: {group: pages, cancel-in-progress: false, queue: max}' .github/workflows/pages.yml
+}
+
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
   edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
@@ -7726,6 +7733,8 @@ selftest() {
     "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
   seeded_case "a quoted extra key in the deploy job's group" ci inject_ci_pages_deploy_group_quoted_key \
     "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+  seeded_case "a second group in the deploy job, tagged" ci inject_ci_pages_deploy_second_group_tagged \
+    "pages.yml: the deploy job carries a key not spelled plainly .!!str concurrency"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \

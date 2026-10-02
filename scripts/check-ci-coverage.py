@@ -540,8 +540,15 @@ def main() -> int:
         deploy = re.search(r"^  deploy:\s*\n(.*?)(?=^  \S|\Z)", live, re.M | re.S)
         # Blank lines inside the block do not end it, for YAML or for this.
         group = deploy and re.search(r"^    concurrency:\s*\n((?:      .*\n?|[ \t]*\n)*)", deploy.group(1), re.M)
-        # One `concurrency` key in the job: YAML keeps the LAST of two.
-        if deploy and len(re.findall(r"""^    (\?\s*)?["']?concurrency["']?\s*(:|$)""", deploy.group(1), re.M)) != 1:
+        # The job's own keys are an allowlist of spelling too (#251): each
+        # one plain (`name:`), so no tag, anchor, merge, quote or escape can
+        # hide a second `concurrency` -- YAML keeps the LAST of two -- and
+        # exactly one of them is `concurrency`.
+        job_keys = re.findall(r"^    (\S.*?)\s*$", deploy.group(1), re.M) if deploy else []
+        unplain = [k for k in job_keys if not re.match(r"[a-z][a-z-]*:(\s|$)", k)]
+        if unplain:
+            failures.append(f"pages.yml: the deploy job carries a key not spelled plainly ({'; '.join(unplain)})")
+        if sum(k.split(":", 1)[0] == "concurrency" for k in job_keys) != 1:
             group = None
         # An allowlist, not a key pattern (#251): the group's lines are
         # exactly `group: pages` and `cancel-in-progress: false`, in either
@@ -552,7 +559,10 @@ def main() -> int:
         lines = [line.strip() for line in group.group(1).splitlines() if line.strip()] if group else []
         others = [line for line in lines if line not in ("group: pages", "cancel-in-progress: false")]
         named = [re.sub(r"""^[?\s]*["']?""", "", line).split(":", 1)[0].strip("\"' ") for line in others]
-        if "group: pages" not in lines:
+        spelled = deploy and re.search(r"^    concurrency:", deploy.group(1), re.M)
+        if "group: pages" not in lines and (lines or (spelled and not group)):
+            failures.append("pages.yml: the deploy job's concurrency group is not spelled plainly, as the two lines `group: pages` and `cancel-in-progress: false`")
+        elif "group: pages" not in lines:
             failures.append("pages.yml: the deploy job holds no `pages` concurrency group, so deploys can overlap")
         elif "cancel-in-progress: false" not in lines:
             failures.append("pages.yml: the deploy job's `pages` group does not say cancel-in-progress: false, so a newer deploy may cancel one mid-publish")

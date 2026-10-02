@@ -3998,6 +3998,15 @@ legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyon
 migrated = false
 
 [[fault]]
+id = "ci.ci_pages_deploy_second_group_tagged"
+kind = "seeded-gate"
+check = "ci"
+label = "a second group in the deploy job, tagged"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly .!!str concurrency"
+migrated = false
+
+[[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
 check = "ci"
