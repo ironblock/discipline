@@ -78,6 +78,9 @@ BRANCH_IGNORE = re.compile(r"^ {4,}branches-ignore:")
 INLINE_LIST = re.compile(r"^\[([^\]]*)\]$")
 LIST_ITEM = re.compile(r"^ {6,}-\s*(.+?)\s*$")
 ON_BLOCK = re.compile(r"^on:\s*$", re.MULTILINE)
+STEP_ITEM = re.compile(r"^\s*- [A-Za-z_-]+:")
+APT = re.compile(r"\bapt(-get)?\b")
+STEP_TIMEOUT = re.compile(r"^\s+timeout-minutes:\s*\d+\s*$")
 BUDGET = pathlib.Path(__file__).resolve().parent.parent / ".github" / "gate-budget.tsv"
 CANCEL_IN_PROGRESS = re.compile(r"^\s*cancel-in-progress:\s*(.+?)\s*$", re.MULTILINE)
 EVENT = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_]*):")
@@ -473,6 +476,38 @@ def main() -> int:
         for part in ("site-replay", "site-ledger"):
             if not re.search(rf"^\s+name: {part}\s*$", uploaded, re.M):
                 failures.append(f"pages.yml: publishes {part}, which no workflow the gate runs uploads")
+
+    # 11. a step that installs from a package mirror is bounded (#222's run)
+    #
+    #    A hung mirror is not a test result. On 2026-10-01 four selftest shards
+    #    sat in `apt-get update` until GitHub's six-hour job limit cancelled
+    #    them. A step that runs `apt-get` therefore carries `timeout-minutes`,
+    #    read off the step itself: its `- ` item and every line indented deeper,
+    #    whatever key opens it. `apt` is held to it as well as `apt-get`. A job-level timeout would not do -- it bounds the
+    #    whole job, and the selftest's own runtime is what it should measure.
+    for wf in sorted(WORKFLOWS.glob("*.yml")):
+        lines = wf.read_text(encoding="utf-8").splitlines()
+        starts = [i for i, line in enumerate(lines) if STEP_ITEM.match(line)]
+        for start in starts:
+            # The step is its `- ` item and every line indented deeper than the
+            # dash, so it ends at the next step, the next job, or the end of the
+            # file -- never in a neighbour (#232's review: a span to the next
+            # `- name:` credited a later job's timeout to this step).
+            dash = len(lines[start]) - len(lines[start].lstrip())
+            end = start + 1
+            while end < len(lines):
+                line = lines[end]
+                if line.strip() and not line.lstrip().startswith("#") and len(line) - len(line.lstrip()) <= dash:
+                    break
+                end += 1
+            step = lines[start:end]
+            if any(APT.search(line) and not line.lstrip().startswith("#") for line in step) and not any(
+                STEP_TIMEOUT.match(line) for line in step
+            ):
+                failures.append(
+                    f"{wf.name}:{start + 1}: a step runs apt-get with no `timeout-minutes`; "
+                    f"a hung mirror holds the job until GitHub's six-hour limit"
+                )
 
     for message in failures:
         print(message, file=sys.stderr)

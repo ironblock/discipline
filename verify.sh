@@ -3809,6 +3809,12 @@ inject_ci() {
   edit_in_place '/^hygiene\t/d' .github/check-owners.tsv
 }
 
+# A package-mirror step left unbounded: a hung `apt-get update` then holds a
+# selftest shard until GitHub's six-hour job limit (#222's run 36884660921).
+inject_ci_apt_step_unbounded() {
+  edit_in_place '/^        timeout-minutes: 5$/d' .github/workflows/gate-selftest.yml
+}
+
 # The trunk's own run cancelled by the next merge (#112): the census a pull
 # request is scoped against goes stale while CI stays green.
 inject_ci_trunk_run_cancelled() {
@@ -7575,6 +7581,8 @@ selftest() {
     "pages.yml: publishes site-ledger, which no workflow the gate runs uploads"
   seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \
     'carries .branches: \[main\]. and is reached'
+  seeded_case "a package-mirror step left unbounded"  ci       inject_ci_apt_step_unbounded \
+    'runs apt-get with no .timeout-minutes.'
   seeded_case "the trunk's run cancelled by a merge"  ci       inject_ci_trunk_run_cancelled \
     'cancels a push run on the trunk'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
