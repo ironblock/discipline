@@ -281,6 +281,8 @@ def parse_workflow(path: pathlib.Path) -> tuple[object, list[str]]:
         out = json.loads(done.stdout)
     except json.JSONDecodeError as err:
         raise ParserMissing(f"rule 10's YAML parser (ruby, psych) answered with something that is not its JSON: {done.stdout.strip()[:120]!r}") from err
+    if not isinstance(out, dict) or not ("error" in out or ("doc" in out and isinstance(out.get("problems"), list))):
+        raise ParserMissing(f"rule 10's YAML parser (ruby, psych) answered with JSON that is not its answer: {done.stdout.strip()[:120]!r}")
     if "error" in out:
         return None, [f"pages.yml: is not YAML: {out['error']}"]
     refusals = []
