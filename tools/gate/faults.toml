@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 132
+mechanics_assertions = 136
 unseedable_guards = 2
 migrated = 0
 
@@ -1746,6 +1746,22 @@ failure_class = "hygiene.clean"
 expected_exit = "0"
 migrated = false
 [[fault]]
+id = "mech.a-ticket-id-shape-in-binary-bytes-is-not-a-ticket-id"
+kind = "mechanics"
+check = "-"
+label = "a ticket-id shape in binary bytes is not a ticket id"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.and-it-reads-red-with-the-binary-flag-restored"
+kind = "mechanics"
+check = "-"
+label = "and it reads red with the binary flag restored"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
 id = "mech.a-patterns-tsv-outside-scripts-is-still-scanned"
 kind = "mechanics"
 check = "-"
@@ -1871,6 +1887,24 @@ check = "-"
 label = "history: the same literal in an author line is not content"
 failure_class = "history.clean"
 expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-an-id-in-a-text-hunk-beside-a-binary-path-is-a-finding"
+kind = "mechanics"
+check = "-"
+label = "history: an id in a text hunk beside a binary path is a finding"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.history-an-id-in-a-binary-path-s-name-is-a-finding"
+kind = "mechanics"
+check = "-"
+label = "history: an id in a binary path's name is a finding"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
 migrated = false
 
 [[fault]]
