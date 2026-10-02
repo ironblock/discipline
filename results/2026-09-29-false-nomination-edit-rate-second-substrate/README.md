@@ -29,6 +29,12 @@ known_defects = [
 ]
 targets_checked = 252
 targets_matched = 252
+claim_issue = "142"
+rule_ratified = { comment = "5826194082", at = "2026-09-25T03:29:00Z", digest = "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2" }
+rule_ratified_note = "the decision rule is stage 2's, byte for byte, ratified on #114; the comparison rule (comparison-rule.toml) was declared on #142 (5877139712), and no ratification comment of #142's own pre-registration exists"
+window_start = "2026-09-29T03:57:42Z"
+window_start_from = "window/run.start, the measured run's first fork; the headroom re-check that decided the excluded forks began earlier, 03:43:27Z (window/fire.log line 2)"
+absent = { supersedes = "nothing replaced: endpoint 1 beside stage 2's word, never in its place (5883192343)" }
 
 [regime]
 arm = "false-nomination-edit-rate-four-arms-six-rungs"

@@ -71,7 +71,7 @@ readonly EXIT_MISUSE=2
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results recompute admission regimen lanes metadata hygiene pages exercise ci history injections resolver derive parity)
+readonly CHECKS=(fmt clippy test library results recompute admission regimen lanes metadata hygiene pages exercise ci history injections bsd resolver derive parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -517,6 +517,13 @@ check_injections() {
   python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
 }
 
+# The same applier run with a BSD-shaped `sed` first on PATH (#75): the
+# structural lint keeps `sed` out of injection bodies, and this is what proves
+# the one spelling left, `edit_in_place`, portable by execution.
+check_bsd() {
+  bash scripts/check-bsd-sed.sh . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
+}
+
 # The merge resolver, exercised on fixtures before it is trusted to resolve a
 # merge. `merge-gate.py` rebuilds the gate files from both sides by name, and
 # for its first three hundred lines nothing ran it: five defects lived in it
@@ -955,13 +962,13 @@ seeded_case() {
       return
     fi
     scoped=(--scope "$scope")
-  elif [ "$check" = "injections" ] && [ -n "$scope" ]; then
+  elif { [ "$check" = "injections" ] || [ "$check" = "bsd" ]; } && [ -n "$scope" ]; then
     scoped=(--scope "$scope")
   elif [ -n "$scope" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
-    SELFTEST_BROKEN+=("${label}: only the test and injections checks take a scope")
-    not_red "$ident" "$check" "only the test and injections checks take a scope"
+    SELFTEST_BROKEN+=("${label}: only the test, injections and bsd checks take a scope")
+    not_red "$ident" "$check" "only the test, injections and bsd checks take a scope"
     return
   fi
   # One log per case, kept for the run, because the box itself is overwritten
@@ -1126,6 +1133,35 @@ edit_in_place() {
       return 1
     fi
   done
+}
+
+# The one portable spelling made GNU-only, in the one spelling no text scan
+# can see (#75): the command's NAME assembled from two strings, so the lint in
+# scripts/check-injections.py, which reads words, never reads `sed`. GNU edits
+# the file in place and every injection still changes the tree, so the
+# `injections` check stays green; under BSD semantics the expression is taken
+# as `-i`'s suffix and every injection that calls `edit_in_place` is inert.
+# Only running the corpus under the shim sees it.
+inject_bsd_edit_in_place_gnu_only() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+start = source.index("edit_in_place() {\n")
+end = source.index("\n}\n", start) + 3
+name = '"s""ed"'
+body = (
+    "edit_in_place() {\n"
+    '  local expression="$1"; shift\n'
+    "  local file\n"
+    '  for file in "$@"; do\n'
+    f'    {name} -i "$expression" "$file" || return 1\n'
+    "  done\n"
+    "}\n"
+)
+path.write_text(source[:start] + body + source[end:], encoding="utf-8")
+EOF
 }
 
 # One generic injection for every lane-declared fault, rather than one bash
@@ -6650,6 +6686,26 @@ prove_mechanics() {
   expect_exit "a credential inside a binary is caught" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-secret"
 
+  # THE BSD CHECK REFUSES TO RUN UNDER GNU SEMANTICS (#75): a shim it cannot
+  # execute, or one that edits a file through GNU's `-i` spelling, would grade
+  # every injection under GNU and call them portable. Both are exit 2, before
+  # a single injection runs, so each case needs only the script and its shim.
+  local bsd; scratch; bsd="$SCRATCH"
+  mkdir -p "${bsd}/unrunnable/scripts/bsd-sed" "${bsd}/gnu-shaped/scripts/bsd-sed"
+  cp "${ROOT}/scripts/check-bsd-sed.sh" "${bsd}/unrunnable/scripts/"
+  cp "${ROOT}/scripts/bsd-sed/sed" "${bsd}/unrunnable/scripts/bsd-sed/sed"
+  chmod 000 "${bsd}/unrunnable/scripts/bsd-sed/sed"
+  expect_exit "the bsd check will not run without an executable shim" 2 \
+    bash "${bsd}/unrunnable/scripts/check-bsd-sed.sh" "${bsd}/unrunnable"
+  cp "${ROOT}/scripts/check-bsd-sed.sh" "${bsd}/gnu-shaped/scripts/"
+  printf '#!/bin/sh\nfor real in /usr/bin/sed /bin/sed; do [ -x "$real" ] && break; done\n' \
+    > "${bsd}/gnu-shaped/scripts/bsd-sed/sed"
+  printf '[ "$1" = -i ] && { shift; f="$2"; "$real" "$1" "$f" > "$f.t" && mv "$f.t" "$f"; exit; }\nexec "$real" "$@"\n' \
+    >> "${bsd}/gnu-shaped/scripts/bsd-sed/sed"
+  chmod +x "${bsd}/gnu-shaped/scripts/bsd-sed/sed"
+  expect_exit "nor with a shim that edits through GNU's -i" 2 \
+    bash "${bsd}/gnu-shaped/scripts/check-bsd-sed.sh" "${bsd}/gnu-shaped"
+
   # ...but an ordinary binary must not trip the loose heuristics. Over-strict
   # is a failure too: a gate that cries wolf on every binary gets switched off.
   #
@@ -7870,6 +7926,8 @@ selftest() {
     'declares no .figures., and a directory dated after.*\[results\.figures-undeclared\]'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing  exit=' inject_that_changes_nothing
+  seeded_case "the one portable spelling made GNU-only" bsd    inject_bsd_edit_in_place_gnu_only \
+    '^  inject_exercise_pnpm_unobtainable  exit=' inject_exercise_pnpm_unobtainable
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
     'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
@@ -9398,7 +9456,7 @@ fi
 # be a misuse rather than silently no scope at all.
 if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
   if [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ]; then
-    echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+    echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
     exit "$EXIT_MISUSE"
   fi
   case "${selected[0]}" in
@@ -9410,18 +9468,18 @@ if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
       }
       VERIFY_TEST_SCOPE="$VERIFY_SCOPE"
       ;;
-    injections)
+    injections|bsd)
       case "$VERIFY_SCOPE" in
         inject_*[!a-z0-9_]*|inject_) ;;
         inject_*) VERIFY_INJECTION_SCOPE="$VERIFY_SCOPE" ;;
       esac
       [ -n "$VERIFY_INJECTION_SCOPE" ] || {
-        echo "verify: --scope '$VERIFY_SCOPE': the injections check takes one injection's name, inject_..." >&2
+        echo "verify: --scope '$VERIFY_SCOPE': the ${selected[0]} check takes one injection's name, inject_..." >&2
         exit "$EXIT_MISUSE"
       }
       ;;
     *)
-      echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+      echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
       exit "$EXIT_MISUSE"
       ;;
   esac

@@ -7,6 +7,9 @@ pre_registration_sha256 = "0b3ac3bb381b5bb823f3d858259e5618d7eabd543c5d1e2e60001
 controls_run = ["scoring-extremes", "shuffled-label-null"]
 known_defects = []
 targets_checked = 19
+claim_issue = "17"
+rule_ratified = { comment = "5739179890", at = "2026-09-19T03:56:32Z", digest = "73137c7810edefc852c6c04a6c62298e7f0e823ac92b1603a2d1b410539e1671" }
+absent = { supersedes = "nothing replaced: the v1 base run of #17", window_start = "not recorded: an embedding run with no window; run.jsonl, the caches and report.json carry no time" }
 
 [regime]
 arm = "entry-to-turn-nomination-four-embedders"

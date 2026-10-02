@@ -70,6 +70,9 @@ jobs:
   repo:
     uses: ./.github/workflows/pkg-repo.yml
 
+  bsd:
+    uses: ./.github/workflows/pkg-bsd.yml
+
   selftest:
     uses: ./.github/workflows/gate-selftest.yml
     # `actions: read` for the scope plan's `main` censuses, `issues: read` for
@@ -81,7 +84,7 @@ jobs:
 
   gate:
     name: gate
-    needs: [diet, pages, exercise, repo, selftest]
+    needs: [diet, pages, exercise, repo, bsd, selftest]
     if: always()
     runs-on: ubuntu-latest
     # `actions: read` on top of the workflow's `contents: read`, because this
