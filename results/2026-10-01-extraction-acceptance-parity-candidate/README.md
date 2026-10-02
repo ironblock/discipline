@@ -24,7 +24,7 @@ targets_checked = 54
 targets_matched = 54
 claim_issue = "143"
 rule_ratified = { comment = "5946588217", at = "2026-10-02T06:14:09Z", digest = "15ebefc2818872fcbfae27ee9fa5057c744f7177d55f9571dadbb98ae8102999", of = "apply.py" }
-rule_ratified_note = "the comment quotes planning's 5921525110 by its heading and approves it; it names no file and states no time, so at is the comment's own timestamp and the rung reads post-hoc. A ratification in chat before the fire is relayed (5933939552), not recorded. apply.py is the operative rule, merged (#191, ced2512) before the first fork; decision-rule.toml and pre-registration.json were transcribed after the fire. If the maintainer adds the time to the comment, at is re-pinned in a follow-up (#32, Dispatch)"
+rule_ratified_note = "the comment quotes planning's 5921525110 by its heading and approves it; it names no file and states no time, so at is the comment's own timestamp and the rung reads post-hoc. A ratification before the fire is relayed (5933939552; 5943037888), not recorded. The comment pins no digest: digest is this migration's sha256 of apply.py, the decision rule's applier_sha256, merged (#191, ced2512) before the first fork; the operative rule is apply.py with the candidate config, which is not pinned here. decision-rule.toml and pre-registration.json were transcribed after the fire"
 window_start = "2026-10-01T14:54:55Z"
 window_start_from = "window/seat-a.start, seat A's first fork"
 absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)" }
