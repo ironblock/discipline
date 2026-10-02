@@ -386,25 +386,9 @@ fn the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
-/// `--into` is a SECOND ARGUMENT SHAPE through the same dispatch, and a shape
-/// is what a subprocess test catches.
-///
-/// `the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane` pins the verb to
-/// its lane. It does not pin the flag: `capture::bakeoff::assemble` is tested
-/// as a FUNCTION, and the arm that routes `--into` to it lives in `bin/diet.rs`
-/// where no test reached. A `--into` misspelled in that match, or `path` and
-/// `into` transposed, falls through to the usage error with every unit test
-/// still green -- which is the defect the sibling test's docstring was written
-/// about, one argument along.
-///
-/// So both directions: the flag spelled right assembles, and a flag spelled
-/// wrong is a usage error that writes NOTHING. Without the second, an arm that
-/// accepted any fourth argument would satisfy the first.
 /// A malformed declaration is a usage error, like a misspelled `--into`
 /// (#271 review): exit 2, nothing on stdout, nothing written.
 fn malformed_declarations_are_usage_errors(run_path: &str, into: &std::path::Path) {
-    // A malformed declaration is a usage error, like a misspelled `--into`
-    // (#271 review): exit 2, nothing on stdout, the reason on stderr.
     let declared = |tail: &[&str]| -> (i32, String, String) {
         let mut args = vec![
             "bakeoff",
@@ -458,6 +442,21 @@ fn malformed_declarations_are_usage_errors(run_path: &str, into: &std::path::Pat
         "a declaration on a command that reads none was accepted"
     );
 }
+
+/// `--into` is a SECOND ARGUMENT SHAPE through the same dispatch, and a shape
+/// is what a subprocess test catches.
+///
+/// `the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane` pins the verb to
+/// its lane. It does not pin the flag: `capture::bakeoff::assemble` is tested
+/// as a FUNCTION, and the arm that routes `--into` to it lives in `bin/diet.rs`
+/// where no test reached. A `--into` misspelled in that match, or `path` and
+/// `into` transposed, falls through to the usage error with every unit test
+/// still green -- which is the defect the sibling test's docstring was written
+/// about, one argument along.
+///
+/// So both directions: the flag spelled right assembles, and a flag spelled
+/// wrong is a usage error that writes NOTHING. Without the second, an arm that
+/// accepted any fourth argument would satisfy the first.
 
 #[test]
 fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {

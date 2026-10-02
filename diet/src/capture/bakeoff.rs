@@ -1808,51 +1808,30 @@ impl Provenance {
 
     /// What the declarations name, held to this run (#271 review): a claim
     /// does not supersede its own product, and a ratification names a file
-    /// this directory carries -- one the assembler writes or copies, never
-    /// the README that states the digest.
-    fn held_to(&self, product_sha256: &str, artifacts: &[&Artifact]) -> Result<(), RunError> {
+    /// this directory will carry -- one the assembler writes or copies, never
+    /// the README that states the digest -- whose bytes hash to its digest.
+    /// Asked of `carried`, the bytes before any is written, so a refusal
+    /// leaves no directory behind.
+    fn held_to(&self, product_sha256: &str, carried: &[(&str, &[u8])]) -> Result<(), RunError> {
         if self.supersedes == Declared::Given(product_sha256.to_owned()) {
             return Err(RunError::Undeclared(format!(
                 "`supersedes` is {product_sha256}, this run's own product; a claim does not \
                  supersede itself"
             )));
         }
-        let carried: Vec<&str> = artifacts
-            .iter()
-            .map(|artifact| artifact.path.as_str())
-            .chain([
-                "pre-registration.json",
-                "run.jsonl",
-                "report.json",
-                "regimen.toml",
-            ])
-            .collect();
-        if let Declared::Given(ratified) = &self.rule_ratified {
-            let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
-            if !carried.contains(&of) {
-                return Err(RunError::Undeclared(format!(
-                    "`rule_ratified` is of `{of}`, which this directory does not carry; it \
-                     carries {}",
-                    carried.join(", ")
-                )));
-            }
-        }
-        Ok(())
-    }
-
-    /// The ratified digest against the bytes the assembler wrote under
-    /// `into`, before the README states it.
-    fn ratification_matches(&self, into: &Path) -> Result<(), RunError> {
         let Declared::Given(ratified) = &self.rule_ratified else {
             return Ok(());
         };
         let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
-        let found = std::fs::read(into.join(of))
-            .map(|bytes| sha256_hex(&bytes))
-            .map_err(|err| RunError::Write {
-                path: of.to_owned(),
-                reason: err.to_string(),
-            })?;
+        let Some((_, bytes)) = carried.iter().find(|(path, _)| *path == of) else {
+            let names: Vec<&str> = carried.iter().map(|(path, _)| *path).collect();
+            return Err(RunError::Undeclared(format!(
+                "`rule_ratified` is of `{of}`, which this directory does not carry; it carries \
+                 {}",
+                names.join(", ")
+            )));
+        };
+        let found = sha256_hex(bytes);
         if found != ratified.digest {
             return Err(RunError::Undeclared(format!(
                 "`rule_ratified.digest` is {}, and `{of}` as written hashes to {found}; the \
@@ -1937,7 +1916,36 @@ pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Val
 
     // WHAT THE DECLARATIONS NAME, HELD TO THIS RUN (#271 review), before
     // anything is written.
-    provenance.held_to(&product_sha256, &artifacts)?;
+    // EVERY BYTE THE DIRECTORY WILL CARRY, BEFORE ANY IS WRITTEN (#271,
+    // track three's read): what the declarations name is checked against
+    // these, so a refusal leaves nothing behind -- not seven files and no
+    // README.
+    let mut copied: Vec<(&str, Vec<u8>)> = Vec::new();
+    for artifact in &artifacts {
+        let bytes =
+            std::fs::read(done.dir.join(&artifact.path)).map_err(|_| RunError::Missing {
+                path: artifact.path.clone(),
+            })?;
+        copied.push((artifact.path.as_str(), bytes));
+    }
+    let mut pre_registration = String::new();
+    json::render(&done.kind.pre_registration(), &mut pre_registration);
+    pre_registration.push('\n');
+    let regime = done.record.regime().clone();
+    let record = synthesized_record(&done, &artifacts, checked, &product_sha256);
+    let rendered_record = crate::formats::record::render(&record);
+    let regimen = regimen_of(&regime);
+    let carried: Vec<(&str, &[u8])> = copied
+        .iter()
+        .map(|(path, bytes)| (*path, bytes.as_slice()))
+        .chain([
+            ("pre-registration.json", pre_registration.as_bytes()),
+            ("run.jsonl", rendered_record.as_bytes()),
+            ("report.json", product.as_bytes()),
+            ("regimen.toml", regimen.as_bytes()),
+        ])
+        .collect();
+    provenance.held_to(&product_sha256, &carried)?;
 
     if into.join("README.md").exists() {
         return Err(RunError::Occupied {
@@ -1952,19 +1960,15 @@ pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Val
     // The caches and the register, by the digests the record declares. Copied
     // rather than referenced: a results directory is a claim with its evidence
     // ATTACHED, and evidence that lives somewhere else is a link.
-    for artifact in &artifacts {
-        let bytes =
-            std::fs::read(done.dir.join(&artifact.path)).map_err(|_| RunError::Missing {
-                path: artifact.path.clone(),
-            })?;
-        let landing = into.join(&artifact.path);
+    for (path, bytes) in &copied {
+        let landing = into.join(path);
         if let Some(parent) = landing.parent() {
             std::fs::create_dir_all(parent).map_err(|err| RunError::Write {
                 path: parent.display().to_string(),
                 reason: err.to_string(),
             })?;
         }
-        write(&landing, &bytes)?;
+        write(&landing, bytes)?;
     }
 
     // THE PRE-REGISTRATION, FIRST, AND HASHED FROM THE BYTES ON DISK.
@@ -1983,19 +1987,11 @@ pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Val
     // the front-matter is of the bytes that ended up on disk, and that those
     // bytes are still there, unchanged, at the moment the scores are written
     // -- re-read below rather than trusted from the variable.
-    let mut pre_registration = String::new();
-    json::render(&done.kind.pre_registration(), &mut pre_registration);
-    pre_registration.push('\n');
     let pre_registration_path = into.join("pre-registration.json");
     write(&pre_registration_path, pre_registration.as_bytes())?;
     let pre_registration_sha256 = sha256_hex(pre_registration.as_bytes());
 
-    let regime = done.record.regime().clone();
-    let record = synthesized_record(&done, &artifacts, checked, &product_sha256);
-    write(
-        &into.join("run.jsonl"),
-        crate::formats::record::render(&record).as_bytes(),
-    )?;
+    write(&into.join("run.jsonl"), rendered_record.as_bytes())?;
     // Re-read, not re-used: the point of the digest is the file, so the file
     // is what is hashed again. Same refusal shape as a cache whose bytes are
     // not the bytes the record declared -- the scores do not get written over
@@ -2012,8 +2008,7 @@ pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Val
         });
     }
     write(&into.join("report.json"), product.as_bytes())?;
-    write(&into.join("regimen.toml"), regimen_of(&regime).as_bytes())?;
-    provenance.ratification_matches(into)?;
+    write(&into.join("regimen.toml"), regimen.as_bytes())?;
     write(
         &into.join("README.md"),
         report_of(
@@ -2706,10 +2701,7 @@ mod tests {
             let landing = dir.join("refused");
             let err = assemble(path, &landing, &refused).expect_err(says);
             assert!(err.to_string().contains(says), "{err}");
-            assert!(
-                !landing.join("README.md").exists(),
-                "a refused assembly wrote its README"
-            );
+            assert!(!landing.exists(), "a refused assembly wrote its directory");
             let _ = std::fs::remove_dir_all(&landing);
         }
         let typed = Provenance::from_flags(&flags(&[
