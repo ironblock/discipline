@@ -1,0 +1,87 @@
+{
+ "tokenizer_sha256": "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30",
+ "unique_states": 5732,
+ "tokens": {
+  "p50": 142,
+  "p90": 439,
+  "p95": 714,
+  "max": 2641
+ },
+ "judged_items": 6976,
+ "tokens_all_items": {
+  "p50": 132,
+  "p90": 401,
+  "p95": 683
+ },
+ "heads": {
+  "verdict": {
+   "question_tokens": 28,
+   "option_tokens": [
+    35,
+    38,
+    38,
+    15
+   ],
+   "head_part": 158,
+   "head_total": 161
+  },
+  "edit": {
+   "question_tokens": 20,
+   "option_tokens": [
+    27,
+    47
+   ],
+   "head_part": 96,
+   "head_total": 99
+  }
+ },
+ "models": {
+  "laya-en": {
+   "max_len": 512,
+   "head_max_len": 192,
+   "questions": {
+    "verdict": {
+     "head_within_cap": true,
+     "state_budget": 350,
+     "truncated": 809,
+     "truncated_share": 0.1411,
+     "p90_within": false,
+     "p90_all_items_within": false
+    },
+    "edit": {
+     "head_within_cap": true,
+     "state_budget": 412,
+     "truncated": 625,
+     "truncated_share": 0.109,
+     "p90_within": false,
+     "p90_all_items_within": true
+    }
+   },
+   "p90_within_every_question": false
+  },
+  "laya-typed-decisions": {
+   "max_len": 1024,
+   "head_max_len": 256,
+   "questions": {
+    "verdict": {
+     "head_within_cap": true,
+     "state_budget": 862,
+     "truncated": 189,
+     "truncated_share": 0.033,
+     "p90_within": true,
+     "p90_all_items_within": true
+    },
+    "edit": {
+     "head_within_cap": true,
+     "state_budget": 924,
+     "truncated": 141,
+     "truncated_share": 0.0246,
+     "p90_within": true,
+     "p90_all_items_within": true
+    }
+   },
+   "p90_within_every_question": true
+  }
+ },
+ "variant": "laya-typed-decisions"
+}

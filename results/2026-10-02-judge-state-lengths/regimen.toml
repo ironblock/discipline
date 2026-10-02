@@ -1,0 +1,6 @@
+# The regimen this run applied: every judge state in the archive (the nomination and the turn's reasoning and prose,
+# as the Sonnet judges saw them) counted in laya's own tokens, against each laya model's state budget under #165's
+# two questions. One substrate: laya's tokenizer on this host's CPU. Nothing is served and nothing is classified.
+arm = "judge-state-lengths"
+substrates = ["laya-tokenizer"]
+dogma_version = 0

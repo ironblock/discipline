@@ -145,7 +145,7 @@ reproducible from a parts list, and the manifest should not imply it is."""
 display_name = "ironblock's 2019 Mac Pro"
 entry_type = "x86-workstation"
 hardware_fingerprint = "f0efb982fe1e4793ba9cf832e32bf30759d358da42e0362251a023c095dc480a"
-role = "the data seat's workstation; a host that serves no model, and the machine whose CPU cores ran the sense bakeoff's four encoder cells"
+role = "the data seat's workstation; a host that serves no model, and the machine whose CPU cores ran the sense bakeoff's four encoder cells and counted the judge states in laya's tokens (#165)"
 measured = "2026-09-05"
 
 model_identifier = "MacPro7,1"
@@ -786,6 +786,21 @@ weights_acts_sha256 = "188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb9073
 reproducible_by_config = true
 reproducible_because = "as for `canned`: replay the acts and the same bytes play again; exact match, no band"
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
+
+# laya's tokenizer, run on this host's CPU to count the archive's judge states in
+# laya's own tokens (#165). Like the encoder cells below it serves nothing.
+[substrate.laya-tokenizer]
+equipment = "mac-pro-2019"
+description = "the tokenizer laya and laya-typed-decisions ship (ModernBERT's BPE), run on the host's CPU by the tokenizers library to count text in laya's own tokens; it embeds and classifies nothing (#165's length measurement)"
+pinned = true
+engine_name = "tokenizers"
+engine_identity = "0.23.2"
+engine_identity_is = "the library version; python 3.12.13"
+hub_id = "convaiinnovations/laya"
+hub_revision = "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
+weights_main = "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30"
+weights_main_file = "tokenizer/tokenizer.json, byte-identical in convaiinnovations/laya-typed-decisions at 1a793eb568e6718f15941d08f85432581df534e3 (read at both hub revisions, #247's review); Apache-2.0"
+sampler_card = "none: counting only, each fragment tokenized alone without special tokens"
 
 # The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
 # not a served model: no server, no sampler, a pinned library on this host's

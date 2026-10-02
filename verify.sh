@@ -6377,6 +6377,19 @@ prove_mechanics() {
   expect_exit "an ordinary binary does not false-positive" 0 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-clean"
 
+  # A ticket-id SHAPE inside binary bytes is not a ticket id (#233): a blob
+  # the runner drew from /dev/urandom, whose bytes spell \x06DIE9 from offset
+  # 18692 (the D at 18693). It reads clean -- and red with the `b` flag restored, so the
+  # decision is held by the fixture and not by the table's comment alone.
+  mkdir -p "${box}/ticket-shape"
+  cp "${ROOT}/tests/fixtures/hygiene-binary/ticket-id-shape-in-random-bytes.bin" "${box}/ticket-shape/"
+  expect_exit "a ticket-id shape in binary bytes is not a ticket id" 0 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/ticket-shape"
+  sed 's/^internal-ticket-id\ti\t/internal-ticket-id\tib\t/' "${ROOT}/scripts/hygiene-patterns.tsv" \
+    > "${box}/patterns-with-b.tsv"
+  expect_exit "and it reads red with the binary flag restored" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/patterns-with-b.tsv" --tree "${box}/ticket-shape"
+
   # The ledger renderer's verdict reaches the results check (#32 I2): a
   # renderer that exits 7 makes `check_results` exit 7 -- its own status,
   # which no other step of the check produces, so the assertion cannot pass
@@ -6871,6 +6884,9 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
   (
     cd "${fake}/repo"
     git init --quiet
+    # The scans below run the copied scripts, which write __pycache__ here;
+    # ignored, so each `git add --all` commits only what its case names.
+    printf '__pycache__/\n' > .gitignore
     printf 'a\n' > a.txt && git add --all && seed_commit --message 'base'
     git update-ref refs/remotes/origin/main HEAD
     printf 'b\n' > b.txt && git add --all && seed_commit --message 'second'
@@ -7035,6 +7051,42 @@ STRICT
   expect_exit "history: the same literal in an author line is not content" 0 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
         GITHUB_EVENT_PATH="${fake}/pr-in-author.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+
+  # ONE BINARY PATH BLINDS NOTHING BESIDE IT (#233's review). A commit's patch
+  # used to be one file, and a file holding a NUL is searched only by the `b`
+  # patterns -- so a ticket id in a text hunk went unseen whenever the same
+  # commit added a binary. Patches are written one file per path now.
+  local fake_mixed
+  (
+    cd "${fake}/repo"
+    printf 'x\000y\000\n' > blob.bin
+    printf 'see %s for the plan\n' "$token" > notes.txt
+    git add --all && seed_commit --message 'a binary beside a text hunk'
+  )
+  fake_mixed="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_author" "$fake_mixed" > "${fake}/pr-mixed.json"
+  expect_exit "history: an id in a text hunk beside a binary path is a finding" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-mixed.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+
+  # A BINARY'S NAME IS TEXT (#240's second review). A path's name sits in its
+  # patch part's header, beside its content -- so a NUL in the content made
+  # the name unscanned. The commit's paths are written as a text file too.
+  local fake_named
+  (
+    cd "${fake}/repo"
+    printf 'x\000y\000\n' > "${token}.bin"
+    git add --all && seed_commit --message 'a binary under a named path'
+  )
+  fake_named="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_mixed" "$fake_named" > "${fake}/pr-named.json"
+  expect_exit "history: an id in a binary path's name is a finding" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-named.json" \
       python3 "${fake}/repo/scripts/check-history.py"
 
   # `--range` REACHES THE CHECK, AND BEATS THE INFERRED ANSWER. A flag that
