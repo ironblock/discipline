@@ -7,6 +7,9 @@ controls_run = []
 known_defects = []
 targets_checked = 2
 targets_matched = 2
+claim_issue = "24"
+rule_ratified = { comment = "5654868940", at = "2026-09-13T17:27:11Z", digest = "dd65d56811c51968c5bddb18323e3956bb2a39b25730522136778c5f4c160632" }
+absent = { supersedes = "derived from 2026-09-17-sense-bakeoff (eac8640d...), not replacing it: the base's unadjudicated is not a verdict, and the rule keeps both visible in the ledger (5654868940)", window_start = "an adjudication collects no data; the base run records no time" }
 
 [regime]
 arm = "sense-bakeoff-four-embedders"

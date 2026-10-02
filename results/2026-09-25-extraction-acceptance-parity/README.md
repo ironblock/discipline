@@ -26,6 +26,12 @@ known_defects = [
 ]
 targets_checked = 41
 targets_matched = 41
+claim_issue = "115"
+rule_ratified = { comment = "5826194209", at = "2026-09-25T03:29:01Z", digest = "2da448c49328993507c9cc026de86646bb15b310009d7d4fea603790a1809c2b", of = "apply.py" }
+rule_ratified_note = "the ratification pinned apply.py, band.py and band.json by digest; decision-rule.toml was transcribed after the fire and is not the ratified file"
+window_start = "2026-09-25T03:42:11Z"
+window_start_from = "window/seat-a.start, seat A's first fork"
+absent = { supersedes = "nothing replaced: a re-fire of the archived row, which stands beside it" }
 
 [regime]
 arm = "extraction-seat-parity-refire"

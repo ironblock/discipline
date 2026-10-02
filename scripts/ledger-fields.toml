@@ -1,0 +1,96 @@
+# The ledger's three fields per claim directory (#32, planning 5935378835), plus window_start (track one's post-hoc
+# check compares rule_ratified.at with it). Every value is read from the record or its threads, with the source beside
+# it; where a field cannot be read, it is named in `absent` with the reason. Applied by migrate-ledger-fields.py, which
+# writes them into each README's front matter. Comment ids and issue numbers are digit strings: identifiers, not
+# measurements (track one, 2026-10-01). window_start is the measured run's first fork, ISO-8601 UTC: the first draw
+# whose result enters the word, after any preflight or headroom step that only decides which forks run; its source
+# is in window_start_from.
+
+["2026-07-29-confabulation-on-nulls"]
+window_start = "2026-07-29T05:21:28Z"
+window_start_from = "the earliest per-call ts in campaign-one.graded.jsonl (line 1); the README gives the date only"
+absent = { claim_issue = "a notebook-era result: no claim issue; added by #39, the seat plan's step 3", supersedes = "nothing replaced: the only record of its claim", rule_ratified = "a notebook-era result: no decision rule and no pre-registration" }
+
+["2026-08-10-extraction-acceptance-inverts"]
+window_start = "2026-08-10T21:53:53Z"
+window_start_from = "the earliest run.begin of the three replays, seat-c/events.jsonl line 1; the original human drive's start is not recorded"
+absent = { claim_issue = "a notebook-era result: no claim issue; added by #42", supersedes = "nothing replaced: the archived row #115 and #143 re-fire beside it", rule_ratified = "a notebook-era result: no decision rule and no pre-registration" }
+
+["2026-09-17-sense-bakeoff"]
+claim_issue = "24"
+rule_ratified = { comment = "5654868940", at = "2026-09-13T17:27:11Z", digest = "dd65d56811c51968c5bddb18323e3956bb2a39b25730522136778c5f4c160632" }
+absent = { supersedes = "nothing replaced: the base run of #24; its adjudication sits beside it", window_start = "not recorded: run.jsonl, the cache metas and report.json carry no time" }
+
+["2026-09-17-sense-bakeoff-adjudication"]
+claim_issue = "24"
+rule_ratified = { comment = "5654868940", at = "2026-09-13T17:27:11Z", digest = "dd65d56811c51968c5bddb18323e3956bb2a39b25730522136778c5f4c160632" }
+absent = { supersedes = "derived from 2026-09-17-sense-bakeoff (eac8640d...), not replacing it: the base's unadjudicated is not a verdict, and the rule keeps both visible in the ledger (5654868940)", window_start = "an adjudication collects no data; the base run records no time" }
+
+["2026-09-19-entry-to-turn-nomination"]
+claim_issue = "17"
+rule_ratified = { comment = "5739179890", at = "2026-09-19T03:56:32Z", digest = "73137c7810edefc852c6c04a6c62298e7f0e823ac92b1603a2d1b410539e1671" }
+absent = { supersedes = "nothing replaced: the v1 base run of #17", window_start = "not recorded: an embedding run with no window; run.jsonl, the caches and report.json carry no time" }
+
+["2026-09-19-entry-to-turn-nomination-adjudication"]
+claim_issue = "17"
+rule_ratified = { comment = "5739179890", at = "2026-09-19T03:56:32Z", digest = "73137c7810edefc852c6c04a6c62298e7f0e823ac92b1603a2d1b410539e1671" }
+absent = { supersedes = "derived from 2026-09-19-entry-to-turn-nomination (4fa03345...), not replacing it: the base's unadjudicated is not a verdict", window_start = "an adjudication collects no data; the base run records no time" }
+
+["2026-09-20-entry-to-turn-nomination-v2"]
+claim_issue = "17"
+rule_ratified = { comment = "5739179890", at = "2026-09-19T03:56:32Z", digest = "73137c7810edefc852c6c04a6c62298e7f0e823ac92b1603a2d1b410539e1671" }
+absent = { supersedes = "nothing replaced: it sits beside v1, which stands as ratified (commit 4a7d3ad)", window_start = "not recorded: no time in run.jsonl, the caches or report.json" }
+
+["2026-09-20-entry-to-turn-nomination-v2-adjudication"]
+claim_issue = "17"
+absent = { supersedes = "nothing replaced: it sits beside the v1 adjudication, both rules and both verdicts in the ledger (README; #17 5863843029)", rule_ratified = "rule v2 was worded on #17 after v1's numbers (5747481065) and never posted as a rule file by digest before it was applied (#17 5863922237): no ratification of the file exists", window_start = "an adjudication collects no data; the base run records no time" }
+
+["2026-09-20-false-nomination-framing"]
+claim_issue = "89"
+rule_ratified = { comment = "5754480755", at = "2026-09-21T02:07:09Z", digest = "043ea99dc4d3de6fd3ffad5bc20605b65d9d8a30303f499112707596bba9263a" }
+rule_ratified_note = "the file as it stands: the claim was ratified before the run (#89 5739199883, 2026-09-19T03:59:59Z), and the [ruling] table (decision 0: the sham reading, rule v2) was added and ratified after it (PR #101 5754480755); no pre-run digest of the file was posted"
+window_start = "2026-09-20T05:37:00Z"
+window_start_from = "#89 5748942437, 'Started 05:37Z', the measured run's first fork; the headroom pilot that decided the admitted forks ran before it, from about 04:31Z (inferred from 5747910143, not stated); the record carries no wall clock"
+absent = { supersedes = "nothing replaced: the first draw; (b)-v2 sits beside it" }
+
+["2026-09-21-false-nomination-framing-v2"]
+claim_issue = "89"
+rule_ratified = { comment = "5755488611", at = "2026-09-21T04:39:46Z", digest = "321c48578534bead8d540a25363fe0b1541f915e83fd2791fd8dde87b3ed450c" }
+window_start = "2026-09-21T04:46:00Z"
+window_start_from = "known_defects: 'control fork first, 04:46Z'; #89 5757349547 'Started 04:46Z'"
+absent = { supersedes = "nothing replaced: it sits beside the (b) record, both draws refuted (#89 5767616859)" }
+
+["2026-09-25-extraction-acceptance-parity"]
+claim_issue = "115"
+window_start = "2026-09-25T03:42:11Z"
+window_start_from = "window/seat-a.start, seat A's first fork"
+rule_ratified = { comment = "5826194209", at = "2026-09-25T03:29:01Z", digest = "2da448c49328993507c9cc026de86646bb15b310009d7d4fea603790a1809c2b", of = "apply.py" }
+rule_ratified_note = "the ratification pinned apply.py, band.py and band.json by digest; decision-rule.toml was transcribed after the fire and is not the ratified file"
+absent = { supersedes = "nothing replaced: a re-fire of the archived row, which stands beside it" }
+
+["2026-09-27-false-nomination-edit-rate"]
+claim_issue = "114"
+rule_ratified = { comment = "5826194082", at = "2026-09-25T03:29:00Z", digest = "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2" }
+window_start = "2026-09-27T23:16:29Z"
+window_start_from = "window/run.start"
+absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }
+
+["2026-09-29-false-nomination-edit-rate-second-substrate"]
+claim_issue = "142"
+rule_ratified = { comment = "5826194082", at = "2026-09-25T03:29:00Z", digest = "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2" }
+rule_ratified_note = "the decision rule is stage 2's, byte for byte, ratified on #114; the comparison rule (comparison-rule.toml) was declared on #142 (5877139712), and no ratification comment of #142's own pre-registration exists"
+window_start = "2026-09-29T03:57:42Z"
+window_start_from = "window/run.start, the measured run's first fork; the headroom re-check that decided the excluded forks began earlier, 03:43:27Z (window/fire.log line 2)"
+absent = { supersedes = "nothing replaced: endpoint 1 beside stage 2's word, never in its place (5883192343)" }
+
+["2026-10-01-extraction-acceptance-parity-candidate"]
+claim_issue = "143"
+window_start = "2026-10-01T14:54:55Z"
+window_start_from = "window/seat-a.start, seat A's first fork"
+rule_ratified = { comment = "5946588217", at = "2026-10-02T06:14:09Z", digest = "15ebefc2818872fcbfae27ee9fa5057c744f7177d55f9571dadbb98ae8102999", of = "apply.py" }
+rule_ratified_note = "the comment quotes planning's 5921525110 by its heading and approves it; it names no file and states no time, so at is the comment's own timestamp and the rung reads post-hoc. A ratification before the fire is relayed (5933939552; 5943037888), not recorded. The comment pins no digest: digest is this migration's sha256 of apply.py, the decision rule's applier_sha256, merged (#191, ced2512) before the first fork; the operative rule is apply.py with the candidate config, which is not pinned here. decision-rule.toml and pre-registration.json were transcribed after the fire"
+absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)" }
+
+["2026-10-02-judge-state-lengths"]
+claim_issue = "165"
+absent = { supersedes = "nothing replaced: the first measurement of #165", rule_ratified = "#165's procedure is planning's design answer on the claim stub, not a ratified decision rule", window_start = "the archive's judge states were read, not drawn; no window" }
