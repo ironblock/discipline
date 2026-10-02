@@ -3576,6 +3576,39 @@ path.write_text(source.replace(old, fence, 1), encoding="utf-8")
 EOF
 }
 
+# A heading a renderer shows that this linter does not read as a section
+# (#265's third review): an indented ` ## Results` puts a figure a reader
+# sees under Results into Test, where a marker would let it stand.
+inject_results_figure_under_unread_heading() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "## Results\n"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, " ## Results\n\nThe rate was [uncited: a sample, 0.241].\n\n" + old, 1), encoding="utf-8")
+EOF
+}
+
+# A reference whose closer is one brace short (#265's third review): matched
+# by no reference, so neither resolved nor refused, and rendered as written.
+inject_results_reference_unclosed() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {{product.decode_rate}.", 1), encoding="utf-8")
+EOF
+}
+
 inject_results_figure_typed_in_test() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
   python3 - <<'EOF'
@@ -7935,6 +7968,10 @@ selftest() {
     "the Conclusion section types the figure\\(s\\) '0\\.142'.*\\[results\\.figure-typed\\]"
   seeded_case "a figure in a fence in Conclusion"     results  inject_results_figure_in_conclusion_fence \
     "the Conclusion section types the figure\\(s\\) '0\\.271'.*\\[results\\.figure-typed\\]"
+  seeded_case "a figure under a heading not read"     results  inject_results_figure_under_unread_heading \
+    "' ## Results', is a heading a renderer shows and this linter does not read as a section.*\\[results\\.heading-unread\\]"
+  seeded_case "a reference one brace short"           results  inject_results_reference_unclosed \
+    "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
   seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \
     "the Test section types the figure\\(s\\) '3'.*\\[results\\.figure-typed\\]"
   seeded_case "an uncited figure in Conclusion"       results  inject_results_figure_uncited_in_conclusion \
@@ -8648,14 +8685,13 @@ prove_selftest_mechanics() {
   # FIGURES ARE REFERENCES (#63): the synthetic `referenced` directory passes,
   # and `--render` prints its figures from the data -- `pct()` of the
   # product's 0.142 is 14.2% -- with nothing else on stdout. And the template,
-  # which shows references inside code spans, passes as `referenced`: a
-  # reference in code is text, not a figure.
+  # which every new directory is copied from, passes as `referenced`.
   expect_exit "a referenced report passes and renders its figures from the data" 0 \
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
       && python3 scripts/check-results.py tests/fixtures/results-referenced/2026-10-03-figures-referenced \
       && out=\$(python3 scripts/check-results.py --render tests/fixtures/results-referenced/2026-10-03-figures-referenced 2>/dev/null) \
       && grep -qF '14.2% at one place' <<<\"\$out\" && ! grep -q '{{' <<<\"\$out\""
-  expect_exit "and a reference inside code is text, not a figure" 0 \
+  expect_exit "and the template passes as referenced" 0 \
     bash -c "cd '${ROOT}' && python3 scripts/check-results.py results/_template"
 
   expect_exit "a record diet refuses gets no verdict from the linter" 0 \

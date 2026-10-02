@@ -157,15 +157,30 @@ FIGURES_NEVER_TYPED = ("Results", "Conclusion")
 # One line, and a reason with a word in it: an unterminated marker must not
 # reach across paragraphs to the next `]`, and `[uncited: 42]` declares
 # nothing (#265's review).
-UNCITED = re.compile(r"\[uncited:[^\]\n]*[A-Za-z][^\]\n]*\]")
+#
+# No `<` or `>` in it (#265's third review): `<!--[uncited: x-->0.241<!--]-->`
+# was a marker to this reader and, its brackets stripped with the comments, a
+# bare figure to every other.
+UNCITED = re.compile(r"\[uncited:[^\]\n<>]*[A-Za-z][^\]\n<>]*\]")
 REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 # What a typed figure is: an ISO date, as ONE token (#63's measurement: a
 # date tokenised as three numbers made every Conclusion unmigratable), or a
 # number standing on its own -- not a digit inside a word (`v2`, `sha256`)
 # and not an issue or ordinal reference (`#63`).
+#
+# A dot before the digits exempts them only after a word or a number -- the
+# `2` of `v1.2` -- never a leading-dot decimal: `.241` and `p < .05` are
+# figures (#265's third review).
 TYPED_FIGURE = re.compile(
-    r"(?<![A-Za-z0-9#.])(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![A-Za-z0-9])"
+    r"(?<![A-Za-z0-9#])(?<![A-Za-z0-9]\.)(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![A-Za-z0-9])"
 )
+# A HEADING THIS LINTER DOES NOT READ AS ONE (#265's third review). Sections
+# are `## ` at column 0 and the title is one `# ` line before them; any other
+# line a renderer shows as a heading -- indented, another level, setext, an
+# `<h1>`..`<h6>` -- would put text a reader sees under "Results" in whatever
+# section came before it. In a referenced body it is refused, not guessed at.
+UNREAD_HEADING = re.compile(r"^(?: {1,3}#{1,6}(?:\s|$)|#(?:#{2,5})?(?:\s|$)|#{1,6}$)|<h[1-6][\s>]", re.IGNORECASE)
+SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
 # `ns.key.key[0]`, or one of three functions over one: the whole grammar.
 REF_PATH = re.compile(r"(product|front|summary)((?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])+)")
 REF_CALL = re.compile(r"(count|round|pct)\(\s*([^,()]+?)\s*(?:,\s*(\d+)\s*)?\)")
@@ -974,6 +989,19 @@ def lint_figures(
     # figure in a code sample, a URL or a comment in Results or Conclusion is
     # refused like any other, and every `{{...}}` is resolved.
     clean = True
+    lines = body.split("\n")
+    first_section = next((i for i, line in enumerate(lines) if HEADING.match(line)), len(lines))
+    for at, line in enumerate(lines):
+        title = at < first_section and re.match(r"^# \S", line)
+        setext = SETEXT_UNDERLINE.match(line) and at > 0 and lines[at - 1].strip()
+        if (UNREAD_HEADING.search(line) and not title) or setext:
+            clean = False
+            fail(
+                "results.heading-unread",
+                f"line {at + 1} of the body, {line[:60]!r}, is a heading a renderer shows "
+                f"and this linter does not read as a section; a referenced body's sections are "
+                f"`## ` at column 0, and its title one `# ` line before them (#63)",
+            )
     for section, text in sections_of(body).items():
         uncited = UNCITED.findall(text)
         if uncited and section in FIGURES_NEVER_TYPED:
@@ -1020,6 +1048,19 @@ def lint_figures(
         rendered.append(shown or "")
         at = match.end()
     rendered.append(body[at:])
+    # EVERY `{{` IS A REFERENCE OR AN ERROR (#265's third review): a brace
+    # pair this grammar did not match -- `{{product.x}` -- was neither
+    # resolved nor refused, and rendered as written.
+    left = "".join(rendered) if clean else REFERENCE.sub(" ", body)
+    for stray in re.finditer(r"\{\{|\}\}", left):
+        clean = False
+        fail(
+            "results.reference-unresolved",
+            f"`{left[max(0, stray.start() - 20) : stray.end() + 20].strip()}` carries a "
+            f"`{stray.group(0)}` that is no reference; every `{{{{...}}}}` resolves, and nothing else "
+            f"in a referenced body is written with double braces",
+        )
+        break
     return "".join(rendered) if clean else None
 
 
