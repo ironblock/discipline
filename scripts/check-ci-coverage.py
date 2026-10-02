@@ -35,6 +35,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -201,6 +202,47 @@ def push_filter(text: str) -> tuple[str, list[str]]:
         if listing and item:
             names.append(item.group(1).strip().strip("\"'"))
     return (state, names)
+
+
+def newest_run_step_verdicts(live: str) -> list[str]:
+    """Runs pages.yml's newest-run step against a stub `gh` (rule 10)."""
+    lines = live.splitlines()
+    at = next((i for i, l in enumerate(lines) if l.strip() == "- name: Publish only the newest run the gate passed"), None)
+    if at is None:
+        return ["pages.yml: no step named 'Publish only the newest run the gate passed' to run against a stub gh"]
+    run = next((i for i in range(at + 1, len(lines)) if lines[i].strip() == "run: |"), None)
+    if run is None:
+        return ["pages.yml: the newest-run step has no `run: |` block to run against a stub gh"]
+    indent = len(lines[run]) - len(lines[run].lstrip()) + 2
+    body = []
+    for line in lines[run + 1:]:
+        if line.strip() and len(line) - len(line.lstrip()) < indent:
+            break
+        body.append(line[indent:])
+    script = "\n".join(body) + "\n"
+    failures = []
+    with tempfile.TemporaryDirectory() as box:
+        stub = pathlib.Path(box) / "gh"
+        # (what the API names as the newest passed run, this run, publish?)
+        for newest, this, publishes in (
+            ("998", "998", True),
+            # The list can lag a run that has only just completed: a LOWER
+            # number publishes. Without this row, `-eq` passes the rest.
+            ("990", "998", True),
+            ("1006", "998", False),
+            ("", "998", False),
+        ):
+            stub.write_text(f"#!/bin/sh\necho '{newest}'\n", encoding="utf-8")
+            stub.chmod(0o755)
+            env = {"PATH": f"{box}:/usr/bin:/bin", "GITHUB_REPOSITORY": "o/r", "RUN_NUMBER": this, "GH_TOKEN": "stub"}
+            done = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+            if (done.returncode == 0) != publishes:
+                said = "publishes" if done.returncode == 0 else f"refuses (exit {done.returncode})"
+                failures.append(
+                    f"pages.yml: the newest-run step {said} when the newest passed run is "
+                    f"{newest or 'none'} and this run is {this}; it must {'publish' if publishes else 'refuse'}"
+                )
+    return failures
 
 
 def main() -> int:
@@ -434,10 +476,11 @@ def main() -> int:
     #
     #    pages.yml runs downstream of a `verify` run and publishes only when
     #    that run SUCCEEDED, was a PUSH and ran this repository's code -- a
-    #    branch filter matches a fork's `main` by name -- and only the sha still
-    #    at main's tip, so a re-run of an older push run cannot deploy over a
-    #    newer one. It checks the site with `./verify.sh --site _site` before
-    #    it uploads, nothing lets a step fail and the job go on, and what it
+    #    branch filter matches a fork's `main` by name -- and only when no
+    #    LATER verify run on main has passed (by run number, read through the
+    #    API), so a re-run of an older push run cannot deploy over a newer one,
+    #    while a later run still running does not block it. It checks the site
+    #    with `./verify.sh --site _site` before it uploads, nothing lets a step fail and the job go on, and what it
     #    uploads is the site it checked. Read from the lines that are not
     #    comments: a guard commented out is no guard. And the two parts it
     #    downloads must be uploaded by something the gate runs.
@@ -464,9 +507,24 @@ def main() -> int:
         check = re.search(r"^\s+run: \./verify\.sh --site _site\s*$", live, re.M)
         if upload_at != -1 and (not check or check.start() > upload_at):
             failures.append("pages.yml: upload-pages-artifact is not preceded by ./verify.sh --site _site")
-        tip = live.find("git ls-remote origin refs/heads/main")
-        if upload_at != -1 and (tip == -1 or tip > upload_at):
-            failures.append("pages.yml: publishes a sha without checking it is still main's tip")
+        # The newest-run step, by name, read as ONE step: the query is its
+        # command, the run number its own env, and nothing makes it optional.
+        step = re.search(r"^      - name: Publish only the newest run the gate passed\n(.*?)(?=^      - |\Z)", live, re.M | re.S)
+        query = r'^\s+newest="\$\(gh api "repos/\$\{GITHUB_REPOSITORY\}/actions/workflows/verify\.yml/runs\?branch=main&event=push&status=success&per_page=1"'
+        if upload_at != -1 and (
+            not step or step.start() > upload_at
+            or not re.search(query, step.group(1), re.M)
+            or not re.search(r"^\s+RUN_NUMBER: \$\{\{ github\.event\.workflow_run\.run_number \}\}\s*$", step.group(1), re.M)
+        ):
+            failures.append("pages.yml: publishes without checking that no later verify run on main has passed")
+        if step and re.search(r"^        if:", step.group(1), re.M):
+            failures.append("pages.yml: the newest-run step carries an `if:`, so it can be skipped and the deploy go on")
+        # And the step DECIDES as described: run under bash with a stub `gh`
+        # answering a run number, it passes when no later run has passed (the
+        # same number, or a lower one the list lags with) and refuses when one
+        # has, or when the answer is empty. Rule 10's text
+        # checks above cannot see a comparison turned round; this can.
+        failures += newest_run_step_verdicts(live)
         if re.search(r"^\s+continue-on-error:", live, re.M):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
         uploaded_path = re.search(r"actions/upload-pages-artifact@\S+\s*\n\s+with:\s*\n\s+path: (\S+)", live)

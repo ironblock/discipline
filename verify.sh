@@ -3870,9 +3870,16 @@ inject_ci_pages_uploads_unchecked() {
   edit_in_place '/run: .\/verify.sh --site _site/d' .github/workflows/pages.yml
 }
 
-# Publishes whatever sha the run checked, main's tip or not.
+# Publishes whatever sha the run checked, though a later run has passed.
 inject_ci_pages_publishes_an_older_sha() {
-  edit_in_place '/git ls-remote origin refs\/heads\/main/d' .github/workflows/pages.yml
+  edit_in_place 's/^\( *\)newest="\$(gh api .*$/\1newest="$RUN_NUMBER"/' .github/workflows/pages.yml
+}
+
+# The newest-run comparison turned round: an older run publishes over a newer
+# one that passed, and the newest one refuses. Only rule 10's stub-gh run of
+# the step sees it; the step's text is all still there.
+inject_ci_pages_newest_run_compared_backwards() {
+  edit_in_place 's/\[ "\$newest" -le "\$RUN_NUMBER" \]/[ "$newest" -ge "$RUN_NUMBER" ]/' .github/workflows/pages.yml
 }
 
 # Publishes on a trigger of its own, beside the gate.
@@ -7603,8 +7610,10 @@ selftest() {
     "pages.yml: the deploy's condition is not exactly its guards joined by &&"
   seeded_case "the site uploaded unchecked" ci inject_ci_pages_uploads_unchecked \
     "pages.yml: upload-pages-artifact is not preceded by \./verify\.sh --site _site"
-  seeded_case "the site published at a sha not main's tip" ci inject_ci_pages_publishes_an_older_sha \
-    "pages.yml: publishes a sha without checking it is still main's tip"
+  seeded_case "the site published though a later run passed" ci inject_ci_pages_publishes_an_older_sha \
+    "pages.yml: publishes without checking that no later verify run on main has passed"
+  seeded_case "the newest-run comparison turned round" ci inject_ci_pages_newest_run_compared_backwards \
+    "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
