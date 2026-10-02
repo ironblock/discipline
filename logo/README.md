@@ -59,7 +59,7 @@ thickness, refractive index and the surface profile are controls too. The profil
 convex circle, concave, lip) are kube.io's; the article writes concave and lip in terms of "Convex", and
 the squircle is assumed. Against `lens.py` the map differs by ~1/255 on average (the page rasterises the
 outline with canvas, `lens.py` with PIL) and the finished logos by under 0.15/255, checked in Chromium.
-"Copy settings" gives the changes from a preset, to be turned into values in `THEMES` and `VARIANTS`.
+Each preset carries its own palettes, wave height and crossing, so it opens exactly as `build.py` renders it (default: `tuned`). Settings are either per palette (the Dark/Light toggle chooses which) or shared by both, and the palettes have colour pickers. "Copy settings" gives the changes from a preset, to be turned into values in `THEMES` and `VARIANTS`.
 
 ## Safari
 

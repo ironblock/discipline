@@ -46,6 +46,9 @@
   .knob { display: grid; grid-template-columns: minmax(0, 1fr) 76px; gap: 2px 10px; align-items: center; }
   .knob-head { grid-column: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
   .knob.is-select .knob-head { grid-column: 1 / span 2; }
+  .knob input[type="color"] { grid-column: 1; width: 100%; height: 34px; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--field); }
+  .knob.is-color code { grid-column: 2; font: 13px var(--mono); color: var(--muted); }
+  .scope { float: right; font-weight: 400; font-size: 11px; color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
   .knob label { color: var(--muted); font-size: 12px; letter-spacing: 0.02em; }
   .knob-reset { visibility: hidden; min-height: 26px; padding: 0 8px; font-size: 12px; font-family: var(--mono); color: var(--accent); background: none; white-space: nowrap; }
   .knob.changed .knob-reset { visibility: visible; }
@@ -103,19 +106,19 @@ const C = D.consts;
 const clone = (o) => JSON.parse(JSON.stringify(o));
 
 /* ---------- state ---------- */
-const GLOBAL_PARAMS = { wavelength: C.WAVELENGTH, ampScale: 1, crossOutside: C.CROSS_OUTSIDE };
+const GLOBAL_PARAMS = { wavelength: C.WAVELENGTH };
 let P = {};                      // params: surface, bezel, thickness, ior, specWidth, bandWidth, taper, harmonics, outside, gain, wavelength, ampScale, crossOutside
-let TH = clone(D.themes);        // both palettes, edited in place
+let TH = {};                     // both palettes, edited in place
 let base = null;                 // what "changed" is measured against
 const ui = { theme: "dark", view: "final", zoom: "100" };
 const T = () => TH[ui.theme];
 
 function applyPreset(name) {
-  const { desc, look, ...p } = D.presets[name], lk = D.looks[look];
-  P = { ...GLOBAL_PARAMS, ...p, surface: "squircle", bezel: lk.bezel, thickness: lk.thickness, ior: C.IOR,
+  const { desc, look, themes, ...p } = D.presets[name], lk = D.looks[look];
+  P = { ...GLOBAL_PARAMS, ...p, surface: "squircle", bezel: lk.bezel, thickness: lk.thickness, ior: lk.ior || C.IOR,
         specWidth: lk.spec_width, bandWidth: lk.band_width };
-  TH = clone(D.themes);
-  base = { preset: name, p: clone(P), themes: clone(D.themes) };
+  TH = clone(themes);
+  base = { preset: name, p: clone(P), themes: clone(themes) };
   document.getElementById("preset-note").textContent = desc;
 }
 
@@ -399,28 +402,31 @@ const OPTS = {
   harmonics: [["single", "Single sine"], ["filter", "Noise, stripped letter by letter"]],
   outside: [["full", "Light shown outside the word"], ["ends", "Ends only (story)"], ["none", "Inside the letters only"]],
 };
+// scope "palette": edits the palette now showing (Dark or Light). scope "shared": one value for both.
 const GROUPS = [
-  { name: "Glass shape", open: true, items: [
-    { k: "surface", s: "p", label: "Surface profile", select: "surface" },
-    { k: "bezel", s: "p", label: "Bezel width", min: 1, max: 40, step: 0.5 },
-    { k: "thickness", s: "p", label: "Glass thickness", min: 1, max: 60, step: 0.5 },
-    { k: "ior", s: "p", label: "Refractive index", min: 1, max: 2.6, step: 0.02 },
-    { k: "gain", s: "p", label: "Displacement gain", min: 0, max: 8, step: 0.05 },
+  { name: "Colours", scope: "palette", open: true, items: [
+    { k: "wave.0", s: "t", label: "Red wave", color: true },
+    { k: "wave.1", s: "t", label: "Green wave", color: true },
+    { k: "wave.2", s: "t", label: "Blue wave", color: true },
+    { k: "beam", s: "t", label: "Beam", color: true },
+    { k: "body", s: "t", label: "Glass body tint", color: true },
+    { k: "lit", s: "t", label: "Lit edge", color: true },
+    { k: "shade", s: "t", label: "Shaded edge", color: true },
+    { k: "edge", s: "t", label: "Edge band", color: true },
+    { k: "rim", s: "t", label: "Hairline rim", color: true },
   ] },
-  { name: "Rim light", items: [
-    { k: "specWidth", s: "p", label: "Rim light reach", min: 0.5, max: 20, step: 0.5 },
-    { k: "bandWidth", s: "p", label: "Edge band reach", min: 0.5, max: 24, step: 0.5 },
+  { name: "Glass body", scope: "palette", items: [
+    { k: "body_top", s: "t", label: "Body opacity, top", min: 0, max: 1, step: 0.01 },
+    { k: "body_bottom", s: "t", label: "Body opacity, bottom", min: 0, max: 1, step: 0.01 },
+  ] },
+  { name: "Rim light", scope: "palette", items: [
     { k: "el.bevel", s: "t", label: "Rim light strength", min: 0, max: 3, step: 0.05 },
     { k: "lit_opacity", s: "t", label: "Lit edge opacity", min: 0, max: 1, step: 0.01 },
     { k: "shade_opacity", s: "t", label: "Shaded edge opacity", min: 0, max: 1, step: 0.01 },
     { k: "edge_opacity", s: "t", label: "Edge band opacity", min: 0, max: 0.6, step: 0.01 },
     { k: "rim_opacity", s: "t", label: "Hairline rim opacity", min: 0, max: 1, step: 0.01 },
   ] },
-  { name: "Glass body", items: [
-    { k: "body_top", s: "t", label: "Body opacity, top", min: 0, max: 1, step: 0.01 },
-    { k: "body_bottom", s: "t", label: "Body opacity, bottom", min: 0, max: 1, step: 0.01 },
-  ] },
-  { name: "Blur and bloom", items: [
+  { name: "Blur and bloom", scope: "palette", items: [
     { k: "frost", s: "t", label: "Frost blur", min: 0, max: 16, step: 0.1 },
     { k: "soft", s: "t", label: "Rim softening blur", min: 0, max: 8, step: 0.1 },
     { k: "bloom.a.0", s: "t", label: "Near bloom, x", min: 0, max: 40, step: 0.5 },
@@ -428,7 +434,7 @@ const GROUPS = [
     { k: "bloom.b.0", s: "t", label: "Far bloom, x", min: 0, max: 80, step: 0.5 },
     { k: "bloom.b.1", s: "t", label: "Far bloom, y", min: 0, max: 40, step: 0.5 },
   ] },
-  { name: "Light inside the glass", items: [
+  { name: "Light inside the glass", scope: "palette", items: [
     { k: "inner", s: "t", label: "Wave thickness inside (\u00d7)", min: 0.4, max: 3.5, step: 0.05 },
     { k: "beam_inner", s: "t", label: "Beam thickness inside (\u00d7)", min: 0.3, max: 3.5, step: 0.05 },
     { k: "el.a_width", s: "t", label: "Near bloom width (\u00d7)", min: 0.5, max: 8, step: 0.1 },
@@ -436,14 +442,23 @@ const GROUPS = [
     { k: "el.b_width", s: "t", label: "Far bloom width (\u00d7)", min: 1, max: 12, step: 0.1 },
     { k: "el.b_alpha", s: "t", label: "Far bloom opacity", min: 0, max: 1.5, step: 0.05 },
   ] },
-  { name: "Light outside the glass", items: [
+  { name: "Light outside the glass", scope: "palette", items: [
     { k: "wave_alpha", s: "t", label: "Wave opacity", min: 0, max: 1, step: 0.01 },
     { k: "beam_width", s: "t", label: "Beam width", min: 1, max: 14, step: 0.5 },
     { k: "glow_wide", s: "t", label: "Wide glow blur", min: 0, max: 24, step: 0.5 },
     { k: "glow_wide_a", s: "t", label: "Wide glow opacity", min: 0, max: 2, step: 0.02 },
     { k: "glow_tight", s: "t", label: "Tight glow blur", min: 0, max: 10, step: 0.1 },
   ] },
-  { name: "Waves", items: [
+  { name: "Glass shape", scope: "shared", items: [
+    { k: "surface", s: "p", label: "Surface profile", select: "surface" },
+    { k: "bezel", s: "p", label: "Bezel width", min: 1, max: 40, step: 0.5 },
+    { k: "thickness", s: "p", label: "Glass thickness", min: 1, max: 60, step: 0.5 },
+    { k: "ior", s: "p", label: "Refractive index", min: 1, max: 2.6, step: 0.02 },
+    { k: "gain", s: "p", label: "Displacement gain", min: 0, max: 8, step: 0.05 },
+    { k: "specWidth", s: "p", label: "Rim light reach", min: 0.5, max: 20, step: 0.5 },
+    { k: "bandWidth", s: "p", label: "Edge band reach", min: 0.5, max: 24, step: 0.5 },
+  ] },
+  { name: "Waves", scope: "shared", items: [
     { k: "wavelength", s: "p", label: "Wavelength", min: 100, max: 420, step: 5 },
     { k: "ampScale", s: "p", label: "Height (1 = x-height)", min: 0.3, max: 1.6, step: 0.02 },
     { k: "taper", s: "p", label: "Taper", select: "taper" },
@@ -471,13 +486,15 @@ function buildKnobs() {
   for (const g of GROUPS) {
     const d = document.createElement("details");
     d.open = !!g.open;
-    const s = document.createElement("summary");
+    const s = document.createElement("summary"), tag = document.createElement("span");
     s.textContent = g.name;
+    tag.className = "scope"; tag.textContent = g.scope === "shared" ? "both themes" : "this palette";
+    s.append(tag);
     const box = document.createElement("div");
     box.className = "knobs";
     for (const it of g.items) {
       const id = "k-" + it.k.replace(/\./g, "-"), row = document.createElement("div");
-      row.className = "knob" + (it.select ? " is-select" : "");
+      row.className = "knob" + (it.select ? " is-select" : "") + (it.color ? " is-color" : "");
       row.dataset.k = it.k;
       const head = document.createElement("div"), lab = document.createElement("label"), undo = document.createElement("button");
       head.className = "knob-head"; lab.htmlFor = id; lab.textContent = it.label;
@@ -491,6 +508,11 @@ function buildKnobs() {
         for (const [v, text] of OPTS[it.select]) sel.add(new Option(text, v));
         sel.addEventListener("change", () => { set(it, sel.value); changed(); });
         row.append(sel);
+      } else if (it.color) {
+        const c = document.createElement("input"), hex = document.createElement("code");
+        c.type = "color"; c.id = id; hex.id = id + "-n";
+        c.addEventListener("input", () => { set(it, c.value); hex.textContent = c.value; changed(); });
+        row.append(c, hex);
       } else {
         const r = document.createElement("input"), n = document.createElement("input");
         r.type = "range"; r.id = id; n.type = "number"; n.id = id + "-n"; n.setAttribute("aria-label", it.label + " value");
@@ -509,13 +531,15 @@ function buildKnobs() {
 function syncKnob(it) {
   const id = "k-" + it.k.replace(/\./g, "-"), v = get(it);
   document.getElementById(id).value = v;
-  if (!it.select) document.getElementById(id + "-n").value = (+v).toFixed(decimals(it.step));
+  if (it.color) document.getElementById(id + "-n").textContent = v;
+  else if (!it.select) document.getElementById(id + "-n").value = (+v).toFixed(decimals(it.step));
 }
 function syncKnobs() {
   ITEMS.forEach(syncKnob);
   markChanged();
 }
 function shown(it, v) {
+  if (it.color) return v;
   if (it.select) return (OPTS[it.select].find(([value]) => value === v) || [, v])[1];
   return (+v).toFixed(decimals(it.step));
 }
@@ -547,7 +571,7 @@ function diff() {
 }
 const STORE = "logo-playground";
 function remember(d) {
-  try { localStorage.setItem(STORE, JSON.stringify({ sig: "v2" + D.defaultPreset + D.width, d })); } catch (e) { /* storage may be unavailable */ }
+  try { localStorage.setItem(STORE, JSON.stringify({ sig: "v3" + D.defaultPreset + D.width, d })); } catch (e) { /* storage may be unavailable */ }
 }
 function restore(d) {
   applyPreset(d.preset in D.presets ? d.preset : D.defaultPreset);
@@ -615,7 +639,7 @@ function init() {
   const presetSel = document.getElementById("preset");
   for (const name of Object.keys(D.presets)) presetSel.add(new Option(name, name));
   let saved = null;
-  try { const s = JSON.parse(localStorage.getItem(STORE) || "null"); if (s && s.sig === "v2" + D.defaultPreset + D.width) saved = s.d; } catch (e) { /* ignore */ }
+  try { const s = JSON.parse(localStorage.getItem(STORE) || "null"); if (s && s.sig === "v3" + D.defaultPreset + D.width) saved = s.d; } catch (e) { /* ignore */ }
   buildKnobs();
   if (saved) restore(saved); else applyPreset(D.defaultPreset);
   presetSel.value = base.preset;

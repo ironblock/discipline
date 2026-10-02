@@ -32,13 +32,14 @@ def data():
         if merged["glass"] == "refract":
             presets[name] = dict(harmonics=merged["harmonics"], look=merged["look"], taper=merged["taper"],
                                  outside=OUTSIDE[merged["outside"]], gain=merged.get("gain", build.REFRACT_GAIN),
-                                 desc=variant["desc"])
+                                 ampScale=merged["amp"], crossOutside=merged["cross"], desc=variant["desc"],
+                                 themes={t: build.overridden(build.THEMES[t], merged["theme"].get(t, {})) for t in build.THEMES})
     consts = {k: getattr(build, k) for k in ("H", "BASELINE", "PAD", "CROP", "ENDS_FADE", "WAVELENGTH", "CROSS_OUTSIDE", "REFRACT_GAIN")}
     consts["IOR"] = lens.IOR
     return dict(consts=consts, word=geo["d"], spans=geo["spans"], width=geo["width"], beamY=geo["beam_y"],
-                xHeight=geo["x_height"], enters=geo["enters"], leaves=geo["leaves"], themes=build.THEMES,
+                xHeight=geo["x_height"], enters=geo["enters"], leaves=geo["leaves"],
                 tapers=build.TAPERS, looks=lens.LOOKS, region=list(maps["region"]), bev=bev, quant=quant,
-                presets=presets, defaultPreset="refract-story-noise")
+                presets=presets, defaultPreset=build.DEFAULT_VARIANT)
 
 
 def main():
