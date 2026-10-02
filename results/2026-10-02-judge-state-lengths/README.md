@@ -16,10 +16,10 @@ known_defects = [
   "The choice of laya-typed-decisions at 1,024 tokens on this measurement is planning's ruling on #165 (comment 5944195901, 2026-10-02T02:00Z), applying #165's procedure to these numbers; this directory measures, the ruling selects.",
   "The hypothesis is the procedure's first branch stated as a claim so that the record can carry the word: refuted means laya-en's p90 does not fit, which is what selects laya-typed-decisions; it is not a finding against laya-en.",
 ]
-claim_issue = "165"
-absent = { supersedes = "nothing replaced: the first measurement of #165", rule_ratified = "#165's procedure is planning's design answer on the claim stub, not a ratified decision rule", window_start = "the archive's judge states were read, not drawn; no window" }
 targets_checked = 7
 targets_matched = 7
+claim_issue = "165"
+absent = { supersedes = "nothing replaced: the first measurement of #165", rule_ratified = "#165's procedure is planning's design answer on the claim stub, not a ratified decision rule", window_start = "the archive's judge states were read, not drawn; no window" }
 
 [regime]
 arm = "judge-state-lengths"
@@ -62,3 +62,5 @@ Both heads are within their caps (verdict 158 and edit 96 tokens of question and
 ## Conclusion
 
 Refuted: laya-en's p90 does not fit under either question, so by #165's procedure the judge seat's variant is **laya-typed-decisions**, which fits the p90 under both and still truncates about 3% of states. Those truncated states are the long reasoning traces, cut from the end. Planning ruled the selection on #165 (comment 5944195901): laya-typed-decisions at 1,024 tokens. The table's review on #165 can change the heads and so the budgets; the counts stand.
+
+**Ledger:** rule_ratified is absent: #165's procedure is planning's design answer on the claim stub, not a ratified decision rule.

@@ -88,3 +88,7 @@ claim_issue = "143"
 window_start = "2026-10-01T14:54:55Z"
 window_start_from = "window/seat-a.start, seat A's first fork"
 absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)", rule_ratified = "the pre-registration is planning's 5921525110 (2026-09-30T23:27:07Z), which states that the maintainer's ratification extends to its text; no comment records the maintainer ratifying the amended text himself, and the field waits for one (#32 5943037888)" }
+
+["2026-10-02-judge-state-lengths"]
+claim_issue = "165"
+absent = { supersedes = "nothing replaced: the first measurement of #165", rule_ratified = "#165's procedure is planning's design answer on the claim stub, not a ratified decision rule", window_start = "the archive's judge states were read, not drawn; no window" }
