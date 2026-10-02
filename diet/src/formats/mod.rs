@@ -49,6 +49,11 @@ pub struct Format {
     /// been walked as zero cases, which the empty-bucket assertion does catch
     /// -- but only as "no fixtures at all", never as "the wrong files".
     pub case_extension: &'static str,
+    /// Read a document's bytes as text. Every format reads UTF-8 and refuses
+    /// anything else, except where the format itself says how a document
+    /// may end: a log whose writer was killed mid-character (#230,
+    /// [`log::decode`]). A function pointer for the reason `project` is one.
+    pub decode: fn(&[u8]) -> Result<&str, std::str::Utf8Error>,
 }
 
 /// Every format with a grammar and a conformance-fixture directory.
@@ -60,41 +65,49 @@ pub const FORMATS: &[Format] = &[
         name: "decline",
         case_extension: "txt",
         project: decline::project,
+        decode: std::str::from_utf8,
     },
     Format {
         name: "interview",
         case_extension: "txt",
         project: interview::project,
+        decode: std::str::from_utf8,
     },
     Format {
         name: "log",
         case_extension: "jsonl",
         project: log::project,
+        decode: log::decode,
     },
     Format {
         name: "operating_points",
         case_extension: "toml",
         project: operating_points::project,
+        decode: std::str::from_utf8,
     },
     Format {
         name: "record",
         case_extension: "jsonl",
         project: record::project,
+        decode: std::str::from_utf8,
     },
     Format {
         name: "regimen",
         case_extension: "toml",
         project: regimen::project,
+        decode: std::str::from_utf8,
     },
     Format {
         name: "shell",
         case_extension: "sh",
         project: shell::project,
+        decode: std::str::from_utf8,
     },
     Format {
         name: "verdict",
         case_extension: "txt",
         project: verdict::project,
+        decode: std::str::from_utf8,
     },
 ];
 
