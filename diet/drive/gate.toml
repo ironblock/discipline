@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 189
+faults = 193
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -975,7 +975,7 @@ catches = [
     "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
-    "drive::serve::tests::the_teed_log_is_every_line_rendered_as_it_is_appended",
+    "drive::serve::tests::the_written_log_is_every_line_rendered_as_it_is_appended",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
@@ -2816,15 +2816,14 @@ failure_class = "drive.serve-log-drops-a-line"
 target = "diet/src/drive/serve.rs"
 expect_exit = 101
 anchor = '''
-            let line = render(&logged);'''
+        let line = render(logged);'''
 becomes = '''
-            if logged.seq == 1 {
-                next = logged.seq + 1;
-                continue;
-            }
-            let line = render(&logged);'''
+        if logged.seq == 1 {
+            return;
+        }
+        let line = render(logged);'''
 catches = [
-    "drive::serve::tests::the_teed_log_is_every_line_rendered_as_it_is_appended",
+    "drive::serve::tests::the_written_log_is_every_line_rendered_as_it_is_appended",
 ]
 
 [[fault]]
@@ -2833,7 +2832,7 @@ failure_class = "drive.serve-bin-ignores-the-log-flag"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-        keep_log(std::sync::Arc::clone(session), render, file);'''
+        keep_log(session, render, file);'''
 becomes = '''
         let _ = (session, render, file);'''
 catches = [
@@ -3068,4 +3067,51 @@ catches = [
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
     "drive::session::tests::a_response_with_timings_is_written_without_usage",
     "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.session-write-through-skips-the-lines-before-it"
+failure_class = "drive.session-write-through-skips-the-lines-before-it"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        for logged in &state.log {
+            sink(logged);
+        }'''
+becomes = '''
+        let _ = &state.log;'''
+catches = [
+    "drive::serve::tests::the_written_log_is_every_line_rendered_as_it_is_appended",
+]
+
+[[fault]]
+id = "drive.session-append-leaves-the-sink-unfed"
+failure_class = "drive.session-append-leaves-the-sink-unfed"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            sink(logged);
+        }
+        seq'''
+becomes = '''
+            let _ = (sink, logged);
+        }
+        seq'''
+catches = [
+    "drive::serve::tests::an_appended_line_is_written_before_its_append_returns",
+]
+
+[[fault]]
+id = "drive.serve-log-writes-after-a-failure"
+failure_class = "drive.serve-log-writes-after-a-failure"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if broken {
+            return;
+        }'''
+becomes = '''
+        let _ = broken;'''
+catches = [
+    "drive::serve::tests::a_failed_log_write_is_handed_over_once_and_nothing_follows_it",
 ]
