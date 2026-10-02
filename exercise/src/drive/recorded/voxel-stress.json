@@ -13,6 +13,9 @@
 "Each answer was written by a model given only the excerpt of the trunk its side call would see, in the interviews' tagged grammar; each tagged line is a patch. Outcomes are all value: nothing here measures mimicry.",
 "A side call's timing is derived: its question and answer in tokens from their text, prefill at 1400 t/s and decode at 40 t/s, one at a time per slot, its prefix the trunk's context at the fork."
 ],
+"carried": {
+"compaction": 1
+},
 "events": [
 {
 "kind": "session.start",

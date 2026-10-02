@@ -176,6 +176,8 @@ def main():
             f'Events of a kind this vocabulary does not have are carried under their own name, not dropped ({counts["carried"] or "none"}).',
             'Scrubbed: the account name and its home directory (now user and /work), and private network addresses (now localhost).',
         ],
+        # The same counts as the `carried` line above, as data (#173).
+        'carried': counts['carried'],
         'events': events,
     }
     text = json.dumps(fixture, ensure_ascii=False, indent=0)

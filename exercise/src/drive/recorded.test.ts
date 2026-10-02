@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
-import { ReplayTransport, load, placed, recordedAt } from './recorded.ts';
+import { type Recording, ReplayTransport, load, placed, recordedAt } from './recorded.ts';
 import { RECORDINGS } from './recordings.ts';
 import { SPECIMEN } from './specimen.ts';
 
@@ -75,11 +75,19 @@ describe('the first drive, recorded and migrated', () => {
 
 describe('reading a recording', () => {
   it('names the recording’s file when it fails: an event with no kind, broken JSON, a missing header (#32, ruling 9)', () => {
-    const good = JSON.stringify({ title: 't', migration: [], events: [{ kind: 'ask', t: 0 }] });
+    const good = JSON.stringify({ title: 't', migration: [], carried: {}, events: [{ kind: 'ask', t: 0 }] });
     expect(load('x', good).title).toBe('t');
-    expect(() => load('x', JSON.stringify({ title: 't', migration: [], events: [{ t: 0 }] }))).toThrow('exercise/src/drive/recorded/x.json: not a recording: event 0 has no kind or time');
+    expect(() => load('x', JSON.stringify({ title: 't', migration: [], carried: {}, events: [{ t: 0 }] }))).toThrow('exercise/src/drive/recorded/x.json: not a recording: event 0 has no kind or time');
     expect(() => load('x', '{"title":')).toThrow(/^exercise\/src\/drive\/recorded\/x\.json: not a recording: not JSON/);
     expect(() => load('x', '{}')).toThrow('exercise/src/drive/recorded/x.json: not a recording: expected title, migration and events');
+    // `carried` is the count a fold is checked against (#173): absent, or not {kind: count}, is no recording.
+    const carrying = (carried: unknown) => JSON.stringify({ title: 't', migration: [], carried, events: [{ kind: 'ask', t: 0 }] });
+    const noCarried = 'exercise/src/drive/recorded/x.json: not a recording: expected carried: {kind: count}, each kind named and each count a whole number above 0';
+    expect(() => load('x', JSON.stringify({ title: 't', migration: [], events: [{ kind: 'ask', t: 0 }] }))).toThrow(noCarried);
+    for (const bad of [null, [], 'compaction', { compaction: 0 }, { compaction: 1.5 }, { compaction: '1' }, { '': 1 }]) {
+      expect(() => load('x', carrying(bad)), JSON.stringify(bad)).toThrow(noCarried);
+    }
+    expect(load('x', carrying({ compaction: 2 })).carried).toEqual({ compaction: 2 });
   });
 });
 
@@ -99,14 +107,33 @@ describe('the other recordings: where the first drive never went', () => {
   });
 });
 
-/** The kinds a recording's `migration` header says it carries under their own name, with their counts. */
-function declaredUnknown(migration: readonly string[]): [string, number][] {
-  const line = migration.find((m) => m.includes('carried under their own name'));
-  return line ? [...line.matchAll(/'([^']+)': (\d+)/g)].map(([, kind, n]) => [kind!, Number(n)]) : [];
+/**
+ * A recording's `carried` against what a fold of its events leaves unknown
+ * (#173): as objects, so kinds and counts are compared, not the order a
+ * migration happened to count them in.
+ */
+function expectCarried(name: string, recording: Recording, seen: readonly LogLine[]) {
+  expect(Object.fromEntries(fold(seen).unknown), `${name}: its carried field disagrees with its events`).toEqual(recording.carried);
 }
 
+describe('a recording\'s carried field', () => {
+  it('is compared by kind and count, not by the order the migration counted them in', () => {
+    // A real capture with a second unknown kind first seen BEFORE its own:
+    // the fold meets them in one order, the field lists them in the other.
+    const base = RECORDINGS['cancelled-capture'];
+    const at = base.events.findIndex((e) => e.kind === 'session.start') + 1;
+    const events = [...base.events.slice(0, at), { kind: 'zz.newer', t: base.events[at - 1]!.t }, ...base.events.slice(at)];
+    const recording: Recording = { ...base, carried: { 'capture.cancelled': 1, 'zz.newer': 1 }, events: events as Recording['events'] };
+    expect([...fold(placed(recording)).unknown.keys()]).toEqual(['zz.newer', 'capture.cancelled']);
+    expectCarried('two kinds', recording, placed(recording));
+    expect(() => expectCarried('two kinds', { ...recording, carried: { 'capture.cancelled': 1, 'zz.newer': 2 } }, placed(recording))).toThrow(
+      'two kinds: its carried field disagrees with its events',
+    );
+  });
+});
+
 describe('replaying a recording', () => {
-  it.each(Object.keys(RECORDINGS) as (keyof typeof RECORDINGS)[])('%s replays whole, in order, and folds with nothing unknown its header does not declare', (name) => {
+  it.each(Object.keys(RECORDINGS) as (keyof typeof RECORDINGS)[])('%s replays whole, in order, and folds to exactly what its carried field declares unknown', (name) => {
     vi.useFakeTimers();
     try {
       const recording = RECORDINGS[name];
@@ -120,7 +147,7 @@ describe('replaying a recording', () => {
       const at = (lines: readonly LogLine[]) => lines.map((line) => `${line.seq} ${line.kind} ${line.t}`).join('\n');
       expect(at(seen)).toBe(at(log));
       expect(seen.filter((line, i) => line.seq !== i)).toEqual([]);
-      expect([...fold(seen).unknown]).toEqual(declaredUnknown(recording.migration));
+      expectCarried(name, recording, seen);
     } finally {
       vi.useRealTimers();
     }

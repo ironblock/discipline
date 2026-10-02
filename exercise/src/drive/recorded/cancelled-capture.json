@@ -13,6 +13,9 @@
 "Tool output is cut at 120 lines or 12,000 characters, a fork question at 1,500, a render at 24,000; each cut says so in the text.",
 "Scrubbed: the account name and its home directory (now user and /work), run directories (/tmp/session), internal ticket ids."
 ],
+"carried": {
+"capture.cancelled": 1
+},
 "events": [
 {
 "kind": "session.start",

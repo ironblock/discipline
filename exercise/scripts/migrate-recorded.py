@@ -302,6 +302,9 @@ def main():
             f'Tool output is cut at {MAX_OUTPUT_LINES} lines or {MAX_OUTPUT_CHARS:,} characters, a fork question at {MAX_QUESTION_CHARS:,}, a render at {MAX_RENDER_CHARS:,}; each cut says so in the text.',
             'Scrubbed: the account name and its home directory (now user and /work), run directories (/tmp/session), internal ticket ids.',
         ],
+        # The same counts as the `carried` line above, as data: what a reader
+        # checks the events against, rather than parsing the prose (#173).
+        'carried': carried,
         'events': events,
     }
     text = json.dumps(fixture, ensure_ascii=False, indent=0)
