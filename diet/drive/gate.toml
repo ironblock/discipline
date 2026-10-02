@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 181
+faults = 182
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2083,7 +2083,7 @@ catches = [
     "drive::canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps",
     "drive::canned::tests::the_first_registered_acts_still_hash_to_their_registered_digest",
     "drive::canned::tests::the_regimen_names_the_substrate_that_plays_these_acts",
-    "drive::engine::tests::a_canned_substrate_is_not_checked",
+    "drive::engine::tests::a_canned_substrate_is_checked_like_any_other",
     "drive::engine::tests::a_declared_literal_is_matched_exactly_before_any_commit",
     "drive::engine::tests::a_malformed_registered_commit_is_refused",
     "drive::engine::tests::a_prebuilt_engine_passes_through_the_check_as_unreported",
@@ -2315,8 +2315,11 @@ becomes = '''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
     "a_drive_server_checks_the_engine_before_it_binds",
+    "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
+    "a_drive_server_refuses_a_canned_regimen_against_a_server_with_no_props",
     "a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it",
     "a_drive_server_refuses_to_start_on_a_substrate_the_registry_does_not_resolve",
+    "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
     "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
@@ -2475,19 +2478,6 @@ catches = [
 ]
 
 [[fault]]
-id = "drive.engine-checks-a-canned-substrate"
-failure_class = "drive.engine-checks-a-canned-substrate"
-target = "diet/src/drive/engine.rs"
-expect_exit = 101
-anchor = '''
-    if matches!(identity.weights, Weights::Canned { .. }) {'''
-becomes = '''
-    if false && matches!(identity.weights, Weights::Canned { .. }) {'''
-catches = [
-    "drive::engine::tests::a_canned_substrate_is_not_checked",
-]
-
-[[fault]]
 id = "drive.engine-compares-the-commit-before-the-literal"
 failure_class = "drive.engine-compares-the-commit-before-the-literal"
 target = "diet/src/drive/engine.rs"
@@ -2514,6 +2504,7 @@ anchor = '''
 becomes = '''
             if false && build_info != literal {'''
 catches = [
+    "drive::engine::tests::a_canned_substrate_is_checked_like_any_other",
     "drive::engine::tests::a_declared_literal_is_matched_exactly_before_any_commit",
 ]
 
@@ -2551,10 +2542,14 @@ expect_exit = 101
 anchor = '''
         .map(|id| diet::drive::engine::check_served(&transport, id))'''
 becomes = '''
-        .map(|_| Ok::<Option<diet::drive::engine::Passed>, String>(None))'''
+        .filter(|_| false)
+        .map(|id| diet::drive::engine::check_served(&transport, id))'''
 catches = [
     "a_drive_server_checks_the_engine_before_it_binds",
+    "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
+    "a_drive_server_refuses_a_canned_regimen_against_a_server_with_no_props",
     "a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it",
+    "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
     "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
@@ -2587,6 +2582,7 @@ anchor = '''
 becomes = '''
             Value::String(String::new()),'''
 catches = [
+    "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
     "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
@@ -2602,6 +2598,7 @@ anchor = '''
 becomes = '''
             Value::String(String::new()),'''
 catches = [
+    "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
     "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
 ]
@@ -2678,6 +2675,8 @@ becomes = '''
     let listen = match listen_on(listen, credential.is_some()) {'''
 catches = [
     "a_drive_server_checks_the_engine_before_it_binds",
+    "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
+    "a_drive_server_refuses_a_canned_regimen_against_a_server_with_no_props",
     "a_drive_server_refuses_a_wildcard_before_it_asks_the_engine",
     "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
@@ -2887,4 +2886,38 @@ becomes = '''
         .truncate(true)'''
 catches = [
     "a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was",
+]
+
+[[fault]]
+id = "drive.engine-skips-a-canned-substrate"
+failure_class = "drive.engine-skips-a-canned-substrate"
+target = "diet/src/drive/engine.rs"
+expect_exit = 101
+anchor = '''
+    let identity = registry::identity(document, id)?;'''
+becomes = '''
+    let identity = registry::identity(document, id)?;
+    if matches!(identity.weights, crate::formats::record::Weights::Canned { .. }) {
+        return Ok(Passed {
+            build_info: String::new(),
+            identity: EngineIdentity::Unreported,
+        });
+    }'''
+catches = [
+    "drive::engine::tests::a_canned_substrate_is_checked_like_any_other",
+]
+
+[[fault]]
+id = "drive.canned-build-info-names-other-acts"
+failure_class = "drive.canned-build-info-names-other-acts"
+target = "diet/src/drive/canned.rs"
+expect_exit = 101
+anchor = '''
+    format!("canned-{}", acts_digest())'''
+becomes = '''
+    format!("canned-{}", digest_of(&acts_as_first_registered()))'''
+catches = [
+    "a_drive_server_announces_the_registered_substrate_its_regimen_names",
+    "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
+    "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
 ]

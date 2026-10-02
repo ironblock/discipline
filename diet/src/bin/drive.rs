@@ -94,9 +94,10 @@ fn serve_usage() -> String {
     out.push_str("same lines GET /events streams; nothing is written without it.\n");
     out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
     out.push_str("resolved from the registry, and an unregistered one refuses to start.\n");
-    out.push_str("Unless the substrate is canned, the server's GET /props build_info must\n");
-    out.push_str("be the registry's engine_build_info for it exactly, or else name its\n");
-    out.push_str("engine_commit, or serve refuses to start.\n");
+    out.push_str("The server's GET /props build_info must be the registry's engine_build_info\n");
+    out.push_str("for the substrate exactly, or else name its engine_commit, or serve refuses\n");
+    out.push_str("to start. A canned substrate's literal is canned-<acts sha256>, which only\n");
+    out.push_str("this crate's own canned server reports.\n");
     out
 }
 
@@ -248,7 +249,7 @@ fn serve(args: &[String]) -> ExitCode {
         .map(|id| diet::drive::engine::check_served(&transport, id))
         .transpose()
     {
-        Ok(build) => build.flatten(),
+        Ok(build) => build,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     let log_path = log_file;
@@ -650,7 +651,7 @@ fn answering(given: Option<&String>) -> Result<(Option<Stub>, Endpoint), (u8, St
     let (served, url) = if let Some(endpoint) = given {
         (None, endpoint.clone())
     } else {
-        let stub = Stub::serving(canned::acts())
+        let stub = Stub::serving_with_props(canned::acts(), &canned::build_info())
             .map_err(|why| (EXIT_HALT, format!("the canned server did not bind: {why}")))?;
         let url = stub.url();
         (Some(stub), url)

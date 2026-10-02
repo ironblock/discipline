@@ -7722,6 +7722,22 @@ failure_class = "client.props-asked-under-the-endpoints-path"
 migrated = false
 
 [[fault]]
+id = "client.stub-leaves-props-unanswered"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stub-leaves-props-unanswered"
+failure_class = "client.stub-leaves-props-unanswered"
+migrated = false
+
+[[fault]]
+id = "client.stub-closes-an-extra-call-silently"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stub-closes-an-extra-call-silently"
+failure_class = "client.stub-closes-an-extra-call-silently"
+migrated = false
+
+[[fault]]
 id = "drive.engine-passes-a-dirty-build"
 kind = "lane-fault"
 check = "lanes"
@@ -7767,14 +7783,6 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.engine-reads-a-refused-props"
 failure_class = "drive.engine-reads-a-refused-props"
-migrated = false
-
-[[fault]]
-id = "drive.engine-checks-a-canned-substrate"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.engine-checks-a-canned-substrate"
-failure_class = "drive.engine-checks-a-canned-substrate"
 migrated = false
 
 [[fault]]
@@ -7879,6 +7887,22 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
 failure_class = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-skips-a-canned-substrate"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-skips-a-canned-substrate"
+failure_class = "drive.engine-skips-a-canned-substrate"
+migrated = false
+
+[[fault]]
+id = "drive.canned-build-info-names-other-acts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-build-info-names-other-acts"
+failure_class = "drive.canned-build-info-names-other-acts"
 migrated = false
 
 [[fault]]
