@@ -784,6 +784,23 @@ def check_run(directory: pathlib.Path) -> list[str]:
     return failures
 
 
+def sibling_products(directory: pathlib.Path) -> dict[str, list[str]]:
+    """Each `product_sha256` the directories beside this one declare, and
+    which directories declare it: what a `supersedes` digest resolves
+    against (#271, Dispatch's ruling (a)). A sibling whose front-matter cannot
+    be read declares nothing here; its own lint says why."""
+    products: dict[str, list[str]] = {}
+    for sibling in sorted(p for p in directory.parent.iterdir() if p.is_dir() and p != directory):
+        try:
+            source, _, _, _ = split_front_matter(read_text(sibling / "README.md"))
+            sha = tomllib.loads(source or "").get("product_sha256")
+        except (OSError, Unreadable, tomllib.TOMLDecodeError):
+            continue
+        if isinstance(sha, str):
+            products.setdefault(sha, []).append(sibling.name)
+    return products
+
+
 def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str, str], None]) -> bool | None:
     """The four provenance fields, their absences and their free text, as
     ruled on #32. Returns whether the rule was ratified after its window
@@ -832,6 +849,18 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
     elif supersedes is not None and supersedes == front.get("product_sha256"):
         # A claim never replaces itself (#271 review): one comparison.
         fail("results.claim-field-malformed", "`supersedes` is this directory's own `product_sha256`; a claim does not supersede itself")
+    elif supersedes is not None:
+        # RESOLVED, NOT TRUSTED (#271, ruling (a)): a digest names a product
+        # exactly, so it must name exactly one beside this directory -- a
+        # dangling or an ambiguous supersession cannot pass.
+        named = sibling_products(directory).get(supersedes, [])
+        if len(named) != 1:
+            fail(
+                "results.claim-field-malformed",
+                f"`supersedes` is {supersedes}, which {len(named)} directory(ies) beside this one "
+                f"declare as their `product_sha256`{': ' + ', '.join(named) if named else ''}; a "
+                f"supersession names exactly one product",
+            )
     window = front.get("window_start")
     if window is not None and not is_utc(window):
         fail("results.claim-field-malformed", f"`window_start` is {window!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")

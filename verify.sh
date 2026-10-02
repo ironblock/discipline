@@ -3572,6 +3572,21 @@ EOF
 }
 
 # An issue number with a leading zero: a second spelling of one id.
+# A supersession that names no product (#271, ruling (a)): a digest of the
+# right shape that no directory beside this one declares.
+inject_results_supersedes_dangling() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'supersedes = "' + "a" * 64 + '"', 1), encoding="utf-8")
+EOF
+}
+
 inject_results_claim_issue_not_digits() {
   python3 - <<'EOF'
 import pathlib
@@ -7942,6 +7957,8 @@ selftest() {
     'but the committed file hashes to'
   seeded_case "a claim field neither given nor absent" results inject_results_claim_field_undeclared \
     'neither gives .claim_issue. nor declares it in .absent.*\[results\.claim-field-undeclared\]'
+  seeded_case "a supersession that names no product" results inject_results_supersedes_dangling \
+    '.supersedes. is a{64}, which 0 directory\(ies\) beside this one declare.*\[results\.claim-field-malformed\]'
   seeded_case "an issue number with a leading zero"   results  inject_results_claim_issue_not_digits \
     '.claim_issue. is .0114.; an issue number is a string of digits.*\[results\.claim-field-malformed\]'
   seeded_case "a claim field given and absent"        results  inject_results_claim_field_both \

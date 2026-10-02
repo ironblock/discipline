@@ -2650,13 +2650,17 @@ mod tests {
         // the given path writes values the gates read, and a reason with a
         // quote, a backslash, a control character and a zero-width space is
         // still TOML. Both land beside the first and are linted with it.
+        // `supersedes` is declared absent here: it must resolve to exactly
+        // one product beside the directory (ruling (a)), and every assembly
+        // of this record has the first one's product -- superseding which is
+        // superseding itself. Its resolution is the linter's, seeded there.
         let pre_registration =
             sha256_hex(&std::fs::read(into.join("pre-registration.json")).expect("written"));
         let given = Provenance::from_flags(&flags(&[
             "--claim-issue",
             "24",
-            "--supersedes",
-            &"a".repeat(64),
+            "--absent",
+            "supersedes=nothing replaced: the first assembly of this claim",
             "--rule-ratified",
             &format!("5826194082,2026-09-25T03:29:00Z,{pre_registration},pre-registration.json"),
         ]))
