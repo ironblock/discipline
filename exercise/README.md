@@ -11,13 +11,20 @@ workflow requirements this application expresses, not the other way round.
 ## What is here: R1, the surface
 
 ```
-pnpm install
-pnpm dev              # the harness on the canned transport, http://localhost:5173 (?speed=4 to hurry it)
-pnpm storybook        # the surface at every moment of the specimen, http://localhost:6006
-pnpm verify           # typecheck, lint, unit tests, every story as a browser test
-pnpm perf             # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
-pnpm build:replay     # the replay page for Pages (#32), into ../_site/replay/
+npx --yes pnpm@11.20.0 -C exercise install
+npx --yes pnpm@11.20.0 -C exercise dev           # the harness on the canned transport, http://localhost:5173 (?speed=4 to hurry it)
+npx --yes pnpm@11.20.0 -C exercise storybook     # the surface at every moment of the specimen, http://localhost:6006
+npx --yes pnpm@11.20.0 -C exercise verify        # typecheck, lint, unit tests, every story as a browser test
+npx --yes pnpm@11.20.0 -C exercise perf          # a performance trace: frames, long frames, layout, style, script, a profile (--ablate, --css)
+npx --yes pnpm@11.20.0 -C exercise build:replay  # the replay page for Pages (#32), into _site/replay/
 ```
+
+Every command in this file runs from the repository root; every file it
+cites is this directory's, `exercise/`, unless it says the repository's. pnpm
+is pinned in this directory's `package.json` (`packageManager`), and the commands run
+that version through `npx --yes`: a pnpm at another version switches to the
+pinned one by itself, and on an Intel Mac that switch fails (#194). The
+repository's `exercise` check runs it the same way.
 
 **The replay page** (#32, `replay.html`, `src/replay.tsx`) is the surface
 built for GitHub Pages: a recorded session replayed from this origin, with
@@ -28,9 +35,9 @@ since its side calls were written after the session, and the page says so.
 Each published recording is a file of its own beside the page,
 `data/<name>.js`, and carries its **admission** beside it in the tree:
 `src/drive/recorded/<name>.admission.json`, written by
-`python3 scripts/admission.py admit <name>`. The admission names the table
+`python3 exercise/scripts/admission.py admit <name>`. The admission names the table
 it was admitted under -- a snapshot of the genesis table, written once into
-`scripts/` as `hygiene-admitted-<id>-patterns.tsv` and its siblings -- with
+the repository's `scripts/` as `hygiene-admitted-<id>-patterns.tsv` and its siblings -- with
 the snapshot's digests, the recording's own digest, and its scrub. A recording
 edited since, or a snapshot edited, fails the build; a change to the live
 table does not, since each recording stays under its snapshot until it is
@@ -41,29 +48,24 @@ each against its admission. `scripts/replay-smoke.mjs` opens the built
 page under a path, as Pages serves it, and loads a recording through its real
 path.
 
-pnpm is pinned in `package.json` (`packageManager`). A pnpm at another
-version switches to the pinned one by itself, and on an Intel Mac that switch
-fails (#194): run the pinned one directly instead, `npx pnpm@11.20.0 install`
-and so on. The repository's `exercise` check does exactly that.
-
 **Driving `diet`.** `?drive` drives `diet`'s own session, served over HTTP
 by `diet-drive serve` (#140; `src/drive/http.ts`). The page reaches it
 same-origin through the dev server's proxy:
 
 ```
-cargo build --bin diet-drive                                   # from diet/
+cargo build -p discipline-diet --bin diet-drive
 target/debug/diet-drive serve --endpoint <llama-server>/v1/chat/completions \
     --model <name> --head <file> --port 7801 --allow-origin http://localhost:5173
-DIET_DRIVE=http://127.0.0.1:7801 pnpm dev                      # then open /?drive
+DIET_DRIVE=http://127.0.0.1:7801 npx --yes pnpm@11.20.0 -C exercise dev   # then open /?drive
 ```
 
-With no model at hand, `node scripts/model-stand-in.mjs` is one: every
+With no model at hand, `node exercise/scripts/model-stand-in.mjs` is one: every
 request answered with `diet`'s own captured llama-server reply, byte for
 byte (a random-weight model, so the words are noise), at
 `http://127.0.0.1:7901/v1/chat/completions`, with
-`scripts/model-stand-in.head.txt` as the head.
+`exercise/scripts/model-stand-in.head.txt` as the head.
 
-`pnpm perf` (`scripts/perf.mjs`) drives a production build in headless
+`npx --yes pnpm@11.20.0 -C exercise perf` (`scripts/perf.mjs`) drives a production build in headless
 Chromium through three sessions -- the kitchen sink, `first-drive` and
 `voxel-stress` -- each in three phases (replay, scroll, pointing), and says
 where frames go. Headless Chromium rasterises and composites in software:
@@ -71,7 +73,7 @@ its script, style and layout numbers are the app's, its paint and
 compositing numbers are not (glass costs frames there and none on a GPU).
 Compare runs with each other, not with a machine.
 
-CI runs the same thing as the repository's `exercise` check (`./verify.sh --only exercise`, owned in `.github/check-owners.tsv`, run by `pkg-exercise.yml`); its seeded fault is a type error.
+CI runs the same thing as the repository's `exercise` check (`./verify.sh --only exercise`, owned in the repository's `.github/check-owners.tsv`, run by its `.github/workflows/pkg-exercise.yml`); its seeded fault is a type error.
 
 - **The trunk is a conversation.** One block per message, role by fill,
   prose proportional, chain-of-thought italic. Each block's header says what
@@ -114,7 +116,7 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
 
 | path | what it is |
 | --- | --- |
-| `src/drive/log.ts` | The session's log as the surface reads it: `diet/formats/log` v0, its types **generated** from the format (`diet/formats/log/log.ts`, #144) and imported. On top of them, what the surface draws that the log does not say yet is marked AHEAD, each tagged with the step of #117 that will add it. `log.test.ts` folds every one of `diet`'s valid logs. A node's id is the `seq` of the line it began at. |
+| `src/drive/log.ts` | The session's log as the surface reads it: `diet/formats/log` v0, its types **generated** from the format (the repository's `diet/formats/log/log.ts`, #144) and imported. On top of them, what the surface draws that the log does not say yet is marked AHEAD, each tagged with the step of #117 that will add it. `log.test.ts` folds every one of `diet`'s valid logs. A node's id is the `seq` of the line it began at. |
 | `src/drive/script.ts`, `place.ts` | The authored shape the specimen, the kitchen sink and the recorded sessions are written in -- labels (`q/2`, `i/1`) where the log has `seq` references -- and the step that places a script in the log. Only the log is folded; stories find nodes by label through `idOf`. |
 | `src/drive/transport.ts` | The drive interface: subscribe to the session's log; send an ask, cancel, declare a seam. |
 | `src/drive/http.ts` | The transport against `diet`'s served session: `/events` as server-sent events, `/commands` as JSON. A closed stream asks, once, what it was answered with (finding 17, #117): 410 rebuilds from a new session's first line, anything else is shown to the author with its reason. |

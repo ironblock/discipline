@@ -371,7 +371,12 @@ check_lanes() { python3 scripts/apply-lane-faults.py --verify; }
 
 check_metadata() { python3 scripts/check-repo-metadata.py; }
 
-check_hygiene() { bash scripts/hygiene.sh; }
+# ...and the scanner itself stays honest on the shell a stock Mac runs (#236):
+# CI cannot run bash 3.2, so this reads hygiene.sh for what keeps it so.
+check_hygiene() {
+  python3 scripts/check-hygiene-portable.py &&
+    bash scripts/hygiene.sh
+}
 
 # The site published to gh-pages is static, and this is what makes that a gate
 # rather than a promise: no subresource from another origin, no network call,
@@ -2951,6 +2956,22 @@ inject_results_ledger_page_calls_out() {
   edit_in_place 's#^<meta charset="utf-8">$#<meta charset="utf-8"><link rel="stylesheet" href="https://example.org/ledger.css">#' exercise/scripts/render-ledger.py
 }
 
+# An array expansion left bare: on bash 3.2 an empty array aborts the scan
+# under `set -u`, and the scan read clean having scanned nothing (#236).
+inject_hygiene_unguarded_expansion() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/hygiene.sh")
+source = path.read_text(encoding="utf-8")
+old = 'targets=(${text_files+"${text_files[@]}"})'
+new = 'targets=("${text_files[@]}")'
+if source.count(old) != 1:
+    raise SystemExit(f"the guard appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_hygiene() {
   bash scripts/seed-hygiene-fault.sh seeded-faults > /dev/null
   git add --all
@@ -3809,6 +3830,12 @@ inject_ci() {
   edit_in_place '/^hygiene\t/d' .github/check-owners.tsv
 }
 
+# A package-mirror step left unbounded: a hung `apt-get update` then holds a
+# selftest shard until GitHub's six-hour job limit (#222's run 36884660921).
+inject_ci_apt_step_unbounded() {
+  edit_in_place '/^        timeout-minutes: 5$/d' .github/workflows/gate-selftest.yml
+}
+
 # The trunk's own run cancelled by the next merge (#112): the census a pull
 # request is scoped against goes stale while CI stays green.
 inject_ci_trunk_run_cancelled() {
@@ -3843,9 +3870,16 @@ inject_ci_pages_uploads_unchecked() {
   edit_in_place '/run: .\/verify.sh --site _site/d' .github/workflows/pages.yml
 }
 
-# Publishes whatever sha the run checked, main's tip or not.
+# Publishes whatever sha the run checked, though a later run has passed.
 inject_ci_pages_publishes_an_older_sha() {
-  edit_in_place '/git ls-remote origin refs\/heads\/main/d' .github/workflows/pages.yml
+  edit_in_place 's/^\( *\)newest="\$(gh api .*$/\1newest="$RUN_NUMBER"/' .github/workflows/pages.yml
+}
+
+# The newest-run comparison turned round: an older run publishes over a newer
+# one that passed, and the newest one refuses. Only rule 10's stub-gh run of
+# the step sees it; the step's text is all still there.
+inject_ci_pages_newest_run_compared_backwards() {
+  edit_in_place 's/\[ "\$newest" -le "\$RUN_NUMBER" \]/[ "$newest" -ge "$RUN_NUMBER" ]/' .github/workflows/pages.yml
 }
 
 # Publishes on a trigger of its own, beside the gate.
@@ -6330,11 +6364,31 @@ prove_mechanics() {
 
   # ...but an ordinary binary must not trip the loose heuristics. Over-strict
   # is a failure too: a gate that cries wolf on every binary gets switched off.
+  #
+  # The arbitrary bytes are FIXED, not drawn from /dev/urandom (#233): a fresh
+  # random 64 KiB made this verdict a lottery -- one shard of twenty read
+  # exit 1 on 2c97097 while the other nineteen passed the same case. A SHA-256
+  # counter stream is the same bytes on every machine and every Python, and is
+  # still a binary nothing in the tree resembles.
   mkdir -p "${box}/bin-clean"
   cp "$(command -v git)" "${box}/bin-clean/git.bin"
-  head -c 65536 /dev/urandom > "${box}/bin-clean/random.bin"
+  python3 -c 'import hashlib, sys; sys.stdout.buffer.write(b"".join(hashlib.sha256(b"#233 an ordinary binary %d" % i).digest() for i in range(2048)))' \
+    > "${box}/bin-clean/random.bin"
   expect_exit "an ordinary binary does not false-positive" 0 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-clean"
+
+  # A ticket-id SHAPE inside binary bytes is not a ticket id (#233): a blob
+  # the runner drew from /dev/urandom, whose bytes spell \x06DIE9 from offset
+  # 18692 (the D at 18693). It reads clean -- and red with the `b` flag restored, so the
+  # decision is held by the fixture and not by the table's comment alone.
+  mkdir -p "${box}/ticket-shape"
+  cp "${ROOT}/tests/fixtures/hygiene-binary/ticket-id-shape-in-random-bytes.bin" "${box}/ticket-shape/"
+  expect_exit "a ticket-id shape in binary bytes is not a ticket id" 0 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/ticket-shape"
+  sed 's/^internal-ticket-id\ti\t/internal-ticket-id\tib\t/' "${ROOT}/scripts/hygiene-patterns.tsv" \
+    > "${box}/patterns-with-b.tsv"
+  expect_exit "and it reads red with the binary flag restored" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/patterns-with-b.tsv" --tree "${box}/ticket-shape"
 
   # The ledger renderer's verdict reaches the results check (#32 I2): a
   # renderer that exits 7 makes `check_results` exit 7 -- its own status,
@@ -6830,6 +6884,9 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
   (
     cd "${fake}/repo"
     git init --quiet
+    # The scans below run the copied scripts, which write __pycache__ here;
+    # ignored, so each `git add --all` commits only what its case names.
+    printf '__pycache__/\n' > .gitignore
     printf 'a\n' > a.txt && git add --all && seed_commit --message 'base'
     git update-ref refs/remotes/origin/main HEAD
     printf 'b\n' > b.txt && git add --all && seed_commit --message 'second'
@@ -6994,6 +7051,42 @@ STRICT
   expect_exit "history: the same literal in an author line is not content" 0 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
         GITHUB_EVENT_PATH="${fake}/pr-in-author.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+
+  # ONE BINARY PATH BLINDS NOTHING BESIDE IT (#233's review). A commit's patch
+  # used to be one file, and a file holding a NUL is searched only by the `b`
+  # patterns -- so a ticket id in a text hunk went unseen whenever the same
+  # commit added a binary. Patches are written one file per path now.
+  local fake_mixed
+  (
+    cd "${fake}/repo"
+    printf 'x\000y\000\n' > blob.bin
+    printf 'see %s for the plan\n' "$token" > notes.txt
+    git add --all && seed_commit --message 'a binary beside a text hunk'
+  )
+  fake_mixed="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_author" "$fake_mixed" > "${fake}/pr-mixed.json"
+  expect_exit "history: an id in a text hunk beside a binary path is a finding" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-mixed.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+
+  # A BINARY'S NAME IS TEXT (#240's second review). A path's name sits in its
+  # patch part's header, beside its content -- so a NUL in the content made
+  # the name unscanned. The commit's paths are written as a text file too.
+  local fake_named
+  (
+    cd "${fake}/repo"
+    printf 'x\000y\000\n' > "${token}.bin"
+    git add --all && seed_commit --message 'a binary under a named path'
+  )
+  fake_named="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_mixed" "$fake_named" > "${fake}/pr-named.json"
+  expect_exit "history: an id in a binary path's name is a finding" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-named.json" \
       python3 "${fake}/repo/scripts/check-history.py"
 
   # `--range` REACHES THE CHECK, AND BEATS THE INFERRED ANSWER. A flag that
@@ -7505,6 +7598,8 @@ selftest() {
     'a pin that can be silently ignored is not a pin'
   seeded_case "template label nothing defines"        metadata inject_metadata \
     'assigns label'
+  seeded_case "a hygiene expansion bash 3.2 aborts on" hygiene inject_hygiene_unguarded_expansion \
+    'is unguarded; bash 3\.2 aborts on it'
   seeded_case "forbidden content in the tree"         hygiene  inject_hygiene \
     'hygiene: internal-ticket-id:'
   seeded_case "external subresource on the site"      pages    inject_pages \
@@ -7567,14 +7662,18 @@ selftest() {
     "pages.yml: the deploy's condition is not exactly its guards joined by &&"
   seeded_case "the site uploaded unchecked" ci inject_ci_pages_uploads_unchecked \
     "pages.yml: upload-pages-artifact is not preceded by \./verify\.sh --site _site"
-  seeded_case "the site published at a sha not main's tip" ci inject_ci_pages_publishes_an_older_sha \
-    "pages.yml: publishes a sha without checking it is still main's tip"
+  seeded_case "the site published though a later run passed" ci inject_ci_pages_publishes_an_older_sha \
+    "pages.yml: publishes without checking that no later verify run on main has passed"
+  seeded_case "the newest-run comparison turned round" ci inject_ci_pages_newest_run_compared_backwards \
+    "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
     "pages.yml: publishes site-ledger, which no workflow the gate runs uploads"
   seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \
     'carries .branches: \[main\]. and is reached'
+  seeded_case "a package-mirror step left unbounded"  ci       inject_ci_apt_step_unbounded \
+    'runs apt-get with no .timeout-minutes.'
   seeded_case "the trunk's run cancelled by a merge"  ci       inject_ci_trunk_run_cancelled \
     'cancels a push run on the trunk'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \

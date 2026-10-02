@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 174
+faults = 181
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -972,6 +972,7 @@ catches = [
     "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
+    "drive::serve::tests::the_teed_log_is_every_line_rendered_as_it_is_appended",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
@@ -1610,6 +1611,7 @@ becomes = '''
 catches = [
     "a_drive_server_binds_loopback_by_default_and_listen_takes_an_ip",
     "a_drive_server_off_loopback_without_a_credential_refuses_to_start",
+    "a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was",
 ]
 
 [[fault]]
@@ -2782,4 +2784,100 @@ becomes = '''
         if false && !is_a_digest(value) {'''
 catches = [
     "drive::registry::tests::a_weights_value_that_is_not_a_digest_is_refused_naming_the_key",
+]
+
+[[fault]]
+id = "drive.serve-log-drops-a-line"
+failure_class = "drive.serve-log-drops-a-line"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            let line = render(&logged);'''
+becomes = '''
+            if logged.seq == 1 {
+                next = logged.seq + 1;
+                continue;
+            }
+            let line = render(&logged);'''
+catches = [
+    "drive::serve::tests::the_teed_log_is_every_line_rendered_as_it_is_appended",
+]
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-log-flag"
+failure_class = "drive.serve-bin-ignores-the-log-flag"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            keep_log(teeing, render, file);'''
+becomes = '''
+            let _ = (teeing, render, file);'''
+catches = [
+    "a_drive_server_whose_log_cannot_be_written_stops_even_with_its_stdout_closed",
+    "a_drive_servers_log_file_is_the_events_stream_line_for_line",
+]
+
+[[fault]]
+id = "drive.serve-bin-hides-a-truncated-log"
+failure_class = "drive.serve-bin-hides-a-truncated-log"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    let truncated = std::fs::metadata(path).is_ok_and(|held| held.len() > 0);'''
+becomes = '''
+    let truncated = false;'''
+catches = [
+    "a_drive_server_says_when_its_log_flag_emptied_a_file",
+]
+
+[[fault]]
+id = "drive.serve-bin-panics-printing-a-failure"
+failure_class = "drive.serve-bin-panics-printing-a-failure"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    let _ = std::io::Write::write_all(&mut std::io::stdout().lock(), format!("{out}\n").as_bytes());'''
+becomes = '''
+    println!("{out}");'''
+catches = [
+    "a_drive_server_whose_log_cannot_be_written_stops_even_with_its_stdout_closed",
+]
+
+[[fault]]
+id = "drive.serve-bin-keeps-serving-a-stopped-log"
+failure_class = "drive.serve-bin-keeps-serving-a-stopped-log"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+        std::process::exit(i32::from(EXIT_OUTPUT));'''
+becomes = '''
+        let _ = EXIT_OUTPUT;'''
+catches = [
+    "a_drive_server_whose_log_cannot_be_written_stops_even_with_its_stdout_closed",
+]
+
+[[fault]]
+id = "drive.serve-bin-misreports-an-uncreatable-log"
+failure_class = "drive.serve-bin-misreports-an-uncreatable-log"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+        Err(why) => return fail(EXIT_OUTPUT, &why),'''
+becomes = '''
+        Err(why) => return fail(EXIT_INPUT, &why),'''
+catches = [
+    "a_drive_server_refuses_an_uncreatable_log_file_before_anything_binds",
+]
+
+[[fault]]
+id = "drive.serve-bin-empties-the-log-before-it-starts"
+failure_class = "drive.serve-bin-empties-the-log-before-it-starts"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+        .truncate(false)'''
+becomes = '''
+        .truncate(true)'''
+catches = [
+    "a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was",
 ]

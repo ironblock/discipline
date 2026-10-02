@@ -55,6 +55,32 @@ use crate::formats::record::json::{self, Value};
 /// It must not contain a line break: one event, one `data:` line.
 pub type Render = fn(&Logged) -> String;
 
+/// Write `session`'s log to `out` as each line is appended (`--log`, #157):
+/// each line's `render`, then a line break, flushed -- byte for byte the
+/// `data:` text `GET /events` streams, one line each, from the first.
+/// Returns only when a write fails.
+pub fn tee<S: Streaming + 'static>(
+    session: &Session<S>,
+    render: Render,
+    out: &mut impl io::Write,
+) -> io::Error {
+    let mut next = 0;
+    loop {
+        for logged in session.wait_from(next, Duration::from_secs(60)) {
+            let line = render(&logged);
+            debug_assert!(!line.contains('\n'), "one event, one line: {line}");
+            if let Err(why) = out
+                .write_all(line.as_bytes())
+                .and_then(|()| out.write_all(b"\n"))
+                .and_then(|()| out.flush())
+            {
+                return why;
+            }
+            next = logged.seq + 1;
+        }
+    }
+}
+
 /// How a server behaves at its edges.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -1205,6 +1231,63 @@ mod tests {
         .reply();
         assert_eq!(status(&proxied), 200, "{proxied}");
         assert_eq!(asked(&session), 1);
+    }
+
+    /// A writer whose bytes the test can read while `tee` holds it.
+    #[derive(Clone, Default)]
+    struct Shared(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl io::Write for Shared {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_teed_log_is_every_line_rendered_as_it_is_appended() {
+        let session = Arc::new(Session::open(
+            Canned::new([deltas(&["Hel", "lo"])]),
+            template(),
+        ));
+        // `tee` never returns while its writes succeed, so it runs on its own
+        // thread, started BEFORE the turn so it tails the lines as they are
+        // appended, and is read against a deadline: a line it drops fails
+        // this, rather than hanging it.
+        let written = Shared::default();
+        let teeing = Arc::clone(&session);
+        let mut out = written.clone();
+        thread::spawn(move || tee(&teeing, crate::drive::session::render, &mut out));
+        session.ask("one", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        assert_eq!(session.end(None), Ok(()));
+        let expected: String = session
+            .events_from(0)
+            .iter()
+            .map(|logged| crate::drive::session::render(logged) + "\n")
+            .collect();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let read = || {
+            String::from_utf8(
+                written
+                    .0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone(),
+            )
+            .expect("text")
+        };
+        while read().len() < expected.len() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(read(), expected);
     }
 
     #[test]
