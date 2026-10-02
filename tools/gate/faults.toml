@@ -4027,7 +4027,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a sharded job never told its shard"
 failure_class = "wiring.shard-not-passed"
-legacy_signature = "pkg-injections\\.yml: `injections` is sharded and the workflow never passes VERIFY_CHECK_SHARD"
+legacy_signature = "pkg-injections\\.yml: .injections. is sharded, and its workflow is not the sharded form"
 migrated = false
 [[fault]]
 id = "ci.ci_shard_count_one"
@@ -4043,7 +4043,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a sharded matrix that is not the table"
 failure_class = "wiring.shard-matrix"
-legacy_signature = "pkg-recompute\\.yml: .recompute..s matrix is not the plan job.s reading of its shard count"
+legacy_signature = "pkg-recompute\\.yml: .recompute. is sharded, and its workflow is not the sharded form"
 migrated = false
 [[fault]]
 id = "ci.ci_check_runs_one_shard"

@@ -114,6 +114,72 @@ SHARDS: dict[str, int] = {}
 
 # How a sharded package's job tells its check which shard it is: the matrix
 # entry over the count the plan job read from check-owners.tsv.
+# A run of verify.sh that listed members and ran nothing (verify.sh's EXIT_LISTED).
+EXIT_LISTED = 3
+
+# The one form a sharded package's workflow takes, comments aside (#262):
+# a plan job reading the package's shard count from check-owners.tsv into a
+# matrix, and one job per shard running the package's check with
+# VERIFY_CHECK_SHARD=K/N. Compared line for line, so nothing can start fewer
+# shards than the table declares, or run a different check, or list instead.
+SHARDED_WORKFLOW = """name: pkg-{pkg}
+on:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  plan:
+    name: {pkg} plan
+    runs-on: ubuntu-latest
+    outputs:
+      shards: ${{{{ steps.read.outputs.shards }}}}
+      count: ${{{{ steps.read.outputs.count }}}}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Read the split this package declares
+        id: read
+        run: |
+          set -euo pipefail
+          count="$(awk -F'\\t' -v pkg={pkg} '!/^#/ && NF>=3 && $2 == pkg {{ print $3 }}' .github/check-owners.tsv)"
+          case "$count" in
+            ''|*[!0-9]*) echo "::error::{pkg} declares no shard count in check-owners.tsv"; exit 1 ;;
+          esac
+          printf 'count=%s\\n' "$count" >> "$GITHUB_OUTPUT"
+          printf 'shards=[%s]\\n' "$(seq -s, 1 "$count")" >> "$GITHUB_OUTPUT"
+  checks:
+    name: {pkg} ${{{{ matrix.shard }}}}
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{{{ fromJSON(needs.plan.outputs.shards) }}}}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Run the checks this package owns, one shard
+        env:
+          VERIFY_CHECK_SHARD: ${{{{ matrix.shard }}}}/${{{{ needs.plan.outputs.count }}}}
+        run: |
+          set -euo pipefail
+          mapfile -t checks < <(
+            awk -F'\\t' -v pkg={pkg} '!/^#/ && NF>=2 && $2 == pkg {{ print $1 }}' \\
+              .github/check-owners.tsv
+          )
+          if [ "${{#checks[@]}}" -eq 0 ]; then
+            echo "::error::no check is owned by '{pkg}'; a workflow that runs nothing is not a pass"
+            exit 1
+          fi
+          args=()
+          for check in "${{checks[@]}}"; do args+=(--only "$check"); done
+          printf 'checks owned by {pkg}: %s, shard %s\\n' "${{checks[*]}}" "$VERIFY_CHECK_SHARD"
+          ./verify.sh "${{args[@]}}"
+"""
+
+# A check's declared shard count, from check-owners.tsv's third column.
+SHARDS: dict[str, int] = {}
+
+# How a sharded package's job tells its check which shard it is: the matrix
+# entry over the count the plan job read from check-owners.tsv.
 SHARD_ENV = re.compile(
     r"^\s+VERIFY_CHECK_SHARD:\s*\$\{\{\s*matrix\.shard\s*\}\}/\$\{\{\s*needs\.plan\.outputs\.count\s*\}\}\s*$",
     re.M,
@@ -138,19 +204,22 @@ def declared_checks(failures: list[str]) -> list[str]:
     return [line.strip() for line in done.stdout.split("\n") if line.strip()]
 
 
-def members_listed(output: str, check: str) -> list[str]:
-    """The member names a check printed between verify.sh's `=== check ===`
-    and `--- check:` lines, under VERIFY_LIST_MEMBERS: one name per line,
-    each a bare identifier, so the check's own diagnostics are not counted."""
-    inside, names = False, []
+def members_listed(output: str, check: str) -> list[str] | None:
+    """The members a check printed between verify.sh's `=== check ===` and
+    its `--- check: LISTED` line: every non-empty line, so no name a pattern
+    would reject falls out of the proof (#268's second review). None when
+    the run did not end in LISTED -- a listing that passed or failed is not
+    a listing."""
+    inside, names, listed = False, [], False
     for line in output.splitlines():
         if line.strip() == f"=== {check} ===":
             inside = True
         elif line.startswith(f"--- {check}:"):
             inside = False
-        elif inside and re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]*", line.strip()):
+            listed = line.startswith(f"--- {check}: LISTED")
+        elif inside and line.strip():
             names.append(line.strip())
-    return names
+    return names if listed else None
 
 
 def owners(failures: list[str]) -> dict[str, str]:
@@ -818,17 +887,24 @@ def main() -> int:
         if sorted(c for c, o in table.items() if o == owner) != [check]:
             failures.append(f"{OWNERS.name}: `{check}` is sharded, so its package `{owner}` must own it alone")
         wf = WORKFLOWS / f"pkg-{owner}.yml"
-        # The env line itself, on a line that is not a comment: a workflow
-        # that only MENTIONS the shard passed when this read the whole text
-        # (its own seeded case found that).
-        live = "\n".join(l for l in wf.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#")) if wf.is_file() else ""
-        if wf.is_file() and not SHARD_ENV.search(live):
-            failures.append(f"{wf.name}: `{check}` is sharded and the workflow never passes VERIFY_CHECK_SHARD, so every job would run all of it")
-        # And the shards it starts are the table's: the matrix is the plan
-        # job's reading of this check's own row, so no shard can be left out
-        # of the matrix while every rule above still reads the table.
-        if wf.is_file() and not (SHARD_MATRIX.search(live) and owner_reads(owner).search(live)):
-            failures.append(f"{wf.name}: `{check}`'s matrix is not the plan job's reading of its shard count from {OWNERS.name}, so the shards CI starts may not be the shards declared")
+        # THE WHOLE WORKFLOW, NOT LINES OF IT (#268's reviews): pinning the
+        # matrix, then the table read, left the line between them -- `seq`
+        # over a constant -- and `exclude:`, a step `if:`, another package's
+        # name or a leaked VERIFY_LIST_MEMBERS each started fewer shards than
+        # declared, or none, while every pinned line held. So a sharded
+        # package's workflow, read without its comments, is exactly one form
+        # with the package's name in it.
+        if wf.is_file():
+            found = [l for l in wf.read_text(encoding="utf-8").splitlines() if l.strip() and not l.lstrip().startswith("#")]
+            wanted = [l for l in SHARDED_WORKFLOW.format(pkg=owner).splitlines() if l.strip()]
+            if found != wanted:
+                at = next((i for i, (a, b) in enumerate(zip(found, wanted)) if a != b), min(len(found), len(wanted)))
+                failures.append(
+                    f"{wf.name}: `{check}` is sharded, and its workflow is not the sharded form: line "
+                    f"{at + 1} of its non-comment lines is {found[at] if at < len(found) else '(none)'!r}, "
+                    f"the form has {wanted[at] if at < len(wanted) else '(none)'!r}; a sharded job runs "
+                    f"exactly the table's split (#262)"
+                )
 
     # 13. a declared split is complete: every member runs in exactly one shard
     #
@@ -849,11 +925,15 @@ def main() -> int:
                 ["bash", str(VERIFY), "--only", check], cwd=VERIFY.parent, env=env, capture_output=True, text=True
             )
             shown = f"VERIFY_CHECK_SHARD={part}/{count} " if part else ""
-            if done.returncode != 0:
-                failures.append(f"`{check}`: {shown}verify.sh --only {check} listing its members exited {done.returncode}: {(done.stdout + done.stderr).strip()[-200:]}")
+            members = members_listed(done.stdout, check)
+            if done.returncode != EXIT_LISTED or members is None:
+                failures.append(
+                    f"`{check}`: {shown}verify.sh --only {check} under VERIFY_LIST_MEMBERS exited "
+                    f"{done.returncode}, not {EXIT_LISTED} with its members LISTED: {(done.stdout + done.stderr).strip()[-200:]}"
+                )
                 listed = []
                 break
-            listed.append(members_listed(done.stdout, check))
+            listed.append(members)
         if not listed:
             continue
         whole, parts = listed[0], listed[1:]

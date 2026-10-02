@@ -67,6 +67,8 @@ set -euo pipefail
 
 readonly EXIT_FAIL=1
 readonly EXIT_MISUSE=2
+# A run under VERIFY_LIST_MEMBERS: members listed, nothing checked (#262).
+readonly EXIT_LISTED=3
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
@@ -576,7 +578,15 @@ run_check() {
   local rc=0 began="$SECONDS"
   "check_${name}" || rc=$?
   CHECKS_TOOK+=("${name}:$(( SECONDS - began ))")
-  if [ "$rc" -eq 0 ]; then
+  if [ "$rc" -eq 0 ] && [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then
+    # LISTED, NEVER PASS (#268's second review): under VERIFY_LIST_MEMBERS a
+    # check prints its members and runs nothing, and a run that ran nothing
+    # must not read as one that passed -- in a CI job's env it would turn the
+    # job into a green no-op. The run exits EXIT_LISTED, which only the
+    # coverage check's member listing expects.
+    printf -- '--- %s: LISTED (members printed, nothing run)\n' "$name"
+    FAILED+=("${name} (listed its members, ran nothing)")
+  elif [ "$rc" -eq 0 ]; then
     printf -- '--- %s: PASS (exit 0)\n' "$name"
   else
     printf -- '--- %s: FAIL (exit %d)\n' "$name" "$rc"
@@ -8121,11 +8131,11 @@ selftest() {
   seeded_case "a results directory no shard re-derives" ci inject_ci_recompute_shard_drops_one \
     '`recompute`.s 3 shards run none of 3 member\(s\), so nothing runs them'
   seeded_case "a sharded job never told its shard"     ci inject_ci_sharded_workflow_without_shard \
-    'pkg-injections\.yml: `injections` is sharded and the workflow never passes VERIFY_CHECK_SHARD'
+    'pkg-injections\.yml: .injections. is sharded, and its workflow is not the sharded form'
   seeded_case "a split into one shard"                 ci inject_ci_shard_count_one \
     '.recompute..s shard count is .1., not a whole number of 2 or more'
   seeded_case "a sharded matrix that is not the table" ci inject_ci_sharded_matrix_not_the_table \
-    'pkg-recompute\.yml: .recompute..s matrix is not the plan job.s reading of its shard count'
+    'pkg-recompute\.yml: .recompute. is sharded, and its workflow is not the sharded form'
   seeded_case "a check that runs one shard whatever"   ci inject_ci_check_runs_one_shard \
     '.recompute..s 3 shards run none of 10 member\(s\), so nothing runs them'
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
@@ -9577,6 +9587,10 @@ for name in "${selected[@]}"; do
 done
 
 echo
+if [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then
+  printf 'verify: VERIFY_LIST_MEMBERS is set, so %d check(s) listed their members and none ran\n' "${#selected[@]}"
+  exit "$EXIT_LISTED"
+fi
 if [ "${#FAILED[@]}" -gt 0 ]; then
   printf 'verify: %d of %d check(s) failed:\n' "${#FAILED[@]}" "${#selected[@]}"
   printf '  - %s\n' "${FAILED[@]}"
