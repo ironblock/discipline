@@ -1608,10 +1608,17 @@ anchor = '''
     std::net::TcpListener::bind((listen, port))'''
 becomes = '''
     std::net::TcpListener::bind((Ipv4Addr::UNSPECIFIED, port))'''
+# REGENERATED ON CI (#239). This list was measured on macOS and carried a
+# third name, `a_drive_server_that_fails_to_start_leaves_an_existing_log_file_
+# as_it_was`, which catches this fault only there: it holds 127.0.0.1:PORT and
+# expects the server's bind to fail. macOS lets the faulted 0.0.0.0:PORT bind
+# beside it, so the server starts and the test fails; Linux refuses it with
+# EADDRINUSE, so the test passes (selftest shard 4 of run 36970607154). Its
+# subject is the log file, not the bind address, so it is dropped rather than
+# split by platform: the two below catch the fault on both.
 catches = [
     "a_drive_server_binds_loopback_by_default_and_listen_takes_an_ip",
     "a_drive_server_off_loopback_without_a_credential_refuses_to_start",
-    "a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was",
 ]
 
 [[fault]]
