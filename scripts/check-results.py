@@ -174,13 +174,55 @@ REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 TYPED_FIGURE = re.compile(
     r"(?<![A-Za-z0-9#])(?<![A-Za-z0-9]\.)(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![A-Za-z0-9])"
 )
-# A HEADING THIS LINTER DOES NOT READ AS ONE (#265's third review). Sections
-# are `## ` at column 0 and the title is one `# ` line before them; any other
-# line a renderer shows as a heading -- indented, another level, setext, an
-# `<h1>`..`<h6>` -- would put text a reader sees under "Results" in whatever
-# section came before it. In a referenced body it is refused, not guessed at.
-UNREAD_HEADING = re.compile(r"^(?: {1,3}#{1,6}(?:\s|$)|#(?:#{2,5})?(?:\s|$)|#{1,6}$)|<h[1-6][\s>]", re.IGNORECASE)
-SETEXT_UNDERLINE = re.compile(r"^ {0,3}(?:=+|-+)\s*$")
+# HEADINGS ARE A WHITELIST (#265's third and fourth reviews). Two reviews
+# found headings a renderer shows that this linter did not read -- indented,
+# setext, `<h2>`, in a blockquote, in a list item, `## Results ##` -- each
+# putting text a reader sees under "Results" in a laxer section. So in a
+# referenced body a heading is one of exactly two lines: `## <section>` at
+# column 0, the section one of the five, or the first `# ` line before them
+# (the title). Any other line that renders as a heading -- after stripping the
+# blockquote and list prefixes a heading can sit behind -- is refused.
+SECTION_LINE = re.compile(r"## (" + "|".join(SECTIONS) + r")")
+CONTAINER_PREFIX = re.compile(r"^(?: {0,3}>[ ]?| {0,3}(?:[-*+]|\d{1,9}[.)])(?: |$)| {1,3})")
+ATX = re.compile(r"#{1,6}(?:[ \t]|$)")
+SETEXT_UNDERLINE = re.compile(r"(?:=+|-+)[ \t]*$")
+HTML_HEADING = re.compile(r"<h[1-6](?:[\s>/]|$)", re.IGNORECASE)
+# A backslash before ASCII punctuation, which CommonMark renders as the
+# character alone: `\{\{` shows `{{` (#265's fourth review).
+BACKSLASH_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
+
+
+def visible(text: str) -> str:
+    """Text as a reader sees it, line for line: backslash escapes dropped,
+    HTML entities decoded, format characters (zero-width and the like)
+    removed. What the figure lint and the brace check read (#265's fourth
+    review: backslash-escaped braces, `&#123;&#123;` and a zero-width space
+    between braces all showed `{{`)."""
+    import html
+    import unicodedata
+
+    text = html.unescape(BACKSLASH_ESCAPE.sub(r"\1", text))
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
+def unread_heading(lines: list[str], at: int, first_section: int, title_at: int | None) -> bool:
+    """Whether line `at` renders as a heading this linter does not read."""
+    line = lines[at]
+    if SECTION_LINE.fullmatch(line) or at == title_at:
+        return False
+    if HTML_HEADING.search(line):
+        return True
+    rest = line
+    while True:
+        stripped = CONTAINER_PREFIX.sub("", rest, count=1)
+        if stripped == rest:
+            break
+        rest = stripped
+    if ATX.match(rest):
+        return True
+    previous = lines[at - 1] if at > 0 else ""
+    return bool(SETEXT_UNDERLINE.match(rest.strip()) and rest.strip() and previous.strip()
+                and not CONTAINER_PREFIX.sub("", previous).strip() == "")
 # `ns.key.key[0]`, or one of three functions over one: the whole grammar.
 REF_PATH = re.compile(r"(product|front|summary)((?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])+)")
 REF_CALL = re.compile(r"(count|round|pct)\(\s*([^,()]+?)\s*(?:,\s*(\d+)\s*)?\)")
@@ -991,18 +1033,18 @@ def lint_figures(
     clean = True
     lines = body.split("\n")
     first_section = next((i for i, line in enumerate(lines) if HEADING.match(line)), len(lines))
+    title_at = next((i for i, line in enumerate(lines[:first_section]) if re.match(r"# \S", line)), None)
     for at, line in enumerate(lines):
-        title = at < first_section and re.match(r"^# \S", line)
-        setext = SETEXT_UNDERLINE.match(line) and at > 0 and lines[at - 1].strip()
-        if (UNREAD_HEADING.search(line) and not title) or setext:
+        if unread_heading(lines, at, first_section, title_at):
             clean = False
             fail(
                 "results.heading-unread",
                 f"line {at + 1} of the body, {line[:60]!r}, is a heading a renderer shows "
-                f"and this linter does not read as a section; a referenced body's sections are "
-                f"`## ` at column 0, and its title one `# ` line before them (#63)",
+                f"and this linter does not read as a section; a referenced body's headings are "
+                f"`## <section>` at column 0, one of {', '.join(SECTIONS)}, and its title the "
+                f"first `# ` line before them (#63)",
             )
-    for section, text in sections_of(body).items():
+    for section, text in sections_of(visible(body)).items():
         uncited = UNCITED.findall(text)
         if uncited and section in FIGURES_NEVER_TYPED:
             clean = False
@@ -1051,7 +1093,7 @@ def lint_figures(
     # EVERY `{{` IS A REFERENCE OR AN ERROR (#265's third review): a brace
     # pair this grammar did not match -- `{{product.x}` -- was neither
     # resolved nor refused, and rendered as written.
-    left = "".join(rendered) if clean else REFERENCE.sub(" ", body)
+    left = visible("".join(rendered) if clean else REFERENCE.sub(" ", body))
     for stray in re.finditer(r"\{\{|\}\}", left):
         clean = False
         fail(

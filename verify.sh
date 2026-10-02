@@ -3609,6 +3609,81 @@ path.write_text(source.replace(old, "the product's own, {{product.decode_rate}."
 EOF
 }
 
+# A leading-dot decimal in Conclusion (#265's third review): `.241` is a figure.
+inject_results_figure_leading_dot() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, at .241.", 1), encoding="utf-8")
+EOF
+}
+
+# A marker built from HTML comments (#265's third review): a reader sees the bare figure.
+inject_results_marker_split_by_comments() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Observation\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '## Observation\n\nAcross <!--[uncited: a sample-->7<!--]--> directories.\n', 1), encoding="utf-8")
+EOF
+}
+
+# A setext heading (#265's third review): `Results` over dashes renders as a heading.
+inject_results_setext_heading() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'Results\n-------\n\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A heading in a blockquote (#265's fourth review): GitHub renders it as one.
+inject_results_heading_in_blockquote() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '> ## Results\n>\n> The rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# Backslash-escaped braces (#265's fourth review): a reader sees `{{` and an unresolved reference.
+inject_results_braces_escaped() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, \\{\\{product.decode_rate\\}\\}.", 1), encoding="utf-8")
+EOF
+}
+
 inject_results_figure_typed_in_test() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
   python3 - <<'EOF'
@@ -7972,6 +8047,16 @@ selftest() {
     "' ## Results', is a heading a renderer shows and this linter does not read as a section.*\\[results\\.heading-unread\\]"
   seeded_case "a reference one brace short"           results  inject_results_reference_unclosed \
     "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+  seeded_case "a leading-dot figure in Conclusion" results inject_results_figure_leading_dot \
+    "the Conclusion section types the figure\(s\) '241'.*\[results\.figure-typed\]"
+  seeded_case "a marker split by comments" results inject_results_marker_split_by_comments \
+    "the Observation section types the figure\(s\) '7'.*\[results\.figure-typed\]"
+  seeded_case "a setext heading" results inject_results_setext_heading \
+    "'-------', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a heading in a blockquote" results inject_results_heading_in_blockquote \
+    "'> ## Results', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "braces escaped past the check" results inject_results_braces_escaped \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
   seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \
     "the Test section types the figure\\(s\\) '3'.*\\[results\\.figure-typed\\]"
   seeded_case "an uncited figure in Conclusion"       results  inject_results_figure_uncited_in_conclusion \
