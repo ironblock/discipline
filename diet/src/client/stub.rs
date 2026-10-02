@@ -211,29 +211,31 @@ fn serve(
     heads: &Mutex<Vec<String>>,
 ) -> Vec<String> {
     let mut asked = Vec::new();
-    for act in acts {
-        let Some(stream) = accept(listener, stop) else {
+    let mut acts = acts.into_iter().peekable();
+    loop {
+        // Without a `/props` to answer, the stub serves exactly its acts and
+        // then refuses, as it always has. With one, it answers `/props`
+        // whenever asked -- before, between and after its acts -- and an act
+        // waits for the next connection that is not a `/props`.
+        if props.is_none() && acts.peek().is_none() {
+            break;
+        }
+        let Some(mut stream) = accept(listener, stop) else {
             break;
         };
-        // A `/props` the stub answers is not one of its acts: every such
-        // request is answered, and the act waits for the next connection.
-        let mut stream = stream;
-        let read = loop {
-            let read = read_request(&mut stream);
-            match (props, &read) {
-                (Some(props), Ok((head, _))) if head.starts_with("GET /props ") => {
-                    heads
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(head.clone());
-                    write_reply(&mut stream, 200, props, Closing::Yes);
-                    match accept(listener, stop) {
-                        Some(next) => stream = next,
-                        None => return asked,
-                    }
-                }
-                _ => break read,
-            }
+        let read = read_request(&mut stream);
+        if let (Some(props), Ok((head, _))) = (props, &read)
+            && head.starts_with("GET /props ")
+        {
+            heads
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(head.clone());
+            write_reply(&mut stream, 200, props, Closing::Yes);
+            continue;
+        }
+        let Some(act) = acts.next() else {
+            break;
         };
         match read {
             Ok((head, body)) => {
