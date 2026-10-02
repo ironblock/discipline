@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 198
+faults = 201
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3191,4 +3191,44 @@ becomes = '''
                 std::fs::remove_file(&sidecar)'''
 catches = [
     "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
+]
+
+[[fault]]
+id = "drive.serve-bin-announces-only-a-held-record"
+failure_class = "drive.serve-bin-announces-only-a-held-record"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Ok::<_, String>(held || stale)'''
+becomes = '''
+            Ok::<_, String>(held)'''
+catches = [
+    "TO-BE-GENERATED",
+]
+
+[[fault]]
+id = "drive.serve-bin-announces-every-record-emptied"
+failure_class = "drive.serve-bin-announces-every-record-emptied"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Ok::<_, String>(held || stale)'''
+becomes = '''
+            Ok::<_, String>(held || stale || true)'''
+catches = [
+    "TO-BE-GENERATED",
+]
+
+[[fault]]
+id = "drive.serve-bin-empties-the-record-before-the-bind"
+failure_class = "drive.serve-bin-empties-the-record-before-the-bind"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            let (file, held) = created(path)?;'''
+becomes = '''
+            let (file, held) = created(path)?;
+            file.set_len(0).map_err(|why| why.to_string())?;'''
+catches = [
+    "TO-BE-GENERATED",
 ]
