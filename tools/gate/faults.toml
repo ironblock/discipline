@@ -8218,6 +8218,30 @@ failure_class = "drive.serve-bin-leaves-an-earlier-sidecar"
 migrated = false
 
 [[fault]]
+id = "drive.serve-bin-announces-only-a-held-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-only-a-held-record"
+failure_class = "drive.serve-bin-announces-only-a-held-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-every-record-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-every-record-emptied"
+failure_class = "drive.serve-bin-announces-every-record-emptied"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-empties-the-record-before-the-bind"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-empties-the-record-before-the-bind"
+failure_class = "drive.serve-bin-empties-the-record-before-the-bind"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
