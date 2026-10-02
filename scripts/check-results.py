@@ -164,12 +164,14 @@ REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 # number standing on its own -- not a digit inside a word (`v2`, `sha256`)
 # and not an issue or ordinal reference (`#63`).
 TYPED_FIGURE = re.compile(
-    r"(?<![\w#.])(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![\w])"
+    r"(?<![A-Za-z0-9#.])(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![A-Za-z0-9])"
 )
 INLINE_CODE = re.compile(r"(?<![`\\])(`+)(?!`)(?:.|\n)*?(?<![`\\])\1(?!`)")
 # A paragraph ends at a blank line; an inline code span never crosses one.
 PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
-LINK_TARGET = re.compile(r"\]\([^)]*\)")
+# A link destination holds no whitespace (#265's second review: prose in
+# parentheses after `]` was being removed as if it were one).
+LINK_TARGET = re.compile(r"\]\([^)\s]*\)")
 # `ns.key.key[0]`, or one of three functions over one: the whole grammar.
 REF_PATH = re.compile(r"(product|front|summary)((?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])+)")
 REF_CALL = re.compile(r"(count|round|pct)\(\s*([^,()]+?)\s*(?:,\s*(\d+)\s*)?\)")
@@ -844,45 +846,73 @@ PREAMBLE = "preamble"
 
 
 def code_ranges(body: str) -> list[tuple[int, int]]:
-    """Where `body` holds code, as (start, end) offsets: each fenced block,
-    whole, and each inline span, found paragraph by paragraph as CommonMark
-    finds them -- a span never crosses a blank line or a heading, and a
-    backslash-escaped backtick opens nothing. A backtick fence whose info
-    string holds a backtick is not a fence. The ONE finder: the typed-figure
-    lint and the reference resolver both read it, so a stray backtick cannot
-    hide from one what the other sees (#265's review)."""
+    """Where `body` holds code, as (start, end) offsets -- only where it is
+    UNAMBIGUOUS, so the finder fails closed (#265's second review).
+
+    A stdlib reader is not a CommonMark parser, and every place this finder
+    sees code that a renderer shows as prose is a figure the lint cannot see
+    and a reference the resolver skips. So it exempts only what no renderer
+    reads otherwise, and anything else is read as prose: a figure there is
+    refused, a reference there is resolved -- the safe direction.
+
+      - A fenced block: its fence at column 0, closed by a fence of the same
+        character at least as long, also at column 0. An unclosed fence, or
+        one indented (inside a list item, say), is prose.
+      - An inline span: on ONE line, inside one table cell (split at `|`),
+        outside any HTML tag or autolink (`<...>`), opened by a run not
+        escaped by an odd number of backslashes and closed by the next run of
+        the same length. A backslash before the closing run escapes nothing,
+        as CommonMark has it.
+
+    HTML comments are blanked first, as the section reader blanks them, so a
+    fence inside a comment opens nothing.
+    """
+    plain = HTML_COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), body)
     ranges: list[tuple[int, int]] = []
     fence: str | None = None
     start = offset = 0
-    prose: list[tuple[int, int]] = []
-    block = 0
-    for line in body.split("\n"):
-        opener = CODE_FENCE.match(line)
+    in_fence: list[tuple[int, int]] = []
+    for line in plain.split("\n"):
+        opener = re.match(r"(`{3,}|~{3,})", line)
         if opener and opener.group(1)[0] == "`" and "`" in line[opener.end():]:
             opener = None
         if fence is None and opener:
-            prose.append((block, offset))
             fence, start = opener.group(1), offset
         elif fence is not None and opener and opener.group(1)[0] == fence[0] \
                 and len(opener.group(1)) >= len(fence) and line.strip().strip(fence[0]) == "":
             ranges.append((start, offset + len(line)))
             fence = None
-            block = offset + len(line) + 1
-        elif fence is None and HEADING.match(line):
-            prose.append((block, offset))
-            block = offset + len(line) + 1
         offset += len(line) + 1
-    if fence is not None:
-        ranges.append((start, len(body)))
-    else:
-        prose.append((block, len(body)))
-    for begin, finish in prose:
-        cursor = begin
-        for gap in [*PARAGRAPH_BREAK.finditer(body, begin, finish), None]:
-            stop = gap.start() if gap else finish
-            for span in INLINE_CODE.finditer(body, cursor, stop):
-                ranges.append(span.span())
-            cursor = gap.end() if gap else finish
+    offset = 0
+    for line in plain.split("\n"):
+        here = (offset, offset + len(line))
+        offset += len(line) + 1
+        if any(a <= here[0] < b for a, b in ranges):
+            continue
+        # Tags and autolinks take precedence over code spans: a backtick
+        # inside one is not a delimiter, so they split the line like cells.
+        tags = [(m.start(), m.end()) for m in re.finditer(r"<[^<>\n]*>", line)]
+        cells = [0, *[i for i, c in enumerate(line) if c == "|"], len(line)]
+        bounds = sorted({*cells, *[x for t in tags for x in t]})
+        for a, b in zip(bounds, bounds[1:]):
+            if any(t0 <= a < t1 for t0, t1 in tags):
+                continue
+            segment = line[a:b]
+            runs = [(m.start(), m.end()) for m in re.finditer(r"`+", segment)]
+            index = 0
+            while index < len(runs):
+                open_at, open_end = runs[index]
+                backslashes = len(segment[:open_at]) - len(segment[:open_at].rstrip("\\"))
+                if backslashes % 2:
+                    index += 1
+                    continue
+                width = open_end - open_at
+                close = next((j for j in range(index + 1, len(runs)) if runs[j][1] - runs[j][0] == width), None)
+                if close is None:
+                    index += 1
+                    continue
+                ranges.append((here[0] + a + open_at, here[0] + a + runs[close][1]))
+                index = close + 1
     return ranges
 
 
@@ -948,6 +978,17 @@ def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None,
     found, value = resolve(scope, steps)
     if not found:
         return None, f"`{{{{{text}}}}}` names `{target}`, which {path.group(1)} does not carry"
+    # `front` is a date, or one of the three `[regime]` keys checked against
+    # the record's start row -- nothing else, counted or not (#265's reviews:
+    # a front string, and then any other `[regime]` key, which only the
+    # author's own regimen.toml backs, carried a figure past the lint).
+    if path.group(1) == "front" and not isinstance(value, datetime.date) \
+            and not (len(steps) >= 2 and steps[0] == "regime" and steps[1] in REQUIRED_REGIME_KEYS):
+        return None, (
+            f"`{{{{{text}}}}}` names `{target}`; a front-matter reference is a date or "
+            f"`regime.arm`, `regime.substrates` or `regime.dogma_version`, the values the "
+            f"record backs -- reference the summary row or the product"
+        )
     if function == "count":
         if isinstance(value, (list, dict)):
             return str(len(value)), None
@@ -956,15 +997,8 @@ def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None,
     # front-matter string is checked against nothing, so a figure in one is a
     # typed figure in a costume, and a front-matter number re-spells through
     # TOML -- `summary` holds the same number as written.
-    if path.group(1) == "front":
-        if isinstance(value, (datetime.date, datetime.time)):
-            return value.isoformat(), None
-        if steps[:1] != ("regime",):
-            return None, (
-                f"`{{{{{text}}}}}` names `{target}`; a front-matter reference is a date or a "
-                f"`[regime]` value, since nothing checks any other against the data -- "
-                f"reference the summary row or the product"
-            )
+    if path.group(1) == "front" and isinstance(value, datetime.date):
+        return value.isoformat(), None
     if isinstance(value, bool):
         shown = "true" if value else "false"
     elif isinstance(value, (Written, str, int, float, datetime.date)):
