@@ -8058,3 +8058,111 @@ label = "drive.canned-build-info-names-other-acts"
 failure_class = "drive.canned-build-info-names-other-acts"
 migrated = false
 
+[[fault]]
+id = "exercise.exercise_recording_carried_disagrees"
+kind = "seeded-gate"
+check = "exercise"
+label = "a capture's carried field disagreeing with its events"
+failure_class = "exercise.recording-carried"
+legacy_signature = "voxel-stress: its carried field disagrees with its events"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_flow_collection_hides_a_group"
+kind = "seeded-gate"
+check = "ci"
+label = "a flow collection hiding a second group"
+failure_class = "wiring.pages-yaml-duplicate"
+legacy_signature = "pages.yml: jobs.deploy: duplicate key .concurrency."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_deploy_job"
+kind = "seeded-gate"
+check = "ci"
+label = "a second deploy job"
+failure_class = "wiring.pages-yaml-duplicate"
+legacy_signature = "pages.yml: jobs: duplicate key .deploy."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_document"
+kind = "seeded-gate"
+check = "ci"
+label = "a second YAML document"
+failure_class = "wiring.pages-yaml-documents"
+legacy_signature = "pages.yml: holds 2 YAML documents, not one"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_quoted_merge_key"
+kind = "seeded-gate"
+check = "ci"
+label = "a quoted merge key over the guards"
+failure_class = "wiring.pages-yaml-merge"
+legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly .<<."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_job"
+kind = "seeded-gate"
+check = "ci"
+label = "a second job that publishes"
+failure_class = "wiring.pages-second-job"
+legacy_signature = "pages.yml: jobs other than .deploy. .publish-too."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_check_step_skipped"
+kind = "seeded-gate"
+check = "ci"
+label = "the check step skipped"
+failure_class = "wiring.pages-step-skipped"
+legacy_signature = "pages.yml: the check step carries if, so it may not run as written"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_site_written_after_its_check"
+kind = "seeded-gate"
+check = "ci"
+label = "the site written after its check"
+failure_class = "wiring.pages-site-written"
+legacy_signature = "pages.yml: a step between ./verify.sh --site _site and the upload"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_upload_always"
+kind = "seeded-gate"
+check = "ci"
+label = "the upload run whatever the check said"
+failure_class = "wiring.pages-step-forced"
+legacy_signature = "pages.yml: a step from the check on carries .if:. .actions/upload-pages-artifact"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_trigger_any_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "the trigger on any branch"
+failure_class = "wiring.pages-trigger"
+legacy_signature = "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_checkout_not_the_run"
+kind = "seeded-gate"
+check = "ci"
+label = "the checkout not the run's sha"
+failure_class = "wiring.pages-checkout"
+legacy_signature = "pages.yml: the site is not checked against the sha that run built"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_condition_outside_its_braces"
+kind = "seeded-gate"
+check = "ci"
+label = "the condition with text outside its braces"
+failure_class = "wiring.pages-condition"
+legacy_signature = "pages.yml: the deploy's condition has text outside its"
+migrated = false
+

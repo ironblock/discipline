@@ -412,5 +412,6 @@ export const KITCHEN_SINK: Recording = {
     'token counts from text length; prefill and decode from assumed rates, not measured',
     'each tool call says where it began (calls_from), as a drive calling tools natively can; the recordings cannot',
   ],
+  carried: {},
   events: compose(KITCHEN_SINK_SCRIPT),
 };
