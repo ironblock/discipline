@@ -7591,6 +7591,14 @@ failure_class = "client.stub-leaves-props-unanswered"
 migrated = false
 
 [[fault]]
+id = "client.stub-closes-an-extra-call-silently"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stub-closes-an-extra-call-silently"
+failure_class = "client.stub-closes-an-extra-call-silently"
+migrated = false
+
+[[fault]]
 id = "drive.engine-passes-a-dirty-build"
 kind = "lane-fault"
 check = "lanes"
