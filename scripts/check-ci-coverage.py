@@ -35,6 +35,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -201,6 +202,40 @@ def push_filter(text: str) -> tuple[str, list[str]]:
         if listing and item:
             names.append(item.group(1).strip().strip("\"'"))
     return (state, names)
+
+
+def newest_run_step_verdicts(live: str) -> list[str]:
+    """Runs pages.yml's newest-run step against a stub `gh` (rule 10)."""
+    lines = live.splitlines()
+    at = next((i for i, l in enumerate(lines) if l.strip() == "- name: Publish only the newest run the gate passed"), None)
+    if at is None:
+        return ["pages.yml: no step named 'Publish only the newest run the gate passed' to run against a stub gh"]
+    run = next((i for i in range(at + 1, len(lines)) if lines[i].strip() == "run: |"), None)
+    if run is None:
+        return ["pages.yml: the newest-run step has no `run: |` block to run against a stub gh"]
+    indent = len(lines[run]) - len(lines[run].lstrip()) + 2
+    body = []
+    for line in lines[run + 1:]:
+        if line.strip() and len(line) - len(line.lstrip()) < indent:
+            break
+        body.append(line[indent:])
+    script = "\n".join(body) + "\n"
+    failures = []
+    with tempfile.TemporaryDirectory() as box:
+        stub = pathlib.Path(box) / "gh"
+        # (what the API names as the newest passed run, this run, publish?)
+        for newest, this, publishes in (("998", "998", True), ("1006", "998", False), ("", "998", False)):
+            stub.write_text(f"#!/bin/sh\necho '{newest}'\n", encoding="utf-8")
+            stub.chmod(0o755)
+            env = {"PATH": f"{box}:/usr/bin:/bin", "GITHUB_REPOSITORY": "o/r", "RUN_NUMBER": this, "GH_TOKEN": "stub"}
+            done = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
+            if (done.returncode == 0) != publishes:
+                said = "publishes" if done.returncode == 0 else f"refuses (exit {done.returncode})"
+                failures.append(
+                    f"pages.yml: the newest-run step {said} when the newest passed run is "
+                    f"{newest or 'none'} and this run is {this}; it must {'publish' if publishes else 'refuse'}"
+                )
+    return failures
 
 
 def main() -> int:
@@ -469,6 +504,11 @@ def main() -> int:
         number = live.find("RUN_NUMBER: ${{ github.event.workflow_run.run_number }}")
         if upload_at != -1 and (newest == -1 or newest > upload_at or number == -1 or number > upload_at):
             failures.append("pages.yml: publishes without checking that no later verify run on main has passed")
+        # And the step DECIDES as described: run under bash with a stub `gh`
+        # answering a run number, it passes when no later run has passed and
+        # refuses when one has, or when the answer is empty. Rule 10's text
+        # checks above cannot see a comparison turned round; this can.
+        failures += newest_run_step_verdicts(live)
         if re.search(r"^\s+continue-on-error:", live, re.M):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
         uploaded_path = re.search(r"actions/upload-pages-artifact@\S+\s*\n\s+with:\s*\n\s+path: (\S+)", live)

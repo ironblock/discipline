@@ -3875,6 +3875,15 @@ label = "the site published though a later run passed"
 failure_class = "wiring.pages-older-sha"
 legacy_signature = "pages.yml: publishes without checking that no later verify run on main has passed"
 migrated = false
+
+[[fault]]
+id = "ci.ci_pages_newest_run_compared_backwards"
+kind = "seeded-gate"
+check = "ci"
+label = "the newest-run comparison turned round"
+failure_class = "wiring.pages-newest-run-comparison"
+legacy_signature = "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
+migrated = false
 [[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"

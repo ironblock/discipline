@@ -3854,6 +3854,13 @@ inject_ci_pages_publishes_an_older_sha() {
   edit_in_place '/actions\/workflows\/verify.yml\/runs?branch=main/d' .github/workflows/pages.yml
 }
 
+# The newest-run comparison turned round: an older run publishes over a newer
+# one that passed, and the newest one refuses. Only rule 10's stub-gh run of
+# the step sees it; the step's text is all still there.
+inject_ci_pages_newest_run_compared_backwards() {
+  edit_in_place 's/\[ "\$newest" -le "\$RUN_NUMBER" \]/[ "$newest" -ge "$RUN_NUMBER" ]/' .github/workflows/pages.yml
+}
+
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
   edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
@@ -7575,6 +7582,8 @@ selftest() {
     "pages.yml: upload-pages-artifact is not preceded by \./verify\.sh --site _site"
   seeded_case "the site published though a later run passed" ci inject_ci_pages_publishes_an_older_sha \
     "pages.yml: publishes without checking that no later verify run on main has passed"
+  seeded_case "the newest-run comparison turned round" ci inject_ci_pages_newest_run_compared_backwards \
+    "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
