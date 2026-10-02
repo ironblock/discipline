@@ -110,7 +110,7 @@ VARIANTS = {
     ),
     "tuned": dict(
         desc="`refract-story-noise` as tuned in the playground: displacement-filter glass with a thicker, denser "
-             "bezel, lower waves and a late taper. The dark palette is retuned; the light one approximates it.",
+             "bezel, lower waves and a late taper. Both palettes are retuned (light: colours tuned, the rest approximated from dark).",
         glass="refract", look="tuned", harmonics="filter", outside="ends", taper="late", gain=3.45, amp=0.68, cross=4,
         theme={"dark": dict(
             wave_alpha=0.85, glow_wide_a=0.16, glow_tight=6.3,
@@ -120,8 +120,10 @@ VARIANTS = {
             bloom=dict(b=(32, 12.5)),
             el=dict(bevel=1.7, a_width=4, a_alpha=0.35, b_width=1.9, b_alpha=0.7),
         ),
-        # an approximation of the dark changes (same ratios where they carry over, then judged by eye), not tuned
+        # the physical values approximate the dark changes (same ratios where they carry over, judged by eye); the colours were tuned in the playground
         "light": dict(
+            wave=("#f07581", "#74f19e", "#7994ec"), beam="#4a4f5e", body="#cbd0ec",
+            shade="#414e81", edge="#737b9c", rim="#9198b6",
             wave_alpha=0.85, glow_wide_a=0.05, glow_tight=1.5,
             body_top=0.03, body_bottom=0.42,
             lit_opacity=0.97, shade_opacity=0.75, edge_opacity=0.13, rim_opacity=0.75,
