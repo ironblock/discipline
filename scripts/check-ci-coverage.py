@@ -472,8 +472,8 @@ def main() -> int:
     #    branch filter matches a fork's `main` by name -- and only when no
     #    LATER verify run on main has passed (by run number, read through the
     #    API), so a re-run of an older push run cannot deploy over a newer one,
-    #    while a later run still running does not block it. It checks the site with `./verify.sh --site _site` before
-    #    it uploads, nothing lets a step fail and the job go on, and what it
+    #    while a later run still running does not block it. It checks the site
+    #    with `./verify.sh --site _site` before it uploads, nothing lets a step fail and the job go on, and what it
     #    uploads is the site it checked. Read from the lines that are not
     #    comments: a guard commented out is no guard. And the two parts it
     #    downloads must be uploaded by something the gate runs.
@@ -500,10 +500,18 @@ def main() -> int:
         check = re.search(r"^\s+run: \./verify\.sh --site _site\s*$", live, re.M)
         if upload_at != -1 and (not check or check.start() > upload_at):
             failures.append("pages.yml: upload-pages-artifact is not preceded by ./verify.sh --site _site")
-        newest = live.find("actions/workflows/verify.yml/runs?branch=main&event=push&status=success")
-        number = live.find("RUN_NUMBER: ${{ github.event.workflow_run.run_number }}")
-        if upload_at != -1 and (newest == -1 or newest > upload_at or number == -1 or number > upload_at):
+        # The newest-run step, by name, read as ONE step: the query is its
+        # command, the run number its own env, and nothing makes it optional.
+        step = re.search(r"^      - name: Publish only the newest run the gate passed\n(.*?)(?=^      - |\Z)", live, re.M | re.S)
+        query = r'^\s+newest="\$\(gh api "repos/\$\{GITHUB_REPOSITORY\}/actions/workflows/verify\.yml/runs\?branch=main&event=push&status=success&per_page=1"'
+        if upload_at != -1 and (
+            not step or step.start() > upload_at
+            or not re.search(query, step.group(1), re.M)
+            or not re.search(r"^\s+RUN_NUMBER: \$\{\{ github\.event\.workflow_run\.run_number \}\}\s*$", step.group(1), re.M)
+        ):
             failures.append("pages.yml: publishes without checking that no later verify run on main has passed")
+        if step and re.search(r"^        if:", step.group(1), re.M):
+            failures.append("pages.yml: the newest-run step carries an `if:`, so it can be skipped and the deploy go on")
         # And the step DECIDES as described: run under bash with a stub `gh`
         # answering a run number, it passes when no later run has passed and
         # refuses when one has, or when the answer is empty. Rule 10's text

@@ -3851,7 +3851,7 @@ inject_ci_pages_uploads_unchecked() {
 
 # Publishes whatever sha the run checked, though a later run has passed.
 inject_ci_pages_publishes_an_older_sha() {
-  edit_in_place '/actions\/workflows\/verify.yml\/runs?branch=main/d' .github/workflows/pages.yml
+  edit_in_place 's/^\( *\)newest="\$(gh api .*$/\1newest="$RUN_NUMBER"/' .github/workflows/pages.yml
 }
 
 # The newest-run comparison turned round: an older run publishes over a newer
