@@ -254,7 +254,7 @@ def main(argv: list[str]) -> int:
         return 0
     # Each directory's own seconds (#262): a split by name balances counts,
     # not cost, and this is what a re-balance is read from. Printed as the
-    # next directory starts, since the loop leaves each one by `continue`.
+    # next directory starts, since `one()` leaves each one by `return`.
     timing: tuple[str, float] | None = None
     # ONE DIRECTORY, TO ITS OUTCOME (#262, #268's fifth review). The census
     # row is written from what this returns, so a directory the loop skips

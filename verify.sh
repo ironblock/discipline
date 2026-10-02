@@ -4372,6 +4372,22 @@ EOF
 }
 
 # The gate's census of the sharded packages renamed out of its pinned form.
+# A comment, then a key the census step still carries (#268's eighth review):
+# YAML reads the comment at any indent, and a reader that ended the gate job
+# at it saw the census step last and exact.
+inject_ci_shard_census_off_behind_a_comment() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+old = 'python3 scripts/check-shard-census.py "${{ runner.temp }}/members"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + chr(10) + '  # the verdict is the job results step above' + chr(10) + '        continue-on-error: true', 1), encoding="utf-8")
+EOF
+}
+
 inject_ci_shard_census_step_removed() {
   python3 - <<'EOF'
 import pathlib
@@ -8325,6 +8341,8 @@ selftest() {
   seeded_case "a member reported as skipped"           ci inject_ci_recompute_reports_a_skip \
     'recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to'
   seeded_case "the gate's shard census allowed to fail" ci inject_ci_shard_census_switched_off \
+    'the gate job does not run check-shard-census\.py'
+  seeded_case "the gate's census off behind a comment" ci inject_ci_shard_census_off_behind_a_comment \
     'the gate job does not run check-shard-census\.py'
   seeded_case "the gate's shard census renamed away"   ci inject_ci_shard_census_step_removed \
     'the gate job does not run check-shard-census\.py'

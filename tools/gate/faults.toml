@@ -4134,6 +4134,14 @@ failure_class = "wiring.shard-incomplete"
 legacy_signature = "the gate job does not run check-shard-census\\.py"
 migrated = false
 [[fault]]
+id = "ci.ci_shard_census_off_behind_a_comment"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's census off behind a comment"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
 id = "ci.ci_shard_census_step_removed"
 kind = "seeded-gate"
 check = "ci"

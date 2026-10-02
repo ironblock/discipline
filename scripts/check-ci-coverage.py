@@ -940,7 +940,12 @@ def main() -> int:
     #    check-shard-census.py adds the shards up against the unsplit listing.
     #    On CI the gate job runs the same census over what the shards really
     #    ran, and refuses a dry row.
-    gate_job = re.search(r"^  gate:\n(.*?)(?=^  \S|\Z)", root_text, re.MULTILINE | re.DOTALL)
+    # The job ends at the next line a job's name could start -- two spaces then
+    # neither a space nor `#` -- never at a comment, which YAML reads at any
+    # indent: `  # ...` then `      continue-on-error: true` would otherwise
+    # end the job's text above a key the census step still carries (#268's
+    # eighth review).
+    gate_job = re.search(r"^  gate:\n(.*?)(?=^  [^\s#]|\Z)", root_text, re.MULTILINE | re.DOTALL)
     # The census is the gate job's LAST step, written exactly: a key appended
     # after its `run:` -- `if: false`, `continue-on-error`, a `|| true`
     # continuation -- would switch it off (#268's fifth review).
