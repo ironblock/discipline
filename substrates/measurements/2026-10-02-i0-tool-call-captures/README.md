@@ -21,7 +21,7 @@ These captures are I0 of #29's plan (comment 5943518924): a real llama-server st
   - **The prompt:** a system line, then a user ask opening with a per-run nonce.
 - **Turn 1** asks for `ls | wc -l`. The model called `bash` with exactly that. The command was read before it ran, then run in a scratch worktree of this repository, and its output, `      18\n` (BSD `wc`'s padding), is `tool-output.txt`.
 - **Turn 2 sends both shapes, `user` first and then `openai`:**
-  - **`user`:** the assistant's streamed content (empty), then a user message: ``The bash tool ran `ls | wc -l` and printed:\n      18\n``. That wording is this capture's choice.
+  - **`user`:** the assistant's streamed content (empty), then a user message: ``The bash tool ran `ls | wc -l` and printed:\n      18\n``. The client's `Message` can't carry a call, so this shape **drops the call itself**: the assistant turn is `content: ""` and the call survives only as the paraphrase in the user's text. The plan's T6 and S1 expect the assistant's call to be carried, so this is the shape as the client can render it today, not a ruling on Q9. The wording is this capture's choice.
   - **`openai`:** an assistant message with `content: null` and `tool_calls` (the call's id, name and arguments as streamed), then a `tool` message carrying the output.
 
 | capture | reply | request body | reply sha256 |
@@ -34,11 +34,11 @@ These captures are I0 of #29's plan (comment 5943518924): a real llama-server st
 
 ## What the server did
 
-**Turn 1: how a streamed call is fragmented.** The reply has 17 `data:` events and then `[DONE]`.
+**Turn 1: how a streamed call is fragmented.** The reply has 16 JSON `data:` events and then `[DONE]`, plus three bare `:` SSE comment lines, which the reader already skips (`diet/src/client/stream.rs`).
 
 | events | what they carry |
 | --- | --- |
-| 5 | role chunks, `delta: {"role":"assistant","content":null}`, the frames `return_progress` adds |
+| 5 | role chunks, `delta: {"role":"assistant","content":null}`: one plain first chunk and four carrying `prompt_progress`, the frames `return_progress` adds |
 | 1 | `tool_calls[0]` with `index` 0, `id`, `type: "function"`, `function.name: "bash"`, and the first argument fragment `{` |
 | 8 | `tool_calls[0]` with `index` and an `arguments` fragment only: `"command":"`, `ls`, ` \|`, ` wc`, ` -`, `l`, `"`, `}` |
 | 1 | `delta: {}` with **`finish_reason: "tool_calls"`** |
@@ -55,9 +55,12 @@ These captures are I0 of #29's plan (comment 5943518924): a real llama-server st
 | `user` | 367 | 330 | 37 | "There are **18** files in the current directory." |
 | `openai` | 383 | 330 | 53 | the same sentence |
 
-- **Both shapes kept the same 330-token prefix warm.** That is turn 1's 334-token prompt less its last four tokens, the rendered generation prompt.
-- **The two shapes cost the same here, so the receipt does not choose between them.** Each re-sent turn 1 whole and paid only for its own tail.
-- **Neither shape invalidated the cached head.**
+- **Both shapes kept the same 330-token prefix warm**, four short of turn 1's 334-token prompt.
+  - Why 330 is not measured. Two readings fit:
+    - the last four tokens are the rendered generation prompt, which turn 2 replaces;
+    - this is a hybrid recurrent model, so warm reuse stops where a state checkpoint landed (the endpoint entry's hazard). Every reply's progress frames stop at the prompt's total less four, which fits a checkpoint as well.
+  - On the second reading, `cache_n` can't tell the two shapes apart past 330 on this model.
+- **So the receipt does not choose between the shapes here.** It shows neither invalidated the shared head. It doesn't show they would cost the same on a model whose cache reuse is not checkpoint-bound.
 
 ## Not checked
 
@@ -65,4 +68,5 @@ These captures are I0 of #29's plan (comment 5943518924): a real llama-server st
 - Thinking on was not captured, so a call after streamed `reasoning_content` is not represented.
 - The `openai` shape was sent second, into a cache that already held the `user` shape's turn 2. Its `cache_n` equals the `user` shape's, so it reused only the shared prefix.
 - Whether the drive endpoint fragments the same way on its card is inferred from the shared commit, not measured there.
+- The fixture names in the courier carry the commit and not the substrate, so a reader could take them for the endpoint's captures. Naming is track three's, and the courier's table names the source.
 - The reader in `check-fingerprints.py` matched only `.so` names, so on macOS it hashed the stub executable without its seven `.dylib` libraries. This change teaches it `.dylib`, with a selftest case seen red on the old rule. `engine-read.json` is the read after the fix.
