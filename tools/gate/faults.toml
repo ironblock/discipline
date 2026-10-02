@@ -4007,6 +4007,33 @@ legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly 
 migrated = false
 
 [[fault]]
+id = "ci.ci_pages_flow_collection_hides_a_group"
+kind = "seeded-gate"
+check = "ci"
+label = "a flow collection hiding a second group"
+failure_class = "wiring.pages-yaml-duplicate"
+legacy_signature = "pages.yml: jobs.deploy: duplicate key .concurrency."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_deploy_job"
+kind = "seeded-gate"
+check = "ci"
+label = "a second deploy job"
+failure_class = "wiring.pages-yaml-duplicate"
+legacy_signature = "pages.yml: jobs: duplicate key .deploy."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_document"
+kind = "seeded-gate"
+check = "ci"
+label = "a second YAML document"
+failure_class = "wiring.pages-yaml-documents"
+legacy_signature = "pages.yml: holds 2 YAML documents, not one"
+migrated = false
+
+[[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
 check = "ci"

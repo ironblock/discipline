@@ -31,6 +31,7 @@ Stdlib only. Exit 0 if the wiring is sound, 1 otherwise.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import subprocess
@@ -204,22 +205,91 @@ def push_filter(text: str) -> tuple[str, list[str]]:
     return (state, names)
 
 
-def newest_run_step_verdicts(live: str) -> list[str]:
-    """Runs pages.yml's newest-run step against a stub `gh` (rule 10)."""
-    lines = live.splitlines()
-    at = next((i for i, l in enumerate(lines) if l.strip() == "- name: Publish only the newest run the gate passed"), None)
-    if at is None:
-        return ["pages.yml: no step named 'Publish only the newest run the gate passed' to run against a stub gh"]
-    run = next((i for i in range(at + 1, len(lines)) if lines[i].strip() == "run: |"), None)
-    if run is None:
-        return ["pages.yml: the newest-run step has no `run: |` block to run against a stub gh"]
-    indent = len(lines[run]) - len(lines[run].lstrip()) + 2
-    body = []
-    for line in lines[run + 1:]:
-        if line.strip() and len(line) - len(line.lstrip()) < indent:
-            break
-        body.append(line[indent:])
-    script = "\n".join(body) + "\n"
+# pages.yml read through a YAML parser (rule 10, #256): Ruby's own, psych,
+# which ships with Ruby on macOS and on ubuntu-latest. The tree is walked, not
+# loaded -- no type is resolved, so `on:` stays the string it is to GitHub
+# rather than YAML 1.1's `true` -- and what could make one reading of the file
+# differ from another is refused outright, anywhere in it: more than one
+# document, a key twice in one mapping (YAML keeps the last), and a tag,
+# anchor, alias or merge key. Out comes JSON: the document, with every scalar
+# a string, and the refusals.
+PSYCH_WALK = r"""
+require "psych"
+require "json"
+problems = []
+short = ->(n) { (n.respond_to?(:tag) && n.tag) ? n.tag.sub("tag:yaml.org,2002:", "!!") + " " : "" }
+mark = ->(n) { (n.respond_to?(:anchor) && n.anchor) ? "&#{n.anchor} " : "" }
+walk = lambda do |node, path|
+  case node
+  when Psych::Nodes::Alias
+    problems << { "kind" => "unplain", "path" => path, "detail" => "*#{node.anchor}" }
+    nil
+  when Psych::Nodes::Scalar
+    problems << { "kind" => "unplain", "path" => path, "detail" => "#{mark.(node)}#{short.(node)}#{node.value}".strip } if node.tag || node.anchor
+    node.value
+  when Psych::Nodes::Sequence
+    problems << { "kind" => "unplain", "path" => path, "detail" => "#{mark.(node)}#{short.(node)}[...]".strip } if node.tag || node.anchor
+    node.children.each_with_index.map { |c, i| walk.(c, path + [i.to_s]) }
+  when Psych::Nodes::Mapping
+    problems << { "kind" => "unplain", "path" => path, "detail" => "#{mark.(node)}#{short.(node)}{...}".strip } if node.tag || node.anchor
+    out = {}
+    node.children.each_slice(2) do |k, v|
+      unless k.is_a?(Psych::Nodes::Scalar)
+        problems << { "kind" => "unplain", "path" => path, "detail" => "a key that is not a scalar" }
+        next
+      end
+      if k.tag || k.anchor || (k.value == "<<" && k.plain)
+        problems << { "kind" => "unplain", "path" => path, "detail" => "#{mark.(k)}#{short.(k)}#{k.value}".strip }
+      end
+      problems << { "kind" => "duplicate", "path" => path, "key" => k.value } if out.key?(k.value)
+      out[k.value] = walk.(v, path + [k.value])
+    end
+    out
+  end
+end
+begin
+  stream = Psych.parse_stream(File.read(ARGV[0]))
+rescue Psych::SyntaxError => e
+  puts JSON.dump({ "error" => e.message })
+  exit 0
+end
+docs = stream.children
+problems << { "kind" => "documents", "count" => docs.size } if docs.size != 1
+puts JSON.dump({ "doc" => docs.empty? ? nil : walk.(docs[0].root, []), "problems" => problems })
+"""
+
+
+class ParserMissing(Exception):
+    """The parser rule 10 reads pages.yml with is not here: a misuse, not a pass."""
+
+
+def parse_workflow(path: pathlib.Path) -> tuple[object, list[str]]:
+    """pages.yml as parsed, and why it may not be read as one plain document."""
+    try:
+        done = subprocess.run(["ruby", "-e", PSYCH_WALK, str(path)], capture_output=True, text=True)
+    except FileNotFoundError as err:
+        raise ParserMissing("rule 10 reads pages.yml with Ruby's YAML parser (psych), and `ruby` was not found") from err
+    if done.returncode != 0:
+        raise ParserMissing(f"rule 10's YAML parser (ruby, psych) failed (exit {done.returncode}): {done.stderr.strip()[:300]}")
+    out = json.loads(done.stdout)
+    if "error" in out:
+        return None, [f"pages.yml: is not YAML: {out['error']}"]
+    refusals = []
+    for p in out["problems"]:
+        where = ".".join(p.get("path", [])) or "the top level"
+        if p["kind"] == "documents":
+            refusals.append(f"pages.yml: holds {p['count']} YAML documents, not one")
+        elif p["kind"] == "duplicate":
+            refusals.append(f"pages.yml: {where}: duplicate key `{p['key']}`; YAML keeps the last, the eye reads the first")
+        elif p["path"] == ["jobs", "deploy"]:
+            refusals.append(f"pages.yml: the deploy job carries a key not spelled plainly ({p['detail']})")
+        else:
+            refusals.append(f"pages.yml: {where}: a tag, anchor, alias or merge key ({p['detail']})")
+    return out["doc"], refusals
+
+
+def newest_run_step_verdicts(script: str) -> list[str]:
+    """Runs pages.yml's newest-run step, as parsed, against a stub `gh` (rule 10)."""
     failures = []
     with tempfile.TemporaryDirectory() as box:
         stub = pathlib.Path(box) / "gh"
@@ -484,94 +554,88 @@ def main() -> int:
     #    fail and the job go on, and what it uploads is the site it checked.
     #    Deploys run one at a time through a `pages` group on the deploy JOB,
     #    never the workflow, where a skipped run cancels a waiting deploy
-    #    (#244). Read from the lines that are not comments: a guard commented
-    #    out is no guard. And the two parts it downloads must be uploaded by
+    #    (#244). Read through a YAML parser (#256): what is checked is what
+    #    YAML reads -- a guard commented out is no guard, and a second job,
+    #    document or spelling cannot show the eye one workflow and GitHub
+    #    another. And the two parts it downloads must be uploaded by
     #    something the gate runs.
     pages = WORKFLOWS / "pages.yml"
     if pages.is_file():
-        live = "\n".join(l for l in pages.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#"))
-        if not re.search(r"^  workflow_run:\s*$", live, re.M) or not re.search(r"^\s+workflows: \[verify\]\s*$", live, re.M):
+        # Read through a YAML parser (#256), not as text: what is checked is
+        # what YAML reads, so no spelling -- a second job, a flow collection
+        # running past a block, a key hidden in a block scalar -- can show
+        # the text one workflow and GitHub another.
+        doc, refusals = parse_workflow(pages)
+        failures += refusals
+        doc = doc if isinstance(doc, dict) else {}
+        on = doc.get("on") if isinstance(doc.get("on"), dict) else {}
+        run_of = on.get("workflow_run") if isinstance(on.get("workflow_run"), dict) else {}
+        if run_of.get("workflows") != ["verify"]:
             failures.append("pages.yml: does not run downstream of the `verify` workflow (workflow_run of verify)")
-        if re.search(r"^  (push|workflow_dispatch|schedule|pull_request|pull_request_target):", live, re.M):
+        if set(on) - {"workflow_run"}:
             failures.append("pages.yml: publishes on a trigger of its own, not only on a `verify` run's completion")
+        if "concurrency" in doc:
+            failures.append("pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters, cancelling a waiting deploy (#244)")
+        jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
+        deploy = jobs.get("deploy") if isinstance(jobs.get("deploy"), dict) else {}
+        if not deploy:
+            failures.append("pages.yml: no `deploy` job")
         guards = {
             "github.event.workflow_run.conclusion == 'success'": "pages.yml: deploys on a workflow_run whatever its conclusion",
             "github.event.workflow_run.event == 'push'": "pages.yml: deploys on a run that was not a push",
             "github.event.workflow_run.head_repository.full_name == github.repository": "pages.yml: deploys a run of a fork's code",
         }
-        conditions = re.findall(r"^    if: (.+?)\s*$", live, re.M)
-        clauses = [c.strip() for c in conditions[0].split("&&")] if len(conditions) == 1 else []
+        condition = deploy.get("if") if isinstance(deploy.get("if"), str) else ""
+        clauses = [c.strip() for c in condition.split("&&")] if condition else []
         for guard, message in guards.items():
             if guard not in clauses:
                 failures.append(message)
-        if len(conditions) == 1 and (set(clauses) - set(guards) or "||" in conditions[0] or "!" in conditions[0]):
-            failures.append(f"pages.yml: the deploy's condition is not exactly its guards joined by && (found `{conditions[0]}`)")
-        upload_at = live.find("actions/upload-pages-artifact")
-        check = re.search(r"^\s+run: \./verify\.sh --site _site\s*$", live, re.M)
-        if upload_at != -1 and (not check or check.start() > upload_at):
+        if condition and (set(clauses) - set(guards) or "||" in condition or "!" in condition):
+            failures.append(f"pages.yml: the deploy's condition is not exactly its guards joined by && (found `{condition}`)")
+        steps = [st for st in deploy.get("steps", []) if isinstance(st, dict)] if isinstance(deploy.get("steps"), list) else []
+        upload = next((i for i, st in enumerate(steps) if str(st.get("uses", "")).startswith("actions/upload-pages-artifact@")), None)
+        check = next((i for i, st in enumerate(steps) if str(st.get("run", "")).strip() == "./verify.sh --site _site"), None)
+        if upload is not None and (check is None or check > upload):
             failures.append("pages.yml: upload-pages-artifact is not preceded by ./verify.sh --site _site")
-        # The newest-run step, by name, read as ONE step: the query is its
-        # command, the run number its own env, and nothing makes it optional.
-        step = re.search(r"^      - name: Publish only the newest run the gate passed\n(.*?)(?=^      - |\Z)", live, re.M | re.S)
-        query = r'^\s+newest="\$\(gh api "repos/\$\{GITHUB_REPOSITORY\}/actions/workflows/verify\.yml/runs\?branch=main&event=push&status=success&per_page=1"'
-        if upload_at != -1 and (
-            not step or step.start() > upload_at
-            or not re.search(query, step.group(1), re.M)
-            or not re.search(r"^\s+RUN_NUMBER: \$\{\{ github\.event\.workflow_run\.run_number \}\}\s*$", step.group(1), re.M)
+        # The newest-run step, by name: the query is the command that sets
+        # `newest`, the run number its own env, and nothing makes it optional.
+        at = next((i for i, st in enumerate(steps) if st.get("name") == "Publish only the newest run the gate passed"), None)
+        step = steps[at] if at is not None else {}
+        script = step.get("run") if isinstance(step.get("run"), str) else ""
+        env = step.get("env") if isinstance(step.get("env"), dict) else {}
+        query = r'^\s*newest="\$\(gh api "repos/\$\{GITHUB_REPOSITORY\}/actions/workflows/verify\.yml/runs\?branch=main&event=push&status=success&per_page=1"'
+        if upload is not None and (
+            at is None or at > upload
+            or not re.search(query, script, re.M)
+            or env.get("RUN_NUMBER") != "${{ github.event.workflow_run.run_number }}"
         ):
             failures.append("pages.yml: publishes without checking that no later verify run on main has passed")
-        if step and re.search(r"^        if:", step.group(1), re.M):
+        if "if" in step:
             failures.append("pages.yml: the newest-run step carries an `if:`, so it can be skipped and the deploy go on")
         # And the step DECIDES as described: run under bash with a stub `gh`
         # answering a run number, it passes when no later run has passed (the
         # same number, or a lower one the list lags with) and refuses when one
-        # has, or when the answer is empty. Rule 10's text
-        # checks above cannot see a comparison turned round; this can.
-        failures += newest_run_step_verdicts(live)
-        # Deploys one at a time, through a group on the deploy JOB (#244): a
-        # workflow-level group admits the runs whose job is skipped, and one
-        # of those cancels a deploy waiting in it.
-        if re.search(r"""^(\?\s*)?["']?concurrency["']?\s*(:|$)""", live, re.M):
-            failures.append("pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters, cancelling a waiting deploy (#244)")
-        # Read inside the `deploy` job only: the same lines under another job
-        # hold nothing back. The group is exactly `group: pages` and
-        # `cancel-in-progress: false`; any other key (`queue: max` keeps every
-        # waiting deploy rather than the newest) is refused.
-        deploy = re.search(r"^  deploy:\s*\n(.*?)(?=^  \S|\Z)", live, re.M | re.S)
-        # Blank lines inside the block do not end it, for YAML or for this.
-        group = deploy and re.search(r"^    concurrency:\s*\n((?:      .*\n?|[ \t]*\n)*)", deploy.group(1), re.M)
-        # The job's own keys are an allowlist of spelling too (#251): each
-        # one plain (`name:`), so no tag, anchor, merge, quote or escape can
-        # hide a second `concurrency` -- YAML keeps the LAST of two -- and
-        # exactly one of them is `concurrency`.
-        job_keys = re.findall(r"^    (\S.*?)\s*$", deploy.group(1), re.M) if deploy else []
-        unplain = [k for k in job_keys if not re.match(r"[a-z][a-z-]*:(\s|$)", k)]
-        if unplain:
-            failures.append(f"pages.yml: the deploy job carries a key not spelled plainly ({'; '.join(unplain)})")
-        if sum(k.split(":", 1)[0] == "concurrency" for k in job_keys) != 1:
-            group = None
-        # An allowlist, not a key pattern (#251): the group's lines are
-        # exactly `group: pages` and `cancel-in-progress: false`, in either
-        # order, and nothing else. Any other line -- a key quoted, tagged,
-        # anchored, merged, escaped or explicit (`? key`) -- is refused, since
-        # YAML may read it into the group; a valid group spelled other than
-        # plainly is refused too, which fails safe.
-        lines = [line.strip() for line in group.group(1).splitlines() if line.strip()] if group else []
-        others = [line for line in lines if line not in ("group: pages", "cancel-in-progress: false")]
-        named = [re.sub(r"""^[?\s]*["']?""", "", line).split(":", 1)[0].strip("\"' ") for line in others]
-        spelled = deploy and re.search(r"^    concurrency:", deploy.group(1), re.M)
-        if "group: pages" not in lines and (lines or (spelled and not group)):
-            failures.append("pages.yml: the deploy job's concurrency group is not spelled plainly, as the two lines `group: pages` and `cancel-in-progress: false`")
-        elif "group: pages" not in lines:
+        # has, or when the answer is empty.
+        failures += newest_run_step_verdicts(script) if script else ["pages.yml: the newest-run step has no `run` to run against a stub gh"]
+        # Deploys one at a time, through a group on the deploy JOB (#244),
+        # exactly `group: pages` and `cancel-in-progress: false`: any other
+        # key (`queue: max` keeps every waiting deploy rather than the newest)
+        # is refused.
+        group = deploy.get("concurrency")
+        if group is None:
             failures.append("pages.yml: the deploy job holds no `pages` concurrency group, so deploys can overlap")
-        elif "cancel-in-progress: false" not in lines:
+        elif not isinstance(group, dict):
+            failures.append("pages.yml: the deploy job's concurrency is not a map of `group: pages` and `cancel-in-progress: false`")
+        elif group.get("group") != "pages":
+            failures.append("pages.yml: the deploy job holds no `pages` concurrency group, so deploys can overlap")
+        elif group.get("cancel-in-progress") != "false":
             failures.append("pages.yml: the deploy job's `pages` group does not say cancel-in-progress: false, so a newer deploy may cancel one mid-publish")
-        elif others:
-            failures.append(f"pages.yml: the deploy job's `pages` group carries keys beyond group and cancel-in-progress ({', '.join(n for n in named if n) or '; '.join(others)})")
-        if re.search(r"^\s+continue-on-error:", live, re.M):
+        elif set(group) != {"group", "cancel-in-progress"}:
+            failures.append(f"pages.yml: the deploy job's `pages` group carries keys beyond group and cancel-in-progress ({', '.join(sorted(set(group) - {'group', 'cancel-in-progress'}))})")
+        if "continue-on-error" in deploy or any("continue-on-error" in st for st in steps):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
-        uploaded_path = re.search(r"actions/upload-pages-artifact@\S+\s*\n\s+with:\s*\n\s+path: (\S+)", live)
-        if upload_at != -1 and (not uploaded_path or uploaded_path.group(1) != "_site"):
+        uploaded_path = (steps[upload].get("with") or {}).get("path") if upload is not None and isinstance(steps[upload].get("with"), dict) else None
+        if upload is not None and uploaded_path != "_site":
             failures.append("pages.yml: uploads something other than the _site it checked")
         uploaded = "".join((WORKFLOWS / wf).read_text(encoding="utf-8") for wf in sorted(gating) if (WORKFLOWS / wf).is_file())
         for part in ("site-replay", "site-ledger"):
@@ -623,4 +687,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except ParserMissing as err:
+        print(f"check-ci-coverage: {err}", file=sys.stderr)
+        sys.exit(2)

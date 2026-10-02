@@ -3939,6 +3939,36 @@ inject_ci_pages_deploy_second_group_tagged() {
     !!str concurrency: {group: pages, cancel-in-progress: false, queue: max}' .github/workflows/pages.yml
 }
 
+# #256: what the text read of rule 10 could not see, and the parse does.
+
+# A flow collection that runs past the deploy block (libyaml does not hold a
+# flow's lines to the block's indentation), carrying a second `concurrency`
+# -- the one YAML keeps -- after it.
+inject_ci_pages_flow_collection_hides_a_group() {
+  edit_in_place 's/^    runs-on: ubuntu-latest$/    runs-on: [ubuntu-latest,/
+/^    runs-on: \[ubuntu-latest,$/a\
+  self-hosted]\
+    "concurrency": {group: pages, cancel-in-progress: false, queue: max}' .github/workflows/pages.yml
+}
+
+# A second `deploy` job after the first: YAML keeps the last, which has no
+# guard, no check and no group.
+inject_ci_pages_second_deploy_job() {
+  edit_in_place '$a\
+  deploy:\
+    runs-on: ubuntu-latest\
+    steps:\
+      - run: "true"' .github/workflows/pages.yml
+}
+
+# A second YAML document after the first: which one a reader takes is the
+# reader's choice.
+inject_ci_pages_second_document() {
+  edit_in_place '$a\
+---\
+jobs: {deploy: {runs-on: ubuntu-latest, steps: [{run: "true"}]}}' .github/workflows/pages.yml
+}
+
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
   edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
@@ -7735,6 +7765,12 @@ selftest() {
     "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
   seeded_case "a second group in the deploy job, tagged" ci inject_ci_pages_deploy_second_group_tagged \
     "pages.yml: the deploy job carries a key not spelled plainly .!!str concurrency"
+  seeded_case "a flow collection hiding a second group" ci inject_ci_pages_flow_collection_hides_a_group \
+    "pages.yml: jobs.deploy: duplicate key .concurrency."
+  seeded_case "a second deploy job" ci inject_ci_pages_second_deploy_job \
+    "pages.yml: jobs: duplicate key .deploy."
+  seeded_case "a second YAML document" ci inject_ci_pages_second_document \
+    "pages.yml: holds 2 YAML documents, not one"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
