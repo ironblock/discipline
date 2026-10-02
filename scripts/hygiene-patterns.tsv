@@ -51,7 +51,13 @@ ssh-user-at-host	i	(^|[^A-Za-z0-9._-])([A-Za-z0-9._-]+@[A-Za-z0-9-]+(\.[A-Za-z0-
 windows-user-path	i	[a-z]:\\+Users\\+
 
 # --- identifiers from a tracker this repository does not use ---
-internal-ticket-id	ib	(^|[^A-Za-z0-9])DIE-?[0-9]+
+# internal-ticket-id is NOT `b` (#233): four random bytes spelling "die" and a
+# digit after a non-alphanumeric byte match it, about once in 3,000 random
+# 64 KiB blobs on the runner, and a ticket-id shape inside binary bytes names
+# no program. A hygiene class is defined by harm, not by shape (#133). The id
+# a person writes lands in text, or in a record's JSON string, which the
+# decoded view scans. tests/fixtures/hygiene-binary/ holds a captured blob.
+internal-ticket-id	i	(^|[^A-Za-z0-9])DIE-?[0-9]+
 
 # --- credentials ---
 aws-access-key-id	b	(^|[^A-Z0-9])(A(KIA|SIA|GPA|IDA|ROA|NPA|NVA|BIA|CCA))[A-Z0-9]{16}([^A-Z0-9]|$)

@@ -6349,6 +6349,19 @@ prove_mechanics() {
   expect_exit "an ordinary binary does not false-positive" 0 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-clean"
 
+  # A ticket-id SHAPE inside binary bytes is not a ticket id (#233): a blob
+  # the runner drew from /dev/urandom, whose bytes spell \x06DIE9 at offset
+  # 18693. It reads clean -- and red with the `b` flag restored, so the
+  # decision is held by the fixture and not by the table's comment alone.
+  mkdir -p "${box}/ticket-shape"
+  cp "${ROOT}/tests/fixtures/hygiene-binary/ticket-id-shape-in-random-bytes.bin" "${box}/ticket-shape/"
+  expect_exit "a ticket-id shape in binary bytes is not a ticket id" 0 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/ticket-shape"
+  sed 's/^internal-ticket-id\ti\t/internal-ticket-id\tib\t/' "${ROOT}/scripts/hygiene-patterns.tsv" \
+    > "${box}/patterns-with-b.tsv"
+  expect_exit "and it reads red with the binary flag restored" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/patterns-with-b.tsv" --tree "${box}/ticket-shape"
+
   # The ledger renderer's verdict reaches the results check (#32 I2): a
   # renderer that exits 7 makes `check_results` exit 7 -- its own status,
   # which no other step of the check produces, so the assertion cannot pass
