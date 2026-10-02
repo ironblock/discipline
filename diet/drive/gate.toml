@@ -2911,5 +2911,6 @@ becomes = '''
     format!("canned-{}", digest_of(&acts_as_first_registered()))'''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
+    "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
     "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
 ]
