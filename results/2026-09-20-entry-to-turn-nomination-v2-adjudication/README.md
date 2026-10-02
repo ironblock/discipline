@@ -8,7 +8,7 @@ known_defects = ["a row the anchored gate rejects still fills a drive's budget a
 targets_checked = 5
 targets_matched = 5
 claim_issue = "17"
-absent = { supersedes = "nothing replaced: it sits beside the v1 adjudication, both rules and both verdicts in the ledger (README; #17 5863843029)", rule_ratified = "rule v2 was worded by the maintainer after v1's numbers (5747481065) and never posted as a rule file by digest before it was applied (#17 5863922237): no ratification of the file exists", window_start = "an adjudication collects no data; the base run records no time" }
+absent = { supersedes = "nothing replaced: it sits beside the v1 adjudication, both rules and both verdicts in the ledger (README; #17 5863843029)", rule_ratified = "rule v2 was worded on #17 after v1's numbers (5747481065) and never posted as a rule file by digest before it was applied (#17 5863922237): no ratification of the file exists", window_start = "an adjudication collects no data; the base run records no time" }
 
 [regime]
 arm = "entry-to-turn-nomination-four-embedders"
@@ -189,4 +189,4 @@ two of the mined positives in the pooled top-5 -- the mined supersessions
 the archive holds are not what an entry-to-turn cosine finds. Labelled
 `characterization`.
 
-**Ledger:** no ratification comment for this rule is on the record: rule v2 was worded by the maintainer after v1's numbers (5747481065) and never posted as a rule file by digest before it was applied (#17 5863922237): no ratification of the file exists.
+**Ledger:** no ratification is on the record: rule v2 was worded on #17 after v1's numbers (5747481065) and never posted as a rule file by digest before it was applied (#17 5863922237): no ratification of the file exists.

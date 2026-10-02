@@ -91,4 +91,3 @@ Beside it, read by nothing:
 Supported, and at the weight the pre-registration set: the inversion held, at a size close to the archived one, on a declared substrate whose original instance was never measured. The band admits much less than that closeness suggests. This is a re-fire of a mechanism the research program has since retired, so it reproduces a result about a lane that no longer runs.
 
 What is still unknown is the same as the archived row's: whether what either seat accepts is true of the mechanism.
-

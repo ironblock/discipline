@@ -37,12 +37,13 @@ def rewrite(text: str, fields: dict) -> str:
     out = lines[:first_table] + block + lines[first_table:]
     front = "\n".join(out)
     tomllib.loads(front)  # it must still parse
-    body = re.sub(r"\n\*\*Ledger:\*\* [^\n]*\n", "\n", text[m.end():])
+    body = re.sub(r"\n+\*\*Ledger:\*\* [^\n]*\n*\Z", "", text[m.end():]).rstrip("\n") + "\n"
     why = (fields.get("absent") or {}).get("rule_ratified")
     if why:  # planning: where no ratification comment exists, say so in the field's absence and in the body
-        if "\n## Conclusion" not in body:
-            raise SystemExit("migrate-ledger-fields: a README with no Conclusion section")
-        body = body.rstrip("\n") + f"\n\n**Ledger:** no ratification comment for this rule is on the record: {why}.\n"
+        heads = re.findall(r"^## (.+)$", body, re.M)
+        if not heads or heads[-1].strip() != "Conclusion":
+            raise SystemExit("migrate-ledger-fields: a README whose last section is not its Conclusion")
+        body = body.rstrip("\n") + f"\n\n**Ledger:** no ratification is on the record: {why}.\n"
     return "+++\n" + front + "\n+++\n" + body
 
 
@@ -53,14 +54,15 @@ def main(argv):
     bad = sorted(set(dirs) ^ set(values))
     if bad:
         raise SystemExit(f"migrate-ledger-fields: the values file and results/ disagree on {bad}")
-    changed = 0
-    for name in dirs:
-        f = values[name]
-        rr = f.get("rule_ratified")
+    for name in dirs:  # every digest first, so a refusal writes nothing
+        rr = values[name].get("rule_ratified")
         if rr:
             target = ROOT / "results" / name / rr.get("of", "decision-rule.toml")
             if hashlib.sha256(target.read_bytes()).hexdigest() != rr["digest"]:
                 raise SystemExit(f"migrate-ledger-fields: {name}'s rule_ratified.digest is not the sha256 of {target.name}")
+    changed = 0
+    for name in dirs:
+        f = values[name]
         readme = ROOT / "results" / name / "README.md"
         old = readme.read_text(encoding="utf-8"); new = rewrite(old, f)
         if new != old:

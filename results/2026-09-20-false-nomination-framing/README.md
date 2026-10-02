@@ -12,7 +12,7 @@ claim_issue = "89"
 rule_ratified = { comment = "5754480755", at = "2026-09-21T02:07:09Z", digest = "043ea99dc4d3de6fd3ffad5bc20605b65d9d8a30303f499112707596bba9263a" }
 rule_ratified_note = "the file as it stands: the claim was ratified before the run (#89 5739199883, 2026-09-19T03:59:59Z), and the [ruling] table (decision 0: the sham reading, rule v2) was added and ratified after it (PR #101 5754480755); no pre-run digest of the file was posted"
 window_start = "2026-09-20T05:37:00Z"
-window_start_from = "#89 5748942437, 'Started 05:37Z' (the main run; the headroom pilot ran before it); the record carries no wall clock"
+window_start_from = "#89 5748942437, 'Started 05:37Z', the measured run's first fork; the headroom pilot that decided the admitted forks ran before it, from about 04:31Z (inferred from 5747910143, not stated); the record carries no wall clock"
 absent = { supersedes = "nothing replaced: the first draw; (b)-v2 sits beside it" }
 
 [regime]
