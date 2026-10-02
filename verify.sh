@@ -3557,6 +3557,25 @@ path.write_text(source.replace(old, "the product's own, 0.142 of it.", 1), encod
 EOF
 }
 
+# A figure in a fenced block in Conclusion is refused like one in prose: code
+# is not exempt (#63, ruled 2026-10-02). The block opens with a `## Notes`
+# line, so the case also proves that a heading a renderer does not show cannot
+# carry the figure out of Conclusion into a section that would allow it.
+inject_results_figure_in_conclusion_fence() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+fence = "the product's own.\n\n```text\n## Notes\n[uncited: a sample] the rate was 0.271\n```\n"
+path.write_text(source.replace(old, fence, 1), encoding="utf-8")
+EOF
+}
+
 inject_results_figure_typed_in_test() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
   python3 - <<'EOF'
@@ -7914,6 +7933,8 @@ selftest() {
     'but the committed file hashes to'
   seeded_case "a figure typed in Conclusion"          results  inject_results_figure_typed_in_conclusion \
     "the Conclusion section types the figure\\(s\\) '0\\.142'.*\\[results\\.figure-typed\\]"
+  seeded_case "a figure in a fence in Conclusion"     results  inject_results_figure_in_conclusion_fence \
+    "the Conclusion section types the figure\\(s\\) '0\\.271'.*\\[results\\.figure-typed\\]"
   seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \
     "the Test section types the figure\\(s\\) '3'.*\\[results\\.figure-typed\\]"
   seeded_case "an uncited figure in Conclusion"       results  inject_results_figure_uncited_in_conclusion \

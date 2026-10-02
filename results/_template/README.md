@@ -25,13 +25,15 @@ Every number in the front-matter, outside `[regime]`, must appear in
 `run.jsonl`'s summary record. `[regime]` must agree with `regimen.toml`.
 That is the whole point: prose is verified against data, never merely written.
 
-Every figure in the body is a reference, not digits (#63): `{{product.PATH}}`
-(the one file here whose sha256 is `product_sha256`), `{{front.KEY}}` (a
-date, or `regime.arm`, `regime.substrates` or `regime.dogma_version`) or
-`{{summary.PATH}}`, or `count()`, `round(…, n)` or `pct(…, n)` of one. The
-linter renders them from the data at check time; `--render DIR` prints the
-result. Results and Conclusion carry no typed figure; Observation, Hypothesis
-and Test may carry one only inside `[uncited: <reason>]`.
+Every figure in the body is a reference, not digits (#63): a path inside
+double braces, rooted at `product.` (the one file here whose sha256 is
+`product_sha256`), `front.` (a date; `regime.arm`, `regime.substrates` or
+`regime.dogma_version`; or `product_sha256` or `pre_registration_sha256`, the
+digests this linter checks) or `summary.`, or `count()`, `round(…, n)` or
+`pct(…, n)` of one. The linter renders every reference, wherever it stands --
+code included -- from the data at check time; `--render DIR` prints the
+result. Results and Conclusion carry no typed figure, not in prose, code, a
+link or a comment; elsewhere a figure stands only inside `[uncited: <reason>]`.
 
 ## Observation
 

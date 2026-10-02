@@ -3090,6 +3090,15 @@ legacy_signature = "the Conclusion section types the figure\\(s\\) '0\\.142'.*\\
 migrated = false
 
 [[fault]]
+id = "results.results_figure_in_conclusion_fence"
+kind = "seeded-gate"
+check = "results"
+label = "a figure in a fence in Conclusion"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '0\\.271'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
 id = "results.results_figure_typed_in_test"
 kind = "seeded-gate"
 check = "results"

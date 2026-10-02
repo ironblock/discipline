@@ -166,15 +166,13 @@ REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 TYPED_FIGURE = re.compile(
     r"(?<![A-Za-z0-9#.])(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![A-Za-z0-9])"
 )
-INLINE_CODE = re.compile(r"(?<![`\\])(`+)(?!`)(?:.|\n)*?(?<![`\\])\1(?!`)")
-# A paragraph ends at a blank line; an inline code span never crosses one.
-PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
-# A link destination holds no whitespace (#265's second review: prose in
-# parentheses after `]` was being removed as if it were one).
-LINK_TARGET = re.compile(r"\]\([^)\s]*\)")
 # `ns.key.key[0]`, or one of three functions over one: the whole grammar.
 REF_PATH = re.compile(r"(product|front|summary)((?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])+)")
 REF_CALL = re.compile(r"(count|round|pct)\(\s*([^,()]+?)\s*(?:,\s*(\d+)\s*)?\)")
+# The front-matter digests a reference may name: each is checked against a
+# file here, so a digest a section needs is written as one of these
+# (#63, ruled 2026-10-02).
+FRONT_DIGESTS = (("product_sha256",), ("pre_registration_sha256",))
 REF_STEP = re.compile(r"\.([A-Za-z_][A-Za-z0-9_-]*)|\[(\d+)\]")
 
 
@@ -367,11 +365,18 @@ def split_front_matter(text: str) -> tuple[str | None, str, str | None, str | No
 
 def body_sections(body: str) -> list[str]:
     """Level-2 headings in document order, ignoring fenced code blocks."""
+    return list(rendered_headings(body).values())
+
+
+def rendered_headings(body: str) -> dict[int, str]:
+    """The level-2 headings a renderer shows, by line index: none inside a
+    fenced code block or an HTML comment."""
     # A heading inside an HTML comment is not a heading: it renders as nothing.
-    body = HTML_COMMENT.sub("", body)
-    headings: list[str] = []
+    # The comment is blanked to its newlines, so line indices still count.
+    body = HTML_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), body)
+    headings: dict[int, str] = {}
     fence: str | None = None
-    for line in body.split("\n"):
+    for index, line in enumerate(body.split("\n")):
         opener = CODE_FENCE.match(line)
         if fence is None:
             if opener:
@@ -379,7 +384,7 @@ def body_sections(body: str) -> list[str]:
             else:
                 match = HEADING.match(line)
                 if match:
-                    headings.append(match.group(1))
+                    headings[index] = match.group(1)
             continue
         # Inside a fence: only a run of the same character, at least as long as
         # the opener, with nothing but whitespace after it, closes the block.
@@ -845,100 +850,28 @@ def figures_declared(name: str, front: dict, fail: Callable[[str, str], None]) -
 PREAMBLE = "preamble"
 
 
-def code_ranges(body: str) -> list[tuple[int, int]]:
-    """Where `body` holds code, as (start, end) offsets -- only where it is
-    UNAMBIGUOUS, so the finder fails closed (#265's second review).
-
-    A stdlib reader is not a CommonMark parser, and every place this finder
-    sees code that a renderer shows as prose is a figure the lint cannot see
-    and a reference the resolver skips. So it exempts only what no renderer
-    reads otherwise, and anything else is read as prose: a figure there is
-    refused, a reference there is resolved -- the safe direction.
-
-      - A fenced block: its fence at column 0, closed by a fence of the same
-        character at least as long, also at column 0. An unclosed fence, or
-        one indented (inside a list item, say), is prose.
-      - An inline span: on ONE line, inside one table cell (split at `|`),
-        outside any HTML tag or autolink (`<...>`), opened by a run not
-        escaped by an odd number of backslashes and closed by the next run of
-        the same length. A backslash before the closing run escapes nothing,
-        as CommonMark has it.
-
-    HTML comments are blanked first, as the section reader blanks them, so a
-    fence inside a comment opens nothing.
-    """
-    plain = HTML_COMMENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), body)
-    ranges: list[tuple[int, int]] = []
-    fence: str | None = None
-    start = offset = 0
-    in_fence: list[tuple[int, int]] = []
-    for line in plain.split("\n"):
-        opener = re.match(r"(`{3,}|~{3,})", line)
-        if opener and opener.group(1)[0] == "`" and "`" in line[opener.end():]:
-            opener = None
-        if fence is None and opener:
-            fence, start = opener.group(1), offset
-        elif fence is not None and opener and opener.group(1)[0] == fence[0] \
-                and len(opener.group(1)) >= len(fence) and line.strip().strip(fence[0]) == "":
-            ranges.append((start, offset + len(line)))
-            fence = None
-        offset += len(line) + 1
-    offset = 0
-    for line in plain.split("\n"):
-        here = (offset, offset + len(line))
-        offset += len(line) + 1
-        if any(a <= here[0] < b for a, b in ranges):
-            continue
-        # Tags and autolinks take precedence over code spans: a backtick
-        # inside one is not a delimiter, so they split the line like cells.
-        tags = [(m.start(), m.end()) for m in re.finditer(r"<[^<>\n]*>", line)]
-        cells = [0, *[i for i, c in enumerate(line) if c == "|"], len(line)]
-        bounds = sorted({*cells, *[x for t in tags for x in t]})
-        for a, b in zip(bounds, bounds[1:]):
-            if any(t0 <= a < t1 for t0, t1 in tags):
-                continue
-            segment = line[a:b]
-            runs = [(m.start(), m.end()) for m in re.finditer(r"`+", segment)]
-            index = 0
-            while index < len(runs):
-                open_at, open_end = runs[index]
-                backslashes = len(segment[:open_at]) - len(segment[:open_at].rstrip("\\"))
-                if backslashes % 2:
-                    index += 1
-                    continue
-                width = open_end - open_at
-                close = next((j for j in range(index + 1, len(runs)) if runs[j][1] - runs[j][0] == width), None)
-                if close is None:
-                    index += 1
-                    continue
-                ranges.append((here[0] + a + open_at, here[0] + a + runs[close][1]))
-                index = close + 1
-    return ranges
-
-
-def masked(body: str, ranges: list[tuple[int, int]]) -> str:
-    """`body` with every range blanked, line breaks kept, so offsets and
-    headings survive and nothing inside code is read as prose."""
-    chars = list(body)
-    for begin, finish in ranges:
-        for at in range(begin, finish):
-            if chars[at] != "\n":
-                chars[at] = " "
-    return "".join(chars)
-
-
 def sections_of(body: str) -> dict[str, str]:
-    """Each level-2 section's text, and the preamble before the first, from a
-    body whose code is already blanked."""
+    """Each level-2 section's text, and the preamble before the first, read
+    as written: nothing in the body is exempt (#63, ruled 2026-10-02).
+
+    Where a section ends is read twice -- every `## ` line a heading, and only
+    the headings a renderer shows (`rendered_headings`) -- and each line is
+    linted under the stricter of the two. A `## Notes` inside a fenced block
+    in Conclusion therefore cannot carry what follows out of Conclusion, and a
+    misread fence cannot carry Conclusion's text into a laxer section."""
+    shown = rendered_headings(body)
     found: dict[str, list[str]] = {PREAMBLE: []}
-    current = PREAMBLE
-    for line in body.split("\n"):
+    blind = aware = PREAMBLE
+    for index, line in enumerate(body.split("\n")):
         heading = HEADING.match(line)
         if heading:
-            current = heading.group(1)
-            found.setdefault(current, [])
-        else:
-            found[current].append(line)
+            blind = heading.group(1)
+        if index in shown:
+            aware = shown[index]
+        # The heading line is linted too: under the other reading it may be
+        # text a renderer shows inside the section it seems to open.
+        current = aware if aware in FIGURES_NEVER_TYPED else blind
+        found.setdefault(current, []).append(line)
     return {name: "\n".join(lines) for name, lines in found.items()}
 
 
@@ -982,12 +915,16 @@ def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None,
     # the record's start row -- nothing else, counted or not (#265's reviews:
     # a front string, and then any other `[regime]` key, which only the
     # author's own regimen.toml backs, carried a figure past the lint).
-    if path.group(1) == "front" and not isinstance(value, datetime.date) \
-            and not (len(steps) >= 2 and steps[0] == "regime" and steps[1] in REQUIRED_REGIME_KEYS):
+    # A date only: `datetime.datetime` is a `datetime.date` too, and its time
+    # part is digits an author chose (#265's third review).
+    if path.group(1) == "front" and type(value) is not datetime.date \
+            and not (len(steps) >= 2 and steps[0] == "regime" and steps[1] in REQUIRED_REGIME_KEYS) \
+            and steps not in FRONT_DIGESTS:
         return None, (
-            f"`{{{{{text}}}}}` names `{target}`; a front-matter reference is a date or "
-            f"`regime.arm`, `regime.substrates` or `regime.dogma_version`, the values the "
-            f"record backs -- reference the summary row or the product"
+            f"`{{{{{text}}}}}` names `{target}`; a front-matter reference is a date, "
+            f"`regime.arm`, `regime.substrates` or `regime.dogma_version`, or a digest this "
+            f"linter checks (`product_sha256`, `pre_registration_sha256`) -- the values "
+            f"something backs; reference the summary row or the product"
         )
     if function == "count":
         if isinstance(value, (list, dict)):
@@ -997,7 +934,7 @@ def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None,
     # front-matter string is checked against nothing, so a figure in one is a
     # typed figure in a costume, and a front-matter number re-spells through
     # TOML -- `summary` holds the same number as written.
-    if path.group(1) == "front" and isinstance(value, datetime.date):
+    if path.group(1) == "front" and type(value) is datetime.date:
         return value.isoformat(), None
     if isinstance(value, bool):
         shown = "true" if value else "false"
@@ -1028,9 +965,16 @@ def lint_figures(
 ) -> str | None:
     """A `referenced` directory's body: no typed figure where none may stand,
     every reference resolved. Returns the rendered body, or None if it fails."""
+    # NOTHING IS EXEMPT (#63, ruled 2026-10-02, withdrawing the code
+    # exemption on #265's measurement). A stdlib reader is not a CommonMark
+    # parser, and three reviews found a finder that saw code, a link target or
+    # a comment where a renderer shows prose -- each a figure the lint could
+    # not see and a reference the resolver skipped. An exemption that cannot
+    # fail closed is a hole with a name, so the body is read as written: a
+    # figure in a code sample, a URL or a comment in Results or Conclusion is
+    # refused like any other, and every `{{...}}` is resolved.
     clean = True
-    code = code_ranges(body)
-    for section, text in sections_of(masked(HTML_COMMENT.sub(lambda m: " " * len(m.group(0)), body), code)).items():
+    for section, text in sections_of(body).items():
         uncited = UNCITED.findall(text)
         if uncited and section in FIGURES_NEVER_TYPED:
             clean = False
@@ -1039,7 +983,7 @@ def lint_figures(
                 f"the {section} section declares a figure `{uncited[0]}`; {section} carries "
                 f"no typed figure, cited or not -- reference the field instead (#63)",
             )
-        bare = REFERENCE.sub(" ", UNCITED.sub(" ", LINK_TARGET.sub("]", text)))
+        bare = REFERENCE.sub(" ", UNCITED.sub(" ", text))
         typed = TYPED_FIGURE.findall(bare)
         if typed:
             clean = False
@@ -1050,9 +994,7 @@ def lint_figures(
                 f"{section} {where} -- reference the product, front-matter or summary field (#63)",
             )
 
-    # A reference inside code -- a span or a fenced block -- is text about
-    # references, as Markdown shows it, not a figure; it is left as written.
-    references = [m for m in REFERENCE.finditer(body) if not any(a <= m.start() < b for a, b in code)]
+    references = list(REFERENCE.finditer(body))
     needs_product = any("product." in m.group(1) for m in references)
     product, why = the_product(directory, front) if needs_product else (None, "no reference names the product")
     scopes: dict[str, object] = {
