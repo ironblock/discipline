@@ -7,6 +7,12 @@
   "p95": 714,
   "max": 2641
  },
+ "judged_items": 6976,
+ "tokens_all_items": {
+  "p50": 132,
+  "p90": 401,
+  "p95": 683
+ },
  "heads": {
   "verdict": {
    "question_tokens": 28,
@@ -39,14 +45,16 @@
      "state_budget": 350,
      "truncated": 809,
      "truncated_share": 0.1411,
-     "p90_within": false
+     "p90_within": false,
+     "p90_all_items_within": false
     },
     "edit": {
      "head_within_cap": true,
      "state_budget": 412,
      "truncated": 625,
      "truncated_share": 0.109,
-     "p90_within": false
+     "p90_within": false,
+     "p90_all_items_within": true
     }
    },
    "p90_within_every_question": false
@@ -60,14 +68,16 @@
      "state_budget": 862,
      "truncated": 189,
      "truncated_share": 0.033,
-     "p90_within": true
+     "p90_within": true,
+     "p90_all_items_within": true
     },
     "edit": {
      "head_within_cap": true,
      "state_budget": 924,
      "truncated": 141,
      "truncated_share": 0.0246,
-     "p90_within": true
+     "p90_within": true,
+     "p90_all_items_within": true
     }
    },
    "p90_within_every_question": true

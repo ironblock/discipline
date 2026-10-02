@@ -45,7 +45,8 @@ def build(root):
             for it in json.loads(b).get("items", []):
                 s = state_of(it); k = sha(s.encode())
                 if k not in seen:
-                    seen[k] = 1; rows.append({"state_sha256": k, "record": d.parent.parent.name, "tokens": tokens(tok, s)})
+                    seen[k] = len(rows); rows.append({"state_sha256": k, "record": d.parent.parent.name, "tokens": tokens(tok, s), "items": 0})
+                rows[seen[k]]["items"] += 1
     (HERE / "batches.json").write_text(json.dumps(batches, indent=1) + "\n")
     (HERE / "counts.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     (HERE / "heads.json").write_text(json.dumps(heads(tok), indent=1) + "\n")
@@ -53,16 +54,19 @@ def build(root):
 def report():
     rows = [json.loads(l) for l in (HERE / "counts.jsonl").read_text().splitlines() if l.strip()]
     hd = json.loads((HERE / "heads.json").read_text())
-    L = sorted(r["tokens"] for r in rows); q = lambda p: L[int(p * (len(L) - 1))]
+    L = sorted(r["tokens"] for r in rows); q = lambda p: L[int(p * (len(L) - 1))]  # the lower order statistic, no interpolation
+    A = sorted(r["tokens"] for r in rows for _ in range(r["items"])); qa = lambda p: A[int(p * (len(A) - 1))]
     out = {"tokenizer_sha256": sha((HERE / "tokenizer.json").read_bytes()), "unique_states": len(L),
-           "tokens": {"p50": q(.5), "p90": q(.9), "p95": q(.95), "max": L[-1]}, "heads": hd, "models": {}}
+           "tokens": {"p50": q(.5), "p90": q(.9), "p95": q(.95), "max": L[-1]},
+           "judged_items": len(A), "tokens_all_items": {"p50": qa(.5), "p90": qa(.9), "p95": qa(.95)}, "heads": hd, "models": {}}
     for m, c in MODELS.items():
         per = {}
         for field, h in hd.items():
             budget = c["max_len"] - h["head_total"] - 1
             over = sum(1 for x in L if x > budget)
             per[field] = {"head_within_cap": h["head_part"] <= c["head_max_len"], "state_budget": budget,
-                          "truncated": over, "truncated_share": round(over / len(L), 4), "p90_within": q(.9) <= budget}
+                          "truncated": over, "truncated_share": round(over / len(L), 4), "p90_within": q(.9) <= budget,
+                          "p90_all_items_within": qa(.9) <= budget}
         out["models"][m] = {**c, "questions": per, "p90_within_every_question": all(v["p90_within"] for v in per.values())}
     out["variant"] = "laya-en" if out["models"]["laya-en"]["p90_within_every_question"] else "laya-typed-decisions"
     (HERE / "report.json").write_text(json.dumps(out, indent=1) + "\n")

@@ -145,7 +145,7 @@ reproducible from a parts list, and the manifest should not imply it is."""
 display_name = "ironblock's 2019 Mac Pro"
 entry_type = "x86-workstation"
 hardware_fingerprint = "f0efb982fe1e4793ba9cf832e32bf30759d358da42e0362251a023c095dc480a"
-role = "the data seat's workstation; a host that serves no model, and the machine whose CPU cores ran the sense bakeoff's four encoder cells"
+role = "the data seat's workstation; a host that serves no model, and the machine whose CPU cores ran the sense bakeoff's four encoder cells and counted the judge states in laya's tokens (#165)"
 measured = "2026-09-05"
 
 model_identifier = "MacPro7,1"
@@ -787,16 +787,8 @@ reproducible_by_config = true
 reproducible_because = "as for `canned`: replay the acts and the same bytes play again; exact match, no band"
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
 
-# The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
-# not a served model: no server, no sampler, a pinned library on this host's
-# CPU cores turning the register's texts and the senses into vectors once,
-# which the results directory then consumes by digest. They are registered so
-# that the record's `start.substrates` ids resolve to something, and under
-# `mac-pro-2019` because that is the machine whose CPU ran them -- the cache
-# metas name the environment that lives on it and record `device: cpu`, and
-# the caches were committed to the research archive from it on 2026-09-04.
-# Each cell is pinned the way its cache meta pins it: hub revision, the digest
-# of the weights file that was loaded, pooling, prefixes, and the library.
+# laya's tokenizer, run on this host's CPU to count the archive's judge states in
+# laya's own tokens (#165). Like the encoder cells below it serves nothing.
 [substrate.laya-tokenizer]
 equipment = "mac-pro-2019"
 description = "the tokenizer laya and laya-typed-decisions ship (ModernBERT's BPE), run on the host's CPU by the tokenizers library to count text in laya's own tokens; it embeds and classifies nothing (#165's length measurement)"
@@ -810,6 +802,16 @@ weights_main = "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30
 weights_main_file = "tokenizer/tokenizer.json, byte-identical in convaiinnovations/laya-typed-decisions at 1a793eb568e6718f15941d08f85432581df534e3 (Sidekick's manifests, relayed by Dispatch 2026-10-02); Apache-2.0"
 sampler_card = "none: counting only, each fragment tokenized alone without special tokens"
 
+# The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
+# not a served model: no server, no sampler, a pinned library on this host's
+# CPU cores turning the register's texts and the senses into vectors once,
+# which the results directory then consumes by digest. They are registered so
+# that the record's `start.substrates` ids resolve to something, and under
+# `mac-pro-2019` because that is the machine whose CPU ran them -- the cache
+# metas name the environment that lives on it and record `device: cpu`, and
+# the caches were committed to the research archive from it on 2026-09-04.
+# Each cell is pinned the way its cache meta pins it: hub revision, the digest
+# of the weights file that was loaded, pooling, prefixes, and the library.
 [substrate.all-MiniLM-L6-v2]
 equipment = "mac-pro-2019"
 description = "sentence-transformers/all-MiniLM-L6-v2, the bakeoff's declared floor, run on the host's CPU by sentence-transformers 3.0.1"
