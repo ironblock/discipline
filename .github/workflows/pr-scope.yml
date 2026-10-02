@@ -1,0 +1,40 @@
+name: pr-scope
+
+# THE CHORE LANE'S VERDICT, as a line on every pull request (#276). It prints
+# what `scripts/pr-scope.py` makes of the diff -- `material` or `chore`, why,
+# and the checks the diff touches -- as a notice on the run and in its
+# summary. It gates nothing: CI runs every check on every pull request
+# whatever this says, and the lane changes only what an author owes locally
+# and on the thread. So it is not called from verify.yml, and the gate does
+# not wait on it.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scope:
+    name: pr-scope
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Classify the diff
+        env:
+          BASE: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          verdict="$(python3 scripts/pr-scope.py --base "origin/${BASE}" --head HEAD)"
+          printf '%s\n' "$verdict"
+          printf '::notice title=pr-scope::%s\n' "$(printf '%s' "$verdict" | paste -sd ';' -)"
+          {
+            echo '### pr-scope'
+            echo
+            echo '```'
+            printf '%s\n' "$verdict"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

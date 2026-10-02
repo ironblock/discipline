@@ -925,6 +925,15 @@ legacy_signature = "is unguarded; bash 3\\.2 aborts on it"
 migrated = false
 
 [[fault]]
+id = "metadata.metadata_protocol_unread"
+kind = "seeded-gate"
+check = "metadata"
+label = "a template edit read as a chore"
+failure_class = "metadata.protocol-unread"
+legacy_signature = "pr-scope: \\.github/PULL_REQUEST_TEMPLATE\\.md classified chore, not material"
+migrated = false
+
+[[fault]]
 id = "hygiene.hygiene"
 kind = "seeded-gate"
 check = "hygiene"

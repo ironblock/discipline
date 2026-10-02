@@ -6,10 +6,29 @@
 
 <!-- The problem this solves, or the claim it serves. Link the issue. -->
 
+## Scope
+
+<!-- REQUIRED. Paste what `python3 scripts/pr-scope.py --base origin/main`
+     prints: `material` or `chore`, why, and the checks the diff touches.
+     The diff decides -- never the branch name, never a label (#276).
+
+     A CHORE lands something that changes no gate input, no record, no claim
+     and no protocol. It owes: CI green on the head; `./verify.sh --only` the
+     checks pr-scope names, with their exit codes, below; one fresh-instance
+     review posted as a review event, under the chore brief. It does not owe
+     an issue's rows, `--selftest`, or ruled disclosures. Its owner merges.
+
+     THE CHORE BRIEF, for its reviewer: hygiene of everything added; the
+     licensing and provenance of every asset -- the tool that made it, the
+     tool's inputs, any embedded font or third-party element, and the licence
+     the repository may carry it under; and every rendering claim either
+     checked on a device or stated as unseen. -->
+
 ## Acceptance
 
 <!-- REQUIRED. Commands and the exit codes they produced on this branch.
-     Re-execute; do not re-read. A verdict through a grep is not a gate. -->
+     Re-execute; do not re-read. A verdict through a grep is not a gate.
+     A chore's rows are `./verify.sh --only <each check pr-scope names>`. -->
 
 | command | exit code |
 | ------- | --------- |
@@ -31,6 +50,9 @@
      merged. A reviewer should be able to tick every box by reading the thread
      and the checks tab, without asking anyone what happened. Merging is the
      job of whoever owns the PR. -->
+
+<!-- A chore owes the first two boxes and the hygiene and history checks; the
+     rest are a material PR's. Mark the others "n/a: chore". -->
 
 - [ ] **CI is green on the head commit, including the `selftest` job.** Not
       "green when I pushed": green on what is about to merge.
@@ -55,4 +77,5 @@
 
 ## Known defects
 
-<!-- What is still wrong after this lands. Empty is a claim. -->
+<!-- What is still wrong after this lands. Empty is a claim.
+     A chore heads this section "Notes" instead, and it may be empty. -->
