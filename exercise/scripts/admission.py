@@ -6,6 +6,15 @@ it -- and that same table re-run over it at every build, so neither a later
 edit to the recording nor a change to the live table moves what it was
 admitted under. Re-admitting under a newer table is a deliberate change.
 
+AN AUTHORED EXAMPLE (#272; the maintainer's ruling on #32, 2026-10-02) is
+admitted by the same scan under the same snapshot, from
+src/drive/examples/<name>.json. Where a recording's migration header says how
+it was scrubbed in one "Scrubbed:" line, an example's says it was authored, in
+one "Authored: " line carrying the maintainer's sentence (EXAMPLE_LABEL in
+src/replay/published.ts) verbatim. Which line is required is decided by the
+list the name is on (PUBLISHED or EXAMPLES); a header carrying both, or
+neither, is not admitted.
+
     python3 exercise/scripts/admission.py admit NAME     scan NAME; if clean, write its admission
     python3 exercise/scripts/admission.py tables DIR     each admitted table, and the published recordings it governs
     python3 exercise/scripts/admission.py verify DIR     every DIR/<name>.js against DIR/<name>.admission.json
@@ -22,8 +31,8 @@ table is the current rule. An admission names its snapshot and the live
 table it was taken from, and says which it cites.
 
 `verify` reads every admission from the tree, never from the site it is
-checking, and holds the site to it: exactly the published recordings
-(src/replay/published.ts) and nothing else in the payload directory; each
+checking, and holds the site to it: exactly the published recordings and
+examples (src/replay/published.ts) and nothing else in the payload directory; each
 payload's bytes the committed recording's, behind one prefix; the
 recording's digest the admitted one; each snapshot byte for byte the one
 admitted; and the site's copy of each admission the tree's.
@@ -46,6 +55,7 @@ import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 RECORDED = ROOT / 'exercise/src/drive/recorded'
+EXAMPLES = ROOT / 'exercise/src/drive/examples'
 # The live genesis table, as hygiene.sh reads it by default.
 LIVE = {
     'patterns': 'scripts/hygiene-patterns.tsv',
@@ -61,12 +71,40 @@ PREFIX = b'export default '  # src/replay/payload.ts
 PUBLISHED_TS = ROOT / 'exercise/src/replay/published.ts'
 
 
-def published() -> list[str]:
-    """The published list, read from the one place it is written."""
-    found = re.search(r"export const PUBLISHED = \[([^\]]*)\] as const", PUBLISHED_TS.read_text(encoding='utf-8'))
+def listed(which: str) -> list[str]:
+    """A published list (PUBLISHED or EXAMPLES), read from the one place it is written."""
+    found = re.search(rf"export const {which} = \[([^\]]*)\] as const", PUBLISHED_TS.read_text(encoding='utf-8'))
     if not found:
-        raise SystemExit(f'admission: {PUBLISHED_TS.relative_to(ROOT)}: no PUBLISHED list to check the site against')
+        raise SystemExit(f'admission: {PUBLISHED_TS.relative_to(ROOT)}: no {which} list to check the site against')
     return re.findall(r"'([a-z0-9-]+)'", found.group(1))
+
+
+def published() -> list[str]:
+    return listed('PUBLISHED')
+
+
+def example_label() -> str:
+    """The maintainer's sentence an example is admitted under, read from where the page reads it."""
+    found = re.search(r"export const EXAMPLE_LABEL = '([^'\\]*)';", PUBLISHED_TS.read_text(encoding='utf-8'))
+    if not found:
+        raise SystemExit(f'admission: {PUBLISHED_TS.relative_to(ROOT)}: no EXAMPLE_LABEL to admit an example under')
+    return found.group(1)
+
+
+def kind_of(name: str) -> dict:
+    """What NAME is published as: where its file is, the admission's key for it, and the one header line it needs."""
+    if name in listed('EXAMPLES'):
+        return {'key': 'example', 'dir': EXAMPLES, 'line': 'Authored:', 'field': 'authored'}
+    return {'key': 'recording', 'dir': RECORDED, 'line': 'Scrubbed:', 'field': 'scrub'}
+
+
+def published_names() -> list[str]:
+    """Every name the site publishes: the recordings, then the examples. A name on both is refused."""
+    recordings, examples = published(), listed('EXAMPLES')
+    both = sorted(set(recordings) & set(examples))
+    if both:
+        raise SystemExit(f'admission: {PUBLISHED_TS.relative_to(ROOT)}: {", ".join(both)} on both PUBLISHED and EXAMPLES; a recording is not an example')
+    return recordings + examples
 
 
 def sha256(data: bytes) -> str:
@@ -103,15 +141,22 @@ def scan(name: str, data: bytes, table: dict) -> int:
 
 
 def admit(name: str) -> int:
-    recording = RECORDED / f'{name}.json'
+    published_names()  # a name on both lists is refused before anything is written
+    kind = kind_of(name)
+    recording = kind['dir'] / f'{name}.json'
     rel = recording.relative_to(ROOT).as_posix()
     if not recording.is_file():
-        print(f'admission: {rel}: no such recording', file=sys.stderr)
+        print(f'admission: {rel}: no such {kind["key"]}', file=sys.stderr)
         return 2
     data = recording.read_bytes()
-    scrub = [line for line in json.loads(data).get('migration', []) if isinstance(line, str) and line.startswith('Scrubbed:')]
-    if len(scrub) != 1:
-        print(f'admission: {rel}: its migration header says how it was scrubbed in exactly one "Scrubbed:" line, or it is not admitted', file=sys.stderr)
+    header = [line for line in json.loads(data).get('migration', []) if isinstance(line, str)]
+    declared = [line for line in header if line.startswith(kind["line"])]
+    other = [line for line in header if line.startswith('Authored:' if kind['key'] == 'recording' else 'Scrubbed:')]
+    if kind['key'] == 'recording' and (len(declared) != 1 or other):
+        print(f'admission: {rel}: its migration header says how it was scrubbed in exactly one "Scrubbed:" line, and carries no "Authored:" line, or it is not admitted', file=sys.stderr)
+        return 1
+    if kind['key'] == 'example' and (declared != [f'Authored: {example_label()}'] or other):
+        print(f'admission: {rel}: an example\'s header says it was authored in exactly one line, "Authored: " and the maintainer\'s sentence (EXAMPLE_LABEL), and carries no "Scrubbed:" line, or it is not admitted', file=sys.stderr)
         return 1
     ident, table = snapshot_of_live()
     status = scan(name, data, table)
@@ -119,32 +164,33 @@ def admit(name: str) -> int:
         print(f'admission: {rel}: not admitted; the genesis table finds something in it (exit {status})', file=sys.stderr)
         return 1
     admission = {
-        'recording': rel,
-        'recording_sha256': sha256(data),
+        kind['key']: rel,
+        f'{kind["key"]}_sha256': sha256(data),
         'table': {'id': ident, **digests(table)},
         'taken_from': digests(LIVE),
-        'cites': 'the snapshot (table): the rule this recording was admitted under. At admission it was the live genesis table (taken_from), byte for byte; the live table may move on, and this recording stays under its snapshot until it is admitted again.',
-        'scrub': scrub[0],
+        'cites': f'the snapshot (table): the rule this {kind["key"]} was admitted under. At admission it was the live genesis table (taken_from), byte for byte; the live table may move on, and this {kind["key"]} stays under its snapshot until it is admitted again.',
+        kind['field']: declared[0],
     }
-    out = RECORDED / f'{name}.admission.json'
+    out = kind['dir'] / f'{name}.admission.json'
     out.write_text(json.dumps(admission, indent=2) + '\n', encoding='utf-8')
     print(f'admission: {rel}: admitted under {table["patterns"]}, {out.relative_to(ROOT).as_posix()}')
     return 0
 
 
 def admissions(directory: str) -> tuple[list, list[str]]:
-    """Each published recording's payload in DIRECTORY with its admission from the tree, and every problem found."""
+    """Each published recording's and example's payload in DIRECTORY with its admission from the tree, and every problem found."""
     data_dir = pathlib.Path(directory)
     if not data_dir.is_dir():
         return [], []
-    names = published()
+    names = published_names()
     expected = {f'{n}.js' for n in names} | {f'{n}.admission.json' for n in names}
-    problems = [f'admission: {data_dir / f.name}: not a published recording or its admission; nothing else is published here' for f in sorted(data_dir.iterdir()) if f.name not in expected]
+    problems = [f'admission: {data_dir / f.name}: not a published recording or example, or its admission; nothing else is published here' for f in sorted(data_dir.iterdir()) if f.name not in expected]
     found = []
     for name in names:
+        kind = kind_of(name)
         payload, copy = data_dir / f'{name}.js', data_dir / f'{name}.admission.json'
-        rel = f'exercise/src/drive/recorded/{name}.json'
-        admitted = RECORDED / f'{name}.admission.json'
+        rel = (kind['dir'] / f'{name}.json').relative_to(ROOT).as_posix()
+        admitted = kind['dir'] / f'{name}.admission.json'
         if not payload.is_file():
             problems.append(f'admission: {payload}: published ({PUBLISHED_TS.relative_to(ROOT)}) but not on the site')
             continue
@@ -155,13 +201,13 @@ def admissions(directory: str) -> tuple[list, list[str]]:
             problems.append(f'admission: {copy}: not the admission in the tree ({admitted.relative_to(ROOT)})')
             continue
         admission = json.loads(admitted.read_text(encoding='utf-8'))
-        if admission.get('recording') != rel:
-            problems.append(f'admission: {admitted.relative_to(ROOT)}: admits {admission.get("recording")}, not {rel}')
+        if admission.get(kind['key']) != rel:
+            problems.append(f'admission: {admitted.relative_to(ROOT)}: admits {admission.get(kind["key"])}, not {rel}')
             continue
         if set(admission.get('table', {})) != {'id', *SNAPSHOT}:
             problems.append(f'admission: {rel}: its admission does not name an admitted genesis table (patterns, exceptions, hashes)')
             continue
-        found.append((payload, admission))
+        found.append((payload, admission, kind['key']))
     return found, problems
 
 
@@ -175,7 +221,7 @@ def tables(directory: str) -> int:
         print(f'admission: {directory}: no published recording to check', file=sys.stderr)
         return 2
     groups: dict = {}
-    for payload, admission in found:
+    for payload, admission, _ in found:
         key = (admission['table']['patterns']['path'], admission['table']['hashes']['path'])
         groups.setdefault(key, []).append(str(payload))
     for (patterns, hashes), payloads in groups.items():
@@ -192,15 +238,15 @@ def verify(directory: str) -> int:
         return 2
     live = digests(LIVE)
     bad = len(problems)
-    for payload, admission in found:
-        rel = admission['recording']
+    for payload, admission, key in found:
+        rel = admission[key]
         body = payload.read_bytes()
         failures = []
         if not body.startswith(PREFIX):
             failures.append(f'admission: {payload}: not a published recording (it does not start "{PREFIX.decode().strip()}")')
         elif body[len(PREFIX):] != (ROOT / rel).read_bytes():
             failures.append(f'admission: {payload}: not {rel} byte for byte behind its prefix')
-        elif sha256(body[len(PREFIX):]) != admission.get('recording_sha256'):
+        elif sha256(body[len(PREFIX):]) != admission.get(f'{key}_sha256'):
             failures.append(f'admission: {rel}: edited since it was admitted; scan it and admit it again (admission.py admit {payload.stem})')
         for part in SNAPSHOT:
             pinned = admission['table'][part]
@@ -215,7 +261,7 @@ def verify(directory: str) -> int:
         if not failures and any(live[part]['sha256'] != admission['table'][part]['sha256'] for part in SNAPSHOT):
             print(f'admission: {rel}: checked under its admitted table {admission["table"]["id"]}; the live table has moved on since')
     total = len(found) + len(problems)
-    print(f'admission: {total - bad} of {total} published recording(s) check against their admissions')
+    print(f'admission: {total - bad} of {total} published recording(s) and example(s) check against their admissions')
     return 1 if bad else 0
 
 

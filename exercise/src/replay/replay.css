@@ -19,3 +19,23 @@
 .ex-replay__source details li {
   color: var(--ink-faint);
 }
+/* An authored example's label (#272): in the index beside the examples, and
+   held at the top of an example's replay for its whole length. */
+.ex-replay__label {
+  max-width: 60rem;
+  margin-inline: auto;
+  padding: 0.5rem 1rem;
+  font: var(--font-chrome, 12px ui-monospace, monospace);
+  color: var(--ink);
+  background: var(--panel);
+  border-block: 1px solid var(--rule);
+}
+.ex-replay__label::first-letter {
+  text-transform: uppercase;
+}
+.ex-replay__pinned {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--page);
+}

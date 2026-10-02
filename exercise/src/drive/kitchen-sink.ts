@@ -1,6 +1,7 @@
 import { compose } from './compose.ts';
 import type { Script } from './compose.ts';
 import type { Recording } from './recorded.ts';
+import { EXAMPLE_LABEL } from '../replay/published.ts';
 
 /**
  * THE KITCHEN SINK: one session at the cadence the surface expects of a
@@ -409,6 +410,8 @@ export const KITCHEN_SINK: Recording = {
   title: 'The kitchen sink: a happy path, authored',
   migration: [
     'authored, not recorded: composed from a script (src/drive/kitchen-sink.ts) onto a clock (compose.ts)',
+    // Where a recording says how it was scrubbed: what admits it to the replay page as an example (#272).
+    `Authored: ${EXAMPLE_LABEL}`,
     'token counts from text length; prefill and decode from assumed rates, not measured',
     'each tool call says where it began (calls_from), as a drive calling tools natively can; the recordings cannot',
   ],
