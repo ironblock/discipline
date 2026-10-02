@@ -148,7 +148,21 @@ CLAIM_FIELDS = ("claim_issue", "supersedes", "rule_ratified", "window_start")
 # read from (required with it), and a caveat on the ratification.
 CLAIM_PROVENANCE = ("window_start_from", "rule_ratified_note")
 DIGIT_ID = re.compile(r"[1-9][0-9]*")
-UTC = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z")
+# ASCII digits only -- `\d` takes any script's digits, and post-hoc is a
+# string comparison of two of these -- and a real time, checked by parsing
+# (#271's review: "2026-13-45T25:61:61Z" and Arabic-Indic digits passed).
+UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+
+
+def is_utc(value: object) -> bool:
+    """An ISO-8601 UTC time as these fields spell it, and a real one."""
+    if not (isinstance(value, str) and UTC.fullmatch(value)):
+        return False
+    try:
+        datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return True
 DEFAULT_RULE_FILE = "decision-rule.toml"
 
 
@@ -790,13 +804,22 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
                 f"front-matter neither gives `{key}` nor declares it in `absent`; an absence is declared, not inferred (#32)",
             )
 
-    # Top level only: the same key inside `[regime]` or `[derivation]` is a
-    # field nobody reads, looking like one somebody does.
+    # Top level only, at any depth: the same key in a table, a table's table
+    # or an array of tables is a field nobody reads, looking like one somebody
+    # does (#271's review found `[derivation.sub]` unchecked).
+    def nested(value: object, where: str) -> None:
+        if isinstance(value, dict):
+            for key, inner in value.items():
+                if key in (*CLAIM_FIELDS, *CLAIM_PROVENANCE):
+                    fail("results.claim-field-nested", f"`{where}.{key}`: `{key}` belongs at the top level of the front-matter")
+                nested(inner, f"{where}.{key}")
+        elif isinstance(value, list):
+            for index, inner in enumerate(value):
+                nested(inner, f"{where}[{index}]")
+
     for table, value in front.items():
-        if isinstance(value, dict) and table not in ("absent", "rule_ratified"):
-            for key in (*CLAIM_FIELDS, *CLAIM_PROVENANCE):
-                if key in value:
-                    fail("results.claim-field-nested", f"`{table}.{key}`: `{key}` belongs at the top level of the front-matter")
+        if table not in ("absent", "rule_ratified"):
+            nested(value, table) if isinstance(value, (dict, list)) else None
 
     issue = front.get("claim_issue")
     if issue is not None and not (isinstance(issue, str) and DIGIT_ID.fullmatch(issue)):
@@ -805,7 +828,7 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
     if supersedes is not None and not (isinstance(supersedes, str) and SHA256.fullmatch(supersedes)):
         fail("results.claim-field-malformed", "`supersedes` is not the 64-hex digest of the product it replaces")
     window = front.get("window_start")
-    if window is not None and not (isinstance(window, str) and UTC.fullmatch(window)):
+    if window is not None and not is_utc(window):
         fail("results.claim-field-malformed", f"`window_start` is {window!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
     source = front.get("window_start_from")
     if window is not None and not (isinstance(source, str) and source.strip()):
@@ -835,7 +858,7 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
     comment, at, digest = ratified.get("comment"), ratified.get("at"), ratified.get("digest")
     if "comment" in ratified and not (isinstance(comment, str) and DIGIT_ID.fullmatch(comment)):
         fail("results.claim-field-malformed", f"`rule_ratified.comment` is {comment!r}; a comment id is a string of digits")
-    if "at" in ratified and not (isinstance(at, str) and UTC.fullmatch(at)):
+    if "at" in ratified and not is_utc(at):
         fail("results.claim-field-malformed", f"`rule_ratified.at` is {at!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
     if "digest" in ratified and not (isinstance(digest, str) and SHA256.fullmatch(digest)):
         fail("results.claim-field-malformed", "`rule_ratified.digest` is not 64 lowercase hex characters")
@@ -847,12 +870,16 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
     parts = pathlib.PurePosixPath(of).parts if isinstance(of, str) else ()
     if not isinstance(of, str) or not of or of.startswith("/") or ".." in parts:
         fail("results.claim-field-malformed", f"`rule_ratified.of` is {of!r}; it is a path inside this directory")
-    elif not (directory / of).is_file():
+    elif not (directory / of).is_file() or (directory / of).is_symlink() \
+            or not (directory / of).resolve().is_relative_to(directory.resolve()):
+        # Not a symlink, and inside once resolved: a link can name a file
+        # anywhere, and the digest would be of whatever sat there (#271's
+        # review, the class `check_consumed` already refuses for evidence).
         fail(
             "results.claim-field-malformed",
             f"`rule_ratified` is of `{of}`, which is not a file here; the digest is of the file `of` names",
         )
-    if isinstance(at, str) and UTC.fullmatch(at) and isinstance(window, str) and UTC.fullmatch(window):
+    if is_utc(at) and is_utc(window):
         return at > window
     return None
 
