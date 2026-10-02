@@ -56,7 +56,9 @@ windows-user-path	i	[a-z]:\\+Users\\+
 # 64 KiB blobs on the runner, and a ticket-id shape inside binary bytes names
 # no program. A hygiene class is defined by harm, not by shape (#133). The id
 # a person writes lands in text, or in a record's JSON string, which the
-# decoded view scans. tests/fixtures/hygiene-binary/ holds a captured blob.
+# decoded view scans. What this gives up: an id in plain ASCII inside a
+# file grep judges binary (a zip, a sqlite file, a PDF stream) is no longer
+# caught here. tests/fixtures/hygiene-binary/ holds a captured blob.
 internal-ticket-id	i	(^|[^A-Za-z0-9])DIE-?[0-9]+
 
 # --- credentials ---

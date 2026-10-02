@@ -50,6 +50,7 @@ import argparse
 import json
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -301,8 +302,14 @@ def main(argv: list[str]) -> int:
             # The `-diff` half matters on its own: an attribute in the tree
             # under scan decided what the history scan could see.
             patch = git("show", "--format=", "--patch", "--text", sha, check=False)
-            if patch:
-                (out / f"patch-{sha[:12]}.txt").write_text(patch + "\n", encoding="utf-8")
+            # ONE FILE PER PATH, not one per commit (#233's review). The
+            # scanner classifies a FILE as binary when it holds a NUL, and a
+            # binary file is searched only by the `b` patterns -- so one binary
+            # path in a commit used to put every text hunk beside it out of
+            # reach of the rest of the table. Split at each `diff --git`
+            # header, so a binary path blinds nothing but itself.
+            for n, part in enumerate(p for p in re.split(r"(?m)^(?=diff --git )", patch) if p.strip()):
+                (out / f"patch-{sha[:12]}-{n}.txt").write_text(part + "\n", encoding="utf-8")
                 patches += 1
         for label, text in extra:
             (out / f"{label}.txt").write_text(text + "\n", encoding="utf-8")
