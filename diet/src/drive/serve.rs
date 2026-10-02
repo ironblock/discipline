@@ -56,29 +56,33 @@ use crate::formats::record::json::{self, Value};
 pub type Render = fn(&Logged) -> String;
 
 /// Write `session`'s log to `out` as each line is appended (`--log`, #157):
-/// each line's `render`, then a line break, flushed -- byte for byte the
-/// `data:` text `GET /events` streams, one line each, from the first.
-/// Returns only when a write fails.
-pub fn tee<S: Streaming + 'static>(
+/// each line's `render`, then a line break, in one write, flushed -- byte for
+/// byte the `data:` text `GET /events` streams, one line each, from the
+/// first. The write is the appending thread's own ([`Session::write_through`],
+/// #230), so a line is written before its append returns; a kill can tear
+/// only the line being written. The first write that fails is handed to
+/// `failed`, and nothing is written after it.
+pub fn write_through<S: Streaming + 'static>(
     session: &Session<S>,
     render: Render,
-    out: &mut impl io::Write,
-) -> io::Error {
-    let mut next = 0;
-    loop {
-        for logged in session.wait_from(next, Duration::from_secs(60)) {
-            let line = render(&logged);
-            debug_assert!(!line.contains('\n'), "one event, one line: {line}");
-            if let Err(why) = out
-                .write_all(line.as_bytes())
-                .and_then(|()| out.write_all(b"\n"))
-                .and_then(|()| out.flush())
-            {
-                return why;
-            }
-            next = logged.seq + 1;
+    mut out: impl io::Write + Send + 'static,
+    mut failed: impl FnMut(io::Error) + Send + 'static,
+) {
+    let mut broken = false;
+    session.write_through(Box::new(move |logged| {
+        if broken {
+            return;
         }
-    }
+        let line = render(logged);
+        debug_assert!(!line.contains('\n'), "one event, one line: {line}");
+        if let Err(why) = out
+            .write_all(format!("{line}\n").as_bytes())
+            .and_then(|()| out.flush())
+        {
+            broken = true;
+            failed(why);
+        }
+    }));
 }
 
 /// How a server behaves at its edges.
@@ -1233,9 +1237,21 @@ mod tests {
         assert_eq!(asked(&session), 1);
     }
 
-    /// A writer whose bytes the test can read while `tee` holds it.
+    /// A writer whose bytes the test can read while the session holds it.
     #[derive(Clone, Default)]
     struct Shared(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl Shared {
+        fn text(&self) -> String {
+            String::from_utf8(
+                self.0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone(),
+            )
+            .expect("text")
+        }
+    }
 
     impl io::Write for Shared {
         fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
@@ -1252,19 +1268,15 @@ mod tests {
     }
 
     #[test]
-    fn the_teed_log_is_every_line_rendered_as_it_is_appended() {
-        let session = Arc::new(Session::open(
-            Canned::new([deltas(&["Hel", "lo"])]),
-            template(),
-        ));
-        // `tee` never returns while its writes succeed, so it runs on its own
-        // thread, started BEFORE the turn so it tails the lines as they are
-        // appended, and is read against a deadline: a line it drops fails
-        // this, rather than hanging it.
+    fn the_written_log_is_every_line_rendered_as_it_is_appended() {
+        let session = Session::open(Canned::new([deltas(&["Hel", "lo"])]), template());
         let written = Shared::default();
-        let teeing = Arc::clone(&session);
-        let mut out = written.clone();
-        thread::spawn(move || tee(&teeing, crate::drive::session::render, &mut out));
+        write_through(
+            &session,
+            crate::drive::session::render,
+            written.clone(),
+            |why| panic!("{why}"),
+        );
         session.ask("one", None).expect("accepted");
         wait_until(&session, "the turn to settle", settled);
         assert_eq!(session.end(None), Ok(()));
@@ -1273,21 +1285,76 @@ mod tests {
             .iter()
             .map(|logged| crate::drive::session::render(logged) + "\n")
             .collect();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let read = || {
-            String::from_utf8(
-                written
+        assert_eq!(written.text(), expected);
+    }
+
+    #[test]
+    fn an_appended_line_is_written_before_its_append_returns() {
+        // #230, ruled: no signal handler; the log's write is the appending
+        // thread's own, so a line a command was answered for is in the file
+        // when the answer goes out, and a kill can tear only the line being
+        // written. Red against the tee thread this replaced, 5 runs of 5.
+        let session = Session::open(Canned::new([deltas(&["Hel", "lo"])]), template());
+        let written = Shared::default();
+        write_through(
+            &session,
+            crate::drive::session::render,
+            written.clone(),
+            |why| panic!("{why}"),
+        );
+        let admitted = session.ask("one", None).expect("accepted");
+        let held = written.text();
+        let asked = session.events_from(admitted.seq);
+        let line = crate::drive::session::render(&asked[0]);
+        assert!(
+            held.contains(&line),
+            "the ask's line, when ask returned: {held}"
+        );
+    }
+
+    #[test]
+    fn a_failed_log_write_is_handed_over_once_and_nothing_follows_it() {
+        struct Refusing(Arc<std::sync::Mutex<u32>>);
+        impl io::Write for Refusing {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                *self
                     .0
                     .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .clone(),
-            )
-            .expect("text")
-        };
-        while read().len() < expected.len() && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(10));
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+                Err(io::Error::other("full"))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
         }
-        assert_eq!(read(), expected);
+        let session = Session::open(Canned::new([deltas(&["Hel", "lo"])]), template());
+        let tries = Arc::new(std::sync::Mutex::new(0));
+        let failures = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let told = Arc::clone(&failures);
+        write_through(
+            &session,
+            crate::drive::session::render,
+            Refusing(Arc::clone(&tries)),
+            move |why| {
+                told.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(why.to_string());
+            },
+        );
+        session.ask("one", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        assert_eq!(
+            (
+                *tries
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                failures
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
+            ),
+            (1, vec!["full".to_owned()])
+        );
     }
 
     #[test]

@@ -325,15 +325,17 @@ fn created(path: &str) -> Result<(std::fs::File, bool), String> {
 }
 
 /// The session's log, written to `file` as each line is appended (`--log`,
-/// #157). A write that fails stops the process: a log that quietly stopped
-/// would be a shorter log claiming to be the session's.
+/// #157), by the appending thread itself: a line is in the file before its
+/// append returns, so a kill tears at most the line being written (#230,
+/// ruled: no signal handler). Unbuffered, one write per line. A write that
+/// fails stops the process: a log that quietly stopped would be a shorter
+/// log claiming to be the session's.
 fn keep_log(
-    session: std::sync::Arc<Session<HttpStream>>,
+    session: &Session<HttpStream>,
     render: diet::drive::serve::Render,
     file: std::fs::File,
 ) {
-    std::thread::spawn(move || {
-        let why = diet::drive::serve::tee(&session, render, &mut std::io::BufWriter::new(file));
+    diet::drive::serve::write_through(session, render, file, |why| {
         let _ = fail(EXIT_OUTPUT, &format!("the log could not be written: {why}"));
         std::process::exit(i32::from(EXIT_OUTPUT));
     });
@@ -366,7 +368,7 @@ fn outputs(
 }
 
 /// The log and the record, started once the server runs. The log is emptied
-/// only now, and the tee writes from its first line whenever it starts; the
+/// only now, and is written from the session's first line on; the
 /// record waits for the session to end. Whether naming the log emptied a
 /// file that held something.
 fn started_writers(
@@ -381,7 +383,7 @@ fn started_writers(
     log.map(|(file, truncated)| {
         file.set_len(0)
             .map_err(|why| format!("the log cannot be emptied: {why}"))?;
-        keep_log(std::sync::Arc::clone(session), render, file);
+        keep_log(session, render, file);
         Ok(truncated)
     })
     .transpose()

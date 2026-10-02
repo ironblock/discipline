@@ -404,7 +404,14 @@ struct State {
     /// A checked gap waiting for its admitted command's outcome: the next
     /// event pushed, under the same lock.
     pending_gap: Option<IdleGap>,
+    /// Where each event is written as it is appended (see
+    /// [`Session::write_through`]).
+    sink: Option<Sink>,
 }
+
+/// What is handed each logged event, on the appending thread, under the
+/// session's lock (see [`Session::write_through`]).
+pub type Sink = Box<dyn FnMut(&Logged) + Send>;
 
 impl State {
     fn push(&mut self, event: Event) -> u64 {
@@ -424,6 +431,9 @@ impl State {
             self.gap_open = Some(seq);
         }
         self.log.push(Logged { seq, t, event });
+        if let (Some(sink), Some(logged)) = (self.sink.as_mut(), self.log.last()) {
+            sink(logged);
+        }
         seq
     }
 
@@ -558,6 +568,7 @@ impl<S: Streaming + 'static> Session<S> {
             gap_open: None,
             carried: None,
             pending_gap: None,
+            sink: None,
         };
         state.push(Event::Started {
             opened,
@@ -776,6 +787,19 @@ impl<S: Streaming + 'static> Session<S> {
     #[must_use]
     pub fn trunk(&self) -> Vec<Message> {
         self.shared.lock().trunk.clone()
+    }
+
+    /// Hand `sink` every event logged so far, then each one as it is
+    /// appended (`--log`, #157). It runs on the appending thread, under the
+    /// session's lock, so an append returns only after `sink` has returned
+    /// (#230, ruled: the write is the appender's own, not a thread's that
+    /// may lag it). A `sink` must not call back into the session.
+    pub fn write_through(&self, mut sink: Sink) {
+        let mut state = self.shared.lock();
+        for logged in &state.log {
+            sink(logged);
+        }
+        state.sink = Some(sink);
     }
 
     /// Every event from sequence number `first` on.

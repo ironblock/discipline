@@ -611,6 +611,46 @@ fn a_drive_server_refuses_a_wildcard_before_it_asks_the_engine() {
 }
 
 #[test]
+fn a_drive_server_killed_mid_session_leaves_a_log_whole_through_what_it_showed() {
+    // #230, ruled: no signal handler. Killed without warning, the log holds
+    // every line `/events` showed before the kill, each whole and in order,
+    // and nothing after its last line break but one torn line at most, which
+    // the reader counts as torn.
+    let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
+    let log_file = file_holding("log", "");
+    let path = log_file.0.to_string_lossy().into_owned();
+    let mut served = start(&stub.url(), &["--log", &path]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let seen = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| complete_data_events(read) >= 2,
+    );
+    served.child.kill().expect("the server is killed");
+    let _ = served.child.wait();
+
+    let shown: Vec<&str> = seen
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .collect();
+    let bytes = std::fs::read(&log_file.0).expect("the log");
+    let text = String::from_utf8_lossy(&bytes);
+    let mut lines: Vec<&str> = text.split('\n').collect();
+    // What follows the last line break is a torn line or nothing: never
+    // read as an event here (the reader counts it, #230).
+    let _torn = lines.pop();
+    assert!(
+        lines.len() >= shown.len() && lines[..shown.len()] == shown[..],
+        "every line shown before the kill is in the log, whole: {text:?}"
+    );
+    for line in &lines {
+        let _ = log_line_object(line);
+    }
+}
+
+#[test]
 fn a_drive_servers_log_file_is_the_events_stream_line_for_line() {
     let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
     let log_file = file_holding("log", "");
