@@ -1774,6 +1774,49 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# A torn FINAL line refused (#230): the tail is never set aside, so a log whose
+# writer was killed mid-write is refused at its last line rather than read
+# through its last complete event.
+inject_log_torn_final_line_refused() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if tail.starts_with('{') && !is_complete_object(tail) {"
+new = "    if tail.starts_with('{') && !is_complete_object(tail) && false {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A torn line accepted ANYWHERE (#230): every line that starts an object and
+# does not finish it is dropped, not only the last, so a log torn in the
+# middle reads as whole -- the amendment was for the final line only.
+inject_log_torn_middle_line_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let (complete, torn) = set_aside_a_torn_tail(text);"
+new = (
+    "    let kept: String = text\n"
+    "        .split_inclusive('\\n')\n"
+    "        .filter(|l| {\n"
+    "            let b = l.trim_end_matches('\\n');\n"
+    "            !(b.starts_with('{') && !is_complete_object(b))\n"
+    "        })\n"
+    "        .collect();\n"
+    "    let (complete, torn) = set_aside_a_torn_tail(&kept);"
+)
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_log_progress_read_in_a_v0_log() {
   python3 - <<'EOF'
 import pathlib
@@ -7410,6 +7453,10 @@ selftest() {
     'log/fixtures/invalid/a-v0-log-carrying-timings\.jsonl' 'test:conformance/formats::log'
   seeded_case "a progress line read in a log that declares v0" test inject_log_progress_read_in_a_v0_log \
     'log/fixtures/invalid/a-v0-log-carrying-progress\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a torn final line refused"           test     inject_log_torn_final_line_refused \
+    'log/fixtures/valid/a-torn-final-line\.jsonl: rejected' 'test:conformance/formats::log'
+  seeded_case "a torn middle line accepted"          test     inject_log_torn_middle_line_accepted \
+    'log/fixtures/invalid/a-torn-line-before-the-end\.jsonl: accepted' 'test:conformance/formats::log'
   seeded_case "a context_overflow read in a log that declares v0" test inject_log_context_overflow_read_in_a_v0_log \
     'log/fixtures/invalid/a-v0-log-carrying-a-context-overflow\.jsonl' 'test:conformance/formats::log'
   seeded_case "a response's reasoning read in a log that declares v0" test inject_log_response_reasoning_read_in_a_v0_log \

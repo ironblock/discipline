@@ -1,60 +1,63 @@
-[
-  {
-    "head": [
-      {
-        "content": "you are the trunk",
-        "role": "system"
-      }
-    ],
-    "kind": "session.start",
-    "model": "a-model",
-    "opened": 1790000000000,
-    "seq": 0,
-    "t": 0,
-    "version": 1
-  },
-  {
-    "kind": "ask",
-    "seq": 1,
-    "t": 5,
-    "text": "say hello",
-    "turn": 1
-  },
-  {
-    "from": "awaiting",
-    "kind": "settlement",
-    "seq": 2,
-    "t": 10,
-    "to": "turn"
-  },
-  {
-    "kind": "request",
-    "lane": "trunk",
-    "seq": 3,
-    "t": 15,
-    "turn": 1
-  },
-  {
-    "kind": "request.failed",
-    "message": "request (262149 tokens) exceeds the available context size (262144 tokens), try increasing it",
-    "reason": "context_overflow",
-    "request": 3,
-    "seq": 4,
-    "status": 400,
-    "t": 20
-  },
-  {
-    "kind": "turn.settled",
-    "reason": "failed",
-    "seq": 5,
-    "t": 25,
-    "turn": 1
-  },
-  {
-    "from": "turn",
-    "kind": "settlement",
-    "seq": 6,
-    "t": 30,
-    "to": "awaiting"
-  }
-]
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "opened": 1790000000000,
+      "seq": 0,
+      "t": 0,
+      "version": 1
+    },
+    {
+      "kind": "ask",
+      "seq": 1,
+      "t": 5,
+      "text": "say hello",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 3,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "kind": "request.failed",
+      "message": "request (262149 tokens) exceeds the available context size (262144 tokens), try increasing it",
+      "reason": "context_overflow",
+      "request": 3,
+      "seq": 4,
+      "status": 400,
+      "t": 20
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "failed",
+      "seq": 5,
+      "t": 25,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 6,
+      "t": 30,
+      "to": "awaiting"
+    }
+  ],
+  "torn": 0
+}

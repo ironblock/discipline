@@ -1,16 +1,19 @@
-[
-  {
-    "head": [
-      {
-        "content": "you are the trunk",
-        "role": "system"
-      }
-    ],
-    "kind": "session.start",
-    "model": "a-model",
-    "opened": 1790000000000,
-    "seq": 0,
-    "t": 0,
-    "version": 0
-  }
-]
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "opened": 1790000000000,
+      "seq": 0,
+      "t": 0,
+      "version": 0
+    }
+  ],
+  "torn": 0
+}

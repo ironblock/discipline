@@ -1,138 +1,141 @@
-[
-  {
-    "head": [
-      {
-        "content": "you are the trunk",
-        "role": "system"
-      }
-    ],
-    "kind": "session.start",
-    "model": "a-model",
-    "opened": 1790000000000,
-    "seq": 0,
-    "t": 0,
-    "version": 0
-  },
-  {
-    "kind": "ask",
-    "seq": 1,
-    "t": 5,
-    "text": "hi",
-    "turn": 1
-  },
-  {
-    "from": "awaiting",
-    "kind": "settlement",
-    "seq": 2,
-    "t": 10,
-    "to": "turn"
-  },
-  {
-    "kind": "request",
-    "lane": "trunk",
-    "seq": 3,
-    "t": 15,
-    "turn": 1
-  },
-  {
-    "because": "in-flight",
-    "command": "ask",
-    "during": "turn",
-    "kind": "refused",
-    "seq": 4,
-    "t": 20
-  },
-  {
-    "kind": "response",
-    "seq": 5,
-    "t": 25,
-    "text": "one",
-    "to_request": 3
-  },
-  {
-    "kind": "turn.settled",
-    "reason": "final",
-    "seq": 6,
-    "t": 30,
-    "turn": 1
-  },
-  {
-    "from": "turn",
-    "kind": "settlement",
-    "seq": 7,
-    "t": 35,
-    "to": "capture"
-  },
-  {
-    "from": "capture",
-    "kind": "settlement",
-    "seq": 8,
-    "t": 40,
-    "to": "awaiting"
-  },
-  {
-    "kind": "ask",
-    "seq": 9,
-    "t": 45,
-    "text": "two",
-    "turn": 2
-  },
-  {
-    "from": "awaiting",
-    "kind": "settlement",
-    "seq": 10,
-    "t": 50,
-    "to": "turn"
-  },
-  {
-    "kind": "request",
-    "lane": "trunk",
-    "seq": 11,
-    "t": 55,
-    "turn": 2
-  },
-  {
-    "because": "stale",
-    "command": "cancel",
-    "during": "turn",
-    "kind": "refused",
-    "seq": 12,
-    "t": 60
-  },
-  {
-    "because": "seam-not-built",
-    "command": "declare-seam",
-    "during": "turn",
-    "kind": "refused",
-    "seq": 13,
-    "t": 65
-  },
-  {
-    "kind": "response",
-    "seq": 14,
-    "t": 70,
-    "text": "two",
-    "to_request": 11
-  },
-  {
-    "kind": "turn.settled",
-    "reason": "final",
-    "seq": 15,
-    "t": 75,
-    "turn": 2
-  },
-  {
-    "from": "turn",
-    "kind": "settlement",
-    "seq": 16,
-    "t": 80,
-    "to": "capture"
-  },
-  {
-    "from": "capture",
-    "kind": "settlement",
-    "seq": 17,
-    "t": 85,
-    "to": "awaiting"
-  }
-]
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "opened": 1790000000000,
+      "seq": 0,
+      "t": 0,
+      "version": 0
+    },
+    {
+      "kind": "ask",
+      "seq": 1,
+      "t": 5,
+      "text": "hi",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 3,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "because": "in-flight",
+      "command": "ask",
+      "during": "turn",
+      "kind": "refused",
+      "seq": 4,
+      "t": 20
+    },
+    {
+      "kind": "response",
+      "seq": 5,
+      "t": 25,
+      "text": "one",
+      "to_request": 3
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 6,
+      "t": 30,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 7,
+      "t": 35,
+      "to": "capture"
+    },
+    {
+      "from": "capture",
+      "kind": "settlement",
+      "seq": 8,
+      "t": 40,
+      "to": "awaiting"
+    },
+    {
+      "kind": "ask",
+      "seq": 9,
+      "t": 45,
+      "text": "two",
+      "turn": 2
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 10,
+      "t": 50,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 11,
+      "t": 55,
+      "turn": 2
+    },
+    {
+      "because": "stale",
+      "command": "cancel",
+      "during": "turn",
+      "kind": "refused",
+      "seq": 12,
+      "t": 60
+    },
+    {
+      "because": "seam-not-built",
+      "command": "declare-seam",
+      "during": "turn",
+      "kind": "refused",
+      "seq": 13,
+      "t": 65
+    },
+    {
+      "kind": "response",
+      "seq": 14,
+      "t": 70,
+      "text": "two",
+      "to_request": 11
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 15,
+      "t": 75,
+      "turn": 2
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 16,
+      "t": 80,
+      "to": "capture"
+    },
+    {
+      "from": "capture",
+      "kind": "settlement",
+      "seq": 17,
+      "t": 85,
+      "to": "awaiting"
+    }
+  ],
+  "torn": 0
+}

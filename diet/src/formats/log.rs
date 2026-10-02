@@ -28,6 +28,13 @@
 //! `request`'s `head_sha256`. A log that declares 0 or 1 and carries one is
 //! refused the same way.
 //!
+//! # A torn final line
+//!
+//! A writer killed mid-write leaves the start of an event with no line break
+//! after it. [`read`] sets that one torn FINAL line aside and counts it
+//! (`torn: 1`); the log's truth ends at the last complete event (#230). A
+//! torn line anywhere else is refused, as any line no version reads is.
+//!
 //! The draft is `diet/drive/plans/r2c-proposal.md`, D4, as ruled on #117:
 //! names from a ruling first, then the record, then the drive's own tags. A
 //! cancelled call is `cancelled`, never a `response`; the drive's rejected,
@@ -518,13 +525,74 @@ pub fn line(text: &str) -> Result<Line, String> {
     from_object(&object)
 }
 
-/// Read a whole log, including the rules that span lines.
+/// A whole log as read: its complete events, and how many torn lines were
+/// set aside after them -- 0, or 1 when the final line was cut short.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Read {
+    /// Every complete event, in file order.
+    pub lines: Vec<Line>,
+    /// Torn final lines set aside: 0 or 1.
+    pub torn: usize,
+}
+
+/// Whether `text` is one complete object of the record's value space, and
+/// nothing else.
+fn is_complete_object(text: &str) -> bool {
+    LogParser::parse(Rule::object, text)
+        .ok()
+        .and_then(|mut pairs| pairs.next())
+        .is_some_and(|pair| pair.as_span().end() == text.len())
+}
+
+/// A TORN FINAL LINE (#230, amending ruling 4 for the final line only): a
+/// writer killed mid-write leaves the start of an object with no line break
+/// after it. Every strict prefix of an object is not an object, so the tail
+/// is torn exactly when it starts one and does not finish it. The file's
+/// truth ends at the last complete event before it. A final line that IS a
+/// complete object is an event, read and checked like any other; a torn line
+/// anywhere but last is followed by a line break and is refused where it is.
+fn set_aside_a_torn_tail(text: &str) -> (&str, usize) {
+    let tail = &text[text.rfind('\n').map_or(0, |at| at + 1)..];
+    if tail.starts_with('{') && !is_complete_object(tail) {
+        (&text[..text.len() - tail.len()], 1)
+    } else {
+        (text, 0)
+    }
+}
+
+/// Read a whole log, including the rules that span lines, setting aside a
+/// torn final line and counting it.
 ///
 /// # Errors
 ///
 /// [`LogError`] naming the first line no version reads, or the first rule a
-/// line breaks.
+/// line breaks -- and when the only line is torn, since then no event is
+/// complete.
+pub fn read(text: &str) -> Result<Read, LogError> {
+    let (complete, torn) = set_aside_a_torn_tail(text);
+    if complete.is_empty() && torn == 1 {
+        return Err(LogError {
+            line: 1,
+            why: "the only line is torn: no event in the log is complete".to_owned(),
+        });
+    }
+    Ok(Read {
+        lines: parse_complete(complete)?,
+        torn,
+    })
+}
+
+/// Read a whole log, including the rules that span lines: [`read`]'s
+/// complete events, a torn final line set aside.
+///
+/// # Errors
+///
+/// As [`read`].
 pub fn parse(text: &str) -> Result<Vec<Line>, LogError> {
+    read(text).map(|read| read.lines)
+}
+
+fn parse_complete(text: &str) -> Result<Vec<Line>, LogError> {
     let document = LogParser::parse(Rule::log_document, text).map_err(|err| {
         let line = match err.line_col {
             pest::error::LineColLocation::Pos((line, _))
@@ -576,8 +644,19 @@ pub fn render(line: &Line) -> String {
 ///
 /// When `source` is not a log this reader reads.
 pub fn project(source: &str) -> Result<Value, String> {
-    parse(source)
-        .map(|lines| Value::Array(lines.iter().map(to_value).collect()))
+    read(source)
+        .map(|read| {
+            Value::Object(BTreeMap::from([
+                (
+                    "events".to_owned(),
+                    Value::Array(read.lines.iter().map(to_value).collect()),
+                ),
+                (
+                    "torn".to_owned(),
+                    Value::Integer(i64::try_from(read.torn).unwrap_or(i64::MAX)),
+                ),
+            ]))
+        })
         .map_err(|err| err.to_string())
 }
 
@@ -2419,8 +2498,11 @@ mod tests {
         );
 
         let projected_without_message = |text: &str| -> Value {
-            let Value::Array(lines) = project(text).expect("a valid fixture projects") else {
-                panic!("a log projects to an array");
+            let Value::Object(mut read) = project(text).expect("a valid fixture projects") else {
+                panic!("a log projects to an object");
+            };
+            let Some(Value::Array(lines)) = read.remove("events") else {
+                panic!("a log's projection carries its events");
             };
             Value::Array(
                 lines

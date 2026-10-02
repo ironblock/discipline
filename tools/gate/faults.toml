@@ -6196,6 +6196,26 @@ legacy_signature = "log/fixtures/invalid/a-v0-log-carrying-progress\\.jsonl"
 migrated = false
 
 [[fault]]
+id = "test.log_torn_final_line_refused"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a torn final line refused"
+failure_class = "log.torn-final-line-refused"
+legacy_signature = "log/fixtures/valid/a-torn-final-line\\.jsonl: rejected"
+migrated = false
+
+[[fault]]
+id = "test.log_torn_middle_line_accepted"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a torn middle line accepted"
+failure_class = "log.torn-middle-line-accepted"
+legacy_signature = "log/fixtures/invalid/a-torn-line-before-the-end\\.jsonl: accepted"
+migrated = false
+
+[[fault]]
 id = "test.log_context_overflow_read_in_a_v0_log"
 kind = "seeded-gate"
 check = "test"
