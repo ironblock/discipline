@@ -846,6 +846,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
                     content: message.content.clone(),
                 })
                 .collect(),
+            // v2's declaration, written once the session carries one (#30's I2).
+            serving: None,
         },
         Event::Asked { turn, text } => log::Event::Ask {
             turn: *turn,
@@ -856,6 +858,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             lane: match lane {
                 Lane::Trunk => log::Lane::Trunk,
             },
+            // v2's head, written once the session carries it (#157's --record).
+            head_sha256: None,
         },
         Event::Settled { from, to } => log::Event::Settlement {
             from: state_of(*from),
@@ -891,6 +895,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             finish_reason: finish_reason.clone(),
             reasoning: reasoning.clone(),
             timings: timings.as_ref().map(timings_line),
+            // v2's keys, written by the session once it carries them (#30's
+            // I3b for `capped`; `usage` for a dialect with no timings).
+            usage: None,
+            capped: None,
         },
         Event::Progress { request, progress } => log::Event::Progress {
             request: *request,
@@ -2368,6 +2376,7 @@ pub(in crate::drive) mod tests {
                 version: log::VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
+                serving: None,
                 head: vec![log::HeadMessage {
                     role: log::Role::System,
                     content: HEAD.to_owned(),
@@ -2384,6 +2393,7 @@ pub(in crate::drive) mod tests {
             log::Event::Request {
                 turn: 1,
                 lane: log::Lane::Trunk,
+                head_sha256: None,
             },
             log::Event::Refused {
                 command: log::Command::Cancel,
@@ -2411,6 +2421,8 @@ pub(in crate::drive) mod tests {
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
                 reasoning: Some("thinking\n".to_owned()),
+                usage: None,
+                capped: None,
                 timings: Some(log::Timings {
                     prompt_n: Some(89),
                     cache_n: Some(0),

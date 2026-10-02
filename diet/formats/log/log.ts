@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 1;
-export const READS = [0, 1] as const;
+export const VERSION = 2;
+export const READS = [0, 1, 2] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -94,14 +94,26 @@ export interface Timings {
   draft_n_accepted?: number;
 }
 
+export interface Usage {
+  prompt_tokens: number;
+  completion_tokens: number;
+  cached_tokens?: number;
+}
+
+export interface Serving {
+  dialect: string;
+  concurrency?: number;
+}
+
 export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1;
+  version: 0 | 1 | 2;
   opened: number;
   model: string;
   head: HeadMessage[];
+  serving?: Serving;
 };
 
 export type AskLine = {
@@ -126,6 +138,7 @@ export type RequestLine = {
   kind: "request";
   turn: number;
   lane: Lane;
+  head_sha256?: string;
 };
 
 export type RefusedLine = {
@@ -159,8 +172,8 @@ export type ResponseLine = {
   text: string;
   finish_reason?: string;
   reasoning?: string;
-  timings?: Timings;
-};
+  capped?: boolean;
+} & ({ timings?: Timings; usage?: never } | { usage?: Usage; timings?: never });
 
 export type CancelledLine = {
   seq: number;
