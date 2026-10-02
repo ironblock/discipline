@@ -238,7 +238,7 @@ walk = lambda do |node, path|
         problems << { "kind" => "unplain", "path" => path, "detail" => "a key that is not a scalar" }
         next
       end
-      if k.tag || k.anchor || (k.value == "<<" && k.plain)
+      if k.tag || k.anchor || k.value == "<<"
         problems << { "kind" => "unplain", "path" => path, "detail" => "#{mark.(k)}#{short.(k)}#{k.value}".strip }
       end
       problems << { "kind" => "duplicate", "path" => path, "key" => k.value } if out.key?(k.value)
@@ -265,6 +265,8 @@ class ParserMissing(Exception):
 
 def parse_workflow(path: pathlib.Path) -> tuple[object, list[str]]:
     """pages.yml as parsed, and why it may not be read as one plain document."""
+    if path.read_bytes().startswith(b"\xef\xbb\xbf"):
+        return None, ["pages.yml: begins with a byte-order mark, which the parser refuses; save it without one"]
     try:
         done = subprocess.run(["ruby", "-e", PSYCH_WALK, str(path)], capture_output=True, text=True)
     except FileNotFoundError as err:
@@ -576,10 +578,18 @@ def main() -> int:
             failures.append("pages.yml: publishes on a trigger of its own, not only on a `verify` run's completion")
         if "concurrency" in doc:
             failures.append("pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters, cancelling a waiting deploy (#244)")
+        if "defaults" in doc:
+            failures.append("pages.yml: workflow-level `defaults`, which can change how every step runs")
         jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
         deploy = jobs.get("deploy") if isinstance(jobs.get("deploy"), dict) else {}
         if not deploy:
             failures.append("pages.yml: no `deploy` job")
+        # The deploy job is the only job: another could upload and publish
+        # with none of the checks below (#258's review).
+        if set(jobs) - {"deploy"}:
+            failures.append(f"pages.yml: jobs other than `deploy` ({', '.join(sorted(set(jobs) - {'deploy'}))}), which nothing here checks")
+        if "defaults" in deploy:
+            failures.append("pages.yml: the deploy job's `defaults`, which can change how every step runs")
         guards = {
             "github.event.workflow_run.conclusion == 'success'": "pages.yml: deploys on a workflow_run whatever its conclusion",
             "github.event.workflow_run.event == 'push'": "pages.yml: deploys on a run that was not a push",
@@ -593,10 +603,18 @@ def main() -> int:
         if condition and (set(clauses) - set(guards) or "||" in condition or "!" in condition):
             failures.append(f"pages.yml: the deploy's condition is not exactly its guards joined by && (found `{condition}`)")
         steps = [st for st in deploy.get("steps", []) if isinstance(st, dict)] if isinstance(deploy.get("steps"), list) else []
-        upload = next((i for i, st in enumerate(steps) if str(st.get("uses", "")).startswith("actions/upload-pages-artifact@")), None)
+        uploads = [i for i, st in enumerate(steps) if str(st.get("uses", "")).lower().startswith("actions/upload-pages-artifact@")]
+        if len(uploads) != 1:
+            failures.append(f"pages.yml: the deploy job uploads with upload-pages-artifact {len(uploads)} times, not once")
+        upload = uploads[0] if uploads else len(steps)
         check = next((i for i, st in enumerate(steps) if str(st.get("run", "")).strip() == "./verify.sh --site _site"), None)
-        if upload is not None and (check is None or check > upload):
+        if check is None or check > upload:
             failures.append("pages.yml: upload-pages-artifact is not preceded by ./verify.sh --site _site")
+        # A step that decides can be made not to: skipped, or run by another
+        # shell than the one its script is written for (#258's review).
+        for i, what in ((check, "check step"), (next((j for j, st in enumerate(steps) if st.get("name") == "Publish only the newest run the gate passed"), None), "newest-run step")):
+            if i is not None and set(steps[i]) & {"if", "shell", "working-directory"}:
+                failures.append(f"pages.yml: the {what} carries {', '.join(sorted(set(steps[i]) & {'if', 'shell', 'working-directory'}))}, so it may not run as written")
         # The newest-run step, by name: the query is the command that sets
         # `newest`, the run number its own env, and nothing makes it optional.
         at = next((i for i, st in enumerate(steps) if st.get("name") == "Publish only the newest run the gate passed"), None)
@@ -604,14 +622,12 @@ def main() -> int:
         script = step.get("run") if isinstance(step.get("run"), str) else ""
         env = step.get("env") if isinstance(step.get("env"), dict) else {}
         query = r'^\s*newest="\$\(gh api "repos/\$\{GITHUB_REPOSITORY\}/actions/workflows/verify\.yml/runs\?branch=main&event=push&status=success&per_page=1"'
-        if upload is not None and (
+        if (
             at is None or at > upload
             or not re.search(query, script, re.M)
             or env.get("RUN_NUMBER") != "${{ github.event.workflow_run.run_number }}"
         ):
             failures.append("pages.yml: publishes without checking that no later verify run on main has passed")
-        if "if" in step:
-            failures.append("pages.yml: the newest-run step carries an `if:`, so it can be skipped and the deploy go on")
         # And the step DECIDES as described: run under bash with a stub `gh`
         # answering a run number, it passes when no later run has passed (the
         # same number, or a lower one the list lags with) and refuses when one
@@ -634,8 +650,8 @@ def main() -> int:
             failures.append(f"pages.yml: the deploy job's `pages` group carries keys beyond group and cancel-in-progress ({', '.join(sorted(set(group) - {'group', 'cancel-in-progress'}))})")
         if "continue-on-error" in deploy or any("continue-on-error" in st for st in steps):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
-        uploaded_path = (steps[upload].get("with") or {}).get("path") if upload is not None and isinstance(steps[upload].get("with"), dict) else None
-        if upload is not None and uploaded_path != "_site":
+        uploaded_path = steps[upload]["with"].get("path") if uploads and isinstance(steps[upload].get("with"), dict) else None
+        if uploads and uploaded_path != "_site":
             failures.append("pages.yml: uploads something other than the _site it checked")
         uploaded = "".join((WORKFLOWS / wf).read_text(encoding="utf-8") for wf in sorted(gating) if (WORKFLOWS / wf).is_file())
         for part in ("site-replay", "site-ledger"):

@@ -3969,6 +3969,28 @@ inject_ci_pages_second_document() {
 jobs: {deploy: {runs-on: ubuntu-latest, steps: [{run: "true"}]}}' .github/workflows/pages.yml
 }
 
+# A quoted merge key: psych merges `"<<"` as it does `<<`, so this one
+# replaces the deploy job's guards with `true` (#258's review).
+inject_ci_pages_quoted_merge_key() {
+  edit_in_place '/^    runs-on: ubuntu-latest$/a\
+    "<<": {if: "true"}' .github/workflows/pages.yml
+}
+
+# A second job that uploads and publishes with none of the deploy job's checks.
+inject_ci_pages_second_job() {
+  edit_in_place '$a\
+  publish-too:\
+    runs-on: ubuntu-latest\
+    steps:\
+      - uses: actions/upload-pages-artifact@v3' .github/workflows/pages.yml
+}
+
+# The check step skipped: the site uploads unchecked.
+inject_ci_pages_check_step_skipped() {
+  edit_in_place '/^        run: \.\/verify\.sh --site _site$/i\
+        if: false' .github/workflows/pages.yml
+}
+
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
   edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
@@ -7771,6 +7793,12 @@ selftest() {
     "pages.yml: jobs: duplicate key .deploy."
   seeded_case "a second YAML document" ci inject_ci_pages_second_document \
     "pages.yml: holds 2 YAML documents, not one"
+  seeded_case "a quoted merge key over the guards" ci inject_ci_pages_quoted_merge_key \
+    "pages.yml: the deploy job carries a key not spelled plainly .<<."
+  seeded_case "a second job that publishes" ci inject_ci_pages_second_job \
+    "pages.yml: jobs other than .deploy. .publish-too."
+  seeded_case "the check step skipped" ci inject_ci_pages_check_step_skipped \
+    "pages.yml: the check step carries if, so it may not run as written"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
