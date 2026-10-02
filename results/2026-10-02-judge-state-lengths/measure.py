@@ -4,12 +4,14 @@
 A judge state is what a Sonnet judge saw for one item: the nomination (`entry`, or `note` in prompt v1's record) and
 the turn's REASONING and PROSE, composed under the prompt's labels exactly as translation-table.json composes a
 control's state. laya's input is [CLS] "<type> question: <instructions>" [SEP] [MASK] " "+opt0 ... [MASK] " "+optN
-[SEP] <state> [SEP] (Sidekick's port of laya's sequence builder, relayed by Dispatch 2026-10-02): each fragment
-tokenized alone without specials, a literal "[MASK]" in text read as a space, each option capped at 48 tokens, the
-question and options capped at head_max_len, and the state given max_len minus the head minus the closing [SEP].
+[SEP] <state> [SEP] (laya's build_sequence, rl_common.py at 55cf4c4e): each fragment tokenized alone without
+specials, a literal "[MASK]" in text read as a space, each option a [MASK] plus at most 48 tokens, the question cut to
+head_max_len less the options (checked here: each head must fit its cap uncut), and the state given max_len minus the
+head minus the closing [SEP].
 
   measure.py build REPO_ROOT    -> writes batches.json (every judge batch consumed, by digest) and counts.jsonl
-                                   (one row per unique state: its sha256, its first record, its token count)
+                                   (one row per unique state: its sha256, its first record, its token count,
+                                   and how many judged items carried it)
   measure.py report             -> writes report.json from counts.jsonl, translation-table.json and tokenizer.json
 `build` needs the `tokenizers` library (0.23.2 here) and the repository; `report` needs neither."""
 import hashlib, json, pathlib, sys

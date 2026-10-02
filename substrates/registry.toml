@@ -799,7 +799,7 @@ engine_identity_is = "the library version; python 3.12.13"
 hub_id = "convaiinnovations/laya"
 hub_revision = "55cf4c4ebb4ebe31b2550e8bdf3bd21b99753851"
 weights_main = "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30"
-weights_main_file = "tokenizer/tokenizer.json, byte-identical in convaiinnovations/laya-typed-decisions at 1a793eb568e6718f15941d08f85432581df534e3 (Sidekick's manifests, relayed by Dispatch 2026-10-02); Apache-2.0"
+weights_main_file = "tokenizer/tokenizer.json, byte-identical in convaiinnovations/laya-typed-decisions at 1a793eb568e6718f15941d08f85432581df534e3 (read at both hub revisions, #247's review); Apache-2.0"
 sampler_card = "none: counting only, each fragment tokenized alone without special tokens"
 
 # The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
