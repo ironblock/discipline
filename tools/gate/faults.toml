@@ -3945,6 +3945,16 @@ label = "the deploy job's group gone"
 failure_class = "wiring.pages-concurrency-missing"
 legacy_signature = "pages.yml: the deploy job holds no .pages. concurrency group"
 migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploy_group_cancels"
+kind = "seeded-gate"
+check = "ci"
+label = "the deploy job's group cancelling"
+failure_class = "wiring.pages-concurrency-cancels"
+legacy_signature = "pages.yml: the deploy job's .pages. group does not say cancel-in-progress: false"
+migrated = false
+
 [[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"

@@ -528,10 +528,21 @@ def main() -> int:
         # Deploys one at a time, through a group on the deploy JOB (#244): a
         # workflow-level group admits the runs whose job is skipped, and one
         # of those cancels a deploy waiting in it.
-        if re.search(r"^concurrency:", live, re.M):
+        if re.search(r"""^["']?concurrency["']?\s*:""", live, re.M):
             failures.append("pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters, cancelling a waiting deploy (#244)")
-        if not re.search(r"^    concurrency:\s*\n      group: pages\s*\n      cancel-in-progress: false\s*$", live, re.M):
-            failures.append("pages.yml: the deploy job holds no `pages` concurrency group with cancel-in-progress false, so deploys can overlap or cancel a running one")
+        # Read inside the `deploy` job only: the same lines under another job
+        # hold nothing back. The group is exactly `group: pages` and
+        # `cancel-in-progress: false`; any other key (`queue: max` keeps every
+        # waiting deploy rather than the newest) is refused.
+        deploy = re.search(r"^  deploy:\s*\n(.*?)(?=^  \S|\Z)", live, re.M | re.S)
+        group = deploy and re.search(r"^    concurrency:\s*\n((?:      .*\n?)*)", deploy.group(1), re.M)
+        keys = dict(re.findall(r"^      ([\w-]+):\s*(.*?)\s*$", group.group(1), re.M)) if group else {}
+        if keys.get("group") != "pages":
+            failures.append("pages.yml: the deploy job holds no `pages` concurrency group, so deploys can overlap")
+        elif keys.get("cancel-in-progress") != "false":
+            failures.append("pages.yml: the deploy job's `pages` group does not say cancel-in-progress: false, so a newer deploy may cancel one mid-publish")
+        elif set(keys) != {"group", "cancel-in-progress"}:
+            failures.append(f"pages.yml: the deploy job's `pages` group carries keys beyond group and cancel-in-progress ({', '.join(sorted(set(keys) - {'group', 'cancel-in-progress'}))})")
         if re.search(r"^\s+continue-on-error:", live, re.M):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
         uploaded_path = re.search(r"actions/upload-pages-artifact@\S+\s*\n\s+with:\s*\n\s+path: (\S+)", live)

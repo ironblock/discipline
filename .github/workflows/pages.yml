@@ -48,12 +48,14 @@ jobs:
     name: publish
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
     # One deploy at a time, and a newer waiting one replaces an older one --
-    # on the JOB, not the workflow (#244). Every verify completion starts a
-    # run of this workflow, and a workflow-level group admits the runs whose
-    # job the `if:` above then skips: measured on a throwaway, such a run
-    # cancelled the deploy waiting behind a running one. A job skipped by its
-    # `if:` never enters a job-level group; measured the same way, the waiting
-    # deploy ran, after the one holding the group.
+    # on the JOB, not the workflow (#244). Every completion of a verify run on
+    # main starts a run of this workflow, and a workflow-level group admits the
+    # runs whose job the `if:` above then skips: measured on a throwaway, such
+    # a run cancelled the deploy waiting behind a running one. A job skipped by
+    # its `if:` never enters a job-level group; measured the same way, the
+    # waiting deploy was not cancelled. One at a time is the group's documented
+    # meaning ("only a single job or workflow using the same concurrency group
+    # will run at a time"), and the default queue keeps one waiting deploy.
     concurrency:
       group: pages
       cancel-in-progress: false

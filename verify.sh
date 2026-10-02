@@ -3891,9 +3891,14 @@ inject_ci_pages_concurrency_at_workflow_level() {
   edit_in_place '/^  id-token: write$/{n;s/^$/concurrency: pages/;}' .github/workflows/pages.yml
 }
 
-# The deploy job's group gone: two deploys may run at once.
+# The deploy job's group gone, all three lines: two deploys may run at once.
 inject_ci_pages_deploys_not_serialized() {
-  edit_in_place '/^      group: pages$/d' .github/workflows/pages.yml
+  edit_in_place '/^    concurrency:$/,/^      cancel-in-progress: false$/d' .github/workflows/pages.yml
+}
+
+# The deploy job's group cancelling: a newer deploy stops one mid-publish.
+inject_ci_pages_deploy_group_cancels() {
+  edit_in_place '/^      group: pages$/{n;s/cancel-in-progress: false/cancel-in-progress: true/;}' .github/workflows/pages.yml
 }
 
 # Publishes on a trigger of its own, beside the gate.
@@ -7684,6 +7689,8 @@ selftest() {
     "pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters"
   seeded_case "the deploy job's group gone" ci inject_ci_pages_deploys_not_serialized \
     "pages.yml: the deploy job holds no .pages. concurrency group"
+  seeded_case "the deploy job's group cancelling" ci inject_ci_pages_deploy_group_cancels \
+    "pages.yml: the deploy job's .pages. group does not say cancel-in-progress: false"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
