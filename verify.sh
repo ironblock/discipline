@@ -3901,6 +3901,14 @@ inject_ci_pages_deploy_group_cancels() {
   edit_in_place '/^      group: pages$/{n;s/cancel-in-progress: false/cancel-in-progress: true/;}' .github/workflows/pages.yml
 }
 
+# A key past a blank line in the deploy job's group: YAML keeps it in the
+# group, so `queue: max` holds every waiting deploy rather than the newest.
+inject_ci_pages_deploy_group_key_past_a_blank() {
+  edit_in_place '/^      cancel-in-progress: false$/a\
+\
+      queue: max' .github/workflows/pages.yml
+}
+
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
   edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
@@ -7691,6 +7699,8 @@ selftest() {
     "pages.yml: the deploy job holds no .pages. concurrency group"
   seeded_case "the deploy job's group cancelling" ci inject_ci_pages_deploy_group_cancels \
     "pages.yml: the deploy job's .pages. group does not say cancel-in-progress: false"
+  seeded_case "a key past a blank line in the deploy job's group" ci inject_ci_pages_deploy_group_key_past_a_blank \
+    "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \

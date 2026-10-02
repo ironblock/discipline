@@ -538,7 +538,8 @@ def main() -> int:
         # `cancel-in-progress: false`; any other key (`queue: max` keeps every
         # waiting deploy rather than the newest) is refused.
         deploy = re.search(r"^  deploy:\s*\n(.*?)(?=^  \S|\Z)", live, re.M | re.S)
-        group = deploy and re.search(r"^    concurrency:\s*\n((?:      .*\n?)*)", deploy.group(1), re.M)
+        # Blank lines inside the block do not end it, for YAML or for this.
+        group = deploy and re.search(r"^    concurrency:\s*\n((?:      .*\n?|[ \t]*\n)*)", deploy.group(1), re.M)
         # One `concurrency` key in the job: YAML keeps the LAST of two.
         if deploy and len(re.findall(r"""^    (\?\s*)?["']?concurrency["']?\s*(:|$)""", deploy.group(1), re.M)) != 1:
             group = None
