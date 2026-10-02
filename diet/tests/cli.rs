@@ -400,46 +400,15 @@ fn the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane() {
 /// So both directions: the flag spelled right assembles, and a flag spelled
 /// wrong is a usage error that writes NOTHING. Without the second, an arm that
 /// accepted any fourth argument would satisfy the first.
-#[test]
-fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {
-    let dir = std::env::temp_dir().join(format!(
-        "diet-bakeoff-into-{}-{}",
-        std::process::id(),
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|since| since.as_nanos())
-            .unwrap_or_default()
-    ));
-    let path = write_bakeoff_run(&dir);
-    let run_path = path.to_str().expect("a UTF-8 path").to_owned();
-
-    // A flag this program does not define is a usage error, and it must not
-    // have written the directory on its way to saying so.
-    let wrong = dir.join("never-written");
-    let (code, out, _) = run(&[
-        "bakeoff",
-        &run_path,
-        "--intoo",
-        wrong.to_str().expect("a UTF-8 path"),
-    ]);
-    assert_eq!(code, 2, "a flag the program does not define was accepted");
-    assert!(out.is_empty(), "a usage error printed a result: {out}");
-    assert!(
-        !wrong.exists(),
-        "a refused assembly wrote its directory anyway"
-    );
-
-    let into = dir.join("2026-01-01-a-sense-bakeoff");
-
-    // NO DECLARATION, NO DIRECTORY (#32, ruled on #271): the claim's
-    // provenance is the caller's to declare, field by field, and an assembly
-    // with none declared is refused before anything is written.
+/// A malformed declaration is a usage error, like a misspelled `--into`
+/// (#271 review): exit 2, nothing on stdout, nothing written.
+fn malformed_declarations_are_usage_errors(run_path: &str, into: &std::path::Path) {
     // A malformed declaration is a usage error, like a misspelled `--into`
     // (#271 review): exit 2, nothing on stdout, the reason on stderr.
     let declared = |tail: &[&str]| -> (i32, String, String) {
         let mut args = vec![
             "bakeoff",
-            run_path.as_str(),
+            run_path,
             "--into",
             into.to_str().expect("a UTF-8 path"),
         ];
@@ -483,11 +452,48 @@ fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {
         );
     }
     // And no other command carries a declaration it would silently ignore.
-    let (code, _, _) = run(&["route", &run_path, "--into", "x", "--claim-issue", "24"]);
+    let (code, _, _) = run(&["route", run_path, "--into", "x", "--claim-issue", "24"]);
     assert_eq!(
         code, 2,
         "a declaration on a command that reads none was accepted"
     );
+}
+
+#[test]
+fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {
+    let dir = std::env::temp_dir().join(format!(
+        "diet-bakeoff-into-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|since| since.as_nanos())
+            .unwrap_or_default()
+    ));
+    let path = write_bakeoff_run(&dir);
+    let run_path = path.to_str().expect("a UTF-8 path").to_owned();
+
+    // A flag this program does not define is a usage error, and it must not
+    // have written the directory on its way to saying so.
+    let wrong = dir.join("never-written");
+    let (code, out, _) = run(&[
+        "bakeoff",
+        &run_path,
+        "--intoo",
+        wrong.to_str().expect("a UTF-8 path"),
+    ]);
+    assert_eq!(code, 2, "a flag the program does not define was accepted");
+    assert!(out.is_empty(), "a usage error printed a result: {out}");
+    assert!(
+        !wrong.exists(),
+        "a refused assembly wrote its directory anyway"
+    );
+
+    let into = dir.join("2026-01-01-a-sense-bakeoff");
+
+    // NO DECLARATION, NO DIRECTORY (#32, ruled on #271): the claim's
+    // provenance is the caller's to declare, field by field, and an assembly
+    // with none declared is refused before anything is written.
+    malformed_declarations_are_usage_errors(&run_path, &into);
 
     let (code, out, err) = run(&[
         "bakeoff",

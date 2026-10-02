@@ -1806,6 +1806,63 @@ impl Provenance {
         })
     }
 
+    /// What the declarations name, held to this run (#271 review): a claim
+    /// does not supersede its own product, and a ratification names a file
+    /// this directory carries -- one the assembler writes or copies, never
+    /// the README that states the digest.
+    fn held_to(&self, product_sha256: &str, artifacts: &[&Artifact]) -> Result<(), RunError> {
+        if self.supersedes == Declared::Given(product_sha256.to_owned()) {
+            return Err(RunError::Undeclared(format!(
+                "`supersedes` is {product_sha256}, this run's own product; a claim does not \
+                 supersede itself"
+            )));
+        }
+        let carried: Vec<&str> = artifacts
+            .iter()
+            .map(|artifact| artifact.path.as_str())
+            .chain([
+                "pre-registration.json",
+                "run.jsonl",
+                "report.json",
+                "regimen.toml",
+            ])
+            .collect();
+        if let Declared::Given(ratified) = &self.rule_ratified {
+            let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
+            if !carried.contains(&of) {
+                return Err(RunError::Undeclared(format!(
+                    "`rule_ratified` is of `{of}`, which this directory does not carry; it \
+                     carries {}",
+                    carried.join(", ")
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// The ratified digest against the bytes the assembler wrote under
+    /// `into`, before the README states it.
+    fn ratification_matches(&self, into: &Path) -> Result<(), RunError> {
+        let Declared::Given(ratified) = &self.rule_ratified else {
+            return Ok(());
+        };
+        let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
+        let found = std::fs::read(into.join(of))
+            .map(|bytes| sha256_hex(&bytes))
+            .map_err(|err| RunError::Write {
+                path: of.to_owned(),
+                reason: err.to_string(),
+            })?;
+        if found != ratified.digest {
+            return Err(RunError::Undeclared(format!(
+                "`rule_ratified.digest` is {}, and `{of}` as written hashes to {found}; the \
+                 ratification is of other bytes",
+                ratified.digest
+            )));
+        }
+        Ok(())
+    }
+
     /// The front-matter lines the fields and their absences take, with
     /// `window_start`'s absence -- derived, not declared -- among them.
     fn front_matter(&self, window_start_absent: &str) -> String {
@@ -1879,36 +1936,8 @@ pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Val
     let checked = u32::try_from(artifacts.len()).unwrap_or(u32::MAX);
 
     // WHAT THE DECLARATIONS NAME, HELD TO THIS RUN (#271 review), before
-    // anything is written. A claim does not supersede its own product, and a
-    // ratification names a file this directory carries -- one of the files
-    // written below, not the README that states the digest -- whose bytes it
-    // is checked against before the README is written.
-    if provenance.supersedes == Declared::Given(product_sha256.clone()) {
-        return Err(RunError::Undeclared(format!(
-            "`supersedes` is {product_sha256}, this run's own product; a claim does not \
-             supersede itself"
-        )));
-    }
-    let carried: Vec<&str> = artifacts
-        .iter()
-        .map(|artifact| artifact.path.as_str())
-        .chain([
-            "pre-registration.json",
-            "run.jsonl",
-            "report.json",
-            "regimen.toml",
-        ])
-        .collect();
-    if let Declared::Given(ratified) = &provenance.rule_ratified {
-        let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
-        if !carried.contains(&of) {
-            return Err(RunError::Undeclared(format!(
-                "`rule_ratified` is of `{of}`, which this directory does not carry; it carries \
-                 {}",
-                carried.join(", ")
-            )));
-        }
-    }
+    // anything is written.
+    provenance.held_to(&product_sha256, &artifacts)?;
 
     if into.join("README.md").exists() {
         return Err(RunError::Occupied {
@@ -1984,22 +2013,7 @@ pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Val
     }
     write(&into.join("report.json"), product.as_bytes())?;
     write(&into.join("regimen.toml"), regimen_of(&regime).as_bytes())?;
-    if let Declared::Given(ratified) = &provenance.rule_ratified {
-        let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
-        let found = std::fs::read(into.join(of))
-            .map(|bytes| sha256_hex(&bytes))
-            .map_err(|err| RunError::Write {
-                path: of.to_owned(),
-                reason: err.to_string(),
-            })?;
-        if found != ratified.digest {
-            return Err(RunError::Undeclared(format!(
-                "`rule_ratified.digest` is {}, and `{of}` as written hashes to {found}; the \
-                 ratification is of other bytes",
-                ratified.digest
-            )));
-        }
-    }
+    provenance.ratification_matches(into)?;
     write(
         &into.join("README.md"),
         report_of(
@@ -2633,6 +2647,84 @@ mod tests {
         );
     }
 
+    /// Beside the first assembly: one with every field given, one with
+    /// reasons a caller might type, and the run-bound refusals, which write
+    /// no README. The two that land are linted with the first.
+    fn assemble_the_declared_variants(path: &Path, dir: &Path, into: &Path, reported: &str) {
+        // EVERY FIELD GIVEN, and reasons a caller might type (#271 review):
+        // the given path writes values the gates read, and a reason with a
+        // quote, a backslash, a control character and a zero-width space is
+        // still TOML. Both land beside the first and are linted with it.
+        let pre_registration =
+            sha256_hex(&std::fs::read(into.join("pre-registration.json")).expect("written"));
+        let given = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--supersedes",
+            &"a".repeat(64),
+            "--rule-ratified",
+            &format!("5826194082,2026-09-25T03:29:00Z,{pre_registration},pre-registration.json"),
+        ]))
+        .expect("every field given");
+        assemble(path, &dir.join("2026-01-02-every-field-given"), &given)
+            .unwrap_or_else(|err| panic!("the given assembly failed: {err}"));
+        // And what the declarations name is held to this run: its own
+        // product superseded, a ratification of the README or of a rule file
+        // it does not carry, or of other bytes, writes nothing.
+        let ratified = |tail: &str| format!("5826194082,2026-09-25T03:29:00Z,{tail}");
+        for (supersedes, rule, says) in [
+            (
+                reported.to_owned(),
+                ratified(&format!("{pre_registration},pre-registration.json")),
+                "does not supersede itself",
+            ),
+            (
+                "a".repeat(64),
+                ratified(&pre_registration),
+                "does not carry",
+            ),
+            (
+                "a".repeat(64),
+                ratified(&format!("{pre_registration},README.md")),
+                "does not carry",
+            ),
+            (
+                "a".repeat(64),
+                ratified(&format!("{},pre-registration.json", "c".repeat(64))),
+                "other bytes",
+            ),
+        ] {
+            let refused = Provenance::from_flags(&flags(&[
+                "--claim-issue",
+                "24",
+                "--supersedes",
+                &supersedes,
+                "--rule-ratified",
+                &rule,
+            ]))
+            .expect("in shape");
+            let landing = dir.join("refused");
+            let err = assemble(path, &landing, &refused).expect_err(says);
+            assert!(err.to_string().contains(says), "{err}");
+            assert!(
+                !landing.join("README.md").exists(),
+                "a refused assembly wrote its README"
+            );
+            let _ = std::fs::remove_dir_all(&landing);
+        }
+        let typed = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--absent",
+            "supersedes=nothing \"replaced\" \\ here\u{1b}\u{200b}",
+            "--absent",
+            "rule_ratified=none\tat all\r\n",
+        ]))
+        .expect("typed reasons");
+        assemble(path, &dir.join("2026-01-03-typed-reasons"), &typed)
+            .unwrap_or_else(|err| panic!("the typed assembly failed: {err}"));
+    }
+
     #[test]
     fn the_assembled_directory_is_one_the_gates_accept() {
         // UNDER THE REPOSITORY, not in the system temp directory, because
@@ -2681,78 +2773,7 @@ mod tests {
             "the answer's digest is not the product's"
         );
 
-        // EVERY FIELD GIVEN, and reasons a caller might type (#271 review):
-        // the given path writes values the gates read, and a reason with a
-        // quote, a backslash, a control character and a zero-width space is
-        // still TOML. Both land beside the first and are linted with it.
-        let pre_registration =
-            sha256_hex(&std::fs::read(into.join("pre-registration.json")).expect("written"));
-        let given = Provenance::from_flags(&flags(&[
-            "--claim-issue",
-            "24",
-            "--supersedes",
-            &"a".repeat(64),
-            "--rule-ratified",
-            &format!("5826194082,2026-09-25T03:29:00Z,{pre_registration},pre-registration.json"),
-        ]))
-        .expect("every field given");
-        assemble(&path, &dir.join("2026-01-02-every-field-given"), &given)
-            .unwrap_or_else(|err| panic!("the given assembly failed: {err}"));
-        // And what the declarations name is held to this run: its own
-        // product superseded, a ratification of the README or of a rule file
-        // it does not carry, or of other bytes, writes nothing.
-        let ratified = |tail: &str| format!("5826194082,2026-09-25T03:29:00Z,{tail}");
-        for (supersedes, rule, says) in [
-            (
-                reported.clone(),
-                ratified(&format!("{pre_registration},pre-registration.json")),
-                "does not supersede itself",
-            ),
-            (
-                "a".repeat(64),
-                ratified(&pre_registration),
-                "does not carry",
-            ),
-            (
-                "a".repeat(64),
-                ratified(&format!("{pre_registration},README.md")),
-                "does not carry",
-            ),
-            (
-                "a".repeat(64),
-                ratified(&format!("{},pre-registration.json", "c".repeat(64))),
-                "other bytes",
-            ),
-        ] {
-            let refused = Provenance::from_flags(&flags(&[
-                "--claim-issue",
-                "24",
-                "--supersedes",
-                &supersedes,
-                "--rule-ratified",
-                &rule,
-            ]))
-            .expect("in shape");
-            let landing = dir.join("refused");
-            let err = assemble(&path, &landing, &refused).expect_err(says);
-            assert!(err.to_string().contains(says), "{err}");
-            assert!(
-                !landing.join("README.md").exists(),
-                "a refused assembly wrote its README"
-            );
-            let _ = std::fs::remove_dir_all(&landing);
-        }
-        let typed = Provenance::from_flags(&flags(&[
-            "--claim-issue",
-            "24",
-            "--absent",
-            "supersedes=nothing \"replaced\" \\ here\u{1b}\u{200b}",
-            "--absent",
-            "rule_ratified=none\tat all\r\n",
-        ]))
-        .expect("typed reasons");
-        assemble(&path, &dir.join("2026-01-03-typed-reasons"), &typed)
-            .unwrap_or_else(|err| panic!("the typed assembly failed: {err}"));
+        assemble_the_declared_variants(&path, &dir, &into, reported);
 
         // AND THE GATES. `check-results.py` dispatches the record verdict to
         // the built binary, and refuses when that binary does not reflect the
