@@ -248,7 +248,7 @@ fn serve(args: &[String]) -> ExitCode {
         .map(|id| diet::drive::engine::check_served(&transport, id))
         .transpose()
     {
-        Ok(build) => build.flatten(),
+        Ok(build) => build,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     let log_path = log_file;
@@ -650,7 +650,7 @@ fn answering(given: Option<&String>) -> Result<(Option<Stub>, Endpoint), (u8, St
     let (served, url) = if let Some(endpoint) = given {
         (None, endpoint.clone())
     } else {
-        let stub = Stub::serving(canned::acts())
+        let stub = Stub::serving_with_props(canned::acts(), &canned::build_info())
             .map_err(|why| (EXIT_HALT, format!("the canned server did not bind: {why}")))?;
         let url = stub.url();
         (Some(stub), url)

@@ -481,7 +481,8 @@ fn a_drive_server_refuses_to_start_on_a_substrate_the_registry_does_not_resolve(
 
 #[test]
 fn a_drive_server_announces_the_registered_substrate_its_regimen_names() {
-    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
     let dev_loop = format!("{}/drive/dev-loop.toml", env!("CARGO_MANIFEST_DIR"));
     let served = start(&stub.url(), &["--regimen", &dev_loop]);
     assert_eq!(served.substrate.as_deref(), Some("canned-cache-n"));
@@ -821,4 +822,51 @@ fn a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was() {
         std::fs::read_to_string(&held.0).expect("still there"),
         "an earlier session's log\n"
     );
+}
+
+/// The dev loop's regimen, which names the canned substrate.
+fn dev_loop() -> String {
+    format!("{}/drive/dev-loop.toml", env!("CARGO_MANIFEST_DIR"))
+}
+
+#[test]
+fn a_drive_server_starts_a_canned_regimen_only_on_the_canned_server() {
+    // #219 item 11: the canned regime is checked like any other, by the
+    // literal its server reports (`canned-` and the acts' digest).
+    let canned = diet::drive::canned::build_info();
+    let stub = Stub::serving_with_props(Vec::new(), &canned).expect("loopback");
+    let served = start(&stub.url(), &["--regimen", &dev_loop()]);
+    assert_eq!(
+        (
+            served.substrate.as_deref(),
+            served.engine_build.as_deref(),
+            served.engine_identity.as_deref()
+        ),
+        (
+            Some("canned-cache-n"),
+            Some(canned.as_str()),
+            Some("unreported (literal matched)")
+        )
+    );
+}
+
+#[test]
+fn a_drive_server_refuses_a_canned_regimen_against_a_live_server() {
+    // A live llama.cpp under the dev loop's regimen once started and
+    // announced a canned identity that was false (#219 item 11).
+    let stub = Stub::serving(vec![props_saying("b8-e486f80")]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &dev_loop()]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("b8-e486f80") && said.contains("canned-"),
+        "both values: {said}"
+    );
+}
+
+#[test]
+fn a_drive_server_refuses_a_canned_regimen_against_a_server_with_no_props() {
+    let stub = Stub::serving(vec![Act::Status(404, "no such route".to_owned())]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &dev_loop()]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("answered 404"), "{said}");
 }

@@ -101,6 +101,22 @@ impl Stub {
     ///
     /// Returns the I/O error if loopback cannot be bound.
     pub fn serving(acts: Vec<Act>) -> io::Result<Self> {
+        Self::start(acts, None)
+    }
+
+    /// A stub serving `acts` that ALSO answers `GET /props` with
+    /// `build_info`, without spending an act on it: a server whose engine
+    /// check a session can make (#219 item 11). The canned server is one,
+    /// answering with [`crate::drive::canned::build_info`].
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error if loopback cannot be bound.
+    pub fn serving_with_props(acts: Vec<Act>, build_info: &str) -> io::Result<Self> {
+        Self::start(acts, Some(format!("{{\"build_info\":\"{build_info}\"}}")))
+    }
+
+    fn start(acts: Vec<Act>, props: Option<String>) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         // Spelled through the type rather than as a method call on the
@@ -116,7 +132,8 @@ impl Stub {
         let seen = Arc::clone(&hangups);
         let heads = Arc::new(Mutex::new(Vec::new()));
         let headed = Arc::clone(&heads);
-        let worker = thread::spawn(move || serve(&listener, acts, &flag, &seen, &headed));
+        let worker =
+            thread::spawn(move || serve(&listener, acts, props.as_deref(), &flag, &seen, &headed));
         Ok(Self {
             address,
             stop,
@@ -188,16 +205,37 @@ impl Drop for Stub {
 fn serve(
     listener: &TcpListener,
     acts: Vec<Act>,
+    props: Option<&str>,
     stop: &AtomicBool,
     hangups: &Mutex<Vec<Held>>,
     heads: &Mutex<Vec<String>>,
 ) -> Vec<String> {
     let mut asked = Vec::new();
     for act in acts {
-        let Some(mut stream) = accept(listener, stop) else {
+        let Some(stream) = accept(listener, stop) else {
             break;
         };
-        match read_request(&mut stream) {
+        // A `/props` the stub answers is not one of its acts: every such
+        // request is answered, and the act waits for the next connection.
+        let mut stream = stream;
+        let read = loop {
+            let read = read_request(&mut stream);
+            match (props, &read) {
+                (Some(props), Ok((head, _))) if head.starts_with("GET /props ") => {
+                    heads
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(head.clone());
+                    write_reply(&mut stream, 200, props, Closing::Yes);
+                    match accept(listener, stop) {
+                        Some(next) => stream = next,
+                        None => return asked,
+                    }
+                }
+                _ => break read,
+            }
+        };
+        match read {
             Ok((head, body)) => {
                 heads
                     .lock()

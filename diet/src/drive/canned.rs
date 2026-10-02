@@ -191,6 +191,15 @@ pub fn acts_digest() -> String {
     digest_of(&acts())
 }
 
+/// What the canned server answers `GET /props` with as its `build_info`:
+/// `canned-` and the digest of the acts it plays. The registry's canned
+/// entries declare it as their `engine_build_info`, so the engine check ties
+/// a canned regime to the canned server like any other (#219 item 11).
+#[must_use]
+pub fn build_info() -> String {
+    format!("canned-{}", acts_digest())
+}
+
 /// The digest of any act list, which is what makes [`acts_digest`] checkable.
 ///
 /// Split out because a digest that ignored its input would move the record and
