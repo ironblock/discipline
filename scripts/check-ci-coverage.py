@@ -540,16 +540,34 @@ def main() -> int:
         deploy = re.search(r"^  deploy:\s*\n(.*?)(?=^  \S|\Z)", live, re.M | re.S)
         # Blank lines inside the block do not end it, for YAML or for this.
         group = deploy and re.search(r"^    concurrency:\s*\n((?:      .*\n?|[ \t]*\n)*)", deploy.group(1), re.M)
-        # One `concurrency` key in the job: YAML keeps the LAST of two.
-        if deploy and len(re.findall(r"""^    (\?\s*)?["']?concurrency["']?\s*(:|$)""", deploy.group(1), re.M)) != 1:
+        # The job's own keys are an allowlist of spelling too (#251): each
+        # one plain (`name:`), so no tag, anchor, merge, quote or escape can
+        # hide a second `concurrency` -- YAML keeps the LAST of two -- and
+        # exactly one of them is `concurrency`.
+        job_keys = re.findall(r"^    (\S.*?)\s*$", deploy.group(1), re.M) if deploy else []
+        unplain = [k for k in job_keys if not re.match(r"[a-z][a-z-]*:(\s|$)", k)]
+        if unplain:
+            failures.append(f"pages.yml: the deploy job carries a key not spelled plainly ({'; '.join(unplain)})")
+        if sum(k.split(":", 1)[0] == "concurrency" for k in job_keys) != 1:
             group = None
-        keys = dict(re.findall(r"^      ([\w-]+):\s*(.*?)\s*$", group.group(1), re.M)) if group else {}
-        if keys.get("group") != "pages":
+        # An allowlist, not a key pattern (#251): the group's lines are
+        # exactly `group: pages` and `cancel-in-progress: false`, in either
+        # order, and nothing else. Any other line -- a key quoted, tagged,
+        # anchored, merged, escaped or explicit (`? key`) -- is refused, since
+        # YAML may read it into the group; a valid group spelled other than
+        # plainly is refused too, which fails safe.
+        lines = [line.strip() for line in group.group(1).splitlines() if line.strip()] if group else []
+        others = [line for line in lines if line not in ("group: pages", "cancel-in-progress: false")]
+        named = [re.sub(r"""^[?\s]*["']?""", "", line).split(":", 1)[0].strip("\"' ") for line in others]
+        spelled = deploy and re.search(r"^    concurrency:", deploy.group(1), re.M)
+        if "group: pages" not in lines and (lines or (spelled and not group)):
+            failures.append("pages.yml: the deploy job's concurrency group is not spelled plainly, as the two lines `group: pages` and `cancel-in-progress: false`")
+        elif "group: pages" not in lines:
             failures.append("pages.yml: the deploy job holds no `pages` concurrency group, so deploys can overlap")
-        elif keys.get("cancel-in-progress") != "false":
+        elif "cancel-in-progress: false" not in lines:
             failures.append("pages.yml: the deploy job's `pages` group does not say cancel-in-progress: false, so a newer deploy may cancel one mid-publish")
-        elif set(keys) != {"group", "cancel-in-progress"}:
-            failures.append(f"pages.yml: the deploy job's `pages` group carries keys beyond group and cancel-in-progress ({', '.join(sorted(set(keys) - {'group', 'cancel-in-progress'}))})")
+        elif others:
+            failures.append(f"pages.yml: the deploy job's `pages` group carries keys beyond group and cancel-in-progress ({', '.join(n for n in named if n) or '; '.join(others)})")
         if re.search(r"^\s+continue-on-error:", live, re.M):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
         uploaded_path = re.search(r"actions/upload-pages-artifact@\S+\s*\n\s+with:\s*\n\s+path: (\S+)", live)

@@ -22,13 +22,14 @@
 //! missing: neither an `engine_build_info` nor an `engine_commit` registered,
 //! a malformed one, a server that does not answer `/props`, a `build_info`
 //! that names no commit, or one that names a commit and something after it
-//! (a dirty build is not the registered commit). A canned substrate is not
-//! checked: the canned server has no `/props`, and tying a canned regime to
-//! a canned server is its own item (#204, disclosure 4).
+//! (a dirty build is not the registered commit). A canned substrate is
+//! checked like any other: the canned server answers `/props` with
+//! `canned-` and its acts' digest, which the registry declares as the
+//! canned entries' literal, so a canned regime runs only on the canned
+//! server (#219 item 11, closing #204's disclosure 4).
 
 use crate::client::stream::HttpStream;
 use crate::client::transport::{HttpReply, TransportFailure};
-use crate::formats::record::Weights;
 
 use super::registry::{self, Identity};
 
@@ -214,8 +215,7 @@ fn expected<'a>(id: &str, identity: &'a Identity) -> Result<Expected<'a>, String
 }
 
 /// The engine check for substrate `id` in `document`, asking the server
-/// through `props`: what passed, or `None` for a canned substrate, which is
-/// not checked.
+/// through `props`: what passed.
 ///
 /// # Errors
 ///
@@ -225,11 +225,8 @@ pub fn check(
     document: &str,
     id: &str,
     props: impl FnOnce() -> Result<HttpReply, TransportFailure>,
-) -> Result<Option<Passed>, String> {
+) -> Result<Passed, String> {
     let identity = registry::identity(document, id)?;
-    if matches!(identity.weights, Weights::Canned { .. }) {
-        return Ok(None);
-    }
     // Before the server is asked: a check the registry cannot support is
     // refused without touching the server.
     let wants = expected(id, &identity)?;
@@ -250,10 +247,10 @@ pub fn check(
     }
     let build_info = build_info_of(&reply.body).map_err(refuse)?;
     let identity = matches(id, &identity, &build_info)?;
-    Ok(Some(Passed {
+    Ok(Passed {
         build_info,
         identity,
-    }))
+    })
 }
 
 /// [`check`] against the server `transport` drives, with the registry this
@@ -262,7 +259,7 @@ pub fn check(
 /// # Errors
 ///
 /// As [`check`].
-pub fn check_served(transport: &HttpStream, id: &str) -> Result<Option<Passed>, String> {
+pub fn check_served(transport: &HttpStream, id: &str) -> Result<Passed, String> {
     check(registry::REGISTRY, id, || {
         transport.props(std::time::Instant::now() + PROPS_DEADLINE)
     })
@@ -318,10 +315,10 @@ mod tests {
             check(REGISTRY, PINNED, || Ok(answered(&format!(
                 "{{\"build_info\":\"{build_info}\"}}"
             )))),
-            Ok(Some(Passed {
+            Ok(Passed {
                 build_info,
                 identity: EngineIdentity::Checked
-            }))
+            })
         );
     }
 
@@ -388,10 +385,10 @@ mod tests {
             check(&registry, "prebuilt", || Ok(answered(
                 "{\"build_info\":\"b0-unknown-dirty\"}"
             ))),
-            Ok(Some(Passed {
+            Ok(Passed {
                 build_info: "b0-unknown-dirty".to_owned(),
                 identity: EngineIdentity::Unreported
-            }))
+            })
         );
         assert_eq!(
             [EngineIdentity::Checked, EngineIdentity::Unreported].map(EngineIdentity::tag),
@@ -458,12 +455,34 @@ mod tests {
     }
 
     #[test]
-    fn a_canned_substrate_is_not_checked() {
+    fn a_canned_substrate_is_checked_like_any_other() {
+        // A canned entry declaring its server's literal (#219 item 11): the
+        // canned server passes; a live server does not.
+        let canned = crate::drive::canned::build_info();
+        let registry = format!(
+            "[equipment.e]\nhardware_fingerprint = \"{}\"\n\
+             [substrate.c]\nequipment = \"e\"\nengine_name = \"n\"\n\
+             engine_identity = \"i\"\nweights_kind = \"canned\"\n\
+             weights_acts_sha256 = \"{}\"\nengine_build_info = \"{canned}\"\n",
+            "a".repeat(64),
+            crate::drive::canned::acts_digest()
+        );
         assert_eq!(
-            check(REGISTRY, "canned-cache-n", || -> Result<HttpReply, _> {
-                panic!("a canned substrate's server is not asked")
-            }),
-            Ok(None)
+            check(&registry, "c", || Ok(answered(&format!(
+                "{{\"build_info\":\"{canned}\"}}"
+            )))),
+            Ok(Passed {
+                build_info: canned.clone(),
+                identity: EngineIdentity::Unreported
+            })
+        );
+        let refused = check(&registry, "c", || {
+            Ok(answered("{\"build_info\":\"b8-e486f80\"}"))
+        })
+        .expect_err("a live server under a canned regime");
+        assert!(
+            refused.contains("b8-e486f80") && refused.contains(&canned),
+            "{refused}"
         );
     }
 }

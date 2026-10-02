@@ -14,7 +14,8 @@ Once was the whole problem. `tools/gate/lanes.toml` -- the root registry,
 manifests exist; this script is what applies them continuously rather than
 once: `--verify` (this file's `lanes` check) confirms every registered lane
 is present and green, `--list` is what `verify.sh --selftest` reads to turn
-every declared fault into a seeded case, and `--apply-only LANE ID` is the
+every declared fault into a seeded case -- one signature per catcher, every
+one required (#239) -- and `--apply-only LANE ID` is the
 injection that case runs.
 
 THREE THINGS THIS PROVES, RULED ON #76:
@@ -54,6 +55,11 @@ DEFAULT_REGISTRY = "tools/gate/lanes.toml"
 # already parses for the same reason -- one format, read the same way
 # wherever a test run's own log is the evidence.
 FAILURE_NAME = re.compile(r"^\s{4}([A-Za-z_][A-Za-z0-9_:]*)\s*$", re.M)
+
+# Between a fault's signatures in `--list`'s third column, one per catcher.
+# The ASCII unit separator: a tab is the column separator, a newline the row
+# separator, and neither can sit inside a column. No test path holds one.
+SIGNATURE_SEPARATOR = "\x1f"
 
 
 class Unusable(Exception):
@@ -158,8 +164,10 @@ def cmd_verify(root: pathlib.Path, registry_path: pathlib.Path) -> int:
     broken = False
     dirty = False
     total_faults = 0
+    total_catchers = 0
     for name, (package, faults) in sorted(found.lanes.items()):
         total_faults += len(faults)
+        total_catchers += sum(len(f.get("catches") or []) for f in faults)
         rc, log = run_command(package["command"], root)
         if rc == -1:
             print(f"apply-lane-faults: {name}'s command could not run: {log}", file=sys.stderr)
@@ -180,7 +188,7 @@ def cmd_verify(root: pathlib.Path, registry_path: pathlib.Path) -> int:
         return EXIT_DIRTY
     print(
         f"apply-lane-faults: {len(found.lanes)} lane(s) registered and green, "
-        f"{total_faults} fault(s) declared"
+        f"{total_faults} fault(s) declared, {total_catchers} catcher(s) among them"
     )
     return 0
 
@@ -225,12 +233,16 @@ def cmd_list(root: pathlib.Path, registry_path: pathlib.Path) -> int:
                     file=sys.stderr,
                 )
                 return EXIT_BROKEN
+            # EVERY catcher, not the first (#239). This column used to carry
+            # `catches[0]` alone, so a second catcher that stopped catching
+            # was declared in the manifest and never checked anywhere CI
+            # runs. The selftest requires each of these in the fault's log.
             print(
                 "\t".join(
                     [
                         name,
                         fault["id"],
-                        failure_signature(catches[0]),
+                        SIGNATURE_SEPARATOR.join(failure_signature(c) for c in catches),
                         fault.get("failure_class", ""),
                     ]
                 )
@@ -294,7 +306,7 @@ def main(argv: list[str]) -> int:
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--verify", action="store_true", help="run every registered lane's command")
-    group.add_argument("--list", action="store_true", help="print lane<TAB>id<TAB>signature<TAB>class, one fault per line")
+    group.add_argument("--list", action="store_true", help="print lane<TAB>id<TAB>signatures<TAB>class, one fault per line; the signatures, one per catcher, are joined by the ASCII unit separator")
     group.add_argument(
         "--apply-only",
         nargs=2,

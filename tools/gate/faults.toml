@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 138
+mechanics_assertions = 141
 unseedable_guards = 2
 migrated = 0
 
@@ -7753,14 +7753,6 @@ failure_class = "drive.engine-reads-a-refused-props"
 migrated = false
 
 [[fault]]
-id = "drive.engine-checks-a-canned-substrate"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.engine-checks-a-canned-substrate"
-failure_class = "drive.engine-checks-a-canned-substrate"
-migrated = false
-
-[[fault]]
 id = "drive.engine-compares-the-commit-before-the-literal"
 kind = "lane-fault"
 check = "lanes"
@@ -7990,5 +7982,79 @@ check = "exercise"
 label = "a story's assertion broken in place"
 failure_class = "exercise.story"
 legacy_signature = "expected '2\\.0' to be '2\\.1'"
+migrated = false
+
+[[fault]]
+id = "mech.every-catcher-a-lane-fault-declares-is-listed"
+kind = "mechanics"
+check = "-"
+label = "every catcher a lane fault declares is listed"
+failure_class = "lanes.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-lane-fault-whose-second-catcher-did-not-fail-is-not-red"
+kind = "mechanics"
+check = "-"
+label = "a lane fault whose second catcher did not fail is not red"
+failure_class = "lanes.catcher-not-seen-red"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.and-with-only-the-catcher-that-failed-it-is"
+kind = "mechanics"
+check = "-"
+label = "and with only the catcher that failed, it is"
+failure_class = "lanes.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_deploy_group_quoted_key"
+kind = "seeded-gate"
+check = "ci"
+label = "a quoted extra key in the deploy job's group"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploy_second_group_tagged"
+kind = "seeded-gate"
+check = "ci"
+label = "a second group in the deploy job, tagged"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly .!!str concurrency"
+migrated = false
+
+[[fault]]
+id = "client.stub-leaves-props-unanswered"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stub-leaves-props-unanswered"
+failure_class = "client.stub-leaves-props-unanswered"
+migrated = false
+
+[[fault]]
+id = "client.stub-closes-an-extra-call-silently"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stub-closes-an-extra-call-silently"
+failure_class = "client.stub-closes-an-extra-call-silently"
+migrated = false
+
+[[fault]]
+id = "drive.engine-skips-a-canned-substrate"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-skips-a-canned-substrate"
+failure_class = "drive.engine-skips-a-canned-substrate"
+migrated = false
+
+[[fault]]
+id = "drive.canned-build-info-names-other-acts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-build-info-names-other-acts"
+failure_class = "drive.canned-build-info-names-other-acts"
 migrated = false
 

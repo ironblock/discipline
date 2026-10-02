@@ -75,7 +75,9 @@ pub enum Held {
 /// Serves its script one connection at a time and then stops listening, so a
 /// client that makes more calls than the script has acts gets a refused
 /// connection rather than a silent hang -- an extra call is a defect and it
-/// should look like one.
+/// should look like one. A stub that answers `/props` keeps listening for
+/// them, so an extra call after its acts is answered `503` and recorded as
+/// `<beyond the script: ...>` instead: visible, and never a silent close.
 #[derive(Debug)]
 pub struct Stub {
     address: SocketAddr,
@@ -101,6 +103,24 @@ impl Stub {
     ///
     /// Returns the I/O error if loopback cannot be bound.
     pub fn serving(acts: Vec<Act>) -> io::Result<Self> {
+        Self::start(acts, None)
+    }
+
+    /// A stub serving `acts` that ALSO answers `GET /props` with
+    /// `build_info`, without spending an act on it: a server whose engine
+    /// check a session can make (#219 item 11). The canned server is one,
+    /// answering with [`crate::drive::canned::build_info`]. A `/props`
+    /// request that cannot be read is not known to be one, so it spends an
+    /// act as `<unread: ...>`, like any unreadable request.
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error if loopback cannot be bound.
+    pub fn serving_with_props(acts: Vec<Act>, build_info: &str) -> io::Result<Self> {
+        Self::start(acts, Some(format!("{{\"build_info\":\"{build_info}\"}}")))
+    }
+
+    fn start(acts: Vec<Act>, props: Option<String>) -> io::Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         listener.set_nonblocking(true)?;
         // Spelled through the type rather than as a method call on the
@@ -116,7 +136,8 @@ impl Stub {
         let seen = Arc::clone(&hangups);
         let heads = Arc::new(Mutex::new(Vec::new()));
         let headed = Arc::clone(&heads);
-        let worker = thread::spawn(move || serve(&listener, acts, &flag, &seen, &headed));
+        let worker =
+            thread::spawn(move || serve(&listener, acts, props.as_deref(), &flag, &seen, &headed));
         Ok(Self {
             address,
             stop,
@@ -134,7 +155,8 @@ impl Stub {
 
     /// The head of every request received so far -- request line and
     /// headers, as sent -- in order, one per request as `asked` has one: a
-    /// request that could not be read is `<unread: ...>` in both. What a
+    /// request that could not be read is `<unread: ...>` in both. A `/props`
+    /// the stub answers has a head here and no entry in `asked`. What a
     /// claim about a header is checked against.
     #[must_use]
     pub fn heads(&self) -> Vec<String> {
@@ -188,16 +210,51 @@ impl Drop for Stub {
 fn serve(
     listener: &TcpListener,
     acts: Vec<Act>,
+    props: Option<&str>,
     stop: &AtomicBool,
     hangups: &Mutex<Vec<Held>>,
     heads: &Mutex<Vec<String>>,
 ) -> Vec<String> {
     let mut asked = Vec::new();
-    for act in acts {
+    let mut acts = acts.into_iter().peekable();
+    loop {
+        // Without a `/props` to answer, the stub serves exactly its acts and
+        // then refuses, as it always has. With one, it answers `/props`
+        // whenever asked -- before, between and after its acts -- and an act
+        // waits for the next connection that is not a `/props`.
+        if props.is_none() && acts.peek().is_none() {
+            break;
+        }
         let Some(mut stream) = accept(listener, stop) else {
             break;
         };
-        match read_request(&mut stream) {
+        let read = read_request(&mut stream);
+        if let (Some(props), Ok((head, _))) = (props, &read)
+            && head.starts_with("GET /props ")
+        {
+            heads
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(head.clone());
+            write_reply(&mut stream, 200, props, Closing::Yes);
+            continue;
+        }
+        let Some(act) = acts.next() else {
+            // Beyond the script, with `/props` still answered: a defect, made
+            // to look like one rather than closed silently.
+            let beyond = match &read {
+                Ok((head, _)) => format!("<beyond the script: {head}>"),
+                Err(why) => format!("<beyond the script: unread: {why}>"),
+            };
+            heads
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(beyond.clone());
+            asked.push(beyond);
+            write_reply(&mut stream, 503, "beyond the stub's script", Closing::Yes);
+            break;
+        };
+        match read {
             Ok((head, body)) => {
                 heads
                     .lock()
