@@ -8123,7 +8123,7 @@ selftest() {
   seeded_case "the condition with text outside its braces" ci inject_ci_pages_condition_outside_its_braces \
     "pages.yml: the deploy's condition has text outside its"
   seeded_case "a check re-measured past its job's budget" ci inject_ci_check_seconds_over_budget \
-    "pkg-repo\\.yml: its checks' measured seconds per job are 346 s, past the 300 s budget"
+    "pkg-repo\\.yml: its checks' measured seconds per job are [0-9]+ s, past the 300 s budget \\(.*hygiene 341\\.2 s"
   seeded_case "a check with no measured seconds"       ci inject_ci_check_seconds_unmeasured \
     '`hygiene` has no measured seconds'
   seeded_case "an injection no shard applies"          ci inject_ci_injection_shard_drops_one \

@@ -3995,7 +3995,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a check re-measured past its job's budget"
 failure_class = "wiring.job-over-budget"
-legacy_signature = "pkg-repo\\.yml: its checks' measured seconds per job are 346 s, past the 300 s budget"
+legacy_signature = "pkg-repo\\.yml: its checks' measured seconds per job are [0-9]+ s, past the 300 s budget \\(.*hygiene 341\\.2 s"
 migrated = false
 [[fault]]
 id = "ci.ci_check_seconds_unmeasured"
