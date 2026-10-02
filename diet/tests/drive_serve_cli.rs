@@ -961,7 +961,15 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
 #[test]
 fn a_drive_server_refuses_a_record_without_a_regimen() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
-    let (code, said) = run_briefly(&stub.url(), &["--record", "unwritten.jsonl"]);
+    let path = std::env::temp_dir()
+        .join(format!(
+            "diet-drive-unwritten-record-{}.jsonl",
+            std::process::id()
+        ))
+        .to_string_lossy()
+        .into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--record", &path]);
+    let _ = std::fs::remove_file(&path);
     assert_eq!(code, Some(2), "{said}");
     assert!(said.contains("--record needs --regimen"), "{said}");
 }
