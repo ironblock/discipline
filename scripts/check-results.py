@@ -154,7 +154,10 @@ FIGURES_LANDED = "2026-10-02"
 # The sections that may carry no typed figure at all, and the ones that may
 # carry one only inside an `[uncited: <reason>]` marker, which declares it.
 FIGURES_NEVER_TYPED = ("Results", "Conclusion")
-UNCITED = re.compile(r"\[uncited:[^\]]*\]")
+# One line, and a reason with a word in it: an unterminated marker must not
+# reach across paragraphs to the next `]`, and `[uncited: 42]` declares
+# nothing (#265's review).
+UNCITED = re.compile(r"\[uncited:[^\]\n]*[A-Za-z][^\]\n]*\]")
 REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 # What a typed figure is: an ISO date, as ONE token (#63's measurement: a
 # date tokenised as three numbers made every Conclusion unmigratable), or a
@@ -163,7 +166,9 @@ REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 TYPED_FIGURE = re.compile(
     r"(?<![\w#.])(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![\w])"
 )
-INLINE_CODE = re.compile(r"(`+)(?:.|\n)*?(?<!`)\1(?!`)")
+INLINE_CODE = re.compile(r"(?<![`\\])(`+)(?!`)(?:.|\n)*?(?<![`\\])\1(?!`)")
+# A paragraph ends at a blank line; an inline code span never crosses one.
+PARAGRAPH_BREAK = re.compile(r"\n[ \t]*\n")
 LINK_TARGET = re.compile(r"\]\([^)]*\)")
 # `ns.key.key[0]`, or one of three functions over one: the whole grammar.
 REF_PATH = re.compile(r"(product|front|summary)((?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])+)")
@@ -788,7 +793,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
         rendered = lint_figures(directory, front, body, written_summary, fail)
     if RENDERED is not None and rendered is not None:
         RENDERED[directory.resolve()] = rendered
-    if FIGURES_SEEN is not None and figures in FIGURES:
+    if FIGURES_SEEN is not None and figures in FIGURES and name != TEMPLATE_DIR:
         FIGURES_SEEN[figures] += 1
 
     if LEDGER is not None and not failures and name != TEMPLATE_DIR:
@@ -832,52 +837,79 @@ def figures_declared(name: str, front: dict, fail: Callable[[str, str], None]) -
     return word
 
 
-def sections_of(body: str) -> dict[str, str]:
-    """Each level-2 section's text, fenced code blocks and HTML comments removed."""
-    body = HTML_COMMENT.sub("", body)
-    found: dict[str, list[str]] = {}
-    current: str | None = None
-    fence: str | None = None
-    for line in body.split("\n"):
-        opener = CODE_FENCE.match(line)
-        if fence is None:
-            if opener:
-                fence = opener.group(1)
-                continue
-            heading = HEADING.match(line)
-            if heading:
-                current = heading.group(1)
-                found.setdefault(current, [])
-            elif current is not None:
-                found[current].append(line)
-            continue
-        if opener and opener.group(1)[0] == fence[0] and len(opener.group(1)) >= len(fence):
-            if line.strip().strip(fence[0]) == "":
-                fence = None
-    return {name: "\n".join(lines) for name, lines in found.items()}
+# What precedes the first level-2 heading -- the title and any introduction
+# -- is linted as a section of its own, like Observation (#265's review: six
+# of the fifteen directories carry figures there).
+PREAMBLE = "preamble"
 
 
 def code_ranges(body: str) -> list[tuple[int, int]]:
-    """Where `body` holds code: each fenced block, whole, and each inline span
-    outside one, as (start, end) offsets."""
+    """Where `body` holds code, as (start, end) offsets: each fenced block,
+    whole, and each inline span, found paragraph by paragraph as CommonMark
+    finds them -- a span never crosses a blank line or a heading, and a
+    backslash-escaped backtick opens nothing. A backtick fence whose info
+    string holds a backtick is not a fence. The ONE finder: the typed-figure
+    lint and the reference resolver both read it, so a stray backtick cannot
+    hide from one what the other sees (#265's review)."""
     ranges: list[tuple[int, int]] = []
     fence: str | None = None
     start = offset = 0
+    prose: list[tuple[int, int]] = []
+    block = 0
     for line in body.split("\n"):
         opener = CODE_FENCE.match(line)
+        if opener and opener.group(1)[0] == "`" and "`" in line[opener.end():]:
+            opener = None
         if fence is None and opener:
+            prose.append((block, offset))
             fence, start = opener.group(1), offset
         elif fence is not None and opener and opener.group(1)[0] == fence[0] \
                 and len(opener.group(1)) >= len(fence) and line.strip().strip(fence[0]) == "":
             ranges.append((start, offset + len(line)))
             fence = None
+            block = offset + len(line) + 1
+        elif fence is None and HEADING.match(line):
+            prose.append((block, offset))
+            block = offset + len(line) + 1
         offset += len(line) + 1
     if fence is not None:
         ranges.append((start, len(body)))
-    for span in INLINE_CODE.finditer(body):
-        if not any(a <= span.start() < b for a, b in ranges):
-            ranges.append(span.span())
+    else:
+        prose.append((block, len(body)))
+    for begin, finish in prose:
+        cursor = begin
+        for gap in [*PARAGRAPH_BREAK.finditer(body, begin, finish), None]:
+            stop = gap.start() if gap else finish
+            for span in INLINE_CODE.finditer(body, cursor, stop):
+                ranges.append(span.span())
+            cursor = gap.end() if gap else finish
     return ranges
+
+
+def masked(body: str, ranges: list[tuple[int, int]]) -> str:
+    """`body` with every range blanked, line breaks kept, so offsets and
+    headings survive and nothing inside code is read as prose."""
+    chars = list(body)
+    for begin, finish in ranges:
+        for at in range(begin, finish):
+            if chars[at] != "\n":
+                chars[at] = " "
+    return "".join(chars)
+
+
+def sections_of(body: str) -> dict[str, str]:
+    """Each level-2 section's text, and the preamble before the first, from a
+    body whose code is already blanked."""
+    found: dict[str, list[str]] = {PREAMBLE: []}
+    current = PREAMBLE
+    for line in body.split("\n"):
+        heading = HEADING.match(line)
+        if heading:
+            current = heading.group(1)
+            found.setdefault(current, [])
+        else:
+            found[current].append(line)
+    return {name: "\n".join(lines) for name, lines in found.items()}
 
 
 def the_product(directory: pathlib.Path, front: dict) -> tuple[dict | None, str | None]:
@@ -920,6 +952,19 @@ def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None,
         if isinstance(value, (list, dict)):
             return str(len(value)), None
         return None, f"`{{{{{text}}}}}` counts `{target}`, which is not a list or a table"
+    # `front` is a date or a `[regime]` value, nothing else (#265's review): a
+    # front-matter string is checked against nothing, so a figure in one is a
+    # typed figure in a costume, and a front-matter number re-spells through
+    # TOML -- `summary` holds the same number as written.
+    if path.group(1) == "front":
+        if isinstance(value, (datetime.date, datetime.time)):
+            return value.isoformat(), None
+        if steps[:1] != ("regime",):
+            return None, (
+                f"`{{{{{text}}}}}` names `{target}`; a front-matter reference is a date or a "
+                f"`[regime]` value, since nothing checks any other against the data -- "
+                f"reference the summary row or the product"
+            )
     if isinstance(value, bool):
         shown = "true" if value else "false"
     elif isinstance(value, (Written, str, int, float, datetime.date)):
@@ -927,13 +972,19 @@ def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None,
     else:
         return None, f"`{{{{{text}}}}}` names `{target}`, which is not one value"
     if function in ("round", "pct"):
+        if not isinstance(value, Written) or int(places or 0) > 12:
+            return None, f"`{{{{{text}}}}}` rounds `{target}`, which is not a number the product or summary wrote, or asks for more than 12 places"
         try:
             number = decimal.Decimal(shown)
+            if function == "pct":
+                number *= 100
+            number = number.quantize(
+                decimal.Decimal(1).scaleb(-int(places or 0)),
+                rounding=decimal.ROUND_HALF_EVEN,
+                context=decimal.Context(prec=60),
+            )
         except decimal.InvalidOperation:
-            return None, f"`{{{{{text}}}}}` rounds `{target}`, which is not a number"
-        if function == "pct":
-            number *= 100
-        number = number.quantize(decimal.Decimal(1).scaleb(-int(places or 0)), rounding=decimal.ROUND_HALF_EVEN)
+            return None, f"`{{{{{text}}}}}` rounds `{target}`, which does not round to that many places"
         shown = f"{number}%" if function == "pct" else str(number)
     return shown, None
 
@@ -944,7 +995,8 @@ def lint_figures(
     """A `referenced` directory's body: no typed figure where none may stand,
     every reference resolved. Returns the rendered body, or None if it fails."""
     clean = True
-    for section, text in sections_of(body).items():
+    code = code_ranges(body)
+    for section, text in sections_of(masked(HTML_COMMENT.sub(lambda m: " " * len(m.group(0)), body), code)).items():
         uncited = UNCITED.findall(text)
         if uncited and section in FIGURES_NEVER_TYPED:
             clean = False
@@ -953,7 +1005,7 @@ def lint_figures(
                 f"the {section} section declares a figure `{uncited[0]}`; {section} carries "
                 f"no typed figure, cited or not -- reference the field instead (#63)",
             )
-        bare = REFERENCE.sub(" ", UNCITED.sub(" ", LINK_TARGET.sub("]", INLINE_CODE.sub(" ", text))))
+        bare = REFERENCE.sub(" ", UNCITED.sub(" ", LINK_TARGET.sub("]", text)))
         typed = TYPED_FIGURE.findall(bare)
         if typed:
             clean = False
@@ -966,7 +1018,6 @@ def lint_figures(
 
     # A reference inside code -- a span or a fenced block -- is text about
     # references, as Markdown shows it, not a figure; it is left as written.
-    code = code_ranges(body)
     references = [m for m in REFERENCE.finditer(body) if not any(a <= m.start() < b for a, b in code)]
     needs_product = any("product." in m.group(1) for m in references)
     product, why = the_product(directory, front) if needs_product else (None, "no reference names the product")

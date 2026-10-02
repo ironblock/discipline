@@ -3509,38 +3509,88 @@ EOF
 # text has one source and each case is the fixture plus its fault.
 inject_results_figure_typed_in_conclusion() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
-  edit_in_place "s/the product's own\\./the product's own, 0.142 of it./" \
-    results/2026-10-03-figures-referenced/README.md
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, 0.142 of it.", 1), encoding="utf-8")
+EOF
 }
 
 inject_results_figure_typed_in_test() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
-  edit_in_place 's/nothing was fired$/nothing was fired 3 times/' \
-    results/2026-10-03-figures-referenced/README.md
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = 'nothing was fired\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'nothing was fired 3 times\n', 1), encoding="utf-8")
+EOF
 }
 
 inject_results_figure_uncited_in_conclusion() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
-  edit_in_place "s/the product's own\\./the product's own [uncited: a guess, 3]./" \
-    results/2026-10-03-figures-referenced/README.md
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own [uncited: a guess, 3].", 1), encoding="utf-8")
+EOF
 }
 
 inject_results_reference_unresolved() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
-  edit_in_place 's/{{product\.of_steps}}/{{product.of_stepz}}/' \
-    results/2026-10-03-figures-referenced/README.md
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '{{product.of_steps}}'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '{{product.of_stepz}}', 1), encoding="utf-8")
+EOF
 }
 
 # The value a headline figure references, altered: the product no longer
 # hashes to `product_sha256`, so no figure can be rendered from it.
 inject_results_referenced_product_altered() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
-  edit_in_place 's/0\.142/0.241/' results/2026-10-03-figures-referenced/report.json
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/report.json")
+source = path.read_text(encoding="utf-8")
+old = '0.142'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '0.241', 1), encoding="utf-8")
+EOF
 }
 
 inject_results_figures_undeclared() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
-  edit_in_place '/^figures = "referenced"$/d' results/2026-10-03-figures-referenced/README.md
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = 'figures = "referenced"\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '', 1), encoding="utf-8")
+EOF
 }
 
 # A consumed digest that no longer matches its file. The claim then cites
