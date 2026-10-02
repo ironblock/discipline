@@ -81,7 +81,7 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
     // announcing must fail this test, not hang it -- and not leave a server
     // running after it.
     let stdout = child.stdout.take().expect("stdout is piped");
-    let (line, announced) = std::sync::mpsc::channel();
+    let (line, lines) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         loop {
@@ -91,8 +91,7 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
             }
         }
     });
-    let announced_rest = announced;
-    let Ok(first) = announced_rest.recv_timeout(Duration::from_secs(10)) else {
+    let Ok(first) = lines.recv_timeout(Duration::from_secs(10)) else {
         let _ = child.kill();
         let _ = child.wait();
         panic!("diet-drive serve did not announce itself within 10 s");
@@ -116,7 +115,7 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
             .as_str()
             .zip(announced["record_truncated"].as_bool())
             .map(|(path, truncated)| (path.to_owned(), truncated)),
-        said: announced_rest,
+        said: lines,
         child,
         _head: head,
     }
@@ -821,7 +820,8 @@ fn a_drive_server_says_when_its_log_flag_emptied_a_file() {
 }
 
 /// `diet-drive serve` started through `sh` with `prelude` before it, its
-/// first line read and its stdout then closed, as `start` closes it.
+/// first line read and its stdout then closed -- unlike `start`, which keeps
+/// reading.
 fn start_through_sh(prelude: &str, endpoint: &str, extra: &[&str]) -> (Child, String, HeadFile) {
     let head = file_holding("head", HEAD);
     let mut child = Command::new("sh")
@@ -977,6 +977,11 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
     let record = file_holding("record", "");
     let path = record.0.to_string_lossy().into_owned();
     let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+    assert_eq!(
+        served.record,
+        Some((path.clone(), false)),
+        "nothing was there to empty"
+    );
     let address = served.listening.clone();
     for turn in 1..=2 {
         let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
@@ -1066,21 +1071,61 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
 #[test]
 fn a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts() {
     // Left in place until the session ends, an earlier run's record would
-    // read as this session's if this one never ended (#264's review).
-    let stub =
-        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    // read as this session's if this one never ended (#264's review). An
+    // empty record beside a stale sidecar is announced as emptied too.
+    for earlier in ["an earlier session's record\n", ""] {
+        let stub = Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info())
+            .expect("loopback");
+        let record = file_holding("record", earlier);
+        let path = record.0.to_string_lossy().into_owned();
+        let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+        std::fs::write(&sidecar, "an earlier session's sidecar\n").expect("written");
+        let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+        let left = (
+            served.record.clone(),
+            std::fs::read_to_string(&record.0).expect("the record"),
+            sidecar.exists(),
+        );
+        let _ = std::fs::remove_file(&sidecar);
+        assert_eq!(
+            left,
+            (Some((path, true)), String::new(), false),
+            "{earlier:?}"
+        );
+    }
+}
+
+#[test]
+fn a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were() {
+    // Emptied only once the address is bound (#264's review, round 2).
     let record = file_holding("record", "an earlier session's record\n");
     let path = record.0.to_string_lossy().into_owned();
     let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
     std::fs::write(&sidecar, "an earlier session's sidecar\n").expect("written");
-    let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = std::net::TcpListener::local_addr(&taken)
+        .expect("its address")
+        .port()
+        .to_string();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &["--regimen", &dev_loop(), "--record", &path, "--port", &port],
+    );
     let left = (
-        served.record.clone(),
-        std::fs::read_to_string(&record.0).expect("the record"),
-        sidecar.exists(),
+        std::fs::read_to_string(&record.0).ok(),
+        std::fs::read_to_string(&sidecar).ok(),
     );
     let _ = std::fs::remove_file(&sidecar);
-    assert_eq!(left, (Some((path, true)), String::new(), false));
+    assert_eq!(code, Some(2), "the bind fails: {said}");
+    assert_eq!(
+        left,
+        (
+            Some("an earlier session's record\n".to_owned()),
+            Some("an earlier session's sidecar\n".to_owned())
+        )
+    );
 }
 
 #[test]

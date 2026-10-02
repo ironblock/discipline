@@ -286,7 +286,9 @@ fn serve(args: &[String]) -> ExitCode {
     let render = diet::drive::session::render;
     // The writers start once the address is bound and before the server
     // does: no command can append a line before the log's sink is in place
-    // (#264's review), and a start refused at the bind has emptied nothing.
+    // (#264's review), and any refusal before this point -- the engine
+    // check, the bind -- leaves the log, the record and its sidecar as they
+    // were. A failure from here on has emptied them.
     let (log, record_held) =
         match started_writers(&writers, render, log_file, record.zip(regime.clone())) {
             Ok(held) => held,
