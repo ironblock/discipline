@@ -574,12 +574,17 @@ def main() -> int:
         run_of = on.get("workflow_run") if isinstance(on.get("workflow_run"), dict) else {}
         if run_of.get("workflows") != ["verify"]:
             failures.append("pages.yml: does not run downstream of the `verify` workflow (workflow_run of verify)")
+        # Exactly: a run completed, on main. Without the branch filter a
+        # passing push run on any branch would publish (#258's review).
+        elif run_of != {"workflows": ["verify"], "types": ["completed"], "branches": ["main"]}:
+            failures.append(f"pages.yml: the workflow_run trigger is not exactly verify's runs completed on main (found {json.dumps(run_of, sort_keys=True)})")
         if set(on) - {"workflow_run"}:
             failures.append("pages.yml: publishes on a trigger of its own, not only on a `verify` run's completion")
         if "concurrency" in doc:
             failures.append("pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters, cancelling a waiting deploy (#244)")
-        if "defaults" in doc:
-            failures.append("pages.yml: workflow-level `defaults`, which can change how every step runs")
+        for key in ("defaults", "env"):
+            if key in doc:
+                failures.append(f"pages.yml: workflow-level `{key}`, which can change how every step runs")
         jobs = doc.get("jobs") if isinstance(doc.get("jobs"), dict) else {}
         deploy = jobs.get("deploy") if isinstance(jobs.get("deploy"), dict) else {}
         if not deploy:
@@ -588,14 +593,21 @@ def main() -> int:
         # with none of the checks below (#258's review).
         if set(jobs) - {"deploy"}:
             failures.append(f"pages.yml: jobs other than `deploy` ({', '.join(sorted(set(jobs) - {'deploy'}))}), which nothing here checks")
-        if "defaults" in deploy:
-            failures.append("pages.yml: the deploy job's `defaults`, which can change how every step runs")
+        # The deploy job's own keys, an allowlist: anything else -- a
+        # container, a matrix, `env`, `defaults`, `needs` -- changes how or
+        # where its steps run, or what they see.
+        extra = set(deploy) - {"name", "if", "concurrency", "runs-on", "environment", "steps", "timeout-minutes"}
+        if extra:
+            failures.append(f"pages.yml: the deploy job carries {', '.join(sorted(extra))}, which can change how or where its steps run")
         guards = {
             "github.event.workflow_run.conclusion == 'success'": "pages.yml: deploys on a workflow_run whatever its conclusion",
             "github.event.workflow_run.event == 'push'": "pages.yml: deploys on a run that was not a push",
             "github.event.workflow_run.head_repository.full_name == github.repository": "pages.yml: deploys a run of a fork's code",
         }
         condition = deploy.get("if") if isinstance(deploy.get("if"), str) else ""
+        # `${{ ... }}` around a whole `if:` is the same expression to GitHub.
+        wrapped = re.fullmatch(r"\s*\$\{\{(.*)\}\}\s*", condition, re.S)
+        condition = wrapped.group(1).strip() if wrapped else condition.strip()
         clauses = [c.strip() for c in condition.split("&&")] if condition else []
         for guard, message in guards.items():
             if guard not in clauses:
@@ -610,11 +622,37 @@ def main() -> int:
         check = next((i for i, st in enumerate(steps) if str(st.get("run", "")).strip() == "./verify.sh --site _site"), None)
         if check is None or check > upload:
             failures.append("pages.yml: upload-pages-artifact is not preceded by ./verify.sh --site _site")
+        # The actions the deploy job may use, matched without regard to case
+        # or version: no other action, and each of these where it belongs.
+        uses = [str(st.get("uses", "")).lower().split("@", 1)[0] for st in steps]
+        allowed = {"", "actions/checkout", "actions/download-artifact", "actions/configure-pages", "actions/upload-pages-artifact", "actions/deploy-pages"}
+        if set(uses) - allowed:
+            failures.append(f"pages.yml: the deploy job uses {', '.join(sorted(set(uses) - allowed))}, which nothing here checks")
+        # The sha that run checked, checked out before the check: the site is
+        # that sha's, and so are the admissions and tables it is checked
+        # against (#258's review).
+        checkouts = [i for i, u in enumerate(uses) if u == "actions/checkout"]
+        if len(checkouts) != 1 or (check is not None and checkouts[0] > check) or steps[checkouts[0]].get("with") != {"ref": "${{ github.event.workflow_run.head_sha }}"}:
+            failures.append("pages.yml: the site is not checked against the sha that run built (one actions/checkout, ref: the run's head_sha, before the check)")
+        # Nothing between the check and the upload writes to the site: only
+        # configure-pages may stand there (#258's review).
+        if check is not None and uploads and any(u != "actions/configure-pages" for u in uses[check + 1:upload]):
+            failures.append("pages.yml: a step between ./verify.sh --site _site and the upload, which can change the site after its check")
+        # From the check on, nothing is skipped or made to run regardless:
+        # an `if:` there (`always()`) publishes a site that failed its check.
+        for i in range(check if check is not None else len(steps), len(steps)):
+            if "if" in steps[i]:
+                failures.append(f"pages.yml: a step from the check on carries `if:` ({steps[i].get('name') or steps[i].get('uses') or steps[i].get('run')}), so it can run whatever the check said")
+        deploys = [i for i, u in enumerate(uses) if u == "actions/deploy-pages"]
+        if len(deploys) != 1 or (uploads and deploys[0] < upload) or "with" in steps[deploys[0]]:
+            failures.append("pages.yml: the deploy job does not deploy once, after the upload, the artifact it uploaded (one actions/deploy-pages, no `with`)")
         # A step that decides can be made not to: skipped, or run by another
         # shell than the one its script is written for (#258's review).
         for i, what in ((check, "check step"), (next((j for j, st in enumerate(steps) if st.get("name") == "Publish only the newest run the gate passed"), None), "newest-run step")):
             if i is not None and set(steps[i]) & {"if", "shell", "working-directory"}:
                 failures.append(f"pages.yml: the {what} carries {', '.join(sorted(set(steps[i]) & {'if', 'shell', 'working-directory'}))}, so it may not run as written")
+        if check is not None and "env" in steps[check]:
+            failures.append("pages.yml: the check step carries env, so it may not run as written")
         # The newest-run step, by name: the query is the command that sets
         # `newest`, the run number its own env, and nothing makes it optional.
         at = next((i for i, st in enumerate(steps) if st.get("name") == "Publish only the newest run the gate passed"), None)
@@ -625,7 +663,7 @@ def main() -> int:
         if (
             at is None or at > upload
             or not re.search(query, script, re.M)
-            or env.get("RUN_NUMBER") != "${{ github.event.workflow_run.run_number }}"
+            or env != {"GH_TOKEN": "${{ github.token }}", "RUN_NUMBER": "${{ github.event.workflow_run.run_number }}"}
         ):
             failures.append("pages.yml: publishes without checking that no later verify run on main has passed")
         # And the step DECIDES as described: run under bash with a stub `gh`

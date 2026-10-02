@@ -3991,6 +3991,31 @@ inject_ci_pages_check_step_skipped() {
         if: false' .github/workflows/pages.yml
 }
 
+# #258's second review: the slips a maintainer could make.
+
+# A step between the check and the upload that writes to the site.
+inject_ci_pages_site_written_after_its_check() {
+  edit_in_place '/^      - uses: actions\/configure-pages@v5$/i\
+      - run: echo example.org > _site/CNAME\
+' .github/workflows/pages.yml
+}
+
+# The upload made to run whatever the check said.
+inject_ci_pages_upload_always() {
+  edit_in_place '/^      - uses: actions\/upload-pages-artifact@v3$/a\
+        if: always()' .github/workflows/pages.yml
+}
+
+# The trigger's branch filter gone: a passing push run on any branch publishes.
+inject_ci_pages_trigger_any_branch() {
+  edit_in_place '/^    branches: \[main\]$/d' .github/workflows/pages.yml
+}
+
+# The site checked against main's tip rather than the sha that built it.
+inject_ci_pages_checkout_not_the_run() {
+  edit_in_place 's/^          ref: \${{ github.event.workflow_run.head_sha }}$/          ref: main/' .github/workflows/pages.yml
+}
+
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
   edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
@@ -7799,6 +7824,14 @@ selftest() {
     "pages.yml: jobs other than .deploy. .publish-too."
   seeded_case "the check step skipped" ci inject_ci_pages_check_step_skipped \
     "pages.yml: the check step carries if, so it may not run as written"
+  seeded_case "the site written after its check" ci inject_ci_pages_site_written_after_its_check \
+    "pages.yml: a step between ./verify.sh --site _site and the upload"
+  seeded_case "the upload run whatever the check said" ci inject_ci_pages_upload_always \
+    "pages.yml: a step from the check on carries .if:. .actions/upload-pages-artifact"
+  seeded_case "the trigger on any branch" ci inject_ci_pages_trigger_any_branch \
+    "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+  seeded_case "the checkout not the run's sha" ci inject_ci_pages_checkout_not_the_run \
+    "pages.yml: the site is not checked against the sha that run built"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
