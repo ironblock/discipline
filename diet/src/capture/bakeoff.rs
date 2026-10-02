@@ -1592,6 +1592,114 @@ const GIVEN_FLAGS: &[(&str, &str)] = &[
 /// The flag that declares a field absent, as `FIELD=REASON`.
 const ABSENT_FLAG: &str = "--absent";
 
+/// The file `rule_ratified` names when it names none. The assembler never
+/// writes one, so an assembled directory's ratification names its file.
+const DEFAULT_RULE_FILE: &str = "decision-rule.toml";
+
+/// THE LINTER'S SHAPES, APPLIED BEFORE ANYTHING IS WRITTEN (#271 review): a
+/// value `check-results.py` would refuse is refused here, so the assembler
+/// never writes a directory the gates then turn away. An issue or comment
+/// number: ASCII digits, no leading zero.
+fn is_issue_number(value: &str) -> bool {
+    !value.is_empty() && !value.starts_with('0') && value.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Sixty-four lowercase hex characters.
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ`, a real calendar day and a time of day without a
+/// leap second -- what the linter's `strptime` reading accepts.
+fn is_utc(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let shape = bytes.len() == 20
+        && bytes.iter().enumerate().all(|(at, b)| match at {
+            4 | 7 => *b == b'-',
+            10 => *b == b'T',
+            13 | 16 => *b == b':',
+            19 => *b == b'Z',
+            _ => b.is_ascii_digit(),
+        });
+    if !shape {
+        return false;
+    }
+    let number = |from: usize, to: usize| value[from..to].parse::<u32>().unwrap_or(u32::MAX);
+    let (year, month, day) = (number(0, 4), number(5, 7), number(8, 10));
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    year >= 1
+        && (1..=12).contains(&month)
+        && (1..=days[month as usize - 1]).contains(&day)
+        && number(11, 13) < 24
+        && number(14, 16) < 60
+        && number(17, 19) < 60
+}
+
+/// Refuses `value` for `field` unless `holds`.
+fn refuse_unless(holds: bool, field: &str, value: &str) -> Result<(), RunError> {
+    if holds {
+        Ok(())
+    } else {
+        Err(RunError::Undeclared(format!(
+            "`{field}` is {value:?}, which `check-results.py` would refuse: an issue or \
+             comment number is digits with no leading zero, a digest 64 lowercase hex, a \
+             time YYYY-MM-DDTHH:MM:SSZ"
+        )))
+    }
+}
+
+/// A given value held to its shape; an absence passes as declared.
+fn shaped(
+    declared: Declared<String>,
+    field: &str,
+    holds: fn(&str) -> bool,
+) -> Result<Declared<String>, RunError> {
+    if let Declared::Given(value) = &declared {
+        refuse_unless(holds(value), field, value)?;
+    }
+    Ok(declared)
+}
+
+/// A TOML basic string. Not Rust's `{:?}`: Debug escapes a control
+/// character as `\u{1b}`, which TOML refuses, and these strings are the first
+/// a caller writes (#271 review).
+fn toml_string(text: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from("\"");
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            ch if ch.is_control() => {
+                let _ = write!(out, "\\u{:04X}", u32::from(ch));
+            }
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
 impl Provenance {
     /// Read from `diet bakeoff`'s flags: `--claim-issue N`, `--supersedes
     /// HEX`, `--rule-ratified COMMENT,AT,DIGEST[,OF]`, and `--absent
@@ -1608,6 +1716,7 @@ impl Provenance {
         while at < flags.len() {
             let value = flags
                 .get(at + 1)
+                .filter(|value| !value.starts_with("--"))
                 .ok_or_else(|| RunError::Undeclared(format!("`{}` takes a value", flags[at])))?;
             // A table, not a match on spellings: the flags are data, and the
             // library check refuses a match arm on a string literal.
@@ -1659,8 +1768,8 @@ impl Provenance {
                 ))),
             }
         };
-        let claim_issue = declared("claim_issue")?;
-        let supersedes = declared("supersedes")?;
+        let claim_issue = shaped(declared("claim_issue")?, "claim_issue", is_issue_number)?;
+        let supersedes = shaped(declared("supersedes")?, "supersedes", is_sha256)?;
         let rule_ratified = match declared("rule_ratified")? {
             Declared::Absent(reason) => Declared::Absent(reason),
             Declared::Given(spec) => {
@@ -1674,6 +1783,13 @@ impl Provenance {
                     return Err(RunError::Undeclared(format!(
                         "`--rule-ratified {spec}` is not COMMENT,AT,DIGEST[,OF]"
                     )));
+                }
+                for (key, value, holds) in [
+                    ("comment", comment, is_issue_number as fn(&str) -> bool),
+                    ("at", at, is_utc),
+                    ("digest", digest, is_sha256),
+                ] {
+                    refuse_unless(holds(value), &format!("rule_ratified.{key}"), value)?;
                 }
                 Declared::Given(Ratified {
                     comment: (*comment).to_owned(),
@@ -1698,13 +1814,13 @@ impl Provenance {
         let mut absences: Vec<(&str, &str)> = Vec::new();
         match &self.claim_issue {
             Declared::Given(issue) => {
-                let _ = writeln!(lines, "claim_issue = {issue:?}");
+                let _ = writeln!(lines, "claim_issue = {}", toml_string(issue));
             }
             Declared::Absent(why) => absences.push(("claim_issue", why)),
         }
         match &self.supersedes {
             Declared::Given(digest) => {
-                let _ = writeln!(lines, "supersedes = {digest:?}");
+                let _ = writeln!(lines, "supersedes = {}", toml_string(digest));
             }
             Declared::Absent(why) => absences.push(("supersedes", why)),
         }
@@ -1713,11 +1829,13 @@ impl Provenance {
                 let of = ratified
                     .of
                     .as_ref()
-                    .map_or(String::new(), |of| format!(", of = {of:?}"));
+                    .map_or(String::new(), |of| format!(", of = {}", toml_string(of)));
                 let _ = writeln!(
                     lines,
-                    "rule_ratified = {{ comment = {:?}, at = {:?}, digest = {:?}{of} }}",
-                    ratified.comment, ratified.at, ratified.digest
+                    "rule_ratified = {{ comment = {}, at = {}, digest = {}{of} }}",
+                    toml_string(&ratified.comment),
+                    toml_string(&ratified.at),
+                    toml_string(&ratified.digest)
                 );
             }
             Declared::Absent(why) => absences.push(("rule_ratified", why)),
@@ -1725,7 +1843,7 @@ impl Provenance {
         absences.push(("window_start", window_start_absent));
         let shown: Vec<String> = absences
             .iter()
-            .map(|(field, why)| format!("{field} = {why:?}"))
+            .map(|(field, why)| format!("{field} = {}", toml_string(why)))
             .collect();
         let _ = writeln!(lines, "absent = {{ {} }}", shown.join(", "));
         lines
@@ -1759,6 +1877,38 @@ pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Val
 
     let artifacts = consumed(&done.record.events);
     let checked = u32::try_from(artifacts.len()).unwrap_or(u32::MAX);
+
+    // WHAT THE DECLARATIONS NAME, HELD TO THIS RUN (#271 review), before
+    // anything is written. A claim does not supersede its own product, and a
+    // ratification names a file this directory carries -- one of the files
+    // written below, not the README that states the digest -- whose bytes it
+    // is checked against before the README is written.
+    if provenance.supersedes == Declared::Given(product_sha256.clone()) {
+        return Err(RunError::Undeclared(format!(
+            "`supersedes` is {product_sha256}, this run's own product; a claim does not \
+             supersede itself"
+        )));
+    }
+    let carried: Vec<&str> = artifacts
+        .iter()
+        .map(|artifact| artifact.path.as_str())
+        .chain([
+            "pre-registration.json",
+            "run.jsonl",
+            "report.json",
+            "regimen.toml",
+        ])
+        .collect();
+    if let Declared::Given(ratified) = &provenance.rule_ratified {
+        let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
+        if !carried.contains(&of) {
+            return Err(RunError::Undeclared(format!(
+                "`rule_ratified` is of `{of}`, which this directory does not carry; it carries \
+                 {}",
+                carried.join(", ")
+            )));
+        }
+    }
 
     if into.join("README.md").exists() {
         return Err(RunError::Occupied {
@@ -1834,6 +1984,22 @@ pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Val
     }
     write(&into.join("report.json"), product.as_bytes())?;
     write(&into.join("regimen.toml"), regimen_of(&regime).as_bytes())?;
+    if let Declared::Given(ratified) = &provenance.rule_ratified {
+        let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
+        let found = std::fs::read(into.join(of))
+            .map(|bytes| sha256_hex(&bytes))
+            .map_err(|err| RunError::Write {
+                path: of.to_owned(),
+                reason: err.to_string(),
+            })?;
+        if found != ratified.digest {
+            return Err(RunError::Undeclared(format!(
+                "`rule_ratified.digest` is {}, and `{of}` as written hashes to {found}; the \
+                 ratification is of other bytes",
+                ratified.digest
+            )));
+        }
+    }
     write(
         &into.join("README.md"),
         report_of(
@@ -2147,6 +2313,11 @@ mod tests {
     use crate::digest::sha256_hex;
     use crate::formats::record::json::Value;
 
+    /// Flags as the binary passes them.
+    fn flags(list: &[&str]) -> Vec<String> {
+        list.iter().map(|f| (*f).to_owned()).collect()
+    }
+
     /// A declared provenance, as a caller who knows the claim passes it.
     fn declared() -> Provenance {
         Provenance::from_flags(&[
@@ -2165,10 +2336,67 @@ mod tests {
     /// #271): a field neither given nor declared absent is refused, by name,
     /// before anything is written -- and so is one given and declared absent
     /// at once, or `window_start`, which the assembler derives.
+    /// A VALUE THE LINTER WOULD REFUSE IS REFUSED HERE (#271 review), and
+    /// so is a run's own product named as superseded or a ratification of a
+    /// file the directory does not carry.
+    #[test]
+    fn a_declaration_out_of_shape_is_refused() {
+        let rest = ["--absent", "supersedes=x", "--absent", "rule_ratified=x"];
+        for (issue, ok) in [("24", true), ("0114", false), ("", false), ("2a", false)] {
+            let mut list = vec!["--claim-issue", issue];
+            list.extend(rest);
+            assert_eq!(
+                Provenance::from_flags(&flags(&list)).is_ok(),
+                ok,
+                "claim_issue {issue:?}"
+            );
+        }
+        let hex = "b".repeat(64);
+        for (at, ok) in [
+            ("2026-09-25T03:29:00Z", true),
+            ("2024-02-29T23:59:59Z", true),
+            ("2026-02-29T00:00:00Z", false),
+            ("2026-09-25T03:29:60Z", false),
+            ("2026-09-25 03:29:00Z", false),
+            ("2026-09-25T03:29:00+00:00", false),
+        ] {
+            let ratified = format!("1,{at},{hex}");
+            let list = [
+                "--absent",
+                "claim_issue=x",
+                "--absent",
+                "supersedes=x",
+                "--rule-ratified",
+                &ratified,
+            ];
+            assert_eq!(
+                Provenance::from_flags(&flags(&list)).is_ok(),
+                ok,
+                "at {at:?}"
+            );
+        }
+        for digest in ["B".repeat(64), "b".repeat(63)] {
+            let list = [
+                "--absent",
+                "claim_issue=x",
+                "--supersedes",
+                &digest,
+                "--absent",
+                "rule_ratified=x",
+            ];
+            assert!(
+                Provenance::from_flags(&flags(&list)).is_err(),
+                "supersedes {digest:?}"
+            );
+        }
+        assert_eq!(
+            super::toml_string("a\"b\\c\u{1b}\u{200b}\n"),
+            "\"a\\\"b\\\\c\\u001B\u{200b}\\n\""
+        );
+    }
+
     #[test]
     fn a_missing_declaration_is_refused_before_anything_is_written() {
-        let flags =
-            |list: &[&str]| -> Vec<String> { list.iter().map(|f| (*f).to_owned()).collect() };
         let missing = Provenance::from_flags(&flags(&[
             "--claim-issue",
             "24",
@@ -2452,6 +2680,79 @@ mod tests {
             sha256_hex(&product),
             "the answer's digest is not the product's"
         );
+
+        // EVERY FIELD GIVEN, and reasons a caller might type (#271 review):
+        // the given path writes values the gates read, and a reason with a
+        // quote, a backslash, a control character and a zero-width space is
+        // still TOML. Both land beside the first and are linted with it.
+        let pre_registration =
+            sha256_hex(&std::fs::read(into.join("pre-registration.json")).expect("written"));
+        let given = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--supersedes",
+            &"a".repeat(64),
+            "--rule-ratified",
+            &format!("5826194082,2026-09-25T03:29:00Z,{pre_registration},pre-registration.json"),
+        ]))
+        .expect("every field given");
+        assemble(&path, &dir.join("2026-01-02-every-field-given"), &given)
+            .unwrap_or_else(|err| panic!("the given assembly failed: {err}"));
+        // And what the declarations name is held to this run: its own
+        // product superseded, a ratification of the README or of a rule file
+        // it does not carry, or of other bytes, writes nothing.
+        let ratified = |tail: &str| format!("5826194082,2026-09-25T03:29:00Z,{tail}");
+        for (supersedes, rule, says) in [
+            (
+                reported.clone(),
+                ratified(&format!("{pre_registration},pre-registration.json")),
+                "does not supersede itself",
+            ),
+            (
+                "a".repeat(64),
+                ratified(&pre_registration),
+                "does not carry",
+            ),
+            (
+                "a".repeat(64),
+                ratified(&format!("{pre_registration},README.md")),
+                "does not carry",
+            ),
+            (
+                "a".repeat(64),
+                ratified(&format!("{},pre-registration.json", "c".repeat(64))),
+                "other bytes",
+            ),
+        ] {
+            let refused = Provenance::from_flags(&flags(&[
+                "--claim-issue",
+                "24",
+                "--supersedes",
+                &supersedes,
+                "--rule-ratified",
+                &rule,
+            ]))
+            .expect("in shape");
+            let landing = dir.join("refused");
+            let err = assemble(&path, &landing, &refused).expect_err(says);
+            assert!(err.to_string().contains(says), "{err}");
+            assert!(
+                !landing.join("README.md").exists(),
+                "a refused assembly wrote its README"
+            );
+            let _ = std::fs::remove_dir_all(&landing);
+        }
+        let typed = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--absent",
+            "supersedes=nothing \"replaced\" \\ here\u{1b}\u{200b}",
+            "--absent",
+            "rule_ratified=none\tat all\r\n",
+        ]))
+        .expect("typed reasons");
+        assemble(&path, &dir.join("2026-01-03-typed-reasons"), &typed)
+            .unwrap_or_else(|err| panic!("the typed assembly failed: {err}"));
 
         // AND THE GATES. `check-results.py` dispatches the record verdict to
         // the built binary, and refuses when that binary does not reflect the

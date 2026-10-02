@@ -153,6 +153,27 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     };
 
+    // The declarations are `bakeoff --into`'s, and a malformed one is a usage
+    // error like a misspelled `--into` (#271 review): read here, before the
+    // input, so no other command carries a tail it silently ignores.
+    let provenance = match (operation, into) {
+        (Operation::Bakeoff, Some(_)) => {
+            match diet::capture::bakeoff::Provenance::from_flags(declarations) {
+                Ok(provenance) => Some(provenance),
+                Err(err) => {
+                    eprintln!("diet: {err}\n");
+                    eprint!("{}", usage());
+                    return ExitCode::from(EXIT_USAGE);
+                }
+            }
+        }
+        _ if declarations.is_empty() => None,
+        _ => {
+            eprint!("{}", usage());
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+
     // Bytes, not text: a format returns a verdict on whatever is on disk, and
     // "this file is not UTF-8" is one of its verdicts rather than a crash.
     let source = match std::fs::read(path) {
@@ -186,15 +207,17 @@ fn main() -> ExitCode {
                 // ASSEMBLE, DON'T PRINT. Ruled 2026-09-10 on #69: the numbers
                 // are a results directory, and printing them leaves the
                 // assembly of one to a person.
-                Some(into) => diet::capture::bakeoff::Provenance::from_flags(declarations)
-                    .and_then(|provenance| {
+                Some(into) => provenance.as_ref().map_or_else(
+                    || Err("the declarations were not read".to_owned()),
+                    |provenance| {
                         diet::capture::bakeoff::assemble(
                             std::path::Path::new(path),
                             std::path::Path::new(into),
-                            &provenance,
+                            provenance,
                         )
-                    })
-                    .map_err(|err| err.to_string()),
+                        .map_err(|err| err.to_string())
+                    },
+                ),
                 None => diet::capture::bakeoff::run(std::path::Path::new(path))
                     .map_err(|err| err.to_string()),
             },

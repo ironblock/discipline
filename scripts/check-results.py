@@ -163,6 +163,8 @@ def is_utc(value: object) -> bool:
     except ValueError:
         return False
     return True
+
+
 DEFAULT_RULE_FILE = "decision-rule.toml"
 
 
@@ -827,6 +829,9 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
     supersedes = front.get("supersedes")
     if supersedes is not None and not (isinstance(supersedes, str) and SHA256.fullmatch(supersedes)):
         fail("results.claim-field-malformed", "`supersedes` is not the 64-hex digest of the product it replaces")
+    elif supersedes is not None and supersedes == front.get("product_sha256"):
+        # A claim never replaces itself (#271 review): one comparison.
+        fail("results.claim-field-malformed", "`supersedes` is this directory's own `product_sha256`; a claim does not supersede itself")
     window = front.get("window_start")
     if window is not None and not is_utc(window):
         fail("results.claim-field-malformed", f"`window_start` is {window!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
@@ -868,8 +873,15 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
     # commit is the migration's measurement, cited in its values file.
     of = ratified.get("of", DEFAULT_RULE_FILE)
     parts = pathlib.PurePosixPath(of).parts if isinstance(of, str) else ()
-    if not isinstance(of, str) or not of or of.startswith("/") or ".." in parts:
-        fail("results.claim-field-malformed", f"`rule_ratified.of` is {of!r}; it is a path inside this directory")
+    if not isinstance(of, str) or not of or of.startswith("/") or ".." in parts \
+            or pathlib.PurePosixPath(of).as_posix() != of or of.startswith("./"):
+        # One spelling per file (#271 review): `./decision-rule.toml` and
+        # `a//b` are refused, so two directories naming one file agree.
+        fail("results.claim-field-malformed", f"`rule_ratified.of` is {of!r}; it is a path inside this directory, spelled plainly")
+    elif of == "README.md":
+        # The README states the digest, so it can never be the file the
+        # digest is of (#271 review).
+        fail("results.claim-field-malformed", "`rule_ratified` is of `README.md`, the file that states its digest; a digest cannot be of itself")
     elif not (directory / of).is_file() or (directory / of).is_symlink() \
             or not (directory / of).resolve().is_relative_to(directory.resolve()):
         # Not a symlink, and inside once resolved: a link can name a file

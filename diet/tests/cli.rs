@@ -434,23 +434,59 @@ fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {
     // NO DECLARATION, NO DIRECTORY (#32, ruled on #271): the claim's
     // provenance is the caller's to declare, field by field, and an assembly
     // with none declared is refused before anything is written.
-    let (code, out, _) = run(&[
-        "bakeoff",
-        &run_path,
-        "--into",
-        into.to_str().expect("a UTF-8 path"),
-    ]);
+    // A malformed declaration is a usage error, like a misspelled `--into`
+    // (#271 review): exit 2, nothing on stdout, the reason on stderr.
+    let declared = |tail: &[&str]| -> (i32, String, String) {
+        let mut args = vec![
+            "bakeoff",
+            run_path.as_str(),
+            "--into",
+            into.to_str().expect("a UTF-8 path"),
+        ];
+        args.extend_from_slice(tail);
+        run(&args)
+    };
+    for (tail, reason) in [
+        (&[][..], "neither given nor declared absent"),
+        (
+            &[
+                "--claim-issue",
+                "0114",
+                "--absent",
+                "supersedes=x",
+                "--absent",
+                "rule_ratified=x",
+            ][..],
+            "`claim_issue` is \"0114\"",
+        ),
+        (
+            &[
+                "--claim-issue",
+                "--absent",
+                "supersedes=x",
+                "--absent",
+                "rule_ratified=x",
+            ][..],
+            "`--claim-issue` takes a value",
+        ),
+    ] {
+        let (code, out, err) = declared(tail);
+        assert_eq!(code, 2, "{tail:?} was not a usage error: {out} {err}");
+        assert!(out.is_empty(), "a usage error printed a result: {out}");
+        assert!(
+            err.contains(reason),
+            "{tail:?}: the refusal does not say {reason:?}: {err}"
+        );
+        assert!(
+            !into.exists(),
+            "a refused assembly wrote its directory anyway"
+        );
+    }
+    // And no other command carries a declaration it would silently ignore.
+    let (code, _, _) = run(&["route", &run_path, "--into", "x", "--claim-issue", "24"]);
     assert_eq!(
-        code, 1,
-        "an assembly with no provenance declared was accepted: {out}"
-    );
-    assert!(
-        out.contains("neither given nor declared absent"),
-        "the refusal does not name what is undeclared: {out}"
-    );
-    assert!(
-        !into.exists(),
-        "a refused assembly wrote its directory anyway"
+        code, 2,
+        "a declaration on a command that reads none was accepted"
     );
 
     let (code, out, err) = run(&[

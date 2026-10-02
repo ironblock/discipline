@@ -1516,10 +1516,6 @@ path.write_text(source.replace(was, now, 1), encoding="utf-8")
 EOF
 }
 
-# The runner's digest comparison made advisory. The cache is still read, the
-# scores are still computed, and they are the scores of whatever bytes happen
-# to be on disk rather than of the bytes the record consumed -- which is a
-# recompute that recomputes something else.
 # The assembler inferring an absence the caller never declared (#32, ruled on
 # #271): an undeclared field written as absent, with no one having said why.
 inject_bakeoff_infers_an_absence() {
@@ -1536,6 +1532,10 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# The runner's digest comparison made advisory. The cache is still read, the
+# scores are still computed, and they are the scores of whatever bytes happen
+# to be on disk rather than of the bytes the record consumed -- which is a
+# recompute that recomputes something else.
 inject_bakeoff_digest_unchecked() {
   python3 - <<'EOF'
 import pathlib
@@ -8659,7 +8659,8 @@ prove_selftest_mechanics() {
   # ratified before does not (the 09-27 edit-rate run).
   expect_exit "post-hoc is derived from the two times, both ways" 0 \
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
-      && ledger=\$(mktemp) && python3 scripts/check-results.py --root results --ledger \"\$ledger\" >/dev/null \
+      && ledger=\$(mktemp) && trap 'rm -f \"\${ledger:?}\"' EXIT \
+      && python3 scripts/check-results.py --root results --ledger \"\$ledger\" >/dev/null \
       && python3 -c 'import json,sys; rows={r[\"directory\"]: r[\"provenance\"][\"post_hoc\"] for r in json.load(open(sys.argv[1]))[\"directories\"]}; sys.exit(0 if rows[\"2026-09-20-false-nomination-framing\"] is True and rows[\"2026-09-27-false-nomination-edit-rate\"] is False else 1)' \"\$ledger\""
 
   expect_exit "a record diet refuses gets no verdict from the linter" 0 \

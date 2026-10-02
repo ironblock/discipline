@@ -26,11 +26,12 @@ That is the whole point: prose is verified against data, never merely written.
 
 A copy of this template must also give the claim's provenance (#32), each
 field at the top level or named in `absent = { field = "why it is absent" }`:
-`claim_issue` (the issue's number as a string of digits), `supersedes` (the
-64-hex digest of the product this one replaces), `rule_ratified = { comment,
-at, digest, of }` (the maintainer's ratifying comment id, its UTC time, and
-the sha256 of the file `of` names -- `decision-rule.toml` unless `of` says
-otherwise) and `window_start` (UTC), with `window_start_from` naming where
+`claim_issue` (the issue's number as a string of digits, no leading zero),
+`supersedes` (the 64-hex digest of the product this one replaces, never this
+directory's own), `rule_ratified = { comment, at, digest }` with an optional
+`of` (the maintainer's ratifying comment id, digits with no leading zero; its
+UTC time; and the sha256 of the file `of` names -- `decision-rule.toml` unless
+`of` names another file here, spelled plainly, and never this README) and `window_start` (UTC), with `window_start_from` naming where
 that time was read. `rule_ratified_note` carries a caveat the three values
 cannot. Whether the rule is post-hoc is derived -- ratified after the window
 opened -- and never written.
