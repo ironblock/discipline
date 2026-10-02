@@ -773,6 +773,8 @@ weights_acts_sha256 = "8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864
 reproducible_by_config = true
 reproducible_because = "replay the acts and the same bytes play again; exact match, no band. Gate 1 compares a canned run exactly rather than re-firing it within a band meant for sampling and hardware that cannot move here."
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
+engine_build_info = "canned-8947e69543df56300d85ed571a6799d66b25a51c18c6d456193918864d7f5e9d"
+engine_build_info_is = "derived, not read from a server: canned::build_info(), \"canned-\" + the entry's acts digest (weights_acts_sha256, equal to engine_identity); its acts as first registered; no server in the crate plays them now, so a serve under a regimen naming this substrate is refused (track three discloses it)"
 
 [substrate.canned-cache-n]
 equipment = "canned-loopback-cache-n"
@@ -786,6 +788,8 @@ weights_acts_sha256 = "188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb9073
 reproducible_by_config = true
 reproducible_because = "as for `canned`: replay the acts and the same bytes play again; exact match, no band"
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
+engine_build_info = "canned-188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
+engine_build_info_is = "derived, not read from a server: canned::build_info(), \"canned-\" + the entry's acts digest (weights_acts_sha256, equal to engine_identity); the acts the crate plays now, so the canned server reports this literal at GET /props"
 
 # The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
 # not a served model: no server, no sampler, a pinned library on this host's
