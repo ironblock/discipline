@@ -35,6 +35,7 @@ pass. A pages.yml that is not YAML is a failure of the file: exit 1.
 
 from __future__ import annotations
 
+import collections
 import json
 import pathlib
 import re
@@ -88,6 +89,27 @@ STEP_ITEM = re.compile(r"^\s*- [A-Za-z_-]+:")
 APT = re.compile(r"\bapt(-get)?\b")
 STEP_TIMEOUT = re.compile(r"^\s+timeout-minutes:\s*\d+\s*$")
 BUDGET = pathlib.Path(__file__).resolve().parent.parent / ".github" / "gate-budget.tsv"
+SECONDS_TABLE = pathlib.Path(__file__).resolve().parent.parent / ".github" / "check-seconds.tsv"
+
+# Each check a declared split may name, and how to ask it which members one
+# shard runs (#262). Asked of the check's own script with `--names`, so the
+# proof that the shards are complete goes through the same filter the check
+# runs, not through a second copy of it.
+SHARDABLE = {
+    "injections": ["scripts/check-injections.py", ".", "--names"],
+    "bsd": ["scripts/check-injections.py", ".", "--names"],
+    "recompute": ["scripts/check-recompute.py", "--root", "results", "--names"],
+}
+
+# How a sharded package's job tells its check which shard it is: the matrix
+# entry over the count the plan job read from check-owners.tsv.
+SHARD_ENV = re.compile(
+    r"^\s+VERIFY_CHECK_SHARD:\s*\$\{\{\s*matrix\.shard\s*\}\}/\$\{\{\s*needs\.plan\.outputs\.count\s*\}\}\s*$",
+    re.M,
+)
+
+# A check's declared shard count, from check-owners.tsv's third column.
+SHARDS: dict[str, int] = {}
 CANCEL_IN_PROGRESS = re.compile(r"^\s*cancel-in-progress:\s*(.+?)\s*$", re.MULTILINE)
 EVENT = re.compile(r"^  ([A-Za-z_][A-Za-z0-9_]*):")
 BRANCH_FILTER = re.compile(r"^ {4,}branches(-ignore)?:")
@@ -121,6 +143,12 @@ def owners(failures: list[str]) -> dict[str, str]:
         if check in table:
             failures.append(f"{OWNERS}:{number}: `{check}` is owned twice")
         table[check] = owner
+        if len(parts) >= 3 and parts[2].strip():
+            count = parts[2].strip()
+            if not count.isdigit() or int(count) < 2:
+                failures.append(f"{OWNERS}:{number}: `{check}`'s shard count is {count!r}, not a whole number of 2 or more")
+            else:
+                SHARDS[check] = int(count)
     return table
 
 
@@ -748,6 +776,99 @@ def main() -> int:
                 failures.append(
                     f"{wf.name}:{start + 1}: a step runs apt-get with no `timeout-minutes`; "
                     f"a hung mirror holds the job until GitHub's six-hour limit"
+                )
+
+    # 12. a declared split is one check per package, passed to every shard
+    #
+    #    A sharded check runs alone in its package's jobs, each with
+    #    VERIFY_CHECK_SHARD=K/N; a second check in that package would run once
+    #    per shard, and a workflow that never passes the shard would run the
+    #    whole check in every job -- the budget spent N times, not split.
+    for check, count in sorted(SHARDS.items()):
+        owner = table.get(check)
+        if check not in SHARDABLE:
+            failures.append(f"{OWNERS.name}: `{check}` declares {count} shards, and it is not a check that can be split by name ({', '.join(sorted(SHARDABLE))})")
+            continue
+        if sorted(c for c, o in table.items() if o == owner) != [check]:
+            failures.append(f"{OWNERS.name}: `{check}` is sharded, so its package `{owner}` must own it alone")
+        wf = WORKFLOWS / f"pkg-{owner}.yml"
+        # The env line itself, on a line that is not a comment: a workflow
+        # that only MENTIONS the shard passed when this read the whole text
+        # (its own seeded case found that).
+        live = "\n".join(l for l in wf.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#")) if wf.is_file() else ""
+        if wf.is_file() and not SHARD_ENV.search(live):
+            failures.append(f"{wf.name}: `{check}` is sharded and the workflow never passes VERIFY_CHECK_SHARD, so every job would run all of it")
+
+    # 13. a declared split is complete: every member runs in exactly one shard
+    #
+    #    Asked of the check itself, shard by shard, against what it runs
+    #    unsplit. A member in no shard is a member nothing runs -- a test that
+    #    cannot fail, which is #239's lesson -- and a member in two is the
+    #    budget spent twice.
+    for check, count in sorted(SHARDS.items()):
+        if check not in SHARDABLE:
+            continue
+        listed = []
+        for part in [None, *range(1, count + 1)]:
+            argv = [sys.executable, *SHARDABLE[check]] + ([] if part is None else ["--shard", f"{part}/{count}"])
+            done = subprocess.run(argv, cwd=WORKFLOWS.parent.parent, capture_output=True, text=True)
+            if done.returncode != 0:
+                failures.append(f"`{check}`: {' '.join(argv[1:])} exited {done.returncode}: {done.stderr.strip()[:200]}")
+                listed = []
+                break
+            listed.append([line for line in done.stdout.splitlines() if line.strip()])
+        if not listed:
+            continue
+        whole, parts = listed[0], listed[1:]
+        seen = collections.Counter(name for part in parts for name in part)
+        missing = [name for name in whole if seen[name] == 0]
+        twice = sorted(name for name, n in seen.items() if n > 1)
+        stray = sorted(set(seen) - set(whole))
+        if not whole:
+            failures.append(f"`{check}` lists no member at all; a split of nothing is not a split")
+        if missing:
+            failures.append(f"`{check}`'s {count} shards run none of {len(missing)} member(s), so nothing runs them: {', '.join(missing[:5])}")
+        if twice:
+            failures.append(f"`{check}`'s shards run {len(twice)} member(s) more than once: {', '.join(twice[:5])}")
+        if stray:
+            failures.append(f"`{check}`'s shards run {len(stray)} member(s) the unsplit check does not: {', '.join(stray[:5])}")
+
+    # 14. no package's measured seconds pass the budget (#262)
+    #
+    #    Read from .github/check-seconds.tsv, a measurement of CI's own logs
+    #    with its runs named, never from this run: the verdict is the same on
+    #    every run, and the next overage is a red line rather than a print.
+    #    A sharded check counts its seconds divided by its shards.
+    measured: dict[str, float] = {}
+    if not SECONDS_TABLE.is_file():
+        failures.append(f"{SECONDS_TABLE.name}: missing; a budget nobody measures against is a print")
+    else:
+        for number, line in enumerate(SECONDS_TABLE.read_text(encoding="utf-8").split("\n"), 1):
+            if not line.strip() or line.startswith("#"):
+                continue
+            row = line.split("\t")
+            if len(row) != 4 or not re.fullmatch(r"\d+(\.\d+)?", row[1]) \
+                    or not re.fullmatch(r"\d{4}-\d\d-\d\d", row[2]) or not re.fullmatch(r"\d+(,\d+)*", row[3]):
+                failures.append(f"{SECONDS_TABLE.name}:{number}: not `check<TAB>seconds<TAB>YYYY-MM-DD<TAB>run,run,...`")
+                continue
+            if row[0] in measured:
+                failures.append(f"{SECONDS_TABLE.name}:{number}: `{row[0]}` is measured twice")
+            measured[row[0]] = float(row[1])
+        for check in checks:
+            if check not in measured:
+                failures.append(f"{SECONDS_TABLE.name}: `{check}` has no measured seconds, so no budget can hold its job")
+        for check in sorted(set(measured) - set(checks)):
+            failures.append(f"{SECONDS_TABLE.name}: `{check}` is measured, and verify.sh defines no such check")
+    budget = declared.get("wall_clock_seconds", "")
+    if measured and budget.isdigit():
+        for owner in sorted(set(table.values())):
+            owned = [c for c, o in table.items() if o == owner and c in measured]
+            per_job = sum(measured[c] / SHARDS.get(c, 1) for c in owned)
+            if per_job > int(budget):
+                shown = ", ".join(f"{c} {measured[c]:g} s" + (f" / {SHARDS[c]}" if c in SHARDS else "") for c in sorted(owned))
+                failures.append(
+                    f"pkg-{owner}.yml: its checks' measured seconds per job are {per_job:.0f} s, past the "
+                    f"{budget} s budget ({shown}); split it in {OWNERS.name}, never by dropping a check"
                 )
 
     for message in failures:

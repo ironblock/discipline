@@ -1,10 +1,10 @@
-name: pkg-bsd
+name: pkg-injections
 
 # A reusable workflow, composed by verify.yml. It runs the checks
 # .github/check-owners.tsv says this package owns -- derived, never named
 # here, so the table and the workflow cannot drift apart.
 #
-# SHARDED. `bsd` applies every injection again under the BSD-shaped sed (#75): 443 s on its own, past the 300 s budget. Split by injection name, the whole population kept (#260, #262).
+# SHARDED. `injections` applies every injection the gate defines, copying and restoring the whole tracked tree for each. At 417 s it is past the 300 s budget on its own, so it is a package of its own, split by injection name (#262).
 # The shard count is the table's third column, read here into a matrix: the
 # table is the one place the split is declared, and every shard runs the one
 # check with VERIFY_CHECK_SHARD=K/N. scripts/check-ci-coverage.py proves the
@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   plan:
-    name: bsd plan
+    name: injections plan
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.read.outputs.shards }}
@@ -30,15 +30,15 @@ jobs:
         id: read
         run: |
           set -euo pipefail
-          count="$(awk -F'\t' -v pkg=bsd '!/^#/ && NF>=3 && $2 == pkg { print $3 }' .github/check-owners.tsv)"
+          count="$(awk -F'\t' -v pkg=injections '!/^#/ && NF>=3 && $2 == pkg { print $3 }' .github/check-owners.tsv)"
           case "$count" in
-            ''|*[!0-9]*) echo "::error::bsd declares no shard count in check-owners.tsv"; exit 1 ;;
+            ''|*[!0-9]*) echo "::error::injections declares no shard count in check-owners.tsv"; exit 1 ;;
           esac
           printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
           printf 'shards=[%s]\n' "$(seq -s, 1 "$count")" >> "$GITHUB_OUTPUT"
 
   checks:
-    name: bsd ${{ matrix.shard }}
+    name: injections ${{ matrix.shard }}
     needs: plan
     runs-on: ubuntu-latest
     strategy:
@@ -54,14 +54,14 @@ jobs:
         run: |
           set -euo pipefail
           mapfile -t checks < <(
-            awk -F'\t' -v pkg=bsd '!/^#/ && NF>=2 && $2 == pkg { print $1 }' \
+            awk -F'\t' -v pkg=injections '!/^#/ && NF>=2 && $2 == pkg { print $1 }' \
               .github/check-owners.tsv
           )
           if [ "${#checks[@]}" -eq 0 ]; then
-            echo "::error::no check is owned by 'bsd'; a workflow that runs nothing is not a pass"
+            echo "::error::no check is owned by 'injections'; a workflow that runs nothing is not a pass"
             exit 1
           fi
           args=()
           for check in "${checks[@]}"; do args+=(--only "$check"); done
-          printf 'checks owned by bsd: %s, shard %s\n' "${checks[*]}" "$VERIFY_CHECK_SHARD"
+          printf 'checks owned by injections: %s, shard %s\n' "${checks[*]}" "$VERIFY_CHECK_SHARD"
           ./verify.sh "${args[@]}"

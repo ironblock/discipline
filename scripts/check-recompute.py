@@ -38,7 +38,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
+
+import gatelib
 
 FENCE = "+++"
 RECOMPUTE = "recompute.sh"
@@ -207,7 +210,24 @@ def proves_it_compares(directory: pathlib.Path, script: pathlib.Path) -> str | N
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default="results", help="the results tree to walk")
+    parser.add_argument(
+        "--shard",
+        metavar="K/N",
+        help="re-derive only the directories whose name hashes to shard K of N "
+        "(#262); every directory lands in exactly one shard",
+    )
+    parser.add_argument(
+        "--names",
+        action="store_true",
+        help="print the directories this invocation would re-derive, and re-derive none",
+    )
     args = parser.parse_args(argv)
+    shard = None
+    if args.shard is not None:
+        shard = gatelib.shard_arg(args.shard)
+        if shard is None:
+            print(f"check-recompute: --shard {args.shard!r} is not K/N with 1 <= K <= N", file=sys.stderr)
+            return 2
 
     root = pathlib.Path(args.root)
     if not root.is_dir():
@@ -226,7 +246,20 @@ def main(argv: list[str]) -> int:
     templates = 0
     results_seen = 0
 
-    for directory in sorted(p for p in root.iterdir() if p.is_dir()):
+    directories = sorted(p for p in root.iterdir() if p.is_dir())
+    if shard is not None:
+        directories = [p for p in directories if gatelib.in_shard(p.name, *shard)]
+    if args.names:
+        print("\n".join(p.name for p in directories))
+        return 0
+    # Each directory's own seconds (#262): a split by name balances counts,
+    # not cost, and this is what a re-balance is read from. Printed as the
+    # next directory starts, since the loop leaves each one by `continue`.
+    timing: tuple[str, float] | None = None
+    for directory in directories:
+        if timing is not None:
+            print(f"check-recompute: {timing[0]} took {time.monotonic() - timing[1]:.1f}s")
+        timing = (directory.name, time.monotonic())
         is_template = directory.name == TEMPLATE
         if not is_template:
             results_seen += 1
@@ -346,12 +379,16 @@ def main(argv: list[str]) -> int:
         else:
             recomputed += 1
 
+    if timing is not None:
+        print(f"check-recompute: {timing[0]} took {time.monotonic() - timing[1]:.1f}s")
+
     for message in failures:
         print(message, file=sys.stderr)
 
     census = (
         f"check-recompute: template: {templates} · results: {recomputed} recomputed, "
         f"{historical} declared historical, {undeclared} undeclared"
+        f"{f' (shard {shard[0]} of {shard[1]})' if shard else ''}"
     )
     if failures:
         print(census, file=sys.stderr)

@@ -90,6 +90,8 @@ readonly REQUIRED_PAGES_CLASSES=(
 )
 
 FAILED=()
+# Each check this run ran, as `name:seconds`, for report_wall_clock (#262).
+CHECKS_TOOK=()
 
 # --------------------------------------------------------------------------
 # checks
@@ -336,7 +338,9 @@ check_regimen() {
 # --root is the check's own parameter and `results` is its default; it is
 # spelled out because a seeded case below depends on this being the root the
 # check reads.
-check_recompute() { python3 scripts/check-recompute.py --root results; }
+check_recompute() {
+  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"}
+}
 
 # A rung's admission word, derived from its admission directory rather than trusted as written (#183): the
 # derivation's own fixtures first, then every admission.toml in the tree re-verified through its own
@@ -514,14 +518,16 @@ check_history() {
 # and applying all of them made that one case 225 s on the runner.
 VERIFY_INJECTION_SCOPE=""
 check_injections() {
-  python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
+  python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"} \
+    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"}
 }
 
 # The same applier run with a BSD-shaped `sed` first on PATH (#75): the
 # structural lint keeps `sed` out of injection bodies, and this is what proves
 # the one spelling left, `edit_in_place`, portable by execution.
 check_bsd() {
-  bash scripts/check-bsd-sed.sh . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
+  bash scripts/check-bsd-sed.sh . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"} \
+    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"}
 }
 
 # The merge resolver, exercised on fixtures before it is trusted to resolve a
@@ -562,8 +568,9 @@ check_parity() { python3 scripts/check-fault-manifest.py; }
 run_check() {
   local name="$1"
   printf '\n=== %s ===\n' "$name"
-  local rc=0
+  local rc=0 began="$SECONDS"
   "check_${name}" || rc=$?
+  CHECKS_TOOK+=("${name}:$(( SECONDS - began ))")
   if [ "$rc" -eq 0 ]; then
     printf -- '--- %s: PASS (exit 0)\n' "$name"
   else
@@ -575,6 +582,9 @@ run_check() {
 # The declared wall-clock budget, beside check-owners.tsv, which is where this
 # repository keeps what CI is held to. Named here; read at the bottom.
 readonly GATE_BUDGET=".github/gate-budget.tsv"
+# What each check was measured to cost on CI (#262), which the coverage check
+# holds every package to; printed beside what each check took this run.
+readonly CHECK_SECONDS=".github/check-seconds.tsv"
 
 # One line, on every run, saying what this run cost against what CI is allowed
 # to cost. THE RUN IS NEVER FAILED ON IT: a slow gate is not a wrong gate, and
@@ -588,7 +598,24 @@ readonly GATE_BUDGET=".github/gate-budget.tsv"
 # checks. What it does NOT measure is the runner's own overhead around it --
 # checkout, apt, the toolchain.
 report_wall_clock() {
-  local elapsed="$SECONDS" budget="" key value
+  local elapsed="$SECONDS" budget="" key value entry check took expected
+  # EACH CHECK AGAINST ITS MEASURED ROW (#262), before the run's total. The
+  # coverage check refuses a package from the table, never from a live run;
+  # this line is where a check drifting from its row shows first. Under
+  # VERIFY_CHECK_SHARD the row is the whole check, so a shard expects its
+  # share of it.
+  if [ -f "${ROOT}/${CHECK_SECONDS}" ]; then
+    for entry in ${CHECKS_TOOK+"${CHECKS_TOOK[@]}"}; do
+      check="${entry%%:*}" took="${entry#*:}"
+      expected="$(awk -F'\t' -v c="$check" -v shard="${VERIFY_CHECK_SHARD:-}" '
+        !/^#/ && $1 == c {
+          n = 1; if (shard ~ /^[0-9]+\/[0-9]+$/) { split(shard, p, "/"); n = p[2] }
+          printf "%.0f", $2 / n; found = 1
+        } END { if (!found) printf "none" }' "${ROOT}/${CHECK_SECONDS}")"
+      printf 'verify: %s took %ds; %s measures %ss%s\n' "$check" "$took" "$CHECK_SECONDS" "$expected" \
+        "${VERIFY_CHECK_SHARD:+ for shard ${VERIFY_CHECK_SHARD}}"
+    done
+  fi
   if [ -f "${ROOT}/${GATE_BUDGET}" ]; then
     while IFS=$'\t' read -r key value || [ -n "${key:-}" ]; do
       case "$key" in
@@ -4115,6 +4142,92 @@ inject_ci_pages_checkout_not_the_run() {
 # here a leading space -- is a non-empty string to GitHub, always true.
 inject_ci_pages_condition_outside_its_braces() {
   edit_in_place 's/^    if: \(github\.event\.workflow_run\.conclusion.*\)$/    if: " ${{ \1 }}"/' .github/workflows/pages.yml
+}
+
+# THE BUDGET HOLDS EVERY PACKAGE, AND A SPLIT RUNS EVERY MEMBER (#262).
+
+# A check re-measured past what its package's budget holds: hygiene at 341 s.
+inject_ci_check_seconds_over_budget() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/check-seconds.tsv')
+source = path.read_text(encoding="utf-8")
+old = 'hygiene\t141.2\t'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'hygiene\t341.2\t', 1), encoding="utf-8")
+EOF
+}
+
+# A check with no measured row: nothing can hold its job to the budget.
+inject_ci_check_seconds_unmeasured() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/check-seconds.tsv')
+source = path.read_text(encoding="utf-8")
+old = '\nhygiene\t141.2\t'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '\nunmeasured-hygiene\t141.2\t', 1), encoding="utf-8")
+EOF
+}
+
+# The applier's shard filter dropping one injection from every shard: declared, and run by nothing (#239's lesson).
+inject_ci_injection_shard_drops_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-injections.py')
+source = path.read_text(encoding="utf-8")
+old = 'applied = [name for name in applied if gatelib.in_shard(name, *shard)]'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'applied = [name for name in applied if gatelib.in_shard(name, *shard) and name != names[-1]]', 1), encoding="utf-8")
+EOF
+}
+
+# recompute's shard filter dropping one directory from every shard.
+inject_ci_recompute_shard_drops_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = 'directories = [p for p in directories if gatelib.in_shard(p.name, *shard)]'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'directories = [p for p in directories if gatelib.in_shard(p.name, *shard)][1:]', 1), encoding="utf-8")
+EOF
+}
+
+# A sharded package whose workflow never passes the shard: every job runs all of it.
+inject_ci_sharded_workflow_without_shard() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/pkg-injections.yml')
+source = path.read_text(encoding="utf-8")
+old = '          VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '          SHARD_IGNORED: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n', 1), encoding="utf-8")
+EOF
+}
+
+# A shard count of 1: a split that splits nothing.
+inject_ci_shard_count_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/check-owners.tsv')
+source = path.read_text(encoding="utf-8")
+old = 'recompute\trecompute\t3\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'recompute\trecompute\t1\n', 1), encoding="utf-8")
+EOF
 }
 
 # Publishes on a trigger of its own, beside the gate.
@@ -7963,6 +8076,18 @@ selftest() {
     "pages.yml: the site is not checked against the sha that run built"
   seeded_case "the condition with text outside its braces" ci inject_ci_pages_condition_outside_its_braces \
     "pages.yml: the deploy's condition has text outside its"
+  seeded_case "a check re-measured past its job's budget" ci inject_ci_check_seconds_over_budget \
+    "pkg-repo\\.yml: its checks' measured seconds per job are 346 s, past the 300 s budget"
+  seeded_case "a check with no measured seconds"       ci inject_ci_check_seconds_unmeasured \
+    '`hygiene` has no measured seconds'
+  seeded_case "an injection no shard applies"          ci inject_ci_injection_shard_drops_one \
+    '`injections`.s 2 shards run none of 1 member\(s\), so nothing runs them'
+  seeded_case "a results directory no shard re-derives" ci inject_ci_recompute_shard_drops_one \
+    '`recompute`.s 3 shards run none of 3 member\(s\), so nothing runs them'
+  seeded_case "a sharded job never told its shard"     ci inject_ci_sharded_workflow_without_shard \
+    'pkg-injections\.yml: `injections` is sharded and the workflow never passes VERIFY_CHECK_SHARD'
+  seeded_case "a split into one shard"                 ci inject_ci_shard_count_one \
+    '.recompute..s shard count is .1., not a whole number of 2 or more'
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \

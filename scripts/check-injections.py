@@ -442,6 +442,26 @@ def main() -> int:
     # unportable body is a finding whatever was asked for.
     args = sys.argv[1:]
     only = None
+    # `--shard K/N` applies the injections whose name hashes to K of N
+    # (#262): the applier copies and restores the whole tree per injection,
+    # and one job applying every one is past the wall-clock budget. Every
+    # injection lands in exactly one shard; the static questions below run in
+    # every shard, since they cost seconds and a finding is a finding.
+    shard = None
+    # `--names` prints the injections this invocation would apply, one per
+    # line, and applies none: what scripts/check-ci-coverage.py reads to prove
+    # a declared split complete through this filter, not through a copy of it.
+    names_only = "--names" in args
+    if names_only:
+        args.remove("--names")
+    if "--shard" in args:
+        at = args.index("--shard")
+        spec = args[at + 1] if at + 1 < len(args) else ""
+        shard = gatelib.shard_arg(spec)
+        if shard is None:
+            print(f"check-injections: --shard {spec!r} is not K/N with 1 <= K <= N", file=sys.stderr)
+            return 2
+        del args[at : at + 2]
     if "--only" in args:
         at = args.index("--only")
         if at + 1 >= len(args):
@@ -580,6 +600,11 @@ def main() -> int:
             )
             return 1
         applied = [only]
+    if shard is not None:
+        applied = [name for name in applied if gatelib.in_shard(name, *shard)]
+    if names_only:
+        print("\n".join(applied))
+        return 0
 
     tracked = tracked_files(root)
     helpers = "\n".join(match.group(0) for match in HELPERS.finditer(text))
@@ -629,7 +654,8 @@ def main() -> int:
         shutil.rmtree(box, ignore_errors=True)
 
     print(
-        f"check-injections: {len(applied)} of {len(names)} injection(s) applied, "
+        f"check-injections: {len(applied)} of {len(names)} injection(s) applied"
+        f"{f' (shard {shard[0]} of {shard[1]})' if shard else ''}, "
         f"{len(inert)} that change nothing or do not finish; every struct literal "
         f"inside one names every field its type declares"
     )

@@ -79,3 +79,22 @@ def seeded_cases(text: str) -> list[Case]:
             )
         )
     return found
+
+
+def in_shard(name: str, index: int, count: int) -> bool:
+    """Whether `name` belongs to shard `index` of `count` (#262): a stable hash
+    of the name, so a check split across jobs never depends on order or on run,
+    and every name lands in exactly one shard."""
+    import hashlib
+
+    return int(hashlib.sha256(name.encode("utf-8")).hexdigest(), 16) % count + 1 == index
+
+
+def shard_arg(spec: str) -> tuple[int, int] | None:
+    """`K/N` with 1 <= K <= N, or None."""
+    import re
+
+    match = re.fullmatch(r"([1-9]\d*)/([1-9]\d*)", spec)
+    if not match or int(match.group(1)) > int(match.group(2)):
+        return None
+    return int(match.group(1)), int(match.group(2))

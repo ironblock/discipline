@@ -73,6 +73,12 @@ jobs:
   bsd:
     uses: ./.github/workflows/pkg-bsd.yml
 
+  injections:
+    uses: ./.github/workflows/pkg-injections.yml
+
+  recompute:
+    uses: ./.github/workflows/pkg-recompute.yml
+
   selftest:
     uses: ./.github/workflows/gate-selftest.yml
     # `actions: read` for the scope plan's `main` censuses, `issues: read` for
@@ -84,7 +90,7 @@ jobs:
 
   gate:
     name: gate
-    needs: [diet, pages, exercise, repo, bsd, selftest]
+    needs: [diet, pages, exercise, repo, bsd, injections, recompute, selftest]
     if: always()
     runs-on: ubuntu-latest
     # `actions: read` on top of the workflow's `contents: read`, because this
