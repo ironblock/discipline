@@ -58,7 +58,7 @@ These captures are I0 of #29's plan (comment 5943518924): a real llama-server st
 - **Both shapes kept the same 330-token prefix warm**, four short of turn 1's 334-token prompt.
   - Why 330 is not measured. Two readings fit:
     - the last four tokens are the rendered generation prompt, which turn 2 replaces;
-    - this is a hybrid recurrent model, so warm reuse stops where a state checkpoint landed (the endpoint entry's hazard). Every reply's progress frames stop at the prompt's total less four, which fits a checkpoint as well.
+    - this is a hybrid recurrent model, so warm reuse stops where a state checkpoint landed (the endpoint entry's hazard). In every reply the last progress frame is at the prompt's full total (334, 367, 383) and the one before it at total less four (330, 363, 379). Turn 1 started with nothing cached and still shows that boundary at 330, which fits a checkpoint as well.
   - On the second reading, `cache_n` can't tell the two shapes apart past 330 on this model.
 - **So the receipt does not choose between the shapes here.** It shows neither invalidated the shared head. It doesn't show they would cost the same on a model whose cache reuse is not checkpoint-bound.
 
