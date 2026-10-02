@@ -76,6 +76,7 @@ fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
          \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
+         \x20                       [--log FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\n",
     );
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
@@ -89,6 +90,8 @@ fn serve_usage() -> String {
     out.push_str("--auth-file names a file holding user:password; every request must then\n");
     out.push_str("present it as Basic auth. --listen off loopback refuses to start without\n");
     out.push_str("it, and a wildcard (0.0.0.0, ::) is refused: name one interface.\n");
+    out.push_str("--log FILE writes the session's log there as each line is appended, the\n");
+    out.push_str("same lines GET /events streams; nothing is written without it.\n");
     out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
     out.push_str("resolved from the registry, and an unregistered one refuses to start.\n");
     out.push_str("Unless the substrate is canned, the server's GET /props build_info must\n");
@@ -105,6 +108,7 @@ struct ServeArgs {
     key_file: Option<String>,
     auth_file: Option<String>,
     regimen_file: Option<String>,
+    log_file: Option<String>,
     listen: IpAddr,
     port: u16,
     allowed_origins: Vec<String>,
@@ -119,6 +123,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut key_file = None;
     let mut auth_file = None;
     let mut regimen_file = None;
+    let mut log_file = None;
     let mut listen = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
@@ -143,6 +148,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
             true
         } else if flag == "--regimen" {
             regimen_file = Some(value.clone());
+            true
+        } else if flag == "--log" {
+            log_file = Some(value.clone());
             true
         } else if flag == "--listen" {
             value.parse().map(|given| listen = given).is_ok()
@@ -170,6 +178,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         key_file,
         auth_file,
         regimen_file,
+        log_file,
         listen,
         port,
         allowed_origins,
@@ -192,6 +201,7 @@ fn serve(args: &[String]) -> ExitCode {
         key_file,
         auth_file,
         regimen_file,
+        log_file,
         listen,
         port,
         allowed_origins,
@@ -241,20 +251,40 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(build) => build.flatten(),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    let log_path = log_file;
+    let log_file = match log_path.as_deref().map(created).transpose() {
+        Ok(file) => file,
+        Err(why) => return fail(EXIT_OUTPUT, &why),
+    };
     let listener = match listener(listen, port) {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
     let session = std::sync::Arc::new(Session::open(transport, shape));
+    let teeing = std::sync::Arc::clone(&session);
     let opened = session.opened();
     let config = Config {
         allowed_origins,
         credential,
         ..Config::default()
     };
-    let server = match Server::start(listener, session, config, diet::drive::session::render) {
+    // One render for the stream and the log, so they are one text.
+    let render = diet::drive::session::render;
+    let server = match Server::start(listener, session, config, render) {
         Ok(server) => server,
         Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
+    };
+    // Emptied only now that the server runs; the tee writes from the log's
+    // first line whenever it starts.
+    let log = match log_file.map(|(file, truncated)| {
+        file.set_len(0).map(|()| {
+            keep_log(teeing, render, file);
+            truncated
+        })
+    }) {
+        Some(Err(why)) => return fail(EXIT_OUTPUT, &format!("the log cannot be emptied: {why}")),
+        Some(Ok(truncated)) => Some(truncated),
+        None => None,
     };
     println!(
         "{}",
@@ -262,7 +292,8 @@ fn serve(args: &[String]) -> ExitCode {
             &server.addr().to_string(),
             opened,
             substrate,
-            engine.as_ref()
+            engine.as_ref(),
+            log_path.as_deref().zip(log),
         )
     );
     // Serves until the process is stopped. The server's threads do the work;
@@ -270,6 +301,36 @@ fn serve(args: &[String]) -> ExitCode {
     loop {
         std::thread::park();
     }
+}
+
+/// The file at `path`, opened for writing (created if absent) but NOT yet
+/// emptied, and whether it holds anything. It is emptied only once the
+/// server has started, so a start that fails leaves an operator's file as
+/// it was.
+fn created(path: &str) -> Result<(std::fs::File, bool), String> {
+    let truncated = std::fs::metadata(path).is_ok_and(|held| held.len() > 0);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map(|file| (file, truncated))
+        .map_err(|why| format!("{path} cannot be written: {why}"))
+}
+
+/// The session's log, written to `file` as each line is appended (`--log`,
+/// #157). A write that fails stops the process: a log that quietly stopped
+/// would be a shorter log claiming to be the session's.
+fn keep_log(
+    session: std::sync::Arc<Session<HttpStream>>,
+    render: diet::drive::serve::Render,
+    file: std::fs::File,
+) {
+    std::thread::spawn(move || {
+        let why = diet::drive::serve::tee(&session, render, &mut std::io::BufWriter::new(file));
+        let _ = fail(EXIT_OUTPUT, &format!("the log could not be written: {why}"));
+        std::process::exit(i32::from(EXIT_OUTPUT));
+    });
 }
 
 /// The session's trunk: the system message, and nothing else fixed yet.
@@ -335,6 +396,7 @@ fn announcement(
     opened: u64,
     substrate: Option<&str>,
     engine: Option<&diet::drive::engine::Passed>,
+    log: Option<(&str, bool)>,
 ) -> String {
     let mut fields = BTreeMap::from([
         ("listening".to_owned(), Value::String(listening.to_owned())),
@@ -364,6 +426,12 @@ fn announcement(
             "engine_identity".to_owned(),
             Value::String(engine.identity.tag().to_owned()),
         );
+    }
+    // Where the log is written, and whether naming it emptied a file that
+    // held something (ruled on #230).
+    if let Some((path, truncated)) = log {
+        fields.insert("log".to_owned(), Value::String(path.to_owned()));
+        fields.insert("log_truncated".to_owned(), Value::Boolean(truncated));
     }
     let mut out = String::new();
     json::render(&Value::Object(fields), &mut out);
@@ -738,7 +806,9 @@ fn fail(code: u8, why: &str) -> ExitCode {
         ),
         &mut out,
     );
-    println!("{out}");
+    // Never a panicking print: a reader that closed stdout must not stop the
+    // caller from exiting with its code (the log's writer above all).
+    let _ = std::io::Write::write_all(&mut std::io::stdout().lock(), format!("{out}\n").as_bytes());
     ExitCode::from(code)
 }
 

@@ -7743,6 +7743,62 @@ failure_class = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
 migrated = false
 
 [[fault]]
+id = "drive.serve-log-drops-a-line"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-log-drops-a-line"
+failure_class = "drive.serve-log-drops-a-line"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-log-flag"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-log-flag"
+failure_class = "drive.serve-bin-ignores-the-log-flag"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-hides-a-truncated-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-hides-a-truncated-log"
+failure_class = "drive.serve-bin-hides-a-truncated-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-panics-printing-a-failure"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-panics-printing-a-failure"
+failure_class = "drive.serve-bin-panics-printing-a-failure"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-keeps-serving-a-stopped-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-keeps-serving-a-stopped-log"
+failure_class = "drive.serve-bin-keeps-serving-a-stopped-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-misreports-an-uncreatable-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-misreports-an-uncreatable-log"
+failure_class = "drive.serve-bin-misreports-an-uncreatable-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-empties-the-log-before-it-starts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-empties-the-log-before-it-starts"
+failure_class = "drive.serve-bin-empties-the-log-before-it-starts"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
