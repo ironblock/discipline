@@ -149,7 +149,15 @@ jobs:
       # it, not just whichever one draws an isolation fault -- sharding is a
       # division of labour, never a selection, per this file's own header,
       # so which shard that lands on is not something to predict.
+      # BOUNDED, because a hung package mirror is not a test result: on
+      # 2026-10-01 four selftest shards sat in `apt-get update` at the archive
+      # fetch until GitHub's six-hour job limit cancelled them (#222's run
+      # 36884660921). Measured over 1,050 runs of this step in the 60 latest
+      # successful verify runs (#232's review): median 11 s, p95 24 s, p99
+      # 54 s, max 100 s, the tail all inside that incident's window. Five
+      # minutes is three times the slowest seen: a step this slow has hung.
       - name: Install the sandbox the isolation lane confines with
+        timeout-minutes: 5
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
 
       # THE ONE RELAXED CONTROL, NAMED, per `pkg-diet.yml` and its ruling on

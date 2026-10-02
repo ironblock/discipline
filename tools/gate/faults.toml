@@ -907,6 +907,15 @@ legacy_signature = "assigns label"
 migrated = false
 
 [[fault]]
+id = "hygiene.hygiene_unguarded_expansion"
+kind = "seeded-gate"
+check = "hygiene"
+label = "a hygiene expansion bash 3.2 aborts on"
+failure_class = "hygiene.scanner-not-portable"
+legacy_signature = "is unguarded; bash 3\\.2 aborts on it"
+migrated = false
+
+[[fault]]
 id = "hygiene.hygiene"
 kind = "seeded-gate"
 check = "hygiene"
@@ -3871,9 +3880,18 @@ migrated = false
 id = "ci.ci_pages_publishes_an_older_sha"
 kind = "seeded-gate"
 check = "ci"
-label = "the site published at a sha not main's tip"
+label = "the site published though a later run passed"
 failure_class = "wiring.pages-older-sha"
-legacy_signature = "pages.yml: publishes a sha without checking it is still main's tip"
+legacy_signature = "pages.yml: publishes without checking that no later verify run on main has passed"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_newest_run_compared_backwards"
+kind = "seeded-gate"
+check = "ci"
+label = "the newest-run comparison turned round"
+failure_class = "wiring.pages-newest-run-comparison"
+legacy_signature = "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
 migrated = false
 [[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
@@ -3898,6 +3916,14 @@ check = "ci"
 label = "pull requests filtered by branch"
 failure_class = "wiring.pull-request-branch-filtered"
 legacy_signature = "carries .branches: \\[main\\]. and is reached"
+migrated = false
+[[fault]]
+id = "ci.ci_apt_step_unbounded"
+kind = "seeded-gate"
+check = "ci"
+label = "a package-mirror step left unbounded"
+failure_class = "wiring.mirror-step-unbounded"
+legacy_signature = "runs apt-get with no .timeout-minutes."
 migrated = false
 [[fault]]
 id = "ci.ci_trunk_run_cancelled"
@@ -5468,6 +5494,14 @@ kind = "lane-fault"
 check = "lanes"
 label = "isolation.the-escape-census-under-reports"
 failure_class = "isolation.the-escape-census-under-reports"
+migrated = false
+
+[[fault]]
+id = "isolation.busy-runner-never-retried"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.busy-runner-never-retried"
+failure_class = "isolation.busy-runner-never-retried"
 migrated = false
 
 [[fault]]
@@ -7732,6 +7766,62 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
 failure_class = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+migrated = false
+
+[[fault]]
+id = "drive.serve-log-drops-a-line"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-log-drops-a-line"
+failure_class = "drive.serve-log-drops-a-line"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-log-flag"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-log-flag"
+failure_class = "drive.serve-bin-ignores-the-log-flag"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-hides-a-truncated-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-hides-a-truncated-log"
+failure_class = "drive.serve-bin-hides-a-truncated-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-panics-printing-a-failure"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-panics-printing-a-failure"
+failure_class = "drive.serve-bin-panics-printing-a-failure"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-keeps-serving-a-stopped-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-keeps-serving-a-stopped-log"
+failure_class = "drive.serve-bin-keeps-serving-a-stopped-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-misreports-an-uncreatable-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-misreports-an-uncreatable-log"
+failure_class = "drive.serve-bin-misreports-an-uncreatable-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-empties-the-log-before-it-starts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-empties-the-log-before-it-starts"
+failure_class = "drive.serve-bin-empties-the-log-before-it-starts"
 migrated = false
 
 [[fault]]
