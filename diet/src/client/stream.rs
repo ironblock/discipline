@@ -1234,6 +1234,20 @@ mod tests {
     }
 
     #[test]
+    fn a_stub_with_props_answers_them_before_and_after_its_acts() {
+        // The canned server's engine check, and a check made again later:
+        // `/props` never spends an act (#219 item 11).
+        let stub = Stub::serving_with_props(vec![Act::Raw(CAPTURED.to_vec())], "canned-x")
+            .expect("loopback");
+        let transport = HttpStream::new(endpoint(&stub));
+        let props = || transport.props(deadline()).expect("answered").body;
+        assert_eq!(props(), "{\"build_info\":\"canned-x\"}");
+        let ended = transport.stream(&shape(), deadline(), &Cancel::new(), &mut |_| {});
+        assert!(ended.is_ok(), "the act is still there: {ended:?}");
+        assert_eq!(props(), "{\"build_info\":\"canned-x\"}");
+    }
+
+    #[test]
     fn props_is_asked_at_the_servers_root_with_the_bearer() {
         let stub = Stub::serving(vec![Act::Answer(
             "{\"build_info\":\"b1-4ceb171\"}".to_owned(),
