@@ -543,15 +543,21 @@ def main() -> int:
         # One `concurrency` key in the job: YAML keeps the LAST of two.
         if deploy and len(re.findall(r"""^    (\?\s*)?["']?concurrency["']?\s*(:|$)""", deploy.group(1), re.M)) != 1:
             group = None
-        # A key in any spelling YAML reads as one -- plain, quoted, or an
-        # explicit `? key` -- as the top-level check above (#251).
-        keys = dict(re.findall(r"""^      (?:\?\s*)?["']?([\w-]+)["']?\s*(?::\s*(.*?))?\s*$""", group.group(1), re.M)) if group else {}
-        if keys.get("group") != "pages":
+        # An allowlist, not a key pattern (#251): the group's lines are
+        # exactly `group: pages` and `cancel-in-progress: false`, in either
+        # order, and nothing else. Any other line -- a key quoted, tagged,
+        # anchored, merged, escaped or explicit (`? key`) -- is refused, since
+        # YAML may read it into the group; a valid group spelled other than
+        # plainly is refused too, which fails safe.
+        lines = [line.strip() for line in group.group(1).splitlines() if line.strip()] if group else []
+        others = [line for line in lines if line not in ("group: pages", "cancel-in-progress: false")]
+        named = [re.sub(r"""^[?\s]*["']?""", "", line).split(":", 1)[0].strip("\"' ") for line in others]
+        if "group: pages" not in lines:
             failures.append("pages.yml: the deploy job holds no `pages` concurrency group, so deploys can overlap")
-        elif keys.get("cancel-in-progress") != "false":
+        elif "cancel-in-progress: false" not in lines:
             failures.append("pages.yml: the deploy job's `pages` group does not say cancel-in-progress: false, so a newer deploy may cancel one mid-publish")
-        elif set(keys) != {"group", "cancel-in-progress"}:
-            failures.append(f"pages.yml: the deploy job's `pages` group carries keys beyond group and cancel-in-progress ({', '.join(sorted(set(keys) - {'group', 'cancel-in-progress'}))})")
+        elif others:
+            failures.append(f"pages.yml: the deploy job's `pages` group carries keys beyond group and cancel-in-progress ({', '.join(n for n in named if n) or '; '.join(others)})")
         if re.search(r"^\s+continue-on-error:", live, re.M):
             failures.append("pages.yml: a step may fail and the deploy go on (continue-on-error)")
         uploaded_path = re.search(r"actions/upload-pages-artifact@\S+\s*\n\s+with:\s*\n\s+path: (\S+)", live)
