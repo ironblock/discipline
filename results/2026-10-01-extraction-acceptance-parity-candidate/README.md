@@ -23,9 +23,11 @@ known_defects = [
 targets_checked = 54
 targets_matched = 54
 claim_issue = "143"
+rule_ratified = { comment = "5946588217", at = "2026-10-02T06:14:09Z", digest = "15ebefc2818872fcbfae27ee9fa5057c744f7177d55f9571dadbb98ae8102999", of = "apply.py" }
+rule_ratified_note = "the comment quotes planning's 5921525110 by its heading and approves it; it names no file and states no time, so at is the comment's own timestamp and the rung reads post-hoc. A ratification in chat before the fire is relayed (5933939552), not recorded. apply.py is the operative rule, merged (#191, ced2512) before the first fork; decision-rule.toml and pre-registration.json were transcribed after the fire. If the maintainer adds the time to the comment, at is re-pinned in a follow-up (#32, Dispatch)"
 window_start = "2026-10-01T14:54:55Z"
 window_start_from = "window/seat-a.start, seat A's first fork"
-absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)", rule_ratified = "the pre-registration is planning's 5921525110 (2026-09-30T23:27:07Z), which states that the maintainer's ratification extends to its text; no comment records the maintainer ratifying the amended text himself, and the field waits for one (#32 5943037888)" }
+absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)" }
 
 [regime]
 arm = "extraction-seat-parity-refire"
@@ -82,5 +84,3 @@ The comparison row: the candidate's effect against the floor's 0.088472 differs 
 ## Conclusion
 
 Supported: the inversion holds on the candidate rung, at about two fifths of the floor's size. The weight is low twice over -- the band is wide, and the fire's own interval reaches below zero -- and the comparison with the floor does not decide whether the inversion's size depends on the rung: the difference sits just past the independence margin. What is still unknown is the archived row's own open question: whether what either seat accepts is true of the mechanism.
-
-**Ledger:** rule_ratified is absent: the pre-registration is planning's 5921525110 (2026-09-30T23:27:07Z), which states that the maintainer's ratification extends to its text; no comment records the maintainer ratifying the amended text himself, and the field waits for one (#32 5943037888).
