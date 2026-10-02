@@ -858,8 +858,8 @@ fn a_drive_server_refuses_a_canned_regimen_against_a_live_server() {
     let (code, said) = run_briefly(&stub.url(), &["--regimen", &dev_loop()]);
     assert_eq!(code, Some(1), "{said}");
     assert!(
-        said.contains("b8-e486f80") && said.contains("canned-"),
-        "both values: {said}"
+        said.contains("b8-e486f80") && said.contains(&diet::drive::canned::build_info()),
+        "both values, the registry's literal among them: {said}"
     );
 }
 

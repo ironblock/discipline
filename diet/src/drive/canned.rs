@@ -453,6 +453,12 @@ mod tests {
                     acts,
                     "[{table}]"
                 );
+                // The literal its server would report (#219 item 11).
+                assert_eq!(
+                    registered(&registry, table, "engine_build_info"),
+                    format!("canned-{acts}"),
+                    "[{table}]"
+                );
                 current_is_registered |= *acts == acts_digest();
             }
         }

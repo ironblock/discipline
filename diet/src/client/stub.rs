@@ -75,7 +75,9 @@ pub enum Held {
 /// Serves its script one connection at a time and then stops listening, so a
 /// client that makes more calls than the script has acts gets a refused
 /// connection rather than a silent hang -- an extra call is a defect and it
-/// should look like one.
+/// should look like one. A stub that answers `/props` keeps listening for
+/// them, so an extra call after its acts is answered `503` and recorded as
+/// `<beyond the script: ...>` instead: visible, and never a silent close.
 #[derive(Debug)]
 pub struct Stub {
     address: SocketAddr,
@@ -107,7 +109,9 @@ impl Stub {
     /// A stub serving `acts` that ALSO answers `GET /props` with
     /// `build_info`, without spending an act on it: a server whose engine
     /// check a session can make (#219 item 11). The canned server is one,
-    /// answering with [`crate::drive::canned::build_info`].
+    /// answering with [`crate::drive::canned::build_info`]. A `/props`
+    /// request that cannot be read is not known to be one, so it spends an
+    /// act as `<unread: ...>`, like any unreadable request.
     ///
     /// # Errors
     ///
@@ -151,7 +155,8 @@ impl Stub {
 
     /// The head of every request received so far -- request line and
     /// headers, as sent -- in order, one per request as `asked` has one: a
-    /// request that could not be read is `<unread: ...>` in both. What a
+    /// request that could not be read is `<unread: ...>` in both. A `/props`
+    /// the stub answers has a head here and no entry in `asked`. What a
     /// claim about a header is checked against.
     #[must_use]
     pub fn heads(&self) -> Vec<String> {
@@ -235,6 +240,18 @@ fn serve(
             continue;
         }
         let Some(act) = acts.next() else {
+            // Beyond the script, with `/props` still answered: a defect, made
+            // to look like one rather than closed silently.
+            let beyond = match &read {
+                Ok((head, _)) => format!("<beyond the script: {head}>"),
+                Err(why) => format!("<beyond the script: unread: {why}>"),
+            };
+            heads
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push(beyond.clone());
+            asked.push(beyond);
+            write_reply(&mut stream, 503, "beyond the stub's script", Closing::Yes);
             break;
         };
         match read {

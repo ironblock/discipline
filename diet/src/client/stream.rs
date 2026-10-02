@@ -1245,6 +1245,20 @@ mod tests {
         let ended = transport.stream(&shape(), deadline(), &Cancel::new(), &mut |_| {});
         assert!(ended.is_ok(), "the act is still there: {ended:?}");
         assert_eq!(props(), "{\"build_info\":\"canned-x\"}");
+        // A call beyond the script is a defect, made to look like one: a
+        // 503, recorded -- never a silent close.
+        let extra = transport.stream(&shape(), deadline(), &Cancel::new(), &mut |_| {});
+        assert!(
+            matches!(extra, Ok(Ended::Rejected { status: 503, .. })),
+            "{extra:?}"
+        );
+        assert!(
+            stub.heads()
+                .last()
+                .is_some_and(|head| head.starts_with("<beyond the script: POST ")),
+            "{:?}",
+            stub.heads()
+        );
     }
 
     #[test]
