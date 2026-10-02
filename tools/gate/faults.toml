@@ -8154,6 +8154,30 @@ failure_class = "drive.session-writes-usage-beside-timings"
 migrated = false
 
 [[fault]]
+id = "drive.session-write-through-skips-the-lines-before-it"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-write-through-skips-the-lines-before-it"
+failure_class = "drive.session-write-through-skips-the-lines-before-it"
+migrated = false
+
+[[fault]]
+id = "drive.session-append-leaves-the-sink-unfed"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-append-leaves-the-sink-unfed"
+failure_class = "drive.session-append-leaves-the-sink-unfed"
+migrated = false
+
+[[fault]]
+id = "drive.serve-log-writes-after-a-failure"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-log-writes-after-a-failure"
+failure_class = "drive.serve-log-writes-after-a-failure"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
