@@ -38,6 +38,10 @@ struct Served {
     engine_identity: Option<String>,
     /// Where `--log` writes, and whether naming it emptied a file.
     log: Option<(String, bool)>,
+    /// Where `--record` writes, and whether naming it emptied anything.
+    record: Option<(String, bool)>,
+    /// Every later line it writes on stdout.
+    said: std::sync::mpsc::Receiver<String>,
     _head: HeadFile,
 }
 
@@ -79,11 +83,16 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
     let stdout = child.stdout.take().expect("stdout is piped");
     let (line, announced) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut first = String::new();
-        let _ = BufReader::new(stdout).read_line(&mut first);
-        let _ = line.send(first);
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut next = String::new();
+            if reader.read_line(&mut next).unwrap_or(0) == 0 || line.send(next).is_err() {
+                break;
+            }
+        }
     });
-    let Ok(first) = announced.recv_timeout(Duration::from_secs(10)) else {
+    let announced_rest = announced;
+    let Ok(first) = announced_rest.recv_timeout(Duration::from_secs(10)) else {
         let _ = child.kill();
         let _ = child.wait();
         panic!("diet-drive serve did not announce itself within 10 s");
@@ -103,6 +112,11 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
             .as_str()
             .zip(announced["log_truncated"].as_bool())
             .map(|(path, truncated)| (path.to_owned(), truncated)),
+        record: announced["record"]
+            .as_str()
+            .zip(announced["record_truncated"].as_bool())
+            .map(|(path, truncated)| (path.to_owned(), truncated)),
+        said: announced_rest,
         child,
         _head: head,
     }
@@ -977,12 +991,28 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
     assert_eq!(status(&reply), 200, "{reply}");
 
     let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !(sidecar.exists() && std::fs::metadata(&record.0).is_ok_and(|m| m.len() > 0))
-        && Instant::now() < deadline
-    {
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    // The report, written after both files: its digests are theirs.
+    let report = log_line_object(
+        &served
+            .said
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the record's report"),
+    );
+    assert_eq!(
+        (
+            report["record_sha256"].as_str().map(str::to_owned),
+            report["sidecar_sha256"].as_str().map(str::to_owned)
+        ),
+        (
+            Some(diet::digest::sha256_hex(
+                &std::fs::read(&record.0).expect("the record")
+            )),
+            Some(diet::digest::sha256_hex(
+                &std::fs::read(&sidecar).expect("the sidecar")
+            ))
+        ),
+        "{report}"
+    );
     let checked = Command::new(DIET)
         .args(["check-record"])
         .arg(&record.0)
@@ -1031,6 +1061,26 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
         "the answer's text is kept: {named}"
     );
     let _ = std::fs::remove_file(&sidecar);
+}
+
+#[test]
+fn a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts() {
+    // Left in place until the session ends, an earlier run's record would
+    // read as this session's if this one never ended (#264's review).
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let record = file_holding("record", "an earlier session's record\n");
+    let path = record.0.to_string_lossy().into_owned();
+    let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+    std::fs::write(&sidecar, "an earlier session's sidecar\n").expect("written");
+    let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+    let left = (
+        served.record.clone(),
+        std::fs::read_to_string(&record.0).expect("the record"),
+        sidecar.exists(),
+    );
+    let _ = std::fs::remove_file(&sidecar);
+    assert_eq!(left, (Some((path, true)), String::new(), false));
 }
 
 #[test]

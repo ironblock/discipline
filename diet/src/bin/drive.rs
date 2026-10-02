@@ -266,7 +266,7 @@ fn serve(args: &[String]) -> ExitCode {
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     let log_path = log_file;
-    let (log_file, record) = match outputs(log_path.as_deref(), record_file) {
+    let (log_file, record) = match outputs(log_path.as_deref(), record_file.as_deref()) {
         Ok(opened) => opened,
         Err(why) => return fail(EXIT_OUTPUT, &why),
     };
@@ -284,13 +284,17 @@ fn serve(args: &[String]) -> ExitCode {
     };
     // One render for the stream and the log, so they are one text.
     let render = diet::drive::session::render;
+    // The writers start once the address is bound and before the server
+    // does: no command can append a line before the log's sink is in place
+    // (#264's review), and a start refused at the bind has emptied nothing.
+    let (log, record_held) =
+        match started_writers(&writers, render, log_file, record.zip(regime.clone())) {
+            Ok(held) => held,
+            Err(why) => return fail(EXIT_OUTPUT, &why),
+        };
     let server = match Server::start(listener, session, config, render) {
         Ok(server) => server,
         Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
-    };
-    let log = match started_writers(&writers, render, log_file, record.zip(regime.clone())) {
-        Ok(log) => log,
-        Err(why) => return fail(EXIT_OUTPUT, &why),
     };
     println!(
         "{}",
@@ -300,6 +304,7 @@ fn serve(args: &[String]) -> ExitCode {
             substrate,
             engine.as_ref(),
             log_path.as_deref().zip(log),
+            record_file.as_deref().zip(record_held),
         )
     );
     // Serves until the process is stopped. The server's threads do the work;
@@ -311,8 +316,8 @@ fn serve(args: &[String]) -> ExitCode {
 
 /// The file at `path`, opened for writing (created if absent) but NOT yet
 /// emptied, and whether it holds anything. It is emptied only once the
-/// server has started, so a start that fails leaves an operator's file as
-/// it was.
+/// server's address is bound, so a start refused there leaves an operator's
+/// file as it was.
 fn created(path: &str) -> Result<(std::fs::File, bool), String> {
     let truncated = std::fs::metadata(path).is_ok_and(|held| held.len() > 0);
     std::fs::OpenOptions::new()
@@ -346,47 +351,69 @@ const RECORD_NEEDS_A_REGIMEN: &str =
     "--record needs --regimen: a record's `start` names the regime it ran under";
 
 /// The files `--log` and `--record` name, opened before anything binds and
-/// emptied only later: the log's with whether it held anything, the
-/// record's with its path.
+/// emptied only later, each with whether it held anything; the record's with
+/// its path.
 #[allow(clippy::type_complexity)]
 fn outputs(
     log: Option<&str>,
-    record: Option<String>,
+    record: Option<&str>,
 ) -> Result<
     (
         Option<(std::fs::File, bool)>,
-        Option<(String, std::fs::File)>,
+        Option<((String, std::fs::File), bool)>,
     ),
     String,
 > {
     let log = log.map(created).transpose()?;
     let record = match record {
-        Some(path) => Some((path.clone(), created(&path)?.0)),
+        Some(path) => {
+            let (file, held) = created(path)?;
+            Some(((path.to_owned(), file), held))
+        }
         None => None,
     };
     Ok((log, record))
 }
 
-/// The log and the record, started once the server runs. The log is emptied
-/// only now, and is written from the session's first line on; the
-/// record waits for the session to end. Whether naming the log emptied a
-/// file that held something.
+/// The log and the record, started once the address is bound and before
+/// the server starts. Both are emptied now: the log is written from the
+/// session's first line on, and the record waits for the session to end --
+/// with an earlier run's record and sidecar gone, so a session that never
+/// ends leaves nothing that reads as its own (#264's review). Whether naming
+/// each emptied something.
+#[allow(clippy::type_complexity)]
 fn started_writers(
     session: &std::sync::Arc<Session<HttpStream>>,
     render: diet::drive::serve::Render,
     log: Option<(std::fs::File, bool)>,
-    record: Option<((String, std::fs::File), diet::formats::record::Regime)>,
-) -> Result<Option<bool>, String> {
-    if let Some((record, regime)) = record {
-        keep_record(std::sync::Arc::clone(session), regime, record);
-    }
-    log.map(|(file, truncated)| {
-        file.set_len(0)
-            .map_err(|why| format!("the log cannot be emptied: {why}"))?;
-        keep_log(session, render, file);
-        Ok(truncated)
-    })
-    .transpose()
+    record: Option<(
+        ((String, std::fs::File), bool),
+        diet::formats::record::Regime,
+    )>,
+) -> Result<(Option<bool>, Option<bool>), String> {
+    let record_held = record
+        .map(|(((path, file), held), regime)| {
+            let sidecar = format!("{path}.unspellable.json");
+            let stale = std::path::Path::new(&sidecar).exists();
+            file.set_len(0)
+                .map_err(|why| format!("the record cannot be emptied: {why}"))?;
+            if stale {
+                std::fs::remove_file(&sidecar)
+                    .map_err(|why| format!("{sidecar} cannot be removed: {why}"))?;
+            }
+            keep_record(std::sync::Arc::clone(session), regime, (path, file));
+            Ok::<_, String>(held || stale)
+        })
+        .transpose()?;
+    let log_held = log
+        .map(|(file, truncated)| {
+            file.set_len(0)
+                .map_err(|why| format!("the log cannot be emptied: {why}"))?;
+            keep_log(session, render, file);
+            Ok::<_, String>(truncated)
+        })
+        .transpose()?;
+    Ok((log_held, record_held))
 }
 
 /// The session's record, written once, when it settles `ended` (`--record`,
@@ -538,6 +565,7 @@ fn announcement(
     substrate: Option<&str>,
     engine: Option<&diet::drive::engine::Passed>,
     log: Option<(&str, bool)>,
+    record: Option<(&str, bool)>,
 ) -> String {
     let mut fields = BTreeMap::from([
         ("listening".to_owned(), Value::String(listening.to_owned())),
@@ -573,6 +601,12 @@ fn announcement(
     if let Some((path, truncated)) = log {
         fields.insert("log".to_owned(), Value::String(path.to_owned()));
         fields.insert("log_truncated".to_owned(), Value::Boolean(truncated));
+    }
+    // And the record's: whether naming it emptied a record or removed a
+    // sidecar an earlier run left.
+    if let Some((path, truncated)) = record {
+        fields.insert("record".to_owned(), Value::String(path.to_owned()));
+        fields.insert("record_truncated".to_owned(), Value::Boolean(truncated));
     }
     let mut out = String::new();
     json::render(&Value::Object(fields), &mut out);

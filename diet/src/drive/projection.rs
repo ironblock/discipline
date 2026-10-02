@@ -44,11 +44,17 @@ pub const MEASUREMENT: &str =
     "https://github.com/ironblock/discipline/issues/157#issuecomment-5941593602";
 
 /// The engines the measurement covers: a commit prefix, or an
-/// `engine_build_info` literal, exactly as [`super::engine`] matches them.
+/// `engine_build_info` literal together with the binary measured. A literal
+/// alone names no engine (every prebuilt release of a fork may report
+/// `b0-unknown-dirty`), so it cites only beside the `engine_identity` the
+/// captures were taken on (#264's review).
 pub const CITED: &[Engine] = &[
     Engine::Commit("e7051ef"),
     Engine::Commit("4df29be"),
-    Engine::Literal("b0-unknown-dirty"),
+    Engine::Literal(
+        "b0-unknown-dirty",
+        "980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4",
+    ),
 ];
 
 /// An engine, as the registry pins it.
@@ -56,25 +62,28 @@ pub const CITED: &[Engine] = &[
 pub enum Engine {
     /// A commit, by a prefix of its hash.
     Commit(&'static str),
-    /// A `build_info` literal, exactly.
-    Literal(&'static str),
+    /// A `build_info` literal, exactly, and the sha256 of the engine binary
+    /// it was measured on (the registry's `engine_identity`).
+    Literal(&'static str, &'static str),
 }
 
 /// Which cited engine `identity` is, if any: its `engine_build_info`
-/// literal when it declares one (checked first, as the engine check does),
-/// else its `engine_commit`.
+/// literal and its engine's digest when it declares a literal (checked
+/// first, as the engine check does), else its `engine_commit`.
 #[must_use]
 pub fn cited(identity: &Identity) -> Option<Engine> {
     CITED
         .iter()
         .copied()
         .find(|engine| match (engine, &identity.engine_build_info) {
-            (Engine::Literal(literal), Some(declared)) => declared == literal,
+            (Engine::Literal(literal, binary), Some(declared)) => {
+                declared == literal && identity.engine.version_or_digest == *binary
+            }
             (Engine::Commit(prefix), None) => identity
                 .engine_commit
                 .as_deref()
                 .is_some_and(|commit| commit.starts_with(prefix)),
-            (Engine::Literal(_), None) | (Engine::Commit(_), Some(_)) => false,
+            (Engine::Literal(..), None) | (Engine::Commit(_), Some(_)) => false,
         })
 }
 
@@ -84,7 +93,9 @@ impl Engine {
     pub fn describes(self) -> String {
         match self {
             Self::Commit(prefix) => format!("commit {prefix}"),
-            Self::Literal(literal) => format!("build_info {literal}"),
+            Self::Literal(literal, binary) => {
+                format!("build_info {literal}, engine binary sha256 {binary}")
+            }
         }
     }
 }
@@ -876,6 +887,7 @@ mod tests {
             lane: Lane::Trunk,
             head_sha256: Some(head()),
         });
+        let events_len = events.len();
         let projection = project(
             &numbered(events),
             &regime(),
@@ -888,10 +900,22 @@ mod tests {
             .map(|item| item.kind)
             .collect();
         assert!(
-            kinds.contains(&"cancelled")
-                && kinds.contains(&"request.failed")
-                && kinds.contains(&"request"),
+            kinds.contains(&"cancelled") && kinds.contains(&"request.failed"),
             "{kinds:?}"
+        );
+        // The unanswered request by its own seq and reason: every request
+        // here is also named for its unrebuildable head, so a bare "request"
+        // proves nothing (#264's review).
+        let unanswered = u64::try_from(events_len - 1).expect("a seq");
+        assert!(
+            projection
+                .unspellable
+                .iter()
+                .any(|item| item.seq == unanswered
+                    && item.kind == "request"
+                    && item.why == "a request with no outcome in the log"),
+            "{:?}",
+            projection.unspellable
         );
         assert!(
             projection
@@ -928,6 +952,14 @@ mod tests {
 
     /// The same, each answer reporting `timings` when given.
     fn a_real_session_log_timed(timings: Option<crate::client::stream::Timings>) -> Vec<log::Line> {
+        a_real_session_log_shaped(timings, BTreeMap::new())
+    }
+
+    /// The same, the trunk sending `template_kwargs`.
+    fn a_real_session_log_shaped(
+        timings: Option<crate::client::stream::Timings>,
+        template_kwargs: BTreeMap<String, crate::formats::record::json::Value>,
+    ) -> Vec<log::Line> {
         use crate::client::stream::{Canned, Step};
         use crate::drive::session::{Session, Settlement, line_of};
         let shape = RequestShape {
@@ -944,7 +976,7 @@ mod tests {
                 retries: 0,
             },
             grammar: None,
-            template_kwargs: BTreeMap::new(),
+            template_kwargs,
             tools: Vec::new(),
         };
         let session = Session::open(
@@ -1007,6 +1039,37 @@ mod tests {
     }
 
     #[test]
+    fn a_trunk_with_a_shape_the_rebuild_does_not_assume_is_unattributed() {
+        // The rebuild assumes no kwargs and no tools (ruled on #157); a trunk
+        // that sends kwargs is caught by the digest, not rebuilt wrong.
+        let log = a_real_session_log_shaped(
+            None,
+            BTreeMap::from([(
+                "enable_thinking".to_owned(),
+                crate::formats::record::json::Value::Boolean(false),
+            )]),
+        );
+        let projection = project(&log, &regime(), None).expect("projected");
+        let reasons: Vec<&PrefixReason> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::PrefixChanged { reason, .. } => Some(reason),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(reasons, [&PrefixReason::Unattributed]);
+        assert!(
+            projection
+                .unspellable
+                .iter()
+                .any(|item| item.why.starts_with("its head could not be rebuilt")),
+            "{:?}",
+            projection.unspellable
+        );
+    }
+
+    #[test]
     fn a_head_the_log_cannot_rebuild_is_unattributed_and_named() {
         // The second request's logged head is not what its trunk rebuilds to:
         // nothing is guessed.
@@ -1046,7 +1109,17 @@ mod tests {
         identity.engine_commit = Some("e486f802d3b46d9aa98b38d162e952b150cb5082".to_owned());
         assert_eq!(cited(&identity), None, "e486f80 is unmeasured");
         identity.engine_build_info = Some("b0-unknown-dirty".to_owned());
-        assert_eq!(cited(&identity), Some(Engine::Literal("b0-unknown-dirty")));
+        assert_eq!(
+            cited(&identity),
+            None,
+            "the literal on another engine's binary is unmeasured"
+        );
+        let beellama = crate::drive::registry::identity(
+            crate::drive::registry::REGISTRY,
+            "cpu-beellama-qwen3-1p7b-q4km",
+        )
+        .expect("registered");
+        assert_eq!(cited(&beellama), Some(CITED[2]), "the binary measured");
         // A literal governs: a cited commit beside an uncited literal is not cited.
         identity.engine_commit = Some("e7051efc8002847f7269c5606318431179b5904e".to_owned());
         identity.engine_build_info = Some("b9-somethingelse".to_owned());
