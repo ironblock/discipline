@@ -256,12 +256,13 @@ def main(argv: list[str]) -> int:
     # not cost, and this is what a re-balance is read from. Printed as the
     # next directory starts, since the loop leaves each one by `continue`.
     timing: tuple[str, float] | None = None
-    for directory in directories:
-        # THE CENSUS ROW FIRST (#262, ruled on #268): what this shard ran is
-        # what the loop reached, after every filter, written as it is reached.
-        gatelib.record_ran(directory.name)
-        if gatelib.census_dry():
-            continue
+    # ONE DIRECTORY, TO ITS OUTCOME (#262, #268's fifth review). The census
+    # row is written from what this returns, so a directory the loop skips
+    # writes no row, and a path that returns no outcome writes a row the
+    # census refuses -- a row written on entry said only that the loop got
+    # there, and a `continue` after it went unseen.
+    def one(directory: pathlib.Path) -> str:
+        nonlocal timing, results_seen, undeclared, historical, templates, recomputed
         if timing is not None:
             print(f"check-recompute: {timing[0]} took {time.monotonic() - timing[1]:.1f}s")
         timing = (directory.name, time.monotonic())
@@ -272,7 +273,7 @@ def main(argv: list[str]) -> int:
         if front is None:
             undeclared += not is_template
             failures.append(f"{directory}: {err}")
-            continue
+            return "failed"
         kind = front.get("kind")
         if kind not in KINDS:
             undeclared += not is_template
@@ -281,14 +282,14 @@ def main(argv: list[str]) -> int:
                 f"{' or '.join(KINDS)}, because a directory that declares nothing is "
                 f"neither checked nor knowingly skipped"
             )
-            continue
+            return "failed"
         if is_template and kind != REPRODUCIBLE:
             failures.append(
                 f"{directory}: the template declares `{kind}`. Every results "
                 f"directory is copied from it, so a template carrying the "
                 f"opt-out hands it to every copy before anyone has run anything"
             )
-            continue
+            return "failed"
         if kind == HISTORICAL:
             # Not an unconditional opt-out any more. It has to say what makes
             # the run unreproducible, and it has to have no script -- because
@@ -303,7 +304,7 @@ def main(argv: list[str]) -> int:
                     f"inputs cannot exist -- a tag with no reason behind it is "
                     f"the opt-out every red result reaches for"
                 )
-                continue
+                return "failed"
             if (directory / RECOMPUTE).is_file():
                 failures.append(
                     f"{directory}: declares `{HISTORICAL}` and carries a "
@@ -313,16 +314,16 @@ def main(argv: list[str]) -> int:
                     f"Becoming historical means removing the script and saying "
                     f"why, in a change somebody reviews"
                 )
-                continue
+                return "failed"
             historical += 1
-            continue
+            return "historical"
 
         script = directory / RECOMPUTE
         if not script.is_file():
             failures.append(
                 f"{directory}: declares `{REPRODUCIBLE}` and carries no {RECOMPUTE}"
             )
-            continue
+            return "failed"
         # An empty script exits 0. So does one that is nothing but comments.
         body = "\n".join(
             line for line in script.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -333,7 +334,7 @@ def main(argv: list[str]) -> int:
                 f"{directory}: {RECOMPUTE} has no executable content, so it exits 0 "
                 f"without recomputing anything"
             )
-            continue
+            return "failed"
         before = tracked_state(directory)
         run = subprocess.run(
             ["bash", str(script.resolve())],
@@ -351,7 +352,7 @@ def main(argv: list[str]) -> int:
                 f"{directory}: git could not report whether {RECOMPUTE} modified "
                 f"the tree, so whether it tampered is unknown and cannot be assumed"
             )
-            continue
+            return "failed"
         if before != after:
             # Re-derivation READS the artefacts. A script that writes the
             # report to match them has made the comparison true rather than
@@ -360,14 +361,14 @@ def main(argv: list[str]) -> int:
                 f"{directory}: {RECOMPUTE} modified the working tree. A recompute "
                 f"that edits what it is checking is tampering, not recomputation"
             )
-            continue
+            return "failed"
         if run.returncode != 0:
             detail = (run.stderr or run.stdout or "").strip().splitlines()
             failures.append(
                 f"{directory}: {RECOMPUTE} exited {run.returncode}"
                 + ("\n  " + "\n  ".join(detail) if detail else "")
             )
-            continue
+            return "failed"
         try:
             vacuous = proves_it_compares(directory, script)
         except CannotProbe as err:
@@ -375,14 +376,21 @@ def main(argv: list[str]) -> int:
             # recomputed; a directory whose vacuity could not be established
             # belongs in neither column, and saying so is EXIT_NOTHING.
             unprobed.append(f"{directory}: {err}")
-            continue
+            return "unprobed"
         if vacuous is not None:
             failures.append(f"{directory}: {vacuous}")
-            continue
+            return "failed"
         if is_template:
             templates += 1
         else:
             recomputed += 1
+        return "template" if is_template else "recomputed"
+
+    for directory in directories:
+        if gatelib.census_dry():
+            gatelib.record_ran(directory.name)
+            continue
+        gatelib.record_ran(directory.name, one(directory))
 
     if timing is not None:
         print(f"check-recompute: {timing[0]} took {time.monotonic() - timing[1]:.1f}s")

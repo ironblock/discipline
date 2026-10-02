@@ -4284,7 +4284,7 @@ import pathlib
 path = pathlib.Path('verify.sh')
 source = path.read_text(encoding="utf-8")
 old = '  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} \\\n'
-new = '  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "${VERIFY_LIST_MEMBERS:+$VERIFY_CHECK_SHARD}${VERIFY_LIST_MEMBERS:-1/${VERIFY_CHECK_SHARD#*/}}"} \\\n'
+new = '  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$(if [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then echo "$VERIFY_CHECK_SHARD"; else echo "1/${VERIFY_CHECK_SHARD#*/}"; fi)"} \\\n'
 if source.count(old) != 1:
     raise SystemExit(f"the anchor appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -4311,6 +4311,48 @@ for old, new in edits:
         raise SystemExit(f"the anchor appears {source.count(old)} times")
     source = source.replace(old, new, 1)
 path.write_text(source, encoding="utf-8")
+EOF
+}
+
+# The fifth review's routes (#268): a member skipped after the census's dry
+# branch and before its outcome, so a dry census is whole and the real run is
+# not; and the gate's census switched off by a key after its `run:`.
+inject_ci_recompute_skips_after_the_dry_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = '        gatelib.record_ran(directory.name, one(directory))\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '        if shard is not None and directory == directories[0]:\n            continue\n' + old, 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_injections_skips_after_the_dry_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-injections.py')
+source = path.read_text(encoding="utf-8")
+old = '            outcome = one(name)\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '            if shard is not None and name == applied[-1]:\n                continue\n' + old, 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_shard_census_switched_off() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+old = 'python3 scripts/check-shard-census.py "${{ runner.temp }}/members"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + chr(10) + '        continue-on-error: true', 1), encoding="utf-8")
 EOF
 }
 
@@ -8248,7 +8290,7 @@ selftest() {
   seeded_case "a sharded matrix that is not the table" ci inject_ci_sharded_matrix_not_the_table \
     'pkg-recompute\.yml: .recompute. is sharded, and its workflow is not the sharded form'
   seeded_case "a check that runs one shard whatever"   ci inject_ci_check_runs_one_shard \
-    '.recompute..s 3 shards run none of 10 member\(s\), so nothing runs them'
+    '.recompute..s 3 shards run none of [0-9]+ member\(s\), so nothing runs them'
   seeded_case "a line separator YAML does not split on" ci inject_ci_sharded_workflow_line_separator \
     "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
   seeded_case "a listing with no line of its own"      ci inject_ci_listing_unmarked \
@@ -8258,9 +8300,15 @@ selftest() {
   seeded_case "an applier that applies fewer than it lists" ci inject_ci_injections_applies_fewer_than_listed \
     '.injections..s 2 shards run none of 2 member\(s\), so nothing runs them'
   seeded_case "a wrapper that runs shard 1 when not listing" ci inject_ci_recompute_wrapper_shard_one_when_running \
-    '.recompute..s shards run 6 member\(s\) more than once'
+    '.recompute..s shards run [0-9]+ member\(s\) more than once'
   seeded_case "a package's call kept in a block scalar" ci inject_ci_caller_in_block_scalar \
     'pkg-recompute\.yml exists but verify\.yml never calls it'
+  seeded_case "a recompute skip the dry census cannot see" ci inject_ci_recompute_skips_after_the_dry_branch \
+    '.recompute, run for real.s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
+  seeded_case "an applier skip the dry census cannot see" ci inject_ci_injections_skips_after_the_dry_branch \
+    '.injections, run for real.s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
+  seeded_case "the gate's shard census allowed to fail" ci inject_ci_shard_census_switched_off \
+    'the gate job does not run check-shard-census\.py'
   seeded_case "the gate's shard census renamed away"   ci inject_ci_shard_census_step_removed \
     'the gate job does not run check-shard-census\.py'
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \

@@ -129,16 +129,19 @@ def census_dry() -> bool:
     return os.environ.get(CENSUS_DRY) == "1"
 
 
-def record_ran(name: str) -> None:
-    """Record `name` as run, if a census was asked for: one row per member, as
-    the loop reaches it, appended so a run that dies part-way says how far."""
+def record_ran(name: str, outcome: str | None = None) -> None:
+    """Record `name`, if a census was asked for: one row per member, appended
+    so a run that dies part-way says how far it got. A real run's row carries
+    the member's OUTCOME, written from what its work returned, never on entry
+    (#268's fifth review: a row on entry said only that the loop got there).
+    A dry run's row carries none."""
     import os
 
     path = os.environ.get(MEMBERS_RAN)
     if not path:
         return
     with open(path, "a", encoding="utf-8") as out:
-        out.write(f"{'dry' if census_dry() else 'ran'}\t{name}\n")
+        out.write(f"dry\t{name}\n" if census_dry() else f"ran\t{name}\t{outcome}\n")
 
 
 def members_listed(output: str, check: str) -> list[str] | None:

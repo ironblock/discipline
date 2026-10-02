@@ -67,6 +67,13 @@ ROOT_WORKFLOW = "verify.yml"
 # whose first line is the `uses:`, at the indents a job and its key take.
 CALLS = re.compile(r"^  [A-Za-z0-9_-]+:\n    uses: \./\.github/workflows/([A-Za-z0-9._-]+)$", re.MULTILINE)
 
+# The real-loop census's inputs (rule 13): seconds each, and every member
+# comes back with an outcome whatever the verdict on it.
+REAL_CENSUS = (
+    ("recompute", [sys.executable, "scripts/check-recompute.py", "--root", "tests/fixtures/results-bad"]),
+    ("injections", [sys.executable, "scripts/check-injections.py", ".", "--only", "inject_ci_trunk_typo"]),
+)
+
 # The gate job's census of the sharded packages (#262, ruled on #268), which
 # must stand in the root workflow at a step's indents: a census nobody runs
 # proves nothing about what the shards ran.
@@ -934,7 +941,10 @@ def main() -> int:
     #    On CI the gate job runs the same census over what the shards really
     #    ran, and refuses a dry row.
     gate_job = re.search(r"^  gate:\n(.*?)(?=^  \S|\Z)", root_text, re.MULTILINE | re.DOTALL)
-    if SHARDS and not (gate_job and SHARD_CENSUS_STEP in gate_job.group(1)):
+    # The census is the gate job's LAST step, written exactly: a key appended
+    # after its `run:` -- `if: false`, `continue-on-error`, a `|| true`
+    # continuation -- would switch it off (#268's fifth review).
+    if SHARDS and not (gate_job and gate_job.group(1).rstrip("\n").endswith(SHARD_CENSUS_STEP.rstrip("\n"))):
         failures.append(
             f"{ROOT_WORKFLOW}: the gate job does not run check-shard-census.py over the shards' "
             f"`members-*` artifacts, so nothing proves the sharded checks ran every member (#262)"
@@ -972,6 +982,31 @@ def main() -> int:
                 failures.extend(line for line in done.stderr.split("\n") if line.strip())
     finally:
         shutil.rmtree(census, ignore_errors=True)
+
+    #    ...AND THE REAL LOOPS RECORD WHAT THEY FINISH (#268's fifth review).
+    #    A dry run never reaches a member's work, so a skip placed there --
+    #    after the dry branch, before the outcome -- is invisible to the dry
+    #    census and visible only on CI. So each script's real loop is run here
+    #    too, split in two, over inputs that cost seconds: recompute over the
+    #    malformed-directory fixtures, the applier over one injection. Every
+    #    member listed must come back as a row with its outcome.
+    for check, command in REAL_CENSUS:
+        listing = subprocess.run([*command, "--names"], cwd=ROOT, capture_output=True, text=True)
+        lines = listing.stdout.split("\n")
+        whole = [l for l in lines[lines.index(gatelib.LISTING) + 1:] if l.strip()] if gatelib.LISTING in lines else []
+        parts = []
+        for part in (1, 2):
+            with tempfile.TemporaryDirectory(prefix="check-ci-coverage.real.") as held:
+                rows = pathlib.Path(held) / "members-ran.tsv"
+                env = {k: v for k, v in os.environ.items() if k != gatelib.CENSUS_DRY}
+                env[gatelib.MEMBERS_RAN] = str(rows)
+                subprocess.run([*command, "--shard", f"{part}/2"], cwd=ROOT, env=env, capture_output=True, text=True)
+                text = rows.read_text(encoding="utf-8") if rows.exists() else ""
+                parts.append([
+                    row.split("\t")[1] for row in text.split("\n")
+                    if re.fullmatch(r"ran\t[^\t]+\t[a-z]+", row)
+                ])
+        failures += gatelib.split_failures(f"{check}, run for real", 2, whole, parts)
 
     # 14. no package's measured seconds pass the budget (#262)
     #

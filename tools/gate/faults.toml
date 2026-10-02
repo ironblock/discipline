@@ -4051,7 +4051,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a check that runs one shard whatever"
 failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute..s 3 shards run none of 10 member\\(s\\), so nothing runs them"
+legacy_signature = ".recompute..s 3 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
 migrated = false
 [[fault]]
 id = "ci.ci_sharded_workflow_line_separator"
@@ -4091,7 +4091,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a wrapper that runs shard 1 when not listing"
 failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute..s shards run 6 member\\(s\\) more than once"
+legacy_signature = ".recompute..s shards run [0-9]+ member\\(s\\) more than once"
 migrated = false
 [[fault]]
 id = "ci.ci_caller_in_block_scalar"
@@ -4100,6 +4100,30 @@ check = "ci"
 label = "a package's call kept in a block scalar"
 failure_class = "wiring.uncalled"
 legacy_signature = "pkg-recompute\\.yml exists but verify\\.yml never calls it"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "a recompute skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute, run for real.s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections, run for real.s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_switched_off"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census allowed to fail"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
 migrated = false
 [[fault]]
 id = "ci.ci_shard_census_step_removed"

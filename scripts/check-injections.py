@@ -610,21 +610,21 @@ def main() -> int:
     helpers = "\n".join(match.group(0) for match in HELPERS.finditer(text))
 
     inert = []
+    finished = 0
     box = Path(tempfile.mkdtemp(prefix="check-injections."))
     try:
         populate(box, root, tracked)
         pristine = digests(box)
         before = fingerprint(box, pristine)
-        for name in applied:
-            # THE CENSUS ROW FIRST (#262, ruled on #268): what this shard
-            # applied is what the loop reached, written as it is reached.
-            gatelib.record_ran(name)
-            if gatelib.census_dry():
-                continue
+        # ONE INJECTION, TO ITS OUTCOME (#262, #268's fifth review): the census
+        # row is written from what this returns, so an injection the loop
+        # skips writes no row -- a row written on entry said only that the
+        # loop reached it.
+        def one(name: str) -> str:
             body = re.search(rf"^{name}\(\) \{{\n.*?^\}}\n", text, re.M | re.S)
             if body is None:
                 inert.append((name, 2, "its body could not be extracted"))
-                continue
+                return "inert"
             run = subprocess.run(
                 ["bash", "-c", f"set -e\n{helpers}\n{body.group(0)}\ncd {box}\n{name}\n"],
                 capture_output=True,
@@ -639,9 +639,11 @@ def main() -> int:
             # was reported as fine here, while the selftest graded the check
             # against the half-made tree and called it a gate that did not
             # fire. Found by running it, after item 3 renamed `substrate`.
+            outcome = "applied"
             if fingerprint(box) == before or run.returncode != 0:
                 tail = (run.stderr or "").strip().splitlines()[-1:] or [""]
                 inert.append((name, run.returncode, tail[0][:80]))
+                outcome = "inert"
             restore(box, root, pristine)
             # The box is shared now, so its cleanliness is a precondition of
             # every case after this one rather than a detail of this one. An
@@ -649,6 +651,17 @@ def main() -> int:
             # "this gate never fires" is the one verdict that must never be
             # reached by accident.
             if fingerprint(box) != before:
+                return "unrestored"
+            return outcome
+
+        for name in applied:
+            if gatelib.census_dry():
+                gatelib.record_ran(name)
+                continue
+            outcome = one(name)
+            gatelib.record_ran(name, outcome)
+            finished += 1
+            if outcome == "unrestored":
                 print(
                     f"check-injections: the sandbox could not be put back after "
                     f"{name}, so nothing after it can be trusted",
@@ -659,7 +672,7 @@ def main() -> int:
         shutil.rmtree(box, ignore_errors=True)
 
     print(
-        f"check-injections: {len(applied)} of {len(names)} injection(s) applied"
+        f"check-injections: {finished if not gatelib.census_dry() else 0} of {len(names)} injection(s) applied"
         f"{f' (shard {shard[0]} of {shard[1]})' if shard else ''}, "
         f"{len(inert)} that change nothing or do not finish; every struct literal "
         f"inside one names every field its type declares"

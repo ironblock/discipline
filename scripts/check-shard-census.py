@@ -13,7 +13,9 @@ selftest:
 
   * every declared shard reported, under `members-<check>-<k>/`, and nothing
     else did -- a missing census is a missing job;
-  * every row is `ran<TAB>member` (`dry` only under --dry, the local proof);
+  * every row is `ran<TAB>member<TAB>outcome`, written from what the
+    member's work returned (under --dry, the local proof, `dry<TAB>member`
+    and nothing else);
   * the members the shards ran, together, are exactly the unsplit listing --
     asked of verify.sh itself, not recomputed here -- none skipped, none run
     twice, none the unsplit check does not run.
@@ -38,7 +40,9 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 OWNERS = ROOT / ".github" / "check-owners.tsv"
 VERIFY = ROOT / "verify.sh"
 EXIT_LISTED = 3
-ROW = re.compile(r"(ran|dry)\t(\S.*)")
+# A real run's row names the member and the outcome its work returned; a dry
+# run's names the member alone.
+ROW = re.compile(r"ran\t([^\t]+)\t([a-z]+)|dry\t([^\t]+)")
 ARTIFACT = re.compile(r"members-([a-z0-9-]+)-([1-9][0-9]*)")
 RAN = "members-ran.tsv"
 
@@ -103,14 +107,18 @@ def main(argv: list[str]) -> int:
                 continue
             row = ROW.fullmatch(line)
             if not row:
-                failures.append(f"{entry.name}/{RAN}:{number}: not `ran<TAB>member`")
-            elif row.group(1) == "dry" and not dry:
+                failures.append(f"{entry.name}/{RAN}:{number}: not `ran<TAB>member<TAB>outcome` or `dry<TAB>member`")
+            elif row.group(3) is not None and not dry:
                 failures.append(
                     f"{entry.name}/{RAN}:{number}: a DRY row -- this shard recorded its members "
                     f"and ran none of them, which is not a run"
                 )
+            elif row.group(3) is None and dry:
+                # The local proof is of the dry loop's own rows (#268's fifth
+                # review): a `ran` row there was written by something else.
+                failures.append(f"{entry.name}/{RAN}:{number}: a `ran` row in a dry census")
             else:
-                members.append(row.group(2))
+                members.append(row.group(1) or row.group(3))
         reported[(check, part)] = members
     for check, count in sorted(shards.items()):
         absent = [k for k in range(1, count + 1) if (check, k) not in reported]
