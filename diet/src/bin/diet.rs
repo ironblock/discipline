@@ -156,7 +156,14 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let text = std::str::from_utf8(&source).map_err(|err| format!("not UTF-8: {err}"));
+    // A log may end inside a character as well as inside an event (#230):
+    // its own decode reads a torn write up to the cut, and nothing else.
+    let text = if matches!(operation, Operation::Format("log")) {
+        diet::formats::log::decode(&source)
+    } else {
+        std::str::from_utf8(&source)
+    }
+    .map_err(|err| format!("not UTF-8: {err}"));
     let (subject, outcome) = match operation {
         Operation::Format(name) => {
             let Some(format) = diet::formats::format(name) else {

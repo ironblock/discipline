@@ -535,25 +535,231 @@ pub struct Read {
     pub torn: usize,
 }
 
-/// Whether `text` is one complete object of the record's value space, and
-/// nothing else.
-fn is_complete_object(text: &str) -> bool {
-    LogParser::parse(Rule::object, text)
-        .ok()
-        .and_then(|mut pairs| pairs.next())
-        .is_some_and(|pair| pair.as_span().end() == text.len())
+/// How a scan of a value-space object stopped short of finishing it.
+enum Stop {
+    /// The text ran out with every byte so far a valid start.
+    Ended,
+    /// A byte no object of the value space has there.
+    Invalid,
 }
 
-/// A TORN FINAL LINE (#230, amending ruling 4 for the final line only): a
-/// writer killed mid-write leaves the start of an object with no line break
-/// after it. Every strict prefix of an object is not an object, so the tail
-/// is torn exactly when it starts one and does not finish it. The file's
-/// truth ends at the last complete event before it. A final line that IS a
-/// complete object is an event, read and checked like any other; a torn line
-/// anywhere but last is followed by a line break and is refused where it is.
+/// A scan of the record's value space (`diet/formats/record/grammar.pest`)
+/// that reports WHERE it stopped, which a parse that fails cannot: pest names
+/// the start of the failing token, not whether the text merely ran out.
+struct Prefix<'a> {
+    text: &'a str,
+    at: usize,
+}
+
+impl Prefix<'_> {
+    fn peek(&self) -> Result<u8, Stop> {
+        self.text
+            .as_bytes()
+            .get(self.at)
+            .copied()
+            .ok_or(Stop::Ended)
+    }
+
+    fn eat(&mut self, byte: u8) -> Result<(), Stop> {
+        if self.peek()? == byte {
+            self.at += 1;
+            Ok(())
+        } else {
+            Err(Stop::Invalid)
+        }
+    }
+
+    fn space(&mut self) {
+        while matches!(self.text.as_bytes().get(self.at), Some(b' ' | b'\t')) {
+            self.at += 1;
+        }
+    }
+
+    fn object(&mut self) -> Result<(), Stop> {
+        self.eat(b'{')?;
+        self.space();
+        if self.peek()? == b'}' {
+            self.at += 1;
+            return Ok(());
+        }
+        loop {
+            self.string()?;
+            self.space();
+            self.eat(b':')?;
+            self.space();
+            self.value()?;
+            self.space();
+            match self.peek()? {
+                b',' => {
+                    self.at += 1;
+                    self.space();
+                }
+                b'}' => {
+                    self.at += 1;
+                    return Ok(());
+                }
+                _ => return Err(Stop::Invalid),
+            }
+        }
+    }
+
+    fn array(&mut self) -> Result<(), Stop> {
+        self.eat(b'[')?;
+        self.space();
+        if self.peek()? == b']' {
+            self.at += 1;
+            return Ok(());
+        }
+        loop {
+            self.value()?;
+            self.space();
+            match self.peek()? {
+                b',' => {
+                    self.at += 1;
+                    self.space();
+                }
+                b']' => {
+                    self.at += 1;
+                    return Ok(());
+                }
+                _ => return Err(Stop::Invalid),
+            }
+        }
+    }
+
+    fn value(&mut self) -> Result<(), Stop> {
+        match self.peek()? {
+            b'{' => self.object(),
+            b'[' => self.array(),
+            b'"' => self.string(),
+            b't' => self.word(b"true"),
+            b'f' => self.word(b"false"),
+            b'-' | b'0'..=b'9' => self.number(),
+            _ => Err(Stop::Invalid),
+        }
+    }
+
+    fn word(&mut self, word: &[u8]) -> Result<(), Stop> {
+        word.iter().try_for_each(|byte| self.eat(*byte))
+    }
+
+    fn string(&mut self) -> Result<(), Stop> {
+        self.eat(b'"')?;
+        loop {
+            match self.peek()? {
+                b'"' => {
+                    self.at += 1;
+                    return Ok(());
+                }
+                b'\\' => {
+                    self.at += 1;
+                    match self.peek()? {
+                        b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => self.at += 1,
+                        b'u' => {
+                            self.at += 1;
+                            for _ in 0..4 {
+                                if !self.peek()?.is_ascii_hexdigit() {
+                                    return Err(Stop::Invalid);
+                                }
+                                self.at += 1;
+                            }
+                        }
+                        _ => return Err(Stop::Invalid),
+                    }
+                }
+                0x00..=0x1f => return Err(Stop::Invalid),
+                _ => self.at += 1,
+            }
+        }
+    }
+
+    /// A number is read whole, then judged: complete, by the grammar's own
+    /// `integer` and `decimal`; cut off by the end of the text, by whether
+    /// some number of the value space starts that way.
+    fn number(&mut self) -> Result<(), Stop> {
+        let start = self.at;
+        while matches!(
+            self.text.as_bytes().get(self.at),
+            Some(b'-' | b'0'..=b'9' | b'.')
+        ) {
+            self.at += 1;
+        }
+        let token = &self.text[start..self.at];
+        if self.at == self.text.len() {
+            return Err(if starts_a_number(token) {
+                Stop::Ended
+            } else {
+                Stop::Invalid
+            });
+        }
+        let whole = |rule| {
+            LogParser::parse(rule, token)
+                .ok()
+                .and_then(|mut pairs| pairs.next())
+                .is_some_and(|pair| pair.as_span().end() == token.len())
+        };
+        if whole(Rule::integer) || whole(Rule::decimal) {
+            Ok(())
+        } else {
+            Err(Stop::Invalid)
+        }
+    }
+}
+
+/// Whether some number of the value space starts with `token`: a sign, then
+/// `0` or a nonzero digit and digits, then a point and digits.
+fn starts_a_number(token: &str) -> bool {
+    let unsigned = token.strip_prefix('-').unwrap_or(token);
+    let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    let whole_ok = whole.is_empty() && !unsigned.contains('.')
+        || whole == "0"
+        || (whole.starts_with(|c: char| c.is_ascii_digit() && c != '0')
+            && whole.bytes().all(|b| b.is_ascii_digit()));
+    whole_ok && fraction.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Whether `text` is a STRICT PREFIX of an object of the record's value
+/// space: every byte a valid continuation, and the text ending before the
+/// object does. That is what a writer killed mid-write leaves, and nothing
+/// else is: a complete object, an object with anything after it, and a byte
+/// no object has there are not torn writes.
+fn is_a_torn_write(text: &str) -> bool {
+    text.starts_with('{') && matches!(Prefix { text, at: 0 }.object(), Err(Stop::Ended))
+}
+
+/// A log's text from its bytes. A writer killed mid-write can cut a
+/// character as well as an event, so bytes that end inside a UTF-8 sequence
+/// are read up to the cut -- but only when what is left of the final line is
+/// a torn write ([`is_a_torn_write`]); any other invalid UTF-8 is refused as
+/// it is in every format.
+///
+/// # Errors
+///
+/// When the bytes are not UTF-8 and are not a log cut inside a character.
+pub fn decode(bytes: &[u8]) -> Result<&str, std::str::Utf8Error> {
+    let err = match std::str::from_utf8(bytes) {
+        Ok(text) => return Ok(text),
+        Err(err) => err,
+    };
+    if err.error_len().is_none()
+        && let Ok(text) = std::str::from_utf8(&bytes[..err.valid_up_to()])
+        && is_a_torn_write(&text[text.rfind('\n').map_or(0, |at| at + 1)..])
+    {
+        return Ok(text);
+    }
+    Err(err)
+}
+
+/// A TORN FINAL LINE (#230, amending ruling 4 for the final line only): the
+/// tail after the last line break, when it is a strict prefix of an object
+/// ([`is_a_torn_write`]). The file's truth ends at the last complete event
+/// before it. Any other final line is read and checked like every line --
+/// a complete event is an event, anything else is refused -- and a torn
+/// line anywhere but last is followed by a line break and is refused where
+/// it is.
 fn set_aside_a_torn_tail(text: &str) -> (&str, usize) {
     let tail = &text[text.rfind('\n').map_or(0, |at| at + 1)..];
-    if tail.starts_with('{') && !is_complete_object(tail) {
+    if is_a_torn_write(tail) {
         (&text[..text.len() - tail.len()], 1)
     } else {
         (text, 0)
@@ -2367,6 +2573,34 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// A LOG CUT INSIDE A CHARACTER (#230): the bytes of a torn write that
+    /// ends mid-sequence read up to the cut, and the tail is set aside; the
+    /// same partial byte after a COMPLETE event is not a torn write and stays
+    /// a refusal, as does invalid UTF-8 anywhere else.
+    #[test]
+    fn a_log_cut_inside_a_character_is_a_torn_write_and_nothing_else_is() {
+        let head = "{\"head\":[{\"content\":\"x\",\"role\":\"system\"}],\"kind\":\"session.start\",\"model\":\"m\",\"opened\":1,\"seq\":0,\"t\":0,\"version\":0}\n";
+        let mut cut = head.as_bytes().to_vec();
+        cut.extend_from_slice(b"{\"kind\":\"ask\",\"seq\":1,\"t\":5,\"text\":\"caf\xc3");
+        let text = decode(&cut).expect("a write cut inside a character decodes to the cut");
+        let read = read(text).expect("and reads through its last complete event");
+        assert_eq!((read.lines.len(), read.torn), (1, 1));
+
+        let mut after_an_event = head.as_bytes().to_vec();
+        after_an_event.push(0xc3);
+        assert!(
+            decode(&after_an_event).is_err(),
+            "a partial byte after a complete event"
+        );
+
+        let mut in_the_middle = head.as_bytes().to_vec();
+        in_the_middle.extend_from_slice(b"{\"kind\":\"ask\",\"text\":\"\xc3\n");
+        assert!(
+            decode(&in_the_middle).is_err(),
+            "invalid UTF-8 before the last line break"
+        );
     }
 
     /// `exactly_one` IS WHAT THE READER ENFORCES: for every line that writes

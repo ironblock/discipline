@@ -13,15 +13,21 @@ import type { LogLine } from './log.ts';
  * checked in its CI -- so what is left to hold here is the surface's half:
  * every fixture folds, into a session, with no line the fold counts as
  * unknown. A kind `diet` gains fails here before it fails in a session.
+ *
+ * The events are READ BY `diet`: each fixture's `.expected.json` is what
+ * `diet check-log` projects from it, pinned by the conformance corpus. A
+ * second reader here, splitting the raw text, would need a second rule for
+ * a torn final line (#230), which `diet`'s reader sets aside and counts.
  */
 const valid = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../diet/formats/log/fixtures/valid');
 const fixtures = readdirSync(valid).filter((f) => f.endsWith('.jsonl')).sort();
 
 const logOf = (file: string): LogLine[] =>
-  readFileSync(path.join(valid, file), 'utf8')
-    .split('\n')
-    .filter((line) => line !== '')
-    .map((line) => JSON.parse(line) as LogLine);
+  (
+    JSON.parse(readFileSync(path.join(valid, file.replace(/\.jsonl$/, '.expected.json')), 'utf8')) as {
+      events: LogLine[];
+    }
+  ).events;
 
 describe("diet's valid v0 logs, as the surface reads them", () => {
   it('finds the fixtures', () => {

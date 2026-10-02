@@ -1783,8 +1783,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/log.rs")
 source = path.read_text(encoding="utf-8")
-old = "    if tail.starts_with('{') && !is_complete_object(tail) {"
-new = "    if tail.starts_with('{') && !is_complete_object(tail) && false {"
+old = "    if is_a_torn_write(tail) {"
+new = "    if is_a_torn_write(tail) && false {"
 if source.count(old) != 1:
     raise SystemExit(f"the rule appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -1806,7 +1806,7 @@ new = (
     "        .split_inclusive('\\n')\n"
     "        .filter(|l| {\n"
     "            let b = l.trim_end_matches('\\n');\n"
-    "            !(b.starts_with('{') && !is_complete_object(b))\n"
+    "            !is_a_torn_write(b)\n"
     "        })\n"
     "        .collect();\n"
     "    let (complete, torn) = set_aside_a_torn_tail(&kept);"
