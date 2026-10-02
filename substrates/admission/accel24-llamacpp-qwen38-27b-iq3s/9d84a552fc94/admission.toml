@@ -32,6 +32,6 @@ word = "pass"
 [results.parity]
 path = "results/2026-10-01-extraction-acceptance-parity-candidate"
 recompute = "recompute.sh"
-manifest_sha256 = "1545241ff670f45fefab2b2e8a3bd22580952ea7311268c1accd3ed9185e50f3"
+manifest_sha256 = "1b86d1176266a262c9771a395e820de5d1a10d420b6bc8c16c4ba2f8436223c1"
 merged_in = "this PR"
 word = "supported"

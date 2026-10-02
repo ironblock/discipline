@@ -22,6 +22,10 @@ known_defects = [
 ]
 targets_checked = 54
 targets_matched = 54
+claim_issue = "143"
+window_start = "2026-10-01T14:54:55Z"
+window_start_from = "window/seat-a.start, seat A's first fork"
+absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)", rule_ratified = "no comment by the maintainer ratifying the amended text exists on #143; relays assert it (5933939552, 2026-10-01T14:50:31Z; #191's body)" }
 
 [regime]
 arm = "extraction-seat-parity-refire"
@@ -78,3 +82,5 @@ The comparison row: the candidate's effect against the floor's 0.088472 differs 
 ## Conclusion
 
 Supported: the inversion holds on the candidate rung, at about two fifths of the floor's size. The weight is low twice over -- the band is wide, and the fire's own interval reaches below zero -- and the comparison with the floor does not decide whether the inversion's size depends on the rung: the difference sits just past the independence margin. What is still unknown is the archived row's own open question: whether what either seat accepts is true of the mechanism.
+
+**Ledger:** no ratification comment for this rule is on the record: no comment by the maintainer ratifying the amended text exists on #143; relays assert it (5933939552, 2026-10-01T14:50:31Z; #191's body).

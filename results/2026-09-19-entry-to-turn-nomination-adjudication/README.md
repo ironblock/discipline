@@ -7,6 +7,9 @@ controls_run = []
 known_defects = ["rule v1's supported precision bar (0.80) is above what the register's positive density lets the pooled top-5 attain (0.7667), so that clause is unadjudicated at k = 5 for every cell; a v2 wording is the maintainer's (#17, 5744391614)", "the verb's gate-arm bootstrap is over the mean per-row score difference with rejected rows at the floor, not the precision difference the pre-gate sub-rule names, so the sub-verdict is unadjudicated (fresh review of PR #96, B1)", "a row the anchored gate rejects still fills a drive's budget at the scoring's floor, tie-broken by id, when fewer than k rows are admitted; precision over admitted nominations only is not emitted (fresh review, S1)", "the run directory's README carries the assembler's generic conclusion, which says the pre-registration names no rule; this run's record consumes decision-rule.toml and the rule is applied here (fresh review, S3)"]
 targets_checked = 5
 targets_matched = 5
+claim_issue = "17"
+rule_ratified = { comment = "5739179890", at = "2026-09-19T03:56:32Z", digest = "73137c7810edefc852c6c04a6c62298e7f0e823ac92b1603a2d1b410539e1671" }
+absent = { supersedes = "derived from 2026-09-19-entry-to-turn-nomination (4fa03345...), not replacing it: the base's unadjudicated is not a verdict", window_start = "an adjudication collects no data; the base run records no time" }
 
 [regime]
 arm = "entry-to-turn-nomination-four-embedders"

@@ -26,6 +26,12 @@ known_defects = [
 ]
 targets_checked = 41
 targets_matched = 41
+claim_issue = "115"
+rule_ratified = { comment = "5826194209", at = "2026-09-25T03:29:01Z", digest = "2da448c49328993507c9cc026de86646bb15b310009d7d4fea603790a1809c2b", of = "apply.py" }
+rule_ratified_note = "the ratification pinned apply.py, band.py and band.json by digest; decision-rule.toml was transcribed after the fire and is not the ratified file"
+window_start = "2026-09-25T03:42:11Z"
+window_start_from = "window/seat-a.start, seat A's first fork"
+absent = { supersedes = "nothing replaced: a re-fire of the archived row, which stands beside it" }
 
 [regime]
 arm = "extraction-seat-parity-refire"
@@ -85,3 +91,4 @@ Beside it, read by nothing:
 Supported, and at the weight the pre-registration set: the inversion held, at a size close to the archived one, on a declared substrate whose original instance was never measured. The band admits much less than that closeness suggests. This is a re-fire of a mechanism the research program has since retired, so it reproduces a result about a lane that no longer runs.
 
 What is still unknown is the same as the archived row's: whether what either seat accepts is true of the mechanism.
+

@@ -7,6 +7,8 @@ controls_run = []
 known_defects = ["a row the anchored gate rejects still fills a drive's budget at the scoring's floor when fewer than k rows are admitted; the pooled figure is adjudicated as ratified and the admitted-only figure the verb emits is reported beside it, not adjudicated", "the register's turn surface is the judged view: the step's one tool call with its output cut to 1,200 characters, narrower than the collector's deployment surface", "rule v2's wording was fixed by the maintainer after the v1 verdict's numbers existed, as a reading of the ratified text; the separation clause that decides both verdicts is untouched by it"]
 targets_checked = 5
 targets_matched = 5
+claim_issue = "17"
+absent = { supersedes = "nothing replaced: it sits beside the v1 adjudication, both rules and both verdicts in the ledger (README; #17 5863843029)", rule_ratified = "rule v2 was worded by the maintainer after v1's numbers (5747481065) and never posted as a rule file by digest before it was applied (#17 5863922237): no ratification of the file exists", window_start = "an adjudication collects no data; the base run records no time" }
 
 [regime]
 arm = "entry-to-turn-nomination-four-embedders"
@@ -186,3 +188,5 @@ planted half, at 1.0 or within one hit of it in every cell, against one or
 two of the mined positives in the pooled top-5 -- the mined supersessions
 the archive holds are not what an entry-to-turn cosine finds. Labelled
 `characterization`.
+
+**Ledger:** no ratification comment for this rule is on the record: rule v2 was worded by the maintainer after v1's numbers (5747481065) and never posted as a rule file by digest before it was applied (#17 5863922237): no ratification of the file exists.
