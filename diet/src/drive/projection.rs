@@ -1,0 +1,739 @@
+//! A driven session's record, projected from its own log (#157, ruled).
+//!
+//! One source: the log `serve` streams and writes is what the record is
+//! made from, at the session's end, and nothing else is consulted but the
+//! regime it ran under and which engine served it. What the record cannot
+//! spell is NAMED, never dropped: each such fact is an [`Unspellable`],
+//! with its reason and, for a response, its text.
+//!
+//! # The counts
+//!
+//! A record's `response.output_tokens` and `turn.prefill_tokens` are
+//! derived from the server's `timings` (`predicted_n`; `prompt_n +
+//! cache_n`) ONLY for an engine in [`CITED`]: the engines on which the
+//! server's `usage` was measured equal to its `timings`, on every capture
+//! ([`MEASUREMENT`]). For any other engine they are unspellable --
+//! "equality unmeasured for this engine" -- and never a derived number. A
+//! response carrying `usage` (a dialect whose server reports no timings,
+//! log v2) gives `output_tokens` as the server's own `completion_tokens`.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use crate::formats::log::{self, Event as Line, Lane};
+use crate::formats::record::json::Decimal;
+use crate::formats::record::{self, Count, Event, Regime, Source};
+
+use super::registry::Identity;
+
+/// Where the equality of `usage` and `timings` was measured (#157).
+pub const MEASUREMENT: &str =
+    "https://github.com/ironblock/discipline/issues/157#issuecomment-5941593602";
+
+/// The engines the measurement covers: a commit prefix, or an
+/// `engine_build_info` literal, exactly as [`super::engine`] matches them.
+pub const CITED: &[Engine] = &[
+    Engine::Commit("e7051ef"),
+    Engine::Commit("4df29be"),
+    Engine::Literal("b0-unknown-dirty"),
+];
+
+/// An engine, as the registry pins it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Engine {
+    /// A commit, by a prefix of its hash.
+    Commit(&'static str),
+    /// A `build_info` literal, exactly.
+    Literal(&'static str),
+}
+
+/// Which cited engine `identity` is, if any: its `engine_build_info`
+/// literal when it declares one (checked first, as the engine check does),
+/// else its `engine_commit`.
+#[must_use]
+pub fn cited(identity: &Identity) -> Option<Engine> {
+    CITED
+        .iter()
+        .copied()
+        .find(|engine| match (engine, &identity.engine_build_info) {
+            (Engine::Literal(literal), Some(declared)) => declared == literal,
+            (Engine::Commit(prefix), None) => identity
+                .engine_commit
+                .as_deref()
+                .is_some_and(|commit| commit.starts_with(prefix)),
+            (Engine::Literal(_), None) | (Engine::Commit(_), Some(_)) => false,
+        })
+}
+
+/// A fact the record could not spell, named rather than dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unspellable {
+    /// The log line it came from.
+    pub seq: u64,
+    /// The log line's kind.
+    pub kind: &'static str,
+    /// Why the record cannot carry it.
+    pub why: String,
+    /// The text the line carried, when it carried any: a response's answer,
+    /// a cancelled call's partial, a failure's message.
+    pub text: Option<String>,
+}
+
+/// The record's rows, and everything the record could not spell.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Projection {
+    /// The rows, in the log's order.
+    pub events: Vec<Event>,
+    /// What the rows do not carry.
+    pub unspellable: Vec<Unspellable>,
+    /// The cited engine the counts were derived on, or `None` when none was.
+    pub engine: Option<Engine>,
+}
+
+/// The record id of the request logged at `seq`.
+fn request_id(seq: u64) -> String {
+    format!("q/{seq}")
+}
+
+/// The record's spelling of the log's `timings`, or `None` when a value is
+/// past what the record can spell.
+fn timings_of(timings: &log::Timings) -> Option<record::Timings> {
+    let count = |n: Option<u64>| match n {
+        None => Some(None),
+        Some(n) => Count::new(n).ok().map(Some),
+    };
+    let millis = |m: &Option<log::Millis>| match m {
+        None => Some(None),
+        Some(m) => {
+            let text = m.as_str();
+            match text.parse::<u64>() {
+                Ok(n) if n.to_string() == text => {
+                    Count::new(n).ok().map(|n| Some(record::Millis::Whole(n)))
+                }
+                _ => Decimal::new(text).map(|d| Some(record::Millis::Exact(d))),
+            }
+        }
+    };
+    Some(record::Timings {
+        prompt_n: count(timings.prompt_n)?,
+        cache_n: count(timings.cache_n)?,
+        prompt_ms: millis(&timings.prompt_ms)?,
+        predicted_n: count(timings.predicted_n)?,
+        predicted_ms: millis(&timings.predicted_ms)?,
+        draft_n: count(timings.draft_n)?,
+        draft_n_accepted: count(timings.draft_n_accepted)?,
+    })
+}
+
+/// A response's `output_tokens`, or why it has none: the server's own
+/// `usage` count when it sent one, else `predicted_n` on a cited engine.
+fn output_tokens(
+    usage: Option<&log::Usage>,
+    timings: Option<&log::Timings>,
+    engine: Option<Engine>,
+) -> Result<Count, &'static str> {
+    if let Some(usage) = usage {
+        return Count::new(usage.completion_tokens).map_err(|_| "a count past the record's bound");
+    }
+    if engine.is_none() {
+        return Err("equality unmeasured for this engine");
+    }
+    let predicted = timings
+        .and_then(|timings| timings.predicted_n)
+        .ok_or("the server reported no predicted_n")?;
+    Count::new(predicted).map_err(|_| "a count past the record's bound")
+}
+
+/// A turn's `prefill_tokens` from its trunk response's `timings`, on a
+/// cited engine: `prompt_n + cache_n`, both as the server reported them.
+fn prefill_tokens(
+    timings: Option<&log::Timings>,
+    engine: Option<Engine>,
+) -> Result<Count, &'static str> {
+    if engine.is_none() {
+        return Err("equality unmeasured for this engine");
+    }
+    let timings = timings.ok_or("its trunk response carried no timings")?;
+    let (Some(prompt), Some(cache)) = (timings.prompt_n, timings.cache_n) else {
+        return Err("the server reported no prompt_n or no cache_n");
+    };
+    prompt
+        .checked_add(cache)
+        .and_then(|total| Count::new(total).ok())
+        .ok_or("a count past the record's bound")
+}
+
+/// The record `lines` project to, under `regime`, on `engine`.
+///
+/// # Errors
+///
+/// When the log does not begin with its session, or a request carries no
+/// `head_sha256`: a live record's request names the head it sent, and
+/// record validation refuses one that does not.
+pub fn project(
+    lines: &[log::Line],
+    regime: &Regime,
+    engine: Option<Engine>,
+) -> Result<Projection, String> {
+    let Some(log::Line {
+        event: Line::SessionStart { .. },
+        ..
+    }) = lines.first()
+    else {
+        return Err("the log does not begin with its session".to_owned());
+    };
+    let substrate = regime
+        .substrates
+        .first()
+        .map(|substrate| substrate.id.clone())
+        .ok_or("the regime declares no substrate")?;
+    let mut walk = Walk::over(lines, substrate, engine);
+    for line in &lines[1..] {
+        walk.line(line)?;
+    }
+    let mut events = vec![Event::Start {
+        regime: Box::new(regime.clone()),
+        source: Source::Live,
+    }];
+    events.extend(walk.events);
+    Ok(Projection {
+        events,
+        unspellable: walk.unspellable,
+        engine,
+    })
+}
+
+/// The walk over a log's lines after its first.
+struct Walk<'a> {
+    /// What each request (by `seq`) came to: its response, cancel or failure.
+    outcome: BTreeMap<u64, &'a Line>,
+    /// Each turn's trunk request, by `seq`.
+    trunk_of: BTreeMap<u32, u64>,
+    substrate: String,
+    engine: Option<Engine>,
+    events: Vec<Event>,
+    unspellable: Vec<Unspellable>,
+    /// Whether a turn row could not be spelled: turn rows run from 1
+    /// without a gap, so none after it can be either.
+    turns_broken: bool,
+    /// The kinds with no row at all, named once each.
+    named_kinds: BTreeSet<&'static str>,
+}
+
+impl<'a> Walk<'a> {
+    fn over(lines: &'a [log::Line], substrate: String, engine: Option<Engine>) -> Self {
+        let mut outcome = BTreeMap::new();
+        let mut trunk_of = BTreeMap::new();
+        for line in lines {
+            match &line.event {
+                Line::Request {
+                    turn,
+                    lane: Lane::Trunk,
+                    ..
+                } => {
+                    trunk_of.entry(*turn).or_insert(line.seq);
+                }
+                Line::Response { to_request, .. } => {
+                    outcome.insert(*to_request, &line.event);
+                }
+                Line::Cancelled { request, .. } | Line::RequestFailed { request, .. } => {
+                    outcome.insert(*request, &line.event);
+                }
+                _ => {}
+            }
+        }
+        Self {
+            outcome,
+            trunk_of,
+            substrate,
+            engine,
+            events: Vec::new(),
+            unspellable: Vec::new(),
+            turns_broken: false,
+            named_kinds: BTreeSet::new(),
+        }
+    }
+
+    fn name(&mut self, seq: u64, kind: &'static str, why: String, text: Option<String>) {
+        self.unspellable.push(Unspellable {
+            seq,
+            kind,
+            why,
+            text,
+        });
+    }
+
+    fn line(&mut self, line: &log::Line) -> Result<(), String> {
+        match &line.event {
+            Line::Ask { turn, .. } => self.ask(line.seq, *turn),
+            Line::Request {
+                lane, head_sha256, ..
+            } => self.request(line.seq, *lane, head_sha256.as_deref())?,
+            Line::Response {
+                to_request,
+                text,
+                timings,
+                usage,
+                ..
+            } => self.response(
+                line.seq,
+                *to_request,
+                text,
+                timings.as_ref(),
+                usage.as_ref(),
+            ),
+            Line::Cancelled { partial, .. } => self.name(
+                line.seq,
+                "cancelled",
+                "a cancelled call: the record has no row for one".to_owned(),
+                Some(partial.clone()),
+            ),
+            Line::RequestFailed {
+                reason, message, ..
+            } => self.name(
+                line.seq,
+                "request.failed",
+                format!(
+                    "a failed call ({}): the record has no row for one",
+                    reason.tag()
+                ),
+                Some(message.clone()),
+            ),
+            // Facts the record has no row for at all, named once per kind.
+            Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
+                let kind = match &line.event {
+                    Line::IdleGap { .. } => log::Kind::IdleGap,
+                    Line::Refused { .. } => log::Kind::Refused,
+                    _ => log::Kind::Progress,
+                }
+                .tag();
+                if self.named_kinds.insert(kind) {
+                    self.name(
+                        line.seq,
+                        kind,
+                        format!("the record has no row for a `{kind}` line"),
+                        None,
+                    );
+                }
+            }
+            // Carried by the rows above: a delta by its response's text, a
+            // settlement and a settled turn by the turn and response rows.
+            Line::Delta { .. }
+            | Line::Settlement { .. }
+            | Line::StopAsked { .. }
+            | Line::TurnSettled { .. }
+            | Line::SessionStart { .. } => {}
+        }
+        Ok(())
+    }
+
+    fn ask(&mut self, seq: u64, turn: u32) {
+        let trunk_timings =
+            self.trunk_of
+                .get(&turn)
+                .and_then(|request| match self.outcome.get(request) {
+                    Some(Line::Response { timings, .. }) => timings.as_ref(),
+                    _ => None,
+                });
+        match (
+            self.turns_broken,
+            prefill_tokens(trunk_timings, self.engine),
+        ) {
+            (false, Ok(prefill_tokens)) => self.events.push(Event::Turn {
+                index: turn,
+                prefill_tokens,
+            }),
+            (false, Err(why)) => {
+                self.turns_broken = true;
+                self.name(
+                    seq,
+                    "ask",
+                    format!("turn {turn}'s prefill_tokens: {why}"),
+                    None,
+                );
+            }
+            (true, _) => self.name(
+                seq,
+                "ask",
+                format!(
+                    "turn {turn} follows a turn the record could not spell, and turn rows run \
+                     from 1 without a gap"
+                ),
+                None,
+            ),
+        }
+    }
+
+    fn request(&mut self, seq: u64, lane: Lane, head_sha256: Option<&str>) -> Result<(), String> {
+        let Some(head_sha256) = head_sha256 else {
+            return Err(format!(
+                "the request at seq {seq} carries no head_sha256, and a live record's request \
+                 names the head it sent"
+            ));
+        };
+        self.events.push(Event::Request {
+            id: request_id(seq),
+            lane: lane.tag().to_owned(),
+            substrate: self.substrate.clone(),
+            retry_of: None,
+            text: None,
+            head_sha256: Some(head_sha256.to_owned()),
+        });
+        if !self.outcome.contains_key(&seq) {
+            self.name(
+                seq,
+                "request",
+                "a request with no outcome in the log".to_owned(),
+                None,
+            );
+        }
+        Ok(())
+    }
+
+    fn response(
+        &mut self,
+        seq: u64,
+        to_request: u64,
+        text: &str,
+        timings: Option<&log::Timings>,
+        usage: Option<&log::Usage>,
+    ) {
+        match output_tokens(usage, timings, self.engine) {
+            Ok(output_tokens) => self.events.push(Event::Response {
+                id: format!("{}#response", request_id(to_request)),
+                to_request: request_id(to_request),
+                output_tokens,
+                text: Some(text.to_owned()),
+                timings: timings.and_then(timings_of),
+            }),
+            Err(why) => self.name(
+                seq,
+                "response",
+                format!("output_tokens: {why}"),
+                Some(text.to_owned()),
+            ),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::formats::log::{
+        FailReason, HeadMessage, Lane, Role, SettleReason, State, Timings, Usage, VERSION,
+    };
+    use crate::formats::record::Record;
+
+    fn regime() -> Regime {
+        let regimen =
+            crate::formats::regimen::parse(crate::drive::canned::DEV_LOOP).expect("a regimen");
+        crate::drive::regimen::regime_of(&regimen, false).expect("a regime")
+    }
+
+    fn head() -> String {
+        "a".repeat(64)
+    }
+
+    fn numbered(events: Vec<Line>) -> Vec<log::Line> {
+        events
+            .into_iter()
+            .enumerate()
+            .map(|(seq, event)| log::Line {
+                seq: seq as u64,
+                t: seq as u64 * 5,
+                event,
+            })
+            .collect()
+    }
+
+    fn start() -> Line {
+        Line::SessionStart {
+            version: VERSION,
+            opened: 1_790_000_000_000,
+            model: "a-model".to_owned(),
+            head: vec![HeadMessage {
+                role: Role::System,
+                content: "you are the trunk".to_owned(),
+            }],
+            serving: None,
+        }
+    }
+
+    /// The warm turn-2 capture's counts (`e7051ef`): 18 prefilled, 160 from
+    /// the cache, 66 generated.
+    fn warm() -> Timings {
+        Timings {
+            prompt_n: Some(18),
+            cache_n: Some(160),
+            predicted_n: Some(66),
+            ..Timings::default()
+        }
+    }
+
+    /// One answered turn, its request at `request`.
+    fn answered(
+        turn: u32,
+        request: u64,
+        timings: Option<Timings>,
+        usage: Option<Usage>,
+    ) -> Vec<Line> {
+        vec![
+            Line::Ask {
+                turn,
+                text: "say hello".to_owned(),
+            },
+            Line::Settlement {
+                from: State::Awaiting,
+                to: State::Turn,
+            },
+            Line::Request {
+                turn,
+                lane: Lane::Trunk,
+                head_sha256: Some(head()),
+            },
+            Line::Delta {
+                request,
+                piece: log::Piece::Text("Hello".to_owned()),
+            },
+            Line::Response {
+                to_request: request,
+                text: "Hello".to_owned(),
+                finish_reason: Some("stop".to_owned()),
+                reasoning: None,
+                timings,
+                usage,
+                capped: None,
+            },
+            Line::TurnSettled {
+                turn,
+                reason: SettleReason::Final,
+            },
+            Line::Settlement {
+                from: State::Turn,
+                to: State::Awaiting,
+            },
+        ]
+    }
+
+    fn two_turns(timings: Option<Timings>) -> Vec<log::Line> {
+        let mut events = vec![start()];
+        events.extend(answered(1, 3, timings.clone(), None));
+        events.extend(answered(2, 10, timings, None));
+        numbered(events)
+    }
+
+    fn validates(projection: &Projection) {
+        let rendered = record::render(&Record {
+            events: projection.events.clone(),
+        });
+        record::parse(&rendered).unwrap_or_else(|why| panic!("{why:?}\n{rendered}"));
+    }
+
+    #[test]
+    fn on_a_cited_engine_the_counts_derive_from_timings() {
+        let projection = project(
+            &two_turns(Some(warm())),
+            &regime(),
+            Some(Engine::Commit("e7051ef")),
+        )
+        .expect("projected");
+        assert!(
+            projection.unspellable.is_empty(),
+            "{:?}",
+            projection.unspellable
+        );
+        let turns: Vec<(u32, u64)> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Turn {
+                    index,
+                    prefill_tokens,
+                } => Some((*index, prefill_tokens.get())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(turns, [(1, 178), (2, 178)], "prompt_n + cache_n");
+        let outputs: Vec<(String, u64)> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Response {
+                    to_request,
+                    output_tokens,
+                    ..
+                } => Some((to_request.clone(), output_tokens.get())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            outputs,
+            [("q/3".to_owned(), 66), ("q/10".to_owned(), 66)],
+            "predicted_n"
+        );
+        validates(&projection);
+    }
+
+    #[test]
+    fn on_an_uncited_engine_no_count_is_derived_and_every_one_is_named() {
+        let projection = project(&two_turns(Some(warm())), &regime(), None).expect("projected");
+        assert!(
+            !projection
+                .events
+                .iter()
+                .any(|event| matches!(event, Event::Turn { .. } | Event::Response { .. })),
+            "never a derived number: {:?}",
+            projection.events
+        );
+        let named: Vec<(&str, bool)> = projection
+            .unspellable
+            .iter()
+            .map(|item| (item.kind, item.text.is_some()))
+            .collect();
+        assert_eq!(
+            named,
+            [
+                ("ask", false),
+                ("response", true),
+                ("ask", false),
+                ("response", true)
+            ],
+            "each turn and each response, the answer's text kept"
+        );
+        assert!(
+            projection.unspellable[1]
+                .why
+                .contains("equality unmeasured for this engine")
+        );
+        validates(&projection);
+    }
+
+    #[test]
+    fn a_response_with_the_servers_usage_counts_by_it() {
+        let mut events = vec![start()];
+        events.extend(answered(
+            1,
+            3,
+            None,
+            Some(Usage {
+                prompt_tokens: 12,
+                completion_tokens: 2,
+                cached_tokens: None,
+            }),
+        ));
+        let projection = project(&numbered(events), &regime(), None).expect("projected");
+        assert!(projection.events.iter().any(|event| matches!(
+            event,
+            Event::Response { output_tokens, .. } if output_tokens.get() == 2
+        )));
+        validates(&projection);
+    }
+
+    #[test]
+    fn a_cancelled_a_failed_and_an_unanswered_call_are_named_not_dropped() {
+        let mut events = vec![start()];
+        for (turn, outcome) in [
+            (
+                1,
+                Line::Cancelled {
+                    request: 3,
+                    partial: "Hel".to_owned(),
+                },
+            ),
+            (
+                2,
+                Line::RequestFailed {
+                    request: 7,
+                    reason: FailReason::Server,
+                    message: "busy".to_owned(),
+                    status: Some(503),
+                    partial: None,
+                },
+            ),
+        ] {
+            events.extend([
+                Line::Ask {
+                    turn,
+                    text: "say hello".to_owned(),
+                },
+                Line::Settlement {
+                    from: State::Awaiting,
+                    to: State::Turn,
+                },
+                Line::Request {
+                    turn,
+                    lane: Lane::Trunk,
+                    head_sha256: Some(head()),
+                },
+                outcome,
+            ]);
+        }
+        events.push(Line::Request {
+            turn: 2,
+            lane: Lane::Trunk,
+            head_sha256: Some(head()),
+        });
+        let projection = project(
+            &numbered(events),
+            &regime(),
+            Some(Engine::Commit("e7051ef")),
+        )
+        .expect("projected");
+        let kinds: Vec<&str> = projection
+            .unspellable
+            .iter()
+            .map(|item| item.kind)
+            .collect();
+        assert!(
+            kinds.contains(&"cancelled")
+                && kinds.contains(&"request.failed")
+                && kinds.contains(&"request"),
+            "{kinds:?}"
+        );
+        assert!(
+            projection
+                .unspellable
+                .iter()
+                .any(|item| item.text.as_deref() == Some("Hel"))
+        );
+        validates(&projection);
+    }
+
+    #[test]
+    fn a_request_without_its_head_is_refused_rather_than_written() {
+        let mut events = vec![start()];
+        let mut turn = answered(1, 3, Some(warm()), None);
+        turn[2] = Line::Request {
+            turn: 1,
+            lane: Lane::Trunk,
+            head_sha256: None,
+        };
+        events.extend(turn);
+        let refused = project(
+            &numbered(events),
+            &regime(),
+            Some(Engine::Commit("e7051ef")),
+        )
+        .expect_err("no head");
+        assert!(refused.contains("head_sha256"), "{refused}");
+    }
+
+    #[test]
+    fn the_cited_engines_are_matched_as_the_engine_check_matches_them() {
+        let mut identity = crate::drive::registry::identity(
+            crate::drive::registry::REGISTRY,
+            "accel24-llamacpp-qwen38-27b-iq3s",
+        )
+        .expect("registered");
+        identity.engine_commit = Some("e7051efc8002847f7269c5606318431179b5904e".to_owned());
+        identity.engine_build_info = None;
+        assert_eq!(cited(&identity), Some(Engine::Commit("e7051ef")));
+        identity.engine_commit = Some("e486f802d3b46d9aa98b38d162e952b150cb5082".to_owned());
+        assert_eq!(cited(&identity), None, "e486f80 is unmeasured");
+        identity.engine_build_info = Some("b0-unknown-dirty".to_owned());
+        assert_eq!(cited(&identity), Some(Engine::Literal("b0-unknown-dirty")));
+        // A literal governs: a cited commit beside an uncited literal is not cited.
+        identity.engine_commit = Some("e7051efc8002847f7269c5606318431179b5904e".to_owned());
+        identity.engine_build_info = Some("b9-somethingelse".to_owned());
+        assert_eq!(cited(&identity), None);
+    }
+}
