@@ -1652,6 +1652,30 @@ fn is_utc(value: &str) -> bool {
         && number(17, 19) < 60
 }
 
+/// The code points a reader cannot see that are neither whitespace nor
+/// control characters. `check-results.py` holds the same list, so a reason
+/// the assembler writes is a reason the linter reads (#271's second review).
+const INVISIBLE: &[u32] = &[
+    0x00AD, 0x061C, 0x180E, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D,
+    0x202E, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x2066, 0x2067, 0x2068, 0x2069, 0xFEFF,
+];
+
+/// Whether `text` carries something a reader can see: a character that is
+/// not whitespace, not a control character, and not in [`INVISIBLE`]. Not
+/// `trim()`: U+001C..U+001F are not whitespace to Rust and are to Python.
+fn has_text(text: &str) -> bool {
+    text.chars()
+        .any(|c| !(c.is_whitespace() || c.is_control() || INVISIBLE.contains(&u32::from(c))))
+}
+
+/// A relative path spelled one way: no empty, `.` or `..` part, so no
+/// leading `/` or `./`, no `a//b`, no trailing `/` -- the linter's plain
+/// spelling (#271's second review).
+fn is_plain(path: &str) -> bool {
+    path.split('/')
+        .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
 /// Refuses `value` for `field` unless `holds`.
 fn refuse_unless(holds: bool, field: &str, value: &str) -> Result<(), RunError> {
     if holds {
@@ -1731,7 +1755,7 @@ impl Provenance {
                          declared by the caller; the assembler derives window_start itself"
                     )));
                 }
-                if reason.trim().is_empty() {
+                if !has_text(reason) {
                     return Err(RunError::Undeclared(format!(
                         "`--absent {field}=` gives no reason; an absence is declared with why"
                     )));
@@ -1823,6 +1847,12 @@ impl Provenance {
             return Ok(());
         };
         let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
+        if !is_plain(of) {
+            return Err(RunError::Undeclared(format!(
+                "`rule_ratified.of` is `{of}`; a path inside the directory is spelled plainly, \
+                 with no empty, `.` or `..` part"
+            )));
+        }
         let Some((_, bytes)) = carried.iter().find(|(path, _)| *path == of) else {
             let names: Vec<&str> = carried.iter().map(|(path, _)| *path).collect();
             return Err(RunError::Undeclared(format!(
@@ -2398,6 +2428,20 @@ mod tests {
                 "supersedes {digest:?}"
             );
         }
+        for reason in ["\u{1f}", "\u{1c}\u{1d}\u{1e}", "\u{200b}", " \u{feff} "] {
+            let list = [
+                "--claim-issue",
+                "24",
+                "--absent",
+                &format!("supersedes={reason}"),
+                "--absent",
+                "rule_ratified=x",
+            ];
+            assert!(
+                Provenance::from_flags(&flags(&list)).is_err(),
+                "a reason no reader can see, {reason:?}, was accepted"
+            );
+        }
         assert_eq!(
             super::toml_string("a\"b\\c\u{1b}\u{200b}\n"),
             "\"a\\\"b\\\\c\\u001B\u{200b}\\n\""
@@ -2686,6 +2730,11 @@ mod tests {
                 "a".repeat(64),
                 ratified(&format!("{pre_registration},README.md")),
                 "does not carry",
+            ),
+            (
+                "a".repeat(64),
+                ratified(&format!("{pre_registration},./pre-registration.json")),
+                "spelled plainly",
             ),
             (
                 "a".repeat(64),

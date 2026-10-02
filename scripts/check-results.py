@@ -71,6 +71,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -166,6 +167,37 @@ def is_utc(value: object) -> bool:
 
 
 DEFAULT_RULE_FILE = "decision-rule.toml"
+# What a reader cannot see and is neither whitespace nor a control character.
+# diet's assembler (`INVISIBLE` in capture/bakeoff.rs) holds the same list, so
+# a reason it writes is a reason this reads (#271's second review).
+INVISIBLE = frozenset(map(chr, (0x00AD, 0x061C, 0x180E, 0x200B, 0x200C, 0x200D, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064, 0x2066, 0x2067, 0x2068, 0x2069, 0xFEFF)))
+
+
+def has_text(value: object) -> bool:
+    """A string with something a reader can see in it."""
+    import unicodedata
+
+    return isinstance(value, str) and any(
+        not (ch.isspace() or unicodedata.category(ch) == "Cc" or ch in INVISIBLE) for ch in value
+    )
+
+
+def named_exactly(directory: pathlib.Path, path: str) -> bool:
+    """Whether `path` names a regular file under `directory` spelled exactly as
+    the directory lists it, part by part, and through no symlink: on a
+    case-insensitive filesystem `readme.md` would otherwise open README.md
+    (#271's second review)."""
+    here = directory
+    for part in path.split("/"):
+        try:
+            if part not in os.listdir(here):
+                return False
+        except OSError:
+            return False
+        here = here / part
+        if here.is_symlink():
+            return False
+    return here.is_file()
 
 
 class Unreadable(Exception):
@@ -812,7 +844,7 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
     for key, reason in absent.items():
         if key not in CLAIM_FIELDS:
             fail("results.claim-field-malformed", f"`absent` names `{key}`, which is none of {', '.join(CLAIM_FIELDS)}")
-        elif not isinstance(reason, str) or not reason.strip():
+        elif not has_text(reason):
             fail("results.claim-field-malformed", f"`absent.{key}` gives no reason; an absence is declared with why")
     for key in CLAIM_FIELDS:
         if key in front and key in absent:
@@ -865,14 +897,14 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
     if window is not None and not is_utc(window):
         fail("results.claim-field-malformed", f"`window_start` is {window!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
     source = front.get("window_start_from")
-    if window is not None and not (isinstance(source, str) and source.strip()):
+    if window is not None and not has_text(source):
         fail("results.window-start-unsourced", "`window_start` gives no `window_start_from`; a time with no source is an invented number (#32)")
     if window is None and "window_start_from" in front:
         fail("results.claim-field-malformed", "`window_start_from` names the source of a `window_start` this directory does not give")
 
     ratified = front.get("rule_ratified")
     note = front.get("rule_ratified_note")
-    if note is not None and not (isinstance(note, str) and note.strip()):
+    if note is not None and not has_text(note):
         fail("results.claim-field-malformed", "`rule_ratified_note` is not free text")
     if ratified is None:
         if note is not None:
@@ -911,7 +943,7 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
         # The README states the digest, so it can never be the file the
         # digest is of (#271 review).
         fail("results.claim-field-malformed", "`rule_ratified` is of `README.md`, the file that states its digest; a digest cannot be of itself")
-    elif not (directory / of).is_file() or (directory / of).is_symlink() \
+    elif not named_exactly(directory, of) \
             or not (directory / of).resolve().is_relative_to(directory.resolve()):
         # Not a symlink, and inside once resolved: a link can name a file
         # anywhere, and the digest would be of whatever sat there (#271's
