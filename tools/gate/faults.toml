@@ -3091,6 +3091,24 @@ legacy_signature = "neither gives .claim_issue. nor declares it in .absent.*\\[r
 migrated = false
 
 [[fault]]
+id = "results.results_product_shared"
+kind = "seeded-gate"
+check = "results"
+label = "one record in two directories"
+failure_class = "results.product-shared"
+legacy_signature = ".product_sha256. [0-9a-f]{64} is declared here and by .*\\[results\\.product-shared\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_supersession_cycle"
+kind = "seeded-gate"
+check = "results"
+label = "a two-directory supersession cycle"
+failure_class = "results.supersession-cycle"
+legacy_signature = ".supersedes. closes a cycle: [^ ]+ -> [^ ]+ -> [^ ]+; .*\\[results\\.supersession-cycle\\]"
+migrated = false
+
+[[fault]]
 id = "results.results_supersedes_dangling"
 kind = "seeded-gate"
 check = "results"

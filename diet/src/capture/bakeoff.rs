@@ -1881,14 +1881,21 @@ impl Provenance {
                  supersede itself"
             )));
         }
+        // ONE PRODUCT, ONE DIRECTORY (#271, ruled): a record assembled beside
+        // a directory already holding its product would make two, and every
+        // supersession of it ambiguous.
+        let siblings = sibling_products(into);
+        if siblings.iter().any(|sha| sha == product_sha256) {
+            return Err(RunError::Undeclared(format!(
+                "this run's product, {product_sha256}, is already a directory's beside the one \
+                 being written; a product is one directory's"
+            )));
+        }
         // RESOLVED AS THE LINTER RESOLVES IT (#271, ruling (a); its third
         // review): the product of exactly one directory beside the one being
         // written, the template not among them.
         if let Declared::Given(digest) = &self.supersedes {
-            let named = sibling_products(into)
-                .iter()
-                .filter(|sha| *sha == digest)
-                .count();
+            let named = siblings.iter().filter(|sha| *sha == digest).count();
             if named != 1 {
                 return Err(RunError::Undeclared(format!(
                     "`supersedes` is {digest}, which {named} directory(ies) beside the one being \
@@ -2783,7 +2790,20 @@ mod tests {
     /// Beside the first assembly: one with every field given, one with
     /// reasons a caller might type, and the run-bound refusals, which write
     /// no README. The two that land are linted with the first.
-    fn assemble_the_declared_variants(path: &Path, dir: &Path, into: &Path, reported: &str) {
+    fn assemble_the_declared_variants(
+        path: &Path,
+        dir: &Path,
+        into: &Path,
+        reported: &str,
+    ) -> Vec<PathBuf> {
+        // Each in a root of its own: one record assembled twice beside itself
+        // is two directories with one product, which the gates refuse.
+        let given_root = dir.with_file_name("bakeoff-every-field-given");
+        let typed_root = dir.with_file_name("bakeoff-typed-reasons");
+        let refused_root = dir.with_file_name("bakeoff-refused");
+        for root in [&given_root, &typed_root, &refused_root] {
+            let _ = std::fs::remove_dir_all(root);
+        }
         // EVERY FIELD GIVEN, and reasons a caller might type (#271 review):
         // the given path writes values the gates read, and a reason with a
         // quote, a backslash, a control character and a zero-width space is
@@ -2803,8 +2823,12 @@ mod tests {
             &format!("5826194082,2026-09-25T03:29:00Z,{pre_registration},pre-registration.json"),
         ]))
         .expect("every field given");
-        assemble(path, &dir.join("2026-01-02-every-field-given"), &given)
-            .unwrap_or_else(|err| panic!("the given assembly failed: {err}"));
+        assemble(
+            path,
+            &given_root.join("2026-01-02-every-field-given"),
+            &given,
+        )
+        .unwrap_or_else(|err| panic!("the given assembly failed: {err}"));
         // And what the declarations name is held to this run: its own
         // product superseded, a ratification of the README or of a rule file
         // it does not carry, or of other bytes, writes nothing.
@@ -2853,7 +2877,7 @@ mod tests {
                 &rule,
             ]))
             .expect("in shape");
-            let landing = dir.join("refused");
+            let landing = refused_root.join("refused");
             let err = assemble(path, &landing, &refused).expect_err(says);
             assert!(err.to_string().contains(says), "{err}");
             assert!(!landing.exists(), "a refused assembly wrote its directory");
@@ -2868,8 +2892,21 @@ mod tests {
             "rule_ratified=none\tat all\r\n",
         ]))
         .expect("typed reasons");
-        assemble(path, &dir.join("2026-01-03-typed-reasons"), &typed)
+        assemble(path, &typed_root.join("2026-01-03-typed-reasons"), &typed)
             .unwrap_or_else(|err| panic!("the typed assembly failed: {err}"));
+        // And beside the first, the same record again is refused.
+        let again = assemble(
+            path,
+            &dir.join("2026-01-05-the-same-record-again"),
+            &declared(),
+        )
+        .expect_err("a second directory of one product");
+        assert!(
+            again.to_string().contains("a product is one directory's"),
+            "{again}"
+        );
+        let _ = std::fs::remove_dir_all(&refused_root);
+        vec![given_root, typed_root]
     }
 
     #[test]
@@ -2920,7 +2957,7 @@ mod tests {
             "the answer's digest is not the product's"
         );
 
-        assemble_the_declared_variants(&path, &dir, &into, reported);
+        let variants = assemble_the_declared_variants(&path, &dir, &into, reported);
 
         // AND THE GATES. `check-results.py` dispatches the record verdict to
         // the built binary, and refuses when that binary does not reflect the
@@ -2952,7 +2989,9 @@ mod tests {
             return;
         }
         let superseding = assemble_a_supersession(&dir);
-        for lint_root in [&dir, &superseding] {
+        let mut lint_roots = vec![dir.clone(), superseding];
+        lint_roots.extend(variants);
+        for lint_root in &lint_roots {
             for (script, what) in [
                 ("scripts/check-results.py", "the directory linter"),
                 ("scripts/check-recompute.py", "gate 0"),
@@ -2972,8 +3011,9 @@ mod tests {
                 );
             }
         }
-        let _ = std::fs::remove_dir_all(&dir);
-        let _ = std::fs::remove_dir_all(&superseding);
+        for lint_root in &lint_roots {
+            let _ = std::fs::remove_dir_all(lint_root);
+        }
     }
 
     /// A cache the record consumed and that is not beside it is a REFUSAL

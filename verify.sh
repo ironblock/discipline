@@ -3571,6 +3571,35 @@ path.write_text(source.replace(old, '', 1), encoding="utf-8")
 EOF
 }
 
+# One record in two directories (#271, ruled): two rows with one product,
+# which makes every supersession of it ambiguous.
+inject_results_product_shared() {
+  cp -R results/2026-09-27-false-nomination-edit-rate results/2026-09-27-false-nomination-edit-rate-again
+}
+
+# A two-directory supersession cycle (#271, ruled): the edit-rate claim
+# supersedes the framing claim, and the framing claim the edit-rate one.
+inject_results_supersession_cycle() {
+  python3 - <<'EOF'
+import pathlib
+
+edits = [
+    ("results/2026-09-27-false-nomination-edit-rate/README.md",
+     'absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }',
+     'supersedes = "ac427f76ee8fd3ae3f596158d7264d2c853ae937f3215f93ad6d00edc94be122"'),
+    ("results/2026-09-20-false-nomination-framing/README.md",
+     'absent = { supersedes = "nothing replaced: the first draw; (b)-v2 sits beside it" }',
+     'supersedes = "9f9afe1b72ca8860742cb037b4a154a9d53ec6c8f7f46d7bc2c4115da0c334b8"'),
+]
+for name, old, new in edits:
+    path = pathlib.Path(name)
+    source = path.read_text(encoding="utf-8")
+    if source.count(old) != 1:
+        raise SystemExit(f"{name}: the anchor appears {source.count(old)} times")
+    path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # A supersession that names no product (#271, ruling (a)): a digest of the
 # right shape that no directory beside this one declares.
 inject_results_supersedes_dangling() {
@@ -7957,6 +7986,10 @@ selftest() {
     'but the committed file hashes to'
   seeded_case "a claim field neither given nor absent" results inject_results_claim_field_undeclared \
     'neither gives .claim_issue. nor declares it in .absent.*\[results\.claim-field-undeclared\]'
+  seeded_case "one record in two directories"       results inject_results_product_shared \
+    '.product_sha256. [0-9a-f]{64} is declared here and by .*\[results\.product-shared\]'
+  seeded_case "a two-directory supersession cycle"  results inject_results_supersession_cycle \
+    '.supersedes. closes a cycle: [^ ]+ -> [^ ]+ -> [^ ]+; .*\[results\.supersession-cycle\]'
   seeded_case "a supersession that names no product" results inject_results_supersedes_dangling \
     '.supersedes. is a{64}, which 0 directory\(ies\) beside this one declare.*\[results\.claim-field-malformed\]'
   seeded_case "an issue number with a leading zero"   results  inject_results_claim_issue_not_digits \

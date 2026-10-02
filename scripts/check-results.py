@@ -809,23 +809,58 @@ def check_run(directory: pathlib.Path) -> list[str]:
     return failures
 
 
-def sibling_products(directory: pathlib.Path) -> dict[str, list[str]]:
-    """Each `product_sha256` the directories beside this one declare, and
-    which directories declare it: what a `supersedes` digest resolves
-    against (#271, Dispatch's ruling (a)). A sibling whose front-matter cannot
-    be read declares nothing here; its own lint says why."""
-    products: dict[str, list[str]] = {}
+def sibling_fronts(directory: pathlib.Path) -> dict[str, tuple[object, object]]:
+    """Each directory beside this one, the template excepted, by name: the
+    `product_sha256` and `supersedes` its front-matter declares. A sibling
+    whose front-matter cannot be read declares nothing here; its own lint
+    says why."""
+    fronts: dict[str, tuple[object, object]] = {}
     for sibling in sorted(
         p for p in directory.parent.iterdir() if p.is_dir() and p != directory and p.name != TEMPLATE_DIR
     ):
         try:
             source, _, _, _ = split_front_matter(read_text(sibling / "README.md"))
-            sha = tomllib.loads(source or "").get("product_sha256")
+            front = tomllib.loads(source or "")
         except (OSError, Unreadable, tomllib.TOMLDecodeError):
             continue
+        fronts[sibling.name] = (front.get("product_sha256"), front.get("supersedes"))
+    return fronts
+
+
+def sibling_products(directory: pathlib.Path) -> dict[str, list[str]]:
+    """Each `product_sha256` the directories beside this one declare, and
+    which directories declare it: what a `supersedes` digest resolves
+    against (#271, Dispatch's ruling (a))."""
+    products: dict[str, list[str]] = {}
+    for name, (sha, _) in sibling_fronts(directory).items():
         if isinstance(sha, str):
-            products.setdefault(sha, []).append(sibling.name)
+            products.setdefault(sha, []).append(name)
     return products
+
+
+def supersession_cycle(directory: pathlib.Path, front: dict) -> list[str] | None:
+    """The directories a supersession walk from this one passes through when
+    it returns here -- a cycle of any length (#271, ruled) -- or None. Each
+    step resolves a `supersedes` digest to the one sibling declaring it as
+    its product; a step that does not resolve to exactly one ends the walk,
+    since that is refused on its own."""
+    fronts = sibling_fronts(directory)
+    fronts[directory.name] = (front.get("product_sha256"), front.get("supersedes"))
+    owner: dict[object, list[str]] = {}
+    for name, (sha, _) in fronts.items():
+        owner.setdefault(sha, []).append(name)
+    path, here = [directory.name], directory.name
+    while True:
+        target = fronts[here][1]
+        named = owner.get(target, []) if isinstance(target, str) else []
+        if len(named) != 1:
+            return None
+        here = named[0]
+        if here == directory.name:
+            return path + [here]
+        if here in path:
+            return None
+        path.append(here)
 
 
 def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str, str], None]) -> bool | None:
@@ -888,6 +923,25 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
                 f"declare as their `product_sha256`{': ' + ', '.join(named) if named else ''}; a "
                 f"supersession names exactly one product",
             )
+        # NO CYCLE (#271, ruled): a claim that its own successor supersedes
+        # orders nothing, at any length.
+        elif (cycle := supersession_cycle(directory, front)) is not None:
+            fail(
+                "results.supersession-cycle",
+                f"`supersedes` closes a cycle: {' -> '.join(cycle)}; a supersession orders "
+                f"claims, and a cycle orders none",
+            )
+    # ONE PRODUCT, ONE DIRECTORY (#271, ruled): a digest is the record's
+    # identity, and two directories declaring one make every supersession of
+    # it ambiguous.
+    own = front.get("product_sha256")
+    shared = sibling_products(directory).get(own, []) if isinstance(own, str) else []
+    if shared:
+        fail(
+            "results.product-shared",
+            f"`product_sha256` {own} is declared here and by {', '.join(shared)}; a product is "
+            f"one directory's, and a supersession of it would name more than one",
+        )
     window = front.get("window_start")
     if window is not None and not is_utc(window):
         fail("results.claim-field-malformed", f"`window_start` is {window!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
