@@ -5479,6 +5479,14 @@ failure_class = "isolation.the-escape-census-under-reports"
 migrated = false
 
 [[fault]]
+id = "isolation.busy-runner-never-retried"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.busy-runner-never-retried"
+failure_class = "isolation.busy-runner-never-retried"
+migrated = false
+
+[[fault]]
 id = "seam.cadence-fires-always"
 kind = "lane-fault"
 check = "lanes"

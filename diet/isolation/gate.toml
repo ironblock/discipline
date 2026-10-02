@@ -26,7 +26,7 @@
 name = "diet-isolation"
 check = "test"
 command = "cargo test -p discipline-diet -- isolation --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 20
+faults = 21
 
 [[fault]]
 id = "isolation.vm-falls-back-to-the-sandbox"
@@ -376,4 +376,18 @@ becomes = '''
         1'''
 catches = [
     "isolation::tests::the_seeded_escapes_are_denied_where_the_mechanism_is_present",
+]
+
+[[fault]]
+id = "isolation.busy-runner-never-retried"
+failure_class = "isolation.busy-runner-never-retried"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+                if why.kind() == std::io::ErrorKind::ExecutableFileBusy'''
+becomes = '''
+                if false && why.kind() == std::io::ErrorKind::ExecutableFileBusy'''
+catches = [
+    "isolation::tests::a_busy_runner_is_retried_within_a_bound_and_nothing_else_is",
+    "isolation::tests::a_runner_still_open_for_writing_runs_once_it_is_closed",
 ]
