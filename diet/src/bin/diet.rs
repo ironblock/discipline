@@ -156,16 +156,24 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let text = std::str::from_utf8(&source).map_err(|err| format!("not UTF-8: {err}"));
+    let not_utf8 = |err: std::str::Utf8Error| format!("not UTF-8: {err}");
     let (subject, outcome) = match operation {
         Operation::Format(name) => {
             let Some(format) = diet::formats::format(name) else {
                 eprintln!("diet: `{name}` is not a format this binary carries");
                 return ExitCode::from(EXIT_USAGE);
             };
+            // The format's own decode: a log may end inside a character as
+            // well as inside an event (#230).
+            let text = (format.decode)(&source).map_err(not_utf8);
             (format.name, text.and_then(|text| (format.project)(text)))
         }
-        Operation::Route => ("route", text.and_then(route)),
+        Operation::Route => (
+            "route",
+            std::str::from_utf8(&source)
+                .map_err(not_utf8)
+                .and_then(route),
+        ),
         Operation::Bakeoff => (
             "bakeoff",
             match into {

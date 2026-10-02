@@ -1,59 +1,62 @@
-[
-  {
-    "head": [
-      {
-        "content": "you are the trunk",
-        "role": "system"
-      }
-    ],
-    "kind": "session.start",
-    "model": "a-model",
-    "opened": 1790000000000,
-    "seq": 0,
-    "t": 0,
-    "version": 0
-  },
-  {
-    "kind": "ask",
-    "seq": 1,
-    "t": 5,
-    "text": "hi",
-    "turn": 1
-  },
-  {
-    "from": "awaiting",
-    "kind": "settlement",
-    "seq": 2,
-    "t": 10,
-    "to": "turn"
-  },
-  {
-    "kind": "request",
-    "lane": "trunk",
-    "seq": 3,
-    "t": 15,
-    "turn": 1
-  },
-  {
-    "kind": "request.failed",
-    "message": "could not connect: refused",
-    "reason": "transport",
-    "request": 3,
-    "seq": 4,
-    "t": 20
-  },
-  {
-    "kind": "turn.settled",
-    "reason": "failed",
-    "seq": 5,
-    "t": 25,
-    "turn": 1
-  },
-  {
-    "from": "turn",
-    "kind": "settlement",
-    "seq": 6,
-    "t": 30,
-    "to": "awaiting"
-  }
-]
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "opened": 1790000000000,
+      "seq": 0,
+      "t": 0,
+      "version": 0
+    },
+    {
+      "kind": "ask",
+      "seq": 1,
+      "t": 5,
+      "text": "hi",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 3,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "kind": "request.failed",
+      "message": "could not connect: refused",
+      "reason": "transport",
+      "request": 3,
+      "seq": 4,
+      "t": 20
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "failed",
+      "seq": 5,
+      "t": 25,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 6,
+      "t": 30,
+      "to": "awaiting"
+    }
+  ],
+  "torn": 0
+}
