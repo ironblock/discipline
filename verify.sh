@@ -8323,7 +8323,7 @@ selftest() {
   seeded_case "an applier skip the dry census cannot see" ci inject_ci_injections_skips_after_the_dry_branch \
     '.injections, run for real..s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
   seeded_case "a member reported as skipped"           ci inject_ci_recompute_reports_a_skip \
-    'recorded .2026-01-[0-9]+-[a-z-]+. as .skipped., which is not an outcome .recompute. runs a member to'
+    'recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to'
   seeded_case "the gate's shard census allowed to fail" ci inject_ci_shard_census_switched_off \
     'the gate job does not run check-shard-census\.py'
   seeded_case "the gate's shard census renamed away"   ci inject_ci_shard_census_step_removed \

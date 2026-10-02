@@ -108,8 +108,8 @@ def shard_arg(spec: str) -> tuple[int, int] | None:
 
 # THE RUNTIME CENSUS (#262, ruled on #268). A listing proves what a check
 # WOULD run; only the run can say what it ran. So each check that can be
-# sharded records every member as its run loop reaches it -- the loop's first
-# statement, after every filter -- into the file this variable names, and
+# sharded records every member its run loop finishes, with the outcome the
+# member's work returned (never on entry), into the file this variable names, and
 # scripts/check-shard-census.py adds the shards' files back up against the
 # unsplit listing. The listing path returns before the loop, so it never
 # writes here.

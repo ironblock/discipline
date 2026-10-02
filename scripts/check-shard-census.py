@@ -7,7 +7,8 @@ the run did. Four reviews of #268 each found a way for the two to differ --
 an edit one statement below the listing's `return`, a wrapper that passes a
 different shard when it is not listing -- and every one left a shard green
 having run less than its share. So each shard's run records the members its
-loop reached, as it reaches them (`gatelib.record_ran`), and this script
+loop finished, each with the outcome its work returned (`gatelib.record_ran`),
+and this script
 checks the claim the split rests on, as check-selftest-census.py does for the
 selftest:
 

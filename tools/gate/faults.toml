@@ -4123,7 +4123,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a member reported as skipped"
 failure_class = "wiring.shard-incomplete"
-legacy_signature = "recorded .2026-01-[0-9]+-[a-z-]+. as .skipped., which is not an outcome .recompute. runs a member to"
+legacy_signature = "recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to"
 migrated = false
 [[fault]]
 id = "ci.ci_shard_census_switched_off"

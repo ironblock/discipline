@@ -68,8 +68,8 @@ jobs:
           ./verify.sh "${args[@]}"
 
       # WHAT THIS SHARD RAN, for the gate's census (#262, ruled on #268): the
-      # members its run loop reached, as it reached them. A listing says what a
-      # shard would run; this says what it did.
+      # members its run loop finished, each with the outcome its work returned.
+      # A listing says what a shard would run; this says what it did.
       - uses: actions/upload-artifact@v4
         with:
           name: members-injections-${{ matrix.shard }}
