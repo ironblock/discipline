@@ -3204,8 +3204,9 @@ inject_hygiene() {
   git add --all
 }
 
-# The protocol list left unread (#276): `in_protocol` answers nothing, so a
-# PR template edit -- which no seeded fault reaches -- reads as a chore.
+# The protocol list left unread (#276): `in_protocol` answers nothing, so no
+# protocol entry is read, and a `substrates/` edit -- in no gate tree, and
+# reached by no seeded fault -- reads as a chore.
 inject_metadata_protocol_unread() {
   python3 - <<'EOF'
 import pathlib
@@ -8318,8 +8319,8 @@ selftest() {
     'is unguarded; bash 3\.2 aborts on it'
   seeded_case "forbidden content in the tree"         hygiene  inject_hygiene \
     'hygiene: internal-ticket-id:'
-  seeded_case "a template edit read as a chore"       metadata inject_metadata_protocol_unread \
-    'pr-scope: \.github/PULL_REQUEST_TEMPLATE\.md classified chore, not material'
+  seeded_case "the protocol list left unread"         metadata inject_metadata_protocol_unread \
+    'pr-scope: \.github/PULL_REQUEST_TEMPLATE\.md falls under None, not the protocol entry'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
   seeded_case "a ledger row citing a missing directory" results inject_results_ledger_row_cites_missing_directory \

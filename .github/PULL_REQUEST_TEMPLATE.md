@@ -9,7 +9,8 @@
 
 ## Why
 
-<!-- The problem this solves, or the claim it serves. Link the issue. -->
+<!-- The problem this solves, or the claim it serves. Link the issue.
+     A chore has no issue: this section is its ticket. -->
 
 ## Scope
 
@@ -21,7 +22,9 @@
      and no protocol. It owes: CI green on the head; `./verify.sh --only` the
      checks pr-scope names, with their exit codes, below; one fresh-instance
      review posted as a review event, under the chore brief. It does not owe
-     an issue's rows, `--selftest`, or ruled disclosures. Its owner merges.
+     an issue's rows, `--selftest`, or ruled disclosures. Its owner merges;
+     Dispatch arms nothing. A chore cannot be what pr-scope calls material,
+     fail hygiene or history, or land without its review event.
 
      THE CHORE BRIEF, for its reviewer: hygiene of everything added, a
      person's schedule, habits or whereabouts among it, which no pattern

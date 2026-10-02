@@ -938,9 +938,9 @@ migrated = false
 id = "metadata.metadata_protocol_unread"
 kind = "seeded-gate"
 check = "metadata"
-label = "a template edit read as a chore"
+label = "the protocol list left unread"
 failure_class = "metadata.protocol-unread"
-legacy_signature = "pr-scope: \\.github/PULL_REQUEST_TEMPLATE\\.md classified chore, not material"
+legacy_signature = "pr-scope: \\.github/PULL_REQUEST_TEMPLATE\\.md falls under None, not the protocol entry"
 migrated = false
 
 [[fault]]

@@ -14,7 +14,10 @@ A diff is MATERIAL when any of these holds, and a CHORE otherwise:
   * it touches the protocol: `PROTOCOL` below, declared here and nowhere
     else -- the results and substrates records, the formats, the PR
     template, CONTRIBUTING.md, check-owners.tsv, the gate README, any
-    workflow.
+    workflow;
+  * it touches the trees the gate runs from, `GATE_TREES` (ruled on #276):
+    the map names the files a check function names, and a check reaches
+    many more; or a root entry other than a Markdown document or a licence.
 
 The branch's name is never read: a `chore/` prefix is a hint, and the diff is
 the value. Printed:
@@ -60,6 +63,39 @@ PROTOCOL = (
     ".github/workflows/",
 )
 
+# THE TREES THE GATE RUNS FROM, declared once (#280's review; ruled on #276).
+# #112's map names the files a check function names; a check also reads
+# files it reaches through `${here}`, an import, `include_str!` or `cd` --
+# about 280 of them, which read `chore` against the map alone. So a diff
+# touching any of these trees or root build files is material whatever the
+# map says. A tree, not a per-file list: it names where the gate's code
+# lives, and the map still names which faults.
+GATE_TREES = (
+    "diet/",
+    "scripts/",
+    "exercise/",
+    "tools/",
+    "tests/",
+    "pages/",
+    ".github/",
+    "Cargo.toml",
+    "Cargo.lock",
+    "rust-toolchain.toml",
+    "rustfmt.toml",
+    "verify.sh",
+)
+
+# What a file at the root may be and stay a chore: a Markdown document other
+# than CONTRIBUTING.md, which is protocol, or a licence. Any other root entry
+# -- `.gitattributes`, a new build file -- is material until ruled otherwise.
+ROOT_CHORE = re.compile(r"(?!CONTRIBUTING\.md$)[^/]+\.md|LICENSE[^/]*")
+
+# What a check's body says it reads besides `scripts/...`: `cargo` reads the
+# Rust workspace, and `cd DIR` the tree it changes into.
+CARGO = re.compile(r"\bcargo\b")
+RUST_WORKSPACE = {"diet/", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml"}
+CHANGES_INTO = re.compile(r"\bcd ([A-Za-z0-9_][A-Za-z0-9_./-]*)")
+
 # Checks that read everything: the tree scan reads every file, the history
 # scan every commit, so a diff of anything touches both.
 READS_EVERYTHING = ("hygiene", "history")
@@ -78,17 +114,30 @@ def scope_selftest():
 
 def changed(base: str, head: str) -> list[str]:
     done = subprocess.run(
-        ["git", "diff", "--name-only", "--no-renames", f"{base}...{head}"],
-        cwd=ROOT, capture_output=True, text=True,
+        ["git", "diff", "--name-only", "--no-renames", "-z", f"{base}...{head}"],
+        cwd=ROOT, capture_output=True,
     )
     if done.returncode != 0:
-        raise RuntimeError(done.stderr.strip() or f"git diff exited {done.returncode}")
-    return [line for line in done.stdout.split("\n") if line]
+        raise RuntimeError(done.stderr.decode(errors="replace").strip() or f"git diff exited {done.returncode}")
+    # NUL-separated, never quoted (#280's review: a non-ASCII, tab or quote in
+    # a path came back C-quoted, starting with `"`, and matched no protocol
+    # entry).
+    return [p.decode("utf-8", errors="surrogateescape") for p in done.stdout.split(b"\0") if p]
 
 
 def in_protocol(path: str) -> str | None:
     """The protocol entry `path` falls under, if any."""
     return next((entry for entry in PROTOCOL if path == entry or (entry.endswith("/") and path.startswith(entry))), None)
+
+
+def in_gate_tree(path: str) -> str | None:
+    """The gate tree or root build file `path` falls under, if any."""
+    return next((entry for entry in GATE_TREES if path == entry or (entry.endswith("/") and path.startswith(entry))), None)
+
+
+def unknown_root(path: str) -> bool:
+    """A root entry that is neither a gate file nor what a chore may touch."""
+    return "/" not in path and in_gate_tree(path) is None and not ROOT_CHORE.fullmatch(path)
 
 
 def check_inputs(scope, text: str) -> dict[str, set[str]]:
@@ -98,8 +147,13 @@ def check_inputs(scope, text: str) -> dict[str, set[str]]:
     checks = re.search(r"^readonly CHECKS=\(([^)]*)\)", text, re.M)
     inputs: dict[str, set[str]] = {}
     for check in (checks.group(1).split() if checks else []):
+        body = bodies.get(f"check_{check}", "")
         reads = scope.check_scripts(bodies, check) | scope.CHECK_INPUTS.get(check, set())
-        for match in TREE_FLAG.finditer(bodies.get(f"check_{check}", "")):
+        for match in TREE_FLAG.finditer(body):
+            reads.add(match.group(1).rstrip("/") + "/")
+        if CARGO.search(body):
+            reads |= RUST_WORKSPACE
+        for match in CHANGES_INTO.finditer(body):
             reads.add(match.group(1).rstrip("/") + "/")
         inputs[check] = reads
     return inputs
@@ -118,6 +172,10 @@ def classify(files: list[str], census: pathlib.Path | None = None) -> tuple[str,
         reason = f"{protocol[0]} is protocol ({protocol[1]})"
     elif changed_set & scope.MACHINERY_FILES:
         reason = f"{sorted(changed_set & scope.MACHINERY_FILES)[0]} is the selftest's machinery"
+    elif tree := next(((f, entry) for f in files if (entry := in_gate_tree(f))), None):
+        reason = f"{tree[0]} is in the gate's tree ({tree[1]})"
+    elif root := next((f for f in files if unknown_root(f)), None):
+        reason = f"{root} is a root entry a chore may not touch (only *.md other than CONTRIBUTING.md, and LICENSE*)"
     else:
         touched = scope.read_census(census)[1] if census else {}
         for ident, (deps, _units) in sorted(scope.dependencies(ROOT, text).items()):
@@ -149,9 +207,56 @@ CASES = (
 )
 
 
+# Each protocol entry, read on its own (#280's review: five entries were
+# covered only because the fault map also reached their cases, so dropping
+# one from PROTOCOL left `--check` green). A path, and the entry it must fall
+# under -- written here, not derived from PROTOCOL.
+PROTOCOL_CASES = (
+    ("results/2026-10-03-x/README.md", "results/"),
+    ("substrates/registry.toml", "substrates/"),
+    ("diet/src/formats/log.rs", "diet/src/formats/"),
+    ("diet/formats/decline/fixtures/valid/x.txt", "diet/formats/"),
+    (".github/PULL_REQUEST_TEMPLATE.md", ".github/PULL_REQUEST_TEMPLATE.md"),
+    ("CONTRIBUTING.md", "CONTRIBUTING.md"),
+    (".github/check-owners.tsv", ".github/check-owners.tsv"),
+    ("tools/gate/README.md", "tools/gate/README.md"),
+    (".github/workflows/pages.yml", ".github/workflows/"),
+)
+
+
+# Each gate tree, read on its own, by a path in it -- written here, not
+# derived from GATE_TREES -- and the root rule both ways.
+GATE_CASES = (
+    ("diet/src/capture/router/asks/generic.txt", "diet/"),
+    ("scripts/hygiene-exceptions.tsv", "scripts/"),
+    ("exercise/src/app.ts", "exercise/"),
+    ("tools/gate/faults.toml", "tools/"),
+    ("tests/fixtures/results-bad/x.reason", "tests/"),
+    ("pages/index.html", "pages/"),
+    (".github/CODEOWNERS", ".github/"),
+    ("Cargo.toml", "Cargo.toml"),
+    ("Cargo.lock", "Cargo.lock"),
+    ("rust-toolchain.toml", "rust-toolchain.toml"),
+    ("rustfmt.toml", "rustfmt.toml"),
+    ("verify.sh", "verify.sh"),
+)
+ROOT_CASES = (
+    ("README.md", False),
+    ("AGENTS.md", False),
+    ("LICENSE", False),
+    ("CONTRIBUTING.md", True),
+    (".gitattributes", True),
+    ("Makefile", True),
+)
+
+
 def check() -> int:
     """Every case gets its verdict, or the classifier is red."""
     wrong = 0
+    for path, entry in PROTOCOL_CASES:
+        if in_protocol(path) != entry:
+            wrong += 1
+            print(f"pr-scope: {path} falls under {in_protocol(path)!r}, not the protocol entry {entry!r}", file=sys.stderr)
     for files, expected in CASES:
         verdict, reason, _checks = classify(list(files))
         if verdict != expected:
@@ -161,10 +266,19 @@ def check() -> int:
                 f"{f' ({reason})' if reason else ''}",
                 file=sys.stderr,
             )
+    for path, entry in GATE_CASES:
+        if in_gate_tree(path) != entry:
+            wrong += 1
+            print(f"pr-scope: {path} falls under {in_gate_tree(path)!r}, not the gate tree {entry!r}", file=sys.stderr)
+    for path, unknown in ROOT_CASES:
+        if unknown_root(path) != unknown:
+            wrong += 1
+            print(f"pr-scope: the root entry {path} reads {'unknown' if unknown_root(path) else 'chore-able'}, not as declared", file=sys.stderr)
+    total = len(CASES) + len(PROTOCOL_CASES) + len(GATE_CASES) + len(ROOT_CASES)
     if wrong:
-        print(f"pr-scope: {wrong} of {len(CASES)} case(s) misclassified", file=sys.stderr)
+        print(f"pr-scope: {wrong} of {total} case(s) misclassified", file=sys.stderr)
         return 1
-    print(f"pr-scope: {len(CASES)} case(s) classified as declared")
+    print(f"pr-scope: {total} case(s) classified as declared")
     return 0
 
 
