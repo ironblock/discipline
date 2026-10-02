@@ -657,11 +657,32 @@ fn a_drive_server_killed_mid_session_leaves_a_log_whole_through_what_it_showed()
         tail.is_empty() || tail[0] == b'{',
         "only an event's start follows the last line break: {tail:?}"
     );
-    if let Ok(text) = std::str::from_utf8(tail)
-        && let Ok(value) = serde_json::from_str::<serde_json::Value>(text)
-    {
-        assert!(value.is_object(), "a complete tail is an event: {text}");
-    }
+    let tail_is_an_event = std::str::from_utf8(tail)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .is_some_and(|value| value.is_object());
+
+    // And #259's reader agrees: the log reads through its last complete
+    // event, a torn tail set aside and counted.
+    let checked = Command::new(DIET)
+        .arg("check-log")
+        .arg(&log_file.0)
+        .output()
+        .expect("diet runs");
+    let said = String::from_utf8_lossy(&checked.stdout);
+    assert_eq!(checked.status.code(), Some(0), "{said}");
+    let read = log_line_object(&said);
+    assert_eq!(
+        (
+            read["value"]["events"].as_array().map(Vec::len),
+            read["value"]["torn"].as_u64()
+        ),
+        (
+            Some(lines.len() + usize::from(tail_is_an_event)),
+            Some(u64::from(!tail.is_empty() && !tail_is_an_event))
+        ),
+        "{said}"
+    );
 }
 
 #[test]
