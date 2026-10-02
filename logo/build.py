@@ -56,7 +56,7 @@ ENDS_FADE = 22    # px over which the outside light fades out beside the first a
 
 # What each option changes. Keys not listed keep BASE_VARIANT's value.
 BASE_VARIANT = dict(harmonics="single", look="carved", taper="mid", glass="elements", margin=MARGIN, outside=True,
-                    amp=1.0, cross=CROSS_OUTSIDE, theme={})
+                    amp=1.0, cross=CROSS_OUTSIDE, theme={}, palette="legacy")
 VARIANTS = {
     "elements": dict(
         desc="The default. Glass built from elements (no displacement filter), a taper halfway between early "
@@ -110,27 +110,9 @@ VARIANTS = {
     ),
     "tuned": dict(
         desc="`refract-story-noise` as tuned in the playground: displacement-filter glass with a thicker, denser "
-             "bezel, lower waves and a late taper. Both palettes are retuned (light: colours tuned, the rest approximated from dark).",
+             "bezel, lower waves and a late taper, drawn in the layered palette (PALETTE and DELTA).",
         glass="refract", look="tuned", harmonics="filter", outside="ends", taper="late", gain=3.45, amp=0.68, cross=4,
-        theme={"dark": dict(
-            wave_alpha=0.85, glow_wide_a=0.16, glow_tight=6.3,
-            body_top=0.01, body_bottom=0.29,
-            lit_opacity=0.78, shade_opacity=0.63, edge_opacity=0.15, rim_opacity=0.5,
-            frost=3.1, soft=0.9, inner=1.05, beam_inner=2.05,
-            bloom=dict(b=(32, 12.5)),
-            el=dict(bevel=1.7, a_width=4, a_alpha=0.35, b_width=1.9, b_alpha=0.7),
-        ),
-        # the physical values approximate the dark changes (same ratios where they carry over, judged by eye); the colours were tuned in the playground
-        "light": dict(
-            wave=("#f07581", "#74f19e", "#7994ec"), beam="#4a4f5e", body="#cbd0ec",
-            shade="#414e81", edge="#737b9c", rim="#9198b6",
-            wave_alpha=0.85, glow_wide_a=0.05, glow_tight=1.5,
-            body_top=0.03, body_bottom=0.42,
-            lit_opacity=0.97, shade_opacity=0.75, edge_opacity=0.13, rim_opacity=0.75,
-            frost=3.1, soft=0.9, inner=1.05, beam_inner=1.25,
-            bloom=dict(b=(32, 12.5)),
-            el=dict(bevel=1.35, a_width=4.3, a_alpha=0.4, b_width=2.1, b_alpha=0.55),
-        )},
+        palette="layered",
     ),
     "filter-glass": dict(
         desc="The previous glass, which bends the light with a displacement filter and two baked maps. Renders on "
@@ -178,6 +160,51 @@ THEMES = {
         el=dict(a_width=2.6, a_alpha=0.55, b_width=5.0, b_alpha=0.45, bevel=0.8),
     ),
 }
+
+
+def layered(*layers):
+    """Merge dicts left to right, nested dicts key by key; a tuple, list or scalar replaces what is below it."""
+    out = {}
+    for layer in layers:
+        for k, v in layer.items():
+            out[k] = layered(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+# The shipped design's palettes (variant palette="layered"), tuned in the playground: what both themes
+# share, then what each theme changes. Everything the refract glass draws with, and nothing else.
+PALETTE = dict(
+    wave_alpha=0.85, beam_width=6, lit="#ffffff",
+    frost=3.1, soft=0.9, inner=1.05,
+    bloom=dict(a=(9, 5.5), b=(32, 12.5)),
+)
+DELTA = {
+    "dark": dict(
+        wave=("#ffa3b3", "#a3ffc6", "#a9c0ff"), beam="#ffffff", pad="#000",
+        glow_wide=9, glow_wide_a=0.16, glow_tight=6.3,
+        body="#f0f3ff", body_top=0.01, body_bottom=0.29,
+        lit_opacity=0.78, shade="#8a7dff", shade_opacity=0.63,
+        edge="#ffffff", edge_opacity=0.15, rim="#ffffff", rim_opacity=0.5,
+        beam_inner=2.05,
+        el=dict(a_width=4, a_alpha=0.35, b_width=1.9, b_alpha=0.7, bevel=1.7),
+    ),
+    "light": dict(
+        wave=("#f07581", "#74f19e", "#7994ec"), beam="#4a4f5e", pad="#fff",
+        glow_wide=2.5, glow_wide_a=0.05, glow_tight=1.5,
+        body="#cbd0ec", body_top=0.03, body_bottom=0.42,
+        lit_opacity=0.97, shade="#414e81", shade_opacity=0.75,
+        edge="#737b9c", edge_opacity=0.13, rim="#9198b6", rim_opacity=0.75,
+        beam_inner=1.25,
+        el=dict(a_width=4.3, a_alpha=0.4, b_width=2.1, b_alpha=0.55, bevel=1.35),
+    ),
+}
+
+
+def palette(theme, v):
+    """The palette a variant draws with in a theme."""
+    if v["palette"] == "layered":
+        return layered(PALETTE, DELTA[theme])
+    return layered(THEMES[theme], v["theme"].get(theme, {}))
 
 
 def layout(font_path, margin=MARGIN):
@@ -479,14 +506,9 @@ def element_glass(t, v, geo, comps, w):
     return "\n    ".join(defs), body
 
 
-def overridden(base, changes):
-    """base with the nested keys in changes replaced (a tuple or number is replaced whole)."""
-    return {k: overridden(base[k], changes[k]) if isinstance(changes.get(k), dict) else changes.get(k, base[k]) for k in base}
-
-
 def svg(theme, variant, geo):
     v = {**BASE_VARIANT, **VARIANTS[variant]}
-    t = overridden(THEMES[theme], v["theme"].get(theme, {}))
+    t = palette(theme, v)
     word_d, spans, width, beam_y = geo["d"], geo["spans"], geo["width"], geo["beam_y"]
     start, end = convergence(spans)
     w = f"{width:.0f}"
