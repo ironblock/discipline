@@ -371,7 +371,12 @@ check_lanes() { python3 scripts/apply-lane-faults.py --verify; }
 
 check_metadata() { python3 scripts/check-repo-metadata.py; }
 
-check_hygiene() { bash scripts/hygiene.sh; }
+# ...and the scanner itself stays honest on the shell a stock Mac runs (#236):
+# CI cannot run bash 3.2, so this reads hygiene.sh for what keeps it so.
+check_hygiene() {
+  python3 scripts/check-hygiene-portable.py &&
+    bash scripts/hygiene.sh
+}
 
 # The site published to gh-pages is static, and this is what makes that a gate
 # rather than a promise: no subresource from another origin, no network call,
@@ -2949,6 +2954,22 @@ inject_results_ledger_row_without_word() {
 # deploy time.
 inject_results_ledger_page_calls_out() {
   edit_in_place 's#^<meta charset="utf-8">$#<meta charset="utf-8"><link rel="stylesheet" href="https://example.org/ledger.css">#' exercise/scripts/render-ledger.py
+}
+
+# An array expansion left bare: on bash 3.2 an empty array aborts the scan
+# under `set -u`, and the scan read clean having scanned nothing (#236).
+inject_hygiene_unguarded_expansion() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/hygiene.sh")
+source = path.read_text(encoding="utf-8")
+old = 'targets=(${text_files+"${text_files[@]}"})'
+new = 'targets=("${text_files[@]}")'
+if source.count(old) != 1:
+    raise SystemExit(f"the guard appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
 }
 
 inject_hygiene() {
@@ -7518,6 +7539,8 @@ selftest() {
     'a pin that can be silently ignored is not a pin'
   seeded_case "template label nothing defines"        metadata inject_metadata \
     'assigns label'
+  seeded_case "a hygiene expansion bash 3.2 aborts on" hygiene inject_hygiene_unguarded_expansion \
+    'is unguarded; bash 3\.2 aborts on it'
   seeded_case "forbidden content in the tree"         hygiene  inject_hygiene \
     'hygiene: internal-ticket-id:'
   seeded_case "external subresource on the site"      pages    inject_pages \
