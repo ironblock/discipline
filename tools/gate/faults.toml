@@ -4107,7 +4107,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a recompute skip the dry census cannot see"
 failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute, run for real.s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+legacy_signature = ".recompute, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
 migrated = false
 [[fault]]
 id = "ci.ci_injections_skips_after_the_dry_branch"
@@ -4115,7 +4115,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "an applier skip the dry census cannot see"
 failure_class = "wiring.shard-incomplete"
-legacy_signature = ".injections, run for real.s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+legacy_signature = ".injections, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
 migrated = false
 [[fault]]
 id = "ci.ci_shard_census_switched_off"
