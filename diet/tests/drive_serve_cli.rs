@@ -636,17 +636,31 @@ fn a_drive_server_killed_mid_session_leaves_a_log_whole_through_what_it_showed()
         .filter_map(|line| line.strip_prefix("data: "))
         .collect();
     let bytes = std::fs::read(&log_file.0).expect("the log");
-    let text = String::from_utf8_lossy(&bytes);
-    let mut lines: Vec<&str> = text.split('\n').collect();
-    // What follows the last line break is a torn line or nothing: never
-    // read as an event here (the reader counts it, #230).
-    let _torn = lines.pop();
+    // Split on line breaks as bytes: a kill may cut inside a character.
+    let mut segments: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
+    let tail = segments.pop().unwrap_or_default();
+    let lines: Vec<&str> = segments
+        .iter()
+        .map(|line| std::str::from_utf8(line).expect("every whole line is UTF-8"))
+        .collect();
     assert!(
         lines.len() >= shown.len() && lines[..shown.len()] == shown[..],
-        "every line shown before the kill is in the log, whole: {text:?}"
+        "every line shown before the kill is in the log, whole: {lines:?}"
     );
     for line in &lines {
         let _ = log_line_object(line);
+    }
+    // What follows the last line break is what #259's reader allows and
+    // nothing else: nothing; a complete event, read as one; or the start of
+    // one, a torn write the reader sets aside and counts (`torn: 1`).
+    assert!(
+        tail.is_empty() || tail[0] == b'{',
+        "only an event's start follows the last line break: {tail:?}"
+    );
+    if let Ok(text) = std::str::from_utf8(tail)
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(text)
+    {
+        assert!(value.is_object(), "a complete tail is an event: {text}");
     }
 }
 
