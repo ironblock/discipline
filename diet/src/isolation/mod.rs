@@ -530,6 +530,11 @@ impl Confinement {
 /// every descriptor into the child until that child execs. So the refusal
 /// is a window, not a verdict: the spawn is retried across it, and past
 /// this bound the refusal is reported as before.
+///
+/// What is retried is the program THIS process executes. Under the sandbox
+/// that is the runner, and a busy command inside it is refused by the
+/// runner's own exec, which is the command's result (exit and stderr), not
+/// a spawn this process can retry.
 const BUSY_PATIENCE: Duration = Duration::from_millis(500);
 
 /// `spawn`'s output, retried while the program is busy being written, for
