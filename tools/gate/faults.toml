@@ -8146,6 +8146,14 @@ failure_class = "drive.serve-bin-never-writes-the-record"
 migrated = false
 
 [[fault]]
+id = "drive.session-writes-usage-beside-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-writes-usage-beside-timings"
+failure_class = "drive.session-writes-usage-beside-timings"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
