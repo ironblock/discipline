@@ -900,6 +900,22 @@ SELFTEST_BOX=""
 # check and one injection, so that derivation would name every one of them
 # `lanes.lane_fault`; the id they are actually registered under comes from the
 # lane manifest instead, and the generator passes it.
+# EVERY signature `expect` carries is in `log`, one ERE per line (#239). A
+# hand-written case carries one; a lane fault carries one per catcher, and a
+# fault is red for its own reason only when each catcher it declares failed.
+# The first one missing is left in LOG_MISSING for the caller to name.
+LOG_MISSING=""
+log_carries_every() {
+  local expect="$1" log="$2" signature
+  while IFS= read -r signature; do
+    grep -qE -- "$signature" "$log" || { LOG_MISSING="$signature"; return 1; }
+  done <<< "$expect"
+}
+
+# A lane fault's signatures as `apply-lane-faults.py --list` joins them (by
+# the ASCII unit separator), one per line, for `log_carries_every`.
+catcher_signatures() { printf '%s' "${1//$'\x1f'/$'\n'}"; }
+
 seeded_case() {
   local label="$1" check="$2" inject="$3" expect="$4" scope="${5-}" ident="${6-}"
   local box="$SELFTEST_BOX"
@@ -1065,10 +1081,10 @@ seeded_case() {
     SELFTEST_BROKEN+=("${label}: the gate did not fire")
     not_red "$ident" "$check" "the gate did not fire"
     sed -n '1,40p' "$log" >&2
-  elif ! grep -qE -- "$expect" "$log"; then
+  elif ! log_carries_every "$expect" "$log"; then
     printf 'WRONG  %4ds verify.sh --only %-8s exit %-3d  %s  <-- RED, BUT NOT FOR ITS OWN FAULT\n' \
       "$(( SECONDS - started ))" "$check" "$rc" "$label"
-    printf '      the log carries no match for: %s\n' "$expect"
+    printf '      the log carries no match for: %s\n' "$LOG_MISSING"
     SELFTEST_BROKEN+=("${label}: red for the wrong reason")
     not_red "$ident" "$check" "red for the wrong reason"
     sed -n '1,40p' "$log" >&2
@@ -8052,9 +8068,11 @@ selftest() {
   # written. `LANE_FAULT_LANE`/`LANE_FAULT_ID` are read by `inject_lane_fault`
   # in the subshell `seeded_case` runs it in.
   #
-  # The signature is the fault's OWN FIRST `catches` NAME, read out of the
-  # manifest -- never typed here -- so a case cannot go WRONG by drifting
-  # from prose nobody re-checks against a run. `check` is always `lanes`:
+  # The signatures are the fault's OWN `catches` NAMES, EVERY ONE (#239),
+  # read out of the manifest -- never typed here -- so a case cannot go
+  # WRONG by drifting from prose nobody re-checks against a run. It used to
+  # be the first name alone, and every catcher after it was declared and
+  # never checked: one that stopped catching was invisible to the gate. `check` is always `lanes`:
   # every lane fault is proven through the one check that runs every
   # registered lane's own command, whichever lane the fault belongs to.
   # The signature is used verbatim as an ERE against the fault's own log --
@@ -8090,8 +8108,12 @@ selftest() {
   # in: zero.
   sc_call="seeded_case"
   sc_inject="inject_lane_fault"
+  local lane_faults=0 lane_catchers=0
   while IFS=$'\t' read -r lane fault_id signature failure_class || [ -n "${lane:-}" ]; do
     [ -n "$lane" ] || continue
+    signature="$(catcher_signatures "$signature")"
+    lane_faults=$(( lane_faults + 1 ))
+    lane_catchers=$(( lane_catchers + $(grep -c '' <<< "$signature") ))
     LANE_FAULT_LANE="$lane" LANE_FAULT_ID="$fault_id"
     # `fault_id` is already lane-prefixed (every gate.toml declares it that
     # way), so `${lane}.` here duplicated it -- "lane: isolation.isolation.…"
@@ -8106,6 +8128,8 @@ selftest() {
     # arguments and does not name them.
     "$sc_call" "lane: ${fault_id}" lanes "$sc_inject" "$signature" "" "$fault_id"
   done < <(python3 "${ROOT}/scripts/apply-lane-faults.py" --list)
+  printf 'lanes: %d lane fault(s), %d catcher(s) enforced -- every one each fault declares\n' \
+    "$lane_faults" "$lane_catchers"
 
   prove_mechanics
 
@@ -8799,6 +8823,48 @@ faults = 0
 EOF
   expect_exit "a command the shell cannot find is still a finding, not broken" 1 \
     python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/wrecked" --verify
+
+  # EVERY CATCHER A LANE FAULT DECLARES IS ENFORCED, NOT THE FIRST (#239). A
+  # synthetic lane whose command fails exactly one test, read the way the
+  # generated cases read it: the signatures `--list` emits, required in the
+  # log `--verify` writes. A fault declaring a second catcher that did not
+  # fail is not red for its own reason; with only the one that failed, it is.
+  local lane_log="${lanes_root}/catchers.log"
+  mkdir -p "${lanes_root}/catchers/tools/gate" "${lanes_root}/catchers/diet/alpha"
+  cp "${lanes_root}/present/tools/gate/lanes.toml" "${lanes_root}/catchers/tools/gate/lanes.toml"
+  printf 'x = 1\n' > "${lanes_root}/catchers/diet/alpha/src.rs"
+  write_catchers_lane() {
+    cat > "${lanes_root}/catchers/diet/alpha/gate.toml" <<EOF
+[package]
+name = "synthetic-alpha"
+check = "test"
+command = "printf 'test alpha::tests::first ... FAILED\\\\ntest alpha::tests::second ... ok\\\\n'; exit 101"
+faults = 1
+
+[[fault]]
+id = "alpha.synthetic"
+target = "diet/alpha/src.rs"
+anchor = "x = 1"
+becomes = "x = 2"
+expect_exit = 1
+catches = [$1]
+EOF
+  }
+  lane_fault_red() {
+    local listed
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/catchers" --verify \
+      > "$lane_log" 2>&1 && return 2
+    listed="$(python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/catchers" --list)" \
+      || return 2
+    log_carries_every "$(catcher_signatures "$(cut -f3 <<< "$listed")")" "$lane_log"
+  }
+  write_catchers_lane '"alpha::tests::first", "alpha::tests::second"'
+  expect_exit "every catcher a lane fault declares is listed" 0 \
+    bash -c '[ "$(python3 "$1" --root "$2" --list | cut -f3 | tr "\037" "\n" | grep -c "FAILED")" -eq 2 ]' \
+    _ "${ROOT}/scripts/apply-lane-faults.py" "${lanes_root}/catchers"
+  expect_exit "a lane fault whose second catcher did not fail is not red" 1 lane_fault_red
+  write_catchers_lane '"alpha::tests::first"'
+  expect_exit "and with only the catcher that failed, it is" 0 lane_fault_red
 
   # --- nothing is read from a half-merged file ---
   #
