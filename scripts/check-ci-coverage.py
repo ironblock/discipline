@@ -610,16 +610,17 @@ def main() -> int:
         # scalar ends with -- makes the value a non-empty string, which is
         # true whatever the guards say (#258's third review).
         wrapped = re.fullmatch(r"\$\{\{(.*)\}\}", condition, re.S)
-        if wrapped:
-            condition = wrapped.group(1).strip()
-        elif "${{" in condition:
+        refused = not wrapped and "${{" in condition
+        if refused:
+            # Named once, as what it is: the guards may be there, but GitHub
+            # never reads them, so "missing guard" would be the wrong story.
             failures.append(f"pages.yml: the deploy's condition has text outside its ${{{{ }}}}, which GitHub reads as a string, always true (found {condition!r})")
-            condition = ""
-        clauses = [c.strip() for c in condition.split("&&")] if condition else []
+        condition = wrapped.group(1).strip() if wrapped else condition
+        clauses = [c.strip() for c in condition.split("&&")] if condition and not refused else []
         for guard, message in guards.items():
-            if guard not in clauses:
+            if guard not in clauses and not refused:
                 failures.append(message)
-        if condition and (set(clauses) - set(guards) or "||" in condition or "!" in condition):
+        if condition and not refused and (set(clauses) - set(guards) or "||" in condition or "!" in condition):
             failures.append(f"pages.yml: the deploy's condition is not exactly its guards joined by && (found `{condition}`)")
         steps = [st for st in deploy.get("steps", []) if isinstance(st, dict)] if isinstance(deploy.get("steps"), list) else []
         uploads = [i for i, st in enumerate(steps) if str(st.get("uses", "")).lower().startswith("actions/upload-pages-artifact@")]
