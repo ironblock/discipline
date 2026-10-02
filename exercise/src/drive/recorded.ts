@@ -56,9 +56,9 @@ export function load(name: string, text: string): Recording {
   const carried = parsed.carried as unknown;
   if (
     typeof carried !== 'object' || carried === null || Array.isArray(carried) ||
-    !Object.values(carried).every((n) => Number.isInteger(n) && (n as number) > 0)
+    !Object.entries(carried).every(([kind, n]) => kind !== '' && Number.isInteger(n) && (n as number) > 0)
   ) {
-    throw fail('expected carried: {kind: count}, each count a whole number above 0');
+    throw fail('expected carried: {kind: count}, each kind named and each count a whole number above 0');
   }
   for (const [i, e] of parsed.events.entries()) {
     if (typeof e?.kind !== 'string' || typeof e.t !== 'number') throw fail(`event ${i} has no kind or time`);
