@@ -103,7 +103,7 @@ The `elements` glass, but the waves are bent by a displacement filter (one `feIm
 
 ### tuned
 
-`refract-story-noise` as tuned in the playground: displacement-filter glass with a thicker, denser bezel, lower waves and a late taper. The dark palette is retuned; the light one is not yet.
+`refract-story-noise` as tuned in the playground: displacement-filter glass with a thicker, denser bezel, lower waves and a late taper. The dark palette is retuned; the light one approximates it.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="logo-dark-tuned.svg">

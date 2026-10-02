@@ -77,7 +77,7 @@ Safari may differ. Against Chromium in WebKitGTK the mean pixel difference is ~1
 The default, `tuned`, uses the displacement filter (`glass="refract"`: two primitives plus plain blurs).
 `elements` avoids the filter altogether, needing only masks, clips and plain blurs, and is the fallback if
 the filter misbehaves somewhere. The filter version was tuned on an iPhone through the playground, which
-draws it through `<img>` like GitHub; the dark palette is retuned, the light one is not.
+draws it through `<img>` like GitHub; the dark palette is retuned, the light one approximates it by ratio and by eye.
 
 Serve the pair with `<picture>`, not a media query inside the SVG: on GitHub the
 `<picture>` `prefers-color-scheme` source follows GitHub's theme setting, while a media
