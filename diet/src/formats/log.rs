@@ -1,4 +1,4 @@
-//! The session event log, v1 (#117 R3), which reads v0 (ruled 2026-09-26).
+//! The session event log, v2 (#157, #30 I0), which reads v1 and v0.
 //!
 //! `diet/formats/log/grammar.pest` says what a log document is: one event
 //! per line, in the record's value space. This module is its one reader and
@@ -21,6 +21,12 @@
 //! a v1 kind, key or tag is refused ([`parse`]). [`line`] reads a line alone
 //! -- a reader resuming mid-log never sees `session.start` -- so it reads the
 //! union, and the scoping is the whole-log reader's.
+//!
+//! v2 (#157 and #30's I0, applied from the #117 courier) adds a `response`'s
+//! `usage` (for a server that reports no `timings`; never both,
+//! [`at_most_one`]) and `capped`, a `session.start`'s `serving`, and a
+//! `request`'s `head_sha256`. A log that declares 0 or 1 and carries one is
+//! refused the same way.
 //!
 //! The draft is `diet/drive/plans/r2c-proposal.md`, D4, as ruled on #117:
 //! names from a ruling first, then the record, then the drive's own tags. A
@@ -891,9 +897,14 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 None => None,
                 Some(_) => Some(fields.timings("timings")?),
             },
-            usage: match object.get("usage") {
-                None => None,
-                Some(_) => Some(fields.usage("usage")?),
+            usage: match (object.get("usage"), object.get("timings")) {
+                (None, _) => None,
+                (Some(_), None) => Some(fields.usage("usage")?),
+                (Some(_), Some(_)) => {
+                    return Err("a response carries both `timings` and `usage`: `usage` is \
+                                carried only for a server that reports no timings (#157)"
+                        .to_owned());
+                }
             },
             capped: fields.optional_flag("capped")?,
         },
@@ -1056,7 +1067,7 @@ pub enum Holds {
     /// A sha256: 64 lowercase hex digits (v2).
     Digest,
     /// A `response`'s [`Usage`]: an object of the keys [`USAGE`] declares,
-    /// every one optional (v2).
+    /// its two counts required and its cache count optional (v2).
     Usage,
     /// A `session.start`'s [`Serving`]: an object of the keys [`SERVING`]
     /// declares (v2).
@@ -1308,6 +1319,18 @@ pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
     }
 }
 
+/// Optional keys of which a line of `kind` carries at most one. A
+/// `response`'s `usage` is carried only for a server that reports no
+/// `timings` (#157): on llama.cpp the two are equal, and a line carrying
+/// both would let them disagree.
+#[must_use]
+pub fn at_most_one(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::Response => &["timings", "usage"],
+        _ => &[],
+    }
+}
+
 // ---------------------------------------------------------------------------
 // TypeScript bindings (#31: the SPA reads a log through types generated from
 // this file, never through a hand-kept mirror of it)
@@ -1353,8 +1376,8 @@ fn ts_name(kind: Kind) -> String {
 ///
 /// # Panics
 ///
-/// If [`exactly_one`] names a key [`schema`] does not declare for the same
-/// kind -- a table defect, and one the schema's own test refuses first.
+/// If [`exactly_one`] or [`at_most_one`] names a key [`schema`] does not
+/// declare for the same kind -- a table defect, and one the schema's own test refuses first.
 #[must_use]
 pub fn typescript() -> String {
     use std::fmt::Write as _;
@@ -1398,11 +1421,12 @@ pub fn typescript() -> String {
     for kind in Kind::ALL {
         let name = ts_name(*kind);
         let one = exactly_one(*kind);
+        let some = at_most_one(*kind);
         let _ = writeln!(out, "export type {name} = {{");
         out.push_str("  seq: number;\n  t: number;\n");
         let _ = writeln!(out, "  kind: \"{}\";", kind.tag());
         for field in schema(*kind) {
-            if one.contains(&field.key) {
+            if one.contains(&field.key) || some.contains(&field.key) {
                 continue;
             }
             let optional = if field.required { "" } else { "?" };
@@ -1422,6 +1446,25 @@ pub fn typescript() -> String {
                     .expect("`exactly_one` names only keys the schema declares");
                 let _ = write!(out, "{{ {key}: {}", ts_holds(holds));
                 for other in one.iter().filter(|o| *o != key) {
+                    let _ = write!(out, "; {other}?: never");
+                }
+                out.push_str(" }");
+            }
+            out.push(')');
+        }
+        if !some.is_empty() {
+            out.push_str(" & (");
+            for (index, key) in some.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(" | ");
+                }
+                let holds = schema(*kind)
+                    .iter()
+                    .find(|f| f.key == *key)
+                    .map(|f| f.holds)
+                    .expect("`at_most_one` names only keys the schema declares");
+                let _ = write!(out, "{{ {key}?: {}", ts_holds(holds));
+                for other in some.iter().filter(|o| *o != key) {
                     let _ = write!(out, "; {other}?: never");
                 }
                 out.push_str(" }");
@@ -2198,6 +2241,13 @@ mod tests {
                 assert!(
                     schema(*kind).iter().any(|f| f.key == *key && !f.required),
                     "`{}`: `exactly_one` names `{key}`, which is not an optional key",
+                    kind.tag()
+                );
+            }
+            for key in at_most_one(*kind) {
+                assert!(
+                    schema(*kind).iter().any(|f| f.key == *key && !f.required),
+                    "`{}`: `at_most_one` names `{key}`, which is not an optional key",
                     kind.tag()
                 );
             }
