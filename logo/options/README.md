@@ -101,6 +101,15 @@ The `elements` glass, but the waves are bent by a displacement filter (one `feIm
   <img alt="Discipline, refract-story-noise variant" src="logo-light-refract-story-noise.svg">
 </picture>
 
+### tuned
+
+`refract-story-noise` as tuned in the playground: displacement-filter glass with a thicker, denser bezel, lower waves and a late taper. The dark palette is retuned; the light one is not yet.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="logo-dark-tuned.svg">
+  <img alt="Discipline, tuned variant" src="logo-light-tuned.svg">
+</picture>
+
 ### filter-glass
 
 The previous glass, which bends the light with a displacement filter and two baked maps. Renders on iPhone Safari via GitHub. Kept as a fallback and a comparison.

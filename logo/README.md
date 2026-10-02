@@ -21,7 +21,7 @@ wavelength is long and lazy (`WAVELENGTH`). The amplitude falls to zero along th
 default) is `a = b = 1.5`. The arithmetic mean of `late` and `early` is exactly linear, so `mid`
 splits the difference in the exponents instead.
 
-Options (`build.py --options`, viewable in `options/README.md`): `elements` (default), `early`, `late`,
+Options (`build.py --options`, viewable in `options/README.md`): `tuned` (default: `refract-story-noise` with the settings from the playground), `elements`, `early`, `late`,
 `noise` (harmonics the glass strips letter by letter), `story` (the incoming waves and outgoing beam are
 drawn, but between the first and last letter the light shows only inside the glass), `story-noise` (story's clipping with noise's tangle), `inside` (nothing outside
 the letters at all, canvas cropped to the word), `filter-glass` (the displacement-filter glass, kept as a
@@ -42,7 +42,7 @@ carved, wide as liquid.
   filter (`feImage` + `feDisplacementMap`, 2 primitives) applied to each light layer reads the same
   baked refraction map. The rim light is still outline strokes. In WebKitGTK the displacement
   matches Chromium, but at 3x the filter output is blocky (see Safari).
-- **`glass="elements"`** (default): the same field is applied to the *geometry* at build time. The wave
+- **`glass="elements"`**: the same field is applied to the *geometry* at build time. The wave
   paths are bent where they cross each bezel and drawn as ordinary paths, the glow is layered copies of
   them with plain blurs, and the rim light is the letter outline stroked in segments whose brightness
   follows the edge normal. No `feImage`, no displacement filter. The bend is exaggerated
@@ -74,8 +74,10 @@ the filter glass renders blocky (filter output below device resolution) and `ele
 Safari may differ. Against Chromium in WebKitGTK the mean pixel difference is ~1-3/255 in dark and
 ~2-5/255 in light.
 
-`elements` is the default because it avoids the displacement filter and the large filter graph, and
-needs only masks, clips and plain blurs.
+The default, `tuned`, uses the displacement filter (`glass="refract"`: two primitives plus plain blurs).
+`elements` avoids the filter altogether, needing only masks, clips and plain blurs, and is the fallback if
+the filter misbehaves somewhere. The filter version was tuned on an iPhone through the playground, which
+draws it through `<img>` like GitHub; the dark palette is retuned, the light one is not.
 
 Serve the pair with `<picture>`, not a media query inside the SVG: on GitHub the
 `<picture>` `prefers-color-scheme` source follows GitHub's theme setting, while a media

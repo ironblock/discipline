@@ -55,7 +55,8 @@ CROSS_OUTSIDE = 6  # px outside the D's left edge where red and green cross; 0 w
 ENDS_FADE = 22    # px over which the outside light fades out beside the first and last letter (about a stem)
 
 # What each option changes. Keys not listed keep BASE_VARIANT's value.
-BASE_VARIANT = dict(harmonics="single", look="carved", taper="mid", glass="elements", margin=MARGIN, outside=True)
+BASE_VARIANT = dict(harmonics="single", look="carved", taper="mid", glass="elements", margin=MARGIN, outside=True,
+                    amp=1.0, cross=CROSS_OUTSIDE, theme={})
 VARIANTS = {
     "elements": dict(
         desc="The default. Glass built from elements (no displacement filter), a taper halfway between early "
@@ -107,13 +108,26 @@ VARIANTS = {
         desc="`story-noise` with the waves bent by the displacement filter at `REFRACT_GAIN`.",
         glass="refract", harmonics="filter", outside="ends",
     ),
+    "tuned": dict(
+        desc="`refract-story-noise` as tuned in the playground: displacement-filter glass with a thicker, denser "
+             "bezel, lower waves and a late taper. The dark palette is retuned; the light one is not yet.",
+        glass="refract", look="tuned", harmonics="filter", outside="ends", taper="late", gain=3.45, amp=0.68, cross=4,
+        theme={"dark": dict(
+            wave_alpha=0.85, glow_wide_a=0.16, glow_tight=6.3,
+            body_top=0.01, body_bottom=0.29,
+            lit_opacity=0.78, shade_opacity=0.63, edge_opacity=0.15, rim_opacity=0.5,
+            frost=3.1, soft=0.9, inner=1.05, beam_inner=2.05,
+            bloom=dict(b=(32, 12.5)),
+            el=dict(bevel=1.7, a_width=4, a_alpha=0.35, b_width=1.9, b_alpha=0.7),
+        )},
+    ),
     "filter-glass": dict(
         desc="The previous glass, which bends the light with a displacement filter and two baked maps. Renders on "
              "iPhone Safari via GitHub. Kept as a fallback and a comparison.",
         glass="filter",
     ),
 }
-DEFAULT_VARIANT = "elements"
+DEFAULT_VARIANT = "tuned"
 
 THEMES = {
     "dark": dict(
@@ -454,15 +468,21 @@ def element_glass(t, v, geo, comps, w):
     return "\n    ".join(defs), body
 
 
+def overridden(base, changes):
+    """base with the nested keys in changes replaced (a tuple or number is replaced whole)."""
+    return {k: overridden(base[k], changes[k]) if isinstance(changes.get(k), dict) else changes.get(k, base[k]) for k in base}
+
+
 def svg(theme, variant, geo):
-    t, v = THEMES[theme], {**BASE_VARIANT, **VARIANTS[variant]}
+    v = {**BASE_VARIANT, **VARIANTS[variant]}
+    t = overridden(THEMES[theme], v["theme"].get(theme, {}))
     word_d, spans, width, beam_y = geo["d"], geo["spans"], geo["width"], geo["beam_y"]
     start, end = convergence(spans)
     w = f"{width:.0f}"
     fade_in, fade_out = (110 if v['outside'] else 1) / width, 1 - (150 if v['outside'] else 1) / width
     ramp0, ramp1 = (end - 45) / width, (end + 25) / width
-    comps = harmonics(spans, v["harmonics"], geo["x_height"] / 2)
-    geo = {**geo, "shift": crossover_shift(comps, v["taper"], beam_y, geo["enters"] - CROSS_OUTSIDE)}
+    comps = harmonics(spans, v["harmonics"], geo["x_height"] / 2 * v["amp"])
+    geo = {**geo, "shift": crossover_shift(comps, v["taper"], beam_y, geo["enters"] - v["cross"])}
     wave_defs = "\n".join(
         f'    <path id="w{k}" d="{d}"/>'
         for k, d in enumerate(wave_paths(comps, v["taper"], width, beam_y, 3 if v["harmonics"] == "single" else 2, geo["shift"]))

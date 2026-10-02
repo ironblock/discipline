@@ -26,6 +26,8 @@ IOR = 1.5
 LOOKS = {
     "carved": dict(bezel=8.0, thickness=11.0, spec_width=5.0, spec_power=1.0, band_width=7.0),
     "liquid": dict(bezel=14.0, thickness=20.0, spec_width=7.0, spec_power=1.0, band_width=9.0),
+    # settled on in the playground (playground.py): a thicker, denser glass that throws light further, with a thin rim
+    "tuned": dict(bezel=12.0, thickness=27.5, spec_width=3.0, spec_power=1.0, band_width=4.0, ior=1.72),
 }
 LIGHT = (-0.7071, -0.7071)  # unit vector toward the light, image coordinates (top-left)
 
@@ -80,13 +82,13 @@ def _raster(contours, region):
     return mask
 
 
-def _bezel_shift(d, bezel, thickness):
+def _bezel_shift(d, bezel, thickness, ior=IOR):
     """How far a vertical ray is thrown sideways at distance d inside the edge. A convex
     squircle bezel: steepest at the edge, flat by `bezel`. Snell's law at the top surface."""
     t = np.clip(d / bezel, 1e-3, 1.0)
     rise = (1 - t) ** 3 * (1 - (1 - t) ** 4) ** -0.75           # dh/dt of h = (1-(1-t)^4)^(1/4)
     alpha = np.arctan(thickness / bezel * rise)                  # surface tilt from horizontal
-    bend = alpha - np.arcsin(np.sin(alpha) / IOR)                # deviation from the vertical
+    bend = alpha - np.arcsin(np.sin(alpha) / ior)                # deviation from the vertical
     return np.where(d < bezel, thickness * np.tan(bend), 0.0)
 
 
@@ -111,7 +113,7 @@ def maps(contours, region, look):
     norm = np.hypot(gx, gy)
     ux, uy = np.divide(gx, norm, out=np.zeros_like(gx), where=norm > 1e-6), np.divide(gy, norm, out=np.zeros_like(gy), where=norm > 1e-6)
 
-    shift = _bezel_shift(d, look["bezel"], look["thickness"]) * mask
+    shift = _bezel_shift(d, look["bezel"], look["thickness"], look.get("ior", IOR)) * mask
     peak = shift.max()
     disp = np.stack([127.5 + 127.5 * shift * ux / peak, 127.5 + 127.5 * shift * uy / peak, np.full_like(d, 128)], -1)
     disp[~mask] = 128
