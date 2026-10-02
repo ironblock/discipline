@@ -307,16 +307,27 @@ def main(argv: list[str]) -> int:
             # binary file is searched only by the `b` patterns -- so one binary
             # path in a commit used to put every text hunk beside it out of
             # reach of the rest of the table. Split at each `diff --git`
-            # header, so a binary path blinds nothing but itself.
+            # header, so a binary path blinds nothing but itself. A combined
+            # diff's `diff --cc` header is not split on: measured over 98
+            # merges, git never puts a NUL in one, so it blinds nothing.
             for n, part in enumerate(p for p in re.split(r"(?m)^(?=diff --git )", patch) if p.strip()):
                 (out / f"patch-{sha[:12]}-{n}.txt").write_text(part + "\n", encoding="utf-8")
                 patches += 1
+            # And the commit's PATHS, in a text file of their own (#240's
+            # second review). A path's name sits in its part's header, in the
+            # same file as its content -- so a binary's NUL made its own name
+            # unscanned by every pattern without `b`. A path is not file
+            # content; it is text a person wrote. quotePath off keeps a
+            # non-ASCII name as written rather than as octal escapes.
+            paths = git("-c", "core.quotePath=false", "show", "--format=",
+                        "--name-status", "--find-renames", sha, check=False)
+            (out / f"paths-{sha[:12]}.txt").write_text(paths + "\n", encoding="utf-8")
         for label, text in extra:
             (out / f"{label}.txt").write_text(text + "\n", encoding="utf-8")
 
         print(f"check-history: {how}")
         print(f"check-history: {len(shas)} commit message(s)"
-              f" and {patches} patch(es)"
+              f", their paths, and {patches} patch file(s), one per path"
               f"{' + ' + ', '.join(l for l, _ in extra) if extra else ''}"
               f", scanned with the same table as the file gate")
 

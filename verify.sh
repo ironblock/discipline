@@ -6856,6 +6856,9 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
   (
     cd "${fake}/repo"
     git init --quiet
+    # The scans below run the copied scripts, which write __pycache__ here;
+    # ignored, so each `git add --all` commits only what its case names.
+    printf '__pycache__/\n' > .gitignore
     printf 'a\n' > a.txt && git add --all && seed_commit --message 'base'
     git update-ref refs/remotes/origin/main HEAD
     printf 'b\n' > b.txt && git add --all && seed_commit --message 'second'
@@ -7039,6 +7042,23 @@ STRICT
   expect_exit "history: an id in a text hunk beside a binary path is a finding" 1 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
         GITHUB_EVENT_PATH="${fake}/pr-mixed.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+
+  # A BINARY'S NAME IS TEXT (#240's second review). A path's name sits in its
+  # patch part's header, beside its content -- so a NUL in the content made
+  # the name unscanned. The commit's paths are written as a text file too.
+  local fake_named
+  (
+    cd "${fake}/repo"
+    printf 'x\000y\000\n' > "${token}.bin"
+    git add --all && seed_commit --message 'a binary under a named path'
+  )
+  fake_named="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_mixed" "$fake_named" > "${fake}/pr-named.json"
+  expect_exit "history: an id in a binary path's name is a finding" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-named.json" \
       python3 "${fake}/repo/scripts/check-history.py"
 
   # `--range` REACHES THE CHECK, AND BEATS THE INFERRED ANSWER. A flag that
