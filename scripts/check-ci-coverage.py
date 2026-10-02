@@ -480,10 +480,13 @@ def main() -> int:
     #    LATER verify run on main has passed (by run number, read through the
     #    API), so a re-run of an older push run cannot deploy over a newer one,
     #    while a later run still running does not block it. It checks the site
-    #    with `./verify.sh --site _site` before it uploads, nothing lets a step fail and the job go on, and what it
-    #    uploads is the site it checked. Read from the lines that are not
-    #    comments: a guard commented out is no guard. And the two parts it
-    #    downloads must be uploaded by something the gate runs.
+    #    with `./verify.sh --site _site` before it uploads, nothing lets a step
+    #    fail and the job go on, and what it uploads is the site it checked.
+    #    Deploys run one at a time through a `pages` group on the deploy JOB,
+    #    never the workflow, where a skipped run cancels a waiting deploy
+    #    (#244). Read from the lines that are not comments: a guard commented
+    #    out is no guard. And the two parts it downloads must be uploaded by
+    #    something the gate runs.
     pages = WORKFLOWS / "pages.yml"
     if pages.is_file():
         live = "\n".join(l for l in pages.read_text(encoding="utf-8").splitlines() if not l.lstrip().startswith("#"))
@@ -528,7 +531,7 @@ def main() -> int:
         # Deploys one at a time, through a group on the deploy JOB (#244): a
         # workflow-level group admits the runs whose job is skipped, and one
         # of those cancels a deploy waiting in it.
-        if re.search(r"""^["']?concurrency["']?\s*:""", live, re.M):
+        if re.search(r"""^(\?\s*)?["']?concurrency["']?\s*(:|$)""", live, re.M):
             failures.append("pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters, cancelling a waiting deploy (#244)")
         # Read inside the `deploy` job only: the same lines under another job
         # hold nothing back. The group is exactly `group: pages` and
@@ -536,6 +539,9 @@ def main() -> int:
         # waiting deploy rather than the newest) is refused.
         deploy = re.search(r"^  deploy:\s*\n(.*?)(?=^  \S|\Z)", live, re.M | re.S)
         group = deploy and re.search(r"^    concurrency:\s*\n((?:      .*\n?)*)", deploy.group(1), re.M)
+        # One `concurrency` key in the job: YAML keeps the LAST of two.
+        if deploy and len(re.findall(r"""^    (\?\s*)?["']?concurrency["']?\s*(:|$)""", deploy.group(1), re.M)) != 1:
+            group = None
         keys = dict(re.findall(r"^      ([\w-]+):\s*(.*?)\s*$", group.group(1), re.M)) if group else {}
         if keys.get("group") != "pages":
             failures.append("pages.yml: the deploy job holds no `pages` concurrency group, so deploys can overlap")
