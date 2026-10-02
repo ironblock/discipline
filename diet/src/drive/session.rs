@@ -2506,6 +2506,46 @@ pub(in crate::drive) mod tests {
         ]
     }
 
+    /// The writer's half of #249's rule: a server that reports `timings`
+    /// gets no `usage` on its response line -- on llama.cpp the two are equal
+    /// (measured on #157), and the reader refuses a line carrying both.
+    #[test]
+    fn a_response_with_timings_is_written_without_usage() {
+        let session = Session::open(
+            Canned::new([vec![
+                Step::Delta("Hello".to_owned()),
+                Step::Timings(crate::client::stream::Timings {
+                    prompt_n: Some(18),
+                    cache_n: Some(160),
+                    predicted_n: Some(66),
+                    ..crate::client::stream::Timings::default()
+                }),
+            ]]),
+            template(),
+        );
+        session.ask("say hello", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let responses: Vec<log::Line> = log
+            .iter()
+            .map(line_of)
+            .filter(|line| matches!(line.event, log::Event::Response { .. }))
+            .collect();
+        assert!(
+            matches!(
+                responses.as_slice(),
+                [log::Line {
+                    event: log::Event::Response {
+                        timings: Some(_),
+                        usage: None,
+                        ..
+                    },
+                    ..
+                }]
+            ),
+            "{responses:?}"
+        );
+    }
+
     #[test]
     fn every_event_the_session_logs_is_a_line_the_log_format_reads() {
         for logged in one_of_every_event() {
