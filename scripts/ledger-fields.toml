@@ -2,7 +2,9 @@
 # check compares rule_ratified.at with it). Every value is read from the record or its threads, with the source beside
 # it; where a field cannot be read, it is named in `absent` with the reason. Applied by migrate-ledger-fields.py, which
 # writes them into each README's front matter. Comment ids and issue numbers are digit strings: identifiers, not
-# measurements (track one, 2026-10-01).
+# measurements (track one, 2026-10-01). window_start is the measured run's first fork, ISO-8601 UTC: the first draw
+# whose result enters the word, after any preflight or headroom step that only decides which forks run; its source
+# is in window_start_from.
 
 ["2026-07-29-confabulation-on-nulls"]
 window_start = "2026-07-29T05:21:28Z"
@@ -85,4 +87,4 @@ absent = { supersedes = "nothing replaced: endpoint 1 beside stage 2's word, nev
 claim_issue = "143"
 window_start = "2026-10-01T14:54:55Z"
 window_start_from = "window/seat-a.start, seat A's first fork"
-absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)", rule_ratified = "no comment on #143 quotes the maintainer ratifying the amended text or posts it by digest, as the recorded ratifications do; relays assert it without either (5933939552, 2026-10-01T14:50:31Z; #191's body)" }
+absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)", rule_ratified = "the pre-registration is planning's 5921525110 (2026-09-30T23:27:07Z), which states that the maintainer's ratification extends to its text; no comment records the maintainer ratifying the amended text himself, and the field waits for one (#32 5943037888)" }

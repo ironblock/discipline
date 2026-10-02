@@ -4,9 +4,12 @@
 The values are scripts/ledger-fields.toml's, read from each record and its threads with the source beside each one;
 this script only places them. For each `results/<dir>/README.md` named there, it removes any of the managed keys
 already in the `+++` block and writes them again just before the block's first table, where TOML requires top-level
-keys to sit. It is idempotent: a second run changes nothing. It refuses a directory the values file does not name, a
-value file naming a directory that does not exist, and a `rule_ratified.digest` that is not the sha256 of the file it
-names (`of`, default `decision-rule.toml`).
+keys to sit. Where `rule_ratified` is absent it also appends one `**Ledger:**` line to the body's Conclusion, which
+must be the last section, saying so with the absence's reason; an earlier Ledger line is replaced, and the body ends
+in exactly one newline. It is idempotent: a second run changes nothing. It refuses a directory the values file does
+not name, a value file naming a directory that does not exist, a `rule_ratified.digest` that is not the sha256 of the
+file it names (`of`, default `decision-rule.toml`), and a README whose last section is not its Conclusion; every
+refusal comes before the first write.
 
 Usage: migrate-ledger-fields.py [--check]   (--check: exit 1 if any README would change, writing nothing)
 """
@@ -25,10 +28,10 @@ def toml_value(v):
     raise SystemExit(f"migrate-ledger-fields: a value of type {type(v).__name__} is not a string or a table")
 
 
-def rewrite(text: str, fields: dict) -> str:
+def rewrite(text: str, fields: dict, name: str) -> str:
     m = re.match(r"\+\+\+\n(.*?)\n\+\+\+\n", text, re.S)
     if not m:
-        raise SystemExit("migrate-ledger-fields: a README has no +++ front matter")
+        raise SystemExit(f"migrate-ledger-fields: {name}'s README has no +++ front matter")
     lines = [l for l in m.group(1).split("\n") if not re.match(rf"^({'|'.join(MANAGED)}) = ", l)]
     first_table = next((i for i, l in enumerate(lines) if re.match(r"^\[", l)), len(lines))
     while first_table > 0 and lines[first_table - 1] == "":
@@ -42,8 +45,8 @@ def rewrite(text: str, fields: dict) -> str:
     if why:  # planning: where no ratification comment exists, say so in the field's absence and in the body
         heads = re.findall(r"^## (.+)$", body, re.M)
         if not heads or heads[-1].strip() != "Conclusion":
-            raise SystemExit("migrate-ledger-fields: a README whose last section is not its Conclusion")
-        body = body.rstrip("\n") + f"\n\n**Ledger:** no ratification is on the record: {why}.\n"
+            raise SystemExit(f"migrate-ledger-fields: {name}'s README's last section is not its Conclusion")
+        body = body.rstrip("\n") + f"\n\n**Ledger:** rule_ratified is absent: {why}.\n"
     return "+++\n" + front + "\n+++\n" + body
 
 
@@ -60,15 +63,16 @@ def main(argv):
             target = ROOT / "results" / name / rr.get("of", "decision-rule.toml")
             if hashlib.sha256(target.read_bytes()).hexdigest() != rr["digest"]:
                 raise SystemExit(f"migrate-ledger-fields: {name}'s rule_ratified.digest is not the sha256 of {target.name}")
-    changed = 0
+    plan = []  # every README rewritten in memory first, so a refusal in any of them writes nothing
     for name in dirs:
-        f = values[name]
         readme = ROOT / "results" / name / "README.md"
-        old = readme.read_text(encoding="utf-8"); new = rewrite(old, f)
+        old = readme.read_text(encoding="utf-8"); new = rewrite(old, values[name], name)
         if new != old:
-            changed += 1
-            if not check:
-                readme.write_text(new, encoding="utf-8")
+            plan.append((readme, new))
+    changed = len(plan)
+    if not check:
+        for readme, new in plan:
+            readme.write_text(new, encoding="utf-8")
     print(f"migrate-ledger-fields: {len(dirs)} claim directories, {changed} {'would change' if check else 'changed'}")
     return 1 if (check and changed) else 0
 

@@ -119,4 +119,4 @@ of the 80 committed fields are byte-identical to the original and the
 eightieth, a "not run" note, differs only in that wording.
 The grader's usage note names this directory's own invocation.
 
-**Ledger:** no ratification is on the record: a notebook-era result: no decision rule and no pre-registration.
+**Ledger:** rule_ratified is absent: a notebook-era result: no decision rule and no pre-registration.

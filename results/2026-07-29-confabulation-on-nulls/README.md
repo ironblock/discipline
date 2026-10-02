@@ -89,4 +89,4 @@ against that program's copy -- the line that names its input path, two
 docstring phrases that pointed at that program's files, and a comment in
 `main()` that named its grader by a private filename.
 
-**Ledger:** no ratification is on the record: a notebook-era result: no decision rule and no pre-registration.
+**Ledger:** rule_ratified is absent: a notebook-era result: no decision rule and no pre-registration.

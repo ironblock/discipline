@@ -25,7 +25,7 @@ targets_matched = 54
 claim_issue = "143"
 window_start = "2026-10-01T14:54:55Z"
 window_start_from = "window/seat-a.start, seat A's first fork"
-absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)", rule_ratified = "no comment on #143 quotes the maintainer ratifying the amended text or posts it by digest, as the recorded ratifications do; relays assert it without either (5933939552, 2026-10-01T14:50:31Z; #191's body)" }
+absent = { supersedes = "nothing replaced: a re-fire on a new rung (planning, #32 5935378835)", rule_ratified = "the pre-registration is planning's 5921525110 (2026-09-30T23:27:07Z), which states that the maintainer's ratification extends to its text; no comment records the maintainer ratifying the amended text himself, and the field waits for one (#32 5943037888)" }
 
 [regime]
 arm = "extraction-seat-parity-refire"
@@ -83,4 +83,4 @@ The comparison row: the candidate's effect against the floor's 0.088472 differs 
 
 Supported: the inversion holds on the candidate rung, at about two fifths of the floor's size. The weight is low twice over -- the band is wide, and the fire's own interval reaches below zero -- and the comparison with the floor does not decide whether the inversion's size depends on the rung: the difference sits just past the independence margin. What is still unknown is the archived row's own open question: whether what either seat accepts is true of the mechanism.
 
-**Ledger:** no ratification is on the record: no comment on #143 quotes the maintainer ratifying the amended text or posts it by digest, as the recorded ratifications do; relays assert it without either (5933939552, 2026-10-01T14:50:31Z; #191's body).
+**Ledger:** rule_ratified is absent: the pre-registration is planning's 5921525110 (2026-09-30T23:27:07Z), which states that the maintainer's ratification extends to its text; no comment records the maintainer ratifying the amended text himself, and the field waits for one (#32 5943037888).
