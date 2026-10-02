@@ -101,8 +101,11 @@ fn usage() -> String {
             Operation::Bakeoff => writeln!(
                 out,
                 "  {command:<18} run the sense bakeoff a run record describes\n\
-                 {:<20} ...and with `--into DIR`, assemble the results directory",
-                ""
+                 {:<20} ...and with `--into DIR`, assemble the results directory; then\n\
+                 {:<20}    --claim-issue N | --absent claim_issue=REASON,\n\
+                 {:<20}    --supersedes HEX | --absent supersedes=REASON, and\n\
+                 {:<20}    --rule-ratified COMMENT,AT,DIGEST[,OF] | --absent rule_ratified=REASON",
+                "", "", "", ""
             ),
             Operation::Replay => writeln!(
                 out,
@@ -131,10 +134,13 @@ fn main() -> ExitCode {
 
     // `bakeoff` takes a second argument and nothing else does, so the shape is
     // read here rather than by a flag parser: two forms, both exact, and
-    // anything else is the usage text.
-    let (command, path, into) = match args.as_slice() {
-        [command, path] => (command, path, None),
-        [command, path, flag, into] if flag == "--into" => (command, path, Some(into)),
+    // anything else is the usage text. After `--into DIR` come the claim's
+    // provenance declarations (#32, ruled on #271), read by the assembler.
+    let (command, path, into, declarations) = match args.as_slice() {
+        [command, path] => (command, path, None, &[][..]),
+        [command, path, flag, into, declarations @ ..] if flag == "--into" => {
+            (command, path, Some(into), declarations)
+        }
         _ => {
             eprint!("{}", usage());
             return ExitCode::from(EXIT_USAGE);
@@ -180,11 +186,15 @@ fn main() -> ExitCode {
                 // ASSEMBLE, DON'T PRINT. Ruled 2026-09-10 on #69: the numbers
                 // are a results directory, and printing them leaves the
                 // assembly of one to a person.
-                Some(into) => diet::capture::bakeoff::assemble(
-                    std::path::Path::new(path),
-                    std::path::Path::new(into),
-                )
-                .map_err(|err| err.to_string()),
+                Some(into) => diet::capture::bakeoff::Provenance::from_flags(declarations)
+                    .and_then(|provenance| {
+                        diet::capture::bakeoff::assemble(
+                            std::path::Path::new(path),
+                            std::path::Path::new(into),
+                            &provenance,
+                        )
+                    })
+                    .map_err(|err| err.to_string()),
                 None => diet::capture::bakeoff::run(std::path::Path::new(path))
                     .map_err(|err| err.to_string()),
             },

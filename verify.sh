@@ -1520,6 +1520,22 @@ EOF
 # scores are still computed, and they are the scores of whatever bytes happen
 # to be on disk rather than of the bytes the record consumed -- which is a
 # recompute that recomputes something else.
+# The assembler inferring an absence the caller never declared (#32, ruled on
+# #271): an undeclared field written as absent, with no one having said why.
+inject_bakeoff_infers_an_absence() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = "(None, None) => Err(RunError::Undeclared(format!("
+new = "(None, None) => Ok(Declared::Absent(format!("
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_bakeoff_digest_unchecked() {
   python3 - <<'EOF'
 import pathlib
@@ -7757,6 +7773,8 @@ selftest() {
     'record/fixtures/invalid/request-unhashed-in-a-live-record\.jsonl' 'test:conformance/formats::record'
   seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
     'sed forms only GNU accepts'
+  seeded_case "an absence the assembler inferred"     test     inject_bakeoff_infers_an_absence \
+    'capture::bakeoff::tests::a_missing_declaration_is_refused_before_anything_is_written \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
     'capture::bakeoff::tests::a_cache_the_record_did_not_consume_is_refused \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \

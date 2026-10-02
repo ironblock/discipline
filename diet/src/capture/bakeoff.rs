@@ -142,6 +142,10 @@ pub enum RunError {
         /// The directory.
         path: String,
     },
+    /// A provenance field the caller neither gave nor declared absent (#32,
+    /// ruled on #271): the assembler writes no directory a person has not
+    /// declared the claim's provenance for.
+    Undeclared(String),
     /// `pre-registration.json` was written and its bytes changed before the
     /// scores were.
     ///
@@ -167,6 +171,7 @@ pub enum RunError {
 impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Undeclared(why) => write!(f, "{why}"),
             Self::Occupied { path } => write!(
                 f,
                 "{path} already holds a README.md: assembling over somebody's results is not \
@@ -1537,6 +1542,188 @@ print(f"{len(consumed)} artefact(s) and the product re-derive")
 PY
 "#;
 
+/// One of the claim's provenance fields as the caller declared it (#32):
+/// given, or absent with the reason why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Declared<T> {
+    /// The value.
+    Given(T),
+    /// Why there is none -- a declaration, never an inference.
+    Absent(String),
+}
+
+/// `rule_ratified`'s values, as ruled on #32: the maintainer's ratifying
+/// comment, its UTC time, and the sha256 of the file `of` names (the rule
+/// file when `of` is `None`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ratified {
+    /// The ratifying comment's id, a string of digits.
+    pub comment: String,
+    /// When it was posted, ISO-8601 UTC.
+    pub at: String,
+    /// The sha256 of the file `of` names.
+    pub digest: String,
+    /// The file the digest is of, when it is not `decision-rule.toml`.
+    pub of: Option<String>,
+}
+
+/// What only the claim's author knows about it (#32, ruled on #271): which
+/// issue it answers, what it supersedes, and which ratified rule decided it.
+/// The assembler refuses to write a directory without a declaration for
+/// each. `window_start` is not here: the assembler derives it from the run
+/// itself, or declares it absent with what it looked at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provenance {
+    /// The claim's issue number.
+    pub claim_issue: Declared<String>,
+    /// The digest of the product this one replaces.
+    pub supersedes: Declared<String>,
+    /// The ratification of the rule the claim was decided by.
+    pub rule_ratified: Declared<Ratified>,
+}
+
+impl Provenance {
+    /// Read from `diet bakeoff`'s flags: `--claim-issue N`, `--supersedes
+    /// HEX`, `--rule-ratified COMMENT,AT,DIGEST[,OF]`, and `--absent
+    /// FIELD=REASON` for any of the three.
+    ///
+    /// # Errors
+    ///
+    /// [`RunError::Undeclared`] naming a field given no declaration, given
+    /// two, or a flag this does not read.
+    pub fn from_flags(flags: &[String]) -> Result<Self, RunError> {
+        let mut given: BTreeMap<&str, String> = BTreeMap::new();
+        let mut absent: BTreeMap<String, String> = BTreeMap::new();
+        let mut at = 0;
+        while at < flags.len() {
+            let value = flags
+                .get(at + 1)
+                .ok_or_else(|| RunError::Undeclared(format!("`{}` takes a value", flags[at])))?;
+            let field = match flags[at].as_str() {
+                "--claim-issue" => "claim_issue",
+                "--supersedes" => "supersedes",
+                "--rule-ratified" => "rule_ratified",
+                "--absent" => {
+                    let (field, reason) = value.split_once('=').ok_or_else(|| {
+                        RunError::Undeclared(format!("`--absent {value}` is not FIELD=REASON"))
+                    })?;
+                    if !["claim_issue", "supersedes", "rule_ratified"].contains(&field) {
+                        return Err(RunError::Undeclared(format!(
+                            "`--absent {field}=...`: only claim_issue, supersedes and rule_ratified are \
+                             declared by the caller; the assembler derives window_start itself"
+                        )));
+                    }
+                    if reason.trim().is_empty() {
+                        return Err(RunError::Undeclared(format!(
+                            "`--absent {field}=` gives no reason; an absence is declared with why"
+                        )));
+                    }
+                    if absent.insert(field.to_owned(), reason.to_owned()).is_some() {
+                        return Err(RunError::Undeclared(format!(
+                            "`{field}` is declared absent twice"
+                        )));
+                    }
+                    at += 2;
+                    continue;
+                }
+                other => {
+                    return Err(RunError::Undeclared(format!(
+                        "`{other}` is not a flag `diet bakeoff` reads"
+                    )));
+                }
+            };
+            if given.insert(field, value.clone()).is_some() {
+                return Err(RunError::Undeclared(format!("`{field}` is given twice")));
+            }
+            at += 2;
+        }
+        let mut declared = |field: &str| -> Result<Declared<String>, RunError> {
+            match (given.remove(field), absent.remove(field)) {
+                (Some(value), None) => Ok(Declared::Given(value)),
+                (None, Some(reason)) => Ok(Declared::Absent(reason)),
+                (Some(_), Some(_)) => Err(RunError::Undeclared(format!(
+                    "`{field}` is both given and declared absent"
+                ))),
+                (None, None) => Err(RunError::Undeclared(format!(
+                    "`{field}` is neither given nor declared absent: pass `--{}` or \
+                     `--absent {field}=REASON`; an absence is declared, not inferred (#32)",
+                    field.replace('_', "-")
+                ))),
+            }
+        };
+        let claim_issue = declared("claim_issue")?;
+        let supersedes = declared("supersedes")?;
+        let rule_ratified = match declared("rule_ratified")? {
+            Declared::Absent(reason) => Declared::Absent(reason),
+            Declared::Given(spec) => {
+                let parts: Vec<&str> = spec.split(',').collect();
+                let [comment, at, digest, of @ ..] = parts.as_slice() else {
+                    return Err(RunError::Undeclared(format!(
+                        "`--rule-ratified {spec}` is not COMMENT,AT,DIGEST[,OF]"
+                    )));
+                };
+                if of.len() > 1 {
+                    return Err(RunError::Undeclared(format!(
+                        "`--rule-ratified {spec}` is not COMMENT,AT,DIGEST[,OF]"
+                    )));
+                }
+                Declared::Given(Ratified {
+                    comment: (*comment).to_owned(),
+                    at: (*at).to_owned(),
+                    digest: (*digest).to_owned(),
+                    of: of.first().map(|of| (*of).to_owned()),
+                })
+            }
+        };
+        Ok(Self {
+            claim_issue,
+            supersedes,
+            rule_ratified,
+        })
+    }
+
+    /// The front-matter lines the fields and their absences take, with
+    /// `window_start`'s absence -- derived, not declared -- among them.
+    fn front_matter(&self, window_start_absent: &str) -> String {
+        use std::fmt::Write as _;
+        let mut lines = String::new();
+        let mut absences: Vec<(&str, &str)> = Vec::new();
+        match &self.claim_issue {
+            Declared::Given(issue) => {
+                let _ = writeln!(lines, "claim_issue = {issue:?}");
+            }
+            Declared::Absent(why) => absences.push(("claim_issue", why)),
+        }
+        match &self.supersedes {
+            Declared::Given(digest) => {
+                let _ = writeln!(lines, "supersedes = {digest:?}");
+            }
+            Declared::Absent(why) => absences.push(("supersedes", why)),
+        }
+        match &self.rule_ratified {
+            Declared::Given(ratified) => {
+                let of = ratified
+                    .of
+                    .as_ref()
+                    .map_or(String::new(), |of| format!(", of = {of:?}"));
+                let _ = writeln!(
+                    lines,
+                    "rule_ratified = {{ comment = {:?}, at = {:?}, digest = {:?}{of} }}",
+                    ratified.comment, ratified.at, ratified.digest
+                );
+            }
+            Declared::Absent(why) => absences.push(("rule_ratified", why)),
+        }
+        absences.push(("window_start", window_start_absent));
+        let shown: Vec<String> = absences
+            .iter()
+            .map(|(field, why)| format!("{field} = {why:?}"))
+            .collect();
+        let _ = writeln!(lines, "absent = {{ {} }}", shown.join(", "));
+        lines
+    }
+}
+
 /// Where a bakeoff's numbers land.
 ///
 /// ASSEMBLED, NOT PRINTED. Ruled 2026-09-10 on #69: printing the report to
@@ -1555,7 +1742,7 @@ PY
 /// Returns [`RunError`] for anything that stops the run, and for a directory
 /// that already holds a report -- overwriting somebody's results is not an
 /// assembly step.
-pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
+pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Value, RunError> {
     let done = computed(path)?;
     let mut product = String::new();
     json::render(&done.report, &mut product);
@@ -1647,6 +1834,7 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
             &product_sha256,
             &pre_registration_sha256,
             checked,
+            &provenance.front_matter(&window_start_absent(path, &done)),
         )
         .as_bytes(),
     )?;
@@ -1664,6 +1852,28 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
             Value::Integer(i64::from(checked)),
         ),
     ])))
+}
+
+/// Why the assembled directory gives no `window_start` (#32, ruled on
+/// #271): the window opens at the run's first fork, and the record's fork
+/// rows carry no clock time, so the assembler says what it looked at and
+/// declares the absence itself rather than leaving it to be inferred. Named
+/// by file name only: the path a caller passed may be a home directory.
+fn window_start_absent(path: &Path, done: &Computed) -> String {
+    let forks = done
+        .record
+        .events
+        .iter()
+        .filter(|event| matches!(event, Event::Fork { .. }))
+        .count();
+    let named = path.file_name().map_or_else(
+        || "the run's record".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    format!(
+        "derived by `diet bakeoff --into` from {named}: its {forks} fork row(s) carry no clock time, \
+         so when the window opened is not in the record"
+    )
 }
 
 /// The record the assembled directory carries: the run's regime and source,
@@ -1838,6 +2048,7 @@ fn report_of(
     product_sha256: &str,
     pre_registration_sha256: &str,
     checked: u32,
+    provenance: &str,
 ) -> String {
     let ids: Vec<String> = regime
         .substrate_ids()
@@ -1861,6 +2072,7 @@ fn report_of(
          controls_run = {controls_run}\n\
          known_defects = []\n\
          targets_checked = {checked}\n\
+         {provenance}\
          \n\
          [regime]\n\
          arm = {:?}\n\
@@ -1922,10 +2134,68 @@ mod tests {
     use std::fmt::Write as _;
     use std::path::{Path, PathBuf};
 
-    use super::{RunError, RunKind, assemble, run};
+    use super::{Provenance, RunError, RunKind, assemble, run};
     use crate::capture::sense::{self, Embedder, Fixture};
     use crate::digest::sha256_hex;
     use crate::formats::record::json::Value;
+
+    /// A declared provenance, as a caller who knows the claim passes it.
+    fn declared() -> Provenance {
+        Provenance::from_flags(&[
+            "--claim-issue".to_owned(),
+            "24".to_owned(),
+            "--absent".to_owned(),
+            "supersedes=nothing replaced: the first run of this claim".to_owned(),
+            "--absent".to_owned(),
+            "rule_ratified=the bakeoff applies no rule; its endpoints are pre-registered"
+                .to_owned(),
+        ])
+        .expect("a declaration for each field")
+    }
+
+    /// NO DIRECTORY WITHOUT A DECLARATION FOR EACH FIELD (#32, ruled on
+    /// #271): a field neither given nor declared absent is refused, by name,
+    /// before anything is written -- and so is one given and declared absent
+    /// at once, or `window_start`, which the assembler derives.
+    #[test]
+    fn a_missing_declaration_is_refused_before_anything_is_written() {
+        let flags =
+            |list: &[&str]| -> Vec<String> { list.iter().map(|f| (*f).to_owned()).collect() };
+        let missing = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--absent",
+            "supersedes=none",
+        ]))
+        .expect_err("rule_ratified is undeclared");
+        assert!(
+            missing
+                .to_string()
+                .contains("`rule_ratified` is neither given nor declared absent"),
+            "{missing}"
+        );
+        let both = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--absent",
+            "claim_issue=x",
+            "--absent",
+            "supersedes=x",
+            "--absent",
+            "rule_ratified=x",
+        ]))
+        .expect_err("claim_issue is given and declared absent");
+        assert!(
+            both.to_string().contains("both given and declared absent"),
+            "{both}"
+        );
+        let derived = Provenance::from_flags(&flags(&["--absent", "window_start=x"]))
+            .expect_err("window_start is derived");
+        assert!(
+            derived.to_string().contains("derives window_start itself"),
+            "{derived}"
+        );
+    }
 
     /// The register this crate ships, used as the fixture's corpus.
     ///
@@ -2143,8 +2413,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        let answer =
-            assemble(&path, &into).unwrap_or_else(|err| panic!("the assembly failed: {err}"));
+        let answer = assemble(&path, &into, &declared())
+            .unwrap_or_else(|err| panic!("the assembly failed: {err}"));
 
         // Every file the ruling named, and the two the gates require.
         for name in [
@@ -2237,7 +2507,7 @@ mod tests {
         let dir = scratch("absent-cache");
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        assemble(&path, &into).expect("the assembly");
+        assemble(&path, &into, &declared()).expect("the assembly");
 
         let gone = "even.vectors.jsonl";
         std::fs::remove_file(into.join(gone)).expect("the cache to remove");
@@ -2292,7 +2562,7 @@ mod tests {
         let dir = scratch("exit-codes");
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        assemble(&path, &into).expect("the assembly");
+        assemble(&path, &into, &declared()).expect("the assembly");
 
         let run_it = |dir: &std::path::Path| {
             let run = std::process::Command::new("bash")
@@ -2393,7 +2663,7 @@ mod tests {
         let dir = scratch("no-evidence");
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        assemble(&path, &into).expect("the assembly");
+        assemble(&path, &into, &declared()).expect("the assembly");
 
         let run_it = || {
             let run = std::process::Command::new("bash")
@@ -2500,9 +2770,9 @@ mod tests {
         let dir = scratch("occupied");
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        assemble(&path, &into).expect("the first assembly");
+        assemble(&path, &into, &declared()).expect("the first assembly");
         let before = std::fs::read(into.join("README.md")).expect("the report");
-        let err = assemble(&path, &into).expect_err("the second assembly");
+        let err = assemble(&path, &into, &declared()).expect_err("the second assembly");
         assert!(matches!(err, RunError::Occupied { .. }), "{err}");
         assert_eq!(
             std::fs::read(into.join("README.md")).expect("the report"),
@@ -2590,7 +2860,7 @@ mod tests {
         // only that the constant is itself, so it is read back off disk out
         // of an assembled directory — the same bytes a reader gets.
         let assembled = dir.join("2026-01-01-a-sense-bakeoff-ladder");
-        assemble(&path, &assembled).expect("the assembly");
+        assemble(&path, &assembled, &declared()).expect("the assembly");
         let pinned = std::fs::read_to_string(assembled.join("pre-registration.json"))
             .expect("the pre-registration is written beside the report");
         let pinned = crate::formats::record::json::line(pinned.trim_end())
@@ -3121,8 +3391,8 @@ mod tests {
         let path = write_pairs_run(&dir);
 
         let into = dir.join("2026-01-01-a-pairs-run");
-        let answer =
-            assemble(&path, &into).unwrap_or_else(|err| panic!("the assembly failed: {err}"));
+        let answer = assemble(&path, &into, &declared())
+            .unwrap_or_else(|err| panic!("the assembly failed: {err}"));
         let Value::String(reported) = field(&answer, "product_sha256") else {
             panic!("the answer names the product's digest")
         };

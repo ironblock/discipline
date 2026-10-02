@@ -270,6 +270,16 @@ legacy_signature = "sed forms only GNU accepts"
 migrated = false
 
 [[fault]]
+id = "test.bakeoff_infers_an_absence"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "an absence the assembler inferred"
+failure_class = "results.claim-field-undeclared"
+legacy_signature = "capture::bakeoff::tests::a_missing_declaration_is_refused_before_anything_is_written \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
 id = "test.bakeoff_digest_unchecked"
 kind = "seeded-gate"
 check = "test"
