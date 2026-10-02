@@ -1,6 +1,11 @@
 ## What changed
 
-<!-- The change, in a sentence or two. Point at the lines that matter. -->
+<!-- The change, in a sentence or two. Point at the lines that matter.
+     Nothing from a private environment, here or anywhere on the thread:
+     hostnames, addresses, home paths, internal ticket identifiers -- and
+     a person's schedule, habits or whereabouts are private too: a machine's
+     availability is a fact about the machine ("reserved", "down", "restored
+     at <time>"), never about a person's time. -->
 
 ## Why
 
@@ -18,7 +23,9 @@
      review posted as a review event, under the chore brief. It does not owe
      an issue's rows, `--selftest`, or ruled disclosures. Its owner merges.
 
-     THE CHORE BRIEF, for its reviewer: hygiene of everything added; the
+     THE CHORE BRIEF, for its reviewer: hygiene of everything added, a
+     person's schedule, habits or whereabouts among it, which no pattern
+     catches; the
      licensing and provenance of every asset -- the tool that made it, the
      tool's inputs, any embedded font or third-party element, and the licence
      the repository may carry it under; and every rendering claim either
