@@ -2929,9 +2929,13 @@ inject_exercise_replay_loads_beside_its_bundle() {
 }
 
 # A published recording's admitted table edited: a snapshot is written once.
+# The snapshot is the one first-drive's admission names -- not the first a
+# listing finds, which, once a re-admission writes a newer snapshot, may be
+# one nothing cites any more (#255's selftest shard 8).
 inject_exercise_admitted_table_edited() {
   local snapshot
-  snapshot="$(ls scripts/hygiene-admitted-*-patterns.tsv | head -n 1)"
+  snapshot="$(grep -o 'scripts/hygiene-admitted-[0-9a-f]*-patterns\.tsv' exercise/src/drive/recorded/first-drive.admission.json | head -n 1)"
+  [ -n "$snapshot" ] && [ -f "$snapshot" ] || { echo "inject: first-drive's admission names no patterns snapshot" >&2; return 1; }
   printf '# edited after it was admitted\n' >> "$snapshot"
 }
 
