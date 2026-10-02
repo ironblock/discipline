@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 193
+faults = 198
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3118,4 +3118,72 @@ becomes = '''
         let _ = broken;'''
 catches = [
     "drive::serve::tests::a_failed_log_write_is_handed_over_once_and_nothing_follows_it",
+]
+
+[[fault]]
+id = "drive.projection-drops-an-unanswered-request"
+failure_class = "drive.projection-drops-an-unanswered-request"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+        if !self.outcome.contains_key(&seq) {'''
+becomes = '''
+        if false && !self.outcome.contains_key(&seq) {'''
+catches = [
+    "TO-BE-GENERATED",
+]
+
+[[fault]]
+id = "drive.projection-cites-a-literal-on-any-binary"
+failure_class = "drive.projection-cites-a-literal-on-any-binary"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+                declared == literal && identity.engine.version_or_digest == *binary'''
+becomes = '''
+                declared == literal && !binary.is_empty()'''
+catches = [
+    "TO-BE-GENERATED",
+]
+
+[[fault]]
+id = "drive.serve-bin-reports-a-digest-of-other-bytes"
+failure_class = "drive.serve-bin-reports-a-digest-of-other-bytes"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Value::String(diet::digest::sha256_hex(sidecar.as_bytes())),'''
+becomes = '''
+            Value::String(diet::digest::sha256_hex(sidecar.trim_end().as_bytes())),'''
+catches = [
+    "TO-BE-GENERATED",
+]
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-record"
+failure_class = "drive.serve-bin-leaves-an-earlier-record"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            file.set_len(0)
+                .map_err(|why| format!("the record cannot be emptied: {why}"))?;'''
+becomes = '''
+            let _ = &file;'''
+catches = [
+    "TO-BE-GENERATED",
+]
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-sidecar"
+failure_class = "drive.serve-bin-leaves-an-earlier-sidecar"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            if stale {
+                std::fs::remove_file(&sidecar)'''
+becomes = '''
+            if false && stale {
+                std::fs::remove_file(&sidecar)'''
+catches = [
+    "TO-BE-GENERATED",
 ]
