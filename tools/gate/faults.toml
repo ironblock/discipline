@@ -3989,6 +3989,15 @@ legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyon
 migrated = false
 
 [[fault]]
+id = "ci.ci_pages_deploy_group_quoted_key"
+kind = "seeded-gate"
+check = "ci"
+label = "a quoted extra key in the deploy job's group"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+migrated = false
+
+[[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
 check = "ci"

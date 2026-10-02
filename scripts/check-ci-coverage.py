@@ -543,7 +543,9 @@ def main() -> int:
         # One `concurrency` key in the job: YAML keeps the LAST of two.
         if deploy and len(re.findall(r"""^    (\?\s*)?["']?concurrency["']?\s*(:|$)""", deploy.group(1), re.M)) != 1:
             group = None
-        keys = dict(re.findall(r"^      ([\w-]+):\s*(.*?)\s*$", group.group(1), re.M)) if group else {}
+        # A key in any spelling YAML reads as one -- plain, quoted, or an
+        # explicit `? key` -- as the top-level check above (#251).
+        keys = dict(re.findall(r"""^      (?:\?\s*)?["']?([\w-]+)["']?\s*(?::\s*(.*?))?\s*$""", group.group(1), re.M)) if group else {}
         if keys.get("group") != "pages":
             failures.append("pages.yml: the deploy job holds no `pages` concurrency group, so deploys can overlap")
         elif keys.get("cancel-in-progress") != "false":

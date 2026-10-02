@@ -3925,6 +3925,13 @@ inject_ci_pages_deploy_group_key_past_a_blank() {
       queue: max' .github/workflows/pages.yml
 }
 
+# An extra key in the deploy job's group, quoted: YAML reads 'queue' as queue
+# (#251).
+inject_ci_pages_deploy_group_quoted_key() {
+  edit_in_place "/^      cancel-in-progress: false\$/a\\
+      'queue': max" .github/workflows/pages.yml
+}
+
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
   edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
@@ -7716,6 +7723,8 @@ selftest() {
   seeded_case "the deploy job's group cancelling" ci inject_ci_pages_deploy_group_cancels \
     "pages.yml: the deploy job's .pages. group does not say cancel-in-progress: false"
   seeded_case "a key past a blank line in the deploy job's group" ci inject_ci_pages_deploy_group_key_past_a_blank \
+    "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+  seeded_case "a quoted extra key in the deploy job's group" ci inject_ci_pages_deploy_group_quoted_key \
     "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
