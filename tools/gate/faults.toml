@@ -1060,6 +1060,15 @@ legacy_signature = "notarget No matching version found for pnpm@0\\.0\\.0-unpubl
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_recording_carried_disagrees"
+kind = "seeded-gate"
+check = "exercise"
+label = "a capture's carried field disagreeing with its events"
+failure_class = "exercise.recording-carried"
+legacy_signature = "voxel-stress: its carried field disagrees with its events"
+migrated = false
+
+[[fault]]
 id = "ci.ci"
 kind = "seeded-gate"
 check = "ci"

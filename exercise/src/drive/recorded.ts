@@ -23,6 +23,13 @@ export interface Recording {
   readonly title: string;
   /** What the migration decided, rather than the record. */
   readonly migration: readonly string[];
+  /**
+   * The events of a kind this vocabulary does not have, carried under their
+   * own name, with how many of each: what a fold of the events must leave
+   * unknown, no more and no less (#173). Written by the migration beside
+   * `migration`, whose prose says the same.
+   */
+  readonly carried: Readonly<Record<string, number>>;
   readonly events: readonly Unplaced[];
 }
 
@@ -45,6 +52,13 @@ export function load(name: string, text: string): Recording {
   }
   if (typeof parsed.title !== 'string' || !Array.isArray(parsed.migration) || !Array.isArray(parsed.events)) {
     throw fail('expected title, migration and events');
+  }
+  const carried = parsed.carried as unknown;
+  if (
+    typeof carried !== 'object' || carried === null || Array.isArray(carried) ||
+    !Object.values(carried).every((n) => Number.isInteger(n) && (n as number) > 0)
+  ) {
+    throw fail('expected carried: {kind: count}, each count a whole number above 0');
   }
   for (const [i, e] of parsed.events.entries()) {
     if (typeof e?.kind !== 'string' || typeof e.t !== 'number') throw fail(`event ${i} has no kind or time`);

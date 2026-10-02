@@ -2949,6 +2949,13 @@ inject_exercise_pnpm_unobtainable() {
   edit_in_place 's/"packageManager": "pnpm@[^"]*"/"packageManager": "pnpm@0.0.0-unpublished"/' exercise/package.json
 }
 
+# A capture whose `carried` field disagrees with its events (#173): it says
+# two compactions where its events hold one. The replay test folds the events
+# and compares with the field, not with the header's prose.
+inject_exercise_recording_carried_disagrees() {
+  edit_in_place 's/^"compaction": 1$/"compaction": 2/' exercise/src/drive/recorded/voxel-stress.json
+}
+
 # #32 I2's emitter mutated (track five's faults, carried here by courier): a
 # ledger row the renderer must refuse, naming the directory. The fixture loop
 # never reaches the renderer, and a record diet accepted cannot lack a word,
@@ -7675,6 +7682,8 @@ selftest() {
     "expected \[ 'step-limit' \] to deeply equal \[\]"
   seeded_case "a pinned pnpm the host cannot have"    exercise inject_exercise_pnpm_unobtainable \
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
+  seeded_case "a capture's carried field disagreeing with its events" exercise inject_exercise_recording_carried_disagrees \
+    'voxel-stress: its carried field disagrees with its events'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
