@@ -76,7 +76,7 @@ fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
          \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
-         \x20                       [--log FILE]\n\
+         \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\n",
     );
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
@@ -90,6 +90,9 @@ fn serve_usage() -> String {
     out.push_str("--auth-file names a file holding user:password; every request must then\n");
     out.push_str("present it as Basic auth. --listen off loopback refuses to start without\n");
     out.push_str("it, and a wildcard (0.0.0.0, ::) is refused: name one interface.\n");
+    out.push_str("--record FILE (needs --regimen) writes the session's record there once it\n");
+    out.push_str("ends, projected from its log, beside FILE.unspellable.json naming what\n");
+    out.push_str("the record could not spell; both digests are reported on stdout.\n");
     out.push_str("--log FILE writes the session's log there as each line is appended, the\n");
     out.push_str("same lines GET /events streams; nothing is written without it.\n");
     out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
@@ -110,6 +113,7 @@ struct ServeArgs {
     auth_file: Option<String>,
     regimen_file: Option<String>,
     log_file: Option<String>,
+    record_file: Option<String>,
     listen: IpAddr,
     port: u16,
     allowed_origins: Vec<String>,
@@ -125,6 +129,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut auth_file = None;
     let mut regimen_file = None;
     let mut log_file = None;
+    let mut record_file = None;
     let mut listen = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
@@ -153,6 +158,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--log" {
             log_file = Some(value.clone());
             true
+        } else if flag == "--record" {
+            record_file = Some(value.clone());
+            true
         } else if flag == "--listen" {
             value.parse().map(|given| listen = given).is_ok()
         } else if flag == "--allow-origin" {
@@ -180,6 +188,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         auth_file,
         regimen_file,
         log_file,
+        record_file,
         listen,
         port,
         allowed_origins,
@@ -203,6 +212,7 @@ fn serve(args: &[String]) -> ExitCode {
         auth_file,
         regimen_file,
         log_file,
+        record_file,
         listen,
         port,
         allowed_origins,
@@ -225,6 +235,9 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(regime) => regime,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    if record_file.is_some() && regime.is_none() {
+        return fail(EXIT_USAGE, RECORD_NEEDS_A_REGIMEN);
+    }
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
@@ -253,8 +266,8 @@ fn serve(args: &[String]) -> ExitCode {
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     let log_path = log_file;
-    let log_file = match log_path.as_deref().map(created).transpose() {
-        Ok(file) => file,
+    let (log_file, record) = match outputs(log_path.as_deref(), record_file) {
+        Ok(opened) => opened,
         Err(why) => return fail(EXIT_OUTPUT, &why),
     };
     let listener = match listener(listen, port) {
@@ -262,7 +275,7 @@ fn serve(args: &[String]) -> ExitCode {
         Err(refused) => return refused,
     };
     let session = std::sync::Arc::new(Session::open(transport, shape));
-    let teeing = std::sync::Arc::clone(&session);
+    let writers = std::sync::Arc::clone(&session);
     let opened = session.opened();
     let config = Config {
         allowed_origins,
@@ -275,17 +288,9 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(server) => server,
         Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
     };
-    // Emptied only now that the server runs; the tee writes from the log's
-    // first line whenever it starts.
-    let log = match log_file.map(|(file, truncated)| {
-        file.set_len(0).map(|()| {
-            keep_log(teeing, render, file);
-            truncated
-        })
-    }) {
-        Some(Err(why)) => return fail(EXIT_OUTPUT, &format!("the log cannot be emptied: {why}")),
-        Some(Ok(truncated)) => Some(truncated),
-        None => None,
+    let log = match started_writers(&writers, render, log_file, record.zip(regime.clone())) {
+        Ok(log) => log,
+        Err(why) => return fail(EXIT_OUTPUT, &why),
     };
     println!(
         "{}",
@@ -332,6 +337,139 @@ fn keep_log(
         let _ = fail(EXIT_OUTPUT, &format!("the log could not be written: {why}"));
         std::process::exit(i32::from(EXIT_OUTPUT));
     });
+}
+
+/// Why `--record` without `--regimen` is a usage refusal.
+const RECORD_NEEDS_A_REGIMEN: &str =
+    "--record needs --regimen: a record's `start` names the regime it ran under";
+
+/// The files `--log` and `--record` name, opened before anything binds and
+/// emptied only later: the log's with whether it held anything, the
+/// record's with its path.
+#[allow(clippy::type_complexity)]
+fn outputs(
+    log: Option<&str>,
+    record: Option<String>,
+) -> Result<
+    (
+        Option<(std::fs::File, bool)>,
+        Option<(String, std::fs::File)>,
+    ),
+    String,
+> {
+    let log = log.map(created).transpose()?;
+    let record = match record {
+        Some(path) => Some((path.clone(), created(&path)?.0)),
+        None => None,
+    };
+    Ok((log, record))
+}
+
+/// The log and the record, started once the server runs. The log is emptied
+/// only now, and the tee writes from its first line whenever it starts; the
+/// record waits for the session to end. Whether naming the log emptied a
+/// file that held something.
+fn started_writers(
+    session: &std::sync::Arc<Session<HttpStream>>,
+    render: diet::drive::serve::Render,
+    log: Option<(std::fs::File, bool)>,
+    record: Option<((String, std::fs::File), diet::formats::record::Regime)>,
+) -> Result<Option<bool>, String> {
+    if let Some((record, regime)) = record {
+        keep_record(std::sync::Arc::clone(session), regime, record);
+    }
+    log.map(|(file, truncated)| {
+        file.set_len(0)
+            .map_err(|why| format!("the log cannot be emptied: {why}"))?;
+        keep_log(std::sync::Arc::clone(session), render, file);
+        Ok(truncated)
+    })
+    .transpose()
+}
+
+/// The session's record, written once, when it settles `ended` (`--record`,
+/// #157): projected from its own log, beside a sidecar naming everything
+/// the record could not spell, both digests reported on stdout. A record
+/// that cannot be written stops the process, as a log that cannot be does.
+fn keep_record(
+    session: std::sync::Arc<Session<HttpStream>>,
+    regime: diet::formats::record::Regime,
+    (path, file): (String, std::fs::File),
+) {
+    std::thread::spawn(move || {
+        let mut next = 0;
+        while session.settlement() != diet::drive::session::Settlement::Ended {
+            next += session
+                .wait_from(next, std::time::Duration::from_secs(60))
+                .len() as u64;
+        }
+        match written_record(&session, &regime, &path, file) {
+            Ok(report) => {
+                let _ = std::io::Write::write_all(
+                    &mut std::io::stdout().lock(),
+                    format!("{report}\n").as_bytes(),
+                );
+            }
+            Err(why) => {
+                let _ = fail(
+                    EXIT_OUTPUT,
+                    &format!("the record could not be written: {why}"),
+                );
+                std::process::exit(i32::from(EXIT_OUTPUT));
+            }
+        }
+    });
+}
+
+/// Project the ended session, check the record reads back, and write it and
+/// its sidecar: the line `keep_record` reports.
+fn written_record(
+    session: &Session<HttpStream>,
+    regime: &diet::formats::record::Regime,
+    path: &str,
+    mut file: std::fs::File,
+) -> Result<String, String> {
+    use diet::drive::projection;
+    use diet::formats::record::{self, Record};
+    let engine =
+        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
+            .ok()
+            .and_then(|identity| projection::cited(&identity));
+    let lines: Vec<_> = session
+        .events_from(0)
+        .iter()
+        .map(diet::drive::session::line_of)
+        .collect();
+    let projected = projection::project(&lines, regime, engine)?;
+    let text = record::render(&Record {
+        events: projected.events.clone(),
+    });
+    record::parse(&text)
+        .map_err(|why| format!("the projected record does not read back: {why:?}"))?;
+    let sidecar = projection::sidecar(&projected) + "\n";
+    let sidecar_path = format!("{path}.unspellable.json");
+    file.set_len(0)
+        .and_then(|()| std::io::Write::write_all(&mut file, text.as_bytes()))
+        .map_err(|why| format!("{path}: {why}"))?;
+    std::fs::write(&sidecar_path, &sidecar).map_err(|why| format!("{sidecar_path}: {why}"))?;
+    let mut report = BTreeMap::from([
+        ("record".to_owned(), Value::String(path.to_owned())),
+        (
+            "record_sha256".to_owned(),
+            Value::String(diet::digest::sha256_hex(text.as_bytes())),
+        ),
+        ("sidecar".to_owned(), Value::String(sidecar_path)),
+        (
+            "sidecar_sha256".to_owned(),
+            Value::String(diet::digest::sha256_hex(sidecar.as_bytes())),
+        ),
+    ]);
+    if let Value::Object(fields) = projection::sidecar_value(&projected) {
+        report.extend(fields);
+    }
+    let mut out = String::new();
+    json::render(&Value::Object(report), &mut out);
+    Ok(out)
 }
 
 /// The session's trunk: the system message, and nothing else fixed yet.

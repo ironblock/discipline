@@ -16,12 +16,26 @@
 //! "equality unmeasured for this engine" -- and never a derived number. A
 //! response carrying `usage` (a dialect whose server reports no timings,
 //! log v2) gives `output_tokens` as the server's own `completion_tokens`.
+//!
+//! # Head changes
+//!
+//! A live record names every change of a lane's head between its requests
+//! (`prefix.changed`). The log carries each request's head digest, and the
+//! trunk it was built from is in the log too: the session's head, then each
+//! answered turn's ask and answer, appended as the session appends them.
+//! Each request's shape is rebuilt from that -- `serve`'s trunk has no tools
+//! and no template arguments, which is ASSERTED by the check, not assumed:
+//! only where `client::head` over the rebuilt shape gives the logged digest
+//! does the row carry its diff. Anywhere else it is `unattributed`, with
+//! nothing guessed, and the mismatch is named (ruled on #157).
 
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::client::head::Head;
+use crate::client::shape::{Limits, Message, RequestShape, Role, SamplerCard};
 use crate::formats::log::{self, Event as Line, Lane};
 use crate::formats::record::json::Decimal;
-use crate::formats::record::{self, Count, Event, Regime, Source};
+use crate::formats::record::{self, Count, Event, PrefixReason, Regime, Source};
 
 use super::registry::Identity;
 
@@ -64,6 +78,61 @@ pub fn cited(identity: &Identity) -> Option<Engine> {
         })
 }
 
+impl Engine {
+    /// How the sidecar names it.
+    #[must_use]
+    pub fn describes(self) -> String {
+        match self {
+            Self::Commit(prefix) => format!("commit {prefix}"),
+            Self::Literal(literal) => format!("build_info {literal}"),
+        }
+    }
+}
+
+/// The sidecar beside a record (ruled on #157): everything the record could
+/// not spell, and -- when counts were derived -- the engine and the
+/// measurement they were derived on. Canonical JSON, one line.
+#[must_use]
+pub fn sidecar(projection: &Projection) -> String {
+    let mut out = String::new();
+    crate::formats::record::json::render(&sidecar_value(projection), &mut out);
+    out
+}
+
+/// [`sidecar`], as a value.
+#[must_use]
+pub fn sidecar_value(projection: &Projection) -> crate::formats::record::json::Value {
+    use crate::formats::record::json::Value;
+    let mut fields = BTreeMap::new();
+    if let Some(engine) = projection.engine {
+        fields.insert("engine".to_owned(), Value::String(engine.describes()));
+        fields.insert(
+            "measurement".to_owned(),
+            Value::String(MEASUREMENT.to_owned()),
+        );
+    }
+    let items = projection
+        .unspellable
+        .iter()
+        .map(|item| {
+            let mut object = BTreeMap::from([
+                (
+                    "seq".to_owned(),
+                    Value::Integer(i64::try_from(item.seq).unwrap_or(i64::MAX)),
+                ),
+                ("kind".to_owned(), Value::String(item.kind.to_owned())),
+                ("why".to_owned(), Value::String(item.why.clone())),
+            ]);
+            if let Some(text) = &item.text {
+                object.insert("text".to_owned(), Value::String(text.clone()));
+            }
+            Value::Object(object)
+        })
+        .collect();
+    fields.insert("unspellable".to_owned(), Value::Array(items));
+    Value::Object(fields)
+}
+
 /// A fact the record could not spell, named rather than dropped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unspellable {
@@ -87,6 +156,15 @@ pub struct Projection {
     pub unspellable: Vec<Unspellable>,
     /// The cited engine the counts were derived on, or `None` when none was.
     pub engine: Option<Engine>,
+}
+
+/// The client's role for a log's.
+fn role_of(role: log::Role) -> Role {
+    match role {
+        log::Role::System => Role::System,
+        log::Role::User => Role::User,
+        log::Role::Assistant => Role::Assistant,
+    }
 }
 
 /// The record id of the request logged at `seq`.
@@ -175,7 +253,7 @@ pub fn project(
     engine: Option<Engine>,
 ) -> Result<Projection, String> {
     let Some(log::Line {
-        event: Line::SessionStart { .. },
+        event: Line::SessionStart { model, head, .. },
         ..
     }) = lines.first()
     else {
@@ -187,6 +265,11 @@ pub fn project(
         .map(|substrate| substrate.id.clone())
         .ok_or("the regime declares no substrate")?;
     let mut walk = Walk::over(lines, substrate, engine);
+    walk.model.clone_from(model);
+    walk.trunk = head
+        .iter()
+        .map(|message| Message::new(role_of(message.role), message.content.clone()))
+        .collect();
     for line in &lines[1..] {
         walk.line(line)?;
     }
@@ -217,6 +300,18 @@ struct Walk<'a> {
     turns_broken: bool,
     /// The kinds with no row at all, named once each.
     named_kinds: BTreeSet<&'static str>,
+    /// The model the session's requests name, from its first line.
+    model: String,
+    /// The trunk as the session holds it: its head, then each answered
+    /// turn's ask and answer.
+    trunk: Vec<Message>,
+    /// Each turn's ask.
+    asks: BTreeMap<u32, String>,
+    /// Each trunk request's turn, by `seq`.
+    turn_of: BTreeMap<u64, u32>,
+    /// The trunk's last request: its logged digest, and its head rebuilt
+    /// from the log when that gave the same digest.
+    last_head: Option<(String, Option<Head>)>,
 }
 
 impl<'a> Walk<'a> {
@@ -250,6 +345,11 @@ impl<'a> Walk<'a> {
             unspellable: Vec::new(),
             turns_broken: false,
             named_kinds: BTreeSet::new(),
+            model: String::new(),
+            trunk: Vec::new(),
+            asks: BTreeMap::new(),
+            turn_of: BTreeMap::new(),
+            last_head: None,
         }
     }
 
@@ -264,23 +364,32 @@ impl<'a> Walk<'a> {
 
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
-            Line::Ask { turn, .. } => self.ask(line.seq, *turn),
+            Line::Ask { turn, text } => {
+                self.asks.insert(*turn, text.clone());
+                self.ask(line.seq, *turn);
+            }
             Line::Request {
-                lane, head_sha256, ..
-            } => self.request(line.seq, *lane, head_sha256.as_deref())?,
+                turn,
+                lane,
+                head_sha256,
+            } => self.request(line.seq, *turn, *lane, head_sha256.as_deref())?,
             Line::Response {
                 to_request,
                 text,
+                reasoning,
                 timings,
                 usage,
                 ..
-            } => self.response(
-                line.seq,
-                *to_request,
-                text,
-                timings.as_ref(),
-                usage.as_ref(),
-            ),
+            } => {
+                self.answered(*to_request, text, reasoning.as_ref());
+                self.response(
+                    line.seq,
+                    *to_request,
+                    text,
+                    timings.as_ref(),
+                    usage.as_ref(),
+                );
+            }
             Line::Cancelled { partial, .. } => self.name(
                 line.seq,
                 "cancelled",
@@ -363,7 +472,13 @@ impl<'a> Walk<'a> {
         }
     }
 
-    fn request(&mut self, seq: u64, lane: Lane, head_sha256: Option<&str>) -> Result<(), String> {
+    fn request(
+        &mut self,
+        seq: u64,
+        turn: u32,
+        lane: Lane,
+        head_sha256: Option<&str>,
+    ) -> Result<(), String> {
         let Some(head_sha256) = head_sha256 else {
             return Err(format!(
                 "the request at seq {seq} carries no head_sha256, and a live record's request \
@@ -378,6 +493,10 @@ impl<'a> Walk<'a> {
             text: None,
             head_sha256: Some(head_sha256.to_owned()),
         });
+        if lane == Lane::Trunk {
+            self.turn_of.insert(seq, turn);
+            self.head_change(seq, turn, head_sha256);
+        }
         if !self.outcome.contains_key(&seq) {
             self.name(
                 seq,
@@ -387,6 +506,80 @@ impl<'a> Walk<'a> {
             );
         }
         Ok(())
+    }
+
+    /// The trunk request at `seq`'s head, rebuilt from the log and checked
+    /// against its logged digest, and the change row from the trunk's last
+    /// request when the head moved.
+    fn head_change(&mut self, seq: u64, turn: u32, logged: &str) {
+        let mut messages = self.trunk.clone();
+        messages.push(Message::new(
+            Role::User,
+            self.asks.get(&turn).cloned().unwrap_or_default(),
+        ));
+        let rebuilt = Head::of(&RequestShape {
+            model: self.model.clone(),
+            messages,
+            sampler: SamplerCard::empty(),
+            limits: Limits {
+                attempt: std::time::Duration::ZERO,
+                call: std::time::Duration::ZERO,
+                max_output_tokens: 0,
+                retries: 0,
+            },
+            grammar: None,
+            // ASSERTED by the digest check below: `serve`'s trunk sends none.
+            template_kwargs: BTreeMap::new(),
+            tools: Vec::new(),
+        });
+        let verified = (rebuilt.digest() == logged).then_some(rebuilt);
+        if verified.is_none() {
+            self.name(
+                seq,
+                "request",
+                format!(
+                    "its head could not be rebuilt from the log: the logged {logged} is not what \
+                     client::head gives over the log's trunk, so a change at it is unattributed"
+                ),
+                None,
+            );
+        }
+        let previous = self
+            .last_head
+            .replace((logged.to_owned(), verified.clone()));
+        let Some((previous_digest, previous_head)) = previous else {
+            return;
+        };
+        if previous_digest == logged {
+            return;
+        }
+        let id = format!("{}#prefix", request_id(seq));
+        let at_request = request_id(seq);
+        let row = match (previous_head, verified) {
+            (Some(previous), Some(now)) => now
+                .change_from(&previous)
+                .map(|change| change.event(id.clone(), at_request.clone())),
+            _ => None,
+        };
+        self.events.push(row.unwrap_or(Event::PrefixChanged {
+            id,
+            at_request,
+            reason: PrefixReason::Unattributed,
+            diff: Vec::new(),
+        }));
+    }
+
+    /// The trunk after an answered trunk request: its ask and its answer,
+    /// appended as the session appends them.
+    fn answered(&mut self, to_request: u64, text: &str, reasoning: Option<&String>) {
+        let Some(turn) = self.turn_of.get(&to_request) else {
+            return;
+        };
+        let ask = self.asks.get(turn).cloned().unwrap_or_default();
+        self.trunk.push(Message::new(Role::User, ask));
+        let mut answer = Message::new(Role::Assistant, text.to_owned());
+        answer.reasoning = reasoning.cloned();
+        self.trunk.push(answer);
     }
 
     fn response(
@@ -514,11 +707,14 @@ mod tests {
         ]
     }
 
-    fn two_turns(timings: Option<Timings>) -> Vec<log::Line> {
-        let mut events = vec![start()];
-        events.extend(answered(1, 3, timings.clone(), None));
-        events.extend(answered(2, 10, timings, None));
-        numbered(events)
+    /// [`warm`], as the client's transport reports it.
+    fn warm_client() -> crate::client::stream::Timings {
+        crate::client::stream::Timings {
+            prompt_n: Some(18),
+            cache_n: Some(160),
+            predicted_n: Some(66),
+            ..crate::client::stream::Timings::default()
+        }
     }
 
     fn validates(projection: &Projection) {
@@ -531,7 +727,7 @@ mod tests {
     #[test]
     fn on_a_cited_engine_the_counts_derive_from_timings() {
         let projection = project(
-            &two_turns(Some(warm())),
+            &a_real_session_log_timed(Some(warm_client())),
             &regime(),
             Some(Engine::Commit("e7051ef")),
         )
@@ -566,16 +762,24 @@ mod tests {
             })
             .collect();
         assert_eq!(
-            outputs,
-            [("q/3".to_owned(), 66), ("q/10".to_owned(), 66)],
-            "predicted_n"
+            outputs
+                .iter()
+                .map(|(_, output)| *output)
+                .collect::<Vec<_>>(),
+            [66, 66],
+            "predicted_n: {outputs:?}"
         );
         validates(&projection);
     }
 
     #[test]
     fn on_an_uncited_engine_no_count_is_derived_and_every_one_is_named() {
-        let projection = project(&two_turns(Some(warm())), &regime(), None).expect("projected");
+        let projection = project(
+            &a_real_session_log_timed(Some(warm_client())),
+            &regime(),
+            None,
+        )
+        .expect("projected");
         assert!(
             !projection
                 .events
@@ -715,6 +919,118 @@ mod tests {
         )
         .expect_err("no head");
         assert!(refused.contains("head_sha256"), "{refused}");
+    }
+
+    /// A real session's log: two turns on a canned transport, ended.
+    fn a_real_session_log() -> Vec<log::Line> {
+        a_real_session_log_timed(None)
+    }
+
+    /// The same, each answer reporting `timings` when given.
+    fn a_real_session_log_timed(timings: Option<crate::client::stream::Timings>) -> Vec<log::Line> {
+        use crate::client::stream::{Canned, Step};
+        use crate::drive::session::{Session, Settlement, line_of};
+        let shape = RequestShape {
+            model: "a-model".to_owned(),
+            messages: vec![Message::new(
+                crate::client::shape::Role::System,
+                "you are the trunk",
+            )],
+            sampler: SamplerCard::empty(),
+            limits: Limits {
+                attempt: std::time::Duration::from_secs(5),
+                call: std::time::Duration::from_secs(5),
+                max_output_tokens: 64,
+                retries: 0,
+            },
+            grammar: None,
+            template_kwargs: BTreeMap::new(),
+            tools: Vec::new(),
+        };
+        let session = Session::open(
+            Canned::new([
+                [
+                    Step::Reasoning("thinking\n".to_owned()),
+                    Step::Delta("Hello".to_owned()),
+                ]
+                .into_iter()
+                .chain(timings.clone().map(Step::Timings))
+                .collect::<Vec<_>>(),
+                [Step::Delta("Again".to_owned())]
+                    .into_iter()
+                    .chain(timings.map(Step::Timings))
+                    .collect::<Vec<_>>(),
+            ]),
+            shape,
+        );
+        for ask in ["say hello", "say it again"] {
+            session.ask(ask, None).expect("accepted");
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while session.settlement() != Settlement::Awaiting
+                && std::time::Instant::now() < deadline
+            {
+                let _ = session.wait_from(0, std::time::Duration::from_millis(20));
+            }
+        }
+        assert_eq!(session.end(None), Ok(()));
+        session.events_from(0).iter().map(line_of).collect()
+    }
+
+    #[test]
+    fn a_real_sessions_head_changes_are_rebuilt_and_named_by_client_head() {
+        let projection = project(&a_real_session_log(), &regime(), None).expect("projected");
+        let changes: Vec<&Event> = projection
+            .events
+            .iter()
+            .filter(|event| matches!(event, Event::PrefixChanged { .. }))
+            .collect();
+        assert_eq!(changes.len(), 1, "{:?}", projection.events);
+        let Event::PrefixChanged { reason, diff, .. } = changes[0] else {
+            unreachable!()
+        };
+        assert_ne!(
+            *reason,
+            PrefixReason::Unattributed,
+            "the log's trunk rebuilt to the logged digest: {:?}",
+            projection.unspellable
+        );
+        assert!(!diff.is_empty());
+        assert!(
+            !projection
+                .unspellable
+                .iter()
+                .any(|item| item.why.contains("could not be rebuilt")),
+            "{:?}",
+            projection.unspellable
+        );
+        validates(&projection);
+    }
+
+    #[test]
+    fn a_head_the_log_cannot_rebuild_is_unattributed_and_named() {
+        // The second request's logged head is not what its trunk rebuilds to:
+        // nothing is guessed.
+        let mut lines = a_real_session_log();
+        let second = lines
+            .iter_mut()
+            .filter(|line| matches!(line.event, Line::Request { .. }))
+            .nth(1)
+            .expect("two requests");
+        if let Line::Request { head_sha256, .. } = &mut second.event {
+            *head_sha256 = Some("c".repeat(64));
+        }
+        let projection = project(&lines, &regime(), None).expect("projected");
+        assert!(projection.events.iter().any(|event| matches!(
+            event,
+            Event::PrefixChanged { reason: PrefixReason::Unattributed, diff, .. } if diff.is_empty()
+        )));
+        assert!(
+            projection
+                .unspellable
+                .iter()
+                .any(|item| item.why.contains("could not be rebuilt"))
+        );
+        validates(&projection);
     }
 
     #[test]

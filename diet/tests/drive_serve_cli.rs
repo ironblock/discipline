@@ -870,3 +870,98 @@ fn a_drive_server_refuses_a_canned_regimen_against_a_server_with_no_props() {
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains("answered 404"), "{said}");
 }
+
+/// `diet`, the checker.
+const DIET: &str = env!("CARGO_BIN_EXE_diet");
+
+#[test]
+fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
+    // #157's acceptance as ruled (a): the projection and the unspellable
+    // path, nothing about counts -- the canned substrate is not a cited
+    // engine, so every turn and response is named, never derived.
+    // The canned regimen passes only on the canned server (#243).
+    let stub = Stub::serving_with_props(
+        vec![Act::Raw(CAPTURED.to_vec()), Act::Raw(CAPTURED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+    let address = served.listening.clone();
+    for turn in 1..=2 {
+        let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+        assert_eq!(status(&reply), 200, "{reply}");
+        exchange(
+            &address,
+            &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+            |read| read.matches(r#""to":"awaiting""#).count() >= turn,
+        );
+    }
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+
+    let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !(sidecar.exists() && std::fs::metadata(&record.0).is_ok_and(|m| m.len() > 0))
+        && Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let checked = Command::new(DIET)
+        .args(["check-record"])
+        .arg(&record.0)
+        .output()
+        .expect("diet runs");
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&checked.stdout)
+    );
+    let written = std::fs::read_to_string(&record.0).expect("the record");
+    let kinds: Vec<String> = written
+        .lines()
+        .map(|line| {
+            log_line_object(line)["record"]
+                .as_str()
+                .expect("a row's kind")
+                .to_owned()
+        })
+        .collect();
+    // The second request's head grew by the first turn's ask and answer,
+    // rebuilt from the log and named by client::head (ruled on #157).
+    assert_eq!(
+        kinds,
+        ["start", "request", "request", "prefix.changed"],
+        "{written}"
+    );
+    assert!(
+        !written.contains(r#""reason":"unattributed""#),
+        "the head was rebuilt: {written}"
+    );
+    let named = log_line_object(&std::fs::read_to_string(&sidecar).expect("the sidecar"));
+    let items = named["unspellable"].as_array().expect("a list");
+    let named_kinds: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item["kind"].as_str())
+        .collect();
+    assert_eq!(
+        named_kinds,
+        ["ask", "response", "ask", "response"],
+        "{named}"
+    );
+    assert!(
+        items[1]["text"].is_string(),
+        "the answer's text is kept: {named}"
+    );
+    let _ = std::fs::remove_file(&sidecar);
+}
+
+#[test]
+fn a_drive_server_refuses_a_record_without_a_regimen() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--record", "unwritten.jsonl"]);
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("--record needs --regimen"), "{said}");
+}
