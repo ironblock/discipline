@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 136
+mechanics_assertions = 138
 unseedable_guards = 2
 migrated = 0
 
@@ -645,6 +645,15 @@ check = "injections"
 label = "an injection that changes nothing"
 failure_class = "gate.injection-inert"
 legacy_signature = "inject_that_changes_nothing  exit="
+migrated = false
+
+[[fault]]
+id = "bsd.bsd_edit_in_place_gnu_only"
+kind = "seeded-gate"
+check = "bsd"
+label = "the one portable spelling made GNU-only"
+failure_class = "gate.injection-inert-under-bsd"
+legacy_signature = "^  inject_[a-z0-9_]+  exit=[1-9]"
 migrated = false
 
 [[fault]]
@@ -1736,6 +1745,22 @@ check = "-"
 label = "a credential inside a binary is caught"
 failure_class = "hygiene.forbidden-pattern"
 expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.the-bsd-check-will-not-run-without-an-executable-shim"
+kind = "mechanics"
+check = "-"
+label = "the bsd check will not run without an executable shim"
+failure_class = "bsd.shim-not-in-force"
+expected_exit = "2"
+migrated = false
+[[fault]]
+id = "mech.nor-with-a-shim-that-edits-through-gnu-s-i"
+kind = "mechanics"
+check = "-"
+label = "nor with a shim that edits through GNU's -i"
+failure_class = "bsd.shim-not-in-force"
+expected_exit = "2"
 migrated = false
 [[fault]]
 id = "mech.an-ordinary-binary-does-not-false-positive"

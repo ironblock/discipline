@@ -44,6 +44,7 @@ metadata	repo
 ci	repo
 history	repo
 injections	repo
+bsd	repo
 resolver	repo
 derive	repo
 parity	repo

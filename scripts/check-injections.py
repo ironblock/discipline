@@ -531,9 +531,9 @@ def main() -> int:
     # This is the same technique `inject_injection_needs_gnu_sed` uses to
     # plant its own fault without tripping the lint while editing it, and the
     # reviewer's sharpest point is that its presence in this tree proves the
-    # authors knew text scanning is defeatable this way. What actually closes
-    # it is running the corpus under BSD semantics -- #75 -- and until that
-    # exists, this residue is declared and not defended.
+    # authors knew text scanning is defeatable this way. What closes it is
+    # running the corpus under BSD semantics: the `bsd` check
+    # (scripts/check-bsd-sed.sh, #75), whose seeded fault is this spelling.
     offset = {}
     running = 1
     for piece in text.split("\n"):
