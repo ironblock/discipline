@@ -8178,6 +8178,46 @@ failure_class = "drive.serve-log-writes-after-a-failure"
 migrated = false
 
 [[fault]]
+id = "drive.projection-drops-an-unanswered-request"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-an-unanswered-request"
+failure_class = "drive.projection-drops-an-unanswered-request"
+migrated = false
+
+[[fault]]
+id = "drive.projection-cites-a-literal-on-any-binary"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-cites-a-literal-on-any-binary"
+failure_class = "drive.projection-cites-a-literal-on-any-binary"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-reports-a-digest-of-other-bytes"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-reports-a-digest-of-other-bytes"
+failure_class = "drive.serve-bin-reports-a-digest-of-other-bytes"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-record"
+failure_class = "drive.serve-bin-leaves-an-earlier-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-sidecar"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-sidecar"
+failure_class = "drive.serve-bin-leaves-an-earlier-sidecar"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
