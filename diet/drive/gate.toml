@@ -910,6 +910,7 @@ catches = [
     "drive::session::tests::a_real_sessions_whole_log_is_a_log_the_format_reads",
     "drive::session::tests::a_session_over_http_cancels_and_the_server_sees_the_caller_leave",
     "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+    "},",
 ]
 
 [[fault]]
@@ -946,6 +947,7 @@ catches = [
     "drive::session::tests::a_cancel_naming_a_turn_that_already_settled_does_not_stop_the_next_one",
     "drive::session::tests::a_command_with_nothing_to_act_on_is_refused_and_logged",
     "drive::session::tests::an_ask_sent_while_a_turn_is_in_flight_is_refused_by_name",
+    "},",
 ]
 
 [[fault]]
@@ -975,7 +977,6 @@ catches = [
     "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
-    "drive::serve::tests::the_written_log_is_every_line_rendered_as_it_is_appended",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
@@ -989,6 +990,7 @@ catches = [
     "drive::session::tests::an_overflow_is_request_failed_context_overflow_and_the_turn_failed",
     "drive::session::tests::progress_is_logged_before_the_first_delta_and_never_after_the_end",
     "drive::session::tests::the_log_is_numbered_by_position_and_a_reader_can_resume_from_any_point",
+    "},",
 ]
 
 [[fault]]
@@ -1030,6 +1032,7 @@ becomes = '''
 catches = [
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
     "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+    "},",
 ]
 
 [[fault]]
@@ -1086,6 +1089,7 @@ becomes = '''
 catches = [
     "drive::session::tests::a_turn_whose_thread_panics_still_settles_and_the_session_goes_on",
     "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
+    "},",
 ]
 
 [[fault]]
@@ -1111,6 +1115,7 @@ catches = [
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
     "drive::session::tests::every_call_is_a_request_and_what_it_produced_names_it",
     "drive::session::tests::progress_is_logged_before_the_first_delta_and_never_after_the_end",
+    "},",
 ]
 
 [[fault]]
@@ -1155,6 +1160,7 @@ becomes = '''
         let t = 0;'''
 catches = [
     "drive::session::tests::each_event_is_stamped_when_it_was_logged",
+    "},",
 ]
 
 [[fault]]
@@ -1628,6 +1634,7 @@ becomes = '''
 catches = [
     "a_drive_server_binds_loopback_by_default_and_listen_takes_an_ip",
     "a_drive_server_off_loopback_without_a_credential_refuses_to_start",
+    "a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was",
 ]
 
 [[fault]]
@@ -1763,6 +1770,7 @@ catches = [
     "drive::serve::tests::a_command_carrying_its_idle_gap_logs_it_and_a_bad_one_is_400",
     "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
     "drive::session::tests::an_admitted_end_logs_the_gap_it_carries_before_it_ends",
+    "},",
 ]
 
 [[fault]]
@@ -2131,6 +2139,7 @@ becomes = '''
 catches = [
     "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
+    "drive::session::tests::a_response_with_timings_is_written_without_usage",
 ]
 
 [[fault]]
@@ -2233,6 +2242,7 @@ catches = [
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
     "drive::session::tests::every_way_a_turn_ends_settles_it_once_with_its_reason",
     "drive::session::tests::progress_is_logged_before_the_first_delta_and_never_after_the_end",
+    "},",
 ]
 
 [[fault]]
@@ -2823,6 +2833,7 @@ becomes = '''
         }
         let line = render(logged);'''
 catches = [
+    "drive::serve::tests::an_appended_line_is_written_before_its_append_returns",
     "drive::serve::tests::the_written_log_is_every_line_rendered_as_it_is_appended",
 ]
 
@@ -2836,6 +2847,7 @@ anchor = '''
 becomes = '''
         let _ = (session, render, file);'''
 catches = [
+    "a_drive_server_killed_mid_session_leaves_a_log_whole_through_what_it_showed",
     "a_drive_server_whose_log_cannot_be_written_stops_even_with_its_stdout_closed",
     "a_drive_servers_log_file_is_the_events_stream_line_for_line",
 ]
@@ -2939,6 +2951,7 @@ becomes = '''
     format!("canned-{}", digest_of(&acts_as_first_registered()))'''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
+    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
     "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
     "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
 ]
@@ -3099,6 +3112,7 @@ becomes = '''
         seq'''
 catches = [
     "drive::serve::tests::an_appended_line_is_written_before_its_append_returns",
+    "drive::serve::tests::the_written_log_is_every_line_rendered_as_it_is_appended",
 ]
 
 [[fault]]
