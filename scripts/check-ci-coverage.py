@@ -224,7 +224,14 @@ def newest_run_step_verdicts(live: str) -> list[str]:
     with tempfile.TemporaryDirectory() as box:
         stub = pathlib.Path(box) / "gh"
         # (what the API names as the newest passed run, this run, publish?)
-        for newest, this, publishes in (("998", "998", True), ("1006", "998", False), ("", "998", False)):
+        for newest, this, publishes in (
+            ("998", "998", True),
+            # The list can lag a run that has only just completed: a LOWER
+            # number publishes. Without this row, `-eq` passes the rest.
+            ("990", "998", True),
+            ("1006", "998", False),
+            ("", "998", False),
+        ):
             stub.write_text(f"#!/bin/sh\necho '{newest}'\n", encoding="utf-8")
             stub.chmod(0o755)
             env = {"PATH": f"{box}:/usr/bin:/bin", "GITHUB_REPOSITORY": "o/r", "RUN_NUMBER": this, "GH_TOKEN": "stub"}
@@ -513,8 +520,9 @@ def main() -> int:
         if step and re.search(r"^        if:", step.group(1), re.M):
             failures.append("pages.yml: the newest-run step carries an `if:`, so it can be skipped and the deploy go on")
         # And the step DECIDES as described: run under bash with a stub `gh`
-        # answering a run number, it passes when no later run has passed and
-        # refuses when one has, or when the answer is empty. Rule 10's text
+        # answering a run number, it passes when no later run has passed (the
+        # same number, or a lower one the list lags with) and refuses when one
+        # has, or when the answer is empty. Rule 10's text
         # checks above cannot see a comparison turned round; this can.
         failures += newest_run_step_verdicts(live)
         if re.search(r"^\s+continue-on-error:", live, re.M):
