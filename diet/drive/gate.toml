@@ -1628,6 +1628,8 @@ becomes = '''
 catches = [
     "a_drive_server_binds_loopback_by_default_and_listen_takes_an_ip",
     "a_drive_server_off_loopback_without_a_credential_refuses_to_start",
+    "a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were",
+    "a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was",
 ]
 
 [[fault]]
@@ -2910,6 +2912,7 @@ anchor = '''
 becomes = '''
         .truncate(true)'''
 catches = [
+    "a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were",
     "a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was",
 ]
 
@@ -2947,6 +2950,7 @@ catches = [
     "a_drive_server_records_a_two_turn_session_that_check_record_reads",
     "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
     "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
+    "a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were",
 ]
 
 [[fault]]
@@ -3203,7 +3207,7 @@ anchor = '''
 becomes = '''
             Ok::<_, String>(held)'''
 catches = [
-    "TO-BE-GENERATED",
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
 ]
 
 [[fault]]
@@ -3216,7 +3220,7 @@ anchor = '''
 becomes = '''
             Ok::<_, String>(held || stale || true)'''
 catches = [
-    "TO-BE-GENERATED",
+    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
 ]
 
 [[fault]]
@@ -3230,5 +3234,5 @@ becomes = '''
             let (file, held) = created(path)?;
             file.set_len(0).map_err(|why| why.to_string())?;'''
 catches = [
-    "TO-BE-GENERATED",
+    "a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were",
 ]
