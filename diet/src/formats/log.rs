@@ -718,9 +718,12 @@ fn starts_a_number(token: &str) -> bool {
     whole_ok && fraction.bytes().all(|b| b.is_ascii_digit())
 }
 
-/// Whether `text` is a STRICT PREFIX of an object of the record's value
-/// space: every byte a valid continuation, and the text ending before the
-/// object does. That is what a writer killed mid-write leaves, and nothing
+/// Whether `text` is a STRICT PREFIX of an object the record's GRAMMAR
+/// accepts: every byte a valid continuation, and the text ending before the
+/// object does. Syntax only: a prefix the grammar could finish but the value
+/// reader would then refuse (a duplicate key, a lone surrogate, nesting past
+/// the depth limit) is still torn here, and none is what a writer of valid
+/// events leaves. That is what a writer killed mid-write leaves, and nothing
 /// else is: a complete object, an object with anything after it, and a byte
 /// no object has there are not torn writes.
 fn is_a_torn_write(text: &str) -> bool {
@@ -730,8 +733,9 @@ fn is_a_torn_write(text: &str) -> bool {
 /// A log's text from its bytes. A writer killed mid-write can cut a
 /// character as well as an event, so bytes that end inside a UTF-8 sequence
 /// are read up to the cut -- but only when what is left of the final line is
-/// a torn write ([`is_a_torn_write`]); any other invalid UTF-8 is refused as
-/// it is in every format.
+/// a torn write ([`is_a_torn_write`]) that the cut character itself
+/// continues -- that is, the cut is inside a string or a key; any other
+/// invalid UTF-8 is refused as it is in every format.
 ///
 /// # Errors
 ///
@@ -743,7 +747,15 @@ pub fn decode(bytes: &[u8]) -> Result<&str, std::str::Utf8Error> {
     };
     if err.error_len().is_none()
         && let Ok(text) = std::str::from_utf8(&bytes[..err.valid_up_to()])
-        && is_a_torn_write(&text[text.rfind('\n').map_or(0, |at| at + 1)..])
+        // The cut character itself must continue the tail: a non-ASCII byte
+        // stands only inside a string, so the tail with a whole character
+        // where the cut one was must still be a torn write. Without this, a
+        // partial byte after a number, a brace or a closing quote read as a
+        // kill (#259's second review).
+        && is_a_torn_write(&format!(
+            "{}\u{e9}",
+            &text[text.rfind('\n').map_or(0, |at| at + 1)..]
+        ))
     {
         return Ok(text);
     }
@@ -2594,6 +2606,38 @@ mod tests {
             decode(&after_an_event).is_err(),
             "a partial byte after a complete event"
         );
+
+        // A partial byte where no text can stand -- after a number, a brace,
+        // a closing quote, an escape's backslash, inside `\u`, or inside
+        // `true` -- is no torn write, whatever the bytes before it.
+        for after in [
+            &b"{\"kind\":\"ask\",\"seq\":9,\"t\":4"[..],
+            b"{\"kind\":\"ask\",\"seq\":9,\"t\":",
+            b"{",
+            b"{\"kind\":\"ask\",\"x\":tr",
+            b"{\"kind\":\"ask\",\"text\":\"caf\"",
+            b"{\"kind\":\"ask\",\"text\":\"\\",
+            b"{\"kind\":\"ask\",\"text\":\"\\u00",
+        ] {
+            let mut bytes = head.as_bytes().to_vec();
+            bytes.extend_from_slice(after);
+            bytes.push(0xc3);
+            assert!(
+                decode(&bytes).is_err(),
+                "a cut character after {:?}",
+                String::from_utf8_lossy(after)
+            );
+        }
+        // And inside a key, or two bytes of three, it is one.
+        for inside in [&b"{\"te\xc3"[..], b"{\"kind\":\"ask\",\"text\":\"\xe6\x97"] {
+            let mut bytes = head.as_bytes().to_vec();
+            bytes.extend_from_slice(inside);
+            assert!(
+                decode(&bytes).is_ok(),
+                "a cut inside {:?}",
+                String::from_utf8_lossy(inside)
+            );
+        }
 
         let mut in_the_middle = head.as_bytes().to_vec();
         in_the_middle.extend_from_slice(b"{\"kind\":\"ask\",\"text\":\"\xc3\n");
