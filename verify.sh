@@ -11,6 +11,7 @@
 #   verify.sh --list          name the checks, in order
 #   verify.sh --site DIR      check a built site as Pages would serve it (#32): check_site
 #   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
+#   (the `ci` check needs `ruby`: rule 10 parses pages.yml with psych; exit 2 without it)
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
 #   verify.sh --selftest --scope-plan F re-prove only what plan F does not inherit (#112)
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum

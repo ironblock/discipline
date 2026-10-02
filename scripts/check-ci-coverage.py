@@ -22,11 +22,14 @@ and each has bitten real projects:
     its required check pending forever. Path filtering is therefore banned on
     anything that gates, and banned mechanically rather than by convention.
 
-This reads line-oriented facts out of the workflow files rather than parsing
-YAML, because the standard library has no YAML parser and this gate must not
-need an install step to tell the truth.
+Most rules read line-oriented facts out of the workflow files rather than
+parsing YAML, because the standard library has no YAML parser. Rule 10 is the
+exception: pages.yml, the deploy, is read through Ruby's YAML parser (psych),
+since a text read of it was shown to be passable spelling by spelling (#256).
 
-Stdlib only. Exit 0 if the wiring is sound, 1 otherwise.
+Python's standard library, plus `ruby` for rule 10. Exit 0 if the wiring is
+sound, 1 if not, and 2 if `ruby` is missing or its parser fails -- a misuse
+named on stderr, never a pass.
 """
 
 from __future__ import annotations
