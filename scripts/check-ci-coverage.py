@@ -1002,10 +1002,19 @@ def main() -> int:
                 env[gatelib.MEMBERS_RAN] = str(rows)
                 subprocess.run([*command, "--shard", f"{part}/2"], cwd=ROOT, env=env, capture_output=True, text=True)
                 text = rows.read_text(encoding="utf-8") if rows.exists() else ""
-                parts.append([
-                    row.split("\t")[1] for row in text.split("\n")
-                    if re.fullmatch(r"ran\t[^\t]+\t[a-z]+", row)
-                ])
+                ran = []
+                for row in text.split("\n"):
+                    shape = re.fullmatch(r"ran\t([^\t]+)\t([a-z]+)", row)
+                    if not shape:
+                        continue
+                    if shape.group(2) in gatelib.RAN_OUTCOMES[check]:
+                        ran.append(shape.group(1))
+                    else:
+                        failures.append(
+                            f"`{check}, run for real`: shard {part}/2 recorded `{shape.group(1)}` as "
+                            f"`{shape.group(2)}`, which is not an outcome `{check}` runs a member to"
+                        )
+                parts.append(ran)
         failures += gatelib.split_failures(f"{check}, run for real", 2, whole, parts)
 
     # 14. no package's measured seconds pass the budget (#262)

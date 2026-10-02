@@ -117,6 +117,13 @@ def main(argv: list[str]) -> int:
                 # The local proof is of the dry loop's own rows (#268's fifth
                 # review): a `ran` row there was written by something else.
                 failures.append(f"{entry.name}/{RAN}:{number}: a `ran` row in a dry census")
+            elif row.group(1) is not None and row.group(2) not in gatelib.RAN_OUTCOMES.get(check, ()):
+                failures.append(
+                    f"{entry.name}/{RAN}:{number}: `{row.group(1)}` came back `{row.group(2)}`, which "
+                    f"is not an outcome `{check}` runs a member to "
+                    f"({', '.join(sorted(gatelib.RAN_OUTCOMES.get(check, ())))}); a member that did not run "
+                    f"is not counted as run"
+                )
             else:
                 members.append(row.group(1) or row.group(3))
         reported[(check, part)] = members

@@ -429,7 +429,10 @@ def main(argv: list[str]) -> int:
         # DECLARED empty rather than a pass, and it stops being available the
         # moment a results directory lands, because the next branch is then
         # the one that runs.
-        print(f"{census}\ncheck-recompute: no results directory yet; declared empty")
+        print(
+            f"{census}\ncheck-recompute: no results directory hashes into shard {shard[0]} of {shard[1]}"
+            if shard else f"{census}\ncheck-recompute: no results directory yet; declared empty"
+        )
         return 0
     if recomputed == 0:
         print(

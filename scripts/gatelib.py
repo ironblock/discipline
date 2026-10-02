@@ -122,6 +122,18 @@ MEMBERS_RAN = "VERIFY_MEMBERS_RAN"
 CENSUS_DRY = "VERIFY_CENSUS_DRY"
 
 
+# The outcomes that mean a member RAN, per sharded check (#268's sixth
+# review). A row carries the outcome its work returned; the census reads it,
+# and an outcome not listed here -- `skipped`, say, written honestly by a
+# shard-only shortcut -- is a member that did not run, never one that did.
+# `bsd` runs the applier's own loop.
+RAN_OUTCOMES = {
+    "recompute": frozenset({"recomputed", "template", "historical", "failed", "unprobed"}),
+    "injections": frozenset({"applied", "inert", "unrestored"}),
+    "bsd": frozenset({"applied", "inert", "unrestored"}),
+}
+
+
 def census_dry() -> bool:
     """Whether this run records its members and does none of their work."""
     import os

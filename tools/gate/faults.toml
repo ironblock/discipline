@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 142
+mechanics_assertions = 143
 unseedable_guards = 2
 migrated = 0
 
@@ -4118,6 +4118,14 @@ failure_class = "wiring.shard-incomplete"
 legacy_signature = ".injections, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
 migrated = false
 [[fault]]
+id = "ci.ci_recompute_reports_a_skip"
+kind = "seeded-gate"
+check = "ci"
+label = "a member reported as skipped"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "recorded .2026-01-[0-9]+-[a-z-]+. as .skipped., which is not an outcome .recompute. runs a member to"
+migrated = false
+[[fault]]
 id = "ci.ci_shard_census_switched_off"
 kind = "seeded-gate"
 check = "ci"
@@ -4275,6 +4283,14 @@ kind = "mechanics"
 check = "resolver"
 label = "a conformance fixture does not"
 failure_class = "resolver.data-is-not-a-source"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-member-reported-skipped-is-not-counted-as-run"
+kind = "mechanics"
+check = "parity"
+label = "a member reported skipped is not counted as run"
+failure_class = "shard.census-outcome"
 legacy_signature = ""
 migrated = false
 [[fault]]

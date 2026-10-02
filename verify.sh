@@ -4343,6 +4343,21 @@ path.write_text(source.replace(old, '            if shard is not None and name =
 EOF
 }
 
+# A member reported honestly as skipped (#268's sixth review): the row says
+# `skipped`, and an outcome no check runs a member to is not a run.
+inject_ci_recompute_reports_a_skip() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = '        timing = (directory.name, time.monotonic())\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '        if shard is not None and directory == directories[0]:\n            return "skipped"\n', 1), encoding="utf-8")
+EOF
+}
+
 inject_ci_shard_census_switched_off() {
   python3 - <<'EOF'
 import pathlib
@@ -8307,6 +8322,8 @@ selftest() {
     '.recompute, run for real..s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
   seeded_case "an applier skip the dry census cannot see" ci inject_ci_injections_skips_after_the_dry_branch \
     '.injections, run for real..s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
+  seeded_case "a member reported as skipped"           ci inject_ci_recompute_reports_a_skip \
+    'recorded .2026-01-[0-9]+-[a-z-]+. as .skipped., which is not an outcome .recompute. runs a member to'
   seeded_case "the gate's shard census allowed to fail" ci inject_ci_shard_census_switched_off \
     'the gate job does not run check-shard-census\.py'
   seeded_case "the gate's shard census renamed away"   ci inject_ci_shard_census_step_removed \
@@ -9324,6 +9341,13 @@ EOF
     bash -c "cd '${ROOT}' && d=\$(mktemp -d) && trap 'rm -rf \"\${d:?}\"' EXIT \
       && mkdir \"\$d/members-recompute-1\" && printf 'dry\tx\n' > \"\$d/members-recompute-1/members-ran.tsv\" \
       && ! out=\$(python3 scripts/check-shard-census.py \"\$d\" 2>&1) && grep -q 'a DRY row' <<<\"\$out\""
+
+  # AN OUTCOME IS READ (#268's sixth review): a row whose outcome is not one
+  # its check runs a member to -- `skipped` -- is refused, not counted as run.
+  expect_exit "a member reported skipped is not counted as run" 0 \
+    bash -c "cd '${ROOT}' && d=\$(mktemp -d) && trap 'rm -rf \"\${d:?}\"' EXIT \
+      && mkdir \"\$d/members-recompute-1\" && printf 'ran\tx\tskipped\n' > \"\$d/members-recompute-1/members-ran.tsv\" \
+      && ! out=\$(python3 scripts/check-shard-census.py \"\$d\" 2>&1) && grep -q 'came back .skipped., which is not an outcome' <<<\"\$out\""
 
   expect_exit "shards that between them ran every fault are a whole" 0 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/whole"
