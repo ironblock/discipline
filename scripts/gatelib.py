@@ -104,3 +104,83 @@ def shard_arg(spec: str) -> tuple[int, int] | None:
     if not match or int(match.group(1)) > int(match.group(2)):
         return None
     return int(match.group(1)), int(match.group(2))
+
+
+# THE RUNTIME CENSUS (#262, ruled on #268). A listing proves what a check
+# WOULD run; only the run can say what it ran. So each check that can be
+# sharded records every member as its run loop reaches it -- the loop's first
+# statement, after every filter -- into the file this variable names, and
+# scripts/check-shard-census.py adds the shards' files back up against the
+# unsplit listing. The listing path returns before the loop, so it never
+# writes here.
+MEMBERS_RAN = "VERIFY_MEMBERS_RAN"
+
+# A DRY run records each member and skips its work: what the coverage check
+# runs locally to prove the census reads the run loop. Its rows say `dry`,
+# and the census on CI refuses a `dry` row, so a job that set this would be
+# red rather than a green run of nothing.
+CENSUS_DRY = "VERIFY_CENSUS_DRY"
+
+
+def census_dry() -> bool:
+    """Whether this run records its members and does none of their work."""
+    import os
+
+    return os.environ.get(CENSUS_DRY) == "1"
+
+
+def record_ran(name: str) -> None:
+    """Record `name` as run, if a census was asked for: one row per member, as
+    the loop reaches it, appended so a run that dies part-way says how far."""
+    import os
+
+    path = os.environ.get(MEMBERS_RAN)
+    if not path:
+        return
+    with open(path, "a", encoding="utf-8") as out:
+        out.write(f"{'dry' if census_dry() else 'ran'}\t{name}\n")
+
+
+def members_listed(output: str, check: str) -> list[str] | None:
+    """The members a check printed after its own `LISTING` line and before
+    verify.sh's `--- check: LISTED` line: every non-empty line, so no name a
+    pattern would reject falls out of the proof (#268's second review). None
+    when the run did not end in LISTED, or when the check printed no LISTING
+    line of its own -- verify.sh says LISTED for any check that exits 0 under
+    VERIFY_LIST_MEMBERS, and a check that ignored `--names` and ran must not
+    pass for one that listed (#268's third)."""
+    inside, names, listed, marked = False, [], False, 0
+    for line in output.split("\n"):
+        if line.strip() == f"=== {check} ===":
+            inside = True
+        elif line.startswith(f"--- {check}:"):
+            inside = False
+            listed = line.startswith(f"--- {check}: LISTED")
+        elif inside and line.strip() == LISTING:
+            marked += 1
+            names = []
+        elif inside and marked and line.strip():
+            names.append(line.strip())
+    return names if listed and marked == 1 else None
+
+
+def split_failures(check: str, count: int, whole: list[str], parts: list[list[str]]) -> list[str]:
+    """What is wrong with `parts` as a split of `whole` into `count` shards:
+    a member in no shard is a member nothing runs -- a test that cannot fail,
+    #239's lesson -- and a member in two is the budget spent twice."""
+    import collections
+
+    failures = []
+    seen = collections.Counter(name for part in parts for name in part)
+    missing = [name for name in whole if seen[name] == 0]
+    twice = sorted(name for name, n in seen.items() if n > 1)
+    stray = sorted(set(seen) - set(whole))
+    if not whole:
+        failures.append(f"`{check}` lists no member at all; a split of nothing is not a split")
+    if missing:
+        failures.append(f"`{check}`'s {count} shards run none of {len(missing)} member(s), so nothing runs them: {', '.join(missing[:5])}")
+    if twice:
+        failures.append(f"`{check}`'s shards run {len(twice)} member(s) more than once: {', '.join(twice[:5])}")
+    if stray:
+        failures.append(f"`{check}`'s shards run {len(stray)} member(s) the unsplit check does not: {', '.join(stray[:5])}")
+    return failures

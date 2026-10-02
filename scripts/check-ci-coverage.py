@@ -35,11 +35,11 @@ pass. A pages.yml that is not YAML is a failure of the file: exit 1.
 
 from __future__ import annotations
 
-import collections
 import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -60,7 +60,24 @@ ROOT_WORKFLOW = "verify.yml"
 # gate's `needs`, and adding one to the root workflow makes its filter a
 # failure automatically.
 
-CALLS = re.compile(r"^\s*uses:\s*\./\.github/workflows/([A-Za-z0-9._-]+)\s*$", re.MULTILINE)
+# A CALL IS A JOB (#268's fourth review): a `uses:` line anywhere in the root
+# workflow -- inside an env block scalar, say -- once counted as calling its
+# workflow, so a package's caller job could be deleted with the gate's `needs`
+# entry and nothing noticed. A call is now exactly a job of the `jobs:` block
+# whose first line is the `uses:`, at the indents a job and its key take.
+CALLS = re.compile(r"^  [A-Za-z0-9_-]+:\n    uses: \./\.github/workflows/([A-Za-z0-9._-]+)$", re.MULTILINE)
+
+# The gate job's census of the sharded packages (#262, ruled on #268), which
+# must stand in the root workflow at a step's indents: a census nobody runs
+# proves nothing about what the shards ran.
+SHARD_CENSUS_STEP = """      - uses: actions/download-artifact@v4
+        with:
+          pattern: members-*
+          path: ${{ runner.temp }}/members
+
+      - name: Every sharded member was run by exactly one shard
+        run: python3 scripts/check-shard-census.py "${{ runner.temp }}/members"
+"""
 JOB = re.compile(r"^  ([A-Za-z0-9_-]+):\s*$", re.MULTILINE)
 JOBS_BLOCK = re.compile(r"^jobs:\s*$", re.MULTILINE)
 NEEDS = re.compile(r"^\s*needs:\s*\[([^\]]*)\]\s*$", re.MULTILINE)
@@ -101,19 +118,20 @@ SECONDS_TABLE = pathlib.Path(__file__).resolve().parent.parent / ".github" / "ch
 # from the job's env to the script, not only the script's own filter.
 SHARDABLE = ("injections", "bsd", "recompute")
 
-# A run of verify.sh that listed members and ran nothing (verify.sh's EXIT_LISTED).
-EXIT_LISTED = 3
 
 # The one form a sharded package's workflow takes, comments aside (#262):
 # a plan job reading the package's shard count from check-owners.tsv into a
 # matrix, and one job per shard running the package's check with
-# VERIFY_CHECK_SHARD=K/N. Compared line for line, so nothing can start fewer
-# shards than the table declares, or run a different check, or list instead.
-SHARDED_WORKFLOW = """name: pkg-{pkg}
-on:
+# VERIFY_CHECK_SHARD=K/N, recording what it ran for the gate's census.
+# Compared line for line from `on:` to the end, blank lines included, so
+# nothing can start fewer shards than the table declares, run a different
+# check, list instead, or skip the census upload.
+SHARDED_WORKFLOW_BODY = """on:
   workflow_call:
+
 permissions:
   contents: read
+
 jobs:
   plan:
     name: {pkg} plan
@@ -133,6 +151,7 @@ jobs:
           esac
           printf 'count=%s\\n' "$count" >> "$GITHUB_OUTPUT"
           printf 'shards=[%s]\\n' "$(seq -s, 1 "$count")" >> "$GITHUB_OUTPUT"
+
   checks:
     name: {pkg} ${{{{ matrix.shard }}}}
     needs: plan
@@ -143,9 +162,11 @@ jobs:
         shard: ${{{{ fromJSON(needs.plan.outputs.shards) }}}}
     steps:
       - uses: actions/checkout@v5
+
       - name: Run the checks this package owns, one shard
         env:
           VERIFY_CHECK_SHARD: ${{{{ matrix.shard }}}}/${{{{ needs.plan.outputs.count }}}}
+          VERIFY_MEMBERS_RAN: ${{{{ runner.temp }}}}/members-ran.tsv
         run: |
           set -euo pipefail
           mapfile -t checks < <(
@@ -160,6 +181,15 @@ jobs:
           for check in "${{checks[@]}}"; do args+=(--only "$check"); done
           printf 'checks owned by {pkg}: %s, shard %s\\n' "${{checks[*]}}" "$VERIFY_CHECK_SHARD"
           ./verify.sh "${{args[@]}}"
+
+      # WHAT THIS SHARD RAN, for the gate's census (#262, ruled on #268): the
+      # members its run loop reached, as it reached them. A listing says what a
+      # shard would run; this says what it did.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: members-{pkg}-${{{{ matrix.shard }}}}
+          path: ${{{{ runner.temp }}}}/members-ran.tsv
+          if-no-files-found: error
 """
 
 # A check's declared shard count, from check-owners.tsv's third column.
@@ -181,29 +211,6 @@ def declared_checks(failures: list[str]) -> list[str]:
     return [line.strip() for line in done.stdout.split("\n") if line.strip()]
 
 
-def members_listed(output: str, check: str) -> list[str] | None:
-    """The members a check printed after its own `gatelib.LISTING` line and
-    before verify.sh's `--- check: LISTED` line: every non-empty line, so no
-    name a pattern would reject falls out of the proof (#268's second
-    review). None when the run did not end in LISTED, or when the check
-    printed no LISTING line of its own -- verify.sh says LISTED for any
-    check that exits 0 under VERIFY_LIST_MEMBERS, and a check that ignored
-    `--names` and ran must not pass for one that listed (#268's third)."""
-    inside, names, listed, marked = False, [], False, 0
-    for line in output.split("\n"):
-        if line.strip() == f"=== {check} ===":
-            inside = True
-        elif line.startswith(f"--- {check}:"):
-            inside = False
-            listed = line.startswith(f"--- {check}: LISTED")
-        elif inside and line.strip() == gatelib.LISTING:
-            marked += 1
-            names = []
-        elif inside and marked and line.strip():
-            names.append(line.strip())
-    return names if listed and marked == 1 else None
-
-
 def owners(failures: list[str]) -> dict[str, str]:
     if not OWNERS.is_file():
         failures.append(f"{OWNERS}: missing")
@@ -221,8 +228,11 @@ def owners(failures: list[str]) -> dict[str, str]:
             failures.append(f"{OWNERS}:{number}: `{check}` is owned twice")
         table[check] = owner
         if len(parts) >= 3 and parts[2].strip():
-            count = parts[2].strip()
-            if not count.isdigit() or int(count) < 2:
+            # As the plan job's awk reads it: `03` or ` 3` would pass a
+            # strip-and-isdigit here and be refused by every shard (#268's
+            # fourth review), so the column is exactly a number.
+            count = parts[2]
+            if not re.fullmatch(r"[1-9][0-9]*", count) or int(count) < 2:
                 failures.append(f"{OWNERS}:{number}: `{check}`'s shard count is {count!r}, not a whole number of 2 or more")
             else:
                 SHARDS[check] = int(count)
@@ -458,7 +468,8 @@ def main() -> int:
     root_text = root.read_text(encoding="utf-8")
 
     # 2. every owner has a workflow, and the root workflow calls it
-    called = set(CALLS.findall(root_text))
+    jobs_at = JOBS_BLOCK.search(root_text)
+    called = set(CALLS.findall(root_text[jobs_at.end():])) if jobs_at else set()
     for owner in sorted(set(table.values())):
         wf = f"pkg-{owner}.yml"
         if not (WORKFLOWS / wf).is_file():
@@ -898,60 +909,69 @@ def main() -> int:
                 continue
             lines = text.split("\n")
             body = next((i for i, l in enumerate(lines) if l.startswith("on:")), len(lines))
-            found = [l for i, l in enumerate(lines) if l.strip() and not (i < body and l.startswith("#"))]
-            wanted = [l for l in SHARDED_WORKFLOW.format(pkg=owner).split("\n") if l.strip()]
+            # The header is the name and comments at column 0; from `on:` on,
+            # every line is compared, blank ones included -- a blank-looking
+            # line inside a run block is script text too (#268's fourth).
+            found = [lines[0], *(l for l in lines[1:body] if l and not l.startswith("#")), *lines[body:]]
+            wanted = [f"name: pkg-{owner}", *SHARDED_WORKFLOW_BODY.format(pkg=owner).split("\n")]
             if found != wanted:
                 at = next((i for i, (a, b) in enumerate(zip(found, wanted)) if a != b), min(len(found), len(wanted)))
                 failures.append(
                     f"{wf.name}: `{check}` is sharded, and its workflow is not the sharded form: line "
-                    f"{at + 1} of its non-comment lines is {found[at] if at < len(found) else '(none)'!r}, "
+                    f"{at + 1} of its lines past the header is {found[at] if at < len(found) else '(none)'!r}, "
                     f"the form has {wanted[at] if at < len(wanted) else '(none)'!r}; a sharded job runs "
                     f"exactly the table's split (#262)"
                 )
 
-    # 13. a declared split is complete: every member runs in exactly one shard
+    # 13. a declared split is complete: every member RUNS in exactly one shard
     #
-    #    Asked of the check itself, shard by shard, against what it runs
-    #    unsplit. A member in no shard is a member nothing runs -- a test that
-    #    cannot fail, which is #239's lesson -- and a member in two is the
-    #    budget spent twice.
-    for check, count in sorted(SHARDS.items()):
-        if check not in SHARDABLE:
-            continue
-        listed = []
-        for part in [None, *range(1, count + 1)]:
-            env = {k: v for k, v in os.environ.items() if k not in ("VERIFY_CHECK_SHARD", "VERIFY_INJECTION_SCOPE")}
-            env["VERIFY_LIST_MEMBERS"] = "1"
-            if part is not None:
-                env["VERIFY_CHECK_SHARD"] = f"{part}/{count}"
-            done = subprocess.run(
-                ["bash", str(VERIFY), "--only", check], cwd=VERIFY.parent, env=env, capture_output=True, text=True
-            )
-            shown = f"VERIFY_CHECK_SHARD={part}/{count} " if part else ""
-            members = members_listed(done.stdout, check)
-            if done.returncode != EXIT_LISTED or members is None:
-                failures.append(
-                    f"`{check}`: {shown}verify.sh --only {check} under VERIFY_LIST_MEMBERS exited "
-                    f"{done.returncode}, not {EXIT_LISTED} with its members LISTED: {(done.stdout + done.stderr).strip()[-200:]}"
+    #    Asked of the run, not of a listing (#262, ruled on #268): four
+    #    reviews found edits below the listing's `return` that changed what a
+    #    shard ran and left what it listed alone. So each shard is run DRY --
+    #    VERIFY_CENSUS_DRY records every member its loop reaches and skips the
+    #    work -- through the same verify.sh function and env a CI job uses, and
+    #    check-shard-census.py adds the shards up against the unsplit listing.
+    #    On CI the gate job runs the same census over what the shards really
+    #    ran, and refuses a dry row.
+    gate_job = re.search(r"^  gate:\n(.*?)(?=^  \S|\Z)", root_text, re.MULTILINE | re.DOTALL)
+    if SHARDS and not (gate_job and SHARD_CENSUS_STEP in gate_job.group(1)):
+        failures.append(
+            f"{ROOT_WORKFLOW}: the gate job does not run check-shard-census.py over the shards' "
+            f"`members-*` artifacts, so nothing proves the sharded checks ran every member (#262)"
+        )
+    census = pathlib.Path(tempfile.mkdtemp(prefix="check-ci-coverage.census."))
+    try:
+        ran = True
+        for check, count in sorted(SHARDS.items()):
+            if check not in SHARDABLE:
+                continue
+            for part in range(1, count + 1):
+                shard_dir = census / f"members-{check}-{part}"
+                shard_dir.mkdir()
+                env = {k: v for k, v in os.environ.items() if k not in ("VERIFY_LIST_MEMBERS", "VERIFY_INJECTION_SCOPE")}
+                env.update({
+                    "VERIFY_CHECK_SHARD": f"{part}/{count}",
+                    gatelib.CENSUS_DRY: "1",
+                    gatelib.MEMBERS_RAN: str(shard_dir / "members-ran.tsv"),
+                })
+                done = subprocess.run(
+                    ["bash", str(VERIFY), "--only", check], cwd=VERIFY.parent, env=env, capture_output=True, text=True
                 )
-                listed = []
-                break
-            listed.append(members)
-        if not listed:
-            continue
-        whole, parts = listed[0], listed[1:]
-        seen = collections.Counter(name for part in parts for name in part)
-        missing = [name for name in whole if seen[name] == 0]
-        twice = sorted(name for name, n in seen.items() if n > 1)
-        stray = sorted(set(seen) - set(whole))
-        if not whole:
-            failures.append(f"`{check}` lists no member at all; a split of nothing is not a split")
-        if missing:
-            failures.append(f"`{check}`'s {count} shards run none of {len(missing)} member(s), so nothing runs them: {', '.join(missing[:5])}")
-        if twice:
-            failures.append(f"`{check}`'s shards run {len(twice)} member(s) more than once: {', '.join(twice[:5])}")
-        if stray:
-            failures.append(f"`{check}`'s shards run {len(stray)} member(s) the unsplit check does not: {', '.join(stray[:5])}")
+                if done.returncode != 0:
+                    ran = False
+                    failures.append(
+                        f"`{check}`: a dry run of shard {part}/{count} exited {done.returncode}, not 0: "
+                        f"{(done.stdout + done.stderr).strip()[-200:]}"
+                    )
+        if ran:
+            done = subprocess.run(
+                [sys.executable, str(ROOT / "scripts" / "check-shard-census.py"), str(census), "--dry"],
+                capture_output=True, text=True,
+            )
+            if done.returncode != 0:
+                failures.extend(line for line in done.stderr.split("\n") if line.strip())
+    finally:
+        shutil.rmtree(census, ignore_errors=True)
 
     # 14. no package's measured seconds pass the budget (#262)
     #

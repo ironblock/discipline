@@ -150,3 +150,15 @@ jobs:
 
       - name: Every fault was run by exactly one shard
         run: python3 scripts/check-selftest-census.py "${{ runner.temp }}/census"
+
+      # The same question of the sharded packages (#262, ruled on #268): did
+      # their shards, between them, RUN every member of their check exactly
+      # once -- read from what each shard's run loop recorded, never from a
+      # listing, against the unsplit listing verify.sh gives here.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: members-*
+          path: ${{ runner.temp }}/members
+
+      - name: Every sharded member was run by exactly one shard
+        run: python3 scripts/check-shard-census.py "${{ runner.temp }}/members"

@@ -616,6 +616,11 @@ def main() -> int:
         pristine = digests(box)
         before = fingerprint(box, pristine)
         for name in applied:
+            # THE CENSUS ROW FIRST (#262, ruled on #268): what this shard
+            # applied is what the loop reached, written as it is reached.
+            gatelib.record_ran(name)
+            if gatelib.census_dry():
+                continue
             body = re.search(rf"^{name}\(\) \{{\n.*?^\}}\n", text, re.M | re.S)
             if body is None:
                 inert.append((name, 2, "its body could not be extracted"))

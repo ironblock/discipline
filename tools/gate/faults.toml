@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 141
+mechanics_assertions = 142
 unseedable_guards = 2
 migrated = 0
 
@@ -4070,6 +4070,46 @@ failure_class = "wiring.shard-incomplete"
 legacy_signature = ".recompute.: verify\\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED"
 migrated = false
 [[fault]]
+id = "ci.ci_recompute_runs_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "a shard that runs fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_applies_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier that applies fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections..s 2 shards run none of 2 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_wrapper_shard_one_when_running"
+kind = "seeded-gate"
+check = "ci"
+label = "a wrapper that runs shard 1 when not listing"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s shards run 6 member\\(s\\) more than once"
+migrated = false
+[[fault]]
+id = "ci.ci_caller_in_block_scalar"
+kind = "seeded-gate"
+check = "ci"
+label = "a package's call kept in a block scalar"
+failure_class = "wiring.uncalled"
+legacy_signature = "pkg-recompute\\.yml exists but verify\\.yml never calls it"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_step_removed"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census renamed away"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
 check = "ci"
@@ -4211,6 +4251,14 @@ kind = "mechanics"
 check = "resolver"
 label = "a conformance fixture does not"
 failure_class = "resolver.data-is-not-a-source"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-dry-census-row-is-refused-where-the-shards-really-ran"
+kind = "mechanics"
+check = "parity"
+label = "a dry census row is refused where the shards really ran"
+failure_class = "shard.census-dry-row"
 legacy_signature = ""
 migrated = false
 [[fault]]

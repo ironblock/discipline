@@ -51,6 +51,7 @@ jobs:
       - name: Run the checks this package owns, one shard
         env:
           VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}
+          VERIFY_MEMBERS_RAN: ${{ runner.temp }}/members-ran.tsv
         run: |
           set -euo pipefail
           mapfile -t checks < <(
@@ -65,3 +66,12 @@ jobs:
           for check in "${checks[@]}"; do args+=(--only "$check"); done
           printf 'checks owned by injections: %s, shard %s\n' "${checks[*]}" "$VERIFY_CHECK_SHARD"
           ./verify.sh "${args[@]}"
+
+      # WHAT THIS SHARD RAN, for the gate's census (#262, ruled on #268): the
+      # members its run loop reached, as it reached them. A listing says what a
+      # shard would run; this says what it did.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: members-injections-${{ matrix.shard }}
+          path: ${{ runner.temp }}/members-ran.tsv
+          if-no-files-found: error

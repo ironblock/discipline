@@ -4248,6 +4248,86 @@ path.write_text(source.replace(old, 'print("\\n".join(p.name for p in directorie
 EOF
 }
 
+# THE RUNTIME CENSUS'S FAULTS (#262, ruled on #268): the fourth review's
+# three reproductions, each an edit below the listing's `return` or in the
+# wrapper, so what a shard lists is whole and what it runs is not.
+inject_ci_recompute_runs_fewer_than_listed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = '        print("\\n".join([gatelib.LISTING, *(p.name for p in directories)]))\n        return 0\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '    if shard is not None:\n        directories = directories[1:]\n', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_injections_applies_fewer_than_listed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-injections.py')
+source = path.read_text(encoding="utf-8")
+old = '        print("\\n".join([gatelib.LISTING, *applied]))\n        return 0\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '    applied = applied[:-1]\n', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_recompute_wrapper_shard_one_when_running() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('verify.sh')
+source = path.read_text(encoding="utf-8")
+old = '  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} \\\n'
+new = '  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "${VERIFY_LIST_MEMBERS:+$VERIFY_CHECK_SHARD}${VERIFY_LIST_MEMBERS:-1/${VERIFY_CHECK_SHARD#*/}}"} \\\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A package dropped from the gate (#268's fourth review): its caller job and
+# its `needs` entry deleted together, and the `uses:` line kept alive inside
+# an env block scalar, where a regex over the whole file once read it as a call.
+inject_ci_caller_in_block_scalar() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+edits = [
+    ("  recompute:\n    uses: ./.github/workflows/pkg-recompute.yml\n\n", ""),
+    ("injections, recompute, selftest]", "injections, selftest]"),
+    ("          NEEDS: ${{ toJSON(needs) }}\n",
+     "          NEEDS: ${{ toJSON(needs) }}\n          CALLED_ELSEWHERE: |\n            uses: ./.github/workflows/pkg-recompute.yml\n"),
+]
+for old, new in edits:
+    if source.count(old) != 1:
+        raise SystemExit(f"the anchor appears {source.count(old)} times")
+    source = source.replace(old, new, 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
+
+# The gate's census of the sharded packages renamed out of its pinned form.
+inject_ci_shard_census_step_removed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+old = "      - name: Every sharded member was run by exactly one shard\n"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "      - name: census\n", 1), encoding="utf-8")
+EOF
+}
+
 # A sharded package whose workflow never passes the shard: every job runs all of it.
 inject_ci_sharded_workflow_without_shard() {
   python3 - <<'EOF'
@@ -8173,6 +8253,16 @@ selftest() {
     "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
   seeded_case "a listing with no line of its own"      ci inject_ci_listing_unmarked \
     '.recompute.: verify\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED'
+  seeded_case "a shard that runs fewer than it lists"  ci inject_ci_recompute_runs_fewer_than_listed \
+    '.recompute..s 3 shards run none of 3 member\(s\), so nothing runs them'
+  seeded_case "an applier that applies fewer than it lists" ci inject_ci_injections_applies_fewer_than_listed \
+    '.injections..s 2 shards run none of 2 member\(s\), so nothing runs them'
+  seeded_case "a wrapper that runs shard 1 when not listing" ci inject_ci_recompute_wrapper_shard_one_when_running \
+    '.recompute..s shards run 6 member\(s\) more than once'
+  seeded_case "a package's call kept in a block scalar" ci inject_ci_caller_in_block_scalar \
+    'pkg-recompute\.yml exists but verify\.yml never calls it'
+  seeded_case "the gate's shard census renamed away"   ci inject_ci_shard_census_step_removed \
+    'the gate job does not run check-shard-census\.py'
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
@@ -9179,6 +9269,14 @@ for k in range(1, SHARDS + 1):
     f"shard\t9\nshards\t{SHARDS}\ntotal\t{total}\n", encoding="utf-8"
 )
 EOF
+  # A DRY ROW IS NOT A RUN (#262, ruled on #268): the coverage check's local
+  # census records members without running them, and the gate's census on CI
+  # refuses such a row, so a job that set VERIFY_CENSUS_DRY is red.
+  expect_exit "a dry census row is refused where the shards really ran" 0 \
+    bash -c "cd '${ROOT}' && d=\$(mktemp -d) && trap 'rm -rf \"\${d:?}\"' EXIT \
+      && mkdir \"\$d/members-recompute-1\" && printf 'dry\tx\n' > \"\$d/members-recompute-1/members-ran.tsv\" \
+      && ! out=\$(python3 scripts/check-shard-census.py \"\$d\" 2>&1) && grep -q 'a DRY row' <<<\"\$out\""
+
   expect_exit "shards that between them ran every fault are a whole" 0 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/whole"
   expect_exit "a shard that skipped a fault it was assigned" 1 \

@@ -257,6 +257,11 @@ def main(argv: list[str]) -> int:
     # next directory starts, since the loop leaves each one by `continue`.
     timing: tuple[str, float] | None = None
     for directory in directories:
+        # THE CENSUS ROW FIRST (#262, ruled on #268): what this shard ran is
+        # what the loop reached, after every filter, written as it is reached.
+        gatelib.record_ran(directory.name)
+        if gatelib.census_dry():
+            continue
         if timing is not None:
             print(f"check-recompute: {timing[0]} took {time.monotonic() - timing[1]:.1f}s")
         timing = (directory.name, time.monotonic())
@@ -381,6 +386,9 @@ def main(argv: list[str]) -> int:
 
     if timing is not None:
         print(f"check-recompute: {timing[0]} took {time.monotonic() - timing[1]:.1f}s")
+    if gatelib.census_dry():
+        print(f"check-recompute: dry census: {len(directories)} directory(ies) recorded, none recomputed")
+        return 0
 
     for message in failures:
         print(message, file=sys.stderr)
