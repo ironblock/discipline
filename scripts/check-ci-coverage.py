@@ -28,8 +28,9 @@ exception: pages.yml, the deploy, is read through Ruby's YAML parser (psych),
 since a text read of it was shown to be passable spelling by spelling (#256).
 
 Python's standard library, plus `ruby` for rule 10. Exit 0 if the wiring is
-sound, 1 if not, and 2 if `ruby` is missing or its parser fails -- a misuse
-named on stderr, never a pass.
+sound, 1 if not, and 2 if `ruby` is missing, exits non-zero, or prints
+something that is not the parser's answer -- a misuse named on stderr, never a
+pass. A pages.yml that is not YAML is a failure of the file: exit 1.
 """
 
 from __future__ import annotations
@@ -276,7 +277,10 @@ def parse_workflow(path: pathlib.Path) -> tuple[object, list[str]]:
         raise ParserMissing("rule 10 reads pages.yml with Ruby's YAML parser (psych), and `ruby` was not found") from err
     if done.returncode != 0:
         raise ParserMissing(f"rule 10's YAML parser (ruby, psych) failed (exit {done.returncode}): {done.stderr.strip()[:300]}")
-    out = json.loads(done.stdout)
+    try:
+        out = json.loads(done.stdout)
+    except json.JSONDecodeError as err:
+        raise ParserMissing(f"rule 10's YAML parser (ruby, psych) answered with something that is not its JSON: {done.stdout.strip()[:120]!r}") from err
     if "error" in out:
         return None, [f"pages.yml: is not YAML: {out['error']}"]
     refusals = []

@@ -11,11 +11,12 @@
 #   verify.sh --list          name the checks, in order
 #   verify.sh --site DIR      check a built site as Pages would serve it (#32): check_site
 #   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
-#   (the `ci` check needs `ruby`: rule 10 parses pages.yml with psych; exit 2 without it)
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
 #   verify.sh --selftest --scope-plan F re-prove only what plan F does not inherit (#112)
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum
 #   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
+#
+# The `ci` check needs `ruby`: rule 10 parses pages.yml with psych (#256).
 #
 # THE SCOPES ARE A HARVEST, NOT A LIST. Every `test` case declares which tests
 # it needs, and there are 181 of them; a flag that makes the gate run LESS is a
@@ -471,6 +472,9 @@ check_site() {
 # workflow that runs it and a seeded fault of its own, and this is not a new
 # concern -- it is the same question `check-ci-coverage.py` already asks, about
 # the same workflows, one file further along.
+#
+# It needs `ruby` as well as python3: rule 10 reads pages.yml through Ruby's
+# YAML parser, psych (#256). Without it the check exits 2, naming why.
 check_ci() { python3 scripts/check-ci-coverage.py; }
 
 # What `--range` hands the history check, and empty unless it was given.
