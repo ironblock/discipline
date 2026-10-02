@@ -3927,6 +3927,43 @@ label = "the newest-run comparison turned round"
 failure_class = "wiring.pages-newest-run-comparison"
 legacy_signature = "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
 migrated = false
+
+[[fault]]
+id = "ci.ci_pages_concurrency_at_workflow_level"
+kind = "seeded-gate"
+check = "ci"
+label = "the deploy's group at the workflow level"
+failure_class = "wiring.pages-concurrency-placement"
+legacy_signature = "pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploys_not_serialized"
+kind = "seeded-gate"
+check = "ci"
+label = "the deploy job's group gone"
+failure_class = "wiring.pages-concurrency-missing"
+legacy_signature = "pages.yml: the deploy job holds no .pages. concurrency group"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploy_group_cancels"
+kind = "seeded-gate"
+check = "ci"
+label = "the deploy job's group cancelling"
+failure_class = "wiring.pages-concurrency-cancels"
+legacy_signature = "pages.yml: the deploy job's .pages. group does not say cancel-in-progress: false"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploy_group_key_past_a_blank"
+kind = "seeded-gate"
+check = "ci"
+label = "a key past a blank line in the deploy job's group"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+migrated = false
+
 [[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
