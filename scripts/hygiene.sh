@@ -152,10 +152,28 @@ fi
 # scanned, and this is a second view of the same files. A file carrying no
 # encoded strings has no view and no mirror file, so the mirror is small.
 mirror="$(mktemp -d)" || { echo "hygiene: mktemp -d failed" >&2; exit "$EXIT_BROKEN"; }
-trap 'rm -rf -- "$mirror"' EXIT
+# ONE trap for both temporaries, and it keeps the status it was called with
+# (#236). Two `trap ... EXIT` lines used to replace each other, leaking the
+# mirror; and a trap ending in `rm` turned an abort under `set -u` into exit 0
+# on bash 3.2 -- a scan that died having scanned nothing read as clean.
+#
+# AND $? CANNOT CARRY THE ABORT: on bash 3.2 an EXIT trap reached through a
+# `set -u` abort sees $? = 0 (measured). So a zero status counts as clean only
+# when the scan reached its last line and said so; any other exit 0 is a scan
+# that stopped short, and is EXIT_BROKEN.
+matchfile=""
+finished=0
+cleanup() {
+  local rc=$?
+  rm -rf -- "$mirror"
+  [ -z "$matchfile" ] || rm -f -- "$matchfile"
+  [ "$finished" = 1 ] || [ "$rc" -ne 0 ] || rc="$EXIT_BROKEN"
+  exit "$rc"
+}
+trap cleanup EXIT
 
 decoded_count=0
-if ! decoded_count="$(printf '%s\0' "${scanned[@]}" \
+if ! decoded_count="$(printf '%s\0' ${scanned+"${scanned[@]}"} \
       | python3 "${here}/hygiene-decode.py" --into "$mirror")"; then
   echo "hygiene: the decoded view could not be built; a scan that skips it is" \
        "a scan of the escaping, not of the content" >&2
@@ -168,7 +186,7 @@ while IFS= read -r -d '' path; do decoded_files+=("$path"); done \
 
 # Check readability once, up front. Otherwise the first pattern's grep fails,
 # its stderr is discarded, and the scan dies with a status and no filename.
-for path in "${scanned[@]}"; do
+for path in ${scanned+"${scanned[@]}"}; do
   [ -r "$path" ] || {
     echo "hygiene: cannot read ${path}; a file the scan cannot open is not clean" >&2
     exit "$EXIT_BROKEN"
@@ -186,7 +204,7 @@ binary_files=()
 for path in ${decoded_files+"${decoded_files[@]}"}; do
   text_files+=("$path")
 done
-for path in "${scanned[@]}"; do
+for path in ${scanned+"${scanned[@]}"}; do
   if grep -Iq . -- "$path" 2>/dev/null || [ ! -s "$path" ]; then
     text_files+=("$path")
   else
@@ -198,7 +216,7 @@ done
 # Reporting it as clean would be a lie, and scanning it byte-wise would find
 # nothing in a UTF-16 document however hostile its contents.
 if [ "$scan_all" = true ] && [ "${#binary_files[@]}" -gt 0 ]; then
-  for path in "${binary_files[@]}"; do
+  for path in ${binary_files+"${binary_files[@]}"}; do
     echo "hygiene: unscannable-encoding: ${path}: not scannable text;" \
          "this surface must be UTF-8" >&2
   done
@@ -211,7 +229,6 @@ fi
 # inside a binary carries NUL bytes, which `$(...)` discards with a warning on
 # stderr. A file keeps grep's exit status ours to read and keeps the noise out.
 matchfile="$(mktemp)" || { echo "hygiene: mktemp failed" >&2; exit "$EXIT_BROKEN"; }
-trap 'rm -f -- "$matchfile"' EXIT
 
 patterns=0
 hits=0
@@ -238,7 +255,7 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
   sed_flags="g"
   case "${flags:-}" in *i*) sed_flags="gI" ;; esac
 
-  targets=("${text_files[@]}")
+  targets=(${text_files+"${text_files[@]}"})
   case "${flags:-}" in
     *b*) targets+=(${binary_files+"${binary_files[@]}"}) ;;
   esac
@@ -248,7 +265,7 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
   while [ "$start" -lt "${#targets[@]}" ]; do
     part=("${targets[@]:start:CHUNK}")
     rc=0
-    grep "${opts[@]}" -e "$regex" -- "${part[@]}" > "$matchfile" 2>/dev/null || rc=$?
+    grep ${opts+"${opts[@]}"} -e "$regex" -- ${part+"${part[@]}"} > "$matchfile" 2>/dev/null || rc=$?
 
     case "$rc" in
       0)
@@ -314,7 +331,7 @@ fi
 # derives itself. A pattern can be given a looser boundary to reach through an
 # escape; a digest cannot, so this half needs the decoding more than the other.
 digests=0
-printf '%s\0' "${scanned[@]}" \
+printf '%s\0' ${scanned+"${scanned[@]}"} \
   | python3 "${here}/check-hashes.py" --table "$hashes_file" || digests=$?
 case "$digests" in
   0) : ;;
@@ -335,3 +352,4 @@ else
        "the latter searched only for credential shapes;" \
        "${decoded_count} decoded view(s) scanned beside them)"
 fi
+finished=1

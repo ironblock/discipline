@@ -907,6 +907,15 @@ legacy_signature = "assigns label"
 migrated = false
 
 [[fault]]
+id = "hygiene.hygiene_unguarded_expansion"
+kind = "seeded-gate"
+check = "hygiene"
+label = "a hygiene expansion bash 3.2 aborts on"
+failure_class = "hygiene.scanner-not-portable"
+legacy_signature = "is unguarded; bash 3\\.2 aborts on it"
+migrated = false
+
+[[fault]]
 id = "hygiene.hygiene"
 kind = "seeded-gate"
 check = "hygiene"
