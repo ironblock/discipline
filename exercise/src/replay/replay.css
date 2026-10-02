@@ -30,9 +30,6 @@
   background: var(--panel);
   border-block: 1px solid var(--rule);
 }
-.ex-replay__label::first-letter {
-  text-transform: uppercase;
-}
 .ex-replay__pinned {
   position: sticky;
   top: 0;

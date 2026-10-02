@@ -46,10 +46,16 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 
 const problems = [];
 // Each published file is a file of its own beside the page, never bundled: no long string of one (40 characters or
-// more, as written or JSON-escaped) is in the page's code. A bundler may drop a title it finds unused and keep the
-// text, so the check reads every string, not one.
-const assets = path.join(site, 'replay', 'assets');
-const code = readdirSync(assets).filter((f) => f.endsWith('.js')).map((f) => [f, readFileSync(path.join(assets, f), 'utf8')]);
+// more, as written or JSON-escaped) is in anything else the page ships -- every file under replay/ but data/. A
+// bundler may drop a title it finds unused and keep the text, so the check reads every string, not one; a file
+// that gives it no string to compare is a check of nothing, and says so.
+const shipped = (dir) =>
+  readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) return full === path.join(site, 'replay', 'data') ? [] : shipped(full);
+    return [[path.relative(path.join(site, 'replay'), full), readFileSync(full, 'utf8')]];
+  });
+const code = shipped(path.join(site, 'replay'));
 const strings = (value, into = new Set()) => {
   if (typeof value === 'string' && value.length >= 40) into.add(value);
   else if (value && typeof value === 'object') for (const v of Object.values(value)) strings(v, into);
@@ -59,8 +65,9 @@ for (const name of [...PUBLISHED, ...EXAMPLES]) {
   const payload = path.join(site, 'replay', 'data', `${name}.js`);
   if (!existsSync(payload)) continue; // named below, when it does not load
   const forms = [...strings(JSON.parse(readFileSync(payload, 'utf8').replace(/^export default /, '')))].flatMap((t) => [t, JSON.stringify(t).slice(1, -1)]);
+  if (forms.length === 0) problems.push(`${name} has no string of 40 characters or more, so nothing shows whether it is bundled into the page's code`);
   const [file] = code.find(([, text]) => forms.some((form) => text.includes(form))) ?? [];
-  if (file) problems.push(`${name} is bundled into the page's code (replay/assets/${file}), not only beside it`);
+  if (file) problems.push(`${name} is bundled into the page's code (replay/${file}), not only beside it`);
 }
 const browser = await chromium.launch();
 try {

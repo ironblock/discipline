@@ -182,7 +182,7 @@
 .ex-session[data-drawer] .ex-session__memory {
   position: fixed;
   z-index: 5;
-  top: 2.6rem;
+  top: calc(var(--ex-pinned-top, 0px) + 2.6rem);
   right: 0;
   bottom: 0;
   width: min(calc(var(--memory-width) + 2rem), calc(100vw - 3rem));
