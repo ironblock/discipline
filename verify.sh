@@ -16,6 +16,8 @@
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum
 #   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
 #
+# The `ci` check needs `ruby`: rule 10 parses pages.yml with psych (#256).
+#
 # THE SCOPES ARE A HARVEST, NOT A LIST. Every `test` case declares which tests
 # it needs, and there are 181 of them; a flag that makes the gate run LESS is a
 # hazard, and 181 hand-maintained declarations are 181 chances at a scope that
@@ -470,6 +472,9 @@ check_site() {
 # workflow that runs it and a seeded fault of its own, and this is not a new
 # concern -- it is the same question `check-ci-coverage.py` already asks, about
 # the same workflows, one file further along.
+#
+# It needs `ruby` as well as python3: rule 10 reads pages.yml through Ruby's
+# YAML parser, psych (#256). Without it the check exits 2, naming why.
 check_ci() { python3 scripts/check-ci-coverage.py; }
 
 # What `--range` hands the history check, and empty unless it was given.
@@ -3937,6 +3942,89 @@ inject_ci_pages_deploy_group_quoted_key() {
 inject_ci_pages_deploy_second_group_tagged() {
   edit_in_place '/^    runs-on: ubuntu-latest$/a\
     !!str concurrency: {group: pages, cancel-in-progress: false, queue: max}' .github/workflows/pages.yml
+}
+
+# #256: what the text read of rule 10 could not see, and the parse does.
+
+# A flow collection that runs past the deploy block (libyaml does not hold a
+# flow's lines to the block's indentation), carrying a second `concurrency`
+# -- the one YAML keeps -- after it.
+inject_ci_pages_flow_collection_hides_a_group() {
+  edit_in_place 's/^    runs-on: ubuntu-latest$/    runs-on: [ubuntu-latest,/
+/^    runs-on: \[ubuntu-latest,$/a\
+  self-hosted]\
+    "concurrency": {group: pages, cancel-in-progress: false, queue: max}' .github/workflows/pages.yml
+}
+
+# A second `deploy` job after the first: YAML keeps the last, which has no
+# guard, no check and no group.
+inject_ci_pages_second_deploy_job() {
+  edit_in_place '$a\
+  deploy:\
+    runs-on: ubuntu-latest\
+    steps:\
+      - run: "true"' .github/workflows/pages.yml
+}
+
+# A second YAML document after the first: which one a reader takes is the
+# reader's choice.
+inject_ci_pages_second_document() {
+  edit_in_place '$a\
+---\
+jobs: {deploy: {runs-on: ubuntu-latest, steps: [{run: "true"}]}}' .github/workflows/pages.yml
+}
+
+# A quoted merge key: psych merges `"<<"` as it does `<<`, so this one
+# replaces the deploy job's guards with `true` (#258's review).
+inject_ci_pages_quoted_merge_key() {
+  edit_in_place '/^    runs-on: ubuntu-latest$/a\
+    "<<": {if: "true"}' .github/workflows/pages.yml
+}
+
+# A second job that uploads and publishes with none of the deploy job's checks.
+inject_ci_pages_second_job() {
+  edit_in_place '$a\
+  publish-too:\
+    runs-on: ubuntu-latest\
+    steps:\
+      - uses: actions/upload-pages-artifact@v3' .github/workflows/pages.yml
+}
+
+# The check step skipped: the site uploads unchecked.
+inject_ci_pages_check_step_skipped() {
+  edit_in_place '/^        run: \.\/verify\.sh --site _site$/i\
+        if: false' .github/workflows/pages.yml
+}
+
+# #258's second review: the slips a maintainer could make.
+
+# A step between the check and the upload that writes to the site.
+inject_ci_pages_site_written_after_its_check() {
+  edit_in_place '/^      - uses: actions\/configure-pages@v5$/i\
+      - run: echo example.org > _site/CNAME\
+' .github/workflows/pages.yml
+}
+
+# The upload made to run whatever the check said.
+inject_ci_pages_upload_always() {
+  edit_in_place '/^      - uses: actions\/upload-pages-artifact@v3$/a\
+        if: always()' .github/workflows/pages.yml
+}
+
+# The trigger's branch filter gone: a passing push run on any branch publishes.
+inject_ci_pages_trigger_any_branch() {
+  edit_in_place '/^    branches: \[main\]$/d' .github/workflows/pages.yml
+}
+
+# The site checked against main's tip rather than the sha that built it.
+inject_ci_pages_checkout_not_the_run() {
+  edit_in_place 's/^          ref: \${{ github.event.workflow_run.head_sha }}$/          ref: main/' .github/workflows/pages.yml
+}
+
+# #258's third review: the job's condition with text outside its `${{ }}` --
+# here a leading space -- is a non-empty string to GitHub, always true.
+inject_ci_pages_condition_outside_its_braces() {
+  edit_in_place 's/^    if: \(github\.event\.workflow_run\.conclusion.*\)$/    if: " ${{ \1 }}"/' .github/workflows/pages.yml
 }
 
 # Publishes on a trigger of its own, beside the gate.
@@ -7735,6 +7823,28 @@ selftest() {
     "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
   seeded_case "a second group in the deploy job, tagged" ci inject_ci_pages_deploy_second_group_tagged \
     "pages.yml: the deploy job carries a key not spelled plainly .!!str concurrency"
+  seeded_case "a flow collection hiding a second group" ci inject_ci_pages_flow_collection_hides_a_group \
+    "pages.yml: jobs.deploy: duplicate key .concurrency."
+  seeded_case "a second deploy job" ci inject_ci_pages_second_deploy_job \
+    "pages.yml: jobs: duplicate key .deploy."
+  seeded_case "a second YAML document" ci inject_ci_pages_second_document \
+    "pages.yml: holds 2 YAML documents, not one"
+  seeded_case "a quoted merge key over the guards" ci inject_ci_pages_quoted_merge_key \
+    "pages.yml: the deploy job carries a key not spelled plainly .<<."
+  seeded_case "a second job that publishes" ci inject_ci_pages_second_job \
+    "pages.yml: jobs other than .deploy. .publish-too."
+  seeded_case "the check step skipped" ci inject_ci_pages_check_step_skipped \
+    "pages.yml: the check step carries if, so it may not run as written"
+  seeded_case "the site written after its check" ci inject_ci_pages_site_written_after_its_check \
+    "pages.yml: a step between ./verify.sh --site _site and the upload"
+  seeded_case "the upload run whatever the check said" ci inject_ci_pages_upload_always \
+    "pages.yml: a step from the check on carries .if:. .actions/upload-pages-artifact"
+  seeded_case "the trigger on any branch" ci inject_ci_pages_trigger_any_branch \
+    "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+  seeded_case "the checkout not the run's sha" ci inject_ci_pages_checkout_not_the_run \
+    "pages.yml: the site is not checked against the sha that run built"
+  seeded_case "the condition with text outside its braces" ci inject_ci_pages_condition_outside_its_braces \
+    "pages.yml: the deploy's condition has text outside its"
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
