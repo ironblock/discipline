@@ -31,8 +31,9 @@ root="${1:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)}"
 # box: a relative PATH entry would point nowhere there, `sed` would resolve to
 # the real one, and every injection would be graded under GNU semantics while
 # the checks below, run from here, all passed (#260's review).
-root="$(cd -- "$root" 2> /dev/null && pwd)" || {
-  echo "check-bsd-sed: ${root} is not a directory" >&2
+given="$root"
+root="$(cd -- "$given" 2> /dev/null && pwd)" || {
+  echo "check-bsd-sed: '${given}' is not a directory" >&2
   exit 2
 }
 shim_dir="${root}/scripts/bsd-sed"
@@ -49,18 +50,33 @@ broken() {
 resolved="$(PATH="${shim_dir}:${PATH}" command -v sed)"
 [ "$resolved" = "$shim" ] || broken "sed resolves to ${resolved:-nothing}, not the shim"
 
-# The shim's difference, tried before it is trusted: each GNU-only in-place
-# spelling must leave the file as it was. A shim that edits through one would
-# grade every injection written that way under GNU semantics and call them
-# portable.
+# The shim, tried before it is trusted. Each GNU-only in-place spelling must
+# leave the file as it was -- a shim that edits through one would grade every
+# injection written that way under GNU semantics and call them portable --
+# and the two spellings BSD itself reads must work, so a shim that does
+# nothing at all cannot pass for one that refuses.
 probe="$(mktemp)" || broken "no temporary file for the probe"
-trap 'rm -f -- "$probe"' EXIT
-for spelling in "-i" "--in-place" "-s -i"; do
+trap 'rm -f -- "$probe" "${probe}.orig"' EXIT
+gnu_only() {
+  case "$1" in
+    leading) sed -i 's/a/b/' "$probe" ;;
+    long) sed --in-place 's/a/b/' "$probe" ;;
+    clustered) sed -s -i 's/a/b/' "$probe" ;;
+    after-the-script) sed -e 's/a/b/' -i "$probe" ;;
+    trailing) sed 's/a/b/' "$probe" -i ;;
+  esac
+}
+for spelling in leading long clustered after-the-script trailing; do
   printf 'a\n' > "$probe"
-  # shellcheck disable=SC2086
-  PATH="${shim_dir}:${PATH}" sed $spelling 's/a/b/' "$probe" > /dev/null 2>&1
-  [ "$(cat "$probe")" = a ] || broken "the shim edited a file through GNU's \`sed ${spelling}\` spelling"
+  PATH="${shim_dir}:${PATH}" gnu_only "$spelling" > /dev/null 2>&1
+  [ "$(cat "$probe")" = a ] || broken "the shim edited a file through GNU's ${spelling} -i spelling"
 done
+printf 'a\n' > "$probe"
+[ "$(PATH="${shim_dir}:${PATH}" sed 's/a/b/' "$probe" 2> /dev/null)" = b ] \
+  || broken "the shim does not run an ordinary sed"
+PATH="${shim_dir}:${PATH}" sed -i .orig 's/a/b/' "$probe" > /dev/null 2>&1
+[ "$(cat "$probe")" = b ] && [ "$(cat "${probe}.orig" 2> /dev/null)" = a ] \
+  || broken "the shim does not edit in place through BSD's own spelling, sed -i SUFFIX"
 
 rc=0
 PATH="${shim_dir}:${PATH}" python3 "${root}/scripts/check-injections.py" "$root" "$@" || rc=$?
