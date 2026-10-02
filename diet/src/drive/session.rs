@@ -221,6 +221,9 @@ pub enum Event {
         turn: u32,
         /// The lane it was made on.
         lane: Lane,
+        /// The sha256 of the request's frozen head, as `client::head` hashes
+        /// it: what a live record's request names (#157).
+        head_sha256: String,
     },
     /// The settlement moved.
     Settled {
@@ -608,6 +611,9 @@ impl<S: Streaming + 'static> Session<S> {
             text: text.to_owned(),
         });
         state.move_to(Settlement::Turn);
+        let mut shape = self.shared.template.clone();
+        shape.messages.clone_from(&state.trunk);
+        shape.messages.push(Message::new(Role::User, text));
         // Pushed here, under the lock that admits the ask, and never on the
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
@@ -615,6 +621,7 @@ impl<S: Streaming + 'static> Session<S> {
         let request = state.push(Event::Requested {
             turn,
             lane: Lane::Trunk,
+            head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
         });
         let cancel = Cancel::new();
         state.flight = Some(Flight {
@@ -622,9 +629,6 @@ impl<S: Streaming + 'static> Session<S> {
             request,
             cancel: cancel.clone(),
         });
-        let mut shape = self.shared.template.clone();
-        shape.messages.clone_from(&state.trunk);
-        shape.messages.push(Message::new(Role::User, text));
         drop(state);
         self.shared.changed.notify_all();
 
@@ -853,13 +857,16 @@ pub fn line_of(logged: &Logged) -> log::Line {
             turn: *turn,
             text: text.clone(),
         },
-        Event::Requested { turn, lane } => log::Event::Request {
+        Event::Requested {
+            turn,
+            lane,
+            head_sha256,
+        } => log::Event::Request {
             turn: *turn,
             lane: match lane {
                 Lane::Trunk => log::Lane::Trunk,
             },
-            // v2's head, written once the session carries it (#157's --record).
-            head_sha256: None,
+            head_sha256: Some(head_sha256.clone()),
         },
         Event::Settled { from, to } => log::Event::Settlement {
             from: state_of(*from),
@@ -1234,6 +1241,15 @@ pub(in crate::drive) mod tests {
 
     const HEAD: &str = "you are the trunk";
 
+    /// The head digest of the first request a session on [`template`]
+    /// sends for `asked`: the template's messages and the ask, through
+    /// `client::head`, computed here apart from the session.
+    fn first_head(asked: &str) -> String {
+        let mut shape = template();
+        shape.messages.push(Message::new(Role::User, asked));
+        crate::client::head::Head::of(&shape).digest().to_owned()
+    }
+
     pub(in crate::drive) fn template() -> RequestShape {
         RequestShape {
             model: "a-model".to_owned(),
@@ -1326,7 +1342,8 @@ pub(in crate::drive) mod tests {
                 },
                 Event::Requested {
                     turn: 1,
-                    lane: Lane::Trunk
+                    lane: Lane::Trunk,
+                    head_sha256: first_head("say hello"),
                 },
                 Event::Delta {
                     request: 3,
@@ -2142,11 +2159,14 @@ pub(in crate::drive) mod tests {
         let requests: Vec<u64> = log
             .iter()
             .filter(|logged| {
-                logged.event
-                    == Event::Requested {
+                matches!(
+                    logged.event,
+                    Event::Requested {
                         turn: 1,
                         lane: Lane::Trunk,
+                        ..
                     }
+                )
             })
             .map(|logged| logged.seq)
             .collect();
@@ -2251,6 +2271,7 @@ pub(in crate::drive) mod tests {
             Event::Requested {
                 turn: 1,
                 lane: Lane::Trunk,
+                head_sha256: "a".repeat(64),
             },
             Event::Refused {
                 command: CommandKind::Cancel,
@@ -2393,7 +2414,7 @@ pub(in crate::drive) mod tests {
             log::Event::Request {
                 turn: 1,
                 lane: log::Lane::Trunk,
-                head_sha256: None,
+                head_sha256: Some("a".repeat(64)),
             },
             log::Event::Refused {
                 command: log::Command::Cancel,
