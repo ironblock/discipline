@@ -868,6 +868,7 @@ becomes = '''
         shape.messages.clone_from(&self.shared.template.messages);'''
 catches = [
     "drive::projection::tests::a_real_sessions_head_changes_are_rebuilt_and_named_by_client_head",
+    "drive::projection::tests::a_trunk_with_a_shape_the_rebuild_does_not_assume_is_unattributed",
     "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
     "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
@@ -2332,6 +2333,7 @@ becomes = '''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
     "a_drive_server_checks_the_engine_before_it_binds",
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
     "a_drive_server_records_a_two_turn_session_that_check_record_reads",
     "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
     "a_drive_server_refuses_a_canned_regimen_against_a_server_with_no_props",
@@ -2941,6 +2943,7 @@ becomes = '''
     format!("canned-{}", digest_of(&acts_as_first_registered()))'''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
     "a_drive_server_records_a_two_turn_session_that_check_record_reads",
     "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
     "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
@@ -3008,6 +3011,7 @@ becomes = '''
 catches = [
     "drive::projection::tests::a_cancelled_a_failed_and_an_unanswered_call_are_named_not_dropped",
     "drive::projection::tests::a_head_the_log_cannot_rebuild_is_unattributed_and_named",
+    "drive::projection::tests::a_trunk_with_a_shape_the_rebuild_does_not_assume_is_unattributed",
     "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
 ]
 
@@ -3022,6 +3026,7 @@ becomes = '''
         let verified = Some(rebuilt);'''
 catches = [
     "drive::projection::tests::a_head_the_log_cannot_rebuild_is_unattributed_and_named",
+    "drive::projection::tests::a_trunk_with_a_shape_the_rebuild_does_not_assume_is_unattributed",
 ]
 
 [[fault]]
@@ -3130,7 +3135,7 @@ anchor = '''
 becomes = '''
         if false && !self.outcome.contains_key(&seq) {'''
 catches = [
-    "TO-BE-GENERATED",
+    "drive::projection::tests::a_cancelled_a_failed_and_an_unanswered_call_are_named_not_dropped",
 ]
 
 [[fault]]
@@ -3143,7 +3148,7 @@ anchor = '''
 becomes = '''
                 declared == literal && !binary.is_empty()'''
 catches = [
-    "TO-BE-GENERATED",
+    "drive::projection::tests::the_cited_engines_are_matched_as_the_engine_check_matches_them",
 ]
 
 [[fault]]
@@ -3156,7 +3161,7 @@ anchor = '''
 becomes = '''
             Value::String(diet::digest::sha256_hex(sidecar.trim_end().as_bytes())),'''
 catches = [
-    "TO-BE-GENERATED",
+    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
 ]
 
 [[fault]]
@@ -3170,7 +3175,7 @@ anchor = '''
 becomes = '''
             let _ = &file;'''
 catches = [
-    "TO-BE-GENERATED",
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
 ]
 
 [[fault]]
@@ -3185,5 +3190,5 @@ becomes = '''
             if false && stale {
                 std::fs::remove_file(&sidecar)'''
 catches = [
-    "TO-BE-GENERATED",
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
 ]
