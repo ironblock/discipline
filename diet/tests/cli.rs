@@ -430,11 +430,40 @@ fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {
     );
 
     let into = dir.join("2026-01-01-a-sense-bakeoff");
+
+    // NO DECLARATION, NO DIRECTORY (#32, ruled on #271): the claim's
+    // provenance is the caller's to declare, field by field, and an assembly
+    // with none declared is refused before anything is written.
+    let (code, out, _) = run(&[
+        "bakeoff",
+        &run_path,
+        "--into",
+        into.to_str().expect("a UTF-8 path"),
+    ]);
+    assert_eq!(
+        code, 1,
+        "an assembly with no provenance declared was accepted: {out}"
+    );
+    assert!(
+        out.contains("neither given nor declared absent"),
+        "the refusal does not name what is undeclared: {out}"
+    );
+    assert!(
+        !into.exists(),
+        "a refused assembly wrote its directory anyway"
+    );
+
     let (code, out, err) = run(&[
         "bakeoff",
         &run_path,
         "--into",
         into.to_str().expect("a UTF-8 path"),
+        "--claim-issue",
+        "24",
+        "--absent",
+        "supersedes=nothing replaced: the first run of this claim",
+        "--absent",
+        "rule_ratified=the bakeoff applies no rule; its endpoints are pre-registered",
     ]);
     assert_eq!(code, 0, "bakeoff --into: {err}");
     assert!(err.is_empty(), "bakeoff --into wrote to stderr: {err}");

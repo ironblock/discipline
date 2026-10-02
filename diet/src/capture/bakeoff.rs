@@ -1582,6 +1582,16 @@ pub struct Provenance {
     pub rule_ratified: Declared<Ratified>,
 }
 
+/// The flags that give a provenance field, and the field each gives.
+const GIVEN_FLAGS: &[(&str, &str)] = &[
+    ("--claim-issue", "claim_issue"),
+    ("--supersedes", "supersedes"),
+    ("--rule-ratified", "rule_ratified"),
+];
+
+/// The flag that declares a field absent, as `FIELD=REASON`.
+const ABSENT_FLAG: &str = "--absent";
+
 impl Provenance {
     /// Read from `diet bakeoff`'s flags: `--claim-issue N`, `--supersedes
     /// HEX`, `--rule-ratified COMMENT,AT,DIGEST[,OF]`, and `--absent
@@ -1599,38 +1609,36 @@ impl Provenance {
             let value = flags
                 .get(at + 1)
                 .ok_or_else(|| RunError::Undeclared(format!("`{}` takes a value", flags[at])))?;
-            let field = match flags[at].as_str() {
-                "--claim-issue" => "claim_issue",
-                "--supersedes" => "supersedes",
-                "--rule-ratified" => "rule_ratified",
-                "--absent" => {
-                    let (field, reason) = value.split_once('=').ok_or_else(|| {
-                        RunError::Undeclared(format!("`--absent {value}` is not FIELD=REASON"))
-                    })?;
-                    if !["claim_issue", "supersedes", "rule_ratified"].contains(&field) {
-                        return Err(RunError::Undeclared(format!(
-                            "`--absent {field}=...`: only claim_issue, supersedes and rule_ratified are \
-                             declared by the caller; the assembler derives window_start itself"
-                        )));
-                    }
-                    if reason.trim().is_empty() {
-                        return Err(RunError::Undeclared(format!(
-                            "`--absent {field}=` gives no reason; an absence is declared with why"
-                        )));
-                    }
-                    if absent.insert(field.to_owned(), reason.to_owned()).is_some() {
-                        return Err(RunError::Undeclared(format!(
-                            "`{field}` is declared absent twice"
-                        )));
-                    }
-                    at += 2;
-                    continue;
-                }
-                other => {
+            // A table, not a match on spellings: the flags are data, and the
+            // library check refuses a match arm on a string literal.
+            let flag = flags[at].as_str();
+            if flag == ABSENT_FLAG {
+                let (field, reason) = value.split_once('=').ok_or_else(|| {
+                    RunError::Undeclared(format!("`--absent {value}` is not FIELD=REASON"))
+                })?;
+                if !GIVEN_FLAGS.iter().any(|(_, known)| *known == field) {
                     return Err(RunError::Undeclared(format!(
-                        "`{other}` is not a flag `diet bakeoff` reads"
+                        "`--absent {field}=...`: only claim_issue, supersedes and rule_ratified are \
+                         declared by the caller; the assembler derives window_start itself"
                     )));
                 }
+                if reason.trim().is_empty() {
+                    return Err(RunError::Undeclared(format!(
+                        "`--absent {field}=` gives no reason; an absence is declared with why"
+                    )));
+                }
+                if absent.insert(field.to_owned(), reason.to_owned()).is_some() {
+                    return Err(RunError::Undeclared(format!(
+                        "`{field}` is declared absent twice"
+                    )));
+                }
+                at += 2;
+                continue;
+            }
+            let Some(&(_, field)) = GIVEN_FLAGS.iter().find(|(spelled, _)| *spelled == flag) else {
+                return Err(RunError::Undeclared(format!(
+                    "`{flag}` is not a flag `diet bakeoff` reads"
+                )));
             };
             if given.insert(field, value.clone()).is_some() {
                 return Err(RunError::Undeclared(format!("`{field}` is given twice")));
