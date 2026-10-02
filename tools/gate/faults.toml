@@ -653,7 +653,7 @@ kind = "seeded-gate"
 check = "bsd"
 label = "the one portable spelling made GNU-only"
 failure_class = "gate.injection-inert-under-bsd"
-legacy_signature = "^  inject_[a-z0-9_]+  exit=[1-9]"
+legacy_signature = "^  inject_exercise_pnpm_unobtainable  exit=[1-9]"
 migrated = false
 
 [[fault]]

@@ -100,6 +100,10 @@ CHECK_INPUTS = {
     "results": {"results/"},
     "recompute": {"results/"},
     "admission": {"substrates/admission/", "results/"},
+    # `check_bsd` names only its script; the shim and the applier it runs
+    # under the shim are reached through it, so a change to either would
+    # otherwise inherit the last red (#260's review).
+    "bsd": {"scripts/bsd-sed/", "scripts/check-injections.py"},
 }
 
 

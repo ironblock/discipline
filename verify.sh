@@ -515,7 +515,9 @@ check_injections() {
 # The same applier run with a BSD-shaped `sed` first on PATH (#75): the
 # structural lint keeps `sed` out of injection bodies, and this is what proves
 # the one spelling left, `edit_in_place`, portable by execution.
-check_bsd() { bash scripts/check-bsd-sed.sh .; }
+check_bsd() {
+  bash scripts/check-bsd-sed.sh . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
+}
 
 # The merge resolver, exercised on fixtures before it is trusted to resolve a
 # merge. `merge-gate.py` rebuilds the gate files from both sides by name, and
@@ -939,13 +941,13 @@ seeded_case() {
       return
     fi
     scoped=(--scope "$scope")
-  elif [ "$check" = "injections" ] && [ -n "$scope" ]; then
+  elif { [ "$check" = "injections" ] || [ "$check" = "bsd" ]; } && [ -n "$scope" ]; then
     scoped=(--scope "$scope")
   elif [ -n "$scope" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
-    SELFTEST_BROKEN+=("${label}: only the test and injections checks take a scope")
-    not_red "$ident" "$check" "only the test and injections checks take a scope"
+    SELFTEST_BROKEN+=("${label}: only the test, injections and bsd checks take a scope")
+    not_red "$ident" "$check" "only the test, injections and bsd checks take a scope"
     return
   fi
   # One log per case, kept for the run, because the box itself is overwritten
@@ -7648,7 +7650,7 @@ selftest() {
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing  exit=' inject_that_changes_nothing
   seeded_case "the one portable spelling made GNU-only" bsd    inject_bsd_edit_in_place_gnu_only \
-    '^  inject_[a-z0-9_]+  exit=[1-9]'
+    '^  inject_exercise_pnpm_unobtainable  exit=[1-9]' inject_exercise_pnpm_unobtainable
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
     'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
@@ -9086,7 +9088,7 @@ fi
 # be a misuse rather than silently no scope at all.
 if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
   if [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ]; then
-    echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+    echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
     exit "$EXIT_MISUSE"
   fi
   case "${selected[0]}" in
@@ -9098,18 +9100,18 @@ if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
       }
       VERIFY_TEST_SCOPE="$VERIFY_SCOPE"
       ;;
-    injections)
+    injections|bsd)
       case "$VERIFY_SCOPE" in
         inject_*[!a-z0-9_]*|inject_) ;;
         inject_*) VERIFY_INJECTION_SCOPE="$VERIFY_SCOPE" ;;
       esac
       [ -n "$VERIFY_INJECTION_SCOPE" ] || {
-        echo "verify: --scope '$VERIFY_SCOPE': the injections check takes one injection's name, inject_..." >&2
+        echo "verify: --scope '$VERIFY_SCOPE': the ${selected[0]} check takes one injection's name, inject_..." >&2
         exit "$EXIT_MISUSE"
       }
       ;;
     *)
-      echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+      echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
       exit "$EXIT_MISUSE"
       ;;
   esac
