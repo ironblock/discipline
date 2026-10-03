@@ -8757,6 +8757,19 @@ prove_selftest_mechanics() {
   local relay; scratch; relay="$SCRATCH"
   cp -r "${ROOT}/results/_template" "${relay}/2026-01-30-no-substrate"
   strip_substrates "${relay}/2026-01-30-no-substrate/run.jsonl"
+  # A copy of the template is a claim directory, so it declares its four
+  # provenance fields (#32): absent here, since the record refusal is the one
+  # failure this case reads.
+  python3 - "${relay}/2026-01-30-no-substrate/README.md" <<'EOF'
+import pathlib, sys
+
+path = pathlib.Path(sys.argv[1])
+source = path.read_text(encoding="utf-8")
+if not source.startswith("+++\n"):
+    raise SystemExit("the template's front-matter fence moved")
+absent = 'absent = { claim_issue = "a fixture", supersedes = "a fixture", rule_ratified = "a fixture", window_start = "a fixture" }\n'
+path.write_text("+++\n" + absent + source[len("+++\n"):], encoding="utf-8")
+EOF
   # POST-HOC IS DERIVED, BOTH WAYS (#32): a rule ratified after its window
   # opened reads post-hoc in the ledger (the 09-20 framing run), and one
   # ratified before does not (the 09-27 edit-rate run).

@@ -491,7 +491,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
     # assembler, which reads the line, not the TOML. So it is spelled once, at
     # the top level, as `product_sha256 = "<64 hex>"`, and nowhere else in the
     # front-matter -- not in a table, not in a string.
-    spelled = [line for line in source.split("\n") if line.lstrip().startswith("product_sha256")]
+    spelled = [line for line in source.split("\n") if line.partition("=")[0].strip() == "product_sha256"]
     if "product_sha256" in front and (len(spelled) != 1 or not PRODUCT_LINE.fullmatch(spelled[0])):
         fail(
             "results.product-spelling",

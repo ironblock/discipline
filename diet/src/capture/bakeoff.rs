@@ -1710,7 +1710,12 @@ fn sibling_products(into: &Path) -> Result<Vec<String>, RunError> {
         }
         let named: Vec<&str> = lines
             .take_while(|line| *line != "+++")
-            .filter(|line| line.trim_start().starts_with("product_sha256"))
+            // The key exactly, not a prefix: `product_sha256_note` is another
+            // key (track three's read of b56f0bf).
+            .filter(|line| {
+                line.split_once('=')
+                    .is_some_and(|(key, _)| key.trim() == "product_sha256")
+            })
             .collect();
         match named.as_slice() {
             [] => {}
