@@ -203,8 +203,13 @@ SECTION_LINE = re.compile(r"## (" + "|".join(SECTIONS) + r")")
 # A tab after `>` or a list marker is a container's separator too (#265's
 # fifth review: `>` TAB `## Results` rendered as a heading), and a leading tab
 # is an indent like spaces (its sixth: a tab-indented `## Results` in a list
-# item, and `>` space TAB `## Results`, rendered as headings).
-CONTAINER_PREFIX = re.compile(r"^(?: {0,3}>[ \t]?| {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)| {1,3}|\t)")
+# item, and `>` space TAB `## Results`, rendered as headings). A footnote
+# definition's label is a container too: the text after `[^note]: ` is block
+# content, and `## Results` there renders as a heading (the review at
+# 727489e).
+CONTAINER_PREFIX = re.compile(
+    r"^(?: {0,3}\[\^[^\]\n]+\]:[ \t]*| {0,3}>[ \t]?| {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)| {1,3}|\t)"
+)
 ATX = re.compile(r"#{1,6}(?:[ \t]|$)")
 SETEXT_UNDERLINE = re.compile(r"(?:=+|-+)[ \t]*$")
 HTML_HEADING = re.compile(r"<h[1-6](?:[\s>/]|$)", re.IGNORECASE)
