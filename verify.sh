@@ -417,6 +417,7 @@ check_exercise() {
       pnpm exec playwright install chromium &&
       pnpm test &&
       python3 scripts/test_render_ledger.py &&
+      python3 scripts/test_admission.py &&
       pnpm build:replay &&
       (cd .. && check_site _site) &&
       node scripts/replay-smoke.mjs ../_site
@@ -3052,6 +3053,14 @@ inject_exercise_snapshot_orphaned() {
   snapshot="$(grep -o 'scripts/hygiene-admitted-[0-9a-f]\{12\}-patterns\.tsv' exercise/src/drive/recorded/first-drive.admission.json | head -n 1)"
   [ -n "$snapshot" ] && [ -f "$snapshot" ] || { echo "inject: first-drive's admission names no patterns snapshot" >&2; return 1; }
   cp "$snapshot" scripts/hygiene-admitted-000000000000-patterns.tsv
+}
+
+# `admit` no longer removing what no admission names (#257): the call after a
+# written admission dropped, so an orphan outlives the admission that should
+# have cleared it. `verify` would still refuse the tree; admission.py's own
+# test is what says `admit` broke its promise.
+inject_exercise_admit_keeps_orphans() {
+  edit_in_place '/^    prune()$/d' exercise/scripts/admission.py
 }
 
 # #32 I2's emitter mutated (track five's faults, carried here by courier): a
@@ -7907,6 +7916,8 @@ selftest() {
     'voxel-stress: its carried field disagrees with its events'
   seeded_case "a snapshot no admission names, left in place" exercise inject_exercise_snapshot_orphaned \
     'admission: scripts/hygiene-admitted-000000000000-patterns\.tsv: a snapshot no admission names'
+  seeded_case "admit no longer removing what no admission names" exercise inject_exercise_admit_keeps_orphans \
+    'FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \

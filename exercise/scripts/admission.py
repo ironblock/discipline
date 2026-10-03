@@ -6,9 +6,9 @@ it -- and that same table re-run over it at every build, so neither a later
 edit to the recording nor a change to the live table moves what it was
 admitted under. Re-admitting under a newer table is a deliberate change.
 
-    python3 exercise/scripts/admission.py admit NAME     scan NAME; if clean, write its admission
+    python3 exercise/scripts/admission.py admit NAME     scan NAME; if clean, write its admission; then remove every snapshot no admission names
     python3 exercise/scripts/admission.py tables DIR     each admitted table, and the published recordings it governs
-    python3 exercise/scripts/admission.py verify DIR     every DIR/<name>.js against DIR/<name>.admission.json
+    python3 exercise/scripts/admission.py verify DIR     every DIR/<name>.js against DIR/<name>.admission.json, and no snapshot no admission names
 
 THE ADMITTED TABLE is a snapshot of the genesis table -- its patterns, its
 exceptions and its salted digests -- written once, by `admit` and nothing
@@ -22,9 +22,14 @@ table is the current rule. An admission names its snapshot and the live
 table it was taken from, and says which it cites.
 
 A SNAPSHOT NO ADMISSION NAMES is a rule nothing is admitted under, and a
-reader of scripts/ cannot tell it from one in force (#257). So `admit`, once
-it has run, removes every snapshot that no `*.admission.json` in the tree
-names, and says which; and `verify` refuses a tree that still holds one.
+reader of scripts/ cannot tell it from one in force (#257). An admission
+names a snapshot by the three paths it lists under `table`; every
+`*.admission.json` under exercise/src/drive/ counts. Any file under scripts/
+whose name starts `hygiene-admitted-` and that no admission names -- whatever
+the rest of its name, and in any subdirectory -- is such a snapshot. `admit`,
+once it has run (admitted or refused), removes every one and says which;
+`verify` refuses a tree that still holds one. An admission this script cannot
+read leaves what it names unknown, so nothing is removed and both exit 2.
 
 `verify` reads every admission from the tree, never from the site it is
 checking, and holds the site to it: exactly the published recordings
@@ -37,8 +42,9 @@ The scan is `verify.sh`'s `check_site`, which runs each snapshot over the
 recordings it governs (`tables`). A payload with no admission beside it
 fails: a recording whose admission is unknown does not publish.
 
-Exit 0 if every payload checks, 1 if any does not (each named), 2 if there was
-nothing to check or the check could not run -- a check of nothing is not a pass.
+Exit 0 if every payload checks and no snapshot is unnamed, 1 if any payload
+does not check or any snapshot is unnamed (each named), 2 if there was nothing
+to check or the check could not run -- a check of nothing is not a pass.
 """
 
 import hashlib
@@ -75,13 +81,31 @@ def published() -> list[str]:
     return re.findall(r"'([a-z0-9-]+)'", found.group(1))
 
 
-SNAPSHOT_FILE = re.compile(r'hygiene-admitted-([0-9a-f]{12})-(?:patterns\.tsv|exceptions\.tsv|hashes\.txt)')
+class Unreadable(Exception):
+    """An admission whose snapshot paths cannot be read: what it names is unknown, so nothing may be removed."""
+
+
+def cited() -> set[str]:
+    """Every snapshot file an admission under exercise/src/drive/ names, by the paths it lists."""
+    named = set()
+    for admitted in sorted((ROOT / 'exercise/src/drive').rglob('*.admission.json')):
+        rel = admitted.relative_to(ROOT).as_posix()
+        try:
+            table = json.loads(admitted.read_text(encoding='utf-8'))['table']
+            paths = [table[part]['path'] for part in SNAPSHOT]
+        except (ValueError, KeyError, TypeError) as err:
+            raise Unreadable(f'admission: {rel}: not an admission this script can read ({type(err).__name__}: {err})') from err
+        if not all(isinstance(path, str) for path in paths):
+            raise Unreadable(f'admission: {rel}: its table names a snapshot path that is not a string')
+        named.update(paths)
+    return named
 
 
 def orphans() -> list[pathlib.Path]:
-    """Every snapshot file in scripts/ whose id no admission in the tree names."""
-    cited = {json.loads(a.read_text(encoding='utf-8')).get('table', {}).get('id') for a in sorted((ROOT / 'exercise/src/drive').rglob('*.admission.json'))}
-    return [f for f in sorted((ROOT / 'scripts').iterdir()) if (m := SNAPSHOT_FILE.fullmatch(f.name)) and m.group(1) not in cited]
+    """Every file under scripts/ named `hygiene-admitted-*` that no admission names."""
+    named = cited()
+    found = [f for f in (ROOT / 'scripts').rglob('hygiene-admitted-*') if f.is_file() or f.is_symlink()]
+    return sorted(f for f in found if f.relative_to(ROOT).as_posix() not in named)
 
 
 def prune() -> None:
@@ -250,7 +274,11 @@ def verify(directory: str) -> int:
 def main(argv: list[str]) -> int:
     commands = {'admit': admit, 'tables': tables, 'verify': verify}
     if len(argv) == 3 and argv[1] in commands:
-        return commands[argv[1]](argv[2])
+        try:
+            return commands[argv[1]](argv[2])
+        except Unreadable as err:
+            print(f'{err}; the snapshots it names are unknown, so none is removed or judged', file=sys.stderr)
+            return 2
     print(__doc__, file=sys.stderr)
     return 2
 

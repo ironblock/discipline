@@ -8097,6 +8097,15 @@ legacy_signature = "admission: scripts/hygiene-admitted-000000000000-patterns\\.
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_admit_keeps_orphans"
+kind = "seeded-gate"
+check = "exercise"
+label = "admit no longer removing what no admission names"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so"
+migrated = false
+
+[[fault]]
 id = "ci.ci_pages_flow_collection_hides_a_group"
 kind = "seeded-gate"
 check = "ci"
