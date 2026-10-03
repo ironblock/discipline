@@ -18,8 +18,14 @@ use diet::formats::log;
 
 const DRIVE: &str = env!("CARGO_BIN_EXE_diet-drive");
 
-/// llama-server `4df29be`'s reply to one streamed ask (R2b's fixture).
+/// llama-server `4df29be`'s reply to one streamed ask (R2b's fixture). It
+/// ends on `finish_reason: "length"`: a capped call (#290).
 const CAPTURED: &[u8] = include_bytes!("../client/fixtures/llama-server-4df29be-stream.http");
+
+/// llama-server `e7051ef`'s reply to one streamed ask, reasoning on, ending
+/// on `finish_reason: "stop"`: an answer.
+const ANSWERED: &[u8] =
+    include_bytes!("../client/fixtures/llama-server-e7051ef-reasoning-stream.http");
 
 const HEAD: &str = "you are the trunk, served\n";
 
@@ -187,8 +193,48 @@ fn status(reply: &str) -> u16 {
 }
 
 #[test]
-fn a_served_drive_streams_a_real_servers_answer_over_sse() {
+fn a_real_servers_capped_reply_is_written_capped_and_settles_failed() {
+    // #290, ruled 5969297103: `4df29be`'s captured reply ended on its cap.
     let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
+    let served = start(&stub.url(), &[]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let stream = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains(r#""reason":"failed""#) && read.contains(r#""to":"awaiting""#),
+    );
+    let lines: Vec<log::Event> = stream
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .map(|data| {
+            log::line(data)
+                .unwrap_or_else(|why| panic!("{data}: {why}"))
+                .event
+        })
+        .collect();
+    assert!(
+        lines.iter().any(|line| matches!(
+            line,
+            log::Event::Response {
+                capped: Some(true),
+                ..
+            }
+        )) && lines.iter().any(|line| matches!(
+            line,
+            log::Event::TurnSettled {
+                reason: log::SettleReason::Failed,
+                ..
+            }
+        )),
+        "{stream}"
+    );
+}
+
+#[test]
+fn a_served_drive_streams_a_real_servers_answer_over_sse() {
+    let stub = Stub::serving(vec![Act::Raw(ANSWERED.to_vec())]).expect("loopback");
     let served = start(&stub.url(), &[]);
     let address = served.listening.clone();
 
@@ -976,7 +1022,7 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
     // engine, so every turn and response is named, never derived.
     // The canned regimen passes only on the canned server (#243).
     let stub = Stub::serving_with_props(
-        vec![Act::Raw(CAPTURED.to_vec()), Act::Raw(CAPTURED.to_vec())],
+        vec![Act::Raw(ANSWERED.to_vec()), Act::Raw(ANSWERED.to_vec())],
         &diet::drive::canned::build_info(),
     )
     .expect("loopback");
