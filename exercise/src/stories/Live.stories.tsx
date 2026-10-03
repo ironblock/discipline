@@ -98,7 +98,7 @@ export const Served: Story = {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]').length).toBe(4));
     await expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="user"]').length).toBe(4);
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
-    // Turn 4 was stopped while writing, its prompt read whole: its footer says the stop (#294).
+    // Turn 4 was stopped while writing, its prompt read whole: its footer says how far it wrote, beside the `cancelled` badge (#294).
     const feet = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"] .ex-block__foot')].map((f) => f.textContent ?? '');
     await expect(feet.some((line) => line.includes('wrote for 3.5 s'))).toBe(true);
   },

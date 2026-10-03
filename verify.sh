@@ -3097,7 +3097,7 @@ inject_exercise_progress_read_nested() {
 
 # A turn stopped mid-prefill drawn as read in full (#294): the read taken as
 # the whole new part, whatever the last frame said. Typecheck and lint pass
-# it; the fold of a stop cut short -- constructed in served.test.ts, as no
+# it; the fold of a stop cut short -- constructed in served/stopped-in-prefill.ts, as no
 # recorded turn stopped in prefill -- says how far it got.
 inject_exercise_stopped_read_drawn_whole() {
   edit_in_place 's|^  const read = wrote ? fresh : Math.min(fresh, Math.max(0, m.processed - m.cache));$|  const read = fresh;|' exercise/src/ui/flow.ts
