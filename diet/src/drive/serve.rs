@@ -46,7 +46,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::session::{CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session};
+use super::session::{
+    CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session, Settlement,
+};
 use crate::client::stream::Streaming;
 use crate::digest::sha256;
 use crate::formats::record::json::{self, Value};
@@ -227,6 +229,18 @@ pub struct Server {
 }
 
 impl Server {
+    /// Stop accepting, and give the open streams up to `grace` to finish:
+    /// an `/events` stream closes itself once it has delivered `ended`, so
+    /// a page sees the session's last line before the process exits (#291).
+    pub fn finish(self, grace: Duration) {
+        let live = Arc::clone(&self.live);
+        drop(self);
+        let until = Instant::now() + grace;
+        while live.load(Ordering::SeqCst) > 0 && Instant::now() < until {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// Serve `session` on `listener`.
     ///
     /// # Errors
@@ -494,6 +508,15 @@ impl<S: Streaming + 'static> Serving<S> {
         }
         let mut next = first;
         while !self.stopping.load(Ordering::SeqCst) {
+            // Once ended, nothing more is logged (#291): a stream past the
+            // last line, `ended`, is done, and closes -- at once, not after
+            // a heartbeat, which a browser reconnecting after the close
+            // would otherwise wait out.
+            if self.session.settlement() == Settlement::Ended
+                && self.session.events_from(next).is_empty()
+            {
+                return;
+            }
             let batch = self.session.wait_from(next, self.config.heartbeat);
             let mut out = String::new();
             if batch.is_empty() {
@@ -1472,6 +1495,75 @@ mod tests {
     }
 
     #[test]
+    fn a_stream_opened_after_ended_past_its_last_line_closes_at_once() {
+        // #315's review: a browser reconnecting after the close asks from
+        // past `ended`; it is closed at once, not after a heartbeat.
+        let (session, server) = serve(
+            Canned::new([]),
+            Config {
+                heartbeat: Duration::from_secs(30),
+                ..quick()
+            },
+        );
+        assert_eq!(session.end(None), Ok(()));
+        let past = session.events_from(0).len();
+        let mut client = Client::send(
+            &server,
+            &events_request(&server, &format!("?from={past}"), ""),
+        );
+        let started = Instant::now();
+        client.read_until(Duration::from_secs(5), |_| false);
+        assert!(client.closed, "{}", client.read);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    #[test]
+    fn after_ended_the_written_log_is_sealed_byte_for_byte() {
+        // #291, ruled: after `ended` every command is refused and writes
+        // nothing -- the log file is the same bytes before and after.
+        let session = Session::open(Canned::new([deltas(&["one"])]), template());
+        let written = Shared::default();
+        write_through(
+            &session,
+            crate::drive::session::render,
+            written.clone(),
+            |why| panic!("{why}"),
+        );
+        session.ask("go", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        assert_eq!(session.end(None), Ok(()));
+        let sealed = written.text();
+        assert!(session.ask("too late", None).is_err());
+        assert!(session.cancel(1, None).is_err());
+        assert!(session.declare_seam(None).is_err());
+        assert!(session.end(None).is_err());
+        assert_eq!(written.text(), sealed);
+    }
+
+    #[test]
+    fn an_events_stream_closes_itself_once_it_has_delivered_ended() {
+        // #291: a page following the log sees `ended`, then the stream ends,
+        // while the server itself keeps running -- the close is the stream's
+        // own, not the server's stop.
+        let (session, server) = serve(Canned::new([]), quick());
+        let mut client = Client::send(&server, &events_request(&server, "?from=0", ""));
+        assert!(client.read_until(Duration::from_secs(5), |read| { read.contains("Started") }));
+        assert_eq!(session.end(None), Ok(()));
+        client.read_until(Duration::from_secs(5), |_| false);
+        assert!(
+            client.closed,
+            "the stream stayed open after ended: {}",
+            client.read
+        );
+        assert!(client.read.contains("to: Ended"), "{}", client.read);
+        drop(server);
+    }
+
+    #[test]
     fn a_refused_command_is_409_with_its_tag_and_is_in_the_log() {
         let gate = Gate::new();
         let (session, server) = serve(
@@ -1505,9 +1597,11 @@ mod tests {
             .iter()
             .filter(|logged| matches!(logged.event, Event::Refused { .. }))
             .count();
+        // The two before `end` are logged; the one after is answered and not
+        // logged, so `ended` stays the log's last line (#291).
         assert_eq!(
-            refusals, 3,
-            "a refusal answered over HTTP is not in the log"
+            refusals, 2,
+            "a refusal answered over HTTP before the end is not in the log"
         );
     }
 
