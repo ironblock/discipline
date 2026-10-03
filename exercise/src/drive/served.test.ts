@@ -54,6 +54,8 @@ describe('a served session, as the page reads it (#288)', () => {
   it('reads a cold prefill from nothing', () => {
     const reading = assistants(upTo(6))[0];
     expect(reading?.kind === 'assistant' && reading.meter).toMatchObject({ total: 523, cache: 0, processed: 111 });
+    // The rate is the server's: 111 tokens in its 326 ms of prefill -- not the 308 ms between the frames' arrivals.
+    expect(reading?.kind === 'assistant' && reading.meter?.ppRate).toBeCloseTo((1000 * 111) / 326, 6);
     expect(reading?.kind === 'assistant' && readingOf(reading, 34391)).toMatchObject({ n: 111, of: 523 });
   });
 });

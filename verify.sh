@@ -3089,7 +3089,8 @@ inject_exercise_recording_carried_disagrees() {
 # The meter reading a progress frame's old, nested shape again (#288): what
 # the page did when it went blank on the rehearsal drive's first live frame.
 # The types are the format's now, so the read goes through a cast, as an
-# older shape kept anywhere else would; only a fold of a served log sees it.
+# older shape kept anywhere else would; typecheck and lint pass it, and any
+# fold of a progress line -- served, or synthesized for a replay -- sees it.
 inject_exercise_progress_read_nested() {
   edit_in_place 's|    processed: top.processed,|    processed: (top as unknown as { prompt: { processed: number } }).prompt.processed,|' exercise/src/session/fold.ts
 }

@@ -147,8 +147,6 @@ export type TurnSettled = Omit<V0.TurnSettledLine, 'reason'> & { readonly reason
 /** A person's idle gap after a settled turn, as the surface measured it (Q4). */
 export type IdleGap = V0.IdleGapLine;
 
-// ------------------------------------------------------------------ AHEAD kinds
-
 /**
  * Where a request's prefill is, right now: the format's own `progress` line
  * (diet/formats/log, v1 D2), one per frame the server streams before the
@@ -160,6 +158,8 @@ export type IdleGap = V0.IdleGapLine;
  * until #288, and went blank on the first live frame.
  */
 export type ProgressFrame = V0.ProgressLine;
+
+// ------------------------------------------------------------------ AHEAD kinds
 
 /** AHEAD (R2's later bump, DoD 2): a tool call began. */
 export interface ToolBegin extends At {
