@@ -178,6 +178,12 @@ def top_level_code(text: str) -> str:
     a function match that runs long, past its real closer, swallowing top-
     level code into the function (#317).
     """
+    # A function match that ran long past its real closer has swallowed the
+    # top-level code after it, which is then in no unit's text the plan reads
+    # as the top level -- so the whole FILE compares, not only `outside`
+    # (#317).
+    if not functions_end_where_matched(text):
+        return text
     outside = outside_functions(text)
     lines = outside.split("\n")
     # A function the pattern cut short -- its `}` inside a heredoc or a
@@ -246,6 +252,14 @@ def functions_parse(text: str) -> bool:
         return all(pool.map(unit_parses, units))
 
 
+def functions_end_where_matched(text: str) -> bool:
+    """Whether every function the patterns match in `text` really ends at its
+    match's end (#317); see unit_ends_where_matched."""
+    units = [m.group(0) for m in FUNCTION.finditer(text)]
+    with concurrent.futures.ThreadPoolExecutor(16) as pool:
+        return all(pool.map(unit_ends_where_matched, units))
+
+
 @functools.lru_cache(maxsize=None)
 def unit_parses(unit: str) -> bool:
     """Whether `unit` parses alone AND its last `}` really closed it.
@@ -255,6 +269,30 @@ def unit_parses(unit: str) -> bool:
     trailing `)` is a syntax error after complete code and mere text inside
     an open heredoc, and is never a heredoc's delimiter, on bash 3.2 and 5."""
     return bash_reads_as_closed(unit, whole=True) and not bash_reads_as_closed(unit + ")", whole=True)
+
+
+@functools.lru_cache(maxsize=None)
+def unit_ends_where_matched(unit: str) -> bool:
+    """Whether the function `unit` really ends at its match's end (#317).
+
+    The pattern ends a function at the first column-0 `}` line. A real closer
+    written otherwise -- `} # end`, `};`, `} <<'EOF'`, an indented `}` -- is
+    passed over, and the match runs long through the next column-0 `}`,
+    reading the top-level code between as the function's body. A function's
+    real end is the shortest prefix of it that parses: before its closer its
+    own `{` is open, and no prefix parses. So no prefix ending at an earlier
+    line holding a `}` may parse, or the match ran long and the top level
+    compares whole. A closer that also opens a brace on its own line (`} ;
+    coproc {`) is not asked about; nor could a prefix ending there parse."""
+    lines = unit.rstrip("\n").split("\n")
+    # Only a line closing more braces than it opens can close the function:
+    # `${x}` and `|| { ...; }` balance on their own line and are skipped, which
+    # keeps this from asking bash about every expansion in every body.
+    return not any(
+        lines[end].count("}") > lines[end].count("{")
+        and bash_reads_as_closed("\n".join(lines[: end + 1]), whole=True)
+        for end in range(len(lines) - 1)
+    )
 
 
 def bash_reads_as_closed(text: str, whole: bool = False) -> bool:
@@ -842,6 +880,13 @@ def _top_level_comments():
         ("g() {\n  cat\n} <<'EOF'\n{\n  \"a\": 1\n}\n# c\n{\n  \"b\": 2\n}\nEOF\ng\n", ("# c", "# d")),
         ("g() {\n  cat\n} <<'EOF'\n}\n# c\nEOF\ng\n", ("# c", "# d")),
         ("set -o posix\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #317: a function match that runs long past a closer written
+        # otherwise -- a trailing comment, `};`, indented, a heredoc on it --
+        # swallows the top-level code after it.
+        ("g() {\n  :\n} # end\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ("g() {\n  :\n};\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ("g() {\n  :\n  }\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ("g() {\n  cat\n} <<'EOF'\nx\nEOF\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
         ('Y="a\\"\n# b"\n', ("# b", "# c")),
         ("echo it\\'s\nZ='a\n# b'\n", ("# b", "# c")),
         ("Z=${#X}' a\n# b'\n", ("# b", "# c")),
