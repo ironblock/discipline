@@ -34,8 +34,8 @@ If a file already holds something, naming it empties it. The first stdout line s
 **The first line on stdout** is JSON:
 
 - `listening` and `opened`;
-- `log` and `log_truncated`;
-- `record` and `record_truncated`;
+- with `--log`, `log` and `log_truncated`;
+- with `--record`, `record` and `record_truncated`;
 - with `--regimen`, also `substrate`, `registry_sha256`, `engine_build` and `engine_identity`.
 
 ## 2. Start the surface
@@ -53,12 +53,12 @@ Open `http://localhost:5173/?drive`. The surface's dev server proxies `/events` 
 
 Send `end`: `{"kind":"end"}` posted to `serve`'s `/commands`. `serve` then:
 
-1. logs `ended`, which is the log's last line;
+1. logs the settlement to `ended`, which is the log's last line;
 2. writes the record;
 3. lets open streams finish;
 4. exits `0`.
 
-You do not need to interrupt it. A command sent after `end` is refused (`409`) and writes nothing.
+You do not need to interrupt it. Once it has exited, a later command finds nothing listening. In the moment before (while the record is written and the streams drain) one is answered `409` and writes nothing to the log.
 
 ## No model at hand
 
