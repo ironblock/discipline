@@ -54,6 +54,7 @@ to check or the check could not run -- a check of nothing is not a pass.
 
 import hashlib
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -99,8 +100,11 @@ def cited() -> set[str]:
             table = json.loads(admitted.read_text(encoding='utf-8'))['table']
             ident = table['id']
             paths = {part: table[part]['path'] for part in SNAPSHOT}
-        except (ValueError, KeyError, TypeError) as err:
+            digests_given = [table[part]['sha256'] for part in SNAPSHOT]
+        except (OSError, ValueError, KeyError, TypeError) as err:
             raise Unreadable(f'admission: {rel}: not an admission this script can read ({type(err).__name__}: {err})') from err
+        if not all(isinstance(d, str) for d in digests_given):
+            raise Unreadable(f'admission: {rel}: its table gives a snapshot digest that is not a string')
         if not (isinstance(ident, str) and re.fullmatch(r'[0-9a-f]{12}', ident)):
             raise Unreadable(f'admission: {rel}: its table id {ident!r} is not a snapshot id')
         for part, path in paths.items():
@@ -114,8 +118,13 @@ def cited() -> set[str]:
 def orphans() -> list[pathlib.Path]:
     """Every file under scripts/ named `hygiene-admitted-*` that no admission names."""
     named = cited()
+    # A cited path can reach a file under another spelling of its name (a case-insensitive disk): that file is cited.
+    kept = [ROOT / path for path in named if (ROOT / path).exists()]
     found = [f for f in (ROOT / 'scripts').rglob('hygiene-admitted-*') if f.is_file() or f.is_symlink()]
-    return sorted(f for f in found if f.relative_to(ROOT).as_posix() not in named)
+    return sorted(
+        f for f in found
+        if f.relative_to(ROOT).as_posix() not in named and not (f.exists() and any(os.path.samefile(f, k) for k in kept))
+    )
 
 
 def prune() -> None:
@@ -293,7 +302,7 @@ def main(argv: list[str]) -> int:
         try:
             return commands[argv[1]](argv[2])
         except Unreadable as err:
-            print(f'{err}; the snapshots it names are unknown, so none is removed or judged', file=sys.stderr)
+            print(f'{err}; the snapshots it names are unknown, so none is removed or judged. Restore that file from git, or delete it, then admit again.', file=sys.stderr)
             return 2
     print(__doc__, file=sys.stderr)
     return 2

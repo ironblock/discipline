@@ -123,6 +123,31 @@ class Admission(unittest.TestCase):
             copy.write_text('{', encoding='utf-8')
         self.unread('admission: exercise/src/drive/recorded/fixture.admission.json: not an admission this script can read', ('admit', 'fixture'), ('verify', data), ('tables', data))
 
+    def test_an_admission_with_no_digest_stops_every_command(self):
+        data = self.site()
+        for copy in (self.recording.with_name('fixture.admission.json'), pathlib.Path(data) / 'fixture.admission.json'):
+            admission = json.loads(copy.read_text(encoding='utf-8'))
+            del admission['table']['hashes']['sha256']
+            copy.write_text(json.dumps(admission, indent=2) + '\n', encoding='utf-8')
+        self.unread('admission: exercise/src/drive/recorded/fixture.admission.json: not an admission this script can read', ('admit', 'fixture'), ('verify', data), ('tables', data))
+
+    def test_an_admission_that_is_a_directory_stops_every_command(self):
+        data = self.site()
+        (self.box / 'exercise/src/drive/recorded/stray.admission.json').mkdir()
+        self.unread('admission: exercise/src/drive/recorded/stray.admission.json: not an admission this script can read', ('admit', 'fixture'), ('verify', data), ('tables', data))
+
+    def test_a_cited_snapshot_under_another_spelling_of_its_name_is_kept(self):
+        patterns = self.box / next(p for p in self.cited if p.endswith('-patterns.tsv'))
+        respelled = patterns.with_name(patterns.name.replace('-patterns.tsv', '-Patterns.tsv'))
+        patterns.rename(respelled)
+        if not patterns.exists():
+            self.skipTest('this disk tells names apart by case, so the cited path no longer reaches the file')
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertNotIn('removed', run.stdout)
+        self.assertTrue(respelled.exists())
+        self.assertEqual(self.run_admission('verify', self.site()).returncode, 0)
+
     def test_a_snapshot_path_in_another_form_is_not_read_as_naming_it(self):
         data = self.site()
         for copy in (self.recording.with_name('fixture.admission.json'), pathlib.Path(data) / 'fixture.admission.json'):
