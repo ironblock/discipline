@@ -23,13 +23,18 @@ table it was taken from, and says which it cites.
 
 A SNAPSHOT NO ADMISSION NAMES is a rule nothing is admitted under, and a
 reader of scripts/ cannot tell it from one in force (#257). An admission
-names a snapshot by the three paths it lists under `table`; every
-`*.admission.json` under exercise/src/drive/ counts. Any file under scripts/
-whose name starts `hygiene-admitted-` and that no admission names -- whatever
-the rest of its name, and in any subdirectory -- is such a snapshot. `admit`,
-once it has run (admitted or refused), removes every one and says which;
-`verify` refuses a tree that still holds one. An admission this script cannot
-read leaves what it names unknown, so nothing is removed and both exit 2.
+names a snapshot by the three paths it lists under `table`, each exactly as
+`admit` writes it (`scripts/hygiene-admitted-<id>-...`, for the id beside
+them); every `*.admission.json` under exercise/src/drive/ counts. Any file
+under scripts/ whose name starts `hygiene-admitted-` and that no admission
+names -- whatever the rest of its name, and in any subdirectory -- is such a
+snapshot. `admit`, once it has run (admitted or refused), removes every one
+at scripts/' top level, where it writes them, and says which; one in a
+subdirectory it names and leaves, since that file is someone else's. `verify`
+refuses a tree that still holds either. An admission this script cannot read,
+or one listing a path in any other form, leaves what it names unknown: all
+three commands exit 2 naming it, and `admit` reads them before it writes
+anything, so it writes and removes nothing.
 
 `verify` reads every admission from the tree, never from the site it is
 checking, and holds the site to it: exactly the published recordings
@@ -92,12 +97,17 @@ def cited() -> set[str]:
         rel = admitted.relative_to(ROOT).as_posix()
         try:
             table = json.loads(admitted.read_text(encoding='utf-8'))['table']
-            paths = [table[part]['path'] for part in SNAPSHOT]
+            ident = table['id']
+            paths = {part: table[part]['path'] for part in SNAPSHOT}
         except (ValueError, KeyError, TypeError) as err:
             raise Unreadable(f'admission: {rel}: not an admission this script can read ({type(err).__name__}: {err})') from err
-        if not all(isinstance(path, str) for path in paths):
-            raise Unreadable(f'admission: {rel}: its table names a snapshot path that is not a string')
-        named.update(paths)
+        if not (isinstance(ident, str) and re.fullmatch(r'[0-9a-f]{12}', ident)):
+            raise Unreadable(f'admission: {rel}: its table id {ident!r} is not a snapshot id')
+        for part, path in paths.items():
+            # Compared as strings, so only the form admit writes is read: `./scripts/...`, or another case of it, is not.
+            if path != SNAPSHOT[part].format(id=ident):
+                raise Unreadable(f'admission: {rel}: its table lists {path!r} where admit writes {SNAPSHOT[part].format(id=ident)!r}')
+        named.update(paths.values())
     return named
 
 
@@ -109,10 +119,14 @@ def orphans() -> list[pathlib.Path]:
 
 
 def prune() -> None:
-    """Remove the snapshots no admission names, each said by name."""
+    """Remove the snapshots no admission names at scripts/' top level, each said by name; name and leave any deeper."""
     for orphan in orphans():
+        rel = orphan.relative_to(ROOT).as_posix()
+        if orphan.parent != ROOT / 'scripts':
+            print(f'admission: {rel}: named like a snapshot no admission names, below scripts/ where admit never writes one; not removed')
+            continue
         orphan.unlink()
-        print(f'admission: removed {orphan.relative_to(ROOT).as_posix()}: a snapshot no admission names')
+        print(f'admission: removed {rel}: a snapshot no admission names')
 
 
 def sha256(data: bytes) -> str:
@@ -149,6 +163,7 @@ def scan(name: str, data: bytes, table: dict) -> int:
 
 
 def admit(name: str) -> int:
+    cited()  # every admission readable, before anything is written
     recording = RECORDED / f'{name}.json'
     rel = recording.relative_to(ROOT).as_posix()
     if not recording.is_file():
@@ -183,6 +198,7 @@ def admit(name: str) -> int:
 def admissions(directory: str) -> tuple[list, list[str]]:
     """Each published recording's payload in DIRECTORY with its admission from the tree, and every problem found."""
     data_dir = pathlib.Path(directory)
+    cited()  # every admission readable, before any is judged
     if not data_dir.is_dir():
         return [], []
     names = published()

@@ -73,9 +73,12 @@ class Admission(unittest.TestCase):
         self.plant(*self.UNNAMED)
         run = self.run_admission('admit', 'fixture')
         self.assertEqual(run.returncode, 0, run.stderr)
-        for name in self.UNNAMED:
+        top, deeper = self.UNNAMED[:-1], self.UNNAMED[-1]
+        for name in top:
             self.assertIn(f'admission: removed {name}: a snapshot no admission names', run.stdout)
-        self.assertEqual(sorted(self.snapshots()), self.cited)
+        # Below scripts/, where admit never writes one, it is someone else's file: named, left, and refused by verify.
+        self.assertIn(f'admission: {deeper}: named like a snapshot no admission names, below scripts/ where admit never writes one; not removed', run.stdout)
+        self.assertEqual(sorted(self.snapshots()), sorted([*self.cited, deeper]))
 
     def test_a_refused_admission_removes_the_snapshot_it_wrote(self):
         with (self.box / 'scripts/hygiene-patterns.tsv').open('a', encoding='utf-8') as live:
@@ -96,15 +99,38 @@ class Admission(unittest.TestCase):
         for name in self.UNNAMED:
             self.assertIn(f'admission: {name}: a snapshot no admission names', run.stderr)
 
-    def test_an_unreadable_admission_stops_both_and_removes_nothing(self):
+    def unread(self, expected, *commands):
+        """Each command exits 2 naming EXPECTED, and admit -- under a live table that moved -- writes and removes nothing."""
+        admission = self.recording.with_name('fixture.admission.json')
+        before = (admission.read_bytes(), sorted(self.snapshots()))
+        with (self.box / 'scripts/hygiene-patterns.tsv').open('a', encoding='utf-8') as live:
+            live.write('# the live table, moved on\n')
+        for args in commands:
+            run = self.run_admission(*args)
+            self.assertEqual(run.returncode, 2, (args, run.stdout, run.stderr))
+            self.assertIn(expected, run.stderr, args)
+        self.assertEqual((admission.read_bytes(), sorted(self.snapshots())), before)
+
+    def test_an_unreadable_admission_stops_every_command_and_writes_nothing(self):
         data = self.site()
         self.plant(self.UNNAMED[0])
         (self.box / 'exercise/src/drive/recorded/stray.admission.json').write_text('{"table": "x"}', encoding='utf-8')
-        for args in (('admit', 'fixture'), ('verify', data)):
-            run = self.run_admission(*args)
-            self.assertEqual(run.returncode, 2, args)
-            self.assertIn('admission: exercise/src/drive/recorded/stray.admission.json: not an admission this script can read', run.stderr)
-        self.assertIn(self.UNNAMED[0], self.snapshots())
+        self.unread('admission: exercise/src/drive/recorded/stray.admission.json: not an admission this script can read', ('admit', 'fixture'), ('verify', data), ('tables', data))
+
+    def test_a_published_admission_that_does_not_parse_stops_every_command(self):
+        data = self.site()
+        for copy in (self.recording.with_name('fixture.admission.json'), pathlib.Path(data) / 'fixture.admission.json'):
+            copy.write_text('{', encoding='utf-8')
+        self.unread('admission: exercise/src/drive/recorded/fixture.admission.json: not an admission this script can read', ('admit', 'fixture'), ('verify', data), ('tables', data))
+
+    def test_a_snapshot_path_in_another_form_is_not_read_as_naming_it(self):
+        data = self.site()
+        for copy in (self.recording.with_name('fixture.admission.json'), pathlib.Path(data) / 'fixture.admission.json'):
+            admission = json.loads(copy.read_text(encoding='utf-8'))
+            for part in ('patterns', 'exceptions', 'hashes'):
+                admission['table'][part]['path'] = './' + admission['table'][part]['path']
+            copy.write_text(json.dumps(admission, indent=2) + '\n', encoding='utf-8')
+        self.unread("where admit writes 'scripts/hygiene-admitted-", ('admit', 'fixture'), ('verify', data), ('tables', data))
 
 
 if __name__ == '__main__':
