@@ -3365,6 +3365,7 @@ becomes = '''
             return because;'''
 catches = [
     "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
+    "drive::serve::tests::after_ended_the_written_log_is_sealed_byte_for_byte",
     "drive::session::tests::a_command_with_nothing_to_act_on_is_refused_and_logged",
 ]
 

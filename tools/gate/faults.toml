@@ -8722,3 +8722,43 @@ label = "a credential shape inside an image payload reads red, against its file"
 failure_class = "hygiene.forbidden-pattern"
 expected_exit = "0"
 migrated = false
+
+[[fault]]
+id = "drive.session-logs-a-refusal-after-the-end"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-logs-a-refusal-after-the-end"
+failure_class = "drive.session-logs-a-refusal-after-the-end"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-serves-on-after-ended"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-serves-on-after-ended"
+failure_class = "drive.serve-bin-serves-on-after-ended"
+migrated = false
+
+[[fault]]
+id = "drive.serve-events-outlive-ended"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-events-outlive-ended"
+failure_class = "drive.serve-events-outlive-ended"
+migrated = false
+
+[[fault]]
+id = "drive.session-drops-its-serving"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-drops-its-serving"
+failure_class = "drive.session-drops-its-serving"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-assumes-one-stream"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-assumes-one-stream"
+failure_class = "drive.serve-bin-assumes-one-stream"
+migrated = false
