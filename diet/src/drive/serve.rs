@@ -85,6 +85,33 @@ pub fn write_through<S: Streaming + 'static>(
     }));
 }
 
+/// What starting a session's writers emptied that held something -- a
+/// previous record, its sidecar, a previous log -- so that a failure after
+/// it says so: a previous record lost without a trace is what the first real
+/// drive would meet (#264, ruled (i)).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Emptied(Vec<String>);
+
+impl Emptied {
+    /// Note that `what` was emptied.
+    pub fn push(&mut self, what: String) {
+        self.0.push(what);
+    }
+
+    /// `why`, and what was already emptied before it, when anything was.
+    #[must_use]
+    pub fn named(&self, why: String) -> String {
+        if self.0.is_empty() {
+            why
+        } else {
+            format!(
+                "{why}; already emptied before this failure: {}",
+                self.0.join(", ")
+            )
+        }
+    }
+}
+
 /// How a server behaves at its edges.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
@@ -1354,6 +1381,22 @@ mod tests {
                     .clone()
             ),
             (1, vec!["full".to_owned()])
+        );
+    }
+
+    #[test]
+    fn a_failure_after_the_writers_names_what_they_emptied() {
+        // The `serve` binary's message for a failure after its writers start,
+        // `Server::start`'s among them, which cannot be made to fail from
+        // outside the process (#264, ruled (i)).
+        let mut emptied = Emptied::default();
+        assert_eq!(emptied.named("why".to_owned()), "why");
+        emptied.push("the previous record at r".to_owned());
+        emptied.push("the previous log at l".to_owned());
+        assert_eq!(
+            emptied.named("the server did not start: x".to_owned()),
+            "the server did not start: x; already emptied before this failure: the previous \
+             record at r, the previous log at l"
         );
     }
 

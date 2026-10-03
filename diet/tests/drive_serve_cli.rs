@@ -1096,6 +1096,29 @@ fn a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts() {
 }
 
 #[test]
+fn a_drive_server_whose_writers_fail_names_what_they_had_emptied() {
+    // A failure after the writers start says what it had already emptied
+    // (#264, ruled (i)): here the record is emptied, then its sidecar --
+    // a directory -- cannot be removed.
+    let record = file_holding("record", "an earlier session's record\n");
+    let path = record.0.to_string_lossy().into_owned();
+    let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+    std::fs::create_dir_all(sidecar.join("held")).expect("a directory where the sidecar goes");
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+    let _ = std::fs::remove_dir_all(&sidecar);
+    assert_eq!(code, Some(3), "{said}");
+    assert!(
+        said.contains("cannot be removed")
+            && said.contains(&format!(
+                "already emptied before this failure: the previous record at {path}"
+            )),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were() {
     // Emptied only once the address is bound (#264's review, round 2).
     let record = file_holding("record", "an earlier session's record\n");

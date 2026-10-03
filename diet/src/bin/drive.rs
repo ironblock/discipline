@@ -275,28 +275,21 @@ fn serve(args: &[String]) -> ExitCode {
         Err(refused) => return refused,
     };
     let session = std::sync::Arc::new(Session::open(transport, shape));
-    let writers = std::sync::Arc::clone(&session);
     let opened = session.opened();
     let config = Config {
         allowed_origins,
         credential,
         ..Config::default()
     };
-    // One render for the stream and the log, so they are one text.
-    let render = diet::drive::session::render;
-    // The writers start once the address is bound and before the server
-    // does: no command can append a line before the log's sink is in place
-    // (#264's review), and any refusal before this point -- the engine
-    // check, the bind -- leaves the log, the record and its sidecar as they
-    // were. A failure from here on has emptied them.
-    let (log, record_held) =
-        match started_writers(&writers, render, log_file, record.zip(regime.clone())) {
-            Ok(held) => held,
-            Err(why) => return fail(EXIT_OUTPUT, &why),
-        };
-    let server = match Server::start(listener, session, config, render) {
-        Ok(server) => server,
-        Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
+    let (server, log, record_held) = match started(
+        session,
+        listener,
+        config,
+        log_path.as_deref().zip(log_file),
+        record.zip(regime.clone()),
+    ) {
+        Ok(started) => started,
+        Err(code) => return code,
     };
     println!(
         "{}",
@@ -377,6 +370,37 @@ fn outputs(
     Ok((log, record))
 }
 
+/// The writers, then the server. The writers start once the address is
+/// bound and before the server does: no command can append a line before
+/// the log's sink is in place (#264's review). Any refusal before this --
+/// the engine check, the bind -- leaves an existing log, record and sidecar
+/// as they were, and creates an absent one empty. A failure from here on
+/// names what it had already emptied (#264, ruled (i)): the writers empty
+/// the record, then its sidecar, then the log, and the server starts last.
+/// One render for the stream and the log, so they are one text.
+#[allow(clippy::type_complexity)]
+fn started(
+    session: std::sync::Arc<Session<HttpStream>>,
+    listener: std::net::TcpListener,
+    config: Config,
+    log: Option<(&str, (std::fs::File, bool))>,
+    record: Option<(
+        ((String, std::fs::File), bool),
+        diet::formats::record::Regime,
+    )>,
+) -> Result<(Server, Option<bool>, Option<bool>), ExitCode> {
+    let render = diet::drive::session::render;
+    let (log, record_held, emptied) =
+        started_writers(&session, render, log, record).map_err(|why| fail(EXIT_OUTPUT, &why))?;
+    let server = Server::start(listener, session, config, render).map_err(|why| {
+        fail(
+            EXIT_HALT,
+            &emptied.named(format!("the server did not start: {why}")),
+        )
+    })?;
+    Ok((server, log, record_held))
+}
+
 /// The log and the record, started once the address is bound and before
 /// the server starts. Both are emptied now: the log is written from the
 /// session's first line on, and the record waits for the session to end --
@@ -387,35 +411,43 @@ fn outputs(
 fn started_writers(
     session: &std::sync::Arc<Session<HttpStream>>,
     render: diet::drive::serve::Render,
-    log: Option<(std::fs::File, bool)>,
+    log: Option<(&str, (std::fs::File, bool))>,
     record: Option<(
         ((String, std::fs::File), bool),
         diet::formats::record::Regime,
     )>,
-) -> Result<(Option<bool>, Option<bool>), String> {
+) -> Result<(Option<bool>, Option<bool>, diet::drive::serve::Emptied), String> {
+    let mut emptied = diet::drive::serve::Emptied::default();
     let record_held = record
         .map(|(((path, file), held), regime)| {
             let sidecar = format!("{path}.unspellable.json");
             let stale = std::path::Path::new(&sidecar).exists();
             file.set_len(0)
                 .map_err(|why| format!("the record cannot be emptied: {why}"))?;
+            if held {
+                emptied.push(format!("the previous record at {path}"));
+            }
             if stale {
                 std::fs::remove_file(&sidecar)
-                    .map_err(|why| format!("{sidecar} cannot be removed: {why}"))?;
+                    .map_err(|why| emptied.named(format!("{sidecar} cannot be removed: {why}")))?;
+                emptied.push(format!("the previous sidecar at {sidecar}"));
             }
             keep_record(std::sync::Arc::clone(session), regime, (path, file));
             Ok::<_, String>(held || stale)
         })
         .transpose()?;
     let log_held = log
-        .map(|(file, truncated)| {
+        .map(|(path, (file, truncated))| {
             file.set_len(0)
-                .map_err(|why| format!("the log cannot be emptied: {why}"))?;
+                .map_err(|why| emptied.named(format!("the log cannot be emptied: {why}")))?;
+            if truncated {
+                emptied.push(format!("the previous log at {path}"));
+            }
             keep_log(session, render, file);
             Ok::<_, String>(truncated)
         })
         .transpose()?;
-    Ok((log_held, record_held))
+    Ok((log_held, record_held, emptied))
 }
 
 /// The session's record, written once, when it settles `ended` (`--record`,
