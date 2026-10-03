@@ -57,7 +57,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::client::CAPPED_FINISH_REASONS;
-use crate::client::shape::{Message, RequestShape, Role};
+use crate::client::shape::{Concurrency, Message, RequestShape, Role, Serving};
 use crate::client::stream::{
     Cancel, Ended as StreamEnded, Piece, Progress, Rejection, Streaming, Timings,
 };
@@ -207,6 +207,9 @@ pub enum Event {
         model: String,
         /// The messages the trunk starts from.
         head: Vec<Message>,
+        /// What serves the session, as its caller declared it: log v2's
+        /// `serving` (#292). `None` when nothing was declared.
+        serving: Option<Serving>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -578,6 +581,18 @@ impl<S: Streaming + 'static> Session<S> {
     /// trunk starts from, and its `limits.call` bounds each turn's call.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
+        Self::opened_as(transport, template, None)
+    }
+
+    /// [`Session::open`], declaring what serves it -- the dialect it speaks
+    /// and, when the operator declared it, its concurrency -- which the log's
+    /// `session.start` carries (#292).
+    #[must_use]
+    pub fn open_serving(transport: S, template: RequestShape, serving: Serving) -> Self {
+        Self::opened_as(transport, template, Some(serving))
+    }
+
+    fn opened_as(transport: S, template: RequestShape, serving: Option<Serving>) -> Self {
         let trunk = template.messages.clone();
         let opened = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -600,6 +615,7 @@ impl<S: Streaming + 'static> Session<S> {
             opened,
             model: template.model.clone(),
             head: template.messages.clone(),
+            serving,
         });
         Self {
             shared: Arc::new(Shared {
@@ -890,6 +906,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             opened,
             model,
             head,
+            serving,
         } => log::Event::SessionStart {
             version: log::VERSION,
             opened: *opened,
@@ -902,7 +919,13 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 })
                 .collect(),
             // v2's declaration, written once the session carries one (#30's I2).
-            serving: None,
+            serving: serving.as_ref().map(|serving| log::Serving {
+                dialect: serving.dialect.name.clone(),
+                concurrency: match serving.concurrency {
+                    Concurrency::Declared(streams) => Some(u64::from(streams)),
+                    Concurrency::Undeclared => None,
+                },
+            }),
         },
         Event::Asked { turn, text } => log::Event::Ask {
             turn: *turn,
@@ -2315,6 +2338,7 @@ pub(in crate::drive) mod tests {
             opened,
             model,
             head,
+            serving: None,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -2373,6 +2397,10 @@ pub(in crate::drive) mod tests {
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
                 head: vec![Message::new(Role::System, HEAD)],
+                serving: Some(Serving {
+                    concurrency: Concurrency::Declared(2),
+                    dialect: crate::client::shape::Dialect::llama_cpp(),
+                }),
             },
             Event::Asked {
                 turn: 1,
@@ -2519,7 +2547,10 @@ pub(in crate::drive) mod tests {
                 version: log::VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
-                serving: None,
+                serving: Some(log::Serving {
+                    dialect: "llama.cpp".to_owned(),
+                    concurrency: Some(2),
+                }),
                 head: vec![log::HeadMessage {
                     role: log::Role::System,
                     content: HEAD.to_owned(),

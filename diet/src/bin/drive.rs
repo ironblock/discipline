@@ -283,7 +283,7 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
-    let session = std::sync::Arc::new(Session::open(transport, shape));
+    let session = served_session(transport, shape);
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
     let config = Config {
@@ -393,6 +393,23 @@ fn outputs(
         None => None,
     };
     Ok((log, record))
+}
+
+/// `serve`'s session, declaring what serves it in the log's `session.start`
+/// (#292): its transport speaks llama-server's dialect, and nobody declared
+/// how many streams the server serves.
+fn served_session(
+    transport: HttpStream,
+    shape: RequestShape,
+) -> std::sync::Arc<Session<HttpStream>> {
+    std::sync::Arc::new(Session::open_serving(
+        transport,
+        shape,
+        Serving {
+            concurrency: Concurrency::Undeclared,
+            dialect: Dialect::llama_cpp(),
+        },
+    ))
 }
 
 /// The writers, then the server. The writers start once the address is

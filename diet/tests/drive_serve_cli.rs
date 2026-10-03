@@ -259,9 +259,24 @@ fn a_served_drive_streams_a_real_servers_answer_over_sse() {
         + "\n";
     log::parse(&document).expect("what the binary streams is a log the format reads");
 
-    let log::Event::SessionStart { opened, head, .. } = &lines[0].event else {
+    let log::Event::SessionStart {
+        opened,
+        head,
+        serving,
+        ..
+    } = &lines[0].event
+    else {
         panic!("the stream does not begin with the session: {stream}");
     };
+    // What serves it, declared (#292): llama-server's dialect, concurrency
+    // undeclared rather than assumed one.
+    assert_eq!(
+        serving
+            .as_ref()
+            .map(|serving| (serving.dialect.as_str(), serving.concurrency)),
+        Some(("llama.cpp", None)),
+        "{stream}"
+    );
     assert_eq!(
         *opened, served.opened,
         "the announced `opened` is the log's"
