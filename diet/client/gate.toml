@@ -704,10 +704,17 @@ anchor = '''
         cancel.on_cancel(move || close(&waker));'''
 becomes = '''
         cancel.on_cancel(move || drop(waker));'''
+# A third name, `a_timings_chunk_before_a_cancel_is_not_a_finished_call`,
+# catches this fault only by timing: its stub writes the timings chunk with
+# no pause after the piece, and the call blocks (red) only if that chunk is
+# read before the cancel is asked; if it arrives after, the read wakes, sees
+# the cancel, and the test passes (selftest shard 15 of run 37021427242, on
+# a branch that does not touch the client). Its subject is the timings
+# chunk, not the socket, so it is dropped, as #252's ruling (b) dropped one:
+# the two below catch the fault on every schedule.
 catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
-    "client::stream::tests::a_timings_chunk_before_a_cancel_is_not_a_finished_call",
 ]
 
 [[fault]]

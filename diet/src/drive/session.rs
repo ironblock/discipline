@@ -221,6 +221,9 @@ pub enum Event {
         turn: u32,
         /// The lane it was made on.
         lane: Lane,
+        /// The sha256 of the request's frozen head, as `client::head` hashes
+        /// it: what a live record's request names (#157).
+        head_sha256: String,
     },
     /// The settlement moved.
     Settled {
@@ -401,7 +404,14 @@ struct State {
     /// A checked gap waiting for its admitted command's outcome: the next
     /// event pushed, under the same lock.
     pending_gap: Option<IdleGap>,
+    /// Where each event is written as it is appended (see
+    /// [`Session::write_through`]).
+    sink: Option<Sink>,
 }
+
+/// What is handed each logged event, on the appending thread, under the
+/// session's lock (see [`Session::write_through`]).
+pub type Sink = Box<dyn FnMut(&Logged) + Send>;
 
 impl State {
     fn push(&mut self, event: Event) -> u64 {
@@ -421,6 +431,9 @@ impl State {
             self.gap_open = Some(seq);
         }
         self.log.push(Logged { seq, t, event });
+        if let (Some(sink), Some(logged)) = (self.sink.as_mut(), self.log.last()) {
+            sink(logged);
+        }
         seq
     }
 
@@ -555,6 +568,7 @@ impl<S: Streaming + 'static> Session<S> {
             gap_open: None,
             carried: None,
             pending_gap: None,
+            sink: None,
         };
         state.push(Event::Started {
             opened,
@@ -608,6 +622,9 @@ impl<S: Streaming + 'static> Session<S> {
             text: text.to_owned(),
         });
         state.move_to(Settlement::Turn);
+        let mut shape = self.shared.template.clone();
+        shape.messages.clone_from(&state.trunk);
+        shape.messages.push(Message::new(Role::User, text));
         // Pushed here, under the lock that admits the ask, and never on the
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
@@ -615,6 +632,7 @@ impl<S: Streaming + 'static> Session<S> {
         let request = state.push(Event::Requested {
             turn,
             lane: Lane::Trunk,
+            head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
         });
         let cancel = Cancel::new();
         state.flight = Some(Flight {
@@ -622,9 +640,6 @@ impl<S: Streaming + 'static> Session<S> {
             request,
             cancel: cancel.clone(),
         });
-        let mut shape = self.shared.template.clone();
-        shape.messages.clone_from(&state.trunk);
-        shape.messages.push(Message::new(Role::User, text));
         drop(state);
         self.shared.changed.notify_all();
 
@@ -774,6 +789,19 @@ impl<S: Streaming + 'static> Session<S> {
         self.shared.lock().trunk.clone()
     }
 
+    /// Hand `sink` every event logged so far, then each one as it is
+    /// appended (`--log`, #157). It runs on the appending thread, under the
+    /// session's lock, so an append returns only after `sink` has returned
+    /// (#230, ruled: the write is the appender's own, not a thread's that
+    /// may lag it). A `sink` must not call back into the session.
+    pub fn write_through(&self, mut sink: Sink) {
+        let mut state = self.shared.lock();
+        for logged in &state.log {
+            sink(logged);
+        }
+        state.sink = Some(sink);
+    }
+
     /// Every event from sequence number `first` on.
     #[must_use]
     pub fn events_from(&self, first: u64) -> Vec<Logged> {
@@ -853,13 +881,16 @@ pub fn line_of(logged: &Logged) -> log::Line {
             turn: *turn,
             text: text.clone(),
         },
-        Event::Requested { turn, lane } => log::Event::Request {
+        Event::Requested {
+            turn,
+            lane,
+            head_sha256,
+        } => log::Event::Request {
             turn: *turn,
             lane: match lane {
                 Lane::Trunk => log::Lane::Trunk,
             },
-            // v2's head, written once the session carries it (#157's --record).
-            head_sha256: None,
+            head_sha256: Some(head_sha256.clone()),
         },
         Event::Settled { from, to } => log::Event::Settlement {
             from: state_of(*from),
@@ -1234,6 +1265,15 @@ pub(in crate::drive) mod tests {
 
     const HEAD: &str = "you are the trunk";
 
+    /// The head digest of the first request a session on [`template`]
+    /// sends for `asked`: the template's messages and the ask, through
+    /// `client::head`, computed here apart from the session.
+    fn first_head(asked: &str) -> String {
+        let mut shape = template();
+        shape.messages.push(Message::new(Role::User, asked));
+        crate::client::head::Head::of(&shape).digest().to_owned()
+    }
+
     pub(in crate::drive) fn template() -> RequestShape {
         RequestShape {
             model: "a-model".to_owned(),
@@ -1326,7 +1366,8 @@ pub(in crate::drive) mod tests {
                 },
                 Event::Requested {
                     turn: 1,
-                    lane: Lane::Trunk
+                    lane: Lane::Trunk,
+                    head_sha256: first_head("say hello"),
                 },
                 Event::Delta {
                     request: 3,
@@ -2142,11 +2183,14 @@ pub(in crate::drive) mod tests {
         let requests: Vec<u64> = log
             .iter()
             .filter(|logged| {
-                logged.event
-                    == Event::Requested {
+                matches!(
+                    logged.event,
+                    Event::Requested {
                         turn: 1,
                         lane: Lane::Trunk,
+                        ..
                     }
+                )
             })
             .map(|logged| logged.seq)
             .collect();
@@ -2251,6 +2295,7 @@ pub(in crate::drive) mod tests {
             Event::Requested {
                 turn: 1,
                 lane: Lane::Trunk,
+                head_sha256: "a".repeat(64),
             },
             Event::Refused {
                 command: CommandKind::Cancel,
@@ -2393,7 +2438,7 @@ pub(in crate::drive) mod tests {
             log::Event::Request {
                 turn: 1,
                 lane: log::Lane::Trunk,
-                head_sha256: None,
+                head_sha256: Some("a".repeat(64)),
             },
             log::Event::Refused {
                 command: log::Command::Cancel,
@@ -2483,6 +2528,46 @@ pub(in crate::drive) mod tests {
                 ended_by: log::GapEnd::Ask,
             },
         ]
+    }
+
+    /// The writer's half of #249's rule: a server that reports `timings`
+    /// gets no `usage` on its response line -- on llama.cpp the two are equal
+    /// (measured on #157), and the reader refuses a line carrying both.
+    #[test]
+    fn a_response_with_timings_is_written_without_usage() {
+        let session = Session::open(
+            Canned::new([vec![
+                Step::Delta("Hello".to_owned()),
+                Step::Timings(crate::client::stream::Timings {
+                    prompt_n: Some(18),
+                    cache_n: Some(160),
+                    predicted_n: Some(66),
+                    ..crate::client::stream::Timings::default()
+                }),
+            ]]),
+            template(),
+        );
+        session.ask("say hello", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let responses: Vec<log::Line> = log
+            .iter()
+            .map(line_of)
+            .filter(|line| matches!(line.event, log::Event::Response { .. }))
+            .collect();
+        assert!(
+            matches!(
+                responses.as_slice(),
+                [log::Line {
+                    event: log::Event::Response {
+                        timings: Some(_),
+                        usage: None,
+                        ..
+                    },
+                    ..
+                }]
+            ),
+            "{responses:?}"
+        );
     }
 
     #[test]

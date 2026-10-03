@@ -8109,6 +8109,166 @@ failure_class = "drive.serve-bin-empties-the-log-before-it-starts"
 migrated = false
 
 [[fault]]
+id = "drive.projection-rebuilds-without-the-answer"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-rebuilds-without-the-answer"
+failure_class = "drive.projection-rebuilds-without-the-answer"
+migrated = false
+
+[[fault]]
+id = "drive.projection-derives-on-an-uncited-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-derives-on-an-uncited-engine"
+failure_class = "drive.projection-derives-on-an-uncited-engine"
+migrated = false
+
+[[fault]]
+id = "drive.projection-prefill-on-an-uncited-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-prefill-on-an-uncited-engine"
+failure_class = "drive.projection-prefill-on-an-uncited-engine"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-an-unspellable"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-an-unspellable"
+failure_class = "drive.projection-drops-an-unspellable"
+migrated = false
+
+[[fault]]
+id = "drive.projection-guesses-an-unrebuilt-head"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-guesses-an-unrebuilt-head"
+failure_class = "drive.projection-guesses-an-unrebuilt-head"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-records-without-a-regimen"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-records-without-a-regimen"
+failure_class = "drive.serve-bin-records-without-a-regimen"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-never-writes-the-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-never-writes-the-record"
+failure_class = "drive.serve-bin-never-writes-the-record"
+migrated = false
+
+[[fault]]
+id = "drive.session-writes-usage-beside-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-writes-usage-beside-timings"
+failure_class = "drive.session-writes-usage-beside-timings"
+migrated = false
+
+[[fault]]
+id = "drive.session-write-through-skips-the-lines-before-it"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-write-through-skips-the-lines-before-it"
+failure_class = "drive.session-write-through-skips-the-lines-before-it"
+migrated = false
+
+[[fault]]
+id = "drive.session-append-leaves-the-sink-unfed"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-append-leaves-the-sink-unfed"
+failure_class = "drive.session-append-leaves-the-sink-unfed"
+migrated = false
+
+[[fault]]
+id = "drive.serve-log-writes-after-a-failure"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-log-writes-after-a-failure"
+failure_class = "drive.serve-log-writes-after-a-failure"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-an-unanswered-request"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-an-unanswered-request"
+failure_class = "drive.projection-drops-an-unanswered-request"
+migrated = false
+
+[[fault]]
+id = "drive.projection-cites-a-literal-on-any-binary"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-cites-a-literal-on-any-binary"
+failure_class = "drive.projection-cites-a-literal-on-any-binary"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-reports-a-digest-of-other-bytes"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-reports-a-digest-of-other-bytes"
+failure_class = "drive.serve-bin-reports-a-digest-of-other-bytes"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-record"
+failure_class = "drive.serve-bin-leaves-an-earlier-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-sidecar"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-sidecar"
+failure_class = "drive.serve-bin-leaves-an-earlier-sidecar"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-only-a-held-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-only-a-held-record"
+failure_class = "drive.serve-bin-announces-only-a-held-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-every-record-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-every-record-emptied"
+failure_class = "drive.serve-bin-announces-every-record-emptied"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-empties-the-record-before-the-bind"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-empties-the-record-before-the-bind"
+failure_class = "drive.serve-bin-empties-the-record-before-the-bind"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-forgets-what-it-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-forgets-what-it-emptied"
+failure_class = "drive.serve-bin-forgets-what-it-emptied"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"

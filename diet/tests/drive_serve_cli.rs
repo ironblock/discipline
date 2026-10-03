@@ -38,6 +38,10 @@ struct Served {
     engine_identity: Option<String>,
     /// Where `--log` writes, and whether naming it emptied a file.
     log: Option<(String, bool)>,
+    /// Where `--record` writes, and whether naming it emptied anything.
+    record: Option<(String, bool)>,
+    /// Every later line it writes on stdout.
+    said: std::sync::mpsc::Receiver<String>,
     _head: HeadFile,
 }
 
@@ -77,13 +81,17 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
     // announcing must fail this test, not hang it -- and not leave a server
     // running after it.
     let stdout = child.stdout.take().expect("stdout is piped");
-    let (line, announced) = std::sync::mpsc::channel();
+    let (line, lines) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let mut first = String::new();
-        let _ = BufReader::new(stdout).read_line(&mut first);
-        let _ = line.send(first);
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut next = String::new();
+            if reader.read_line(&mut next).unwrap_or(0) == 0 || line.send(next).is_err() {
+                break;
+            }
+        }
     });
-    let Ok(first) = announced.recv_timeout(Duration::from_secs(10)) else {
+    let Ok(first) = lines.recv_timeout(Duration::from_secs(10)) else {
         let _ = child.kill();
         let _ = child.wait();
         panic!("diet-drive serve did not announce itself within 10 s");
@@ -103,6 +111,11 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
             .as_str()
             .zip(announced["log_truncated"].as_bool())
             .map(|(path, truncated)| (path.to_owned(), truncated)),
+        record: announced["record"]
+            .as_str()
+            .zip(announced["record_truncated"].as_bool())
+            .map(|(path, truncated)| (path.to_owned(), truncated)),
+        said: lines,
         child,
         _head: head,
     }
@@ -611,6 +624,81 @@ fn a_drive_server_refuses_a_wildcard_before_it_asks_the_engine() {
 }
 
 #[test]
+fn a_drive_server_killed_mid_session_leaves_a_log_whole_through_what_it_showed() {
+    // #230, ruled: no signal handler. Killed without warning, the log holds
+    // every line `/events` showed before the kill, each whole and in order,
+    // and nothing after its last line break but one torn line at most, which
+    // the reader counts as torn.
+    let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
+    let log_file = file_holding("log", "");
+    let path = log_file.0.to_string_lossy().into_owned();
+    let mut served = start(&stub.url(), &["--log", &path]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let seen = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| complete_data_events(read) >= 2,
+    );
+    served.child.kill().expect("the server is killed");
+    let _ = served.child.wait();
+
+    let shown: Vec<&str> = seen
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .collect();
+    let bytes = std::fs::read(&log_file.0).expect("the log");
+    // Split on line breaks as bytes: a kill may cut inside a character.
+    let mut segments: Vec<&[u8]> = bytes.split(|byte| *byte == b'\n').collect();
+    let tail = segments.pop().unwrap_or_default();
+    let lines: Vec<&str> = segments
+        .iter()
+        .map(|line| std::str::from_utf8(line).expect("every whole line is UTF-8"))
+        .collect();
+    assert!(
+        lines.len() >= shown.len() && lines[..shown.len()] == shown[..],
+        "every line shown before the kill is in the log, whole: {lines:?}"
+    );
+    for line in &lines {
+        let _ = log_line_object(line);
+    }
+    // What follows the last line break is what #259's reader allows and
+    // nothing else: nothing; a complete event, read as one; or the start of
+    // one, a torn write the reader sets aside and counts (`torn: 1`).
+    assert!(
+        tail.is_empty() || tail[0] == b'{',
+        "only an event's start follows the last line break: {tail:?}"
+    );
+    let tail_is_an_event = std::str::from_utf8(tail)
+        .ok()
+        .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+        .is_some_and(|value| value.is_object());
+
+    // And #259's reader agrees: the log reads through its last complete
+    // event, a torn tail set aside and counted.
+    let checked = Command::new(DIET)
+        .arg("check-log")
+        .arg(&log_file.0)
+        .output()
+        .expect("diet runs");
+    let said = String::from_utf8_lossy(&checked.stdout);
+    assert_eq!(checked.status.code(), Some(0), "{said}");
+    let read = log_line_object(&said);
+    assert_eq!(
+        (
+            read["value"]["events"].as_array().map(Vec::len),
+            read["value"]["torn"].as_u64()
+        ),
+        (
+            Some(lines.len() + usize::from(tail_is_an_event)),
+            Some(u64::from(!tail.is_empty() && !tail_is_an_event))
+        ),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_drive_servers_log_file_is_the_events_stream_line_for_line() {
     let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
     let log_file = file_holding("log", "");
@@ -732,7 +820,8 @@ fn a_drive_server_says_when_its_log_flag_emptied_a_file() {
 }
 
 /// `diet-drive serve` started through `sh` with `prelude` before it, its
-/// first line read and its stdout then closed, as `start` closes it.
+/// first line read and its stdout then closed -- unlike `start`, which keeps
+/// reading.
 fn start_through_sh(prelude: &str, endpoint: &str, extra: &[&str]) -> (Child, String, HeadFile) {
     let head = file_holding("head", HEAD);
     let mut child = Command::new("sh")
@@ -817,7 +906,13 @@ fn a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was() {
         .to_string();
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let (code, said) = run_briefly(&stub.url(), &["--log", &path, "--port", &port]);
+    // Exit 2 is shared with a usage refusal: the reason says it was the bind
+    // (#264, round 3).
     assert_eq!(code, Some(2), "the bind fails: {said}");
+    assert!(
+        said.contains("cannot listen on"),
+        "the bind, not usage: {said}"
+    );
     assert_eq!(
         std::fs::read_to_string(&held.0).expect("still there"),
         "an earlier session's log\n"
@@ -869,4 +964,249 @@ fn a_drive_server_refuses_a_canned_regimen_against_a_server_with_no_props() {
     let (code, said) = run_briefly(&stub.url(), &["--regimen", &dev_loop()]);
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains("answered 404"), "{said}");
+}
+
+/// `diet`, the checker.
+const DIET: &str = env!("CARGO_BIN_EXE_diet");
+
+#[test]
+fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
+    // #157's acceptance as ruled (a): the projection and the unspellable
+    // path, nothing about counts -- the canned substrate is not a cited
+    // engine, so every turn and response is named, never derived.
+    // The canned regimen passes only on the canned server (#243).
+    let stub = Stub::serving_with_props(
+        vec![Act::Raw(CAPTURED.to_vec()), Act::Raw(CAPTURED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+    assert_eq!(
+        served.record,
+        Some((path.clone(), false)),
+        "nothing was there to empty"
+    );
+    let address = served.listening.clone();
+    for turn in 1..=2 {
+        let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+        assert_eq!(status(&reply), 200, "{reply}");
+        exchange(
+            &address,
+            &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+            |read| read.matches(r#""to":"awaiting""#).count() >= turn,
+        );
+    }
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+
+    let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+    // The report, written after both files: its digests are theirs.
+    let report = log_line_object(
+        &served
+            .said
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the record's report"),
+    );
+    assert_eq!(
+        (
+            report["record_sha256"].as_str().map(str::to_owned),
+            report["sidecar_sha256"].as_str().map(str::to_owned)
+        ),
+        (
+            Some(diet::digest::sha256_hex(
+                &std::fs::read(&record.0).expect("the record")
+            )),
+            Some(diet::digest::sha256_hex(
+                &std::fs::read(&sidecar).expect("the sidecar")
+            ))
+        ),
+        "{report}"
+    );
+    let checked = Command::new(DIET)
+        .args(["check-record"])
+        .arg(&record.0)
+        .output()
+        .expect("diet runs");
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&checked.stdout)
+    );
+    let written = std::fs::read_to_string(&record.0).expect("the record");
+    let kinds: Vec<String> = written
+        .lines()
+        .map(|line| {
+            log_line_object(line)["record"]
+                .as_str()
+                .expect("a row's kind")
+                .to_owned()
+        })
+        .collect();
+    // The second request's head grew by the first turn's ask and answer,
+    // rebuilt from the log and named by client::head (ruled on #157).
+    assert_eq!(
+        kinds,
+        ["start", "request", "request", "prefix.changed"],
+        "{written}"
+    );
+    assert!(
+        !written.contains(r#""reason":"unattributed""#),
+        "the head was rebuilt: {written}"
+    );
+    let named = log_line_object(&std::fs::read_to_string(&sidecar).expect("the sidecar"));
+    let items = named["unspellable"].as_array().expect("a list");
+    let named_kinds: Vec<&str> = items
+        .iter()
+        .filter_map(|item| item["kind"].as_str())
+        .collect();
+    assert_eq!(
+        named_kinds,
+        ["ask", "response", "ask", "response"],
+        "{named}"
+    );
+    assert!(
+        items[1]["text"].is_string(),
+        "the answer's text is kept: {named}"
+    );
+    let _ = std::fs::remove_file(&sidecar);
+}
+
+#[test]
+fn a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts() {
+    // Left in place until the session ends, an earlier run's record would
+    // read as this session's if this one never ended (#264's review). An
+    // empty record beside a stale sidecar is announced as emptied too.
+    for earlier in ["an earlier session's record\n", ""] {
+        let stub = Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info())
+            .expect("loopback");
+        let record = file_holding("record", earlier);
+        let path = record.0.to_string_lossy().into_owned();
+        let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+        std::fs::write(&sidecar, "an earlier session's sidecar\n").expect("written");
+        let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+        let left = (
+            served.record.clone(),
+            std::fs::read_to_string(&record.0).expect("the record"),
+            sidecar.exists(),
+        );
+        let _ = std::fs::remove_file(&sidecar);
+        assert_eq!(
+            left,
+            (Some((path, true)), String::new(), false),
+            "{earlier:?}"
+        );
+    }
+}
+
+#[test]
+fn a_drive_server_whose_writers_fail_names_what_they_had_emptied() {
+    // A failure after the writers start says what it had already emptied
+    // (#264, ruled (i)): here the record is emptied, then its sidecar --
+    // a directory -- cannot be removed.
+    let record = file_holding("record", "an earlier session's record\n");
+    let path = record.0.to_string_lossy().into_owned();
+    let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+    std::fs::create_dir_all(sidecar.join("held")).expect("a directory where the sidecar goes");
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+    let _ = std::fs::remove_dir_all(&sidecar);
+    assert_eq!(code, Some(3), "{said}");
+    assert!(
+        said.contains("cannot be removed")
+            && said.contains(&format!(
+                "already emptied before this failure: the previous record at {path}"
+            )),
+        "{said}"
+    );
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_drive_server_whose_log_cannot_be_emptied_names_the_record_it_had_emptied() {
+    // Linux refuses `ftruncate` on anything but a regular file, so a log at
+    // `/dev/null` opens and then cannot be emptied -- after the record was
+    // (#264, ruled (i); round 4). macOS empties `/dev/null`, so this path is
+    // reached only here.
+    let record = file_holding("record", "an earlier session's record\n");
+    let path = record.0.to_string_lossy().into_owned();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &dev_loop(),
+            "--record",
+            &path,
+            "--log",
+            "/dev/null",
+        ],
+    );
+    assert_eq!(code, Some(3), "{said}");
+    assert!(
+        said.contains("the log cannot be emptied")
+            && said.contains(&format!(
+                "already emptied before this failure: the previous record at {path}"
+            )),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were() {
+    // Emptied only once the address is bound (#264's review, round 2).
+    let record = file_holding("record", "an earlier session's record\n");
+    let path = record.0.to_string_lossy().into_owned();
+    let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+    std::fs::write(&sidecar, "an earlier session's sidecar\n").expect("written");
+    let taken = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = std::net::TcpListener::local_addr(&taken)
+        .expect("its address")
+        .port()
+        .to_string();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &["--regimen", &dev_loop(), "--record", &path, "--port", &port],
+    );
+    let left = (
+        std::fs::read_to_string(&record.0).ok(),
+        std::fs::read_to_string(&sidecar).ok(),
+    );
+    let _ = std::fs::remove_file(&sidecar);
+    // Exit 2 is shared with a usage refusal: the reason says it was the bind
+    // (#264, round 3).
+    assert_eq!(code, Some(2), "the bind fails: {said}");
+    assert!(
+        said.contains("cannot listen on"),
+        "the bind, not usage: {said}"
+    );
+    assert_eq!(
+        left,
+        (
+            Some("an earlier session's record\n".to_owned()),
+            Some("an earlier session's sidecar\n".to_owned())
+        )
+    );
+}
+
+#[test]
+fn a_drive_server_refuses_a_record_without_a_regimen() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let path = std::env::temp_dir()
+        .join(format!(
+            "diet-drive-unwritten-record-{}.jsonl",
+            std::process::id()
+        ))
+        .to_string_lossy()
+        .into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--record", &path]);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("--record needs --regimen"), "{said}");
 }

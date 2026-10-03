@@ -76,7 +76,7 @@ fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
          \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
-         \x20                       [--log FILE]\n\
+         \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\n",
     );
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
@@ -90,6 +90,9 @@ fn serve_usage() -> String {
     out.push_str("--auth-file names a file holding user:password; every request must then\n");
     out.push_str("present it as Basic auth. --listen off loopback refuses to start without\n");
     out.push_str("it, and a wildcard (0.0.0.0, ::) is refused: name one interface.\n");
+    out.push_str("--record FILE (needs --regimen) writes the session's record there once it\n");
+    out.push_str("ends, projected from its log, beside FILE.unspellable.json naming what\n");
+    out.push_str("the record could not spell; both digests are reported on stdout.\n");
     out.push_str("--log FILE writes the session's log there as each line is appended, the\n");
     out.push_str("same lines GET /events streams; nothing is written without it.\n");
     out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
@@ -110,6 +113,7 @@ struct ServeArgs {
     auth_file: Option<String>,
     regimen_file: Option<String>,
     log_file: Option<String>,
+    record_file: Option<String>,
     listen: IpAddr,
     port: u16,
     allowed_origins: Vec<String>,
@@ -125,6 +129,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut auth_file = None;
     let mut regimen_file = None;
     let mut log_file = None;
+    let mut record_file = None;
     let mut listen = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
@@ -153,6 +158,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--log" {
             log_file = Some(value.clone());
             true
+        } else if flag == "--record" {
+            record_file = Some(value.clone());
+            true
         } else if flag == "--listen" {
             value.parse().map(|given| listen = given).is_ok()
         } else if flag == "--allow-origin" {
@@ -180,6 +188,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         auth_file,
         regimen_file,
         log_file,
+        record_file,
         listen,
         port,
         allowed_origins,
@@ -203,6 +212,7 @@ fn serve(args: &[String]) -> ExitCode {
         auth_file,
         regimen_file,
         log_file,
+        record_file,
         listen,
         port,
         allowed_origins,
@@ -225,6 +235,9 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(regime) => regime,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    if record_file.is_some() && regime.is_none() {
+        return fail(EXIT_USAGE, RECORD_NEEDS_A_REGIMEN);
+    }
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
@@ -253,8 +266,8 @@ fn serve(args: &[String]) -> ExitCode {
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     let log_path = log_file;
-    let log_file = match log_path.as_deref().map(created).transpose() {
-        Ok(file) => file,
+    let (log_file, record) = match outputs(log_path.as_deref(), record_file.as_deref()) {
+        Ok(opened) => opened,
         Err(why) => return fail(EXIT_OUTPUT, &why),
     };
     let listener = match listener(listen, port) {
@@ -262,30 +275,21 @@ fn serve(args: &[String]) -> ExitCode {
         Err(refused) => return refused,
     };
     let session = std::sync::Arc::new(Session::open(transport, shape));
-    let teeing = std::sync::Arc::clone(&session);
     let opened = session.opened();
     let config = Config {
         allowed_origins,
         credential,
         ..Config::default()
     };
-    // One render for the stream and the log, so they are one text.
-    let render = diet::drive::session::render;
-    let server = match Server::start(listener, session, config, render) {
-        Ok(server) => server,
-        Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
-    };
-    // Emptied only now that the server runs; the tee writes from the log's
-    // first line whenever it starts.
-    let log = match log_file.map(|(file, truncated)| {
-        file.set_len(0).map(|()| {
-            keep_log(teeing, render, file);
-            truncated
-        })
-    }) {
-        Some(Err(why)) => return fail(EXIT_OUTPUT, &format!("the log cannot be emptied: {why}")),
-        Some(Ok(truncated)) => Some(truncated),
-        None => None,
+    let (server, log, record_held) = match started(
+        session,
+        listener,
+        config,
+        log_path.as_deref().zip(log_file),
+        record.zip(regime.clone()),
+    ) {
+        Ok(started) => started,
+        Err(code) => return code,
     };
     println!(
         "{}",
@@ -295,6 +299,7 @@ fn serve(args: &[String]) -> ExitCode {
             substrate,
             engine.as_ref(),
             log_path.as_deref().zip(log),
+            record_file.as_deref().zip(record_held),
         )
     );
     // Serves until the process is stopped. The server's threads do the work;
@@ -306,8 +311,8 @@ fn serve(args: &[String]) -> ExitCode {
 
 /// The file at `path`, opened for writing (created if absent) but NOT yet
 /// emptied, and whether it holds anything. It is emptied only once the
-/// server has started, so a start that fails leaves an operator's file as
-/// it was.
+/// server's address is bound, so a start refused there leaves an operator's
+/// file as it was.
 fn created(path: &str) -> Result<(std::fs::File, bool), String> {
     let truncated = std::fs::metadata(path).is_ok_and(|held| held.len() > 0);
     std::fs::OpenOptions::new()
@@ -320,18 +325,215 @@ fn created(path: &str) -> Result<(std::fs::File, bool), String> {
 }
 
 /// The session's log, written to `file` as each line is appended (`--log`,
-/// #157). A write that fails stops the process: a log that quietly stopped
-/// would be a shorter log claiming to be the session's.
+/// #157), by the appending thread itself: a line is in the file before its
+/// append returns, so a kill tears at most the line being written (#230,
+/// ruled: no signal handler). Unbuffered, one write per line. A write that
+/// fails stops the process: a log that quietly stopped would be a shorter
+/// log claiming to be the session's.
 fn keep_log(
-    session: std::sync::Arc<Session<HttpStream>>,
+    session: &Session<HttpStream>,
     render: diet::drive::serve::Render,
     file: std::fs::File,
 ) {
-    std::thread::spawn(move || {
-        let why = diet::drive::serve::tee(&session, render, &mut std::io::BufWriter::new(file));
+    diet::drive::serve::write_through(session, render, file, |why| {
         let _ = fail(EXIT_OUTPUT, &format!("the log could not be written: {why}"));
         std::process::exit(i32::from(EXIT_OUTPUT));
     });
+}
+
+/// Why `--record` without `--regimen` is a usage refusal.
+const RECORD_NEEDS_A_REGIMEN: &str =
+    "--record needs --regimen: a record's `start` names the regime it ran under";
+
+/// The files `--log` and `--record` name, opened before anything binds and
+/// emptied only later, each with whether it held anything; the record's with
+/// its path.
+#[allow(clippy::type_complexity)]
+fn outputs(
+    log: Option<&str>,
+    record: Option<&str>,
+) -> Result<
+    (
+        Option<(std::fs::File, bool)>,
+        Option<((String, std::fs::File), bool)>,
+    ),
+    String,
+> {
+    let log = log.map(created).transpose()?;
+    let record = match record {
+        Some(path) => {
+            let (file, held) = created(path)?;
+            Some(((path.to_owned(), file), held))
+        }
+        None => None,
+    };
+    Ok((log, record))
+}
+
+/// The writers, then the server. The writers start once the address is
+/// bound and before the server does: no command can append a line before
+/// the log's sink is in place (#264's review). Any refusal before this --
+/// the engine check, the bind -- leaves an existing log, record and sidecar
+/// as they were; the bind's refusal, coming after the outputs are opened,
+/// creates an absent one empty. A failure from here on
+/// names what it had already emptied (#264, ruled (i)): the writers empty
+/// the record, then its sidecar, then the log, and the server starts last.
+/// One render for the stream and the log, so they are one text.
+#[allow(clippy::type_complexity)]
+fn started(
+    session: std::sync::Arc<Session<HttpStream>>,
+    listener: std::net::TcpListener,
+    config: Config,
+    log: Option<(&str, (std::fs::File, bool))>,
+    record: Option<(
+        ((String, std::fs::File), bool),
+        diet::formats::record::Regime,
+    )>,
+) -> Result<(Server, Option<bool>, Option<bool>), ExitCode> {
+    let render = diet::drive::session::render;
+    let (log, record_held, emptied) =
+        started_writers(&session, render, log, record).map_err(|why| fail(EXIT_OUTPUT, &why))?;
+    let server = Server::start(listener, session, config, render).map_err(|why| {
+        fail(
+            EXIT_HALT,
+            &emptied.named(format!("the server did not start: {why}")),
+        )
+    })?;
+    Ok((server, log, record_held))
+}
+
+/// The log and the record, started once the address is bound and before
+/// the server starts. Both are emptied now: the log is written from the
+/// session's first line on, and the record waits for the session to end --
+/// with an earlier run's record and sidecar gone, so a session that never
+/// ends leaves nothing that reads as its own (#264's review). Whether naming
+/// each emptied something.
+#[allow(clippy::type_complexity)]
+fn started_writers(
+    session: &std::sync::Arc<Session<HttpStream>>,
+    render: diet::drive::serve::Render,
+    log: Option<(&str, (std::fs::File, bool))>,
+    record: Option<(
+        ((String, std::fs::File), bool),
+        diet::formats::record::Regime,
+    )>,
+) -> Result<(Option<bool>, Option<bool>, diet::drive::serve::Emptied), String> {
+    let mut emptied = diet::drive::serve::Emptied::default();
+    let record_held = record
+        .map(|(((path, file), held), regime)| {
+            let sidecar = format!("{path}.unspellable.json");
+            let stale = std::path::Path::new(&sidecar).exists();
+            file.set_len(0)
+                .map_err(|why| format!("the record cannot be emptied: {why}"))?;
+            if held {
+                emptied.push(format!("the previous record at {path}"));
+            }
+            if stale {
+                std::fs::remove_file(&sidecar)
+                    .map_err(|why| emptied.named(format!("{sidecar} cannot be removed: {why}")))?;
+                emptied.push(format!("the previous sidecar at {sidecar}"));
+            }
+            keep_record(std::sync::Arc::clone(session), regime, (path, file));
+            Ok::<_, String>(held || stale)
+        })
+        .transpose()?;
+    let log_held = log
+        .map(|(path, (file, truncated))| {
+            file.set_len(0)
+                .map_err(|why| emptied.named(format!("the log cannot be emptied: {why}")))?;
+            if truncated {
+                emptied.push(format!("the previous log at {path}"));
+            }
+            keep_log(session, render, file);
+            Ok::<_, String>(truncated)
+        })
+        .transpose()?;
+    Ok((log_held, record_held, emptied))
+}
+
+/// The session's record, written once, when it settles `ended` (`--record`,
+/// #157): projected from its own log, beside a sidecar naming everything
+/// the record could not spell, both digests reported on stdout. A record
+/// that cannot be written stops the process, as a log that cannot be does.
+fn keep_record(
+    session: std::sync::Arc<Session<HttpStream>>,
+    regime: diet::formats::record::Regime,
+    (path, file): (String, std::fs::File),
+) {
+    std::thread::spawn(move || {
+        let mut next = 0;
+        while session.settlement() != diet::drive::session::Settlement::Ended {
+            next += session
+                .wait_from(next, std::time::Duration::from_secs(60))
+                .len() as u64;
+        }
+        match written_record(&session, &regime, &path, file) {
+            Ok(report) => {
+                let _ = std::io::Write::write_all(
+                    &mut std::io::stdout().lock(),
+                    format!("{report}\n").as_bytes(),
+                );
+            }
+            Err(why) => {
+                let _ = fail(
+                    EXIT_OUTPUT,
+                    &format!("the record could not be written: {why}"),
+                );
+                std::process::exit(i32::from(EXIT_OUTPUT));
+            }
+        }
+    });
+}
+
+/// Project the ended session, check the record reads back, and write it and
+/// its sidecar: the line `keep_record` reports.
+fn written_record(
+    session: &Session<HttpStream>,
+    regime: &diet::formats::record::Regime,
+    path: &str,
+    mut file: std::fs::File,
+) -> Result<String, String> {
+    use diet::drive::projection;
+    use diet::formats::record::{self, Record};
+    let engine =
+        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
+            .ok()
+            .and_then(|identity| projection::cited(&identity));
+    let lines: Vec<_> = session
+        .events_from(0)
+        .iter()
+        .map(diet::drive::session::line_of)
+        .collect();
+    let projected = projection::project(&lines, regime, engine)?;
+    let text = record::render(&Record {
+        events: projected.events.clone(),
+    });
+    record::parse(&text)
+        .map_err(|why| format!("the projected record does not read back: {why:?}"))?;
+    let sidecar = projection::sidecar(&projected) + "\n";
+    let sidecar_path = format!("{path}.unspellable.json");
+    file.set_len(0)
+        .and_then(|()| std::io::Write::write_all(&mut file, text.as_bytes()))
+        .map_err(|why| format!("{path}: {why}"))?;
+    std::fs::write(&sidecar_path, &sidecar).map_err(|why| format!("{sidecar_path}: {why}"))?;
+    let mut report = BTreeMap::from([
+        ("record".to_owned(), Value::String(path.to_owned())),
+        (
+            "record_sha256".to_owned(),
+            Value::String(diet::digest::sha256_hex(text.as_bytes())),
+        ),
+        ("sidecar".to_owned(), Value::String(sidecar_path)),
+        (
+            "sidecar_sha256".to_owned(),
+            Value::String(diet::digest::sha256_hex(sidecar.as_bytes())),
+        ),
+    ]);
+    if let Value::Object(fields) = projection::sidecar_value(&projected) {
+        report.extend(fields);
+    }
+    let mut out = String::new();
+    json::render(&Value::Object(report), &mut out);
+    Ok(out)
 }
 
 /// The session's trunk: the system message, and nothing else fixed yet.
@@ -398,6 +600,7 @@ fn announcement(
     substrate: Option<&str>,
     engine: Option<&diet::drive::engine::Passed>,
     log: Option<(&str, bool)>,
+    record: Option<(&str, bool)>,
 ) -> String {
     let mut fields = BTreeMap::from([
         ("listening".to_owned(), Value::String(listening.to_owned())),
@@ -433,6 +636,12 @@ fn announcement(
     if let Some((path, truncated)) = log {
         fields.insert("log".to_owned(), Value::String(path.to_owned()));
         fields.insert("log_truncated".to_owned(), Value::Boolean(truncated));
+    }
+    // And the record's: whether naming it emptied a record or removed a
+    // sidecar an earlier run left.
+    if let Some((path, truncated)) = record {
+        fields.insert("record".to_owned(), Value::String(path.to_owned()));
+        fields.insert("record_truncated".to_owned(), Value::Boolean(truncated));
     }
     let mut out = String::new();
     json::render(&Value::Object(fields), &mut out);
