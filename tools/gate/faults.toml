@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 141
+mechanics_assertions = 143
 unseedable_guards = 2
 migrated = 0
 
@@ -3990,6 +3990,166 @@ legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyon
 migrated = false
 
 [[fault]]
+id = "ci.ci_check_seconds_over_budget"
+kind = "seeded-gate"
+check = "ci"
+label = "a check re-measured past its job's budget"
+failure_class = "wiring.job-over-budget"
+legacy_signature = "pkg-repo\\.yml: its checks' measured seconds per job are [0-9]+ s, past the 300 s budget \\(.*hygiene 341\\.2 s"
+migrated = false
+[[fault]]
+id = "ci.ci_check_seconds_unmeasured"
+kind = "seeded-gate"
+check = "ci"
+label = "a check with no measured seconds"
+failure_class = "wiring.check-unmeasured"
+legacy_signature = "`hygiene` has no measured seconds"
+migrated = false
+[[fault]]
+id = "ci.ci_injection_shard_drops_one"
+kind = "seeded-gate"
+check = "ci"
+label = "an injection no shard applies"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "`injections`.s 2 shards run none of 1 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_shard_drops_one"
+kind = "seeded-gate"
+check = "ci"
+label = "a results directory no shard re-derives"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "`recompute`.s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_workflow_without_shard"
+kind = "seeded-gate"
+check = "ci"
+label = "a sharded job never told its shard"
+failure_class = "wiring.shard-not-passed"
+legacy_signature = "pkg-injections\\.yml: .injections. is sharded, and its workflow is not the sharded form"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_count_one"
+kind = "seeded-gate"
+check = "ci"
+label = "a split into one shard"
+failure_class = "wiring.shard-count"
+legacy_signature = ".recompute..s shard count is .1., not a whole number of 2 or more"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_matrix_not_the_table"
+kind = "seeded-gate"
+check = "ci"
+label = "a sharded matrix that is not the table"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml: .recompute. is sharded, and its workflow is not the sharded form"
+migrated = false
+[[fault]]
+id = "ci.ci_check_runs_one_shard"
+kind = "seeded-gate"
+check = "ci"
+label = "a check that runs one shard whatever"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_workflow_line_separator"
+kind = "seeded-gate"
+check = "ci"
+label = "a line separator YAML does not split on"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
+migrated = false
+[[fault]]
+id = "ci.ci_listing_unmarked"
+kind = "seeded-gate"
+check = "ci"
+label = "a listing with no line of its own"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute.: verify\\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_runs_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "a shard that runs fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_applies_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier that applies fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections..s 2 shards run none of 2 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_wrapper_shard_one_when_running"
+kind = "seeded-gate"
+check = "ci"
+label = "a wrapper that runs shard 1 when not listing"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s shards run [0-9]+ member\\(s\\) more than once"
+migrated = false
+[[fault]]
+id = "ci.ci_caller_in_block_scalar"
+kind = "seeded-gate"
+check = "ci"
+label = "a package's call kept in a block scalar"
+failure_class = "wiring.uncalled"
+legacy_signature = "pkg-recompute\\.yml exists but verify\\.yml never calls it"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "a recompute skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_reports_a_skip"
+kind = "seeded-gate"
+check = "ci"
+label = "a member reported as skipped"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_switched_off"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census allowed to fail"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_off_behind_a_comment"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's census off behind a comment"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_step_removed"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census renamed away"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
 check = "ci"
@@ -4131,6 +4291,22 @@ kind = "mechanics"
 check = "resolver"
 label = "a conformance fixture does not"
 failure_class = "resolver.data-is-not-a-source"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-member-reported-skipped-is-not-counted-as-run"
+kind = "mechanics"
+check = "parity"
+label = "a member reported skipped is not counted as run"
+failure_class = "shard.census-outcome"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-dry-census-row-is-refused-where-the-shards-really-ran"
+kind = "mechanics"
+check = "parity"
+label = "a dry census row is refused where the shards really ran"
+failure_class = "shard.census-dry-row"
 legacy_signature = ""
 migrated = false
 [[fault]]
