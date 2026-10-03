@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import pathlib
 import re
 import subprocess
@@ -136,11 +137,25 @@ def scope_selftest():
 LINK_MODES = {"120000": "a symlink", "160000": "a gitlink"}
 
 
-def changed(base: str, head: str, repo: pathlib.Path = ROOT) -> tuple[list[str], dict[str, str]]:
-    """The diff's paths, and those of them that are a link, with what kind."""
+def hermetic() -> dict[str, str]:
+    """The environment with no `GIT_*` variable and no global or system git
+    config (#280's sixth review): a hook's `GIT_DIR` pointed the throwaway
+    repository's commits at the caller's, and a global `commit.gpgsign` or
+    `diff.ignoreSubmodules` changed what the cases saw."""
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    return env
+
+
+def changed(
+    base: str, head: str, repo: pathlib.Path = ROOT, env: dict[str, str] | None = None,
+) -> tuple[list[str], dict[str, str]]:
+    """The diff's paths, and those of them that are a link, with what kind.
+    Submodules are never ignored, whatever the config says (#280's sixth
+    review: `diff.ignoreSubmodules = all` hid a gitlink)."""
     done = subprocess.run(
-        ["git", "diff", "--raw", "--no-renames", "-z", f"{base}...{head}"],
-        cwd=repo, capture_output=True,
+        ["git", "diff", "--raw", "--no-renames", "--ignore-submodules=none", "-z", f"{base}...{head}"],
+        cwd=repo, capture_output=True, env=env,
     )
     if done.returncode != 0:
         raise RuntimeError(done.stderr.decode(errors="replace").strip() or f"git diff exited {done.returncode}")
@@ -380,30 +395,40 @@ def git_cases() -> list[str]:
     wrong: list[str] = []
     with tempfile.TemporaryDirectory(prefix="pr-scope-") as tmp:
         repo = pathlib.Path(tmp)
+        env = hermetic()
         git = lambda *a: subprocess.run(
             ["git", "-c", "user.name=pr-scope", "-c", "user.email=pr-scope@example.invalid", *a],
-            cwd=repo, capture_output=True, check=True,
+            cwd=repo, capture_output=True, check=True, env=env,
         )
         git("init", "--quiet")
+        # The setting that hid a gitlink, set where `hermetic()` leaves it.
+        git("config", "diff.ignoreSubmodules", "all")
         record = repo / "results" / "x" / "README.md"
         record.parent.mkdir(parents=True)
         record.write_text("a record\n", encoding="utf-8")
         (repo / "logo").mkdir()
+        (repo / "logo" / "old").symlink_to("notes.md")
         git("add", "--all")
         git("commit", "--quiet", "-m", "base")
         git("tag", "base")
         git("mv", "results/x/README.md", "logo/notes.md")
+        git("rm", "--quiet", "logo/old")
         (repo / "logo" / "caf\u00e9.svg").write_text("<svg/>\n", encoding="utf-8")
         (repo / "logo" / "dirlink").symlink_to("..")
         git("add", "--all")
+        commit = git("rev-parse", "base").stdout.decode().strip()
+        git("update-index", "--add", "--cacheinfo", f"160000,{commit},sub")
         git("commit", "--quiet", "-m", "head")
-        files, links = changed("base", "HEAD", repo)
+        files, links = changed("base", "HEAD", repo, env)
         # A rename is read as both its names, a non-ASCII path as itself.
-        expected = ["logo/caf\u00e9.svg", "logo/dirlink", "logo/notes.md", "results/x/README.md"]
+        expected = ["logo/caf\u00e9.svg", "logo/dirlink", "logo/notes.md", "logo/old", "results/x/README.md", "sub"]
         if sorted(files) != expected:
-            wrong.append(f"a rename out of results/, a non-ASCII path and a symlink read as {sorted(files)}, not {expected}")
-        if links != {"logo/dirlink": "a symlink"}:
-            wrong.append(f"the symlink logo/dirlink read as links {links}")
+            wrong.append(f"a rename out of results/, a non-ASCII path and three links read as {sorted(files)}, not {expected}")
+        # A link added, a link removed (its mode only on the old side), and a
+        # gitlink.
+        declared_links = {"logo/dirlink": "a symlink", "logo/old": "a symlink", "sub": "a gitlink"}
+        if links != declared_links:
+            wrong.append(f"the links read as {links}, not {declared_links}")
         if classify(["logo/dirlink"], links={"logo/dirlink": "a symlink"})[0] != "material":
             wrong.append("a symlink classified chore")
         (repo / "pkg").mkdir()
@@ -432,11 +457,13 @@ def check() -> int:
                 f"{f' ({reason})' if reason else ''}",
                 file=sys.stderr,
             )
-    # A path's CR printed raw could start a workflow command (#280's fifth review).
-    printed = escaped("results/a\r::warning::x\n%")
-    if printed != "results/a\\x0d::warning::x\\x0a%":
+    # A path's CR printed raw could start a workflow command (#280's fifth
+    # review), and bytes that are not UTF-8 could not be printed at all
+    # (its sixth): what `main` prints is held, not only the helper.
+    printed = report("material", "results/a\r::warning::x\n%\udcff", ["hygiene"])
+    if printed != ["material", "reason: results/a\\x0d::warning::x\\x0a%\\xff", "checks: hygiene"]:
         wrong += 1
-        print(f"pr-scope: a CR and an LF in a path print as {printed!r}, not escaped", file=sys.stderr)
+        print(f"pr-scope: a CR, an LF and a non-UTF-8 byte in a path print as {printed!r}, not escaped", file=sys.stderr)
     chore_files, chore_checks = CHORE_CHECKS
     verdict, _reason, named = classify(list(chore_files))
     if verdict != "chore" or named != chore_checks:
@@ -459,8 +486,20 @@ def check() -> int:
 
 
 def escaped(text: str) -> str:
-    """`text` with every C0 control character and DEL written as `\\xNN`."""
-    return re.sub(r"[\x00-\x1f\x7f]", lambda m: f"\\x{ord(m.group()):02x}", text)
+    """`text` with every C0 control character and DEL written as `\\xNN`,
+    and a byte that is not UTF-8 (read as a lone surrogate) the same way."""
+    return re.sub(
+        r"[\x00-\x1f\x7f\udc80-\udcff]",
+        lambda m: f"\\x{ord(m.group()) - (0xDC00 if ord(m.group()) > 0xFF else 0):02x}",
+        text,
+    )
+
+
+def report(verdict: str, reason: str, checks: list[str]) -> list[str]:
+    """The lines `main` prints. A path is printed with its control
+    characters escaped (#280's fifth review): a lone CR ends a line for the
+    Actions runner, so a path carrying one could start a workflow command."""
+    return [verdict, *([f"reason: {escaped(reason)}"] if reason else []), f"checks: {', '.join(checks)}"]
 
 
 def main(argv: list[str]) -> int:
@@ -482,14 +521,7 @@ def main(argv: list[str]) -> int:
     if not VERIFY.is_file():
         print("pr-scope: verify.sh is not in this tree; there is no gate to classify against", file=sys.stderr)
         return EXIT_BROKEN
-    verdict, reason, checks = classify(files, args.census, links)
-    print(verdict)
-    if reason:
-        # A path is printed with its control characters escaped (#280's
-        # fifth review): a lone CR ends a line for the Actions runner, so a
-        # path carrying one could start a workflow command.
-        print(f"reason: {escaped(reason)}")
-    print(f"checks: {', '.join(checks)}")
+    print("\n".join(report(*classify(files, args.census, links))))
     return 0
 
 
