@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor } from 'storybook/test';
 
+import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import { App } from '../App.tsx';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
@@ -146,5 +147,26 @@ export const NotEndedByAccident: Story = {
     await waitFor(async () => expect(end.textContent).toBe('end the session?'));
     await new Promise((resolve) => setTimeout(resolve, 300));
     await expect(says(canvasElement)).toBe('your turn');
+  },
+};
+
+/**
+ * `?drive`, a turn that hit its output cap (#290): `capped` on the response, the turn settled `failed` -- track three's
+ * fixture. The answer says it hit max tokens, the turn's end says so in place of a failed request, and neither the
+ * ask nor what it wrote is in the model's context (ruled 5969941559).
+ */
+export const ServedCapped: Story = {
+  name: '?drive: a turn that hit max tokens, so no answer',
+  args: { drive: true, web: serving(capped) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-turnend')).not.toBeNull());
+    const answer = canvasElement.querySelector('.ex-trunk [data-tone="assistant"]') as HTMLElement;
+    await expect(answer.querySelector('.ex-stop[data-level="warn"]')?.textContent).toBe('hit max tokens');
+    await expect(answer.querySelector('.ex-context-out')).not.toBeNull();
+    await expect(canvasElement.querySelector('.ex-trunk [data-tone="user"] .ex-context-out')).not.toBeNull();
+    const end = canvasElement.querySelector('.ex-turnend') as HTMLElement;
+    await expect(end.dataset['level']).toBe('warn');
+    await expect(end.textContent).toContain('hit max tokens, so no answer');
+    await expect(end.textContent).not.toContain('a request failed');
   },
 };

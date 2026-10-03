@@ -3149,6 +3149,14 @@ inject_exercise_example_bundled_into_page() {
   edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
 }
 
+# A capped turn read from the settle word alone (#290): every failed turn
+# drawn as hitting max tokens, whether or not its response carried `capped`.
+# Typecheck and lint pass it; the fold of a request that failed says it was
+# not capped (capped.test.ts).
+inject_exercise_capped_from_settle_alone() {
+  edit_in_place "s|slot.line.reason === 'failed' \&\& cappedTurns.has(slot.line.turn)|slot.line.reason === 'failed'|" exercise/src/session/fold.ts
+}
+
 # The meter reading a progress frame's old, nested shape again (#288): what
 # the page did when it went blank on the rehearsal drive's first live frame.
 # The types are the format's now, so the read goes through a cast, as an
@@ -8487,6 +8495,8 @@ selftest() {
     'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
   seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \
     "replay-smoke: kitchen-sink's label is on the page but out of view"
+  seeded_case "a capped turn read from the settle word alone" exercise inject_exercise_capped_from_settle_alone \
+    'FAIL.*capped\.test\.ts.*is not read from the settle word alone'
   seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
     "replay-smoke: kitchen-sink is bundled into the page's code"
   seeded_case "the meter reading a progress frame's old shape" exercise inject_exercise_progress_read_nested \
