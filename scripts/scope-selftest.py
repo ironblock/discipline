@@ -4,25 +4,26 @@
 A fault's redness is a property of a (target, catcher) pair, and it does not
 change under a diff that touches neither. So a PR re-proves a fault only when
 the diff reaches something that fault depends on, and INHERITS the rest --
-declared in the census with the `main` commit at which each was last seen
+declared in the census with the commit at which each was last seen
 red, never counted as passed.
 
     scope-selftest.py --base REF --census DIR --out PLAN
     verify.sh --selftest --scope-plan PLAN [--shard K/N] [--census ...]
 
-`--base` is what the PR is measured against (its merge base with `main`).
+`--base` is what the PR is measured against (its merge base with its base
+branch).
 `--census` is a directory of census files from the latest successful full
-selftest on `main`: the ids that ran there, the commit they ran at, and the
+selftest on the base branch (a push or the nightly, #326): the ids that ran there, the commit they ran at, and the
 files each fault's injection touched. PLAN is `inherit<TAB>ID<TAB>SHA` rows;
 a fault the plan does not name is re-proven, so every rule below fails
 toward running.
 
 A FAULT IS RE-PROVEN when any of these holds (ruled on #112, 2026-09-27):
 
-  * it has no last-red commit on `main` -- new on this PR, or never seen red
+  * it has no last-red commit on the base branch -- new on this PR, or never seen red
     there, or seen red at a commit this branch does not contain;
   * the diff touches a file its injection touched (read off the sandbox by
-    the `main` run, never parsed out of the injection's body);
+    the full run, never parsed out of the injection's body);
   * the diff touches the file that defines its catcher: the test module a
     `test` scope or a lane fault's `catches` names, the fixture a results
     fault plants, the pattern table a pattern class is drawn from, or a
@@ -35,7 +36,7 @@ A FAULT IS RE-PROVEN when any of these holds (ruled on #112, 2026-09-27):
     re-proves everything.
 
 Indirect dependencies (a helper change that quietly greens a fault) are the
-full `main` run's to catch, within a day; that is the design's own answer to
+full runs' to catch, within a day; that is the design's own answer to
 drift, and this script does not pretend to see them.
 
 Exit 0 with a plan written; 2 when the question cannot be answered.
@@ -69,6 +70,23 @@ FUNCTION = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{\n(.*?)^\}\n", re.M | re
 # ...and the one-line form, `check_parity() { python3 scripts/...; }`, which
 # ten of the checks are spelled in.
 ONE_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{ (.*) \}\n", re.M)
+# An alias defined by the builtin: `alias name=...` (also `\alias`, `builtin
+# alias`, `eval alias ...`). BASH_ALIASES is main's spelling check's, searched
+# in the whole text. A definition hidden in a split or computed string (`eval
+# "al""ias ..."`) is not seen (#323).
+ALIAS_DEFINITION = re.compile(r"(?<![\w-])alias\s+(?:-p\s+)?[^\s=;|&]+=")
+def code_lines(text: str) -> list[str]:
+    """`text`'s lines but its comment lines -- where a line that continues
+    the one before (an odd run of backslashes ends it) is code, `#` first or
+    not (#328's delta review: `x=1\\` then `#; alias q=...`)."""
+    kept, carried = [], False
+    for line in text.split("\n"):
+        if carried or not line.lstrip().startswith("#"):
+            kept.append(line)
+        carried = (len(line) - len(line.rstrip("\\"))) % 2 == 1
+    return kept
+
+
 SCRIPT = re.compile(r"scripts/[A-Za-z0-9_./-]+")
 CALL = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 
@@ -92,6 +110,8 @@ MACHINERY_FILES = frozenset(
         "scripts/apply-lane-faults.py", "scripts/check-fault-manifest.py",
         "Cargo.toml", "Cargo.lock", "rust-toolchain.toml",
         ".github/workflows/gate-selftest.yml", "diet/Cargo.toml",
+        # Which kind a run is, and so whether it is scoped at all (#326).
+        ".github/branches.tsv",
     }
 )
 
@@ -108,19 +128,75 @@ CHECK_INPUTS = {
     # under the shim are reached through it, so a change to either would
     # otherwise inherit the last red (#260's review).
     "bsd": {"scripts/bsd-sed/", "scripts/check-injections.py"},
+    # `ci` reads the workflows and the tables beside them; `metadata` the
+    # repository's labels, milestones and issue templates (#276: a diff of a
+    # workflow must name the check that reads it).
+    "ci": {".github/workflows/", ".github/check-owners.tsv", ".github/gate-budget.tsv"},
+    "metadata": {".github/labels.json", ".github/milestones.json", ".github/ISSUE_TEMPLATE/"},
+    # ...and what three more read beside the script their function names
+    # (#280's review): the manifest, the lane registry, and the scanner's
+    # own tables and helpers.
+    "parity": {"tools/gate/faults.toml"},
+    "lanes": {"tools/gate/lanes.toml"},
+    "hygiene": {
+        "scripts/hygiene-patterns.tsv", "scripts/hygiene-exceptions.tsv",
+        "scripts/hygiene-decode.py", "scripts/check-hashes.py",
+    },
 }
 
 
 BUDGET = ROOT / ".github" / "gate-budget.tsv"
+BRANCHES = ROOT / ".github" / "branches.tsv"
+
+# What a run is, which decides whether it is scoped and how many shards it
+# gets (#326). `scoped`: a pull request into anything but the release branch
+# re-proves what its diff reaches, under `max_shards`. `superseding`: a push to
+# the integration branch runs every fault under `develop_shards`, and the next
+# push cancels it. `full`: a release pull request, a push to the release
+# branch and the nightly run every fault under `max_shards`, never cancelled.
+KINDS = ("scoped", "superseding", "full")
 
 
-def max_shards(path: pathlib.Path = BUDGET) -> int:
-    """The declared ceiling on concurrent selftest jobs."""
+def declared(name: str, path: pathlib.Path = BUDGET) -> str:
+    """One constant from a declared-facts table (`key<TAB>value`)."""
     for line in path.read_text(encoding="utf-8").splitlines():
         key, _, value = line.partition("\t")
-        if key == "max_shards" and value.strip().isdigit() and int(value) > 0:
-            return int(value)
-    raise Unusable(f"{path.name} declares no positive max_shards")
+        if key == name and value.strip():
+            return value.strip()
+    raise Unusable(f"{path.name} declares no {name}")
+
+
+def max_shards(path: pathlib.Path = BUDGET, name: str = "max_shards") -> int:
+    """The declared ceiling on concurrent selftest jobs."""
+    try:
+        value = declared(name, path)
+    except Unusable:
+        value = ""
+    if value.isdigit() and int(value) > 0:
+        return int(value)
+    raise Unusable(f"{path.name} declares no positive {name}")
+
+
+def run_kind(event: str, ref: str, base_ref: str, default_branch: str, release: str) -> str:
+    """Which of KINDS a run is, from its event and the branches it names.
+
+    Before the rename the default branch IS the release branch, and the
+    order of these tests keeps today's behaviour there: a pull request into
+    it is scoped (the default branch wins), a push to it is full and never
+    cancelled (the release branch wins). After it the two differ, and each
+    gets its own kind.
+    """
+    if event == "pull_request":
+        if not default_branch:
+            raise Unusable("a pull request's run needs the repository's default branch to say what it is")
+        return "full" if base_ref == release and base_ref != default_branch else "scoped"
+    if event == "push":
+        if ref == release:
+            return "full"
+        if not default_branch:
+            raise Unusable("a push run needs the repository's default branch to say what it is")
+        return "superseding" if ref == default_branch else "full"
+    return "full"
 
 
 def shard_count(reproven: int, total: int, ceiling: int) -> int:
@@ -174,10 +250,18 @@ def top_level_code(text: str) -> str:
     compared whole when bash -n cannot parse it, when a line starts with `}`
     (a closer the function pattern left behind), when a matched function does
     not parse alone as a complete unit (cut short), or when the text can turn
-    alias expansion on. Whole re-proves; it never skips. What this cannot see:
-    a function match that runs long, past its real closer, swallowing top-
-    level code into the function (#317).
+    alias expansion on or defines an alias (#323). Whole re-proves; it never
+    skips. A function match that runs long past its real closer compares the
+    whole file (#317). What this cannot see (#329): a closer whose line
+    balances its braces or continues onto the next, and the one-line pattern's
+    matches.
     """
+    # A function match that ran long past its real closer has swallowed the
+    # top-level code after it, which is then in no unit's text the plan reads
+    # as the top level -- so the whole FILE compares, not only `outside`
+    # (#317).
+    if not functions_end_where_matched(text):
+        return text
     outside = outside_functions(text)
     lines = outside.split("\n")
     # A function the pattern cut short -- its `}` inside a heredoc or a
@@ -189,13 +273,20 @@ def top_level_code(text: str) -> str:
     # review broke the claim that the unit check subsumes it.
     if any(line.startswith("}") for line in lines) or not functions_parse(text):
         return outside
-    # bash expands aliases only where `expand_aliases` is set or in POSIX
-    # mode, neither of which bash -n runs: an alias can open a quote or a
-    # heredoc unseen (#310: N7b, N10; #314's review: `set -o posix`,
-    # POSIXLY_CORRECT, an option name split by quotes).
-    # Case-sensitive: verify.sh's comments say POSIX, and no shell option or
-    # variable is spelled so.
-    if re.search(r"_aliases|expand_al|\bposix\b|POSIXLY_CORRECT|BASH_ALIASES", text):
+    # An alias can open a quote or a heredoc bash -n never sees, since bash -n
+    # expands none (#310: N7b, N10). Two checks, as a union: the spellings
+    # that turn expansion on (#314; case-sensitive, as verify.sh's comments
+    # say POSIX), and an alias's DEFINITION -- by the `alias` builtin or
+    # BASH_ALIASES, outside a comment line -- for a switch no spelling shows
+    # (#323: a split or computed option name, a `#!/bin/sh` shebang's POSIX
+    # mode). Neither alone: #328's review defined aliases in ways no regex
+    # sees (`alias -- q=`, a sourced file) under a literal switch.
+    # main's predicate VERBATIM, then the definition check OR'd beside it, so
+    # the union is a superset of main by construction (#328's delta review:
+    # moving BASH_ALIASES out of this whole-text search regressed).
+    if re.search(r"_aliases|expand_al|\bposix\b|POSIXLY_CORRECT|BASH_ALIASES", text) or any(
+        ALIAS_DEFINITION.search(line) for line in code_lines(text)
+    ):
         return outside
     # A top level bash -n cannot parse whole compares whole (#308's fifth
     # review): its first error hides every open quote after it from the check
@@ -246,6 +337,14 @@ def functions_parse(text: str) -> bool:
         return all(pool.map(unit_parses, units))
 
 
+def functions_end_where_matched(text: str) -> bool:
+    """Whether every function the patterns match in `text` really ends at its
+    match's end (#317); see unit_ends_where_matched."""
+    units = [m.group(0) for m in FUNCTION.finditer(text)]
+    with concurrent.futures.ThreadPoolExecutor(16) as pool:
+        return all(pool.map(unit_ends_where_matched, units))
+
+
 @functools.lru_cache(maxsize=None)
 def unit_parses(unit: str) -> bool:
     """Whether `unit` parses alone AND its last `}` really closed it.
@@ -255,6 +354,30 @@ def unit_parses(unit: str) -> bool:
     trailing `)` is a syntax error after complete code and mere text inside
     an open heredoc, and is never a heredoc's delimiter, on bash 3.2 and 5."""
     return bash_reads_as_closed(unit, whole=True) and not bash_reads_as_closed(unit + ")", whole=True)
+
+
+@functools.lru_cache(maxsize=None)
+def unit_ends_where_matched(unit: str) -> bool:
+    """Whether the function `unit` really ends at its match's end (#317).
+
+    The pattern ends a function at the first column-0 `}` line. A real closer
+    written otherwise -- `} # end`, `};`, `} <<'EOF'`, an indented `}` -- is
+    passed over, and the match runs long through the next column-0 `}`,
+    reading the top-level code between as the function's body. A function's
+    real end is the shortest prefix of it that parses: before its closer its
+    own `{` is open, and no prefix parses. So no prefix ending at an earlier
+    line holding a `}` may parse, or the match ran long and the top level
+    compares whole. A closer that also opens a brace on its own line (`} ;
+    coproc {`) is not asked about; nor could a prefix ending there parse."""
+    lines = unit.rstrip("\n").split("\n")
+    # Only a line closing more braces than it opens can close the function:
+    # `${x}` and `|| { ...; }` balance on their own line and are skipped, which
+    # keeps this from asking bash about every expansion in every body.
+    return not any(
+        lines[end].count("}") > lines[end].count("{")
+        and bash_reads_as_closed("\n".join(lines[: end + 1]), whole=True)
+        for end in range(len(lines) - 1)
+    )
 
 
 def bash_reads_as_closed(text: str, whole: bool = False) -> bool:
@@ -462,7 +585,7 @@ def dependencies(root: pathlib.Path, text: str) -> dict[str, tuple[set[str], set
 def checks_of(root: pathlib.Path, text: str) -> dict[str, str]:
     """id -> the check verify.sh proves the fault against: the `CHECK` a
     `not_red` row names, and so the `check:<CHECK>` label a drift issue on
-    `main` carries (#112). A fault this cannot place is named by its id's
+    a full run carries (#112). A fault this cannot place is named by its id's
     first word, which is the check for every case whose id verify.sh derives."""
     checks = {ident: case[1] for ident, case in case_lines(text).items()}
     for manifest in sorted(root.glob("diet/*/gate.toml")):
@@ -472,7 +595,7 @@ def checks_of(root: pathlib.Path, text: str) -> dict[str, str]:
 
 
 # --------------------------------------------------------------------------
-# the main run's census
+# the full run's census
 # --------------------------------------------------------------------------
 
 
@@ -480,7 +603,7 @@ def read_census(directory: pathlib.Path) -> tuple[dict[str, str], dict[str, set[
     """(id -> the commit it last ran red at, id -> files its injection touched).
 
     Only the three row kinds this needs are read; the rest is
-    check-selftest-census.py's to grade. A fault the `main` run INHERITED was
+    check-selftest-census.py's to grade. A fault the full run INHERITED was
     not seen red there, so it contributes no sha.
     """
     red: dict[str, str] = {}
@@ -540,7 +663,7 @@ def decide(
             continue
         sha = red.get(ident)
         if not sha:
-            rerun[ident] = "no last-red commit on main"
+            rerun[ident] = "no last-red commit on the base branch"
             continue
         if not reachable(sha):
             rerun[ident] = f"last seen red at {sha}, which this branch does not contain"
@@ -570,7 +693,7 @@ def changed_since(since: str, root: pathlib.Path) -> tuple[set[str], set[str]]:
     HEAD.
 
     Measured from the commit a fault was last seen red at, NOT from the PR's
-    merge base: whatever landed on `main` after that run is part of what the
+    merge base: whatever landed on the base branch after that run is part of what the
     inheritance would be vouching for (found by #130's review). And
     `--no-renames`, because a rename is listed under its new path only, and
     the old path is the one a fault depends on.
@@ -704,11 +827,11 @@ def _renames():
     return None
 
 
-@fixture("a fault with no last-red commit on main runs regardless of scope")
+@fixture("a fault with no last-red commit on the base branch runs regardless of scope")
 def _no_last_red():
     rerun, _ = _decide(red={"lanes.b": "abc1234", "results.c": "abc1234"})
     if "test.a" not in rerun or "no last-red" not in rerun["test.a"]:
-        return f"a fault never seen red on main was not re-proven: {rerun}"
+        return f"a fault never seen red on the base branch was not re-proven: {rerun}"
     return None
 
 
@@ -721,7 +844,7 @@ def _unreachable_sha():
     return None
 
 
-@fixture("a file the fault's injection touched re-proves it, read off the main run")
+@fixture("a file the fault's injection touched re-proves it, read off the full run")
 def _touched_file():
     rerun, _ = _decide(changed_files={"diet/src/object.rs"}, touched={"test.a": {"diet/src/object.rs"}})
     if set(rerun) != {"test.a"}:
@@ -842,6 +965,36 @@ def _top_level_comments():
         ("g() {\n  cat\n} <<'EOF'\n{\n  \"a\": 1\n}\n# c\n{\n  \"b\": 2\n}\nEOF\ng\n", ("# c", "# d")),
         ("g() {\n  cat\n} <<'EOF'\n}\n# c\nEOF\ng\n", ("# c", "# d")),
         ("set -o posix\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #323: expansion turned on by a spelling no list holds; the alias's
+        # definition is what is seen.
+        ("shopt -s \"expand_\"\"aliases\"\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("o=expand_; shopt -s ${o}aliases\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("POSIXLY_CORRECT=1\nBASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #328's review: a literal switch with a definition no regex sees, and
+        # definition forms each held: in a function body, via `builtin`, a
+        # quoted name.
+        ("shopt -s expand_aliases\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("set -o posix\n'alias' q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("POSIXLY_CORRECT=1\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("define() {\n  alias q=\"echo '\"\n}\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("builtin alias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("alias 'q'=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("set -o \"pos\"ix\nBASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #328's delta review: BASH_ALIASES and an alias on a continued `#`
+        # line, and each spelling alternative held alone -- split around
+        # `_aliases`, around `expand_al`, and spelled inside a function body.
+        ("set -o \"pos\"ix\nx=1\\\n#; BASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("set -o \"pos\"ix\nx=1\\\n#; alias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("shopt -s \"expand\"_aliases\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("shopt -s expand_al\"iases\"\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("on() {\n  shopt -s expand_aliases\n}\non\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #317: a function match that runs long past a closer written
+        # otherwise -- a trailing comment, `};`, indented, a heredoc on it --
+        # swallows the top-level code after it.
+        ("g() {\n  :\n} # end\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ("g() {\n  :\n};\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ("g() {\n  :\n  }\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ("g() {\n  cat\n} <<'EOF'\nx\nEOF\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
         ('Y="a\\"\n# b"\n', ("# b", "# c")),
         ("echo it\\'s\nZ='a\n# b'\n", ("# b", "# c")),
         ("Z=${#X}' a\n# b'\n", ("# b", "# c")),
@@ -855,7 +1008,9 @@ def _top_level_comments():
     # And the fix stays on for the tree it was written for: today's verify.sh
     # does not fall back to comparing its top level whole (#310).
     today = (ROOT / "verify.sh").read_text(encoding="utf-8")
-    if top_level_code(today) == outside_functions(today):
+    # Whole is either the top level or, for a match that ran long (#317), the
+    # file: neither may be what today's verify.sh compares (#327's review).
+    if top_level_code(today) in (outside_functions(today), today):
         return "this verify.sh's top level is compared whole, so #305's fix is off"
     # usage() prints the header, line 2 to the first empty line (#310): an
     # edit there is read; a comment after it is not.
@@ -869,6 +1024,11 @@ def _top_level_comments():
     gap = "#!/usr/bin/env bash\n\n# usage, after an empty line 2\n\nusage() {\n  sed -n '2,/^$/s/^# \\{0,1\\}//p' \"$0\"\n}\n"
     if top_level_code(gap) == top_level_code(gap.replace("after an empty", "after a blank")):
         return "an edit to a header after an empty line 2 read as unchanged"
+    # A comment that shows an alias's definition defines nothing (#323): it
+    # does not switch comparing comments off.
+    shown = base + "# alias q=x is how one would define it\n"
+    if top_level_code(shown) != top_level_code(shown.replace("# one", "# one, re-worded")):
+        return "a comment showing an alias definition made comments compare"
     if top_level_code(base) == top_level_code(base.replace("/usr/bin/env bash", "/bin/sh")):
         return "a changed shebang was not seen"
     if top_level_code(base + "  # indented\n") != top_level_code(base + "  # re-worded\n"):
@@ -947,6 +1107,36 @@ def _shard_count():
             return f"{reproven} of {total} under {ceiling} gave {got}, not {want}"
     if max_shards() < 1:
         return "the checked-in budget declares no ceiling"
+    if max_shards(name="develop_shards") < 1:
+        return "the checked-in budget declares no superseding ceiling"
+    return None
+
+
+@fixture("a run's kind follows the event and the branch, before and after the rename (#326)")
+def _run_kind():
+    for event, ref, base, default, want in (
+        # after the rename: the default and the release branch differ
+        ("pull_request", "7/merge", "integration", "integration", "scoped"),
+        ("pull_request", "7/merge", "release", "integration", "full"),
+        ("pull_request", "7/merge", "feat/x", "integration", "scoped"),
+        ("push", "integration", "", "integration", "superseding"),
+        ("push", "release", "", "integration", "full"),
+        ("schedule", "integration", "", "", "full"),
+        # before it: one branch is both, and today's behaviour holds
+        ("pull_request", "7/merge", "release", "release", "scoped"),
+        ("push", "release", "", "release", "full"),
+    ):
+        got = run_kind(event, ref, base, default, "release")
+        if got != want:
+            return f"{event} on {ref or base} with default {default or 'unknown'} is {got}, not {want}"
+    for event in ("pull_request", "push"):
+        try:
+            run_kind(event, "integration", "integration", "", "release")
+        except Unusable:
+            continue
+        return f"a {event} run with no default branch was given a kind rather than refused"
+    if declared("release_branch", BRANCHES) == declared("integration_branch", BRANCHES):
+        return "the checked-in branch table names one branch twice"
     return None
 
 
@@ -1002,15 +1192,44 @@ def selftest() -> int:
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
     parser.add_argument("--base", help="the ref the PR targets; recorded in the plan. Each inheritance is measured from the commit its fault was last seen red at")
-    parser.add_argument("--census", help="a directory of census files from main's full run")
+    parser.add_argument("--census", help="a directory of census files from the base branch's latest full run")
     parser.add_argument("--out", help="where to write the plan")
     parser.add_argument("--checks-out", help="also write the checks whose faults are re-proven, one per line, for selftest-drift.py block")
     parser.add_argument("--matrix", action="store_true", help="print the selftest matrix, [1..N], for the run --plan describes (every fault re-proven when --plan is not given)")
     parser.add_argument("--plan", help="with --matrix: a plan this script wrote")
+    parser.add_argument("--kind", nargs="?", const="", choices=("",) + KINDS, help="alone: print this run's kind from --event, --ref, --base-ref and --default-branch; with --matrix: the kind whose ceiling to divide (default full)")
+    parser.add_argument("--event", default="", help="with --kind: github.event_name")
+    parser.add_argument("--ref", default="", help="with --kind: github.ref_name")
+    parser.add_argument("--base-ref", default="", help="with --kind: github.base_ref")
+    parser.add_argument("--default-branch", default="", help="with --kind: the repository's default branch")
+    parser.add_argument("--list-checks", action="store_true", help="print every check with a listed fault, one per line: what a full run re-proves, for selftest-drift.py block on a release pull request")
     parser.add_argument("--selftest", action="store_true", help="run the fixtures and exit")
     args = parser.parse_args(argv)
     if args.selftest:
         return selftest()
+    if args.list_checks:
+        try:
+            named = checks_of(ROOT, (ROOT / "verify.sh").read_text(encoding="utf-8"))
+            every = sorted({named.get(i, i.split(".", 1)[0]) for i in listed_faults(ROOT)})
+        except (Unusable, OSError) as err:
+            print(f"scope-selftest: {err}", file=sys.stderr)
+            return EXIT_BROKEN
+        if not every:
+            print("scope-selftest: the manifest lists no fault, so no check", file=sys.stderr)
+            return EXIT_BROKEN
+        print("\n".join(every))
+        return 0
+    if args.kind == "" and not args.matrix:
+        try:
+            kind = run_kind(args.event, args.ref, args.base_ref, args.default_branch,
+                            declared("release_branch", BRANCHES))
+        except (Unusable, OSError) as err:
+            print(f"scope-selftest: {err}", file=sys.stderr)
+            return EXIT_BROKEN
+        print(kind)
+        print(f"scope-selftest: {args.event} run (ref {args.ref or '-'}, base {args.base_ref or '-'}, "
+              f"default {args.default_branch or '-'}) is {kind}", file=sys.stderr)
+        return 0
     if args.matrix:
         try:
             listed = set(listed_faults(ROOT))
@@ -1021,7 +1240,10 @@ def main(argv: list[str]) -> int:
                 # not make the count of what runs look smaller than it is.
                 inherited = len({line.split("\t")[1] for line in pathlib.Path(args.plan).read_text(encoding="utf-8").splitlines()
                                  if line.startswith("inherit\t") and len(line.split("\t")) > 1} & listed)
-            n = shard_count(total - inherited, total, max_shards())
+            if args.plan and args.kind not in (None, "", "scoped"):
+                raise Unusable(f"a {args.kind} run re-proves every fault; it takes no plan")
+            ceiling = max_shards(name="develop_shards" if args.kind == "superseding" else "max_shards")
+            n = shard_count(total - inherited, total, ceiling)
         except (Unusable, OSError) as err:
             print(f"scope-selftest: {err}", file=sys.stderr)
             return EXIT_BROKEN
@@ -1038,7 +1260,7 @@ def main(argv: list[str]) -> int:
         census = pathlib.Path(args.census)
         red, touched = read_census(census) if census.is_dir() else ({}, {})
         reachable = is_ancestor(ROOT)
-        # One diff per commit the census names (a `main` run has one), each
+        # One diff per commit the census names (a full run has one), each
         # measured from that commit to this head.
         rerun: dict[str, str] = {}
         inherit: dict[str, str] = {}

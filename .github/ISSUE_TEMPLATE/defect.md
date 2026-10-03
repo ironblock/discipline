@@ -43,4 +43,7 @@ labels: defect
 ## Environment
 
 <!-- Only what bears on the defect. Nothing from a private environment: the
-     hygiene gate rejects hostnames, addresses and home paths for a reason. -->
+     hygiene gate rejects hostnames, addresses and home paths for a reason, and
+     a person's schedule, habits or whereabouts are private too: a machine's
+     availability is a fact about the machine ("reserved", "down", "restored
+     at <time>"), never about a person's time. -->

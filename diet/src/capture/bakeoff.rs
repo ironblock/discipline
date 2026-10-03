@@ -142,6 +142,10 @@ pub enum RunError {
         /// The directory.
         path: String,
     },
+    /// A provenance field the caller neither gave nor declared absent (#32,
+    /// ruled on #271): the assembler writes no directory a person has not
+    /// declared the claim's provenance for.
+    Undeclared(String),
     /// `pre-registration.json` was written and its bytes changed before the
     /// scores were.
     ///
@@ -167,6 +171,7 @@ pub enum RunError {
 impl fmt::Display for RunError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Undeclared(why) => write!(f, "{why}"),
             Self::Occupied { path } => write!(
                 f,
                 "{path} already holds a README.md: assembling over somebody's results is not \
@@ -1537,6 +1542,527 @@ print(f"{len(consumed)} artefact(s) and the product re-derive")
 PY
 "#;
 
+/// One of the claim's provenance fields as the caller declared it (#32):
+/// given, or absent with the reason why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Declared<T> {
+    /// The value.
+    Given(T),
+    /// Why there is none -- a declaration, never an inference.
+    Absent(String),
+}
+
+/// `rule_ratified`'s values, as ruled on #32: the maintainer's ratifying
+/// comment, its UTC time, and the sha256 of the file `of` names (the rule
+/// file when `of` is `None`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Ratified {
+    /// The ratifying comment's id, a string of digits.
+    pub comment: String,
+    /// When it was posted, ISO-8601 UTC.
+    pub at: String,
+    /// The sha256 of the file `of` names.
+    pub digest: String,
+    /// The file the digest is of, when it is not `decision-rule.toml`.
+    pub of: Option<String>,
+}
+
+/// What only the claim's author knows about it (#32, ruled on #271): which
+/// issue it answers, what it supersedes, and which ratified rule decided it.
+/// The assembler refuses to write a directory without a declaration for
+/// each. `window_start` is not here: the assembler derives it from the run
+/// itself, or declares it absent with what it looked at.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Provenance {
+    /// The claim's issue number.
+    pub claim_issue: Declared<String>,
+    /// The digest of the product this one replaces.
+    pub supersedes: Declared<String>,
+    /// The ratification of the rule the claim was decided by.
+    pub rule_ratified: Declared<Ratified>,
+}
+
+/// The flags that give a provenance field, and the field each gives.
+const GIVEN_FLAGS: &[(&str, &str)] = &[
+    ("--claim-issue", "claim_issue"),
+    ("--supersedes", "supersedes"),
+    ("--rule-ratified", "rule_ratified"),
+];
+
+/// The flag that declares a field absent, as `FIELD=REASON`.
+const ABSENT_FLAG: &str = "--absent";
+
+/// The file `rule_ratified` names when it names none. The assembler never
+/// writes one, so an assembled directory's ratification names its file.
+const DEFAULT_RULE_FILE: &str = "decision-rule.toml";
+
+/// THE LINTER'S SHAPES, APPLIED BEFORE ANYTHING IS WRITTEN (#271 review): a
+/// value `check-results.py` would refuse is refused here, so the assembler
+/// never writes a directory the gates then turn away. An issue or comment
+/// number: ASCII digits, no leading zero.
+fn is_issue_number(value: &str) -> bool {
+    !value.is_empty() && !value.starts_with('0') && value.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Sixty-four lowercase hex characters.
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+/// `YYYY-MM-DDTHH:MM:SSZ`, a real calendar day and a time of day without a
+/// leap second -- what the linter's `strptime` reading accepts.
+fn is_utc(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let shape = bytes.len() == 20
+        && bytes.iter().enumerate().all(|(at, b)| match at {
+            4 | 7 => *b == b'-',
+            10 => *b == b'T',
+            13 | 16 => *b == b':',
+            19 => *b == b'Z',
+            _ => b.is_ascii_digit(),
+        });
+    if !shape {
+        return false;
+    }
+    let number = |from: usize, to: usize| value[from..to].parse::<u32>().unwrap_or(u32::MAX);
+    let (year, month, day) = (number(0, 4), number(5, 7), number(8, 10));
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let days = [
+        31,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
+    year >= 1
+        && (1..=12).contains(&month)
+        && (1..=days[month as usize - 1]).contains(&day)
+        && number(11, 13) < 24
+        && number(14, 16) < 60
+        && number(17, 19) < 60
+}
+
+/// Whether `text` carries something a reader can read: at least one ASCII
+/// letter or digit. `check-results.py`'s `has_text` is the same rule, stated
+/// the same way, so a reason the assembler writes is one the linter reads
+/// (#271's third review: a list of invisible code points kept growing, and a
+/// Hangul filler or a braille blank was still "text").
+fn has_text(text: &str) -> bool {
+    text.chars().any(|c| c.is_ascii_alphanumeric())
+}
+
+/// The `product_sha256` each directory beside `into` declares, `into`
+/// itself and the template excepted -- what a `supersedes` digest resolves
+/// against and what a second directory of one product collides with.
+///
+/// READ AS THE LINTER READS IT, OR REFUSED (#271's fourth review): a sibling
+/// is read only from its one canonical line, `product_sha256 = "<64 hex>"`
+/// at the top of its front-matter, which `check-results.py` requires of every
+/// directory; a sibling carrying the key spelled any other way, or more than
+/// once, is one this cannot read as the linter does, and the assembly is
+/// refused rather than guessed. So is a parent that exists and cannot be
+/// listed, and an `--into` with a `..` part. An empty parent is `.`; a parent
+/// that does not exist yet has no siblings.
+fn sibling_products(into: &Path) -> Result<Vec<String>, RunError> {
+    let here = std::env::current_dir().map_err(|err| RunError::Write {
+        path: into.display().to_string(),
+        reason: format!("the working directory cannot be read, so the siblings cannot be: {err}"),
+    })?;
+    siblings_from(&here, into)
+}
+
+/// [`sibling_products`] with the working directory given, so a relative
+/// `--into` is tested without moving the process's.
+fn siblings_from(cwd: &Path, into: &Path) -> Result<Vec<String>, RunError> {
+    use std::path::Component;
+    if into.as_os_str().is_empty() {
+        return Err(RunError::Undeclared(
+            "`--into` is empty; name the directory to write".to_owned(),
+        ));
+    }
+    if into.components().any(|part| part == Component::ParentDir) {
+        return Err(RunError::Undeclared(format!(
+            "`--into {}` has a `..` part; name the directory without one",
+            into.display()
+        )));
+    }
+    // ABSOLUTE FIRST (#271's fifth review): `--into .` or `./` from inside
+    // the target named the target itself as the parent, so its own contents
+    // were read as its siblings and the real ones never were. Joined to the
+    // working directory, with `.` parts dropped, the parent is the real one
+    // and the name is the target's own.
+    let target: PathBuf = cwd
+        .join(into)
+        .components()
+        .filter(|part| *part != Component::CurDir)
+        .collect();
+    let (Some(parent), Some(name)) = (target.parent(), target.file_name()) else {
+        return Err(RunError::Undeclared(format!(
+            "`--into {}` names no directory beside others",
+            into.display()
+        )));
+    };
+    if !parent.exists() {
+        return Ok(Vec::new());
+    }
+    let entries = std::fs::read_dir(parent).map_err(|err| RunError::Write {
+        path: parent.display().to_string(),
+        reason: format!("its directories cannot be listed, so the siblings cannot be read: {err}"),
+    })?;
+    let mut products = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        // A symlink that resolves to nothing may name the directory being
+        // written, which would then be read twice, as itself and as the link
+        // (the fifth review's M1).
+        if entry.file_type().is_ok_and(|kind| kind.is_symlink()) && !path.exists() {
+            return Err(RunError::Undeclared(format!(
+                "`{}` beside the directory being written is a symlink to nothing; once the \
+                 directory is written it may be read twice",
+                entry.file_name().to_string_lossy()
+            )));
+        }
+        if !path.is_dir()
+            || path.file_name() == Some(name)
+            || path.file_name().is_some_and(|name| name == "_template")
+        {
+            continue;
+        }
+        let Ok(readme) = std::fs::read_to_string(path.join("README.md")) else {
+            continue;
+        };
+        // A carriage return that ends no line is a line break to Python's
+        // reader and none to `lines()`, so the two would read different
+        // front-matter (the fifth review's B2).
+        if readme.replace("\r\n", "\n").contains('\r') {
+            return Err(unreadable_sibling(&path));
+        }
+        let mut lines = readme.lines();
+        if lines.next() != Some("+++") {
+            continue;
+        }
+        let named: Vec<&str> = lines
+            .take_while(|line| *line != "+++")
+            // Any line naming the key, however spelled around it -- quoted,
+            // in a table, in a string, or a longer key (the fifth review's
+            // B1): the one spelling-independent rule, and the linter's.
+            .filter(|line| line.contains("product_sha256"))
+            .collect();
+        match named.as_slice() {
+            [] => {}
+            [line] => {
+                let sha = line
+                    .strip_prefix("product_sha256 = \"")
+                    .and_then(|rest| rest.strip_suffix('"'))
+                    .filter(|sha| is_sha256(sha));
+                let Some(sha) = sha else {
+                    return Err(unreadable_sibling(&path));
+                };
+                products.push(sha.to_owned());
+            }
+            _ => return Err(unreadable_sibling(&path)),
+        }
+    }
+    Ok(products)
+}
+
+/// A sibling whose product this cannot read as the linter does.
+fn unreadable_sibling(path: &Path) -> RunError {
+    RunError::Undeclared(format!(
+        "`{}` beside the directory being written does not spell its `product_sha256` as one \
+         line, `product_sha256 = \"<64 hex>\"`, which `check-results.py` requires; its product \
+         cannot be read as the gates read it",
+        path.file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+    ))
+}
+
+/// A relative path spelled one way: no empty, `.` or `..` part, so no
+/// leading `/` or `./`, no `a//b`, no trailing `/` -- the linter's plain
+/// spelling (#271's second review).
+fn is_plain(path: &str) -> bool {
+    path.split('/')
+        .all(|part| !part.is_empty() && part != "." && part != "..")
+}
+
+/// Refuses `value` for `field` unless `holds`.
+fn refuse_unless(holds: bool, field: &str, value: &str) -> Result<(), RunError> {
+    if holds {
+        Ok(())
+    } else {
+        Err(RunError::Undeclared(format!(
+            "`{field}` is {value:?}, which `check-results.py` would refuse: an issue or \
+             comment number is digits with no leading zero, a digest 64 lowercase hex, a \
+             time YYYY-MM-DDTHH:MM:SSZ"
+        )))
+    }
+}
+
+/// A given value held to its shape; an absence passes as declared.
+fn shaped(
+    declared: Declared<String>,
+    field: &str,
+    holds: fn(&str) -> bool,
+) -> Result<Declared<String>, RunError> {
+    if let Declared::Given(value) = &declared {
+        refuse_unless(holds(value), field, value)?;
+    }
+    Ok(declared)
+}
+
+/// A TOML basic string. Not Rust's `{:?}`: Debug escapes a control
+/// character as `\u{1b}`, which TOML refuses, and these strings are the first
+/// a caller writes (#271 review).
+fn toml_string(text: &str) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::from("\"");
+    for ch in text.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            ch if ch.is_control() => {
+                let _ = write!(out, "\\u{:04X}", u32::from(ch));
+            }
+            ch => out.push(ch),
+        }
+    }
+    out.push('"');
+    out
+}
+
+impl Provenance {
+    /// Read from `diet bakeoff`'s flags: `--claim-issue N`, `--supersedes
+    /// HEX`, `--rule-ratified COMMENT,AT,DIGEST[,OF]`, and `--absent
+    /// FIELD=REASON` for any of the three.
+    ///
+    /// # Errors
+    ///
+    /// [`RunError::Undeclared`] naming a field given no declaration, given
+    /// two, or a flag this does not read.
+    pub fn from_flags(flags: &[String]) -> Result<Self, RunError> {
+        let mut given: BTreeMap<&str, String> = BTreeMap::new();
+        let mut absent: BTreeMap<String, String> = BTreeMap::new();
+        let mut at = 0;
+        while at < flags.len() {
+            let value = flags
+                .get(at + 1)
+                .filter(|value| !value.starts_with("--"))
+                .ok_or_else(|| RunError::Undeclared(format!("`{}` takes a value", flags[at])))?;
+            // A table, not a match on spellings: the flags are data, and the
+            // library check refuses a match arm on a string literal.
+            let flag = flags[at].as_str();
+            if flag == ABSENT_FLAG {
+                let (field, reason) = value.split_once('=').ok_or_else(|| {
+                    RunError::Undeclared(format!("`--absent {value}` is not FIELD=REASON"))
+                })?;
+                if !GIVEN_FLAGS.iter().any(|(_, known)| *known == field) {
+                    return Err(RunError::Undeclared(format!(
+                        "`--absent {field}=...`: only claim_issue, supersedes and rule_ratified are \
+                         declared by the caller; the assembler derives window_start itself"
+                    )));
+                }
+                if !has_text(reason) {
+                    return Err(RunError::Undeclared(format!(
+                        "`--absent {field}=` gives no reason; an absence is declared with why"
+                    )));
+                }
+                if absent.insert(field.to_owned(), reason.to_owned()).is_some() {
+                    return Err(RunError::Undeclared(format!(
+                        "`{field}` is declared absent twice"
+                    )));
+                }
+                at += 2;
+                continue;
+            }
+            let Some(&(_, field)) = GIVEN_FLAGS.iter().find(|(spelled, _)| *spelled == flag) else {
+                return Err(RunError::Undeclared(format!(
+                    "`{flag}` is not a flag `diet bakeoff` reads"
+                )));
+            };
+            if given.insert(field, value.clone()).is_some() {
+                return Err(RunError::Undeclared(format!("`{field}` is given twice")));
+            }
+            at += 2;
+        }
+        let mut declared = |field: &str| -> Result<Declared<String>, RunError> {
+            match (given.remove(field), absent.remove(field)) {
+                (Some(value), None) => Ok(Declared::Given(value)),
+                (None, Some(reason)) => Ok(Declared::Absent(reason)),
+                (Some(_), Some(_)) => Err(RunError::Undeclared(format!(
+                    "`{field}` is both given and declared absent"
+                ))),
+                (None, None) => Err(RunError::Undeclared(format!(
+                    "`{field}` is neither given nor declared absent: pass `--{}` or \
+                     `--absent {field}=REASON`; an absence is declared, not inferred (#32)",
+                    field.replace('_', "-")
+                ))),
+            }
+        };
+        let claim_issue = shaped(declared("claim_issue")?, "claim_issue", is_issue_number)?;
+        let supersedes = shaped(declared("supersedes")?, "supersedes", is_sha256)?;
+        let rule_ratified = match declared("rule_ratified")? {
+            Declared::Absent(reason) => Declared::Absent(reason),
+            Declared::Given(spec) => {
+                let parts: Vec<&str> = spec.split(',').collect();
+                let [comment, at, digest, of @ ..] = parts.as_slice() else {
+                    return Err(RunError::Undeclared(format!(
+                        "`--rule-ratified {spec}` is not COMMENT,AT,DIGEST[,OF]"
+                    )));
+                };
+                if of.len() > 1 {
+                    return Err(RunError::Undeclared(format!(
+                        "`--rule-ratified {spec}` is not COMMENT,AT,DIGEST[,OF]"
+                    )));
+                }
+                for (key, value, holds) in [
+                    ("comment", comment, is_issue_number as fn(&str) -> bool),
+                    ("at", at, is_utc),
+                    ("digest", digest, is_sha256),
+                ] {
+                    refuse_unless(holds(value), &format!("rule_ratified.{key}"), value)?;
+                }
+                Declared::Given(Ratified {
+                    comment: (*comment).to_owned(),
+                    at: (*at).to_owned(),
+                    digest: (*digest).to_owned(),
+                    of: of.first().map(|of| (*of).to_owned()),
+                })
+            }
+        };
+        Ok(Self {
+            claim_issue,
+            supersedes,
+            rule_ratified,
+        })
+    }
+
+    /// What the declarations name, held to this run (#271 review): a claim
+    /// does not supersede its own product, and a ratification names a file
+    /// this directory will carry -- one the assembler writes or copies, never
+    /// the README that states the digest -- whose bytes hash to its digest.
+    /// Asked of `carried`, the bytes before any is written, so a refusal
+    /// leaves no directory behind.
+    fn held_to(
+        &self,
+        product_sha256: &str,
+        carried: &[(&str, &[u8])],
+        into: &Path,
+    ) -> Result<(), RunError> {
+        if self.supersedes == Declared::Given(product_sha256.to_owned()) {
+            return Err(RunError::Undeclared(format!(
+                "`supersedes` is {product_sha256}, this run's own product; a claim does not \
+                 supersede itself"
+            )));
+        }
+        // ONE PRODUCT, ONE DIRECTORY (#271, ruled): a record assembled beside
+        // a directory already holding its product would make two, and every
+        // supersession of it ambiguous.
+        let siblings = sibling_products(into)?;
+        if siblings.iter().any(|sha| sha == product_sha256) {
+            return Err(RunError::Undeclared(format!(
+                "this run's product, {product_sha256}, is already a directory's beside the one \
+                 being written; a product is one directory's"
+            )));
+        }
+        // RESOLVED AS THE LINTER RESOLVES IT (#271, ruling (a); its third
+        // review): the product of exactly one directory beside the one being
+        // written, the template not among them.
+        if let Declared::Given(digest) = &self.supersedes {
+            let named = siblings.iter().filter(|sha| *sha == digest).count();
+            if named != 1 {
+                return Err(RunError::Undeclared(format!(
+                    "`supersedes` is {digest}, which {named} directory(ies) beside the one being \
+                     written declare as their `product_sha256`; a supersession names exactly one \
+                     product"
+                )));
+            }
+        }
+        let Declared::Given(ratified) = &self.rule_ratified else {
+            return Ok(());
+        };
+        let of = ratified.of.as_deref().unwrap_or(DEFAULT_RULE_FILE);
+        if !is_plain(of) {
+            return Err(RunError::Undeclared(format!(
+                "`rule_ratified.of` is `{of}`; a path inside the directory is spelled plainly, \
+                 with no empty, `.` or `..` part"
+            )));
+        }
+        let Some((_, bytes)) = carried.iter().find(|(path, _)| *path == of) else {
+            let names: Vec<&str> = carried.iter().map(|(path, _)| *path).collect();
+            return Err(RunError::Undeclared(format!(
+                "`rule_ratified` is of `{of}`, which this directory does not carry; it carries \
+                 {}",
+                names.join(", ")
+            )));
+        };
+        let found = sha256_hex(bytes);
+        if found != ratified.digest {
+            return Err(RunError::Undeclared(format!(
+                "`rule_ratified.digest` is {}, and `{of}` as written hashes to {found}; the \
+                 ratification is of other bytes",
+                ratified.digest
+            )));
+        }
+        Ok(())
+    }
+
+    /// The front-matter lines the fields and their absences take, with
+    /// `window_start`'s absence -- derived, not declared -- among them.
+    fn front_matter(&self, window_start_absent: &str) -> String {
+        use std::fmt::Write as _;
+        let mut lines = String::new();
+        let mut absences: Vec<(&str, &str)> = Vec::new();
+        match &self.claim_issue {
+            Declared::Given(issue) => {
+                let _ = writeln!(lines, "claim_issue = {}", toml_string(issue));
+            }
+            Declared::Absent(why) => absences.push(("claim_issue", why)),
+        }
+        match &self.supersedes {
+            Declared::Given(digest) => {
+                let _ = writeln!(lines, "supersedes = {}", toml_string(digest));
+            }
+            Declared::Absent(why) => absences.push(("supersedes", why)),
+        }
+        match &self.rule_ratified {
+            Declared::Given(ratified) => {
+                let of = ratified
+                    .of
+                    .as_ref()
+                    .map_or(String::new(), |of| format!(", of = {}", toml_string(of)));
+                let _ = writeln!(
+                    lines,
+                    "rule_ratified = {{ comment = {}, at = {}, digest = {}{of} }}",
+                    toml_string(&ratified.comment),
+                    toml_string(&ratified.at),
+                    toml_string(&ratified.digest)
+                );
+            }
+            Declared::Absent(why) => absences.push(("rule_ratified", why)),
+        }
+        absences.push(("window_start", window_start_absent));
+        let shown: Vec<String> = absences
+            .iter()
+            .map(|(field, why)| format!("{field} = {}", toml_string(why)))
+            .collect();
+        let _ = writeln!(lines, "absent = {{ {} }}", shown.join(", "));
+        lines
+    }
+}
+
 /// Where a bakeoff's numbers land.
 ///
 /// ASSEMBLED, NOT PRINTED. Ruled 2026-09-10 on #69: printing the report to
@@ -1555,7 +2081,7 @@ PY
 /// Returns [`RunError`] for anything that stops the run, and for a directory
 /// that already holds a report -- overwriting somebody's results is not an
 /// assembly step.
-pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
+pub fn assemble(path: &Path, into: &Path, provenance: &Provenance) -> Result<Value, RunError> {
     let done = computed(path)?;
     let mut product = String::new();
     json::render(&done.report, &mut product);
@@ -1564,6 +2090,40 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
 
     let artifacts = consumed(&done.record.events);
     let checked = u32::try_from(artifacts.len()).unwrap_or(u32::MAX);
+
+    // WHAT THE DECLARATIONS NAME, HELD TO THIS RUN (#271 review), before
+    // anything is written.
+    // EVERY BYTE THE DIRECTORY WILL CARRY, BEFORE ANY IS WRITTEN (#271,
+    // track three's read): what the declarations name is checked against
+    // these, so a refusal leaves nothing behind -- not seven files and no
+    // README.
+    let mut copied: Vec<(&str, Vec<u8>)> = Vec::new();
+    for artifact in &artifacts {
+        let bytes =
+            std::fs::read(done.dir.join(&artifact.path)).map_err(|_| RunError::Missing {
+                path: artifact.path.clone(),
+            })?;
+        copied.push((artifact.path.as_str(), bytes));
+    }
+    let mut pre_registration = String::new();
+    json::render(&done.kind.pre_registration(), &mut pre_registration);
+    pre_registration.push('\n');
+    let regime = done.record.regime().clone();
+    let record = synthesized_record(&done, &artifacts, checked, &product_sha256);
+    let rendered_record = crate::formats::record::render(&record);
+    let regimen = regimen_of(&regime);
+    let carried: Vec<(&str, &[u8])> = copied
+        .iter()
+        .map(|(path, bytes)| (*path, bytes.as_slice()))
+        .chain([
+            ("pre-registration.json", pre_registration.as_bytes()),
+            ("run.jsonl", rendered_record.as_bytes()),
+            ("report.json", product.as_bytes()),
+            ("regimen.toml", regimen.as_bytes()),
+            ("recompute.sh", RECOMPUTE.as_bytes()),
+        ])
+        .collect();
+    provenance.held_to(&product_sha256, &carried, into)?;
 
     if into.join("README.md").exists() {
         return Err(RunError::Occupied {
@@ -1578,19 +2138,15 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
     // The caches and the register, by the digests the record declares. Copied
     // rather than referenced: a results directory is a claim with its evidence
     // ATTACHED, and evidence that lives somewhere else is a link.
-    for artifact in &artifacts {
-        let bytes =
-            std::fs::read(done.dir.join(&artifact.path)).map_err(|_| RunError::Missing {
-                path: artifact.path.clone(),
-            })?;
-        let landing = into.join(&artifact.path);
+    for (path, bytes) in &copied {
+        let landing = into.join(path);
         if let Some(parent) = landing.parent() {
             std::fs::create_dir_all(parent).map_err(|err| RunError::Write {
                 path: parent.display().to_string(),
                 reason: err.to_string(),
             })?;
         }
-        write(&landing, &bytes)?;
+        write(&landing, bytes)?;
     }
 
     // THE PRE-REGISTRATION, FIRST, AND HASHED FROM THE BYTES ON DISK.
@@ -1609,19 +2165,11 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
     // the front-matter is of the bytes that ended up on disk, and that those
     // bytes are still there, unchanged, at the moment the scores are written
     // -- re-read below rather than trusted from the variable.
-    let mut pre_registration = String::new();
-    json::render(&done.kind.pre_registration(), &mut pre_registration);
-    pre_registration.push('\n');
     let pre_registration_path = into.join("pre-registration.json");
     write(&pre_registration_path, pre_registration.as_bytes())?;
     let pre_registration_sha256 = sha256_hex(pre_registration.as_bytes());
 
-    let regime = done.record.regime().clone();
-    let record = synthesized_record(&done, &artifacts, checked, &product_sha256);
-    write(
-        &into.join("run.jsonl"),
-        crate::formats::record::render(&record).as_bytes(),
-    )?;
+    write(&into.join("run.jsonl"), rendered_record.as_bytes())?;
     // Re-read, not re-used: the point of the digest is the file, so the file
     // is what is hashed again. Same refusal shape as a cache whose bytes are
     // not the bytes the record declared -- the scores do not get written over
@@ -1638,7 +2186,7 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
         });
     }
     write(&into.join("report.json"), product.as_bytes())?;
-    write(&into.join("regimen.toml"), regimen_of(&regime).as_bytes())?;
+    write(&into.join("regimen.toml"), regimen.as_bytes())?;
     write(
         &into.join("README.md"),
         report_of(
@@ -1647,6 +2195,7 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
             &product_sha256,
             &pre_registration_sha256,
             checked,
+            &provenance.front_matter(&window_start_absent(path, &done)),
         )
         .as_bytes(),
     )?;
@@ -1664,6 +2213,28 @@ pub fn assemble(path: &Path, into: &Path) -> Result<Value, RunError> {
             Value::Integer(i64::from(checked)),
         ),
     ])))
+}
+
+/// Why the assembled directory gives no `window_start` (#32, ruled on
+/// #271): the window opens at the run's first fork, and the record's fork
+/// rows carry no clock time, so the assembler says what it looked at and
+/// declares the absence itself rather than leaving it to be inferred. Named
+/// by file name only: the path a caller passed may be a home directory.
+fn window_start_absent(path: &Path, done: &Computed) -> String {
+    let forks = done
+        .record
+        .events
+        .iter()
+        .filter(|event| matches!(event, Event::Fork { .. }))
+        .count();
+    let named = path.file_name().map_or_else(
+        || "the run's record".to_owned(),
+        |name| name.to_string_lossy().into_owned(),
+    );
+    format!(
+        "derived by `diet bakeoff --into` from {named}: its {forks} fork row(s) carry no clock time, \
+         so when the window opened is not in the record"
+    )
 }
 
 /// The record the assembled directory carries: the run's regime and source,
@@ -1838,6 +2409,7 @@ fn report_of(
     product_sha256: &str,
     pre_registration_sha256: &str,
     checked: u32,
+    provenance: &str,
 ) -> String {
     let ids: Vec<String> = regime
         .substrate_ids()
@@ -1861,6 +2433,7 @@ fn report_of(
          controls_run = {controls_run}\n\
          known_defects = []\n\
          targets_checked = {checked}\n\
+         {provenance}\
          \n\
          [regime]\n\
          arm = {:?}\n\
@@ -1922,10 +2495,144 @@ mod tests {
     use std::fmt::Write as _;
     use std::path::{Path, PathBuf};
 
-    use super::{RunError, RunKind, assemble, run};
+    use super::{Provenance, RunError, RunKind, assemble, run, siblings_from};
     use crate::capture::sense::{self, Embedder, Fixture};
     use crate::digest::sha256_hex;
     use crate::formats::record::json::Value;
+
+    /// Flags as the binary passes them.
+    fn flags(list: &[&str]) -> Vec<String> {
+        list.iter().map(|f| (*f).to_owned()).collect()
+    }
+
+    /// A declared provenance, as a caller who knows the claim passes it.
+    fn declared() -> Provenance {
+        Provenance::from_flags(&[
+            "--claim-issue".to_owned(),
+            "24".to_owned(),
+            "--absent".to_owned(),
+            "supersedes=nothing replaced: the first run of this claim".to_owned(),
+            "--absent".to_owned(),
+            "rule_ratified=the bakeoff applies no rule; its endpoints are pre-registered"
+                .to_owned(),
+        ])
+        .expect("a declaration for each field")
+    }
+
+    /// NO DIRECTORY WITHOUT A DECLARATION FOR EACH FIELD (#32, ruled on
+    /// #271): a field neither given nor declared absent is refused, by name,
+    /// before anything is written -- and so is one given and declared absent
+    /// at once, or `window_start`, which the assembler derives.
+    /// A VALUE THE LINTER WOULD REFUSE IS REFUSED HERE (#271 review), and
+    /// so is a run's own product named as superseded or a ratification of a
+    /// file the directory does not carry.
+    #[test]
+    fn a_declaration_out_of_shape_is_refused() {
+        let rest = ["--absent", "supersedes=x", "--absent", "rule_ratified=x"];
+        for (issue, ok) in [("24", true), ("0114", false), ("", false), ("2a", false)] {
+            let mut list = vec!["--claim-issue", issue];
+            list.extend(rest);
+            assert_eq!(
+                Provenance::from_flags(&flags(&list)).is_ok(),
+                ok,
+                "claim_issue {issue:?}"
+            );
+        }
+        let hex = "b".repeat(64);
+        for (at, ok) in [
+            ("2026-09-25T03:29:00Z", true),
+            ("2024-02-29T23:59:59Z", true),
+            ("2026-02-29T00:00:00Z", false),
+            ("2026-09-25T03:29:60Z", false),
+            ("2026-09-25 03:29:00Z", false),
+            ("2026-09-25T03:29:00+00:00", false),
+        ] {
+            let ratified = format!("1,{at},{hex}");
+            let list = [
+                "--absent",
+                "claim_issue=x",
+                "--absent",
+                "supersedes=x",
+                "--rule-ratified",
+                &ratified,
+            ];
+            assert_eq!(
+                Provenance::from_flags(&flags(&list)).is_ok(),
+                ok,
+                "at {at:?}"
+            );
+        }
+        for digest in ["B".repeat(64), "b".repeat(63)] {
+            let list = [
+                "--absent",
+                "claim_issue=x",
+                "--supersedes",
+                &digest,
+                "--absent",
+                "rule_ratified=x",
+            ];
+            assert!(
+                Provenance::from_flags(&flags(&list)).is_err(),
+                "supersedes {digest:?}"
+            );
+        }
+        for reason in ["\u{1f}", "\u{1c}\u{1d}\u{1e}", "\u{200b}", " \u{feff} "] {
+            let list = [
+                "--claim-issue",
+                "24",
+                "--absent",
+                &format!("supersedes={reason}"),
+                "--absent",
+                "rule_ratified=x",
+            ];
+            assert!(
+                Provenance::from_flags(&flags(&list)).is_err(),
+                "a reason no reader can see, {reason:?}, was accepted"
+            );
+        }
+        assert_eq!(
+            super::toml_string("a\"b\\c\u{1b}\u{200b}\n"),
+            "\"a\\\"b\\\\c\\u001B\u{200b}\\n\""
+        );
+    }
+
+    #[test]
+    fn a_missing_declaration_is_refused_before_anything_is_written() {
+        let missing = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--absent",
+            "supersedes=none",
+        ]))
+        .expect_err("rule_ratified is undeclared");
+        assert!(
+            missing
+                .to_string()
+                .contains("`rule_ratified` is neither given nor declared absent"),
+            "{missing}"
+        );
+        let both = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--absent",
+            "claim_issue=x",
+            "--absent",
+            "supersedes=x",
+            "--absent",
+            "rule_ratified=x",
+        ]))
+        .expect_err("claim_issue is given and declared absent");
+        assert!(
+            both.to_string().contains("both given and declared absent"),
+            "{both}"
+        );
+        let derived = Provenance::from_flags(&flags(&["--absent", "window_start=x"]))
+            .expect_err("window_start is derived");
+        assert!(
+            derived.to_string().contains("derives window_start itself"),
+            "{derived}"
+        );
+    }
 
     /// The register this crate ships, used as the fixture's corpus.
     ///
@@ -2171,6 +2878,322 @@ mod tests {
         );
     }
 
+    /// A SECOND RECORD SUPERSEDES THE FIRST (ruling (a); #271's third
+    /// review), in a root of its own where each product is declared once:
+    /// the first record's directory, then a record with one more cache
+    /// consumed -- so another product -- whose `supersedes` resolves to it.
+    /// Returns the root, for the gates to lint.
+    fn assemble_a_supersession(base: &Path) -> PathBuf {
+        fn unchanged(_: &str) -> Option<Vec<f64>> {
+            None
+        }
+        let root = base.with_file_name("bakeoff-superseding");
+        let _ = std::fs::remove_dir_all(&root);
+        let first = write_run(&base.with_file_name("bakeoff-superseding-first-input"));
+        let answer = assemble(&first, &root.join("2026-01-01-the-first"), &declared())
+            .unwrap_or_else(|err| panic!("the first assembly failed: {err}"));
+        let Value::String(product) = field(&answer, "product_sha256") else {
+            panic!("the answer names the product's digest")
+        };
+        let second = write_run_with(
+            &base.with_file_name("bakeoff-superseding-second-input"),
+            &[("again", unchanged)],
+        );
+        let successor = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--supersedes",
+            product,
+            "--absent",
+            "rule_ratified=the bakeoff applies no rule; its endpoints are pre-registered",
+        ]))
+        .expect("a supersession");
+        assemble(
+            &second,
+            &root.join("2026-01-02-supersedes-the-first"),
+            &successor,
+        )
+        .unwrap_or_else(|err| panic!("the superseding assembly failed: {err}"));
+        root
+    }
+
+    /// Beside the first assembly: one with every field given, one with
+    /// reasons a caller might type, and the run-bound refusals, which write
+    /// no README. The two that land are linted with the first.
+    fn assemble_the_declared_variants(
+        path: &Path,
+        dir: &Path,
+        into: &Path,
+        reported: &str,
+    ) -> Vec<PathBuf> {
+        // Each in a root of its own: one record assembled twice beside itself
+        // is two directories with one product, which the gates refuse.
+        let given_root = dir.with_file_name("bakeoff-every-field-given");
+        let typed_root = dir.with_file_name("bakeoff-typed-reasons");
+        let refused_root = dir.with_file_name("bakeoff-refused");
+        for root in [&given_root, &typed_root, &refused_root] {
+            let _ = std::fs::remove_dir_all(root);
+        }
+        // EVERY FIELD GIVEN, and reasons a caller might type (#271 review):
+        // the given path writes values the gates read, and a reason with a
+        // quote, a backslash, a control character and a zero-width space is
+        // still TOML. Both land beside the first and are linted with it.
+        // `supersedes` is declared absent here: it must resolve to exactly
+        // one product beside the directory (ruling (a)), and every assembly
+        // of this record has the first one's product -- superseding which is
+        // superseding itself. Its resolution is the linter's, seeded there.
+        let pre_registration =
+            sha256_hex(&std::fs::read(into.join("pre-registration.json")).expect("written"));
+        let given = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--absent",
+            "supersedes=nothing replaced: the first assembly of this claim",
+            "--rule-ratified",
+            &format!("5826194082,2026-09-25T03:29:00Z,{pre_registration},pre-registration.json"),
+        ]))
+        .expect("every field given");
+        assemble(
+            path,
+            &given_root.join("2026-01-02-every-field-given"),
+            &given,
+        )
+        .unwrap_or_else(|err| panic!("the given assembly failed: {err}"));
+        // And what the declarations name is held to this run: its own
+        // product superseded, a ratification of the README or of a rule file
+        // it does not carry, or of other bytes, writes nothing.
+        let ratified = |tail: &str| format!("5826194082,2026-09-25T03:29:00Z,{tail}");
+        for (supersedes, rule, says) in [
+            (
+                reported.to_owned(),
+                ratified(&format!("{pre_registration},pre-registration.json")),
+                "does not supersede itself",
+            ),
+            (
+                "a".repeat(64),
+                ratified(&format!("{pre_registration},pre-registration.json")),
+                "names exactly one product",
+            ),
+            (String::new(), ratified(&pre_registration), "does not carry"),
+            (
+                String::new(),
+                ratified(&format!("{pre_registration},README.md")),
+                "does not carry",
+            ),
+            (
+                String::new(),
+                ratified(&format!("{pre_registration},./pre-registration.json")),
+                "spelled plainly",
+            ),
+            (
+                String::new(),
+                ratified(&format!("{},pre-registration.json", "c".repeat(64))),
+                "other bytes",
+            ),
+        ] {
+            // An empty `supersedes` here is one declared absent, so the case
+            // is refused for its own reason, not for a dangling digest.
+            let declared = if supersedes.is_empty() {
+                ["--absent", "supersedes=nothing replaced"]
+            } else {
+                ["--supersedes", supersedes.as_str()]
+            };
+            let refused = Provenance::from_flags(&flags(&[
+                "--claim-issue",
+                "24",
+                declared[0],
+                declared[1],
+                "--rule-ratified",
+                &rule,
+            ]))
+            .expect("in shape");
+            let landing = refused_root.join("refused");
+            let err = assemble(path, &landing, &refused).expect_err(says);
+            assert!(err.to_string().contains(says), "{err}");
+            assert!(!landing.exists(), "a refused assembly wrote its directory");
+            let _ = std::fs::remove_dir_all(&landing);
+        }
+        let typed = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--absent",
+            "supersedes=nothing \"replaced\" \\ here\u{1b}\u{200b}",
+            "--absent",
+            "rule_ratified=none\tat all\r\n",
+        ]))
+        .expect("typed reasons");
+        assemble(path, &typed_root.join("2026-01-03-typed-reasons"), &typed)
+            .unwrap_or_else(|err| panic!("the typed assembly failed: {err}"));
+        // And beside the first, the same record again is refused.
+        let again = assemble(
+            path,
+            &dir.join("2026-01-05-the-same-record-again"),
+            &declared(),
+        )
+        .expect_err("a second directory of one product");
+        assert!(
+            again.to_string().contains("a product is one directory's"),
+            "{again}"
+        );
+        let _ = std::fs::remove_dir_all(&refused_root);
+        vec![given_root, typed_root]
+    }
+
+    /// THE SIBLINGS ARE READ AS THE LINTER READS THEM, OR THE ASSEMBLY IS
+    /// REFUSED (#271's fourth review): a sibling whose product is spelled
+    /// other than as one canonical line -- a trailing comment, a second line
+    /// in a table -- cannot be read as `check-results.py` reads it; an
+    /// `--into` with a `..` part names a parent this cannot trust; and the
+    /// template's placeholder product resolves no supersession.
+    #[test]
+    fn the_assembler_reads_siblings_as_the_linter_does() {
+        let base = std::env::temp_dir().join(format!("bakeoff-siblings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let path = write_run(&base.join("input"));
+        let root = base.join("results");
+        let sha = "c".repeat(64);
+        let sibling = |name: &str, front: &str| {
+            let dir = root.join(name);
+            std::fs::create_dir_all(&dir).expect("a sibling");
+            std::fs::write(
+                dir.join("README.md"),
+                format!("+++\n{front}\n+++\n# a sibling\n"),
+            )
+            .expect("its README");
+        };
+        let refused = |into: &Path, provenance: &Provenance, says: &str| {
+            let err = assemble(&path, into, provenance).expect_err(says);
+            assert!(err.to_string().contains(says), "{err}");
+            assert!(!into.exists(), "a refused assembly wrote its directory");
+        };
+        // A sibling whose product cannot be read as the linter reads it.
+        let spelled_wrong = || {
+            refused(
+                &root.join("2026-01-09-new"),
+                &declared(),
+                "does not spell its `product_sha256`",
+            );
+            let _ = std::fs::remove_dir_all(&root);
+        };
+        sibling(
+            "2026-01-01-commented",
+            &format!("product_sha256 = \"{sha}\" # the report"),
+        );
+        spelled_wrong();
+        sibling(
+            "2026-01-01-tabled",
+            &format!(
+                "product_sha256 = \"{sha}\"\n[note]\nproduct_sha256 = \"{}\"",
+                "d".repeat(64)
+            ),
+        );
+        spelled_wrong();
+        refused(
+            &root.join("x").join("..").join("2026-01-09-new"),
+            &declared(),
+            "has a `..` part",
+        );
+        // The fifth review: a quoted key beside a canonical line in a string,
+        // a carriage return that ends no line, and a symlink to nothing.
+        sibling(
+            "2026-01-01-quoted",
+            &format!(
+                "\"product_sha256\" = \"{}\"\nnote = \"\"\"\nproduct_sha256 = \"{sha}\"\n\"\"\"",
+                "d".repeat(64)
+            ),
+        );
+        spelled_wrong();
+        sibling(
+            "2026-01-01-cr",
+            &format!("kind = \"x\"\rproduct_sha256 = \"{sha}\""),
+        );
+        spelled_wrong();
+        // A carriage return in the opening fence, where no key is named, so
+        // only the carriage-return rule refuses it: Python reads the fence
+        // and the product beneath it, and `lines()` sees no fence at all and
+        // would skip the sibling unread.
+        let fenced = root.join("2026-01-01-cr-fence");
+        std::fs::create_dir_all(&fenced).expect("a sibling");
+        std::fs::write(
+            fenced.join("README.md"),
+            format!("+++\rkind = \"x\"\nproduct_sha256 = \"{sha}\"\n+++\n# a sibling\n"),
+        )
+        .expect("its README");
+        spelled_wrong();
+        std::fs::create_dir_all(&root).expect("the root");
+        std::os::unix::fs::symlink(root.join("2026-01-09-new"), root.join("2026-01-01-alias"))
+            .expect("a dangling link");
+        refused(
+            &root.join("2026-01-09-new"),
+            &declared(),
+            "a symlink to nothing",
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        sibling("_template", &format!("product_sha256 = \"{sha}\""));
+        let of_the_template = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--supersedes",
+            &sha,
+            "--absent",
+            "rule_ratified=none applied",
+        ]))
+        .expect("in shape");
+        refused(
+            &root.join("2026-01-09-new"),
+            &of_the_template,
+            "names exactly one product",
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// AN `--into` IS READ FROM THE WORKING DIRECTORY (#271's fifth review):
+    /// `.` and `./` from inside the target named the target as its own
+    /// parent, and an unlistable parent must refuse, never read as empty.
+    #[test]
+    fn the_siblings_are_the_targets_real_ones() {
+        let base = std::env::temp_dir().join(format!("bakeoff-into-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("results");
+        let sha = "c".repeat(64);
+        let one = root.join("2026-01-01-one");
+        std::fs::create_dir_all(&one).expect("a sibling");
+        std::fs::write(
+            one.join("README.md"),
+            format!("+++\nproduct_sha256 = \"{sha}\"\n+++\n# a sibling\n"),
+        )
+        .expect("its README");
+        // Relative spellings are read from the working directory: `.` and
+        // `./` from inside the target, and a bare name from its parent, all
+        // read the real siblings; an empty `--into` names nothing.
+        let target = root.join("2026-01-09-new");
+        std::fs::create_dir_all(&target).expect("an empty target");
+        for (cwd, into) in [(&target, "."), (&target, "./"), (&root, "2026-01-09-new")] {
+            let read = siblings_from(cwd, Path::new(into)).expect("the siblings");
+            assert_eq!(
+                read,
+                vec![sha.clone()],
+                "`--into {into}` read the wrong siblings"
+            );
+        }
+        assert!(
+            siblings_from(&root, Path::new("")).is_err(),
+            "an empty `--into` was read"
+        );
+        // A parent that cannot be listed refuses; it never reads as no siblings.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000))
+                .expect("a locked parent");
+            let read = siblings_from(&root, &root.join("2026-01-10-other"));
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755))
+                .expect("unlocked");
+            let err = read.expect_err("an unlistable parent was read as no siblings");
+            assert!(err.to_string().contains("cannot be listed"), "{err}");
+        }
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     #[test]
     fn the_assembled_directory_is_one_the_gates_accept() {
         // UNDER THE REPOSITORY, not in the system temp directory, because
@@ -2187,8 +3210,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        let answer =
-            assemble(&path, &into).unwrap_or_else(|err| panic!("the assembly failed: {err}"));
+        let answer = assemble(&path, &into, &declared())
+            .unwrap_or_else(|err| panic!("the assembly failed: {err}"));
 
         // Every file the ruling named, and the two the gates require.
         for name in [
@@ -2219,6 +3242,8 @@ mod tests {
             "the answer's digest is not the product's"
         );
 
+        let variants = assemble_the_declared_variants(&path, &dir, &into, reported);
+
         // AND THE GATES. `check-results.py` dispatches the record verdict to
         // the built binary, and refuses when that binary does not reflect the
         // source -- which `cargo test` alone does not guarantee, because
@@ -2248,25 +3273,32 @@ mod tests {
             let _ = std::fs::remove_dir_all(&dir);
             return;
         }
-        for (script, what) in [
-            ("scripts/check-results.py", "the directory linter"),
-            ("scripts/check-recompute.py", "gate 0"),
-        ] {
-            let out = std::process::Command::new("python3")
-                .arg(root.join(script))
-                .arg("--root")
-                .arg(&dir)
-                .current_dir(&root)
-                .output()
-                .unwrap_or_else(|err| panic!("{what} could not be run: {err}"));
-            assert!(
-                out.status.success(),
-                "{what} refused the assembled directory:\n{}{}",
-                String::from_utf8_lossy(&out.stdout),
-                String::from_utf8_lossy(&out.stderr),
-            );
+        let superseding = assemble_a_supersession(&dir);
+        let mut lint_roots = vec![dir.clone(), superseding];
+        lint_roots.extend(variants);
+        for lint_root in &lint_roots {
+            for (script, what) in [
+                ("scripts/check-results.py", "the directory linter"),
+                ("scripts/check-recompute.py", "gate 0"),
+            ] {
+                let out = std::process::Command::new("python3")
+                    .arg(root.join(script))
+                    .arg("--root")
+                    .arg(lint_root)
+                    .current_dir(&root)
+                    .output()
+                    .unwrap_or_else(|err| panic!("{what} could not be run: {err}"));
+                assert!(
+                    out.status.success(),
+                    "{what} refused the assembled directory:\n{}{}",
+                    String::from_utf8_lossy(&out.stdout),
+                    String::from_utf8_lossy(&out.stderr),
+                );
+            }
         }
-        let _ = std::fs::remove_dir_all(&dir);
+        for lint_root in &lint_roots {
+            let _ = std::fs::remove_dir_all(lint_root);
+        }
     }
 
     /// A cache the record consumed and that is not beside it is a REFUSAL
@@ -2281,7 +3313,7 @@ mod tests {
         let dir = scratch("absent-cache");
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        assemble(&path, &into).expect("the assembly");
+        assemble(&path, &into, &declared()).expect("the assembly");
 
         let gone = "even.vectors.jsonl";
         std::fs::remove_file(into.join(gone)).expect("the cache to remove");
@@ -2336,7 +3368,7 @@ mod tests {
         let dir = scratch("exit-codes");
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        assemble(&path, &into).expect("the assembly");
+        assemble(&path, &into, &declared()).expect("the assembly");
 
         let run_it = |dir: &std::path::Path| {
             let run = std::process::Command::new("bash")
@@ -2437,7 +3469,7 @@ mod tests {
         let dir = scratch("no-evidence");
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        assemble(&path, &into).expect("the assembly");
+        assemble(&path, &into, &declared()).expect("the assembly");
 
         let run_it = || {
             let run = std::process::Command::new("bash")
@@ -2544,9 +3576,9 @@ mod tests {
         let dir = scratch("occupied");
         let path = write_run(&dir);
         let into = dir.join("2026-01-01-a-sense-bakeoff");
-        assemble(&path, &into).expect("the first assembly");
+        assemble(&path, &into, &declared()).expect("the first assembly");
         let before = std::fs::read(into.join("README.md")).expect("the report");
-        let err = assemble(&path, &into).expect_err("the second assembly");
+        let err = assemble(&path, &into, &declared()).expect_err("the second assembly");
         assert!(matches!(err, RunError::Occupied { .. }), "{err}");
         assert_eq!(
             std::fs::read(into.join("README.md")).expect("the report"),
@@ -2634,7 +3666,7 @@ mod tests {
         // only that the constant is itself, so it is read back off disk out
         // of an assembled directory — the same bytes a reader gets.
         let assembled = dir.join("2026-01-01-a-sense-bakeoff-ladder");
-        assemble(&path, &assembled).expect("the assembly");
+        assemble(&path, &assembled, &declared()).expect("the assembly");
         let pinned = std::fs::read_to_string(assembled.join("pre-registration.json"))
             .expect("the pre-registration is written beside the report");
         let pinned = crate::formats::record::json::line(pinned.trim_end())
@@ -3165,8 +4197,8 @@ mod tests {
         let path = write_pairs_run(&dir);
 
         let into = dir.join("2026-01-01-a-pairs-run");
-        let answer =
-            assemble(&path, &into).unwrap_or_else(|err| panic!("the assembly failed: {err}"));
+        let answer = assemble(&path, &into, &declared())
+            .unwrap_or_else(|err| panic!("the assembly failed: {err}"));
         let Value::String(reported) = field(&answer, "product_sha256") else {
             panic!("the answer names the product's digest")
         };

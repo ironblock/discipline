@@ -48,13 +48,17 @@ export interface UserNode extends Provenance {
   /** Session time it finished: when it was asked. */
   readonly endedAt: number;
   /**
-   * Its turn was cancelled: `diet` sends the model only finished turns (#29, Q12, keeping D13 for `cancelled`), so
-   * from here on this is not in what the model reads (#289). The fact is the log's `turn.settled` with `cancelled`.
+   * Its turn ended without an answer: `diet` sends the model only finished turns (#29, Q12, keeping D13 for
+   * `cancelled`, `failed` and `timeout`), so from here on this is not in what the model reads (#289). The fact is the log's
+   * `turn.settled`, and this is its word. A capped turn is `failed` (#290, ruled 5969941559).
    */
-  readonly outOfContext?: true;
+  readonly outOfContext?: OffTrunk;
 }
 
 export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled' | 'failed';
+
+/** The settle words that leave a turn off the trunk. */
+export type OffTrunk = 'cancelled' | 'failed' | 'timeout';
 
 /** Why a generation stopped: the response's `finish_reason` as llama.cpp spells it, or `cancelled` for a stopped call. */
 export type Stop = Open<'stop' | 'tool_calls' | 'length' | 'cancelled'>;
@@ -64,6 +68,8 @@ export interface Generation {
   readonly reasoning: string;
   readonly text: string;
   readonly stop?: Stop;
+  /** Its response hit the output cap (the log's `capped`): what it wrote is not an answer (#290). */
+  readonly capped?: true;
   readonly slot: number;
   readonly startedAt: number;
   /** Where its tool calls began in what it wrote (the response's `calls_from`): what came before is its text's. */
@@ -106,10 +112,11 @@ export interface AssistantNode extends Provenance, Generation {
   readonly id: string;
   readonly turn: number;
   /**
-   * Its turn was cancelled: `diet` sends the model only finished turns (#29, Q12, keeping D13 for `cancelled`), so
-   * from here on this is not in what the model reads (#289). The fact is the log's `turn.settled` with `cancelled`.
+   * Its turn ended without an answer: `diet` sends the model only finished turns (#29, Q12, keeping D13 for
+   * `cancelled`, `failed` and `timeout`), so from here on this is not in what the model reads (#289). The fact is the log's
+   * `turn.settled`, and this is its word. A capped turn is `failed` (#290, ruled 5969941559).
    */
-  readonly outOfContext?: true;
+  readonly outOfContext?: OffTrunk;
 }
 
 export interface ToolNode extends Provenance {
@@ -137,6 +144,8 @@ export interface SettledNode extends Provenance {
   readonly id: string;
   readonly turn: number;
   readonly reason: SettleReason;
+  /** It settled `failed` because its answer hit the output cap: the pair is the record of a capped turn (#290, ruled 5969297103). */
+  readonly capped?: true;
   readonly endedAt: number;
 }
 
@@ -307,6 +316,7 @@ function generation(g: GenerationBuilder, trunkSlot: number): Generation {
     lastActivityAt: ended?.t ?? g.deltas.at(-1)?.t ?? request.t,
     ...(ended ? { endedAt: ended.t, wallMs: ended.t - request.t } : {}),
     ...(response?.finish_reason !== undefined ? { stop: response.finish_reason } : cancelled ? { stop: 'cancelled' } : {}),
+    ...(response?.capped ? { capped: true as const } : {}),
     // A stopped call's timings are not a measurement, and v0 gives it none: what the frames said stands.
     ...(response?.timings ? { timings: response.timings } : {}),
     ...(response?.calls_from ? { callsFrom: response.calls_from } : {}),
@@ -392,7 +402,9 @@ export function fold(lines: readonly LogLine[]): Session {
 
   const unknown = new Map<string, number>();
   const settles = new Map<number, LineOf<'turn.settled'>>();
-  const cancelledTurns = new Set<number>();
+  const offTrunk = new Map<number, OffTrunk>();
+  /** Turns whose latest trunk response hit the output cap. */
+  const cappedTurns = new Set<number>();
   const gaps: Folded<GapNode>[] = [];
   let lastSettled: number | undefined;
   let phase = start.phase ?? '';
@@ -439,6 +451,8 @@ export function fold(lines: readonly LogLine[]): Session {
         generations.set(e.seq, { request: e, deltas: [], frames: [] });
         if (e.lane === 'trunk') {
           if (!firstRequestOfTurn.has(e.turn)) firstRequestOfTurn.set(e.turn, e.seq);
+          // A later step on the trunk: the cap that matters is the latest step's.
+          cappedTurns.delete(e.turn);
           era().slots.push({ kind: 'assistant', request: e.seq });
         } else if (e.fork !== undefined) {
           const f = forks.get(e.fork);
@@ -454,6 +468,7 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'response': {
         const g = generations.get(e.to_request);
         if (g) g.response = e;
+        if (g && e.capped && g.request.lane === 'trunk' && g.request.turn !== undefined) cappedTurns.add(g.request.turn);
         break;
       }
       case 'cancelled': {
@@ -477,7 +492,7 @@ export function fold(lines: readonly LogLine[]): Session {
       }
       case 'turn.settled':
         settles.set(e.seq, e);
-        if (e.reason === 'cancelled') cancelledTurns.add(e.turn);
+        if (e.reason === 'cancelled' || e.reason === 'failed' || e.reason === 'timeout') offTrunk.set(e.turn, e.reason as OffTrunk);
         lastSettled = e.seq;
         if (openTurn === e.turn) openTurn = undefined;
         // A turn that ended on its own, or was cancelled (the message says so), needs no mark.
@@ -560,7 +575,7 @@ export function fold(lines: readonly LogLine[]): Session {
             text: ask.text,
             endedAt: ask.t,
             ...(timings ? { prefill: { fresh: timings.prompt_n, cached: timings.cache_n } } : {}),
-            ...(cancelledTurns.has(slot.turn) ? { outOfContext: true as const } : {}),
+            ...(offTrunk.has(slot.turn) ? { outOfContext: offTrunk.get(slot.turn)! } : {}),
             ...provenance(ask, first?.response),
           });
         }
@@ -571,7 +586,7 @@ export function fold(lines: readonly LogLine[]): Session {
             id: id(g.request.seq),
             turn: g.request.turn,
             ...generation(g, trunkSlot),
-            ...(g.request.turn !== undefined && cancelledTurns.has(g.request.turn) ? { outOfContext: true as const } : {}),
+            ...(g.request.turn !== undefined && offTrunk.has(g.request.turn) ? { outOfContext: offTrunk.get(g.request.turn)! } : {}),
             ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.cancelled, g.failed),
           };
           return brand(node);
@@ -597,6 +612,7 @@ export function fold(lines: readonly LogLine[]): Session {
             id: id(slot.line.seq),
             turn: slot.line.turn,
             reason: slot.line.reason,
+            ...(slot.line.reason === 'failed' && cappedTurns.has(slot.line.turn) ? { capped: true as const } : {}),
             endedAt: slot.line.t,
             ...provenance(slot.line),
           });
