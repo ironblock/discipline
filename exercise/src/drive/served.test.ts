@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
-import { readingOf } from '../ui/flow.ts';
+import { edgeOf, flowText, readingOf, writingOf } from '../ui/flow.ts';
 import type { LogLine } from './log.ts';
 
 /**
@@ -49,6 +49,36 @@ describe('a served session, as the page reads it (#288)', () => {
     expect(reading?.kind === 'assistant' && reading.progress).toBe('prefill');
     expect(reading?.kind === 'assistant' && reading.meter).toEqual({ at: 288037, total: 2334, cache: 1767, processed: 1818, ppRate: (1000 * 51) / 125 });
     expect(reading?.kind === 'assistant' && readingOf(reading, 288037)).toMatchObject({ n: 51, of: 567 });
+  });
+
+  it('says where a stop cut turn 4: it had read its whole prompt and written for 3.5 s (#294)', () => {
+    const stopped = assistants(log)[3];
+    const firstDelta = log.find((l) => l.kind === 'delta' && l.request === 1182);
+    expect(stopped?.kind === 'assistant' && flowText(readingOf(stopped, 0)!)).toMatch(/^\+567 tok in /);
+    expect(stopped?.kind === 'assistant' && edgeOf(stopped)).toEqual({ read: 1 });
+    expect(stopped?.kind === 'assistant' && writingOf(stopped, 0)).toEqual({ phase: 'tg', ms: 292041 - (firstDelta?.t ?? 0), running: false, stopped: 'writing' });
+    expect(stopped?.kind === 'assistant' && flowText(writingOf(stopped, 0)!)).toBe('stopped after 3.5 s of writing');
+  });
+
+  it('says where a stop cut a read short -- the log here WRITTEN BY THIS TEST past seq 1185, as no turn in the rehearsal stopped in prefill (#294)', () => {
+    // The rehearsal to turn 4's third progress line (51 of 567 new tokens read), then a stop the drive would log
+    // there: stop.asked, cancelled with nothing written, the turn settled. Constructed, not recorded (ruled on #294).
+    const at = 288100;
+    const cut: LogLine[] = [
+      ...upTo(1185),
+      { seq: 1186, t: at, kind: 'stop.asked', turn: 4 },
+      { seq: 1187, t: at + 1, kind: 'cancelled', request: 1182, partial: '' },
+      { seq: 1188, t: at + 1, kind: 'turn.settled', turn: 4, reason: 'cancelled' },
+      { seq: 1189, t: at + 1, kind: 'settlement', from: 'turn', to: 'awaiting' },
+    ] as LogLine[];
+    const stopped = assistants(cut)[3];
+    expect(stopped?.kind === 'assistant' && stopped.progress).toBe('cancelled');
+    const read = stopped?.kind === 'assistant' ? readingOf(stopped, 999_999) : undefined;
+    // Timed to the stop, not to now: 51 of 567, from the request at 287889 to the cancel at 288101.
+    expect(read).toEqual({ phase: 'pp', n: 51, of: 567, ms: 288101 - 287889, running: false, stopped: 'reading' });
+    expect(flowText(read!)).toMatch(/^\+51 of 567 tok in 212 ms \(.+ t\/s pp\) · stopped$/);
+    expect(stopped?.kind === 'assistant' && edgeOf(stopped)?.read).toBeCloseTo(51 / 567, 6);
+    expect(stopped?.kind === 'assistant' && flowText(writingOf(stopped, 999_999)!)).toBe('stopped before writing');
   });
 
   it('reads a cold prefill from nothing', () => {

@@ -97,6 +97,9 @@ export const Served: Story = {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]').length).toBe(4));
     await expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="user"]').length).toBe(4);
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    // Turn 4 was stopped while writing, its prompt read whole: its footer says the stop (#294).
+    const feet = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"] .ex-block__foot')].map((f) => f.textContent ?? '');
+    await expect(feet.some((line) => line.startsWith('stopped after 3.5 s of writing'))).toBe(true);
   },
 };
 
@@ -109,5 +112,28 @@ export const ServedReading: Story = {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]').length).toBe(4));
     const reading = [...canvasElement.querySelectorAll('.ex-trunk .ex-block__head .ex-block__flow')].map((f) => f.textContent ?? '');
     await expect(reading.some((line) => line.startsWith('+51 of 567 tok in '))).toBe(true);
+  },
+};
+
+/**
+ * `?drive`, a turn stopped mid-prefill (#294). No turn in the rehearsal stopped in prefill, so the log past turn 4's
+ * third progress line is WRITTEN BY THIS STORY, as the drive would log a stop there (ruled on #294): the block
+ * says how far the read got and that a stop cut it, and that nothing was written.
+ */
+const STOPPED_IN_PREFILL = [
+  { seq: 1186, t: 288100, kind: 'stop.asked', turn: 4 },
+  { seq: 1187, t: 288101, kind: 'cancelled', request: 1182, partial: '' },
+  { seq: 1188, t: 288101, kind: 'turn.settled', turn: 4, reason: 'cancelled' },
+  { seq: 1189, t: 288101, kind: 'settlement', from: 'turn', to: 'awaiting' },
+].map((line) => JSON.stringify(line));
+
+export const ServedStoppedReading: Story = {
+  name: '?drive: a turn stopped mid-prefill, drawn as read that far',
+  args: { drive: true, web: serving(rehearsalTo(1185) + STOPPED_IN_PREFILL.join('\n') + '\n') },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const last = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]')].at(-1) as HTMLElement;
+    await expect(last.querySelector('.ex-block__head .ex-block__flow')?.textContent).toMatch(/^\+51 of 567 tok in 212 ms \(.+ t\/s pp\) · stopped$/);
+    await expect(last.querySelector('.ex-block__foot')?.textContent).toContain('stopped before writing');
   },
 };

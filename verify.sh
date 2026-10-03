@@ -3095,6 +3095,14 @@ inject_exercise_progress_read_nested() {
   edit_in_place 's|    processed: top.processed,|    processed: (top as unknown as { prompt: { processed: number } }).prompt.processed,|' exercise/src/session/fold.ts
 }
 
+# A turn stopped mid-prefill drawn as read in full (#294): the read taken as
+# the whole new part, whatever the last frame said. Typecheck and lint pass
+# it; the fold of a stop cut short -- constructed in served.test.ts, as no
+# recorded turn stopped in prefill -- says how far it got.
+inject_exercise_stopped_read_drawn_whole() {
+  edit_in_place 's|^  const read = Math.min(fresh, Math.max(0, m.processed - m.cache));$|  const read = fresh;|' exercise/src/ui/flow.ts
+}
+
 # #32 I2's emitter mutated (track five's faults, carried here by courier): a
 # ledger row the renderer must refuse, naming the directory. The fixture loop
 # never reaches the renderer, and a record diet accepted cannot lack a word,
@@ -8249,6 +8257,8 @@ selftest() {
     'voxel-stress: its carried field disagrees with its events'
   seeded_case "the meter reading a progress frame's old shape" exercise inject_exercise_progress_read_nested \
     "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
+  seeded_case "a turn stopped mid-prefill drawn as read in full" exercise inject_exercise_stopped_read_drawn_whole \
+    'FAIL.*served\.test\.ts.*says where a stop cut a read short'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
