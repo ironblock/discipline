@@ -6,7 +6,10 @@
 
 A diff is MATERIAL when any of these holds, and a CHORE otherwise:
 
-  * #112's map returns a seeded fault for it: a changed file reaches a
+  * #112's map returns a seeded fault for it -- today every file the map
+    reaches also lies in PROTOCOL, GATE_TREES or the root rule (0 of its 158
+    inputs outside them, measured on #280's third review), so the map is
+    kept as a second reader, not as the rule that decides: a changed file reaches a
     fault's catcher, the selftest machinery, or -- with `--census`, the
     latest `main` selftest's census -- a file a fault's injection touched.
     The map is `scope-selftest.py`'s own, read from there, never copied;
@@ -17,7 +20,9 @@ A diff is MATERIAL when any of these holds, and a CHORE otherwise:
     workflow;
   * it touches the trees the gate runs from, `GATE_TREES` (ruled on #276):
     the map names the files a check function names, and a check reaches
-    many more; or a root entry other than a Markdown document or a licence.
+    many more; or a root entry other than a Markdown document or a licence,
+    anything under a root dot-directory, or a top-level Python package or
+    `node_modules/`, which the gate's interpreters import from.
 
 The branch's name is never read: a `chore/` prefix is a hint, and the diff is
 the value. Printed:
@@ -151,6 +156,23 @@ def in_gate_tree(path: str) -> str | None:
     return under(path, GATE_TREES)
 
 
+def importable(path: str, files: list[str]) -> bool:
+    """Whether `path` lies in a top-level Python package -- a directory whose
+    `__init__.py` this diff adds or the tree carries -- or in a root
+    `node_modules/` (#280's third review, ruled on #276). The gate runs
+    `python3 -c` and `python3 -` from the root, where a package named `json`
+    or `pathlib` replaces the standard library's; Node falls back to a root
+    `node_modules/` from `exercise/`. A plain directory nothing imports, such
+    as `logo/`, stays an asset directory."""
+    if "/" not in path:
+        return False
+    first = path.split("/", 1)[0]
+    if first.casefold() == "node_modules":
+        return True
+    init = f"{first}/__init__.py"
+    return any(f.casefold() == init.casefold() for f in files) or (ROOT / init).is_file()
+
+
 def unknown_root(path: str) -> bool:
     """A root entry that is neither a gate file nor what a chore may touch:
     a root file other than a Markdown document or a licence, or anything
@@ -204,6 +226,8 @@ def classify(files: list[str], census: pathlib.Path | None = None) -> tuple[str,
         reason = f"{tree[0]} is in the gate's tree ({tree[1]})"
     elif root := next((f for f in files if unknown_root(f)), None):
         reason = f"{root} is a root entry a chore may not touch (only *.md other than CONTRIBUTING.md, and LICENSE*)"
+    elif package := next((f for f in files if importable(f, files)), None):
+        reason = f"{package} is in a top-level package or node_modules/, which the gate's interpreters import from"
     else:
         touched = scope.read_census(census)[1] if census else {}
         for ident, (deps, _units) in sorted(scope.dependencies(ROOT, text).items()):
@@ -243,7 +267,16 @@ CASES = (
     (("Results/x/README.md",), "material"),
     (("Diet/src/lib.rs",), "material"),
     (("docs/notes.md", "logo/a.svg", "NOTES.MD"), "chore"),
+    (("json/__init__.py",), "material"),
+    (("pathlib/__init__.py", "pathlib/x.py"), "material"),
+    (("node_modules/x/index.js",), "material"),
+    (("logo/build.py", "logo/lens.py"), "chore"),
 )
+
+# What a chore owes locally, read through classify: #274's paths name
+# exactly hygiene and history (#276's done-when), so a change that stopped
+# naming either is red.
+CHORE_CHECKS = (("README.md", "logo/logo-dark.svg", "logo/build.py"), ["hygiene", "history"])
 
 
 # Each protocol entry, read on its own (#280's review: five entries were
@@ -305,6 +338,11 @@ def check() -> int:
                 f"{f' ({reason})' if reason else ''}",
                 file=sys.stderr,
             )
+    chore_files, chore_checks = CHORE_CHECKS
+    verdict, _reason, named = classify(list(chore_files))
+    if verdict != "chore" or named != chore_checks:
+        wrong += 1
+        print(f"pr-scope: {', '.join(chore_files)} classified {verdict}, naming {named}, not chore naming {chore_checks}", file=sys.stderr)
     for path, entry in GATE_CASES:
         if in_gate_tree(path) != entry:
             wrong += 1
@@ -313,7 +351,7 @@ def check() -> int:
         if unknown_root(path) != unknown:
             wrong += 1
             print(f"pr-scope: the root entry {path} reads {'unknown' if unknown_root(path) else 'chore-able'}, not as declared", file=sys.stderr)
-    total = len(CASES) + len(PROTOCOL_CASES) + len(GATE_CASES) + len(ROOT_CASES)
+    total = len(CASES) + len(PROTOCOL_CASES) + len(GATE_CASES) + len(ROOT_CASES) + 1
     if wrong:
         print(f"pr-scope: {wrong} of {total} case(s) misclassified", file=sys.stderr)
         return 1

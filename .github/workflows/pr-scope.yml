@@ -37,7 +37,7 @@ jobs:
           {
             echo '### pr-scope'
             echo
-            echo '```'
-            printf '%s\n' "$verdict"
-            echo '```'
+            echo '<pre>'
+            printf '%s\n' "$verdict" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g'
+            echo '</pre>'
           } >> "$GITHUB_STEP_SUMMARY"

@@ -61,7 +61,8 @@
      job of whoever owns the PR. -->
 
 <!-- A chore owes the first two boxes and the hygiene and history checks; the
-     rest are a material PR's. Mark the others "n/a: chore". -->
+     rest are a material PR's. Mark the others "n/a: chore". For a chore, the
+     second box's deferred findings go under "Notes". -->
 
 - [ ] **CI is green on the head commit, including the `selftest` job.** Not
       "green when I pushed": green on what is about to merge.
