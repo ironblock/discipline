@@ -3207,6 +3207,78 @@ legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.refere
 migrated = false
 
 [[fault]]
+id = "results.results_figure_hidden_by_escaped_braces"
+kind = "seeded-gate"
+check = "results"
+label = "a figure between escaped braces"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '0\\.241'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_tab_indented"
+kind = "seeded-gate"
+check = "results"
+label = "a tab-indented heading in a list item"
+failure_class = "results.heading-unread"
+legacy_signature = "'.t## Results', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_after_list_marker_tab"
+kind = "seeded-gate"
+check = "results"
+label = "a heading after a list marker and a tab"
+failure_class = "results.heading-unread"
+legacy_signature = "'-.t## Results', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_braces_split_by_emphasis"
+kind = "seeded-gate"
+check = "results"
+label = "braces split by emphasis"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_braces_split_by_strikethrough"
+kind = "seeded-gate"
+check = "results"
+label = "braces split by strikethrough"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_braces_split_by_link"
+kind = "seeded-gate"
+check = "results"
+label = "braces split by link syntax"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_comment_marker_in_code_span"
+kind = "seeded-gate"
+check = "results"
+label = "a comment marker in a code span"
+failure_class = "results.heading-unread"
+legacy_signature = "carries a comment marker .<!--. inside a code span.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_backtick_fence_info_backtick"
+kind = "seeded-gate"
+check = "results"
+label = "a fence whose info string holds a backtick"
+failure_class = "results.heading-unread"
+legacy_signature = "carries a backtick fence whose info string holds a backtick.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
 id = "results.results_figure_after_hash"
 kind = "seeded-gate"
 check = "results"

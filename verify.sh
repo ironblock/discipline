@@ -3889,6 +3889,126 @@ path.write_text(source.replace(old, '>\t## Results\n>\n> The rate was [uncited: 
 EOF
 }
 
+# A figure between escaped braces in comments (#265's sixth review): decoded first, the braces read as a reference and hid it.
+inject_results_figure_hidden_by_escaped_braces() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, at a rate of <!-- \\{\\{ -->0.241<!-- \\}\\} -->.", 1), encoding="utf-8")
+EOF
+}
+
+# A tab-indented heading in a list item (#265's sixth review): a leading tab is an indent.
+inject_results_heading_tab_indented() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '- a note\n\n\t## Results\n\n\tThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A heading after a list marker and a tab (#265's sixth review, M1).
+inject_results_heading_after_list_marker_tab() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '-\t## Results\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# Braces split by emphasis markers (#265's sixth review, M1): a reader sees `{{`.
+inject_results_braces_split_by_emphasis() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {*{*product.decode_rate*}*}.", 1), encoding="utf-8")
+EOF
+}
+
+# Braces split by strikethrough (#265's sixth review, M2): a reader sees `{{`.
+inject_results_braces_split_by_strikethrough() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {~{product.decode_rate}~}.", 1), encoding="utf-8")
+EOF
+}
+
+# Braces split by link syntax (#265's sixth review, M2): a reader sees the link text, `{{`.
+inject_results_braces_split_by_link() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {[{](#x)product.decode_rate}[}](#x)}.", 1), encoding="utf-8")
+EOF
+}
+
+# A comment marker inside a code span (#265's sixth review): no comment to a renderer, so the heading it hid shows.
+inject_results_comment_marker_in_code_span() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'The run used the `<!--` marker.\n\n## Results\n\n<!--\n## Test\n-->\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A backtick fence whose info string holds a backtick (#265's sixth review): no fence to a renderer.
+inject_results_backtick_fence_info_backtick() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '```js`x\n## Results\n<!--\n## Test\n-->\nThe rate was [uncited: a sample, 0.241].\n<div>\n```\n</div>\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
 # Braces split by an HTML comment (#265's fifth review): a reader sees `{{`.
 inject_results_braces_split_by_markup() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
@@ -8756,6 +8876,22 @@ selftest() {
     ">.t## Results., is a heading a renderer shows.*\[results\.heading-unread\]"
   seeded_case "braces split by markup" results inject_results_braces_split_by_markup \
     "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "a figure between escaped braces" results inject_results_figure_hidden_by_escaped_braces \
+    "the Conclusion section types the figure\(s\) '0\.241'.*\[results\.figure-typed\]"
+  seeded_case "a tab-indented heading in a list item" results inject_results_heading_tab_indented \
+    "'.t## Results', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a heading after a list marker and a tab" results inject_results_heading_after_list_marker_tab \
+    "'-.t## Results', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "braces split by emphasis" results inject_results_braces_split_by_emphasis \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "braces split by strikethrough" results inject_results_braces_split_by_strikethrough \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "braces split by link syntax" results inject_results_braces_split_by_link \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "a comment marker in a code span" results inject_results_comment_marker_in_code_span \
+    "carries a comment marker .<!--. inside a code span.*\[results\.heading-unread\]"
+  seeded_case "a fence whose info string holds a backtick" results inject_results_backtick_fence_info_backtick \
+    "carries a backtick fence whose info string holds a backtick.*\[results\.heading-unread\]"
   seeded_case "a figure after a hash" results inject_results_figure_after_hash \
     "the Conclusion section types the figure\(s\) '0\.142'.*\[results\.figure-typed\]"
   seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \

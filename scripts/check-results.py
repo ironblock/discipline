@@ -198,8 +198,10 @@ def typed_figures(text: str) -> list[str]:
 # blockquote and list prefixes a heading can sit behind -- is refused.
 SECTION_LINE = re.compile(r"## (" + "|".join(SECTIONS) + r")")
 # A tab after `>` or a list marker is a container's separator too (#265's
-# fifth review: `>` TAB `## Results` rendered as a heading).
-CONTAINER_PREFIX = re.compile(r"^(?: {0,3}>[ \t]?| {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)| {1,3})")
+# fifth review: `>` TAB `## Results` rendered as a heading), and a leading tab
+# is an indent like spaces (its sixth: a tab-indented `## Results` in a list
+# item, and `>` space TAB `## Results`, rendered as headings).
+CONTAINER_PREFIX = re.compile(r"^(?: {0,3}>[ \t]?| {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)| {1,3}|\t)")
 ATX = re.compile(r"#{1,6}(?:[ \t]|$)")
 SETEXT_UNDERLINE = re.compile(r"(?:=+|-+)[ \t]*$")
 HTML_HEADING = re.compile(r"<h[1-6](?:[\s>/]|$)", re.IGNORECASE)
@@ -219,6 +221,41 @@ def visible(text: str) -> str:
 
     text = html.unescape(BACKSLASH_ESCAPE.sub(r"\1", text))
     return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
+def code_spans(line: str) -> list[tuple[int, int]]:
+    """The stretches of `line` inside a backtick code span: from a run of
+    backticks to the next run of the same length, or to the line's end when
+    none closes it -- fail closed, since a span may continue onto the next
+    line."""
+    runs = [(m.start(), m.end()) for m in re.finditer(r"`+", line)]
+    spans: list[tuple[int, int]] = []
+    k = 0
+    while k < len(runs):
+        start, end = runs[k]
+        close = next((j for j in range(k + 1, len(runs)) if runs[j][1] - runs[j][0] == end - start), None)
+        if close is None:
+            spans.append((end, len(line)))
+            break
+        spans.append((end, runs[close][0]))
+        k = close + 1
+    return spans
+
+
+def misread_structure(line: str) -> str | None:
+    """Why `line` would make this linter's reading of comments and fences
+    differ from a renderer's, or None (#265's sixth review). `rendered_headings`
+    blanks comments before it looks for code, so a `<!--` inside a code span
+    opened a comment no renderer shows, hiding a heading the reader sees; and
+    a backtick fence whose info string holds a backtick is no fence to a
+    renderer, which then shows the headings this linter read as code."""
+    for marker in re.finditer(r"<!--|-->", line):
+        if any(start <= marker.start() < end for start, end in code_spans(line)):
+            return f"a comment marker `{marker.group(0)}` inside a code span"
+    opener = CODE_FENCE.match(line)
+    if opener and opener.group(1)[0] == "`" and "`" in line[opener.end():]:
+        return "a backtick fence whose info string holds a backtick, which renders as no fence"
+    return None
 
 
 def unread_heading(lines: list[str], at: int, first_section: int, title_at: int | None) -> bool:
@@ -1060,6 +1097,15 @@ def lint_figures(
                 f"`## <section>` at column 0, one of {', '.join(SECTIONS)}, and its title the "
                 f"first `# ` line before them (#63)",
             )
+    for at, line in enumerate(lines):
+        why = misread_structure(line)
+        if why:
+            clean = False
+            fail(
+                "results.heading-unread",
+                f"line {at + 1} of the body, {line[:60]!r}, carries {why}; this linter cannot read "
+                f"which headings a renderer shows past it, so a referenced body may not (#63)",
+            )
     # SECTIONS FROM THE RAW LINES (#265's fifth review): where a section
     # starts is read from the lines the whitelist and the renderer read, never
     # from decoded text -- an escaped or comment-hidden `## Observation` in
@@ -1067,7 +1113,12 @@ def lint_figures(
     # a laxer section. `visible()` is applied to each section's text, for the
     # figure lint only.
     for section, raw_text in sections_of(body).items():
-        text = visible(raw_text)
+        # References come out at the raw positions the resolver reads, THEN
+        # the text is decoded (#265's sixth review): decoding first turned
+        # `\{\{` or `&#123;&#123;` in a comment into `{{`, and the figure
+        # between two such spans was stripped as a reference the resolver
+        # never saw.
+        text = visible(REFERENCE.sub(" ", raw_text))
         uncited = UNCITED.findall(text)
         if uncited and section in FIGURES_NEVER_TYPED:
             clean = False
@@ -1076,7 +1127,7 @@ def lint_figures(
                 f"the {section} section declares a figure `{uncited[0]}`; {section} carries "
                 f"no typed figure, cited or not -- reference the field instead (#63)",
             )
-        bare = REFERENCE.sub(" ", UNCITED.sub(" ", text))
+        bare = UNCITED.sub(" ", text)
         typed = typed_figures(bare)
         if typed:
             clean = False
@@ -1119,10 +1170,11 @@ def lint_figures(
     # Braces as a reader sees them: escapes, entities and format characters
     # dropped (visible), and comments, tags and emphasis markers removed, which
     # GitHub never shows -- `{<!-- -->{x}<!-- -->}` and `{*{*x*}*}` read `{{x}}`
-    # (#265's fifth review).
-    left = re.sub(
-        r"<!--.*?-->|<[^>\n]*>|[*_`]", "", visible("".join(rendered) if clean else REFERENCE.sub(" ", body)), flags=re.DOTALL
-    )
+    # (#265's fifth review). Strikethrough's `~` too, and a link down to its
+    # text: `{~{x}~}` and `{[{](#a)x}[}](#a)}` read `{{x}}` (its sixth).
+    seen = visible("".join(rendered) if clean else REFERENCE.sub(" ", body))
+    seen = re.sub(r"!?\[([^\]\n]*)\]\([^)\n]*\)", r"\1", seen)
+    left = re.sub(r"<!--.*?-->|<[^>\n]*>|[*_`~]", "", seen, flags=re.DOTALL)
     for stray in re.finditer(r"\{\{|\}\}", left):
         clean = False
         fail(
