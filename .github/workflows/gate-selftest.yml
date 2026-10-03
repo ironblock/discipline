@@ -139,6 +139,24 @@ jobs:
       - name: Resolve the pinned toolchain
         run: cargo --version
 
+      # A CARGO CACHE WHERE THE FAULTS BUILD (#306). Every sandbox builds into
+      # one target, VERIFY_SELFTEST_TARGET below, and this restores into that
+      # directory -- not the checkout's target/, which no fault builds in. Keyed
+      # on Cargo.lock, rust-toolchain.toml and rustc (the action's own key)
+      # and the runner image, which rides in `shared-key`: with `shared-key`
+      # set the action ignores `key` (#309's review). The workspace's crates
+      # rebuild in every box regardless, and the action drops them before
+      # saving. Shard 1 saves, and only it: the others would race to write
+      # the same key.
+      - name: Name the runner image for the cache key
+        run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+      - name: Restore the Cargo cache the sandboxes build into
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: ". -> target/selftest"
+          shared-key: selftest-${{ env.RUNNER_IMAGE }}
+          save-if: ${{ matrix.shard == 1 }}
+
       # The isolation lane's seeded faults need a sandbox to execute
       # against, same as `pkg-diet.yml`'s own copy of these three steps --
       # without `bwrap` the lane asserts a correct REFUSAL and passes, which
@@ -204,6 +222,8 @@ jobs:
           path: ${{ runner.temp }}
 
       - name: ./verify.sh --selftest --shard ${{ matrix.shard }}
+        env:
+          VERIFY_SELFTEST_TARGET: ${{ github.workspace }}/target/selftest
         run: >-
           ./verify.sh --selftest
           --shard ${{ matrix.shard }}/${{ strategy.job-total }}
