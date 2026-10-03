@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 213
+faults = 214
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3432,4 +3432,17 @@ becomes = '''
             dialect: Dialect::llama_cpp(),'''
 catches = [
     "a_served_drive_streams_a_real_servers_answer_over_sse",
+]
+
+[[fault]]
+id = "drive.floor-regimen-names-other-hardware"
+failure_class = "drive.floor-regimen-names-other-hardware"
+target = "diet/drive/floor.toml"
+expect_exit = 101
+anchor = '''
+substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"'''
+becomes = '''
+substrate_hardware = "0000000000000000000000000000000000000000000000000000000000000000"'''
+catches = [
+    "drive::tests::the_floor_regimen_and_head_ship_as_a_drive_can_start",
 ]
