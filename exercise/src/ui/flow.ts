@@ -19,9 +19,11 @@ export interface Flow {
   readonly of?: number;
   readonly ms: number;
   readonly running: boolean;
+  /** A stop cut it short (#294): while it was reading the prompt, or while it was writing. */
+  readonly stopped?: 'reading' | 'writing';
 }
 
-type Generating = Partial<Pick<Generation, 'progress' | 'meter' | 'timings' | 'startedAt' | 'writingSince' | 'lastActivityAt' | 'callsFrom'>>;
+type Generating = Partial<Pick<Generation, 'progress' | 'meter' | 'timings' | 'startedAt' | 'writingSince' | 'endedAt' | 'lastActivityAt' | 'callsFrom'>>;
 
 /** Now, as a running count reads it: never before the generation's last sign of life, where no clock runs (a part drawn on its own). */
 function clock(g: Generating, now: number): number {
@@ -45,9 +47,17 @@ export function readingOf(g: Generating, at: number): Flow | undefined {
   }
   const t = g.timings;
   if (t?.prompt_n !== undefined) return { phase: 'pp', n: t.prompt_n, ms: t.prompt_ms ?? 0, running: false };
-  // Writing, before the response's timings: the frames said what was read, and the first token when.
-  if (m) return { phase: 'pp', n: m.total - m.cache, ms: Math.max(0, (g.writingSince ?? now) - started), running: false };
-  return undefined;
+  if (!m) return undefined;
+  // No timings yet, or none to come: the frames said what was read, and the first token -- or the stop -- when.
+  const fresh = m.total - m.cache;
+  // Once it wrote, its prompt was read through, whatever the last frame said: no final frame is promised.
+  const wrote = g.writingSince !== undefined;
+  const read = wrote ? fresh : Math.min(fresh, Math.max(0, m.processed - m.cache));
+  // Stopped before the last of its prompt was read: how far it got, of how much, by the last frame -- counted and
+  // timed there, so the rate is the read's own and not diluted by the wait for the stop (#294).
+  const cut = g.progress === 'cancelled' && !wrote && read < fresh;
+  const until = cut ? m.at : (g.writingSince ?? g.endedAt ?? now);
+  return { phase: 'pp', n: read, ...(cut ? { of: fresh, stopped: 'reading' as const } : {}), ms: Math.max(0, until - started), running: false };
 }
 
 /** What a generation has written, and how long that took (or is taking, at `now`). Nothing while it reads. */
@@ -56,6 +66,13 @@ export function writingOf(g: Generating, at: number): Flow | undefined {
   const now = clock(g, at);
   const t = g.timings;
   if (t?.predicted_n !== undefined) return { phase: 'tg', n: t.predicted_n, ms: t.predicted_ms ?? 0, running: false };
+  // Stopped: for how long it had written when the stop came, or that it never began (#294). The stop itself is the
+  // footer's `cancelled` badge; this says only how far the writing got.
+  if (g.progress === 'cancelled') {
+    return g.writingSince !== undefined
+      ? { phase: 'tg', ms: Math.max(0, (g.endedAt ?? now) - g.writingSince), running: false, stopped: 'writing' }
+      : { phase: 'tg', ms: 0, running: false, stopped: 'reading' };
+  }
   if (g.progress !== 'streaming') return undefined;
   const since = g.writingSince ?? g.startedAt ?? now;
   // Only how long: nothing in the log counts tokens generated before the response's timings do (#288).
@@ -81,7 +98,10 @@ export function writtenApart(g: Generating): { readonly text: Flow; readonly cal
 
 /** How far through the new part of its prompt a generation is, for its top edge; absent while nothing has said. */
 export function edgeOf(g: Generating): { readonly read: number } | undefined {
-  if (g.progress !== 'prefill') return g.timings || g.meter ? { read: 1 } : undefined;
+  if (g.timings) return { read: 1 };
+  // A read a stop cut short stays where the stop left it (#294); any other past prefill -- or one that went on to
+  // write -- was read through.
+  if ((g.progress !== 'prefill' && g.progress !== 'cancelled') || g.writingSince !== undefined) return g.meter ? { read: 1 } : undefined;
   const m = g.meter;
   if (!m) return undefined;
   const fresh = m.total - m.cache;
@@ -95,7 +115,10 @@ export function warmOf(g: Generating): number | undefined {
 
 /** A flow in one line: `+7.9k of 16.4k tok in 5.7 s (1,380 t/s pp)`. */
 export function flowText(f: Flow): string {
+  // A stopped turn's writing: how far it got. The stop is named once, by the footer's `cancelled` badge.
+  if (f.phase === 'tg' && f.stopped === 'reading') return 'wrote nothing';
+  if (f.phase === 'tg' && f.stopped === 'writing' && f.n === undefined) return `wrote for ${took(f.ms)}`;
   if (f.n === undefined) return f.running ? `${f.phase === 'pp' ? 'reading' : 'writing'} · ${took(f.ms)}` : `+? tok in ${took(f.ms)}`;
   const of = f.of !== undefined ? ` of ${tokens(f.of)}` : '';
-  return `+${tokens(f.n)}${of} tok in ${took(f.ms)} (${rate(f.n, f.ms)} t/s ${f.phase})`;
+  return `+${tokens(f.n)}${of} tok in ${took(f.ms)} (${rate(f.n, f.ms)} t/s ${f.phase})${f.stopped ? ' · cut short' : ''}`;
 }

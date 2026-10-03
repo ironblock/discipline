@@ -5,6 +5,7 @@ import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import { App } from '../App.tsx';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
+import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
  * The canned transport, driven for real: type an ask, watch it stream, let
@@ -98,6 +99,9 @@ export const Served: Story = {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]').length).toBe(4));
     await expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="user"]').length).toBe(4);
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    // Turn 4 was stopped while writing, its prompt read whole: its footer says how far it wrote, beside the `cancelled` badge (#294).
+    const feet = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"] .ex-block__foot')].map((f) => f.textContent ?? '');
+    await expect(feet.some((line) => line.includes('wrote for 3.5 s'))).toBe(true);
   },
 };
 
@@ -110,6 +114,25 @@ export const ServedReading: Story = {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]').length).toBe(4));
     const reading = [...canvasElement.querySelectorAll('.ex-trunk .ex-block__head .ex-block__flow')].map((f) => f.textContent ?? '');
     await expect(reading.some((line) => line.startsWith('+51 of 567 tok in '))).toBe(true);
+  },
+};
+
+/**
+ * `?drive`, a turn stopped mid-prefill (#294). No turn in the rehearsal stopped in prefill, so the log past turn 4's
+ * third progress line is CONSTRUCTED (`served/stopped-in-prefill.ts`, ruled on #294): the block says how far the
+ * read got and that it was cut short, and that nothing was written.
+ */
+export const ServedStoppedReading: Story = {
+  name: '?drive: a turn stopped mid-prefill, drawn as read that far (a constructed stop)',
+  args: {
+    drive: true,
+    web: serving(rehearsalTo(STOPPED_IN_PREFILL_AFTER) + STOPPED_IN_PREFILL.map((line) => JSON.stringify(line)).join('\n') + '\n'),
+  },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const last = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]')].at(-1) as HTMLElement;
+    await expect(last.querySelector('.ex-block__head .ex-block__flow')?.textContent).toMatch(/^\+51 of 567 tok in 148 ms \(.+ t\/s pp\) · cut short$/);
+    await expect(last.querySelector('.ex-block__foot')?.textContent).toContain('wrote nothing');
   },
 };
 
