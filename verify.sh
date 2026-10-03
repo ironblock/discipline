@@ -3086,6 +3086,14 @@ inject_exercise_recording_carried_disagrees() {
   edit_in_place 's/^"compaction": 1$/"compaction": 2/' exercise/src/drive/recorded/voxel-stress.json
 }
 
+# The meter reading a progress frame's old, nested shape again (#288): what
+# the page did when it went blank on the rehearsal drive's first live frame.
+# The types are the format's now, so the read goes through a cast, as an
+# older shape kept anywhere else would; only a fold of a served log sees it.
+inject_exercise_progress_read_nested() {
+  edit_in_place 's|    processed: top.processed,|    processed: (top as unknown as { prompt: { processed: number } }).prompt.processed,|' exercise/src/session/fold.ts
+}
+
 # #32 I2's emitter mutated (track five's faults, carried here by courier): a
 # ledger row the renderer must refuse, naming the directory. The fixture loop
 # never reaches the renderer, and a record diet accepted cannot lack a word,
@@ -8238,6 +8246,8 @@ selftest() {
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a capture's carried field disagreeing with its events" exercise inject_exercise_recording_carried_disagrees \
     'voxel-stress: its carried field disagrees with its events'
+  seeded_case "the meter reading a progress frame's old shape" exercise inject_exercise_progress_read_nested \
+    "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \

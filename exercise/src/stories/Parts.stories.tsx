@@ -347,7 +347,8 @@ export const AssistantPrefillMetered: Story = {
     // As far through the new part as the server has read it -- not through the whole prompt.
     const m = trunkNodeAt({ beat: 2, t: 10_000 }, 'q/3', 'assistant').meter;
     await expect(m).toBeDefined();
-    await expect(Number(edge.style.getPropertyValue('--read'))).toBeCloseTo((m?.processed ?? 0) / ((m?.total ?? 0) - (m?.cache ?? 0)), 2);
+    // `processed` counts the warm part in (#288): the new part read is what is past it.
+    await expect(Number(edge.style.getPropertyValue('--read'))).toBeCloseTo(((m?.processed ?? 0) - (m?.cache ?? 0)) / ((m?.total ?? 0) - (m?.cache ?? 0)), 2);
     // The role's chip leads the header, before what it reads.
     await expect(canvasElement.querySelector('.ex-block__head > .ex-block__label')?.textContent).toBe('assistant');
   },
@@ -359,9 +360,10 @@ export const AssistantStreaming: Story = {
   // At this moment the answer ends in a list item with nothing in it yet: the caret still has to show.
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelectorAll('.ex-caret')).toHaveLength(1);
-    // Writing, the footer counts tokens and time as they come, from the first token.
+    // Writing, the footer times it from the first token; nothing in the log counts what is generated until the
+    // response's timings do (#288), so it says how long and not how much.
     const foot = canvasElement.querySelector('.ex-block__foot')?.textContent ?? '';
-    await expect(foot).toMatch(/^\+\d+ tok in \d+\.\d s \([\d.]+ t\/s tg\)$/);
+    await expect(foot).toMatch(/^writing · \d+\.\d s$/);
   },
 };
 
@@ -410,11 +412,13 @@ export const ReadApartFromWritten: Story = {
     await expect(text('reading', '.ex-block__flow')).toMatch(/^\+.+ of 16\.4k tok in .+ pp\)$/);
     await expect(at('reading').querySelectorAll('.ex-block__body .ex-caret')).toHaveLength(1);
     await expect(at('reading').querySelector('.ex-block__foot')).toBeNull();
-    // Writing and written: what was read stays at the top; the footer is only what was written.
+    // Writing and written: what was read stays at the top; the footer is only what was written -- how long while
+    // writing (nothing counts it before the timings, #288), and how much once written.
     for (const name of ['writing', 'written']) {
       await expect(text(name, '.ex-block__head .ex-block__flow')).toMatch(/^\+.+ tok in .+ t\/s pp\)$/);
-      await expect(text(name, '.ex-block__foot')).toMatch(/^\+.+ tok in .+ t\/s tg\)/);
     }
+    await expect(text('writing', '.ex-block__foot')).toMatch(/^writing · /);
+    await expect(text('written', '.ex-block__foot')).toMatch(/^\+.+ tok in .+ t\/s tg\)/);
     // A side call reads its edge too, and says what it read when opened: a warm fork, a few new tokens.
     await expect(at('side').querySelector('.ex-block__edge')).not.toBeNull();
     // Opened, it is a block as the trunk's: what it read heads it -- new tokens, the warm part on hover -- and what it wrote closes it.

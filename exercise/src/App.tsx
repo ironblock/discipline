@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { CannedTransport } from './drive/canned.ts';
 import { HttpTransport } from './drive/http.ts';
+import type { Web } from './drive/http.ts';
 import { ReplayTransport } from './drive/recorded.ts';
 import { SESSIONS } from './drive/sessions.ts';
 import type { SessionName } from './drive/sessions.ts';
@@ -23,12 +24,23 @@ const EXPECTS: Readonly<Record<string, string>> = {
 /**
  * The harness: driving `diet`'s session over HTTP (`drive`, #117 I5), or on
  * the canned transport, or replaying a recorded session, which plays and
- * takes no commands.
+ * takes no commands. `web` stands in for the browser's own `EventSource` and
+ * `fetch` while driving, so a story can serve the page a log (#288).
  */
-export function App({ speed = 1, recording, drive = false }: { readonly speed?: number; readonly recording?: SessionName; readonly drive?: boolean }) {
+export function App({
+  speed = 1,
+  recording,
+  drive = false,
+  web,
+}: {
+  readonly speed?: number;
+  readonly recording?: SessionName;
+  readonly drive?: boolean;
+  readonly web?: Web;
+}) {
   const transport = useMemo(
-    () => (drive ? new HttpTransport() : recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
-    [speed, recording, drive],
+    () => (drive ? new HttpTransport('', web) : recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
+    [speed, recording, drive, web],
   );
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);

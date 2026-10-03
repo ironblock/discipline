@@ -8264,6 +8264,15 @@ legacy_signature = "voxel-stress: its carried field disagrees with its events"
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_progress_read_nested"
+kind = "seeded-gate"
+check = "exercise"
+label = "the meter reading a progress frame's old shape"
+failure_class = "exercise.progress-shape"
+legacy_signature = "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
+migrated = false
+
+[[fault]]
 id = "ci.ci_pages_flow_collection_hides_a_group"
 kind = "seeded-gate"
 check = "ci"

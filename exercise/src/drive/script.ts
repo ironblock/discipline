@@ -63,18 +63,22 @@ export interface Delta extends At {
 }
 
 /**
- * Where a request is, right now: how much of its prompt is read, and how
- * many tokens it has generated. Transient, like `delta`: never recorded. From
- * llama.cpp's stream if it carries prompt progress, else its `/slots`, polled
- * once a second while busy (#117 R3, ruled 2026-09-26).
+ * Where a request's prefill is, right now: the log's `progress` line
+ * (`log.ts`, the format's own), with its request named by label. `processed`
+ * counts the cache in; no frame comes after the first delta, and none says
+ * how much is generated.
  */
 export interface ProgressFrame extends At {
   readonly kind: 'progress';
   readonly request: string;
-  /** The prompt: all of it, the part reused from the slot's cache, and how many of the rest -- the new tokens -- have been read. */
-  readonly prompt: { readonly total: number; readonly cache: number; readonly processed: number };
-  /** Tokens generated so far. */
-  readonly decoded: number;
+  /** Prompt tokens in all. */
+  readonly total: number;
+  /** Prompt tokens reused from the slot's cache. */
+  readonly cache: number;
+  /** Prompt tokens processed so far, the cache among them: `cache` at the start, `total` once read. */
+  readonly processed: number;
+  /** Milliseconds of prefill so far, by the server's clock. */
+  readonly time_ms: number;
 }
 
 export type Stop = Open<'stop' | 'tool' | 'length' | 'cancelled'>;
