@@ -1738,8 +1738,14 @@ anchor = '''
 becomes = '''
         self.pending_gap = self.carried.take().map(|(gap, _)| gap);
         let during = self.settlement;'''
+# A second name, `a_gap_closes_at_the_command_that_ends_it_even_when_that_
+# command_carries_none`, caught this fault only through a `declare_seam` sent
+# after `end`: the refusal's push logged the pending gap. Since #315 a
+# refusal after `end` is not logged (#291, ruled), so nothing pushes the gap
+# and that test passes under the fault (selftest shard 14, run 37131651858).
+# Its subject is the gap's close, not a refusal's, so it is dropped, as
+# #252's ruling (b) dropped one; the one below catches the fault.
 catches = [
-    "drive::session::tests::a_gap_closes_at_the_command_that_ends_it_even_when_that_command_carries_none",
     "drive::session::tests::a_refused_commands_gap_is_neither_logged_nor_closed_and_the_admitted_one_carries_it",
 ]
 
