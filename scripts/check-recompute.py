@@ -38,7 +38,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import tomllib
+
+import gatelib
 
 FENCE = "+++"
 RECOMPUTE = "recompute.sh"
@@ -207,7 +210,24 @@ def proves_it_compares(directory: pathlib.Path, script: pathlib.Path) -> str | N
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default="results", help="the results tree to walk")
+    parser.add_argument(
+        "--shard",
+        metavar="K/N",
+        help="re-derive only the directories whose name hashes to shard K of N "
+        "(#262); every directory lands in exactly one shard",
+    )
+    parser.add_argument(
+        "--names",
+        action="store_true",
+        help="print the directories this invocation would re-derive, and re-derive none",
+    )
     args = parser.parse_args(argv)
+    shard = None
+    if args.shard is not None:
+        shard = gatelib.shard_arg(args.shard)
+        if shard is None:
+            print(f"check-recompute: --shard {args.shard!r} is not K/N with 1 <= K <= N", file=sys.stderr)
+            return 2
 
     root = pathlib.Path(args.root)
     if not root.is_dir():
@@ -226,7 +246,26 @@ def main(argv: list[str]) -> int:
     templates = 0
     results_seen = 0
 
-    for directory in sorted(p for p in root.iterdir() if p.is_dir()):
+    directories = sorted(p for p in root.iterdir() if p.is_dir())
+    if shard is not None:
+        directories = [p for p in directories if gatelib.in_shard(p.name, *shard)]
+    if args.names:
+        print("\n".join([gatelib.LISTING, *(p.name for p in directories)]))
+        return 0
+    # Each directory's own seconds (#262): a split by name balances counts,
+    # not cost, and this is what a re-balance is read from. Printed as the
+    # next directory starts, since `one()` leaves each one by `return`.
+    timing: tuple[str, float] | None = None
+    # ONE DIRECTORY, TO ITS OUTCOME (#262, #268's fifth review). The census
+    # row is written from what this returns, so a directory the loop skips
+    # writes no row, and a path that returns no outcome writes a row the
+    # census refuses -- a row written on entry said only that the loop got
+    # there, and a `continue` after it went unseen.
+    def one(directory: pathlib.Path) -> str:
+        nonlocal timing, results_seen, undeclared, historical, templates, recomputed
+        if timing is not None:
+            print(f"check-recompute: {timing[0]} took {time.monotonic() - timing[1]:.1f}s")
+        timing = (directory.name, time.monotonic())
         is_template = directory.name == TEMPLATE
         if not is_template:
             results_seen += 1
@@ -234,7 +273,7 @@ def main(argv: list[str]) -> int:
         if front is None:
             undeclared += not is_template
             failures.append(f"{directory}: {err}")
-            continue
+            return "failed"
         kind = front.get("kind")
         if kind not in KINDS:
             undeclared += not is_template
@@ -243,14 +282,14 @@ def main(argv: list[str]) -> int:
                 f"{' or '.join(KINDS)}, because a directory that declares nothing is "
                 f"neither checked nor knowingly skipped"
             )
-            continue
+            return "failed"
         if is_template and kind != REPRODUCIBLE:
             failures.append(
                 f"{directory}: the template declares `{kind}`. Every results "
                 f"directory is copied from it, so a template carrying the "
                 f"opt-out hands it to every copy before anyone has run anything"
             )
-            continue
+            return "failed"
         if kind == HISTORICAL:
             # Not an unconditional opt-out any more. It has to say what makes
             # the run unreproducible, and it has to have no script -- because
@@ -265,7 +304,7 @@ def main(argv: list[str]) -> int:
                     f"inputs cannot exist -- a tag with no reason behind it is "
                     f"the opt-out every red result reaches for"
                 )
-                continue
+                return "failed"
             if (directory / RECOMPUTE).is_file():
                 failures.append(
                     f"{directory}: declares `{HISTORICAL}` and carries a "
@@ -275,16 +314,16 @@ def main(argv: list[str]) -> int:
                     f"Becoming historical means removing the script and saying "
                     f"why, in a change somebody reviews"
                 )
-                continue
+                return "failed"
             historical += 1
-            continue
+            return "historical"
 
         script = directory / RECOMPUTE
         if not script.is_file():
             failures.append(
                 f"{directory}: declares `{REPRODUCIBLE}` and carries no {RECOMPUTE}"
             )
-            continue
+            return "failed"
         # An empty script exits 0. So does one that is nothing but comments.
         body = "\n".join(
             line for line in script.read_text(encoding="utf-8", errors="replace").splitlines()
@@ -295,7 +334,7 @@ def main(argv: list[str]) -> int:
                 f"{directory}: {RECOMPUTE} has no executable content, so it exits 0 "
                 f"without recomputing anything"
             )
-            continue
+            return "failed"
         before = tracked_state(directory)
         run = subprocess.run(
             ["bash", str(script.resolve())],
@@ -313,7 +352,7 @@ def main(argv: list[str]) -> int:
                 f"{directory}: git could not report whether {RECOMPUTE} modified "
                 f"the tree, so whether it tampered is unknown and cannot be assumed"
             )
-            continue
+            return "failed"
         if before != after:
             # Re-derivation READS the artefacts. A script that writes the
             # report to match them has made the comparison true rather than
@@ -322,14 +361,14 @@ def main(argv: list[str]) -> int:
                 f"{directory}: {RECOMPUTE} modified the working tree. A recompute "
                 f"that edits what it is checking is tampering, not recomputation"
             )
-            continue
+            return "failed"
         if run.returncode != 0:
             detail = (run.stderr or run.stdout or "").strip().splitlines()
             failures.append(
                 f"{directory}: {RECOMPUTE} exited {run.returncode}"
                 + ("\n  " + "\n  ".join(detail) if detail else "")
             )
-            continue
+            return "failed"
         try:
             vacuous = proves_it_compares(directory, script)
         except CannotProbe as err:
@@ -337,14 +376,27 @@ def main(argv: list[str]) -> int:
             # recomputed; a directory whose vacuity could not be established
             # belongs in neither column, and saying so is EXIT_NOTHING.
             unprobed.append(f"{directory}: {err}")
-            continue
+            return "unprobed"
         if vacuous is not None:
             failures.append(f"{directory}: {vacuous}")
-            continue
+            return "failed"
         if is_template:
             templates += 1
         else:
             recomputed += 1
+        return "template" if is_template else "recomputed"
+
+    for directory in directories:
+        if gatelib.census_dry():
+            gatelib.record_ran(directory.name)
+            continue
+        gatelib.record_ran(directory.name, one(directory))
+
+    if timing is not None:
+        print(f"check-recompute: {timing[0]} took {time.monotonic() - timing[1]:.1f}s")
+    if gatelib.census_dry():
+        print(f"check-recompute: dry census: {len(directories)} directory(ies) recorded, none recomputed")
+        return 0
 
     for message in failures:
         print(message, file=sys.stderr)
@@ -352,6 +404,7 @@ def main(argv: list[str]) -> int:
     census = (
         f"check-recompute: template: {templates} · results: {recomputed} recomputed, "
         f"{historical} declared historical, {undeclared} undeclared"
+        f"{f' (shard {shard[0]} of {shard[1]})' if shard else ''}"
     )
     if failures:
         print(census, file=sys.stderr)
@@ -376,7 +429,10 @@ def main(argv: list[str]) -> int:
         # DECLARED empty rather than a pass, and it stops being available the
         # moment a results directory lands, because the next branch is then
         # the one that runs.
-        print(f"{census}\ncheck-recompute: no results directory yet; declared empty")
+        print(
+            f"{census}\ncheck-recompute: no results directory hashes into shard {shard[0]} of {shard[1]}"
+            if shard else f"{census}\ncheck-recompute: no results directory yet; declared empty"
+        )
         return 0
     if recomputed == 0:
         print(

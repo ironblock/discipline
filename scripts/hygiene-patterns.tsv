@@ -33,6 +33,14 @@
 # pattern here. This file is the only file the scan skips: it is the one
 # place forbidden shapes are meant to be written down.
 #
+# An image embedded in a text file as a base64 data URI (an SVG's PNG) is
+# blanked from the loose rows' reading when its decoded bytes are that image
+# -- PNG, JPEG, GIF or WebP, by their start and end, behind a delimiter --
+# and read as prose by every row otherwise (#278). The `b` rows read every
+# original file whole. The loose rows find their shapes in base64 at the rate
+# they find them in random bytes, and a shape inside bytes names nothing
+# (#233).
+#
 # Add a pattern here, not in the script. Add a case to
 # `scripts/seed-hygiene-fault.sh` at the same time, so that every pattern
 # has been seen catch something.

@@ -36,14 +36,18 @@ export interface Recording {
 /** Where a recording lives in the repository, by name: what a failure to read one names (#32, ruling 9). */
 export const recordingPath = (name: string) => `exercise/src/drive/recorded/${name}.json`;
 
+/** Where an authored example's committed text lives (#272), by name: what a failure to read one names. */
+export const examplePath = (name: string) => `exercise/src/drive/examples/${name}.json`;
+
 /**
  * A recording read from its text, or an error that names its file: a build
  * that fails on a recording says which one, not only an event's index. The
  * recordings themselves are in `recordings.ts`, so that a page can load one
- * without carrying the others (the replay page, `replay.tsx`).
+ * without carrying the others (the replay page, `replay.tsx`). An authored
+ * example is read the same way and names its own file (`examplePath`, #272).
  */
-export function load(name: string, text: string): Recording {
-  const fail = (why: string) => new Error(`${recordingPath(name)}: not a recording: ${why}`);
+export function load(name: string, text: string, file = recordingPath(name)): Recording {
+  const fail = (why: string) => new Error(`${file}: not a recording: ${why}`);
   let parsed: Partial<Recording>;
   try {
     parsed = JSON.parse(text) as Partial<Recording>;

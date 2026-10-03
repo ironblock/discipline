@@ -44,11 +44,15 @@ Exit 0 with a plan written; 2 when the question cannot be answered.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
+import functools
 import json
+import os
 import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -148,6 +152,163 @@ def functions(text: str) -> dict[str, str]:
 def outside_functions(text: str) -> str:
     """verify.sh with every top-level function removed: its own top-level code."""
     return ONE_LINE.sub("", FUNCTION.sub("", text))
+
+
+def top_level_code(text: str) -> str:
+    """`outside_functions` without its comment and blank lines (#305).
+
+    The comment above each injection lives between functions, so adding or
+    re-wording one changed `<top-level>` and re-proved every fault: 803 on
+    #293's run, for 27 comment lines and 2 blank ones. A comment block is not
+    machinery.
+
+    ONLY WHOLE LINES ARE DROPPED: a line that is blank, or whose first non-
+    blank character is `#`. Every other line is kept byte for byte, so a
+    trailing comment on a code line is code here. A whole line is not dropped
+    where bash would read it as text: after a line ending in an odd run of
+    backslashes (a continuation); when a kept logical line opens a heredoc
+    (any `<<` compares the top level whole, since bash 3.2's `-n` never
+    reports one left open); inside a quoted value, which BASH DECIDES -- `bash
+    -n` on the top level up to each run of dropped lines must report no quote
+    left open -- or in the header usage() prints as --help. The top level is
+    compared whole when bash -n cannot parse it, when a line starts with `}`
+    (a closer the function pattern left behind), when a matched function does
+    not parse alone as a complete unit (cut short), or when the text can turn
+    alias expansion on. Whole re-proves; it never skips. What this cannot see:
+    a function match that runs long, past its real closer, swallowing top-
+    level code into the function (#317).
+    """
+    # A function match that ran long past its real closer has swallowed the
+    # top-level code after it, which is then in no unit's text the plan reads
+    # as the top level -- so the whole FILE compares, not only `outside`
+    # (#317).
+    if not functions_end_where_matched(text):
+        return text
+    outside = outside_functions(text)
+    lines = outside.split("\n")
+    # A function the pattern cut short -- its `}` inside a heredoc or a
+    # quoted value, column 0 or a one-line form's -- leaks a tail here that
+    # may parse (#310: Q8, N4, N2b) and may balance a `{` with the real
+    # closer (#308's B1). Each matched function must parse alone as a
+    # complete unit, or the top level compares whole (see unit_parses). A
+    # closer left at the top level compares whole too, by itself: #314's
+    # review broke the claim that the unit check subsumes it.
+    if any(line.startswith("}") for line in lines) or not functions_parse(text):
+        return outside
+    # bash expands aliases only where `expand_aliases` is set or in POSIX
+    # mode, neither of which bash -n runs: an alias can open a quote or a
+    # heredoc unseen (#310: N7b, N10; #314's review: `set -o posix`,
+    # POSIXLY_CORRECT, an option name split by quotes).
+    # Case-sensitive: verify.sh's comments say POSIX, and no shell option or
+    # variable is spelled so.
+    if re.search(r"_aliases|expand_al|\bposix\b|POSIXLY_CORRECT|BASH_ALIASES", text):
+        return outside
+    # A top level bash -n cannot parse whole compares whole (#308's fifth
+    # review): its first error hides every open quote after it from the check
+    # below.
+    if not bash_reads_as_closed(outside, whole=True):
+        return outside
+    kept: list[str] = []
+    dropped: list[int] = []
+    carried = False
+    logical = ""
+    # usage() prints verify.sh's header, line 2 to the first empty line, as
+    # `--help` (#310): where the text reads itself so, those comments are text
+    # bash reads, and they are kept.
+    header = 1
+    if "sed -n '2,/^$/" in text:
+        # sed tests `/^$/` first on the line after line 2, so an empty line 2
+        # is printed through the next empty line (#314's review).
+        header = next((n for n in range(2, len(lines)) if lines[n] == ""), len(lines))
+    for number, line in enumerate(lines):
+        # Only a space or a tab is blank to bash: a line of `\r` or of a
+        # non-breaking space is a command.
+        bare = line.strip(" \t")
+        if not carried and number >= header and (not bare or (bare.startswith("#") and not line.startswith("#!"))):
+            dropped.append(number)
+            continue
+        kept.append(line)
+        # On the logical line, joined as bash joins continued lines, so a
+        # `<` that continues into a `<` -- over any number of lines -- is
+        # still a heredoc (#308's fifth review; #310's N1c).
+        carried_into = carried
+        carried = (len(line) - len(line.rstrip("\\"))) % 2 == 1
+        logical = (logical if carried_into else "") + (line[:-1] if carried else line)
+        if "<<" in logical:
+            return outside
+    starts = [n for n in dropped if n - 1 not in dropped]
+    if any(not bash_reads_as_closed("\n".join(lines[:n])) for n in starts):
+        return outside
+    return "\n".join(kept)
+
+
+def functions_parse(text: str) -> bool:
+    """Whether every function the patterns match in `text` parses alone.
+
+    Each function's verdict is kept by its text: the plan reads verify.sh at
+    each census commit, and most functions are the same at all of them."""
+    units = [m.group(0) for m in FUNCTION.finditer(text)] + [m.group(0) for m in ONE_LINE.finditer(text)]
+    with concurrent.futures.ThreadPoolExecutor(16) as pool:
+        return all(pool.map(unit_parses, units))
+
+
+def functions_end_where_matched(text: str) -> bool:
+    """Whether every function the patterns match in `text` really ends at its
+    match's end (#317); see unit_ends_where_matched."""
+    units = [m.group(0) for m in FUNCTION.finditer(text)]
+    with concurrent.futures.ThreadPoolExecutor(16) as pool:
+        return all(pool.map(unit_ends_where_matched, units))
+
+
+@functools.lru_cache(maxsize=None)
+def unit_parses(unit: str) -> bool:
+    """Whether `unit` parses alone AND its last `}` really closed it.
+
+    A unit cut inside a heredoc opened on its real closer (`} <<'EOF'`) still
+    parses: bash -n does not report a heredoc left open (#314's review). A
+    trailing `)` is a syntax error after complete code and mere text inside
+    an open heredoc, and is never a heredoc's delimiter, on bash 3.2 and 5."""
+    return bash_reads_as_closed(unit, whole=True) and not bash_reads_as_closed(unit + ")", whole=True)
+
+
+@functools.lru_cache(maxsize=None)
+def unit_ends_where_matched(unit: str) -> bool:
+    """Whether the function `unit` really ends at its match's end (#317).
+
+    The pattern ends a function at the first column-0 `}` line. A real closer
+    written otherwise -- `} # end`, `};`, `} <<'EOF'`, an indented `}` -- is
+    passed over, and the match runs long through the next column-0 `}`,
+    reading the top-level code between as the function's body. A function's
+    real end is the shortest prefix of it that parses: before its closer its
+    own `{` is open, and no prefix parses. So no prefix ending at an earlier
+    line holding a `}` may parse, or the match ran long and the top level
+    compares whole. A closer that also opens a brace on its own line (`} ;
+    coproc {`) is not asked about; nor could a prefix ending there parse."""
+    lines = unit.rstrip("\n").split("\n")
+    # Only a line closing more braces than it opens can close the function:
+    # `${x}` and `|| { ...; }` balance on their own line and are skipped, which
+    # keeps this from asking bash about every expansion in every body.
+    return not any(
+        lines[end].count("}") > lines[end].count("{")
+        and bash_reads_as_closed("\n".join(lines[: end + 1]), whole=True)
+        for end in range(len(lines) - 1)
+    )
+
+
+def bash_reads_as_closed(text: str, whole: bool = False) -> bool:
+    """Whether bash, parsing `text` alone, finds no quote still open at its
+    end: the line after it then starts where a comment can. Not a heredoc:
+    bash 3.2's `-n` says nothing of one left open, so a kept line's `<<`
+    compares whole instead."""
+    # In the C locale, so the message this reads is bash's English one on a
+    # host with a translated bash (#310).
+    parsed = subprocess.run(
+        ["bash", "-n"], input=text + "\n", capture_output=True, text=True,
+        env={**os.environ, "LC_ALL": "C"},
+    )
+    if whole:
+        return parsed.returncode == 0
+    return "matching" not in parsed.stderr
 
 
 def without_cases(body: str) -> str:
@@ -468,7 +629,7 @@ def changed_since(since: str, root: pathlib.Path) -> tuple[set[str], set[str]]:
             raise Unusable(f"verify.sh at {since} could not be read")
         new = (root / "verify.sh").read_text(encoding="utf-8")
         units = changed_functions(old.stdout, new)
-        if outside_functions(old.stdout) != outside_functions(new):
+        if top_level_code(old.stdout) != top_level_code(new):
             units.add("<top-level>")
         before, after = case_lines(old.stdout), case_lines(new)
         units |= {f"case:{i}" for i in set(before) | set(after) if before.get(i) != after.get(i)}
@@ -631,6 +792,132 @@ def _machinery():
         rerun, inherit = _decide(changed_files=files, changed_units=units)
         if inherit:
             return f"{sorted(files | units)} changed and {sorted(inherit)} was still inherited"
+    return None
+
+
+@fixture("a comment or blank line between functions is not a top-level change")
+def _top_level_comments():
+    # #305: every injection's comment sits between functions, so a PR that
+    # added one re-proved all 800 faults. Code there still counts, and so does
+    # anything in a top-level heredoc, where a `#` line is read.
+    base = "#!/usr/bin/env bash\nset -e\n# one\ninject_a() {\n  :\n}\nX=1\n"
+    commented = base.replace("# one\n", "# one, re-worded, `<<-` named\n\n# and a new block\n")
+    if top_level_code(base) != top_level_code(commented):
+        return "a comment-only change between functions read as a top-level change"
+    # And through `changed_since`, on a repository of two commits: the plan
+    # reads the units from there.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        git = lambda *args: subprocess.run(["git", "-c", "user.name=f", "-c", "user.email=f@f", *args],
+                                           cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+        git("init", "-q")
+        (root / "verify.sh").write_text(base, encoding="utf-8")
+        git("add", "verify.sh"); git("commit", "-qm", "base")
+        since = git("rev-parse", "HEAD")
+        (root / "verify.sh").write_text(commented, encoding="utf-8")
+        git("commit", "-qam", "comments")
+        if "<top-level>" in changed_since(since, root)[1]:
+            return "changed_since read a comment-only change as `<top-level>`"
+        (root / "verify.sh").write_text(commented.replace("X=1", "X=2"), encoding="utf-8")
+        git("commit", "-qam", "code")
+        if "<top-level>" not in changed_since(since, root)[1]:
+            return "changed_since missed a code change between functions"
+    if top_level_code(base) == top_level_code(base.replace("X=1", "X=2")):
+        return "a code change between functions was not seen"
+    heredoc = base + "cat <<'EOF'\n# read\nEOF\n"
+    if top_level_code(heredoc) == top_level_code(heredoc.replace("# read", "# changed")):
+        return "a `#` line in a top-level heredoc was skipped"
+    # #308's review: text bash reads that starts with `#` or is blank, and the
+    # two exceptions to "a comment is not machinery".
+    for read, edit in (
+        ("X=a\\\n#b\n", ("#b", "#c")),                       # a continuation
+        ('MSG="a\n# b"\n', ("# b", "# c")),                     # an open double quote
+        ("MSG='a\n\nb'\n", ("\n\n", "\n")),                     # a blank in an open single quote
+        ("g() {\n  cat <<EOF\n}\n# read\nEOF\n}\n", ("# read", "# changed")),  # a function cut short
+        # The second review: a joined line starting `#`, escapes the scanner
+        # must skip, a `#` that ends no word, a `$'` string, and a quote the
+        # scanner cannot follow (nested in `"$(...)"`), which bash confirms.
+        ("X=a\\\n#'b\n# c\n'\n", ("# c", "# d")),
+        ("X=a\\\n#b\\\n# c\n", ("# c", "# d")),
+        # The third review's J1 and J2: a `#` the scan took for a comment,
+        # then a trailing backslash bash joins the next line by.
+        ("Y=$(echo a)#b\\\n# c\n", ("# c", "# d")),
+        ("Y=${x:-a #b}\\\n# c\n", ("# c", "# d")),
+        # The fourth review's H2 and H6: a heredoc opened after a `#` the scan
+        # took for a comment, and inside a quote it misread.
+        ("Y=$(echo a)#b; cat <<EOF\n# c\nEOF\n", ("# c", "# d")),
+        ("A=$'it\\'s'; cat <<EOF\nx'\n# c\nEOF\n", ("# c", "# d")),
+        # #310: bash's check holds for every run, not only the last, and for
+        # a double quote left open as well as a single one.
+        ('C="$(echo "it\'s")"\nD=\'a\n# c\'\nE=1\n# tail\n', ("# c", "# d")),
+        ('C="$(echo "it\'s")"\nD="it\'s\n# c"\n', ("# c", "# d")),
+        # #308's fifth review: an earlier line bash -n cannot parse (an
+        # extglob a `shopt` enables at run time) before a plain open quote;
+        # a blank line a continuation joins; a heredoc operator split by one;
+        # a function closer that is not a lone `}`.
+        ("shopt -s extglob\ncase x in +(x)) :;; esac\nD='a\n# c'\necho \"[$D]\"\n", ("# c", "# d")),
+        ('X=a\\\n\necho "[$X]"\n', ("\\\n\n", "\\\n")),
+        ("cat <\\\n<EOF\n# c\nEOF\n", ("# c", "# d")),
+        ("g() {\n  cat <<EOF\n}\n# c\nEOF\n} # g\ng\n", ("# c", "# d")),
+        # The sixth review's B1: a leaked tail whose `{` the real closer
+        # balances, so the whole parses.
+        ("g() {\n  cat <<'EOF'\n}\n# c\n{\nEOF\n}\ng\n", ("# c", "# d")),
+        ("g() {\n  cat <<'EOF'\n}\n# c\n{\nEOF\n} # g\ng\n", ("# c", "# d")),
+        # #310: the closer written `};`; a `<<` split over two continuations;
+        # functions the pattern cuts short whose leaked tail parses (Q8, the
+        # quoted form N4, the one-line form N2b, an indented real closer
+        # B1i); an alias opening a quote (N7b).
+        ("g() {\n  cat <<'EOF'\n}\n# c\n{\nEOF\n};\ng\n", ("# c", "# d")),
+        ("cat <\\\n\\\n<EOF\n# c\nEOF\n", ("# c", "# d")),
+        ("g() {\n  cat <<EOF\n}\n# c\nh() {\nEOF\n}\n", ("# c", "# d")),
+        ('g() {\n  Y="\n}\n# c\nh() {\n"; echo "$Y"\n}\n', ("# c", "# d")),
+        ("g() { X='a }\n# c\n'; echo \"$X\"; }\ng\n: \\'\n", ("# c", "# d")),
+        ("g() {\n  cat <<'EOF'\n}\n# c\n{\nEOF\n  }\ng\n", ("# c", "# d")),
+        ("shopt -s expand_aliases\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #314's review: a function whose real closer opens a heredoc, cut
+        # inside it, with a balanced tail (R1) and without (R3); and an alias
+        # in POSIX mode.
+        ("g() {\n  cat\n} <<'EOF'\n{\n  \"a\": 1\n}\n# c\n{\n  \"b\": 2\n}\nEOF\ng\n", ("# c", "# d")),
+        ("g() {\n  cat\n} <<'EOF'\n}\n# c\nEOF\ng\n", ("# c", "# d")),
+        ("set -o posix\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #317: a function match that runs long past a closer written
+        # otherwise -- a trailing comment, `};`, indented, a heredoc on it --
+        # swallows the top-level code after it.
+        ("g() {\n  :\n} # end\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ("g() {\n  :\n};\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ("g() {\n  :\n  }\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ("g() {\n  cat\n} <<'EOF'\nx\nEOF\necho top\nh() {\n  :\n}\n", ("echo top", "echo bottom")),
+        ('Y="a\\"\n# b"\n', ("# b", "# c")),
+        ("echo it\\'s\nZ='a\n# b'\n", ("# b", "# c")),
+        ("Z=${#X}' a\n# b'\n", ("# b", "# c")),
+        ("A=$'it\\'s'\nB='a\n# b'\n", ("# b", "# c")),
+        ('C="$(echo "it\'s")"\nD=\'a\n# b\'\n', ("# b", "# c")),
+        ("(echo a)#it's\nE='a\n# b'\n", ("# b", "# c")),
+        ("F=1\n\r\n", ("\r\n", "\n")),
+    ):
+        if top_level_code(base + read) == top_level_code(base + read.replace(*edit)):
+            return f"text bash reads was dropped: {read!r}"
+    # And the fix stays on for the tree it was written for: today's verify.sh
+    # does not fall back to comparing its top level whole (#310).
+    today = (ROOT / "verify.sh").read_text(encoding="utf-8")
+    if top_level_code(today) == outside_functions(today):
+        return "this verify.sh's top level is compared whole, so #305's fix is off"
+    # usage() prints the header, line 2 to the first empty line (#310): an
+    # edit there is read; a comment after it is not.
+    helped = "#!/usr/bin/env bash\n# usage, as --help prints it\n\n# not printed\nusage() {\n  sed -n '2,/^$/s/^# \\{0,1\\}//p' \"$0\"\n}\n"
+    if top_level_code(helped) == top_level_code(helped.replace("as --help prints", "as -h prints")):
+        return "an edit to the header usage() prints read as unchanged"
+    if top_level_code(helped) != top_level_code(helped.replace("# not printed", "# still not printed")):
+        return "a comment after the header read as a top-level change"
+    # sed tests the end of `2,/^$/` from line 3, so an empty line 2 is
+    # printed through the next empty line (#314's review).
+    gap = "#!/usr/bin/env bash\n\n# usage, after an empty line 2\n\nusage() {\n  sed -n '2,/^$/s/^# \\{0,1\\}//p' \"$0\"\n}\n"
+    if top_level_code(gap) == top_level_code(gap.replace("after an empty", "after a blank")):
+        return "an edit to a header after an empty line 2 read as unchanged"
+    if top_level_code(base) == top_level_code(base.replace("/usr/bin/env bash", "/bin/sh")):
+        return "a changed shebang was not seen"
+    if top_level_code(base + "  # indented\n") != top_level_code(base + "  # re-worded\n"):
+        return "an indented comment between functions read as a top-level change"
     return None
 
 
