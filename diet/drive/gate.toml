@@ -3055,9 +3055,12 @@ failure_class = "drive.serve-bin-never-writes-the-record"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-            keep_record(std::sync::Arc::clone(session), regime, (path, file));'''
+            let writer = keep_record(std::sync::Arc::clone(session), regime, (path, file));'''
 becomes = '''
-            let _ = (regime, path, file);'''
+            let writer = {
+                let _ = (regime, path, file);
+                std::thread::spawn(|| {})
+            };'''
 catches = [
     "a_drive_server_records_a_two_turn_session_that_check_record_reads",
 ]
@@ -3207,9 +3210,9 @@ failure_class = "drive.serve-bin-announces-only-a-held-record"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-            Ok::<_, String>(held || stale)'''
+            Ok::<_, String>((held || stale, writer))'''
 becomes = '''
-            Ok::<_, String>(held)'''
+            Ok::<_, String>((held, writer))'''
 catches = [
     "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
 ]
@@ -3220,9 +3223,9 @@ failure_class = "drive.serve-bin-announces-every-record-emptied"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-            Ok::<_, String>(held || stale)'''
+            Ok::<_, String>((held || stale, writer))'''
 becomes = '''
-            Ok::<_, String>(held || stale || true)'''
+            Ok::<_, String>((held || stale || true, writer))'''
 catches = [
     "a_drive_server_records_a_two_turn_session_that_check_record_reads",
 ]
