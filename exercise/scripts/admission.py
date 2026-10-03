@@ -118,13 +118,20 @@ def cited() -> set[str]:
 def orphans() -> list[pathlib.Path]:
     """Every file under scripts/ named `hygiene-admitted-*` that no admission names."""
     named = cited()
-    # A cited path can reach a file under another spelling of its name (a case-insensitive disk): that file is cited.
-    kept = [ROOT / path for path in named if (ROOT / path).exists()]
+    by_case = {path.casefold(): path for path in named}
+
+    def respelled(f: pathlib.Path, rel: str) -> bool:
+        # A cited path reaches this file under another case of its own name (a case-insensitive disk): it is cited.
+        # Only that: a link, or another name for the same file, is a name nothing admits under.
+        if f.is_symlink() or rel.casefold() not in by_case:
+            return False
+        try:
+            return os.path.samefile(f, ROOT / by_case[rel.casefold()])
+        except OSError:
+            return False
+
     found = [f for f in (ROOT / 'scripts').rglob('hygiene-admitted-*') if f.is_file() or f.is_symlink()]
-    return sorted(
-        f for f in found
-        if f.relative_to(ROOT).as_posix() not in named and not (f.exists() and any(os.path.samefile(f, k) for k in kept))
-    )
+    return sorted(f for f in found if (rel := f.relative_to(ROOT).as_posix()) not in named and not respelled(f, rel))
 
 
 def prune() -> None:

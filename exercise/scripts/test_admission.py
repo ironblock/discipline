@@ -136,6 +136,29 @@ class Admission(unittest.TestCase):
         (self.box / 'exercise/src/drive/recorded/stray.admission.json').mkdir()
         self.unread('admission: exercise/src/drive/recorded/stray.admission.json: not an admission this script can read', ('admit', 'fixture'), ('verify', data), ('tables', data))
 
+    def test_a_link_to_a_cited_snapshot_under_an_unnamed_id_is_unnamed(self):
+        cited = self.box / next(p for p in self.cited if p.endswith('-patterns.tsv'))
+        symlink = self.box / 'scripts/hygiene-admitted-000000000000-patterns.tsv'
+        hardlink = self.box / 'scripts/hygiene-admitted-111111111111-patterns.tsv'
+        symlink.symlink_to(cited.name)
+        hardlink.hardlink_to(cited)
+        names = [p.relative_to(self.box).as_posix() for p in (symlink, hardlink)]
+        refused = self.run_admission('verify', self.site())
+        self.assertEqual(refused.returncode, 1)
+        for name in names:
+            self.assertIn(f'admission: {name}: a snapshot no admission names', refused.stderr)
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        for name in names:
+            self.assertIn(f'admission: removed {name}: a snapshot no admission names', run.stdout)
+        self.assertEqual(sorted(self.snapshots()), self.cited)
+
+    def test_an_unreadable_admission_says_the_way_out(self):
+        (self.box / 'exercise/src/drive/recorded/stray.admission.json').write_text('{', encoding='utf-8')
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 2)
+        self.assertIn('Restore that file from git, or delete it, then admit again.', run.stderr)
+
     def test_a_cited_snapshot_under_another_spelling_of_its_name_is_kept(self):
         patterns = self.box / next(p for p in self.cited if p.endswith('-patterns.tsv'))
         respelled = patterns.with_name(patterns.name.replace('-patterns.tsv', '-Patterns.tsv'))
