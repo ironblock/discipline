@@ -8242,6 +8242,14 @@ failure_class = "drive.serve-bin-empties-the-record-before-the-bind"
 migrated = false
 
 [[fault]]
+id = "drive.serve-bin-forgets-what-it-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-forgets-what-it-emptied"
+failure_class = "drive.serve-bin-forgets-what-it-emptied"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
