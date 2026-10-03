@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 214
+faults = 213
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3061,12 +3061,9 @@ failure_class = "drive.serve-bin-never-writes-the-record"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-            let writer = keep_record(std::sync::Arc::clone(session), regime, (path, file));'''
+    if let Some((regime, (path, file))) = running.record {'''
 becomes = '''
-            let writer = {
-                let _ = (regime, path, file);
-                std::thread::spawn(|| {})
-            };'''
+    if let Some((regime, (path, file))) = running.record.filter(|_| false) {'''
 catches = [
     "a_drive_server_records_a_two_turn_session_that_check_record_reads",
 ]
@@ -3216,9 +3213,9 @@ failure_class = "drive.serve-bin-announces-only-a-held-record"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-            Ok::<_, String>((held || stale, writer))'''
+            Ok::<_, String>((held || stale, (regime, (path, file))))'''
 becomes = '''
-            Ok::<_, String>((held, writer))'''
+            Ok::<_, String>((held, (regime, (path, file))))'''
 catches = [
     "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
 ]
@@ -3229,9 +3226,9 @@ failure_class = "drive.serve-bin-announces-every-record-emptied"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-            Ok::<_, String>((held || stale, writer))'''
+            Ok::<_, String>((held || stale, (regime, (path, file))))'''
 becomes = '''
-            Ok::<_, String>((held || stale || true, writer))'''
+            Ok::<_, String>((held || stale || true, (regime, (path, file))))'''
 catches = [
     "a_drive_server_records_a_two_turn_session_that_check_record_reads",
 ]
@@ -3435,24 +3432,4 @@ becomes = '''
             dialect: Dialect::llama_cpp(),'''
 catches = [
     "a_served_drive_streams_a_real_servers_answer_over_sse",
-]
-
-[[fault]]
-id = "drive.serve-bin-exits-before-the-record"
-failure_class = "drive.serve-bin-exits-before-the-record"
-target = "diet/src/bin/drive.rs"
-expect_exit = 101
-anchor = '''
-    if let Some(writer) = running.record_writer
-        && writer.join().is_err()
-    {'''
-becomes = '''
-    if let Some(writer) = running.record_writer
-        && {
-            drop(writer);
-            false
-        }
-    {'''
-catches = [
-    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
 ]
