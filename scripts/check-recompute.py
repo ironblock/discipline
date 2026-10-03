@@ -26,7 +26,10 @@ reporting success -- so an undeclared directory is a failure, and finding no
 recomputable directory at all is exit 2 rather than a pass.
 
 Stdlib only. Exit 0 if every recomputable directory re-derives, 1 if one does
-not or a directory is undeclared, 2 if there is nothing to recompute.
+not or a directory is undeclared, 2 if there is nothing to recompute. Under
+`--only` (#318, the selftest's narrowing to the directories a seeded fault
+mutated) a scope naming only the template has no results directory to count,
+and says so with exit 0; a name that is not there is exit 2.
 """
 
 from __future__ import annotations
@@ -221,7 +224,9 @@ def main(argv: list[str]) -> int:
         metavar="NAME[,NAME]",
         help="re-derive only these directories under --root (#318): a seeded "
         "fault's case narrowed to the directory it mutated. A name that is not "
-        "there is a misuse, so a scope can never narrow to nothing and pass",
+        "there is a misuse (exit 2). A scope of only the template re-derives no "
+        "results directory and says so; that is the selftest's narrowing, and "
+        "CI never passes one",
     )
     parser.add_argument(
         "--names",

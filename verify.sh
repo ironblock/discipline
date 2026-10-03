@@ -7,6 +7,7 @@
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
 #   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
+#   verify.sh --only recompute --scope DIR[,DIR]   re-derive those directories (selftest only, #318)
 #   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
 #   verify.sh --site DIR      check a built site as Pages would serve it (#32): check_site
@@ -989,10 +990,10 @@ seeded_case() {
   in_shard "$ident" || return 0
   SELFTEST_CASES=$(( SELFTEST_CASES + 1 ))
 
-  # A `test` case says which tests it needs; an `injections` case MAY name the
-  # one injection it needs (#112); anything else says nothing, because
-  # `--scope` narrows only those two checks and verify.sh refuses it
-  # elsewhere. Both halves are reported here rather than left to become a
+  # A `test` case says which tests it needs; an `injections` or `bsd` case
+  # MAY name the one injection it needs (#112); a `recompute` case MAY name
+  # the directories it mutated (#318); anything else says nothing, because
+  # `--scope` narrows only those checks and verify.sh refuses it elsewhere. Both halves are reported here rather than left to become a
   # confusing exit 2 from inside the box, and scripts/check-fault-manifest.py
   # refuses the same two states before a run ever starts.
   local -a scoped=()
@@ -10427,7 +10428,7 @@ if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
       # refuses a name that is not there; this refuses a spelling that is
       # not a list of names at all.
       case "$VERIFY_SCOPE" in
-        ''|,*|*,|*,,*|*[!A-Za-z0-9._,-]*|.*|*,.*) ;;
+        ''|,*|*,|*,,*|*[!A-Za-z0-9._,-]*|.*|*,.*|-*|*,-*) ;;
         *) VERIFY_RECOMPUTE_SCOPE="$VERIFY_SCOPE" ;;
       esac
       [ -n "$VERIFY_RECOMPUTE_SCOPE" ] || {
