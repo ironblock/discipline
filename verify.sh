@@ -3086,6 +3086,29 @@ inject_exercise_recording_carried_disagrees() {
   edit_in_place 's/^"compaction": 1$/"compaction": 2/' exercise/src/drive/recorded/voxel-stress.json
 }
 
+# An authored example replayed without its label (#272): the condition turned
+# around, so the kitchen sink plays with nothing over it to say it is not a
+# session (and a recording gets the label instead). Typecheck and lint pass it;
+# the story that replays the example reads the label before and after it plays.
+inject_exercise_example_replayed_without_label() {
+  edit_in_place 's/{example ? <PinnedExampleLabel \/> : null}/{!example ? <PinnedExampleLabel \/> : null}/' exercise/src/replay/Replay.tsx
+}
+
+# The label there, but not held: it scrolls away with the top of the page, so
+# most of the replay reads as a session. Only the browser smoke, scrolled to
+# the end of the built page, can see it.
+inject_exercise_example_label_scrolls_away() {
+  edit_in_place '/^  position: sticky;$/d' exercise/src/replay/replay.css
+}
+
+# An example bundled into the page's own code: its registry imported from the
+# page's entry, which carries the whole authored script in with it. Typecheck,
+# lint, tests and the scans pass it; the smoke finds the example's text in
+# replay/assets/, where only the page's code belongs.
+inject_exercise_example_bundled_into_page() {
+  edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
+}
+
 # #32 I2's emitter mutated (track five's faults, carried here by courier): a
 # ledger row the renderer must refuse, naming the directory. The fixture loop
 # never reaches the renderer, and a record diet accepted cannot lack a word,
@@ -8238,6 +8261,12 @@ selftest() {
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a capture's carried field disagreeing with its events" exercise inject_exercise_recording_carried_disagrees \
     'voxel-stress: its carried field disagrees with its events'
+  seeded_case "an authored example replayed without its label" exercise inject_exercise_example_replayed_without_label \
+    'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
+  seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \
+    "replay-smoke: kitchen-sink's label is on the page but out of view"
+  seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
+    "replay-smoke: kitchen-sink is bundled into the page's code"
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
