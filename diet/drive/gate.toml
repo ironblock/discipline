@@ -955,9 +955,9 @@ failure_class = "drive.session-skips-the-capture-state"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            state.move_to(Settlement::Capture);'''
+    state.move_to(Settlement::Capture);'''
 becomes = '''
-            let _ = Settlement::Capture;'''
+    let _ = Settlement::Capture;'''
 catches = [
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
 ]
@@ -1530,9 +1530,9 @@ failure_class = "drive.session-reasoning-left-off-the-trunk"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            answer.reasoning.clone_from(&reasoning);'''
+    answer.reasoning.clone_from(&reasoning);'''
 becomes = '''
-            let _ = &reasoning;'''
+    let _ = &reasoning;'''
 catches = [
     "drive::projection::tests::a_real_sessions_head_changes_are_rebuilt_and_named_by_client_head",
     "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
@@ -1547,9 +1547,9 @@ failure_class = "drive.session-reasoning-trimmed"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            let reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
+    let reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
 becomes = '''
-            let reasoning = (!reasoning.is_empty()).then(|| reasoning.trim_end().to_owned());'''
+    let reasoning = (!reasoning.is_empty()).then(|| reasoning.trim_end().to_owned());'''
 catches = [
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::the_responses_reasoning_is_its_deltas_byte_for_byte",
@@ -2123,13 +2123,13 @@ failure_class = "drive.session-drops-timings"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-                reasoning,
-                timings,
-            });'''
+        reasoning,
+        timings,
+    });'''
 becomes = '''
-                reasoning,
-                timings: None,
-            });'''
+        reasoning,
+        timings: None,
+    });'''
 catches = [
     "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
@@ -2142,15 +2142,15 @@ failure_class = "drive.session-response-reasoning-dropped"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-                finish_reason,
-                reasoning,
-                timings,
-            });'''
+        finish_reason,
+        reasoning,
+        timings,
+    });'''
 becomes = '''
-                finish_reason,
-                reasoning: None,
-                timings,
-            });'''
+        finish_reason,
+        reasoning: None,
+        timings,
+    });'''
 catches = [
     "drive::projection::tests::a_real_sessions_head_changes_are_rebuilt_and_named_by_client_head",
     "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
@@ -2206,26 +2206,26 @@ failure_class = "drive.session-logs-progress-after-the-end"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-                timings,
-            });
-            state.push(Event::TurnSettled {
-                turn,
-                reason: SettleReason::Final,'''
+        timings,
+    });
+    state.push(Event::TurnSettled {
+        turn,
+        reason: SettleReason::Final,'''
 becomes = '''
-                timings,
-            });
-            state.push(Event::Progress {
-                request,
-                progress: Progress {
-                    total: 1,
-                    cache: 0,
-                    processed: 1,
-                    time_ms: 1,
-                },
-            });
-            state.push(Event::TurnSettled {
-                turn,
-                reason: SettleReason::Final,'''
+        timings,
+    });
+    state.push(Event::Progress {
+        request,
+        progress: Progress {
+            total: 1,
+            cache: 0,
+            processed: 1,
+            time_ms: 1,
+        },
+    });
+    state.push(Event::TurnSettled {
+        turn,
+        reason: SettleReason::Final,'''
 catches = [
     "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
     "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
@@ -3068,10 +3068,10 @@ failure_class = "drive.session-writes-usage-beside-timings"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            // I3b for `capped`; `usage` for a dialect with no timings).
+            // only by a capped call, below.
             usage: None,'''
 becomes = '''
-            // I3b for `capped`; `usage` for a dialect with no timings).
+            // only by a capped call, below.
             usage: timings.as_ref().map(|t| log::Usage {
                 prompt_tokens: t.prompt_n.unwrap_or(0) + t.cache_n.unwrap_or(0),
                 completion_tokens: t.predicted_n.unwrap_or(0),
