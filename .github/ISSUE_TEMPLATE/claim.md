@@ -26,6 +26,12 @@ labels: claim
 <!-- Every control this claim was run against. "none" is an answer, and a
      costly one. -->
 
+<!-- Nothing from a private environment: the hygiene gate rejects hostnames,
+     addresses, home paths and internal ticket identifiers for a reason, and
+     a person's schedule, habits or whereabouts are private too: a machine's
+     availability is a fact about the machine ("reserved", "down", "restored
+     at <time>"), never about a person's time. -->
+
 ## Reproduction
 
 ```
