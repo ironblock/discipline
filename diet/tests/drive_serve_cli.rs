@@ -906,7 +906,13 @@ fn a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was() {
         .to_string();
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let (code, said) = run_briefly(&stub.url(), &["--log", &path, "--port", &port]);
+    // Exit 2 is shared with a usage refusal: the reason says it was the bind
+    // (#264, round 3).
     assert_eq!(code, Some(2), "the bind fails: {said}");
+    assert!(
+        said.contains("cannot listen on"),
+        "the bind, not usage: {said}"
+    );
     assert_eq!(
         std::fs::read_to_string(&held.0).expect("still there"),
         "an earlier session's log\n"
@@ -1141,7 +1147,13 @@ fn a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_the
         std::fs::read_to_string(&sidecar).ok(),
     );
     let _ = std::fs::remove_file(&sidecar);
+    // Exit 2 is shared with a usage refusal: the reason says it was the bind
+    // (#264, round 3).
     assert_eq!(code, Some(2), "the bind fails: {said}");
+    assert!(
+        said.contains("cannot listen on"),
+        "the bind, not usage: {said}"
+    );
     assert_eq!(
         left,
         (
