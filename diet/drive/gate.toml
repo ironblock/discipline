@@ -2345,6 +2345,7 @@ catches = [
     "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
+    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
 ]
 
 [[fault]]
@@ -2857,6 +2858,7 @@ becomes = '''
     let truncated = false;'''
 catches = [
     "a_drive_server_says_when_its_log_flag_emptied_a_file",
+    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
 ]
 
 [[fault]]
@@ -2951,6 +2953,7 @@ catches = [
     "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
     "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
     "a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were",
+    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
 ]
 
 [[fault]]
@@ -3195,6 +3198,7 @@ becomes = '''
                 std::fs::remove_file(&sidecar)'''
 catches = [
     "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
+    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
 ]
 
 [[fault]]
@@ -3247,6 +3251,5 @@ anchor = '''
 becomes = '''
         if true || self.0.is_empty() {'''
 catches = [
-    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
     "drive::serve::tests::a_failure_after_the_writers_names_what_they_emptied",
 ]
