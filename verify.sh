@@ -3128,6 +3128,15 @@ inject_exercise_example_bundled_into_page() {
   edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
 }
 
+# The meter reading a progress frame's old, nested shape again (#288): what
+# the page did when it went blank on the rehearsal drive's first live frame.
+# The types are the format's now, so the read goes through a cast, as an
+# older shape kept anywhere else would; typecheck and lint pass it, and any
+# fold of a progress line -- served, or synthesized for a replay -- sees it.
+inject_exercise_progress_read_nested() {
+  edit_in_place 's|    processed: top.processed,|    processed: (top as unknown as { prompt: { processed: number } }).prompt.processed,|' exercise/src/session/fold.ts
+}
+
 # #32 I2's emitter mutated (track five's faults, carried here by courier): a
 # ledger row the renderer must refuse, naming the directory. The fixture loop
 # never reaches the renderer, and a record diet accepted cannot lack a word,
@@ -8290,6 +8299,8 @@ selftest() {
     "replay-smoke: kitchen-sink's label is on the page but out of view"
   seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
     "replay-smoke: kitchen-sink is bundled into the page's code"
+  seeded_case "the meter reading a progress frame's old shape" exercise inject_exercise_progress_read_nested \
+    "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \

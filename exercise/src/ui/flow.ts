@@ -5,9 +5,11 @@ import { rate, tokens, took } from './format.ts';
  * Tokens moving through the model, and how long they have taken: READ (the
  * new part of the prompt, prefill, `pp`) or WRITTEN (generation, `tg`). One
  * shape for both, said one way -- `+100 tok in 5.0 s (20 t/s pp)` -- so a
- * block's header (what went in) and footer (what came out) read alike, and
- * both count up while they run. The rate is derived from the two numbers
- * shown, never reported beside them.
+ * block's header (what went in) and footer (what came out) read alike. The
+ * header counts up while it reads, from the log's `progress` lines; the footer
+ * says only how long until the response's timings say how much, since nothing
+ * in the log counts tokens generated before then (#288). The rate is derived
+ * from the two numbers shown, never reported beside them.
  */
 export interface Flow {
   readonly phase: 'pp' | 'tg';
@@ -35,7 +37,8 @@ export function readingOf(g: Generating, at: number): Flow | undefined {
     const fresh = m ? m.total - m.cache : undefined;
     return {
       phase: 'pp',
-      ...(m && fresh !== undefined ? { n: Math.min(fresh, m.processed), of: fresh } : {}),
+      // `processed` counts the warm part in: the new tokens read are what is past it.
+      ...(m && fresh !== undefined ? { n: Math.min(fresh, Math.max(0, m.processed - m.cache)), of: fresh } : {}),
       ms: Math.max(0, now - started),
       running: true,
     };
@@ -55,9 +58,8 @@ export function writingOf(g: Generating, at: number): Flow | undefined {
   if (t?.predicted_n !== undefined) return { phase: 'tg', n: t.predicted_n, ms: t.predicted_ms ?? 0, running: false };
   if (g.progress !== 'streaming') return undefined;
   const since = g.writingSince ?? g.startedAt ?? now;
-  // A count only from a frame since writing began: an earlier one's zero is stale, not measured.
-  const counted = g.meter && g.meter.at >= since ? { n: g.meter.decoded } : {};
-  return { phase: 'tg', ...counted, ms: Math.max(0, now - since), running: true };
+  // Only how long: nothing in the log counts tokens generated before the response's timings do (#288).
+  return { phase: 'tg', ms: Math.max(0, now - since), running: true };
 }
 
 /**
@@ -83,7 +85,7 @@ export function edgeOf(g: Generating): { readonly read: number } | undefined {
   const m = g.meter;
   if (!m) return undefined;
   const fresh = m.total - m.cache;
-  return { read: fresh === 0 ? 1 : Math.min(1, m.processed / fresh) };
+  return { read: fresh === 0 ? 1 : Math.min(1, Math.max(0, m.processed - m.cache) / fresh) };
 }
 
 /** The warm part of a generation's prompt: tokens reused, not read. */

@@ -84,19 +84,20 @@ export interface Generation {
 }
 
 /**
- * A running request's progress: its prompt (all of it, the warm part, and
- * how many new tokens are read -- held at the most any frame said), tokens
- * generated, and each phase's speed so far, in tokens per second.
+ * A running request's prefill, as the log's `progress` lines say it: its
+ * prompt (all of it, the warm part, and how much is processed so far, the
+ * warm part among it -- held at the most any frame said), and the rate the
+ * new part is read at by the server's own clock, in tokens per second. The
+ * frames stop at the first token and never count what is generated (#288).
  */
 export interface Meter {
   /** Session time of the last frame. */
   readonly at: number;
   readonly total: number;
   readonly cache: number;
+  /** Prompt tokens processed, the cache among them: `cache` at the start, `total` once the prompt is read. */
   readonly processed: number;
-  readonly decoded: number;
   readonly ppRate?: number;
-  readonly tgRate?: number;
 }
 
 export interface AssistantNode extends Provenance, Generation {
@@ -316,22 +317,15 @@ function generation(g: GenerationBuilder, trunkSlot: number): Generation {
 
 function meterOf(frames: readonly LineOf<'progress'>[]): Meter {
   const last = frames.at(-1)!;
-  const top = frames.reduce((best, f) => (f.prompt.processed > best.prompt.processed ? f : best), frames[0]!);
-  const first = frames[0]!;
-  const perSecond = (n: number, ms: number) => (ms > 0 && n > 0 ? (1000 * n) / ms : undefined);
-  const ppRate = perSecond(top.prompt.processed - first.prompt.processed, top.t - first.t);
-  // Generation is timed from the first frame that had read the whole prompt.
-  const newTokens = last.prompt.total - last.prompt.cache;
-  const read = frames.find((f) => f.prompt.processed >= newTokens);
-  const tgRate = read ? perSecond(last.decoded - read.decoded, last.t - read.t) : undefined;
+  const top = frames.reduce((best, f) => (f.processed > best.processed ? f : best), frames[0]!);
+  // The new part read, over the prefill time the server measured for it.
+  const ppRate = top.time_ms > 0 && top.processed > top.cache ? (1000 * (top.processed - top.cache)) / top.time_ms : undefined;
   return {
     at: last.t,
-    total: last.prompt.total,
-    cache: last.prompt.cache,
-    processed: top.prompt.processed,
-    decoded: last.decoded,
+    total: last.total,
+    cache: last.cache,
+    processed: top.processed,
     ...(ppRate !== undefined ? { ppRate } : {}),
-    ...(tgRate !== undefined ? { tgRate } : {}),
   };
 }
 
