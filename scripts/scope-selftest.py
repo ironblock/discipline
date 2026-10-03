@@ -69,6 +69,23 @@ FUNCTION = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{\n(.*?)^\}\n", re.M | re
 # ...and the one-line form, `check_parity() { python3 scripts/...; }`, which
 # ten of the checks are spelled in.
 ONE_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{ (.*) \}\n", re.M)
+# An alias defined by the builtin: `alias name=...` (also `\alias`, `builtin
+# alias`, `eval alias ...`). BASH_ALIASES is main's spelling check's, searched
+# in the whole text. A definition hidden in a split or computed string (`eval
+# "al""ias ..."`) is not seen (#323).
+ALIAS_DEFINITION = re.compile(r"(?<![\w-])alias\s+(?:-p\s+)?[^\s=;|&]+=")
+def code_lines(text: str) -> list[str]:
+    """`text`'s lines but its comment lines -- where a line that continues
+    the one before (an odd run of backslashes ends it) is code, `#` first or
+    not (#328's delta review: `x=1\\` then `#; alias q=...`)."""
+    kept, carried = [], False
+    for line in text.split("\n"):
+        if carried or not line.lstrip().startswith("#"):
+            kept.append(line)
+        carried = (len(line) - len(line.rstrip("\\"))) % 2 == 1
+    return kept
+
+
 SCRIPT = re.compile(r"scripts/[A-Za-z0-9_./-]+")
 CALL = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 
@@ -174,9 +191,11 @@ def top_level_code(text: str) -> str:
     compared whole when bash -n cannot parse it, when a line starts with `}`
     (a closer the function pattern left behind), when a matched function does
     not parse alone as a complete unit (cut short), or when the text can turn
-    alias expansion on. Whole re-proves; it never skips. What this cannot see:
-    a function match that runs long, past its real closer, swallowing top-
-    level code into the function (#317).
+    alias expansion on or defines an alias (#323). Whole re-proves; it never
+    skips. A function match that runs long past its real closer compares the
+    whole file (#317). What this cannot see (#329): a closer whose line
+    balances its braces or continues onto the next, and the one-line pattern's
+    matches.
     """
     # A function match that ran long past its real closer has swallowed the
     # top-level code after it, which is then in no unit's text the plan reads
@@ -195,13 +214,20 @@ def top_level_code(text: str) -> str:
     # review broke the claim that the unit check subsumes it.
     if any(line.startswith("}") for line in lines) or not functions_parse(text):
         return outside
-    # bash expands aliases only where `expand_aliases` is set or in POSIX
-    # mode, neither of which bash -n runs: an alias can open a quote or a
-    # heredoc unseen (#310: N7b, N10; #314's review: `set -o posix`,
-    # POSIXLY_CORRECT, an option name split by quotes).
-    # Case-sensitive: verify.sh's comments say POSIX, and no shell option or
-    # variable is spelled so.
-    if re.search(r"_aliases|expand_al|\bposix\b|POSIXLY_CORRECT|BASH_ALIASES", text):
+    # An alias can open a quote or a heredoc bash -n never sees, since bash -n
+    # expands none (#310: N7b, N10). Two checks, as a union: the spellings
+    # that turn expansion on (#314; case-sensitive, as verify.sh's comments
+    # say POSIX), and an alias's DEFINITION -- by the `alias` builtin or
+    # BASH_ALIASES, outside a comment line -- for a switch no spelling shows
+    # (#323: a split or computed option name, a `#!/bin/sh` shebang's POSIX
+    # mode). Neither alone: #328's review defined aliases in ways no regex
+    # sees (`alias -- q=`, a sourced file) under a literal switch.
+    # main's predicate VERBATIM, then the definition check OR'd beside it, so
+    # the union is a superset of main by construction (#328's delta review:
+    # moving BASH_ALIASES out of this whole-text search regressed).
+    if re.search(r"_aliases|expand_al|\bposix\b|POSIXLY_CORRECT|BASH_ALIASES", text) or any(
+        ALIAS_DEFINITION.search(line) for line in code_lines(text)
+    ):
         return outside
     # A top level bash -n cannot parse whole compares whole (#308's fifth
     # review): its first error hides every open quote after it from the check
@@ -880,6 +906,29 @@ def _top_level_comments():
         ("g() {\n  cat\n} <<'EOF'\n{\n  \"a\": 1\n}\n# c\n{\n  \"b\": 2\n}\nEOF\ng\n", ("# c", "# d")),
         ("g() {\n  cat\n} <<'EOF'\n}\n# c\nEOF\ng\n", ("# c", "# d")),
         ("set -o posix\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #323: expansion turned on by a spelling no list holds; the alias's
+        # definition is what is seen.
+        ("shopt -s \"expand_\"\"aliases\"\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("o=expand_; shopt -s ${o}aliases\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("POSIXLY_CORRECT=1\nBASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #328's review: a literal switch with a definition no regex sees, and
+        # definition forms each held: in a function body, via `builtin`, a
+        # quoted name.
+        ("shopt -s expand_aliases\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("set -o posix\n'alias' q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("POSIXLY_CORRECT=1\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("define() {\n  alias q=\"echo '\"\n}\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("builtin alias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("alias 'q'=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("set -o \"pos\"ix\nBASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #328's delta review: BASH_ALIASES and an alias on a continued `#`
+        # line, and each spelling alternative held alone -- split around
+        # `_aliases`, around `expand_al`, and spelled inside a function body.
+        ("set -o \"pos\"ix\nx=1\\\n#; BASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("set -o \"pos\"ix\nx=1\\\n#; alias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("shopt -s \"expand\"_aliases\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("shopt -s expand_al\"iases\"\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("on() {\n  shopt -s expand_aliases\n}\non\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
         # #317: a function match that runs long past a closer written
         # otherwise -- a trailing comment, `};`, indented, a heredoc on it --
         # swallows the top-level code after it.
@@ -900,7 +949,9 @@ def _top_level_comments():
     # And the fix stays on for the tree it was written for: today's verify.sh
     # does not fall back to comparing its top level whole (#310).
     today = (ROOT / "verify.sh").read_text(encoding="utf-8")
-    if top_level_code(today) == outside_functions(today):
+    # Whole is either the top level or, for a match that ran long (#317), the
+    # file: neither may be what today's verify.sh compares (#327's review).
+    if top_level_code(today) in (outside_functions(today), today):
         return "this verify.sh's top level is compared whole, so #305's fix is off"
     # usage() prints the header, line 2 to the first empty line (#310): an
     # edit there is read; a comment after it is not.
@@ -914,6 +965,11 @@ def _top_level_comments():
     gap = "#!/usr/bin/env bash\n\n# usage, after an empty line 2\n\nusage() {\n  sed -n '2,/^$/s/^# \\{0,1\\}//p' \"$0\"\n}\n"
     if top_level_code(gap) == top_level_code(gap.replace("after an empty", "after a blank")):
         return "an edit to a header after an empty line 2 read as unchanged"
+    # A comment that shows an alias's definition defines nothing (#323): it
+    # does not switch comparing comments off.
+    shown = base + "# alias q=x is how one would define it\n"
+    if top_level_code(shown) != top_level_code(shown.replace("# one", "# one, re-worded")):
+        return "a comment showing an alias definition made comments compare"
     if top_level_code(base) == top_level_code(base.replace("/usr/bin/env bash", "/bin/sh")):
         return "a changed shebang was not seen"
     if top_level_code(base + "  # indented\n") != top_level_code(base + "  # re-worded\n"):
