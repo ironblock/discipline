@@ -1,0 +1,4 @@
+pid of llama-server (pgrep -x): 2813
+sha256 of /proc/<pid>/exe: 980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4
+process start (ps lstart, the box's local time, UTC-7): Fri Oct  2 16:15:48 2026 = 2026-10-02T23:15:48Z
+listeners on the server's port (ss -ltn): 1

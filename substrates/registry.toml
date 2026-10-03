@@ -537,7 +537,7 @@ os_deployment_digest = "e3307b110e1c656633f655bb3b6cf9123a45dbac788ac8a9421e407c
 os_deployment_checksum = "d1e67933bd2b2253fb29e63960a58d17e058ca974217f87486dd5241cc69576e"
 os_deployment_checksum_note = "the booted deployment's own checksum, read 2026-10-01 by rpm-ostree status --json; the capture records the base-checksum above"
 kernel = "7.2.7-ogc1.1.fc44.x86_64"
-pinned_by = "substrate capture of 2026-10-01 (--hash-models), taken after the restore of that day: the machine rebooted 2026-09-30T05:18:53Z, during its owner's scheduled use, into operating system image 44.20260928.1, and production was dark until the provisioning script restored it (first health 2026-10-01T05:05:44Z; #143)"
+pinned_by = "substrate capture of 2026-10-01 (--hash-models), taken after the restore of that day: the machine rebooted 2026-09-30T05:18:53Z, during reserved use, into operating system image 44.20260928.1, and production was dark until the provisioning script restored it (first health 2026-10-01T05:05:44Z; #143)"
 os_update_note = """
 The 2026-09-20 instance recorded 44.20260928 as staged; the image booted is 44.20260928.1, and no digest of the staged one was recorded to show them one image. Against the 2026-09-20 capture, `fingerprint --check` drifts in three fields, kernel, deployment digest and kargs, and in nothing else: launch flags and the three model files' digests are identical."""
 engine_identity_measured = true
@@ -549,6 +549,28 @@ accelerator_driver_read_note = "read 2026-10-01 from the driver library the rest
 canary = """
 Canary e0827, k = 36, one draw at registration (2026-10-01, after the restore): 36/36, 99% Wilson [0.844, 1.000] (z = 2.576, #114's rule), read against the 2026-09-20 instance's pooled baseline, PASS. That comparison is a stopgap, not #114's rule: #114 pools per instance and this instance has no pool yet; only the interval's level is #114's. Under #114's rule this instance's own pool begins with that draw; the draw is not committed, so it is not yet poolable."""
 admission_note = "the floor's admission (substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/) stands on this instance: its fingerprint is engine, weights, template, serving line and reasoning state, and an operating-system change is instance state. This is Dispatch's interim reading of planning's admission fingerprint (#143, comment 5884256685), posted there for planning to refine; the admission record itself is not edited here, since its manifest digest pins its files"
+current = false
+current_note = "superseded 2026-10-02 by the 2026-10-02 instance: the box booted operating system image 44.20260929"
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-10-02"
+os_deployment_version = "44.20260929"
+os_deployment_digest = "361661fde059f7ea116edd4ed236bae54bc5dd4b3e49733e440b478354b68dd4"
+os_deployment_checksum = "2fd9934e890d6173846ba5a4c7baa43341ca28831b944999056942bd24fb0eda"
+os_deployment_checksum_note = "the booted deployment's own checksum, read 2026-10-02 by rpm-ostree status --json (substrates/measurements/2026-10-02-floor-restore/os.txt); the capture records the base-checksum above; the image's own timestamp is 2026-09-30T11:07:16Z, and 44.20260928.1 stays present as the rollback"
+kernel = "7.2.7-ogc1.1.fc44.x86_64"
+pinned_by = "substrate capture of 2026-10-02 (--hash-models), taken after the restore of that day: the box slept after the 2026-10-01 window and was rebooted 2026-10-02T23:13Z into operating system image 44.20260929, and the provisioning script restored production (first health 2026-10-02T23:16:02Z; #143). The capture is committed with home paths collapsed to ~ and the root filesystem UUID in kargs redacted, as substrates/measurements/2026-10-02-floor-restore/substrate-2026-10-02-postupdate.json (sha256 d6e08c2840c0c97ee64aa55b8f6ab010555d4a7531b204b48b97228d35993465); the raw capture, kept privately like the earlier ones, hashes to f2a6ca42810abb9dd8b250db729d64a44c0acaea38465b367514e2910d33d192"
+os_update_note = """
+Against the 2026-10-01 capture, `fingerprint --check` drifts in two fields, deployment digest and kargs, and in nothing else: in kargs only the ostree deployment path moved (the kernel stays 7.2.7-ogc1.1), and launch flags and the three model files' digests (re-hashed) are identical (substrates/measurements/2026-10-02-floor-restore/fingerprint-check.txt)."""
+engine_identity_measured = true
+engine_identity_measured_on = "2026-10-02"
+engine_identity_measured_how = """
+The running server's binary hashed through `/proc/<pid>/exe` (process found by `pgrep -x`) returned the substrate's engine digest (substrates/measurements/2026-10-02-floor-restore/process.txt)."""
+accelerator_driver_read = "615.71.09"
+accelerator_driver_read_note = "read 2026-10-02 from the driver library the restored process maps (libcuda.so.615.71.09, substrates/measurements/2026-10-02-floor-restore/os.txt), unchanged from the 2026-10-01 read"
+canary = """
+Canary e0827, k = 36, one draw at registration (2026-10-02, after the restore): 35/36, 99% Wilson [0.801, 0.997] (z = 2.576, #114's rule), read against the 2026-09-20 instance's pooled baseline, PASS (substrates/measurements/2026-10-02-floor-restore/canary.txt; the 99% interval in canary-interval.txt). The same stopgap as the 2026-10-01 instance's: #114 pools per instance and this instance has no pool yet; only the interval's level is #114's. This draw is committed sample by sample (canary.txt: 36 hit-or-miss lines, the miss at sample 22), so under #114's rule it is the first draw of this instance's own pool."""
+admission_note = "the floor's admission stands on this instance as on the 2026-10-01 one: engine, weights, template, serving line and reasoning state are unchanged, and an operating-system change is instance state (Dispatch's interim reading, #143, comment 5884256685)"
 current = true
 
 [substrate.accel24-llamacpp-qwen38-27b-iq3s]
