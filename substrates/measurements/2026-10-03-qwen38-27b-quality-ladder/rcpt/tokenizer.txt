@@ -1,0 +1,4 @@
+# tokcheck.py output, 2026-10-03: the 27B files on linux-pc and the Flash-Next reference of #336 on rtx6000ada-host (metadata only; *_sha are sha256 prefixes)
+linux-pc        Qwen3.8-27B-Q8_0.gguf pre=qwen35 model=gpt2 n_vocab=248320 tokens_sha=6d8afc30d32560a9 merges=247587 merges_sha=b645cd089105aa7f types_sha=d54439ef48197cc1 bos=248044 eos=248046
+linux-pc        Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf pre=qwen35 model=gpt2 n_vocab=248320 tokens_sha=6d8afc30d32560a9 merges=247587 merges_sha=b645cd089105aa7f types_sha=d54439ef48197cc1 bos=248044 eos=248046
+rtx6000ada-host Qwen3.8-Flash-Next-Q8_0-00001-of-00006.gguf pre=qwen35 model=gpt2 n_vocab=248320 tokens_sha=6d8afc30d32560a9 merges=247587 merges_sha=b645cd089105aa7f types_sha=d54439ef48197cc1 bos=248044 eos=248046
