@@ -2191,6 +2191,351 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# Log v3 (#297, the courier from track three): each new rule disabled in
+# turn. The per-outcome keys, the substrate claim's all-or-none, the capped
+# settle's response, a tool_call's citation, and a stream's byte count beside
+# its text.
+
+inject_log_tool_call_forbidden_keys_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if object.contains_key(*barred) {'
+new = '        if false && object.contains_key(*barred) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_tool_call_required_keys_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if !object.contains_key(*needed) {'
+new = '        if false && !object.contains_key(*needed) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_substrate_claim_in_part_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if !carried.is_empty() && carried.len() < together.len() {'
+new = '    if false && !carried.is_empty() && carried.len() < together.len() {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_capped_settle_unchecked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if !response_capped {'
+new = '    if false && !response_capped {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_tool_call_citing_anything_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if !requests.contains(&cited) {'
+new = '    if false && !requests.contains(&cited) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_stream_without_its_bytes_unpaired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if has_text != has_bytes {'
+new = '        if false && has_text != has_bytes {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v3's review round (#297): cancelled's forbidden `exit`, the `capped`
+# settle's version gate, and a call's one line, naming its request's turn.
+
+inject_log_cancelled_call_exit_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            &["isolation", "network"],\n            &[\n                "exit",\n'
+new = '            &["isolation", "network"],\n            &[\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_capped_settle_read_in_a_v2_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if capped {'
+new = '    if false && capped {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_tool_call_written_twice_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if !calls.insert((request, id.to_owned())) {'
+new = '    if false && !calls.insert((request, id.to_owned())) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_tool_call_naming_another_turn_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        && asked != turn'
+new = '        && false && asked != turn'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v3 (#297, ruled from #300's build): only a `bash` call carries the exec
+# keys -- required of it where its outcome requires them, forbidden on any
+# other name -- and only a `bash` call must carry its streams (5975651100).
+
+inject_log_bash_call_exec_keys_unrequired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if !bash && EXEC.contains(needed) {'
+new = '        if EXEC.contains(needed) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_non_bash_call_exec_keys_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if !bash && object.contains_key(*exec) {'
+new = '        if false && !bash && object.contains_key(*exec) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_bash_call_streams_unrequired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if !bash\n            && STREAMS\n'
+new = '        if true\n            && STREAMS\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v3 (#297, ruled at 5975651100): `unrecorded` confinement -- isolation
+# and network each on its own, never `confined` beside an unrecorded
+# isolation, and neither in a session that made the substrate claim.
+
+inject_log_unrecorded_isolation_in_a_served_session_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if claimed && isolation == Some(Isolation::Unrecorded) {'
+new = '    if false && claimed && isolation == Some(Isolation::Unrecorded) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_unrecorded_network_in_a_served_session_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if claimed && network == Some(Network::Unrecorded) {'
+new = '    if false && claimed && network == Some(Network::Unrecorded) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_unrecorded_call_confined_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if unrecorded && object.contains_key("confined") {'
+new = '    if false && unrecorded && object.contains_key("confined") {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v3 (#297): a bash call's argv and policy words by outcome -- a refused
+# call's argv exactly when it parsed, a cancelled call's isolation and network.
+
+inject_log_refused_unparsable_call_argv_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if !parsed && has_argv {'
+new = '    if false && !parsed && has_argv {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_refused_parsed_call_argv_unrequired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if parsed && !has_argv {'
+new = '    if false && parsed && !has_argv {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_cancelled_bash_call_policy_words_unrequired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            &["isolation", "network"],'
+new = '            &[],'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_refused_call_policy_words_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            &["reason"],\n            &[\n                "confined",\n                "isolation",\n                "network",\n'
+new = '            &["reason"],\n            &[\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v3 (#297, ruled at 5975957135): a stream's byte count is 0 exactly when
+# its text is empty, each direction on its own; and `policy` is an exec key,
+# forbidden on any name but `bash`.
+
+inject_log_empty_stream_with_a_byte_count_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '                if text.is_empty() && bytes != 0 {'
+new = '                if false && text.is_empty() && bytes != 0 {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_stream_text_with_a_zero_byte_count_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '                if !text.is_empty() && bytes == 0 {'
+new = '                if false && !text.is_empty() && bytes == 0 {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_non_bash_call_policy_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = 'pub const EXEC: &[&str] = &["argv", "confined", "isolation", "network", "policy"];'
+new = 'pub const EXEC: &[&str] = &["argv", "confined", "isolation", "network"];'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # #79: the check that a `prefix.changed` is a change at all. Disabled, a row
 # over two requests that hash the same is accepted -- and a cache census reads
 # a mutation the file itself denies.
@@ -8634,6 +8979,52 @@ selftest() {
     'log/fixtures/invalid/a-timings-key-the-server-does-not-send\.jsonl' 'test:conformance/formats::log'
   seeded_case "a timings key declared that no line writes" test inject_log_timings_declares_a_key_nothing_writes \
     'the_schema_is_what_every_kind_writes \.\.\. FAILED' 'lib/formats::log::tests'
+  seeded_case "a tool_call carrying a key its outcome forbids read" test inject_log_tool_call_forbidden_keys_read \
+    'log/fixtures/invalid/a-refused-call-carrying-an-exit\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a tool_call missing a key its outcome requires read" test inject_log_tool_call_required_keys_unchecked \
+    'log/fixtures/invalid/a-failed-call-without-its-policy\.jsonl' 'test:conformance/formats::log'
+  seeded_case "part of a session.start's substrate claim read" test inject_log_substrate_claim_in_part_read \
+    'log/fixtures/invalid/a-session-start-with-part-of-its-claim\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a capped settle whose response is not capped read" test inject_log_capped_settle_unchecked \
+    'log/fixtures/invalid/a-capped-settle-whose-response-is-not-capped\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a tool_call citing anything read as a request" test inject_log_tool_call_citing_anything_read \
+    'log/fixtures/invalid/a-tool-call-naming-no-request\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a stream's text and its byte count not paired" test inject_log_stream_without_its_bytes_unpaired \
+    'a_streams_text_and_its_byte_count_come_together \.\.\. FAILED' 'lib/formats::log::tests'
+  seeded_case "a cancelled tool_call carrying an exit read" test inject_log_cancelled_call_exit_read \
+    'log/fixtures/invalid/a-cancelled-call-carrying-an-exit\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a capped settle read in a log that declares v2" test inject_log_capped_settle_read_in_a_v2_log \
+    'log/fixtures/invalid/a-v2-log-settling-capped\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a call's tool_call written twice read" test inject_log_tool_call_written_twice_read \
+    'log/fixtures/invalid/a-call-written-twice\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a tool_call naming another turn than its request's read" test inject_log_tool_call_naming_another_turn_read \
+    'log/fixtures/invalid/a-tool-call-naming-another-turn\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a bash call that ran without its argv read" test inject_log_bash_call_exec_keys_unrequired \
+    'log/fixtures/invalid/a-bash-call-that-ran-without-its-argv\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a read call carrying an argv read" test inject_log_non_bash_call_exec_keys_read \
+    'log/fixtures/invalid/a-read-call-carrying-an-argv\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a bash call that ran without its stdout read" test inject_log_bash_call_streams_unrequired \
+    'log/fixtures/invalid/a-bash-call-that-ran-without-its-stdout\.jsonl' 'test:conformance/formats::log'
+  seeded_case "an unrecorded isolation read in a served session" test inject_log_unrecorded_isolation_in_a_served_session_read \
+    'log/fixtures/invalid/an-unrecorded-isolation-in-a-served-session\.jsonl' 'test:conformance/formats::log'
+  seeded_case "an unrecorded network read in a served session" test inject_log_unrecorded_network_in_a_served_session_read \
+    'log/fixtures/invalid/an-unrecorded-network-in-a-served-session\.jsonl' 'test:conformance/formats::log'
+  seeded_case "an unrecorded call carrying its confined read" test inject_log_unrecorded_call_confined_read \
+    'log/fixtures/invalid/an-unrecorded-call-carrying-its-confined\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a refused unparsable bash call carrying an argv read" test inject_log_refused_unparsable_call_argv_read \
+    'log/fixtures/invalid/a-refused-unparsable-call-carrying-an-argv\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a refused not_allowed bash call without its argv read" test inject_log_refused_parsed_call_argv_unrequired \
+    'log/fixtures/invalid/a-refused-not-allowed-call-without-its-argv\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a cancelled bash call without its policy words read" test inject_log_cancelled_bash_call_policy_words_unrequired \
+    'log/fixtures/invalid/a-cancelled-bash-call-without-its-policy-words\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a refused bash call carrying its policy words read" test inject_log_refused_call_policy_words_read \
+    'log/fixtures/invalid/a-refused-call-carrying-its-isolation\.jsonl' 'test:conformance/formats::log'
+  seeded_case "an empty stream with a non-zero byte count read" test inject_log_empty_stream_with_a_byte_count_read \
+    'log/fixtures/invalid/an-empty-stream-with-a-non-zero-byte-count\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a stream's text with a zero byte count read" test inject_log_stream_text_with_a_zero_byte_count_read \
+    'log/fixtures/invalid/a-stream-with-text-and-a-zero-byte-count\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a read call that failed carrying a policy read" test inject_log_non_bash_call_policy_read \
+    'log/fixtures/invalid/a-read-call-that-failed-carrying-a-policy\.jsonl' 'test:conformance/formats::log'
   seeded_case "a head change that is not a change"    test     inject_record_prefix_change_not_a_change \
     'record/fixtures/invalid/prefix-change-that-is-not-a-change\.jsonl' 'test:conformance/formats::record'
   seeded_case "the miss classes reordered"           test     inject_record_prefix_precedence_reordered \

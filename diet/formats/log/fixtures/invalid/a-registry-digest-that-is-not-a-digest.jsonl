@@ -1,0 +1,2 @@
+{"engine_build":"b0-unknown-dirty","engine_identity":"literal_matched","head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"registry_sha256":"f1e2569d","seq":0,"substrate":"accel24-beellama-qwen27b-q4kxl","t":0,"version":3}
+{"kind":"ask","seq":1,"t":5,"text":"list the files","turn":1}
