@@ -297,8 +297,9 @@ def summarise(rows: list[dict]) -> dict:
 
 def decide(summary: dict, criterion: dict) -> dict:
     """`_decide`, with the re-draw budget echoed on every path when any cell had an invalid sample: the budget is applied
-    when the samples are drawn, not here, so it is echoed where it was spent -- a run that re-drew carries the number it
-    ran under, and a run that never re-drew decides to the same bytes as before (#304)."""
+    when the samples are drawn, not here, so it is echoed where it was spent -- a run that re-drew carries the budget of
+    the criterion it is decided under (not checked here against the run's criterion_sha256 in meta.json), and a run that
+    never re-drew decides to the same bytes as before (#304)."""
     out = _decide(summary, criterion)
     if "max_redraws" in criterion and any(c.get("application", {}).get("invalid", 0) for c in summary.values()):
         out["max_redraws"] = criterion["max_redraws"]
