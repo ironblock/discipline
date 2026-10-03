@@ -239,7 +239,7 @@ build_diet() {
 # check's: the renderer's verdict reaches it (`RENDER_LEDGER` names the
 # renderer, so the mechanics assertion can stand one in). The page links the
 # commit it was rendered from; a tree with no commit (the selftest's box)
-# links main.
+# links HEAD, the default branch (#326).
 check_results() {
   build_diet || return
   local ledger rc=0
@@ -680,7 +680,7 @@ usage() {
 SELFTEST_SCRATCH=()
 SELFTEST_BROKEN=()
 # Each fault this run did not see red, as `ID<TAB>CHECK<TAB>WHY`, written to
-# the census. On `main` and the nightly, a shard that fails keeps its census,
+# the census. On a push and the nightly, a shard that fails keeps its census,
 # and scripts/selftest-drift.py opens an issue labelled `check:<CHECK>` for
 # each row (#112). SELFTEST_BROKEN is the run's verdict; this is the per-fault
 # record the verdict is about, for the rows that have a fault to name.
@@ -727,7 +727,7 @@ SELFTEST_RAN=()
 # by --scope-plan (scripts/scope-selftest.py writes it); a fault it does not
 # name runs, so no plan -- and any plan that forgets a fault -- means the old
 # behaviour, every fault re-proven. An inherited fault is never counted as
-# passed: the census declares it, with the `main` commit it was last seen red
+# passed: the census declares it, with the commit it was last seen red
 # at, and nothing here runs it.
 SELFTEST_SCOPE_PLAN=""
 SELFTEST_RAN_IDS=()
@@ -1065,7 +1065,7 @@ seeded_case() {
   # WHAT THIS FAULT TOUCHED, for #112's scoping: the files between the two
   # trees `sandbox_state` just wrote (its first line), read off the sandbox
   # rather than parsed out of the injection's body. The census carries them,
-  # and the `main` run's census is what a PR's scope is decided from.
+  # and the base branch's full run's census is what a PR's scope is decided from.
   local touched
   while IFS= read -r touched; do
     [ -n "$touched" ] && SELFTEST_TOUCHED+=("${ident}"$'\t'"${touched}")
@@ -4863,7 +4863,7 @@ EOF
 }
 
 # Both corroborating namers stripped of their branch filter. Nothing is
-# broken today: verify.yml still says `branches: [main]`, the gate still runs
+# broken today: verify.yml still names both branches, the gate still runs
 # on the trunk, and every check passes. What is gone is the second opinion. The
 # rule that grades the NAME has only corroboration to grade it with, so with
 # one namer left it quietly stops grading anything while still reporting a
@@ -9394,7 +9394,7 @@ selftest() {
       # predicted (ruled on #108, 2026-09-24). Reported, never graded: the
       # budget is a printed number, not a gate (#112).
       printf 'elapsed\t%d\n' "$SECONDS"
-      # The commit these verdicts are about, so a `main` run's census can say
+      # The commit these verdicts are about, so a full run's census can say
       # at which sha each fault was last seen red (#112).
       printf 'commit\t%s\n' "$(git -C "$ROOT" rev-parse HEAD 2> /dev/null || echo unknown)"
       # Each fault this shard ran, by ordinal AND id: the id is what a later

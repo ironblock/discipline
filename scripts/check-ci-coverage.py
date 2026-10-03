@@ -791,7 +791,7 @@ def main() -> int:
         if wf.name not in called:
             failures.append(f"{wf.name}: exists but {ROOT_WORKFLOW} never calls it")
 
-    # 8. a run on the trunk is never cancelled by the next push to it
+    # 8. a run on the release branch is never cancelled; an integration push is (#326)
     #
     #    The push-to-trunk run is the full selftest whose census every pull
     #    request's scope plan is read from (#112). `cancel-in-progress: true`

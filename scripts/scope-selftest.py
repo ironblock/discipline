@@ -93,6 +93,8 @@ MACHINERY_FILES = frozenset(
         "scripts/apply-lane-faults.py", "scripts/check-fault-manifest.py",
         "Cargo.toml", "Cargo.lock", "rust-toolchain.toml",
         ".github/workflows/gate-selftest.yml", "diet/Cargo.toml",
+        # Which kind a run is, and so whether it is scoped at all (#326).
+        ".github/branches.tsv",
     }
 )
 
