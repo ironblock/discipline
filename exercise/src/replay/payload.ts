@@ -11,3 +11,10 @@ export const wrap = (json: string) => PREFIX + json;
 
 /** The recording a payload carries, or undefined if it is not one this module wrote. */
 export const unwrap = (js: string) => (js.startsWith(PREFIX) ? js.slice(PREFIX.length) : undefined);
+
+/**
+ * An authored example's committed text, from its source (#272): what
+ * scripts/write-examples.mjs writes to src/drive/examples/<name>.json, and
+ * what published.test.ts holds that file to, so the source stays the one copy.
+ */
+export const serialize = (value: unknown) => JSON.stringify(value, null, 2) + '\n';

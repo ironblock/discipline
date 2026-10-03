@@ -50,6 +50,18 @@ each against its admission. `scripts/replay-smoke.mjs` opens the built
 page under a path, as Pages serves it, and loads a recording through its real
 path.
 
+**Authored examples** (#272; the maintainer's ruling on #32) are published
+apart from the recordings, never as sessions: `kitchen-sink` is listed under
+"Authored examples (not sessions)" and replayed under the maintainer's
+sentence, `EXAMPLE_LABEL` in `src/replay/published.ts`, pinned over the page
+for the whole replay. An example is written in TypeScript and committed as
+`src/drive/examples/<name>.json` by `node scripts/write-examples.mjs`, which
+is what the page publishes; `published.test.ts` fails while the two differ.
+It is admitted by the same `admit`, under the same snapshot, with an
+`Authored:` line carrying the sentence where a recording carries its
+`Scrubbed:` line. After editing an example's source: write it, then admit it
+again.
+
 **Driving `diet`.** `?drive` drives `diet`'s own session, served over HTTP
 by `diet-drive serve` (#140; `src/drive/http.ts`). The page reaches it
 same-origin through the dev server's proxy:
@@ -125,7 +137,7 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
 | `src/drive/specimen.ts` | **Authored, not recorded.** One session walking the definition of done, as a script. Deleted when a recorded session replaces it. |
 | `src/drive/canned.ts` | A transport that plays the specimen with real timing, and `snapshot()`, the same session stopped at any moment. |
 | `src/drive/recorded/` | **Recorded, not authored** -- adapter-shaped inputs: foreign logs through a PII-scrubbed migration, allowed as stand-ins by #31's fixture rule as amended (Planning, #25, 2026-09-28); the migration is an adapter, not a second parser of `diet`. Sessions the predecessor recorded against a real model, migrated once by `scripts/migrate-recorded.py` (each file's `migration` header says what the migration decided) and scrubbed of names and paths. `?session=first-drive` replays one (also `cancelled-capture`, `step-limit`); `Session/Recorded` stops each where it went wrong. `voxel-stress` is an OpenCode session (`scripts/migrate-opencode.py`): native tool calls, several a step, six tools -- its side calls did not run, and are stitched on by `scripts/stitch-sides.py`, their answers written by a model from the trunk's own text; a stand-in until a drive's recording replaces it. A kind the vocabulary lacks is carried under its own name, never dropped. Deltas and progress frames are synthesized from each response's timings, since neither was recorded. |
-| `src/drive/kitchen-sink.ts` | **Authored, at a working drive's cadence.** Six asks over three phases and two refills, side calls where #31 wants them (an extraction while a tool runs, an interview in the person's gap, a ratify before each refill): the happy path, to hold a recording's receipt up against. Written as a script and placed on a clock by `compose.ts` (tokens from text, prefill and decode from assumed rates). `?session=kitchen-sink` replays it; `Session/Kitchen sink` stops it at moments. |
+| `src/drive/kitchen-sink.ts` | **Authored, at a working drive's cadence.** Six asks over three phases and two refills, side calls where #31 wants them (an extraction while a tool runs, an interview in the person's gap, a ratify before each refill): the happy path, to hold a recording's receipt up against. Written as a script and placed on a clock by `compose.ts` (tokens from text, prefill and decode from assumed rates). `?session=kitchen-sink` replays it; `Session/Kitchen sink` stops it at moments. Published on the replay page as an example, from `src/drive/examples/kitchen-sink.json` (#272). |
 | `src/ui/sets.ts` | The registries for the open sets -- lanes, tools, outcomes, patch ops, reasons, refusals: each known member and how it is drawn, and a neutral fallback, under its own name, for everything else. |
 | `src/session/gap.ts`, `useIdleGap.ts` | The idle gap (Q4 on #117), measured on the page: from a turn settling to the person's next accepted command, split into notice, read, compose, away and blocked -- integer ms, summing exactly to the gap -- and carried as `idle_gap` on the command that ends it, which the drive logs as `idle.gap`. `diet` logs it only if that command is admitted (#146); the canned transport does the same. The receipt's sixth number is exact once every gap was measured. |
 | `src/session/fold.ts` | The only place an event becomes something drawable. Every node is branded `Folded`, carries the log positions it came from, and the steps of #117 it waits on. |

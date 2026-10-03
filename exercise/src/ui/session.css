@@ -128,9 +128,11 @@
   background-image: var(--live-field);
 }
 
+/* `--ex-pinned-top`: room a page keeps above the session's pinned chrome --
+   the replay page's example label (#272); nothing anywhere else sets it. */
 .ex-session__header {
   position: sticky;
-  top: 0;
+  top: var(--ex-pinned-top, 0px);
   z-index: 3;
 }
 
@@ -149,7 +151,7 @@
 
 .ex-session__memory {
   position: sticky;
-  top: 3.5rem;
+  top: calc(var(--ex-pinned-top, 0px) + 3.5rem);
   margin-top: 2.2rem;
   width: var(--memory-width);
   flex: 0 0 auto;
@@ -180,7 +182,7 @@
 .ex-session[data-drawer] .ex-session__memory {
   position: fixed;
   z-index: 5;
-  top: 2.6rem;
+  top: calc(var(--ex-pinned-top, 0px) + 2.6rem);
   right: 0;
   bottom: 0;
   width: min(calc(var(--memory-width) + 2rem), calc(100vw - 3rem));
@@ -304,7 +306,7 @@
   position: sticky;
   /* Tucked a little under the header (which sits above it), so nothing
      scrolling past can show in a gap between the two. */
-  top: 1.8rem;
+  top: calc(var(--ex-pinned-top, 0px) + 1.8rem);
   z-index: 2;
   padding: 0.95rem 0 0.6rem;
   background: var(--lanehead-bg, var(--chrome-bg, var(--page)));

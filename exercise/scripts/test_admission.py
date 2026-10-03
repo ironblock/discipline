@@ -32,7 +32,7 @@ class Admission(unittest.TestCase):
         (self.box / 'exercise/scripts').mkdir(parents=True)
         shutil.copyfile(ROOT / 'exercise/scripts/admission.py', self.box / 'exercise/scripts/admission.py')
         (self.box / 'exercise/src/replay').mkdir(parents=True)
-        (self.box / 'exercise/src/replay/published.ts').write_text("export const PUBLISHED = ['fixture'] as const;\n", encoding='utf-8')
+        (self.box / 'exercise/src/replay/published.ts').write_text("export const PUBLISHED = ['fixture'] as const;\nexport const EXAMPLES = [] as const;\n", encoding='utf-8')
         self.recording = self.box / 'exercise/src/drive/recorded/fixture.json'
         self.recording.parent.mkdir(parents=True)
         self.recording.write_text(json.dumps(FIXTURE), encoding='utf-8')

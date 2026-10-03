@@ -67,6 +67,8 @@ set -euo pipefail
 
 readonly EXIT_FAIL=1
 readonly EXIT_MISUSE=2
+# A run under VERIFY_LIST_MEMBERS: members listed, nothing checked (#262).
+readonly EXIT_LISTED=3
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
@@ -90,6 +92,8 @@ readonly REQUIRED_PAGES_CLASSES=(
 )
 
 FAILED=()
+# Each check this run ran, as `name:seconds`, for report_wall_clock (#262).
+CHECKS_TOOK=()
 
 # --------------------------------------------------------------------------
 # checks
@@ -336,7 +340,14 @@ check_regimen() {
 # --root is the check's own parameter and `results` is its default; it is
 # spelled out because a seeded case below depends on this being the root the
 # check reads.
-check_recompute() { python3 scripts/check-recompute.py --root results; }
+# VERIFY_LIST_MEMBERS makes each check that can be sharded print the members
+# it would run and run none (#262): scripts/check-ci-coverage.py asks THIS
+# function, under VERIFY_CHECK_SHARD, so the wiring from the job's env to the
+# script is on the path it proves complete, not beside it.
+check_recompute() {
+  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} \
+    ${VERIFY_LIST_MEMBERS:+--names}
+}
 
 # A rung's admission word, derived from its admission directory rather than trusted as written (#183): the
 # derivation's own fixtures first, then every admission.toml in the tree re-verified through its own
@@ -515,14 +526,16 @@ check_history() {
 # and applying all of them made that one case 225 s on the runner.
 VERIFY_INJECTION_SCOPE=""
 check_injections() {
-  python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
+  python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"} \
+    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} ${VERIFY_LIST_MEMBERS:+--names}
 }
 
 # The same applier run with a BSD-shaped `sed` first on PATH (#75): the
 # structural lint keeps `sed` out of injection bodies, and this is what proves
 # the one spelling left, `edit_in_place`, portable by execution.
 check_bsd() {
-  bash scripts/check-bsd-sed.sh . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
+  bash scripts/check-bsd-sed.sh . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"} \
+    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} ${VERIFY_LIST_MEMBERS:+--names}
 }
 
 # The merge resolver, exercised on fixtures before it is trusted to resolve a
@@ -563,9 +576,18 @@ check_parity() { python3 scripts/check-fault-manifest.py; }
 run_check() {
   local name="$1"
   printf '\n=== %s ===\n' "$name"
-  local rc=0
+  local rc=0 began="$SECONDS"
   "check_${name}" || rc=$?
-  if [ "$rc" -eq 0 ]; then
+  CHECKS_TOOK+=("${name}:$(( SECONDS - began ))")
+  if [ "$rc" -eq 0 ] && [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then
+    # LISTED, NEVER PASS (#268's second review): under VERIFY_LIST_MEMBERS a
+    # check prints its members and runs nothing, and a run that ran nothing
+    # must not read as one that passed -- in a CI job's env it would turn the
+    # job into a green no-op. The run exits EXIT_LISTED, which only the
+    # coverage check's member listing expects.
+    printf -- '--- %s: LISTED (members printed, nothing run)\n' "$name"
+    FAILED+=("${name} (listed its members, ran nothing)")
+  elif [ "$rc" -eq 0 ]; then
     printf -- '--- %s: PASS (exit 0)\n' "$name"
   else
     printf -- '--- %s: FAIL (exit %d)\n' "$name" "$rc"
@@ -576,6 +598,9 @@ run_check() {
 # The declared wall-clock budget, beside check-owners.tsv, which is where this
 # repository keeps what CI is held to. Named here; read at the bottom.
 readonly GATE_BUDGET=".github/gate-budget.tsv"
+# What each check was measured to cost on CI (#262), which the coverage check
+# holds every package to; printed beside what each check took this run.
+readonly CHECK_SECONDS=".github/check-seconds.tsv"
 
 # One line, on every run, saying what this run cost against what CI is allowed
 # to cost. THE RUN IS NEVER FAILED ON IT: a slow gate is not a wrong gate, and
@@ -589,7 +614,24 @@ readonly GATE_BUDGET=".github/gate-budget.tsv"
 # checks. What it does NOT measure is the runner's own overhead around it --
 # checkout, apt, the toolchain.
 report_wall_clock() {
-  local elapsed="$SECONDS" budget="" key value
+  local elapsed="$SECONDS" budget="" key value entry check took expected
+  # EACH CHECK AGAINST ITS MEASURED ROW (#262), before the run's total. The
+  # coverage check refuses a package from the table, never from a live run;
+  # this line is where a check drifting from its row shows first. Under
+  # VERIFY_CHECK_SHARD the row is the whole check, so a shard expects its
+  # share of it.
+  if [ -f "${ROOT}/${CHECK_SECONDS}" ]; then
+    for entry in ${CHECKS_TOOK+"${CHECKS_TOOK[@]}"}; do
+      check="${entry%%:*}" took="${entry#*:}"
+      expected="$(awk -F'\t' -v c="$check" -v shard="${VERIFY_CHECK_SHARD:-}" '
+        !/^#/ && $1 == c {
+          n = 1; if (shard ~ /^[0-9]+\/[0-9]+$/) { split(shard, p, "/"); n = p[2] }
+          printf "%.0f", $2 / n; found = 1
+        } END { if (!found) printf "none" }' "${ROOT}/${CHECK_SECONDS}")"
+      printf 'verify: %s took %ds; %s measures %ss%s\n' "$check" "$took" "$CHECK_SECONDS" "$expected" \
+        "${VERIFY_CHECK_SHARD:+ for shard ${VERIFY_CHECK_SHARD}}"
+    done
+  fi
   if [ -f "${ROOT}/${GATE_BUDGET}" ]; then
     while IFS=$'\t' read -r key value || [ -n "${key:-}" ]; do
       case "$key" in
@@ -3063,6 +3105,29 @@ inject_exercise_admit_keeps_orphans() {
   edit_in_place '/^    prune()$/d' exercise/scripts/admission.py
 }
 
+# An authored example replayed without its label (#272): the condition turned
+# around, so the kitchen sink plays with nothing over it to say it is not a
+# session (and a recording gets the label instead). Typecheck and lint pass it;
+# the story that replays the example reads the label before and after it plays.
+inject_exercise_example_replayed_without_label() {
+  edit_in_place 's/{example ? <PinnedExampleLabel \/> : null}/{!example ? <PinnedExampleLabel \/> : null}/' exercise/src/replay/Replay.tsx
+}
+
+# The label there, but not held: it scrolls away with the top of the page, so
+# most of the replay reads as a session. Only the browser smoke, scrolled to
+# the end of the built page, can see it.
+inject_exercise_example_label_scrolls_away() {
+  edit_in_place '/^  position: sticky;$/d' exercise/src/replay/replay.css
+}
+
+# An example bundled into the page's own code: its registry imported from the
+# page's entry, which carries the whole authored script in with it. Typecheck,
+# lint, tests and the scans pass it; the smoke finds the example's text in
+# replay/assets/, where only the page's code belongs.
+inject_exercise_example_bundled_into_page() {
+  edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
+}
+
 # #32 I2's emitter mutated (track five's faults, carried here by courier): a
 # ledger row the renderer must refuse, naming the directory. The fixture loop
 # never reaches the renderer, and a record diet accepted cannot lack a word,
@@ -3378,12 +3443,12 @@ p.write_text(s.replace(old, 'json.dumps({"exe": exe}, sort_keys=True,', 1), enco
 PYEOF
 }
 # #202: the recipe's shared-object pattern narrowed to bare `.so`, so a versioned library (libllama.so.0.4.1)
-# drops out of the engine fingerprint unseen.
+# -- and on macOS every .dylib (#29's I0) -- drops out of the engine fingerprint unseen.
 inject_admission_engine_pattern_narrowed() {
   python3 - <<'PYEOF'
 import pathlib
 p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
-old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$")'
+old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$|\\.dylib$")'
 assert old in s, "the pattern moved"
 p.write_text(s.replace(old, 'SHARED_OBJECT = re.compile(r"\\.so$")', 1), encoding="utf-8")
 PYEOF
@@ -4134,6 +4199,307 @@ inject_ci_pages_checkout_not_the_run() {
 # here a leading space -- is a non-empty string to GitHub, always true.
 inject_ci_pages_condition_outside_its_braces() {
   edit_in_place 's/^    if: \(github\.event\.workflow_run\.conclusion.*\)$/    if: " ${{ \1 }}"/' .github/workflows/pages.yml
+}
+
+# THE BUDGET HOLDS EVERY PACKAGE, AND A SPLIT RUNS EVERY MEMBER (#262).
+
+# A check re-measured past what its package's budget holds: hygiene at 341 s.
+inject_ci_check_seconds_over_budget() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/check-seconds.tsv')
+source = path.read_text(encoding="utf-8")
+old = 'hygiene\t141.2\t'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'hygiene\t341.2\t', 1), encoding="utf-8")
+EOF
+}
+
+# A check with no measured row: nothing can hold its job to the budget.
+inject_ci_check_seconds_unmeasured() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/check-seconds.tsv')
+source = path.read_text(encoding="utf-8")
+old = '\nhygiene\t141.2\t'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '\nunmeasured-hygiene\t141.2\t', 1), encoding="utf-8")
+EOF
+}
+
+# The applier's shard filter dropping one injection from every shard: declared, and run by nothing (#239's lesson).
+inject_ci_injection_shard_drops_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-injections.py')
+source = path.read_text(encoding="utf-8")
+old = 'applied = [name for name in applied if gatelib.in_shard(name, *shard)]'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'applied = [name for name in applied if gatelib.in_shard(name, *shard) and name != names[-1]]', 1), encoding="utf-8")
+EOF
+}
+
+# recompute's shard filter dropping one directory from every shard.
+inject_ci_recompute_shard_drops_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = 'directories = [p for p in directories if gatelib.in_shard(p.name, *shard)]'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'directories = [p for p in directories if gatelib.in_shard(p.name, *shard)][1:]', 1), encoding="utf-8")
+EOF
+}
+
+# A line separator YAML does not split on (#268's third review): the run
+# step's last line a bash comment to the runner, two lines to a reader that
+# splits as Python does -- a shard green having run nothing.
+inject_ci_sharded_workflow_line_separator() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/pkg-recompute.yml')
+source = path.read_text(encoding="utf-8")
+old = '          ./verify.sh "${args[@]}"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '          #\u2028' + old, 1), encoding="utf-8")
+EOF
+}
+
+# A listing with no LISTING line of its own: what a check that ignored
+# `--names` and ran would print, which verify.sh still calls LISTED.
+inject_ci_listing_unmarked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = 'print("\\n".join([gatelib.LISTING, *(p.name for p in directories)]))'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'print("\\n".join(p.name for p in directories))', 1), encoding="utf-8")
+EOF
+}
+
+# THE RUNTIME CENSUS'S FAULTS (#262, ruled on #268): the fourth review's
+# three reproductions, each an edit below the listing's `return` or in the
+# wrapper, so what a shard lists is whole and what it runs is not.
+inject_ci_recompute_runs_fewer_than_listed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = '        print("\\n".join([gatelib.LISTING, *(p.name for p in directories)]))\n        return 0\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '    if shard is not None:\n        directories = directories[1:]\n', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_injections_applies_fewer_than_listed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-injections.py')
+source = path.read_text(encoding="utf-8")
+old = '        print("\\n".join([gatelib.LISTING, *applied]))\n        return 0\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '    applied = applied[:-1]\n', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_recompute_wrapper_shard_one_when_running() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('verify.sh')
+source = path.read_text(encoding="utf-8")
+old = '  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} \\\n'
+new = '  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$(if [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then echo "$VERIFY_CHECK_SHARD"; else echo "1/${VERIFY_CHECK_SHARD#*/}"; fi)"} \\\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A package dropped from the gate (#268's fourth review): its caller job and
+# its `needs` entry deleted together, and the `uses:` line kept alive inside
+# an env block scalar, where a regex over the whole file once read it as a call.
+inject_ci_caller_in_block_scalar() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+edits = [
+    ("  recompute:\n    uses: ./.github/workflows/pkg-recompute.yml\n\n", ""),
+    ("injections, recompute, selftest]", "injections, selftest]"),
+    ("          NEEDS: ${{ toJSON(needs) }}\n",
+     "          NEEDS: ${{ toJSON(needs) }}\n          CALLED_ELSEWHERE: |\n            uses: ./.github/workflows/pkg-recompute.yml\n"),
+]
+for old, new in edits:
+    if source.count(old) != 1:
+        raise SystemExit(f"the anchor appears {source.count(old)} times")
+    source = source.replace(old, new, 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
+
+# The fifth review's routes (#268): a member skipped after the census's dry
+# branch and before its outcome, so a dry census is whole and the real run is
+# not; and the gate's census switched off by a key after its `run:`.
+inject_ci_recompute_skips_after_the_dry_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = '        gatelib.record_ran(directory.name, one(directory))\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '        if shard is not None and directory == directories[0]:\n            continue\n' + old, 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_injections_skips_after_the_dry_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-injections.py')
+source = path.read_text(encoding="utf-8")
+old = '            outcome = one(name)\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '            if shard is not None and name == applied[-1]:\n                continue\n' + old, 1), encoding="utf-8")
+EOF
+}
+
+# A member reported honestly as skipped (#268's sixth review): the row says
+# `skipped`, and an outcome no check runs a member to is not a run.
+inject_ci_recompute_reports_a_skip() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = '        timing = (directory.name, time.monotonic())\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '        if shard is not None and directory == directories[0]:\n            return "skipped"\n', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_shard_census_switched_off() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+old = 'python3 scripts/check-shard-census.py "${{ runner.temp }}/members"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + chr(10) + '        continue-on-error: true', 1), encoding="utf-8")
+EOF
+}
+
+# The gate's census of the sharded packages renamed out of its pinned form.
+# A comment, then a key the census step still carries (#268's eighth review):
+# YAML reads the comment at any indent, and a reader that ended the gate job
+# at it saw the census step last and exact.
+inject_ci_shard_census_off_behind_a_comment() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+old = 'python3 scripts/check-shard-census.py "${{ runner.temp }}/members"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + chr(10) + '  # the verdict is the job results step above' + chr(10) + '        continue-on-error: true', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_shard_census_step_removed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+old = "      - name: Every sharded member was run by exactly one shard\n"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "      - name: census\n", 1), encoding="utf-8")
+EOF
+}
+
+# A sharded package whose workflow never passes the shard: every job runs all of it.
+inject_ci_sharded_workflow_without_shard() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/pkg-injections.yml')
+source = path.read_text(encoding="utf-8")
+old = '          VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '          SHARD_IGNORED: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n', 1), encoding="utf-8")
+EOF
+}
+
+# A shard count of 1: a split that splits nothing.
+inject_ci_shard_count_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/check-owners.tsv')
+source = path.read_text(encoding="utf-8")
+old = 'recompute\trecompute\t3\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'recompute\trecompute\t1\n', 1), encoding="utf-8")
+EOF
+}
+
+# A sharded job's matrix hardcoded: shards 2 and 3 never start, every rule still reading the table (#268's review).
+inject_ci_sharded_matrix_not_the_table() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/pkg-recompute.yml')
+source = path.read_text(encoding="utf-8")
+old = 'shard: ${{ fromJSON(needs.plan.outputs.shards) }}'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'shard: [1]', 1), encoding="utf-8")
+EOF
+}
+
+# A check function that runs shard 1 whatever its job is told: two thirds of the directories run nowhere (#268's review).
+inject_ci_check_runs_one_shard() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+# Anchored on the function's own line break, which the quoted copy below
+# spells as an escape, so the anchor names the function and not this body.
+old = 'check_recompute() {\n  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"}'
+new = 'check_recompute() {\n  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "1/${VERIFY_CHECK_SHARD#*/}"}'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
 }
 
 # Publishes on a trigger of its own, beside the gate.
@@ -7918,6 +8284,12 @@ selftest() {
     'admission: scripts/hygiene-admitted-000000000000-patterns\.tsv: a snapshot no admission names'
   seeded_case "admit no longer removing what no admission names" exercise inject_exercise_admit_keeps_orphans \
     'FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so'
+  seeded_case "an authored example replayed without its label" exercise inject_exercise_example_replayed_without_label \
+    'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
+  seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \
+    "replay-smoke: kitchen-sink's label is on the page but out of view"
+  seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
+    "replay-smoke: kitchen-sink is bundled into the page's code"
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
@@ -7986,6 +8358,46 @@ selftest() {
     "pages.yml: the site is not checked against the sha that run built"
   seeded_case "the condition with text outside its braces" ci inject_ci_pages_condition_outside_its_braces \
     "pages.yml: the deploy's condition has text outside its"
+  seeded_case "a check re-measured past its job's budget" ci inject_ci_check_seconds_over_budget \
+    "pkg-repo\\.yml: its checks' measured seconds per job are [0-9]+ s, past the 300 s budget \\(.*hygiene 341\\.2 s"
+  seeded_case "a check with no measured seconds"       ci inject_ci_check_seconds_unmeasured \
+    '`hygiene` has no measured seconds'
+  seeded_case "an injection no shard applies"          ci inject_ci_injection_shard_drops_one \
+    '`injections`.s 2 shards run none of 1 member\(s\), so nothing runs them'
+  seeded_case "a results directory no shard re-derives" ci inject_ci_recompute_shard_drops_one \
+    '`recompute`.s 3 shards run none of 3 member\(s\), so nothing runs them'
+  seeded_case "a sharded job never told its shard"     ci inject_ci_sharded_workflow_without_shard \
+    'pkg-injections\.yml: .injections. is sharded, and its workflow is not the sharded form'
+  seeded_case "a split into one shard"                 ci inject_ci_shard_count_one \
+    '.recompute..s shard count is .1., not a whole number of 2 or more'
+  seeded_case "a sharded matrix that is not the table" ci inject_ci_sharded_matrix_not_the_table \
+    'pkg-recompute\.yml: .recompute. is sharded, and its workflow is not the sharded form'
+  seeded_case "a check that runs one shard whatever"   ci inject_ci_check_runs_one_shard \
+    '.recompute..s 3 shards run none of [0-9]+ member\(s\), so nothing runs them'
+  seeded_case "a line separator YAML does not split on" ci inject_ci_sharded_workflow_line_separator \
+    "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
+  seeded_case "a listing with no line of its own"      ci inject_ci_listing_unmarked \
+    '.recompute.: verify\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED'
+  seeded_case "a shard that runs fewer than it lists"  ci inject_ci_recompute_runs_fewer_than_listed \
+    '.recompute..s 3 shards run none of 3 member\(s\), so nothing runs them'
+  seeded_case "an applier that applies fewer than it lists" ci inject_ci_injections_applies_fewer_than_listed \
+    '.injections..s 2 shards run none of 2 member\(s\), so nothing runs them'
+  seeded_case "a wrapper that runs shard 1 when not listing" ci inject_ci_recompute_wrapper_shard_one_when_running \
+    '.recompute..s shards run [0-9]+ member\(s\) more than once'
+  seeded_case "a package's call kept in a block scalar" ci inject_ci_caller_in_block_scalar \
+    'pkg-recompute\.yml exists but verify\.yml never calls it'
+  seeded_case "a recompute skip the dry census cannot see" ci inject_ci_recompute_skips_after_the_dry_branch \
+    '.recompute, run for real..s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
+  seeded_case "an applier skip the dry census cannot see" ci inject_ci_injections_skips_after_the_dry_branch \
+    '.injections, run for real..s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
+  seeded_case "a member reported as skipped"           ci inject_ci_recompute_reports_a_skip \
+    'recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to'
+  seeded_case "the gate's shard census allowed to fail" ci inject_ci_shard_census_switched_off \
+    'the gate job does not run check-shard-census\.py'
+  seeded_case "the gate's census off behind a comment" ci inject_ci_shard_census_off_behind_a_comment \
+    'the gate job does not run check-shard-census\.py'
+  seeded_case "the gate's shard census renamed away"   ci inject_ci_shard_census_step_removed \
+    'the gate job does not run check-shard-census\.py'
   seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
     "pages.yml: publishes on a trigger of its own"
   seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
@@ -8992,6 +9404,21 @@ for k in range(1, SHARDS + 1):
     f"shard\t9\nshards\t{SHARDS}\ntotal\t{total}\n", encoding="utf-8"
 )
 EOF
+  # A DRY ROW IS NOT A RUN (#262, ruled on #268): the coverage check's local
+  # census records members without running them, and the gate's census on CI
+  # refuses such a row, so a job that set VERIFY_CENSUS_DRY is red.
+  expect_exit "a dry census row is refused where the shards really ran" 0 \
+    bash -c "cd '${ROOT}' && d=\$(mktemp -d) && trap 'rm -rf \"\${d:?}\"' EXIT \
+      && mkdir \"\$d/members-recompute-1\" && printf 'dry\tx\n' > \"\$d/members-recompute-1/members-ran.tsv\" \
+      && ! out=\$(python3 scripts/check-shard-census.py \"\$d\" 2>&1) && grep -q 'a DRY row' <<<\"\$out\""
+
+  # AN OUTCOME IS READ (#268's sixth review): a row whose outcome is not one
+  # its check runs a member to -- `skipped` -- is refused, not counted as run.
+  expect_exit "a member reported skipped is not counted as run" 0 \
+    bash -c "cd '${ROOT}' && d=\$(mktemp -d) && trap 'rm -rf \"\${d:?}\"' EXIT \
+      && mkdir \"\$d/members-recompute-1\" && printf 'ran\tx\tskipped\n' > \"\$d/members-recompute-1/members-ran.tsv\" \
+      && ! out=\$(python3 scripts/check-shard-census.py \"\$d\" 2>&1) && grep -q 'came back .skipped., which is not an outcome' <<<\"\$out\""
+
   expect_exit "shards that between them ran every fault are a whole" 0 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/whole"
   expect_exit "a shard that skipped a fault it was assigned" 1 \
@@ -9435,6 +9862,18 @@ for name in "${selected[@]}"; do
 done
 
 echo
+if [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then
+  # A check that FAILED under the listing keeps its failure's exit (#268's
+  # third review): exit 3 says every selected check listed, and nothing else.
+  listed=0
+  for failure in "${FAILED[@]}"; do
+    case "$failure" in *"(listed its members, ran nothing)") listed=$(( listed + 1 )) ;; esac
+  done
+  if [ "$listed" -eq "${#FAILED[@]}" ]; then
+    printf 'verify: VERIFY_LIST_MEMBERS is set, so %d check(s) listed their members and none ran\n' "${#selected[@]}"
+    exit "$EXIT_LISTED"
+  fi
+fi
 if [ "${#FAILED[@]}" -gt 0 ]; then
   printf 'verify: %d of %d check(s) failed:\n' "${#FAILED[@]}" "${#selected[@]}"
   printf '  - %s\n' "${FAILED[@]}"

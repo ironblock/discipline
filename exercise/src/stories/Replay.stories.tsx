@@ -1,7 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, waitFor } from 'storybook/test';
 
+import { AUTHORED } from '../drive/examples.ts';
 import { RECORDINGS } from '../drive/recordings.ts';
+import { EXAMPLE_LABEL } from '../replay/published.ts';
 import { Replay, ReplayIndex } from '../replay/Replay.tsx';
 
 /** The replay page (#32): a recording with where it came from drawn above it, and the page's index. */
@@ -29,13 +31,31 @@ export const FirstDrive: Story = {
   },
 };
 
+export const Example: Story = {
+  name: 'an authored example, under its label for the whole replay',
+  render: () => <Replay name="kitchen-sink" recording={AUTHORED['kitchen-sink']} speed={100_000} example />,
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('.ex-replay__label')?.textContent).toBe(EXAMPLE_LABEL);
+    const lines = [...canvasElement.querySelectorAll('.ex-replay__source li')].map((li) => li.textContent ?? '');
+    await expect(lines).toContain(`Authored: ${EXAMPLE_LABEL}`);
+    await expect(lines.some((line) => line.startsWith('Scrubbed:'))).toBe(false);
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-trunk .ex-block')).not.toBeNull());
+    // Still there once the session has played: the label is the page's, not the opening moment's.
+    await expect(canvasElement.querySelector('.ex-replay__label')?.textContent).toBe(EXAMPLE_LABEL);
+  },
+};
+
 export const Index: Story = {
-  name: 'the index: what is published, what is not and why, what is not here yet',
+  name: 'the index: what is published, the examples apart under their label, what is not and why, what is not here yet',
   render: () => <ReplayIndex asked="voxel-stress" />,
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelector('.ex-replay__note')?.textContent).toContain('voxel-stress');
     await expect(canvasElement.querySelector('.ex-replay__note')?.textContent).toContain('written by a model after the session');
-    await expect([...canvasElement.querySelectorAll('.ex-replay__list a')].map((a) => a.textContent)).toEqual(['first-drive', 'cancelled-capture', 'step-limit']);
+    await expect([...canvasElement.querySelectorAll('.ex-replay__recordings a')].map((a) => a.textContent)).toEqual(['first-drive', 'cancelled-capture', 'step-limit']);
+    const examples = canvasElement.querySelector('.ex-replay__examples');
+    await expect(examples?.querySelector('h2')?.textContent).toBe('Authored examples (not sessions)');
+    await expect(examples?.querySelector('.ex-replay__label')?.textContent).toBe(EXAMPLE_LABEL);
+    await expect([...(examples?.querySelectorAll('a') ?? [])].map((a) => a.textContent)).toEqual(['kitchen-sink']);
     await expect(canvasElement.textContent).toContain('#31');
   },
 };

@@ -1,0 +1,25 @@
+{
+ "read": "disk",
+ "exe": "e501161173eddeac41d0d3249cc3056f32d591a309d941bb1bcb905be6c99bff",
+ "exe_bytes": 20760,
+ "exe_mtime": "2026-10-02T12:26:45Z",
+ "libraries": {
+  "libggml-base.0.24.0.dylib": "6361a3f3e2a41e7682aeb2b7cf3ad735ab5b98075d3865346641ab2528cface6",
+  "libggml-cpu.0.24.0.dylib": "db9acb61fd3615f94360a683b67b2f9486f8d9b0d511bb8a937ad43b5e8ad9d2",
+  "libggml.0.24.0.dylib": "19e970877d76df14ca085d2a3ca18c16cdf80b6b3daf62214ade4b9d62a992ff",
+  "libllama-common.0.4.1.dylib": "6518a0d28b20bc34e2eda876f8b0ad956625bb103350e5026db857ba7dfa4cdc",
+  "libllama-server-impl.dylib": "1ca197db52bed3b6a711d39d4236b22ad92a801b82e29eb16a7e06a3b5ef9fb2",
+  "libllama.0.4.1.dylib": "07a447e75136722b09eacabeee2176c03790f77ba847efe48d7bd2cd641e3448",
+  "libmtmd.0.4.1.dylib": "4a8956e4f660dc831526552dd81eafa5d98731298a87299e0101a1f4eb26a7bf"
+ },
+ "library_mtimes": {
+  "libggml-base.0.24.0.dylib": "2026-10-02T12:24:04Z",
+  "libggml-cpu.0.24.0.dylib": "2026-10-02T12:24:30Z",
+  "libggml.0.24.0.dylib": "2026-10-02T12:24:32Z",
+  "libllama-common.0.4.1.dylib": "2026-10-02T12:26:20Z",
+  "libllama-server-impl.dylib": "2026-10-02T12:26:45Z",
+  "libllama.0.4.1.dylib": "2026-10-02T12:24:52Z",
+  "libmtmd.0.4.1.dylib": "2026-10-02T12:26:09Z"
+ },
+ "engine_fingerprint": "30053225c3ffeeaa9a95b9f0df78b5e8755093d83e9f74c7339a4679b1d037d7"
+}

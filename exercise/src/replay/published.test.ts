@@ -4,11 +4,14 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
+import { AUTHORED } from '../drive/examples.ts';
+import { examplePath, load } from '../drive/recorded.ts';
 import { RECORDINGS } from '../drive/recordings.ts';
-import { PREFIX, unwrap, wrap } from './payload.ts';
-import { NOT_PUBLISHED, PUBLISHED } from './published.ts';
+import { PREFIX, serialize, unwrap, wrap } from './payload.ts';
+import { EXAMPLE_LABEL, EXAMPLES, NOT_PUBLISHED, PUBLISHED } from './published.ts';
 
 const recorded = path.join(path.dirname(fileURLToPath(import.meta.url)), '../drive/recorded');
+const examples = path.join(path.dirname(fileURLToPath(import.meta.url)), '../drive/examples');
 
 describe('what the replay page publishes (#32)', () => {
   it('publishes the three recorded whole, and never an authored session', () => {
@@ -24,6 +27,41 @@ describe('what the replay page publishes (#32)', () => {
 
   it('publishes nothing that was not admitted: each has its admission beside it', () => {
     expect(PUBLISHED.filter((name) => !existsSync(path.join(recorded, `${name}.admission.json`)))).toEqual([]);
+  });
+});
+
+describe('the authored examples it publishes apart from the recordings (#272)', () => {
+  it('publishes the kitchen sink as an example, never as a recording, and still not voxel-stress', () => {
+    expect([...EXAMPLES]).toEqual(['kitchen-sink']);
+    expect(EXAMPLES.filter((name) => (PUBLISHED as readonly string[]).includes(name))).toEqual([]);
+    expect(EXAMPLES.filter((name) => Object.hasOwn(NOT_PUBLISHED, name))).toEqual([]);
+    expect(EXAMPLES).not.toContain('voxel-stress');
+    expect(NOT_PUBLISHED['voxel-stress']).toContain('written by a model after the session');
+  });
+
+  it("labels each with the maintainer's sentence, verbatim", () => {
+    expect(EXAMPLE_LABEL).toBe('this is an example of everything working the way we think it should, not a real session');
+  });
+
+  it.each(EXAMPLES)('%s: says it was authored, in one line carrying the label, and says nothing was scrubbed', (name) => {
+    const { migration } = AUTHORED[name];
+    expect(migration.filter((line) => line.startsWith('Authored:'))).toEqual([`Authored: ${EXAMPLE_LABEL}`]);
+    expect(migration.filter((line) => line.startsWith('Scrubbed:'))).toEqual([]);
+  });
+
+  it.each(EXAMPLES)('%s: the committed file is its source, serialized (node scripts/write-examples.mjs)', (name) => {
+    const committed = readFileSync(path.join(examples, `${name}.json`), 'utf8');
+    expect(committed).toBe(serialize(AUTHORED[name]));
+    expect(load(name, committed, examplePath(name))).toEqual(AUTHORED[name]);
+  });
+
+  it('publishes no example that was not admitted: each has its admission beside it', () => {
+    expect(EXAMPLES.filter((name) => !existsSync(path.join(examples, `${name}.admission.json`)))).toEqual([]);
+  });
+
+  it.each(EXAMPLES)('%s: wrap() puts the committed file, byte for byte, behind one prefix', (name) => {
+    const source = readFileSync(path.join(examples, `${name}.json`), 'utf8');
+    expect(unwrap(wrap(source))).toBe(source);
   });
 });
 
