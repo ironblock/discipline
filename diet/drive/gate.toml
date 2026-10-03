@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 201
+faults = 202
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3235,4 +3235,18 @@ becomes = '''
             file.set_len(0).map_err(|why| why.to_string())?;'''
 catches = [
     "a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were",
+]
+
+[[fault]]
+id = "drive.serve-bin-forgets-what-it-emptied"
+failure_class = "drive.serve-bin-forgets-what-it-emptied"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if self.0.is_empty() {'''
+becomes = '''
+        if true || self.0.is_empty() {'''
+catches = [
+    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
+    "drive::serve::tests::a_failure_after_the_writers_names_what_they_emptied",
 ]
