@@ -296,11 +296,23 @@ def summarise(rows: list[dict]) -> dict:
     return dict(sorted(out.items(), key=lambda kv: float(kv[0])))
 
 def decide(summary: dict, criterion: dict) -> dict:
+    """`_decide`, with the re-draw budget echoed on every path when any cell had an invalid sample: the budget is applied
+    when the samples are drawn, not here, so it is echoed where it was spent -- a run that re-drew carries the budget of
+    the criterion it is decided under (not checked here against the run's criterion_sha256 in meta.json), and a run that
+    never re-drew decides to the same bytes as before (#304)."""
+    out = _decide(summary, criterion)
+    if "max_redraws" in criterion and any(c.get("application", {}).get("invalid", 0) for c in summary.values()):
+        out["max_redraws"] = criterion["max_redraws"]
+    return out
+
+
+def _decide(summary: dict, criterion: dict) -> dict:
     """The ruled word. criterion: within (1), min_samples (5), max_errors (0). The control is the
     fraction-0 cell. A cell with an error, a thinking-off sample, or too few samples is unadjudicated;
     a cell whose pass count falls more than `within` below the control's is a cliff and fails; a
     fail outranks an unadjudicated cell; the control itself must be adjudicable. It echoes only the criterion keys
-    it applies, and adds `kwarg_delivery_findings` beside the word when a cell had two or more invalid samples."""
+    it applies, adds `max_redraws` when any cell had an invalid sample (the budget those draws ran under), and adds
+    `kwarg_delivery_findings` beside the word when a cell had two or more invalid samples."""
     within, mins, maxe = criterion.get("within", 1), criterion.get("min_samples", 5), criterion.get("max_errors", 0)
     if "0" not in summary and "0.0" not in summary:
         return {"word": "unadjudicated", "why": "no zero-pad control cell"}
@@ -433,11 +445,13 @@ def cmd_selftest(a) -> int:
           f"{ {k: (len(v), len(set(v))) for k, v in by_cell.items()} }")
     d3 = decide(summarise(rows3), tomllib.loads((HERE / "criterion.toml").read_text()))
     check(d3["word"] == "unadjudicated", "re-draw: a cell that cannot fill five valid samples within the budget is unadjudicated", f"{d3}")
+    check(d3.get("max_redraws") == budget == 3, "re-draw: decide echoes the ruled budget (#143, 3) where a cell re-drew", f"{d3.get('max_redraws')!r}, criterion {budget!r}")
     base_cell = {"application": {"n": 5, "pass": 5, "errors": 0, "thinking_off": 0, "truncated": 0}, "retrieval": {"n": 1, "pass": 1}}
     two = {"0.0": base_cell, "0.5": {"application": {**base_cell["application"], "invalid": 2}, "retrieval": base_cell["retrieval"]}}
     one = {"0.0": base_cell, "0.5": {"application": {**base_cell["application"], "invalid": 1}, "retrieval": base_cell["retrieval"]}}
     crit = tomllib.loads((HERE / "criterion.toml").read_text())
     d2, d1 = decide(two, crit), decide(one, crit)
+    check("max_redraws" not in decide({"0.0": base_cell, "0.5": base_cell}, crit), "re-draw: a run with no invalid sample decides without the budget key, so its committed decide.json is unchanged", "")
     check(d2["word"] == "pass" and d2.get("kwarg_delivery_findings", {}).get("cells") == {"0.5": 2},
           "decide: two invalid samples in a cell are a kwarg-delivery finding beside the word, not the word", f"{d2}")
     check("kwarg_delivery_findings" not in d1, "decide: one invalid sample in a cell is no finding")
