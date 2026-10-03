@@ -7916,7 +7916,28 @@ selftest() {
   # refuses outright.
   local -A SCOPE_INHERIT=()
   [ -z "$SELFTEST_SCOPE_PLAN" ] || load_scope_plan
-  scratch; SELFTEST_TARGET="${SCRATCH}/target"
+  # THE SANDBOXES' TARGET MAY BE A CACHED ONE (#306): CI names a directory a
+  # Cargo cache restores into, so the dependencies are compiled once per
+  # lockfile, toolchain and runner image rather than on every shard. Unset, a
+  # scratch of its own, as before. The workspace's own crates rebuild in every
+  # box either way: seeded_case touches lib.rs there, and each run's box is a
+  # new path, so nothing a cache holds can stand in for a crate a fault edited.
+  # ABSOLUTE ONLY: by here verify.sh has moved to ROOT, so a relative path
+  # would land somewhere the caller never named (as --census says of its own).
+  if [ -n "${VERIFY_SELFTEST_TARGET:-}" ]; then
+    case "$VERIFY_SELFTEST_TARGET" in
+      /*) ;;
+      *) echo "selftest: VERIFY_SELFTEST_TARGET must be an absolute path, not '$VERIFY_SELFTEST_TARGET'" >&2
+         exit "$EXIT_MISUSE" ;;
+    esac
+    mkdir -p -- "$VERIFY_SELFTEST_TARGET" &&
+      SELFTEST_TARGET="$(cd -- "$VERIFY_SELFTEST_TARGET" && pwd)" || {
+        echo "selftest: VERIFY_SELFTEST_TARGET ($VERIFY_SELFTEST_TARGET) is not a usable directory" >&2
+        exit "$EXIT_MISUSE"
+      }
+  else
+    scratch; SELFTEST_TARGET="${SCRATCH}/target"
+  fi
   scratch; SELFTEST_LOGS="$SCRATCH"
   # DERIVE MODE KEEPS ITS LOGS. `selftest_cleanup` removes every scratch it
   # registered, so an index written there would name files that no longer
