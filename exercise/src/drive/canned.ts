@@ -101,7 +101,7 @@ export interface CannedOptions {
 }
 
 /** Which command ends a gap with which `ended_by`. */
-const ENDS = { ask: 'ask', seam: 'seam', cancel: 'cancel' } as const satisfies Record<Command['kind'], IdleGapBody['ended_by']>;
+const ENDS = { ask: 'ask', seam: 'seam', cancel: 'cancel', end: 'end' } as const satisfies Record<Command['kind'], IdleGapBody['ended_by']>;
 
 export class CannedTransport implements DriveTransport {
   readonly #beats: readonly Beat[];
@@ -148,7 +148,8 @@ export class CannedTransport implements DriveTransport {
     const gap = extras?.idle_gap;
     const opened = this.#openGap;
     this.#gap = gap && gap.ended_by === ENDS[command.kind] && gap.opened_by === opened ? gap : undefined;
-    const ack = command.kind === 'ask' ? this.#fire('send', command.text) : command.kind === 'seam' ? this.#seam(command.to) : this.#cancel();
+    const ack =
+      command.kind === 'ask' ? this.#fire('send', command.text) : command.kind === 'seam' ? this.#seam(command.to) : command.kind === 'end' ? this.#end() : this.#cancel();
     // Refused, it is dropped. Admitted, the gap that was open closes, carried or not -- unless the command settled a
     // turn and opened the next one itself, as a cancel does (`diet` closes it at admission, before the command runs).
     this.#gap = undefined;
@@ -161,6 +162,14 @@ export class CannedTransport implements DriveTransport {
     const scripted = this.#beats[this.#next]?.events.find((e) => e.kind === 'seam');
     if (scripted?.kind === 'seam' && scripted.phase && scripted.phase.to !== to) return { ok: false, refused: 'off-script' };
     return this.#fire('seam');
+  }
+
+  /** As `diet`'s `Session::end`: taken only while awaiting -- refused while work is in flight, or once ended. */
+  #end(): Ack {
+    if (this.#log.some((l) => l.kind === 'settlement' && l.to === 'ended')) return { ok: false, refused: 'ended' };
+    if (this.busy) return { ok: false, refused: 'in-flight' };
+    this.#emit({ kind: 'session.end', t: this.#now() });
+    return { ok: true };
   }
 
   #cancel(): Ack {

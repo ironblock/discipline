@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { fold } from '../session/fold.ts';
 import { CannedTransport } from './canned.ts';
 import type { LogLine } from './log.ts';
 import { SPECIMEN } from './specimen.ts';
@@ -16,7 +17,7 @@ async function settled() {
   return { transport, lines, open: open.seq };
 }
 
-const gap = (opened_by: number, ended_by: 'ask' | 'seam' | 'cancel' = 'ask') => ({ opened_by, notice: 0, read: 1000, compose: 500, away: 0, blocked: 0, ended_by });
+const gap = (opened_by: number, ended_by: 'ask' | 'seam' | 'cancel' | 'end' = 'ask') => ({ opened_by, notice: 0, read: 1000, compose: 500, away: 0, blocked: 0, ended_by });
 
 describe('the canned transport, as the drive (#146, ruling (b) on #117)', () => {
   it('logs an admitted command’s gap just before the first line the command pushes', async () => {
@@ -63,5 +64,27 @@ describe('the canned transport, as the drive (#146, ruling (b) on #117)', () => 
     transport.close();
     expect(ack.ok).toBe(false);
     expect(lines.slice(before).some((l) => l.kind === 'idle.gap')).toBe(false);
+  });
+});
+
+describe('the canned transport, ended (#289, as `diet`’s `Session::end`)', () => {
+  it('ends while awaiting: the gap it carries, then the settlement into ended, and the session is ended', async () => {
+    const { transport, lines, open } = await settled();
+    const before = lines.length;
+    await expect(transport.dispatch({ kind: 'end' }, { idle_gap: gap(open, 'end') })).resolves.toEqual({ ok: true });
+    transport.close();
+    expect(lines.slice(before).map((l) => l.kind)).toEqual(['idle.gap', 'settlement']);
+    expect(lines.at(-1)).toMatchObject({ kind: 'settlement', from: 'awaiting', to: 'ended' });
+    expect(fold(lines).state).toBe('ended');
+  });
+
+  it('refuses while work is in flight, and once ended', async () => {
+    const { transport } = await settled();
+    await transport.dispatch({ kind: 'ask', text: 'next' });
+    await expect(transport.dispatch({ kind: 'end' })).resolves.toEqual({ ok: false, refused: 'in-flight' });
+    await transport.dispatch({ kind: 'cancel' });
+    await expect(transport.dispatch({ kind: 'end' })).resolves.toEqual({ ok: true });
+    await expect(transport.dispatch({ kind: 'end' })).resolves.toEqual({ ok: false, refused: 'ended' });
+    transport.close();
   });
 });

@@ -27,6 +27,10 @@ import { apart, contrast } from './contrast.ts';
 import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
 import type { Cursor } from '../drive/canned.ts';
 import { MOMENTS, branchAt, sessionAt, trunkNodeAt, variantAt } from './moments.ts';
+import { fold } from '../session/fold.ts';
+import type { Session, SessionState } from '../session/fold.ts';
+import type { LogLine } from '../drive/log.ts';
+import { useIdleGap } from '../session/useIdleGap.ts';
 
 /**
  * One component, one story per state it distinguishes. Every node comes out
@@ -1017,5 +1021,114 @@ export const SegmentsPick: Story = {
     const off = canvas(group).getByRole('radio', { name: 'off' }) as HTMLInputElement;
     await expect(off.disabled).toBe(true);
     await expect(off.closest('label')?.getAttribute('title')).toBe('not while the curtain is open');
+  },
+};
+
+/**
+ * The idle gap's composing, probed on the page (#289): the hook as `App` uses it, after a turn settled, beside a
+ * composer. A paste puts text in without a keystroke -- by menu, by mouse, by drag, by an automation's `fill` -- and
+ * the time after it is composing, not reading. The rehearsal drive's one page-sent ask logged `compose: 0`.
+ */
+function GapProbe() {
+  const gap = useIdleGap({ lastSettled: 7, state: 'awaiting' } as unknown as Session);
+  const [carried, setCarried] = useState('');
+  return (
+    <div className="ex-composer">
+      <textarea className="ex-composer__input" aria-label="your ask" />
+      <button type="button" onClick={() => setCarried(JSON.stringify(gap.carry('ask')))}>
+        carry
+      </button>
+      <output data-testid="carried">{carried}</output>
+    </div>
+  );
+}
+
+export const GapPasteIsComposing: Story = {
+  name: 'Idle gap · a paste starts composing, without a keystroke',
+  render: () => <GapProbe />,
+  play: async ({ canvasElement }) => {
+    const input = canvasElement.querySelector('textarea') as HTMLTextAreaElement;
+    await userEvent.click(input);
+    await userEvent.paste('Here is the part of diet/src/bin/drive.rs that writes the log.');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    await userEvent.click(canvasElement.querySelector('button') as HTMLButtonElement);
+    const carried = JSON.parse(canvasElement.querySelector('output')?.textContent ?? '{}') as { compose?: number; read?: number };
+    // What was measured is said, whichever way it goes, before it is held to anything.
+    console.info(`idle gap carried after a paste: ${JSON.stringify(carried)}`);
+    await expect(carried.compose, JSON.stringify(carried)).toBeGreaterThanOrEqual(350);
+  },
+};
+
+/**
+ * A cancelled turn (#289): its ask and what answered it are gone from what the model reads next -- `diet` sends it
+ * only finished turns -- and both say so. The log as `diet` writes a stopped turn.
+ */
+const CANCELLED_TURN = [
+  { seq: 0, t: 0, kind: 'session.start', version: 2, opened: 1_790_000_000_000, model: 'm', head: [{ role: 'system', content: 's' }] },
+  { seq: 1, t: 10, kind: 'ask', turn: 1, text: 'Walk me through what happens when the disk fills.' },
+  { seq: 2, t: 10, kind: 'settlement', from: 'awaiting', to: 'turn' },
+  { seq: 3, t: 10, kind: 'request', turn: 1, lane: 'trunk' },
+  { seq: 4, t: 200, kind: 'delta', request: 3, text: 'When the disk fills, the' },
+  { seq: 5, t: 900, kind: 'stop.asked', turn: 1 },
+  { seq: 6, t: 901, kind: 'cancelled', request: 3, partial: 'When the disk fills, the' },
+  { seq: 7, t: 901, kind: 'turn.settled', turn: 1, reason: 'cancelled' },
+  { seq: 8, t: 901, kind: 'settlement', from: 'turn', to: 'awaiting' },
+] as unknown as LogLine[];
+
+export const CancelledOutOfContext: Story = {
+  name: 'Message · a cancelled turn, not in the model’s context',
+  render: () => {
+    const nodes = fold(CANCELLED_TURN).eras[0]?.nodes ?? [];
+    return (
+      <>
+        {nodes.map((n) => (n.kind === 'user' ? <UserMessage key={n.id} node={n} /> : n.kind === 'assistant' ? <AssistantMessage key={n.id} node={n} /> : null))}
+      </>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const marks = [...canvasElement.querySelectorAll('.ex-context-out')].map((m) => m.textContent);
+    await expect(marks).toEqual(["not in the model's context", "not in the model's context"]);
+  },
+};
+
+/**
+ * The end control, armed and then not idle (#289): a busy session or a dropped link disables it. Armed by a
+ * click that never focused it -- Safari does not focus a button on click -- it is never blurred either, so only
+ * leaving idle can disarm it; idle again, it asks again.
+ */
+function EndHarness() {
+  const [state, setState] = useState<SessionState>('awaiting');
+  const [sent, setSent] = useState<string[]>([]);
+  return (
+    <div>
+      <Composer state={state} phase="spec" phases={PHASES} dispatch={async (c) => (setSent((s) => [...s, c.kind]), { ok: true })} />
+      <button type="button" data-probe="busy" onClick={() => setState('turn')}>
+        busy
+      </button>
+      <button type="button" data-probe="idle" onClick={() => setState('awaiting')}>
+        idle
+      </button>
+      <output data-probe="sent">{sent.join(',')}</output>
+    </div>
+  );
+}
+
+export const EndDisarmedWhenNotIdle: Story = {
+  name: 'Composer · end, armed, is disarmed when the session stops being idle',
+  render: () => <EndHarness />,
+  play: async ({ canvasElement }) => {
+    const end = canvasElement.querySelector('.ex-composer__end') as HTMLButtonElement;
+    // Armed as Safari arms it: a click that leaves the focus where it was.
+    end.click();
+    await waitFor(async () => expect(end.textContent).toBe('end the session?'));
+    await expect(document.activeElement).not.toBe(end);
+    (canvasElement.querySelector('[data-probe="busy"]') as HTMLButtonElement).click();
+    await waitFor(async () => expect(end.disabled).toBe(true));
+    (canvasElement.querySelector('[data-probe="idle"]') as HTMLButtonElement).click();
+    await waitFor(async () => expect(end.disabled).toBe(false));
+    await expect(end.textContent).toBe('end');
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await userEvent.click(end);
+    await expect(canvasElement.querySelector('[data-probe="sent"]')?.textContent).toBe('');
   },
 };
