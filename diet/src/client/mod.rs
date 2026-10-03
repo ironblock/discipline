@@ -145,7 +145,7 @@ pub(crate) use vocabulary;
 /// generation that hits its cap is a typed outcome and is never graded as
 /// wrong or malformed; a reason NOT in this list is carried as the server
 /// spelled it and decided by nobody.
-const CAPPED_FINISH_REASONS: &[&str] = &["length", "max_tokens"];
+pub(crate) const CAPPED_FINISH_REASONS: &[&str] = &["length", "max_tokens"];
 
 vocabulary! {
     /// Why an attempt exists after the first one.

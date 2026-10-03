@@ -1242,6 +1242,28 @@ fn a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_the
 }
 
 #[test]
+fn a_drive_servers_default_cap_leaves_room_for_reasoning() {
+    // #290, measured (5969377550): 512 cut off three reasoning turns.
+    let stub = Stub::serving(vec![Act::Raw(ANSWERED.to_vec())]).expect("loopback");
+    let served = start(&stub.url(), &[]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _ = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains(r#""reason":"final""#),
+    );
+    drop(served);
+    let sent = stub.received();
+    assert!(
+        sent.iter()
+            .any(|body| body.contains(r#""max_tokens":8192"#)),
+        "{sent:?}"
+    );
+}
+
+#[test]
 fn diet_drive_usage_names_the_serve_form() {
     // The top-level usage listed only the scripted drive (#290).
     let out = Command::new(DRIVE).output().expect("diet-drive runs");

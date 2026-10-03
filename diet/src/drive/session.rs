@@ -56,6 +56,7 @@ use std::fmt;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::client::CAPPED_FINISH_REASONS;
 use crate::client::shape::{Message, RequestShape, Role};
 use crate::client::stream::{
     Cancel, Ended as StreamEnded, Piece, Progress, Rejection, Streaming, Timings,
@@ -288,7 +289,8 @@ pub enum Event {
         /// What the server measured of the call, as it reported it.
         timings: Option<Timings>,
     },
-    /// The call hit its output cap (`finish_reason: "length"`): what it
+    /// The call hit its output cap (a `finish_reason` in the client's
+    /// [`crate::client::CAPPED_FINISH_REASONS`], `length` among them): what it
     /// streamed is not an answer, so neither its ask nor `text` is on the
     /// trunk, and the turn settles `failed`. Written as a `response` with
     /// `capped` (ruled on #290, comment 5969297103; log v3's `capped` settle
@@ -1230,7 +1232,10 @@ fn settle_finished(
     (partial, reasoning): (String, String),
     (finish_reason, timings): (Option<String>, Option<Timings>),
 ) {
-    if finish_reason.as_deref() == Some(CAPPED) {
+    if finish_reason
+        .as_deref()
+        .is_some_and(|reason| CAPPED_FINISH_REASONS.contains(&reason))
+    {
         state.push(Event::Capped {
             request,
             text: partial,
@@ -1271,9 +1276,6 @@ fn settle_finished(
     // capture, and the log says the session passed through.
     state.move_to(Settlement::Awaiting);
 }
-
-/// The `finish_reason` a server gives a call its output cap ended.
-const CAPPED: &str = "length";
 
 /// How a failed call settles its turn: a call that ran out of time is a
 /// `timeout`, and every other failure is `failed`.
@@ -2619,6 +2621,28 @@ pub(in crate::drive) mod tests {
     /// The writer's half of #249's rule: a server that reports `timings`
     /// gets no `usage` on its response line -- on llama.cpp the two are equal
     /// (measured on #157), and the reader refuses a line carrying both.
+    #[test]
+    fn every_capped_finish_reason_the_client_knows_caps_a_turn() {
+        // One list, the client's, so the session and the scripted drive
+        // cannot disagree about what a cap is (#290).
+        for reason in crate::client::CAPPED_FINISH_REASONS {
+            let session = Session::open(
+                Canned::new([vec![
+                    Step::Delta("cut".to_owned()),
+                    Step::FinishReason((*reason).to_owned()),
+                ]]),
+                template(),
+            );
+            session.ask("go", None).expect("accepted");
+            let log = wait_until(&session, "the turn to settle", settled);
+            assert!(
+                log.iter()
+                    .any(|logged| matches!(logged.event, Event::Capped { .. })),
+                "{reason}: {log:?}"
+            );
+        }
+    }
+
     #[test]
     fn a_capped_call_is_written_capped_settles_failed_and_stays_off_the_trunk() {
         // #290, ruled (5969297103): a turn its output cap ended is not an
