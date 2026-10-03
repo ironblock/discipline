@@ -382,7 +382,9 @@ check_admission() {
 # from `apply-lane-faults.py --list`, below, rather than declared by hand.
 check_lanes() { python3 scripts/apply-lane-faults.py --verify; }
 
-check_metadata() { python3 scripts/check-repo-metadata.py; }
+# ...and the chore lane's classifier against its own cases (#276): a protocol
+# entry it stopped reading would let a template edit land as a chore.
+check_metadata() { python3 scripts/check-repo-metadata.py && python3 scripts/pr-scope.py --check; }
 
 # ...and the scanner itself stays honest on the shell a stock Mac runs (#236):
 # CI cannot run bash 3.2, so this reads hygiene.sh for what keeps it so.
@@ -3239,6 +3241,22 @@ EOF
 inject_hygiene() {
   bash scripts/seed-hygiene-fault.sh seeded-faults > /dev/null
   git add --all
+}
+
+# The protocol list left unread (#276): `in_protocol` answers nothing, so no
+# protocol entry is read, and a `substrates/` edit -- in no gate tree, and
+# reached by no seeded fault -- reads as a chore.
+inject_metadata_protocol_unread() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/pr-scope.py')
+source = path.read_text(encoding="utf-8")
+old = '    """The protocol entry `path` falls under, if any."""\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '    return None\n', 1), encoding="utf-8")
+EOF
 }
 
 # A data-URI payload read as prose again (#278): the views are never built,
@@ -8687,6 +8705,8 @@ selftest() {
     'is unguarded; bash 3\.2 aborts on it'
   seeded_case "forbidden content in the tree"         hygiene  inject_hygiene \
     'hygiene: internal-ticket-id:'
+  seeded_case "the protocol list left unread"         metadata inject_metadata_protocol_unread \
+    'pr-scope: \.github/PULL_REQUEST_TEMPLATE\.md falls under None, not the protocol entry'
   seeded_case "a data-URI payload read as prose"      hygiene  inject_hygiene_datauri_read_as_prose \
     'hygiene: internal-ticket-id: tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri\.svg:6:'
   seeded_case "external subresource on the site"      pages    inject_pages \

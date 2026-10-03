@@ -125,6 +125,20 @@ CHECK_INPUTS = {
     # under the shim are reached through it, so a change to either would
     # otherwise inherit the last red (#260's review).
     "bsd": {"scripts/bsd-sed/", "scripts/check-injections.py"},
+    # `ci` reads the workflows and the tables beside them; `metadata` the
+    # repository's labels, milestones and issue templates (#276: a diff of a
+    # workflow must name the check that reads it).
+    "ci": {".github/workflows/", ".github/check-owners.tsv", ".github/gate-budget.tsv"},
+    "metadata": {".github/labels.json", ".github/milestones.json", ".github/ISSUE_TEMPLATE/"},
+    # ...and what three more read beside the script their function names
+    # (#280's review): the manifest, the lane registry, and the scanner's
+    # own tables and helpers.
+    "parity": {"tools/gate/faults.toml"},
+    "lanes": {"tools/gate/lanes.toml"},
+    "hygiene": {
+        "scripts/hygiene-patterns.tsv", "scripts/hygiene-exceptions.tsv",
+        "scripts/hygiene-decode.py", "scripts/check-hashes.py",
+    },
 }
 
 
