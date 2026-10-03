@@ -1575,10 +1575,6 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
-# The runner's digest comparison made advisory. The cache is still read, the
-# scores are still computed, and they are the scores of whatever bytes happen
-# to be on disk rather than of the bytes the record consumed -- which is a
-# recompute that recomputes something else.
 # The assembler writing a second directory of one product (#271, ruled):
 # its refusal disabled, so the same record assembles beside itself.
 inject_bakeoff_writes_a_second_product() {
@@ -1594,6 +1590,10 @@ path.write_text(source.replace(old, "if false && siblings.iter().any(|sha| sha =
 EOF
 }
 
+# The runner's digest comparison made advisory. The cache is still read, the
+# scores are still computed, and they are the scores of whatever bytes happen
+# to be on disk rather than of the bytes the record consumed -- which is a
+# recompute that recomputes something else.
 inject_bakeoff_digest_unchecked() {
   python3 - <<'EOF'
 import pathlib

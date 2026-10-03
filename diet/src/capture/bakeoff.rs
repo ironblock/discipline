@@ -3066,16 +3066,20 @@ mod tests {
             assert!(err.to_string().contains(says), "{err}");
             assert!(!into.exists(), "a refused assembly wrote its directory");
         };
+        // A sibling whose product cannot be read as the linter reads it.
+        let spelled_wrong = || {
+            refused(
+                &root.join("2026-01-09-new"),
+                &declared(),
+                "does not spell its `product_sha256`",
+            );
+            let _ = std::fs::remove_dir_all(&root);
+        };
         sibling(
             "2026-01-01-commented",
             &format!("product_sha256 = \"{sha}\" # the report"),
         );
-        refused(
-            &root.join("2026-01-09-new"),
-            &declared(),
-            "does not spell its `product_sha256`",
-        );
-        let _ = std::fs::remove_dir_all(&root);
+        spelled_wrong();
         sibling(
             "2026-01-01-tabled",
             &format!(
@@ -3083,12 +3087,7 @@ mod tests {
                 "d".repeat(64)
             ),
         );
-        refused(
-            &root.join("2026-01-09-new"),
-            &declared(),
-            "does not spell its `product_sha256`",
-        );
-        let _ = std::fs::remove_dir_all(&root);
+        spelled_wrong();
         refused(
             &root.join("x").join("..").join("2026-01-09-new"),
             &declared(),
@@ -3103,46 +3102,32 @@ mod tests {
                 "d".repeat(64)
             ),
         );
-        refused(
-            &root.join("2026-01-09-new"),
-            &declared(),
-            "does not spell its `product_sha256`",
+        spelled_wrong();
+        sibling(
+            "2026-01-01-cr",
+            &format!("kind = \"x\"\rproduct_sha256 = \"{sha}\""),
         );
-        let _ = std::fs::remove_dir_all(&root);
-        sibling("2026-01-01-cr", &format!("kind = \"x\"\rproduct_sha256 = \"{sha}\""));
-        refused(
-            &root.join("2026-01-09-new"),
-            &declared(),
-            "does not spell its `product_sha256`",
-        );
-        let _ = std::fs::remove_dir_all(&root);
+        spelled_wrong();
+        // A carriage return in the opening fence, where no key is named, so
+        // only the carriage-return rule refuses it: Python reads the fence
+        // and the product beneath it, and `lines()` sees no fence at all and
+        // would skip the sibling unread.
+        let fenced = root.join("2026-01-01-cr-fence");
+        std::fs::create_dir_all(&fenced).expect("a sibling");
+        std::fs::write(
+            fenced.join("README.md"),
+            format!("+++\rkind = \"x\"\nproduct_sha256 = \"{sha}\"\n+++\n# a sibling\n"),
+        )
+        .expect("its README");
+        spelled_wrong();
         std::fs::create_dir_all(&root).expect("the root");
         std::os::unix::fs::symlink(root.join("2026-01-09-new"), root.join("2026-01-01-alias"))
             .expect("a dangling link");
-        refused(&root.join("2026-01-09-new"), &declared(), "a symlink to nothing");
-        let _ = std::fs::remove_dir_all(&root);
-        // Relative spellings are read from the working directory: `.` and
-        // `./` from inside the target, and a bare name from its parent, all
-        // read the real siblings; an empty `--into` names nothing.
-        sibling("2026-01-01-one", &format!("product_sha256 = \"{sha}\""));
-        let target = root.join("2026-01-09-new");
-        std::fs::create_dir_all(&target).expect("an empty target");
-        for (cwd, into) in [(&target, "."), (&target, "./"), (&root, "2026-01-09-new")] {
-            let read = siblings_from(cwd, Path::new(into)).expect("the siblings");
-            assert_eq!(read, vec![sha.clone()], "`--into {into}` read the wrong siblings");
-        }
-        assert!(siblings_from(&root, Path::new("")).is_err(), "an empty `--into` was read");
-        // A parent that cannot be listed refuses; it never reads as no siblings.
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000))
-                .expect("a locked parent");
-            let read = siblings_from(&root, &root.join("2026-01-10-other"));
-            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755))
-                .expect("unlocked");
-            let err = read.expect_err("an unlistable parent was read as no siblings");
-            assert!(err.to_string().contains("cannot be listed"), "{err}");
-        }
+        refused(
+            &root.join("2026-01-09-new"),
+            &declared(),
+            "a symlink to nothing",
+        );
         let _ = std::fs::remove_dir_all(&root);
         sibling("_template", &format!("product_sha256 = \"{sha}\""));
         let of_the_template = Provenance::from_flags(&flags(&[
@@ -3159,6 +3144,53 @@ mod tests {
             &of_the_template,
             "names exactly one product",
         );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// AN `--into` IS READ FROM THE WORKING DIRECTORY (#271's fifth review):
+    /// `.` and `./` from inside the target named the target as its own
+    /// parent, and an unlistable parent must refuse, never read as empty.
+    #[test]
+    fn the_siblings_are_the_targets_real_ones() {
+        let base = std::env::temp_dir().join(format!("bakeoff-into-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let root = base.join("results");
+        let sha = "c".repeat(64);
+        let one = root.join("2026-01-01-one");
+        std::fs::create_dir_all(&one).expect("a sibling");
+        std::fs::write(
+            one.join("README.md"),
+            format!("+++\nproduct_sha256 = \"{sha}\"\n+++\n# a sibling\n"),
+        )
+        .expect("its README");
+        // Relative spellings are read from the working directory: `.` and
+        // `./` from inside the target, and a bare name from its parent, all
+        // read the real siblings; an empty `--into` names nothing.
+        let target = root.join("2026-01-09-new");
+        std::fs::create_dir_all(&target).expect("an empty target");
+        for (cwd, into) in [(&target, "."), (&target, "./"), (&root, "2026-01-09-new")] {
+            let read = siblings_from(cwd, Path::new(into)).expect("the siblings");
+            assert_eq!(
+                read,
+                vec![sha.clone()],
+                "`--into {into}` read the wrong siblings"
+            );
+        }
+        assert!(
+            siblings_from(&root, Path::new("")).is_err(),
+            "an empty `--into` was read"
+        );
+        // A parent that cannot be listed refuses; it never reads as no siblings.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000))
+                .expect("a locked parent");
+            let read = siblings_from(&root, &root.join("2026-01-10-other"));
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755))
+                .expect("unlocked");
+            let err = read.expect_err("an unlistable parent was read as no siblings");
+            assert!(err.to_string().contains("cannot be listed"), "{err}");
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 
