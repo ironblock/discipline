@@ -169,8 +169,12 @@ def importable(path: str, files: list[str]) -> bool:
     first = path.split("/", 1)[0]
     if first.casefold() == "node_modules":
         return True
-    init = f"{first}/__init__.py"
-    return any(f.casefold() == init.casefold() for f in files) or (ROOT / init).is_file()
+    # An `__init__` with ANY suffix marks a package (#280's fourth review):
+    # Python's finder takes `.py`, a sourceless `.pyc` and every extension
+    # suffix (`.so`, `.abi3.so`, `.cpython-312-...so`), which differ by
+    # interpreter, so the name is matched, never a list of suffixes.
+    init = re.compile(re.escape(first) + r"/__init__\.[^/]+", re.IGNORECASE)
+    return any(init.fullmatch(f) for f in files) or any((ROOT / first).glob("__init__.*"))
 
 
 def unknown_root(path: str) -> bool:
@@ -268,6 +272,9 @@ CASES = (
     (("Diet/src/lib.rs",), "material"),
     (("docs/notes.md", "logo/a.svg", "NOTES.MD"), "chore"),
     (("json/__init__.py",), "material"),
+    (("json/__init__.pyc",), "material"),
+    (("re/__init__.so",), "material"),
+    (("json/__init__.cpython-312-x86_64-linux-gnu.so",), "material"),
     (("pathlib/__init__.py", "pathlib/x.py"), "material"),
     (("node_modules/x/index.js",), "material"),
     (("logo/build.py", "logo/lens.py"), "chore"),
