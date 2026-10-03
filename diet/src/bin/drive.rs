@@ -93,6 +93,8 @@ fn serve_usage() -> String {
     out.push_str("--record FILE (needs --regimen) writes the session's record there once it\n");
     out.push_str("ends, projected from its log, beside FILE.unspellable.json naming what\n");
     out.push_str("the record could not spell; both digests are reported on stdout.\n");
+    out.push_str("--max-output-tokens defaults to 8192, room for a reasoning model's thinking\n");
+    out.push_str("(measured on the floor, #290); a turn that hits it is logged capped.\n");
     out.push_str("--log FILE writes the session's log there as each line is appended, the\n");
     out.push_str("same lines GET /events streams; nothing is written without it.\n");
     out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
@@ -103,6 +105,13 @@ fn serve_usage() -> String {
     out.push_str("this crate's own canned server reports.\n");
     out
 }
+
+/// `serve`'s output cap when `--max-output-tokens` is not given: room for
+/// a reasoning model's thinking before its answer. Measured on the floor
+/// (#290, comment 5969377550): the rehearsal's three turns capped at 512
+/// finished at 3,561, 408 and 1,873 completion tokens at a cap of 4096,
+/// one sample each; 8192 leaves the largest more than twice its room.
+const SERVE_MAX_OUTPUT_TOKENS: u32 = 8192;
 
 /// What `serve`'s flags say.
 struct ServeArgs {
@@ -133,7 +142,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut listen = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
-    let mut max_output_tokens: u32 = 512;
+    let mut max_output_tokens: u32 = SERVE_MAX_OUTPUT_TOKENS;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -700,7 +709,10 @@ fn is_an_origin(value: &str) -> bool {
 
 fn usage() -> String {
     let mut out =
-        String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n\n");
+        String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n");
+    // The interactive server, which the first form's usage once hid (#290).
+    out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");
+    out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n\n");
     out.push_str("Runs the pinned three-turn script through <regimen> in <worktree>\n");
     out.push_str("and writes the record to <output.jsonl>. With no endpoint the canned\n");
     out.push_str("server answers on loopback -- no model, no network out.\n\n");

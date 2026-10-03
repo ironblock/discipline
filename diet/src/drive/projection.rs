@@ -384,6 +384,20 @@ impl<'a> Walk<'a> {
                 lane,
                 head_sha256,
             } => self.request(line.seq, *turn, *lane, head_sha256.as_deref())?,
+            // A capped call is not an answer (#290, ruled 5969297103): no
+            // row, its text named, and nothing put on the rebuilt trunk.
+            Line::Response {
+                text,
+                capped: Some(true),
+                ..
+            } => self.name(
+                line.seq,
+                "response",
+                "a capped call: its output cap ended it before an answer, and its turn \
+                 settled failed"
+                    .to_owned(),
+                Some(text.clone()),
+            ),
             Line::Response {
                 to_request,
                 text,
@@ -451,6 +465,8 @@ impl<'a> Walk<'a> {
             self.trunk_of
                 .get(&turn)
                 .and_then(|request| match self.outcome.get(request) {
+                    // A capped call's prompt was still prefilled: the cap
+                    // bounds the output, not the prompt (#313's review).
                     Some(Line::Response { timings, .. }) => timings.as_ref(),
                     _ => None,
                 });
@@ -960,6 +976,15 @@ mod tests {
         timings: Option<crate::client::stream::Timings>,
         template_kwargs: BTreeMap<String, crate::formats::record::json::Value>,
     ) -> Vec<log::Line> {
+        a_real_session_log_of(timings, template_kwargs, false)
+    }
+
+    /// The same, the first turn ended by its output cap when `capped`.
+    fn a_real_session_log_of(
+        timings: Option<crate::client::stream::Timings>,
+        template_kwargs: BTreeMap<String, crate::formats::record::json::Value>,
+        capped: bool,
+    ) -> Vec<log::Line> {
         use crate::client::stream::{Canned, Step};
         use crate::drive::session::{Session, Settlement, line_of};
         let shape = RequestShape {
@@ -987,6 +1012,7 @@ mod tests {
                 ]
                 .into_iter()
                 .chain(timings.clone().map(Step::Timings))
+                .chain(capped.then(|| Step::FinishReason("length".to_owned())))
                 .collect::<Vec<_>>(),
                 [Step::Delta("Again".to_owned())]
                     .into_iter()
@@ -1035,6 +1061,67 @@ mod tests {
             "{:?}",
             projection.unspellable
         );
+        validates(&projection);
+    }
+
+    #[test]
+    fn a_capped_call_is_named_not_answered_and_the_next_head_still_rebuilds() {
+        // #290, ruled 5969297103: a capped call settles `failed`, stays off
+        // the trunk, and is no answer -- so the record has no row for it, and
+        // the next request's head, rebuilt without it, matches the log.
+        let projection = project(
+            &a_real_session_log_of(None, BTreeMap::new(), true),
+            &regime(),
+            None,
+        )
+        .expect("projected");
+        assert!(
+            projection
+                .unspellable
+                .iter()
+                .any(|item| item.kind == "response"
+                    && item.why.starts_with("a capped call")
+                    && item.text.as_deref() == Some("Hello")),
+            "{:?}",
+            projection.unspellable
+        );
+        assert!(
+            projection.events.iter().all(|event| !matches!(
+                event,
+                Event::PrefixChanged {
+                    reason: PrefixReason::Unattributed,
+                    ..
+                }
+            )),
+            "{:?}",
+            projection.events
+        );
+        validates(&projection);
+    }
+
+    #[test]
+    fn on_a_cited_engine_a_capped_turn_keeps_its_prefill_and_the_next_turn_is_rowed() {
+        // #313's review: the cap bounds the output, not the prompt, so a
+        // capped call's reported prefill is a turn row's, and the turns after
+        // it are not broken by it.
+        let projection = project(
+            &a_real_session_log_of(Some(warm_client()), BTreeMap::new(), true),
+            &regime(),
+            Some(Engine::Commit("e7051ef")),
+        )
+        .expect("projected");
+        let turns: Vec<(u32, u64)> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Turn {
+                    index,
+                    prefill_tokens,
+                } => Some((*index, prefill_tokens.get())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(turns, [(1, 178), (2, 178)], "{:?}", projection.unspellable);
         validates(&projection);
     }
 

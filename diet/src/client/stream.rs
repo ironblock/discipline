@@ -994,6 +994,9 @@ pub enum Step {
     Timings(Timings),
     /// A prefill progress frame.
     Progress(Progress),
+    /// Finish with this `finish_reason` rather than `stop` -- `length` is a
+    /// call its output cap ended (#290).
+    FinishReason(String),
 }
 
 /// Scripted streams, one per call, in call order; and every request it was
@@ -1049,6 +1052,7 @@ impl Streaming for Canned {
             ));
         };
         let mut timings = None;
+        let mut finish_reason = "stop".to_owned();
         for step in steps {
             if cancel.is_asked() {
                 return Ok(Ended::Cancelled);
@@ -1076,13 +1080,14 @@ impl Streaming for Canned {
                 }
                 Step::Progress(progress) => on_delta(Piece::Progress(progress)),
                 Step::Timings(measured) => timings = Some(measured),
+                Step::FinishReason(reason) => finish_reason = reason,
             }
         }
         if cancel.is_asked() {
             return Ok(Ended::Cancelled);
         }
         Ok(Ended::Finished {
-            finish_reason: Some("stop".to_owned()),
+            finish_reason: Some(finish_reason),
             timings,
         })
     }
@@ -1568,6 +1573,30 @@ mod tests {
             Ok("Hel")
         );
         cancel_and_expect(&asker, &finished);
+    }
+
+    #[test]
+    fn a_canned_stream_finishes_with_the_reason_it_is_given() {
+        // `length` is how a server says a call's output cap ended it (#290).
+        let canned = Canned::new([
+            vec![
+                Step::Delta("cut".to_owned()),
+                Step::FinishReason("length".to_owned()),
+            ],
+            vec![Step::Delta("ok".to_owned())],
+        ]);
+        let reasons: Vec<Option<String>> = (0..2)
+            .map(
+                |_| match canned.stream(&shape(), deadline(), &Cancel::new(), &mut |_| {}) {
+                    Ok(Ended::Finished { finish_reason, .. }) => finish_reason,
+                    other => panic!("{other:?}"),
+                },
+            )
+            .collect();
+        assert_eq!(
+            reasons,
+            [Some("length".to_owned()), Some("stop".to_owned())]
+        );
     }
 
     #[test]
