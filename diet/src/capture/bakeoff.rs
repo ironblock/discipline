@@ -2089,10 +2089,54 @@ mod tests {
         r#""product_sha256":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}"#
     );
 
-    fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("bakeoff-{name}"));
+    /// A directory of this test's own, removed when it drops. Unique to
+    /// the process and to the call (#316): a name from the test alone was
+    /// shared by every `verify.sh` on the machine, so two worktrees verifying
+    /// at once corrupted each other's fixtures.
+    struct Scratch(PathBuf);
+
+    impl std::ops::Deref for Scratch {
+        type Target = PathBuf;
+        fn deref(&self) -> &PathBuf {
+            &self.0
+        }
+    }
+
+    impl AsRef<Path> for Scratch {
+        fn as_ref(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn scratch(name: &str) -> Scratch {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static MADE: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "bakeoff-{name}-{}-{}",
+            std::process::id(),
+            MADE.fetch_add(1, Ordering::Relaxed)
+        ));
         let _ = std::fs::remove_dir_all(&dir);
-        dir
+        Scratch(dir)
+    }
+
+    #[test]
+    fn two_scratches_never_share_a_directory() {
+        let (one, two) = (scratch("same"), scratch("same"));
+        assert_ne!(*one, *two, "one test's name gave two calls one directory");
+        let pid = std::process::id().to_string();
+        assert!(
+            one.file_name()
+                .is_some_and(|name| name.to_string_lossy().contains(&pid)),
+            "{} does not name its process, so a second verify on this machine shares it",
+            one.display()
+        );
     }
 
     fn field<'a>(value: &'a Value, key: &str) -> &'a Value {

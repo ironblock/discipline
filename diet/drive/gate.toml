@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 182
+faults = 208
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -867,6 +867,10 @@ anchor = '''
 becomes = '''
         shape.messages.clone_from(&self.shared.template.messages);'''
 catches = [
+    "drive::projection::tests::a_real_sessions_head_changes_are_rebuilt_and_named_by_client_head",
+    "drive::projection::tests::a_trunk_with_a_shape_the_rebuild_does_not_assume_is_unattributed",
+    "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::the_trunk_is_appended_never_rebuilt",
 ]
@@ -951,9 +955,9 @@ failure_class = "drive.session-skips-the-capture-state"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            state.move_to(Settlement::Capture);'''
+    state.move_to(Settlement::Capture);'''
 becomes = '''
-            let _ = Settlement::Capture;'''
+    let _ = Settlement::Capture;'''
 catches = [
     "drive::session::tests::an_ask_is_answered_streamed_and_the_answer_is_every_piece_in_order",
 ]
@@ -972,7 +976,6 @@ catches = [
     "drive::serve::tests::a_reader_resuming_after_an_id_of_this_process_starts_at_the_next",
     "drive::serve::tests::an_ask_over_http_streams_its_answer_to_a_reader_already_listening",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
-    "drive::serve::tests::the_teed_log_is_every_line_rendered_as_it_is_appended",
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
     "drive::session::tests::a_failed_call_is_typed_and_leaves_the_trunk_alone",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
@@ -1120,6 +1123,9 @@ anchor = '''
 becomes = '''
             head: Vec::new(),'''
 catches = [
+    "drive::projection::tests::a_real_sessions_head_changes_are_rebuilt_and_named_by_client_head",
+    "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
     "drive::session::tests::the_log_begins_with_the_session_it_describes",
 ]
 
@@ -1524,10 +1530,13 @@ failure_class = "drive.session-reasoning-left-off-the-trunk"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            answer.reasoning.clone_from(&reasoning);'''
+    answer.reasoning.clone_from(&reasoning);'''
 becomes = '''
-            let _ = &reasoning;'''
+    let _ = &reasoning;'''
 catches = [
+    "drive::projection::tests::a_real_sessions_head_changes_are_rebuilt_and_named_by_client_head",
+    "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::the_responses_reasoning_is_its_deltas_byte_for_byte",
 ]
@@ -1538,9 +1547,9 @@ failure_class = "drive.session-reasoning-trimmed"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-            let reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
+    let reasoning = (!reasoning.is_empty()).then_some(reasoning);'''
 becomes = '''
-            let reasoning = (!reasoning.is_empty()).then(|| reasoning.trim_end().to_owned());'''
+    let reasoning = (!reasoning.is_empty()).then(|| reasoning.trim_end().to_owned());'''
 catches = [
     "drive::session::tests::a_thinking_turns_reasoning_joins_the_trunk_and_goes_back_byte_identical",
     "drive::session::tests::the_responses_reasoning_is_its_deltas_byte_for_byte",
@@ -1615,7 +1624,9 @@ becomes = '''
 # beside it, so the server starts and the test fails; Linux refuses it with
 # EADDRINUSE, so the test passes (selftest shard 4 of run 36970607154). Its
 # subject is the log file, not the bind address, so it is dropped rather than
-# split by platform: the two below catch the fault on both.
+# split by platform: the two below catch the fault on both. The same holds
+# for `a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_
+# sidecar_as_they_were` (#264), which holds the port the same way.
 catches = [
     "a_drive_server_binds_loopback_by_default_and_listen_takes_an_ip",
     "a_drive_server_off_loopback_without_a_credential_refuses_to_start",
@@ -2091,6 +2102,7 @@ catches = [
     "drive::engine::tests::a_server_on_another_commit_is_refused_naming_both",
     "drive::engine::tests::a_server_on_the_registered_commit_passes_and_reports_its_build",
     "drive::engine::tests::a_substrate_with_no_registered_engine_identity_is_refused_and_the_server_is_not_asked",
+    "drive::projection::tests::the_cited_engines_are_matched_as_the_engine_check_matches_them",
     "drive::regimen::tests::a_regimen_whose_hardware_disagrees_with_the_registry_is_refused",
     "drive::regimen::tests::a_registered_chat_template_crosses_into_the_regime",
     "drive::regimen::tests::a_registered_substrate_crosses_with_the_registrys_identity",
@@ -2111,15 +2123,17 @@ failure_class = "drive.session-drops-timings"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-                reasoning,
-                timings,
-            });'''
+        reasoning,
+        timings,
+    });'''
 becomes = '''
-                reasoning,
-                timings: None,
-            });'''
+        reasoning,
+        timings: None,
+    });'''
 catches = [
+    "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
+    "drive::session::tests::a_response_with_timings_is_written_without_usage",
 ]
 
 [[fault]]
@@ -2128,16 +2142,19 @@ failure_class = "drive.session-response-reasoning-dropped"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-                finish_reason,
-                reasoning,
-                timings,
-            });'''
+        finish_reason,
+        reasoning,
+        timings,
+    });'''
 becomes = '''
-                finish_reason,
-                reasoning: None,
-                timings,
-            });'''
+        finish_reason,
+        reasoning: None,
+        timings,
+    });'''
 catches = [
+    "drive::projection::tests::a_real_sessions_head_changes_are_rebuilt_and_named_by_client_head",
+    "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
     "drive::session::tests::the_responses_reasoning_is_its_deltas_byte_for_byte",
 ]
 
@@ -2178,6 +2195,7 @@ anchor = '''
 becomes = '''
         cache_n: None,'''
 catches = [
+    "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
     "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
 ]
@@ -2188,27 +2206,29 @@ failure_class = "drive.session-logs-progress-after-the-end"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-                timings,
-            });
-            state.push(Event::TurnSettled {
-                turn,
-                reason: SettleReason::Final,'''
+        timings,
+    });
+    state.push(Event::TurnSettled {
+        turn,
+        reason: SettleReason::Final,'''
 becomes = '''
-                timings,
-            });
-            state.push(Event::Progress {
-                request,
-                progress: Progress {
-                    total: 1,
-                    cache: 0,
-                    processed: 1,
-                    time_ms: 1,
-                },
-            });
-            state.push(Event::TurnSettled {
-                turn,
-                reason: SettleReason::Final,'''
+        timings,
+    });
+    state.push(Event::Progress {
+        request,
+        progress: Progress {
+            total: 1,
+            cache: 0,
+            processed: 1,
+            time_ms: 1,
+        },
+    });
+    state.push(Event::TurnSettled {
+        turn,
+        reason: SettleReason::Final,'''
 catches = [
+    "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
     "drive::serve::tests::every_data_line_is_one_log_line_and_its_id_is_opened_and_seq",
     "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
     "drive::session::tests::a_real_sessions_whole_log_is_a_log_the_format_reads",
@@ -2315,6 +2335,8 @@ becomes = '''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
     "a_drive_server_checks_the_engine_before_it_binds",
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
+    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
     "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
     "a_drive_server_refuses_a_canned_regimen_against_a_server_with_no_props",
     "a_drive_server_refuses_a_substrate_with_no_registered_engine_identity_without_asking_it",
@@ -2323,6 +2345,7 @@ catches = [
     "a_drive_server_starts_on_a_prebuilt_engine_by_its_literal",
     "a_drive_server_starts_on_a_substrate_of_several_shards",
     "a_drive_server_starts_only_on_the_engine_the_registry_pins",
+    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
 ]
 
 [[fault]]
@@ -2798,15 +2821,15 @@ failure_class = "drive.serve-log-drops-a-line"
 target = "diet/src/drive/serve.rs"
 expect_exit = 101
 anchor = '''
-            let line = render(&logged);'''
+        let line = render(logged);'''
 becomes = '''
-            if logged.seq == 1 {
-                next = logged.seq + 1;
-                continue;
-            }
-            let line = render(&logged);'''
+        if logged.seq == 1 {
+            return;
+        }
+        let line = render(logged);'''
 catches = [
-    "drive::serve::tests::the_teed_log_is_every_line_rendered_as_it_is_appended",
+    "drive::serve::tests::an_appended_line_is_written_before_its_append_returns",
+    "drive::serve::tests::the_written_log_is_every_line_rendered_as_it_is_appended",
 ]
 
 [[fault]]
@@ -2815,10 +2838,11 @@ failure_class = "drive.serve-bin-ignores-the-log-flag"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-            keep_log(teeing, render, file);'''
+        keep_log(session, render, file);'''
 becomes = '''
-            let _ = (teeing, render, file);'''
+        let _ = (session, render, file);'''
 catches = [
+    "a_drive_server_killed_mid_session_leaves_a_log_whole_through_what_it_showed",
     "a_drive_server_whose_log_cannot_be_written_stops_even_with_its_stdout_closed",
     "a_drive_servers_log_file_is_the_events_stream_line_for_line",
 ]
@@ -2834,6 +2858,7 @@ becomes = '''
     let truncated = false;'''
 catches = [
     "a_drive_server_says_when_its_log_flag_emptied_a_file",
+    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
 ]
 
 [[fault]]
@@ -2855,8 +2880,10 @@ failure_class = "drive.serve-bin-keeps-serving-a-stopped-log"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
+        let _ = fail(EXIT_OUTPUT, &format!("the log could not be written: {why}"));
         std::process::exit(i32::from(EXIT_OUTPUT));'''
 becomes = '''
+        let _ = fail(EXIT_OUTPUT, &format!("the log could not be written: {why}"));
         let _ = EXIT_OUTPUT;'''
 catches = [
     "a_drive_server_whose_log_cannot_be_written_stops_even_with_its_stdout_closed",
@@ -2868,8 +2895,10 @@ failure_class = "drive.serve-bin-misreports-an-uncreatable-log"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
+        Ok(opened) => opened,
         Err(why) => return fail(EXIT_OUTPUT, &why),'''
 becomes = '''
+        Ok(opened) => opened,
         Err(why) => return fail(EXIT_INPUT, &why),'''
 catches = [
     "a_drive_server_refuses_an_uncreatable_log_file_before_anything_binds",
@@ -2885,6 +2914,7 @@ anchor = '''
 becomes = '''
         .truncate(true)'''
 catches = [
+    "a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were",
     "a_drive_server_that_fails_to_start_leaves_an_existing_log_file_as_it_was",
 ]
 
@@ -2918,6 +2948,403 @@ becomes = '''
     format!("canned-{}", digest_of(&acts_as_first_registered()))'''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
+    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
     "a_drive_server_refuses_a_canned_regimen_against_a_live_server",
     "a_drive_server_starts_a_canned_regimen_only_on_the_canned_server",
+    "a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were",
+    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
+]
+
+[[fault]]
+id = "drive.projection-rebuilds-without-the-answer"
+failure_class = "drive.projection-rebuilds-without-the-answer"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+        answer.reasoning = reasoning.cloned();
+        self.trunk.push(answer);'''
+becomes = '''
+        answer.reasoning = reasoning.cloned();
+        let _ = answer;'''
+catches = [
+    "drive::projection::tests::a_real_sessions_head_changes_are_rebuilt_and_named_by_client_head",
+    "drive::projection::tests::on_a_cited_engine_the_counts_derive_from_timings",
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
+]
+
+[[fault]]
+id = "drive.projection-derives-on-an-uncited-engine"
+failure_class = "drive.projection-derives-on-an-uncited-engine"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+    if engine.is_none() {
+        return Err("equality unmeasured for this engine");
+    }
+    let predicted'''
+becomes = '''
+    let predicted'''
+catches = [
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
+]
+
+[[fault]]
+id = "drive.projection-prefill-on-an-uncited-engine"
+failure_class = "drive.projection-prefill-on-an-uncited-engine"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+    if engine.is_none() {
+        return Err("equality unmeasured for this engine");
+    }
+    let timings'''
+becomes = '''
+    let timings'''
+catches = [
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
+]
+
+[[fault]]
+id = "drive.projection-drops-an-unspellable"
+failure_class = "drive.projection-drops-an-unspellable"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+        self.unspellable.push(Unspellable {'''
+becomes = '''
+        let _ = &mut self.unspellable;
+        drop(Unspellable {'''
+catches = [
+    "drive::projection::tests::a_cancelled_a_failed_and_an_unanswered_call_are_named_not_dropped",
+    "drive::projection::tests::a_head_the_log_cannot_rebuild_is_unattributed_and_named",
+    "drive::projection::tests::a_trunk_with_a_shape_the_rebuild_does_not_assume_is_unattributed",
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
+]
+
+[[fault]]
+id = "drive.projection-guesses-an-unrebuilt-head"
+failure_class = "drive.projection-guesses-an-unrebuilt-head"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+        let verified = (rebuilt.digest() == logged).then_some(rebuilt);'''
+becomes = '''
+        let verified = Some(rebuilt);'''
+catches = [
+    "drive::projection::tests::a_head_the_log_cannot_rebuild_is_unattributed_and_named",
+    "drive::projection::tests::a_trunk_with_a_shape_the_rebuild_does_not_assume_is_unattributed",
+]
+
+[[fault]]
+id = "drive.serve-bin-records-without-a-regimen"
+failure_class = "drive.serve-bin-records-without-a-regimen"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    if record_file.is_some() && regime.is_none() {'''
+becomes = '''
+    if false && record_file.is_some() && regime.is_none() {'''
+catches = [
+    "a_drive_server_refuses_a_record_without_a_regimen",
+]
+
+[[fault]]
+id = "drive.serve-bin-never-writes-the-record"
+failure_class = "drive.serve-bin-never-writes-the-record"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            keep_record(std::sync::Arc::clone(session), regime, (path, file));'''
+becomes = '''
+            let _ = (regime, path, file);'''
+catches = [
+    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
+]
+
+[[fault]]
+id = "drive.session-writes-usage-beside-timings"
+failure_class = "drive.session-writes-usage-beside-timings"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            // only by a capped call, below.
+            usage: None,'''
+becomes = '''
+            // only by a capped call, below.
+            usage: timings.as_ref().map(|t| log::Usage {
+                prompt_tokens: t.prompt_n.unwrap_or(0) + t.cache_n.unwrap_or(0),
+                completion_tokens: t.predicted_n.unwrap_or(0),
+                cached_tokens: t.cache_n,
+            }),'''
+catches = [
+    "drive::projection::tests::on_an_uncited_engine_no_count_is_derived_and_every_one_is_named",
+    "drive::session::tests::a_finished_turns_response_carries_the_servers_timings",
+    "drive::session::tests::a_response_with_timings_is_written_without_usage",
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.session-write-through-skips-the-lines-before-it"
+failure_class = "drive.session-write-through-skips-the-lines-before-it"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        for logged in &state.log {
+            sink(logged);
+        }'''
+becomes = '''
+        let _ = &state.log;'''
+catches = [
+    "drive::serve::tests::the_written_log_is_every_line_rendered_as_it_is_appended",
+]
+
+[[fault]]
+id = "drive.session-append-leaves-the-sink-unfed"
+failure_class = "drive.session-append-leaves-the-sink-unfed"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            sink(logged);
+        }
+        seq'''
+becomes = '''
+            let _ = (sink, logged);
+        }
+        seq'''
+catches = [
+    "drive::serve::tests::an_appended_line_is_written_before_its_append_returns",
+    "drive::serve::tests::the_written_log_is_every_line_rendered_as_it_is_appended",
+]
+
+[[fault]]
+id = "drive.serve-log-writes-after-a-failure"
+failure_class = "drive.serve-log-writes-after-a-failure"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if broken {
+            return;
+        }'''
+becomes = '''
+        let _ = broken;'''
+catches = [
+    "drive::serve::tests::a_failed_log_write_is_handed_over_once_and_nothing_follows_it",
+]
+
+[[fault]]
+id = "drive.projection-drops-an-unanswered-request"
+failure_class = "drive.projection-drops-an-unanswered-request"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+        if !self.outcome.contains_key(&seq) {'''
+becomes = '''
+        if false && !self.outcome.contains_key(&seq) {'''
+catches = [
+    "drive::projection::tests::a_cancelled_a_failed_and_an_unanswered_call_are_named_not_dropped",
+]
+
+[[fault]]
+id = "drive.projection-cites-a-literal-on-any-binary"
+failure_class = "drive.projection-cites-a-literal-on-any-binary"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+                declared == literal && identity.engine.version_or_digest == *binary'''
+becomes = '''
+                declared == literal && !binary.is_empty()'''
+catches = [
+    "drive::projection::tests::the_cited_engines_are_matched_as_the_engine_check_matches_them",
+]
+
+[[fault]]
+id = "drive.serve-bin-reports-a-digest-of-other-bytes"
+failure_class = "drive.serve-bin-reports-a-digest-of-other-bytes"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Value::String(diet::digest::sha256_hex(sidecar.as_bytes())),'''
+becomes = '''
+            Value::String(diet::digest::sha256_hex(sidecar.trim_end().as_bytes())),'''
+catches = [
+    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
+]
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-record"
+failure_class = "drive.serve-bin-leaves-an-earlier-record"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            file.set_len(0)
+                .map_err(|why| format!("the record cannot be emptied: {why}"))?;'''
+becomes = '''
+            let _ = &file;'''
+catches = [
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
+]
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-sidecar"
+failure_class = "drive.serve-bin-leaves-an-earlier-sidecar"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            if stale {
+                std::fs::remove_file(&sidecar)'''
+becomes = '''
+            if false && stale {
+                std::fs::remove_file(&sidecar)'''
+catches = [
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
+    "a_drive_server_whose_writers_fail_names_what_they_had_emptied",
+]
+
+[[fault]]
+id = "drive.serve-bin-announces-only-a-held-record"
+failure_class = "drive.serve-bin-announces-only-a-held-record"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Ok::<_, String>(held || stale)'''
+becomes = '''
+            Ok::<_, String>(held)'''
+catches = [
+    "a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts",
+]
+
+[[fault]]
+id = "drive.serve-bin-announces-every-record-emptied"
+failure_class = "drive.serve-bin-announces-every-record-emptied"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            Ok::<_, String>(held || stale)'''
+becomes = '''
+            Ok::<_, String>(held || stale || true)'''
+catches = [
+    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
+]
+
+[[fault]]
+id = "drive.serve-bin-empties-the-record-before-the-bind"
+failure_class = "drive.serve-bin-empties-the-record-before-the-bind"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            let (file, held) = created(path)?;'''
+becomes = '''
+            let (file, held) = created(path)?;
+            file.set_len(0).map_err(|why| why.to_string())?;'''
+catches = [
+    "a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were",
+]
+
+[[fault]]
+id = "drive.serve-bin-forgets-what-it-emptied"
+failure_class = "drive.serve-bin-forgets-what-it-emptied"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+        if self.0.is_empty() {'''
+becomes = '''
+        if true || self.0.is_empty() {'''
+catches = [
+    "drive::serve::tests::a_failure_after_the_writers_names_what_they_emptied",
+]
+
+[[fault]]
+id = "drive.session-settles-a-capped-turn-final"
+failure_class = "drive.session-settles-a-capped-turn-final"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    if finish_reason
+        .as_deref()
+        .is_some_and(|reason| CAPPED_FINISH_REASONS.contains(&reason))
+    {'''
+becomes = '''
+    if false
+        && finish_reason
+            .as_deref()
+            .is_some_and(|reason| CAPPED_FINISH_REASONS.contains(&reason))
+    {'''
+catches = [
+    "drive::session::tests::a_capped_call_is_written_capped_settles_failed_and_stays_off_the_trunk",
+]
+
+[[fault]]
+id = "drive.session-writes-a-capped-response-uncapped"
+failure_class = "drive.session-writes-a-capped-response-uncapped"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            usage: None,
+            capped: Some(true),'''
+becomes = '''
+            usage: None,
+            capped: None,'''
+catches = [
+    "drive::session::tests::a_capped_call_is_written_capped_settles_failed_and_stays_off_the_trunk",
+]
+
+[[fault]]
+id = "drive.projection-answers-a-capped-call"
+failure_class = "drive.projection-answers-a-capped-call"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+                capped: Some(true),
+                ..
+            } => self.name('''
+becomes = '''
+                capped: Some(true),
+                ..
+            } if false => self.name('''
+catches = [
+    "drive::projection::tests::a_capped_call_is_named_not_answered_and_the_next_head_still_rebuilds",
+]
+
+[[fault]]
+id = "drive.serve-bin-usage-hides-serve"
+failure_class = "drive.serve-bin-usage-hides-serve"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");'''
+becomes = '''
+'''
+catches = [
+    "diet_drive_usage_names_the_serve_form",
+]
+
+[[fault]]
+id = "drive.serve-bin-cap-cuts-reasoning"
+failure_class = "drive.serve-bin-cap-cuts-reasoning"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+const SERVE_MAX_OUTPUT_TOKENS: u32 = 8192;'''
+becomes = '''
+const SERVE_MAX_OUTPUT_TOKENS: u32 = 512;'''
+catches = [
+    "a_drive_servers_default_cap_leaves_room_for_reasoning",
+]
+
+[[fault]]
+id = "drive.projection-drops-a-capped-calls-prefill"
+failure_class = "drive.projection-drops-a-capped-calls-prefill"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+                    Some(Line::Response { timings, .. }) => timings.as_ref(),'''
+becomes = '''
+                    Some(Line::Response {
+                        timings,
+                        capped: None | Some(false),
+                        ..
+                    }) => timings.as_ref(),'''
+catches = [
+    "drive::projection::tests::on_a_cited_engine_a_capped_turn_keeps_its_prefill_and_the_next_turn_is_rowed",
 ]

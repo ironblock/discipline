@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 143
+mechanics_assertions = 152
 unseedable_guards = 2
 migrated = 0
 
@@ -287,6 +287,16 @@ target = "lib/capture::bakeoff"
 label = "the assembled directory's evidence is elsewhere"
 failure_class = "results.evidence-not-attached"
 legacy_signature = "capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_scratch_shared"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "the bakeoff scratch shared by every run"
+failure_class = "test.fixture-path-shared"
+legacy_signature = "capture::bakeoff::tests::two_scratches_never_share_a_directory \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -8109,6 +8119,166 @@ failure_class = "drive.serve-bin-empties-the-log-before-it-starts"
 migrated = false
 
 [[fault]]
+id = "drive.projection-rebuilds-without-the-answer"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-rebuilds-without-the-answer"
+failure_class = "drive.projection-rebuilds-without-the-answer"
+migrated = false
+
+[[fault]]
+id = "drive.projection-derives-on-an-uncited-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-derives-on-an-uncited-engine"
+failure_class = "drive.projection-derives-on-an-uncited-engine"
+migrated = false
+
+[[fault]]
+id = "drive.projection-prefill-on-an-uncited-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-prefill-on-an-uncited-engine"
+failure_class = "drive.projection-prefill-on-an-uncited-engine"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-an-unspellable"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-an-unspellable"
+failure_class = "drive.projection-drops-an-unspellable"
+migrated = false
+
+[[fault]]
+id = "drive.projection-guesses-an-unrebuilt-head"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-guesses-an-unrebuilt-head"
+failure_class = "drive.projection-guesses-an-unrebuilt-head"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-records-without-a-regimen"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-records-without-a-regimen"
+failure_class = "drive.serve-bin-records-without-a-regimen"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-never-writes-the-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-never-writes-the-record"
+failure_class = "drive.serve-bin-never-writes-the-record"
+migrated = false
+
+[[fault]]
+id = "drive.session-writes-usage-beside-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-writes-usage-beside-timings"
+failure_class = "drive.session-writes-usage-beside-timings"
+migrated = false
+
+[[fault]]
+id = "drive.session-write-through-skips-the-lines-before-it"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-write-through-skips-the-lines-before-it"
+failure_class = "drive.session-write-through-skips-the-lines-before-it"
+migrated = false
+
+[[fault]]
+id = "drive.session-append-leaves-the-sink-unfed"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-append-leaves-the-sink-unfed"
+failure_class = "drive.session-append-leaves-the-sink-unfed"
+migrated = false
+
+[[fault]]
+id = "drive.serve-log-writes-after-a-failure"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-log-writes-after-a-failure"
+failure_class = "drive.serve-log-writes-after-a-failure"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-an-unanswered-request"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-an-unanswered-request"
+failure_class = "drive.projection-drops-an-unanswered-request"
+migrated = false
+
+[[fault]]
+id = "drive.projection-cites-a-literal-on-any-binary"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-cites-a-literal-on-any-binary"
+failure_class = "drive.projection-cites-a-literal-on-any-binary"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-reports-a-digest-of-other-bytes"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-reports-a-digest-of-other-bytes"
+failure_class = "drive.serve-bin-reports-a-digest-of-other-bytes"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-record"
+failure_class = "drive.serve-bin-leaves-an-earlier-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-sidecar"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-sidecar"
+failure_class = "drive.serve-bin-leaves-an-earlier-sidecar"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-only-a-held-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-only-a-held-record"
+failure_class = "drive.serve-bin-announces-only-a-held-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-every-record-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-every-record-emptied"
+failure_class = "drive.serve-bin-announces-every-record-emptied"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-empties-the-record-before-the-bind"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-empties-the-record-before-the-bind"
+failure_class = "drive.serve-bin-empties-the-record-before-the-bind"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-forgets-what-it-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-forgets-what-it-emptied"
+failure_class = "drive.serve-bin-forgets-what-it-emptied"
+migrated = false
+
+[[fault]]
 id = "drive.session-drops-timings"
 kind = "lane-fault"
 check = "lanes"
@@ -8264,6 +8434,51 @@ legacy_signature = "voxel-stress: its carried field disagrees with its events"
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_snapshot_orphaned"
+kind = "seeded-gate"
+check = "exercise"
+label = "a snapshot no admission names, left in place"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "admission: scripts/hygiene-admitted-000000000000-patterns\\.tsv: a snapshot no admission names"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_admit_keeps_orphans"
+kind = "seeded-gate"
+check = "exercise"
+label = "admit no longer removing what no admission names"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_replayed_without_label"
+kind = "seeded-gate"
+check = "exercise"
+label = "an authored example replayed without its label"
+failure_class = "exercise.example-unlabelled"
+legacy_signature = "FAIL.*Replay\\.stories\\.tsx > an authored example, under its label for the whole replay"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_label_scrolls_away"
+kind = "seeded-gate"
+check = "exercise"
+label = "an example's label scrolling away"
+failure_class = "exercise.example-unlabelled"
+legacy_signature = "replay-smoke: kitchen-sink's label is on the page but out of view"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_bundled_into_page"
+kind = "seeded-gate"
+check = "exercise"
+label = "an example bundled into the page's code"
+failure_class = "exercise.payload-bundled"
+legacy_signature = "replay-smoke: kitchen-sink is bundled into the page's code"
+migrated = false
+
+[[fault]]
 id = "exercise.exercise_progress_read_nested"
 kind = "seeded-gate"
 check = "exercise"
@@ -8380,3 +8595,139 @@ failure_class = "wiring.pages-condition"
 legacy_signature = "pages.yml: the deploy's condition has text outside its"
 migrated = false
 
+[[fault]]
+id = "drive.session-settles-a-capped-turn-final"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-settles-a-capped-turn-final"
+failure_class = "drive.session-settles-a-capped-turn-final"
+migrated = false
+
+[[fault]]
+id = "drive.session-writes-a-capped-response-uncapped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-writes-a-capped-response-uncapped"
+failure_class = "drive.session-writes-a-capped-response-uncapped"
+migrated = false
+
+[[fault]]
+id = "drive.projection-answers-a-capped-call"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-answers-a-capped-call"
+failure_class = "drive.projection-answers-a-capped-call"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-usage-hides-serve"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-usage-hides-serve"
+failure_class = "drive.serve-bin-usage-hides-serve"
+migrated = false
+
+[[fault]]
+id = "client.canned-ignores-its-finish-reason"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-ignores-its-finish-reason"
+failure_class = "client.canned-ignores-its-finish-reason"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-cap-cuts-reasoning"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-cap-cuts-reasoning"
+failure_class = "drive.serve-bin-cap-cuts-reasoning"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-a-capped-calls-prefill"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-a-capped-calls-prefill"
+failure_class = "drive.projection-drops-a-capped-calls-prefill"
+migrated = false
+[[fault]]
+id = "hygiene.hygiene_datauri_read_as_prose"
+kind = "seeded-gate"
+check = "hygiene"
+label = "a data-URI payload read as prose"
+failure_class = "hygiene.forbidden-pattern"
+legacy_signature = "hygiene: internal-ticket-id: tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri\\.svg:6:"
+migrated = false
+
+[[fault]]
+id = "mech.a-ticket-id-shape-in-a-data-uri-payload-is-not-a-ticket-id"
+kind = "mechanics"
+check = "-"
+label = "a ticket-id shape in a data-URI payload is not a ticket id"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.and-the-same-bytes-outside-a-data-uri-read-red"
+kind = "mechanics"
+check = "-"
+label = "and the same bytes outside a data URI read red"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.a-readable-run-after-a-made-up-image-prefix-reads-red"
+kind = "mechanics"
+check = "-"
+label = "a readable run after a made-up image prefix reads red"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.a-hit-beside-an-image-is-named-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a hit beside an image is named against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-scan-of-a-tree-with-an-image-leaves-no-prose-view-behind"
+kind = "mechanics"
+check = "-"
+label = "a scan of a tree with an image leaves no prose view behind"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-readable-run-behind-every-image-label-every-check-s-near-miss-and-every-refused-delimiter-reads-red-once-each"
+kind = "mechanics"
+check = "-"
+label = "a readable run behind every image label, every check's near miss and every refused delimiter reads red once each"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.thirteen-hits-beside-images-two-files-sharing-a-name-are-each-named-once-against-their-own-file"
+kind = "mechanics"
+check = "-"
+label = "thirteen hits beside images, two files sharing a name, are each named once against their own file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-hit-in-a-decoded-view-beside-an-image-is-named-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a hit in a decoded view beside an image is named against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-credential-shape-inside-an-image-payload-reads-red-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a credential shape inside an image payload reads red, against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false

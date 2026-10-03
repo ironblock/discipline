@@ -428,6 +428,7 @@ check_exercise() {
       pnpm exec playwright install chromium &&
       pnpm test &&
       python3 scripts/test_render_ledger.py &&
+      python3 scripts/test_admission.py &&
       pnpm build:replay &&
       (cd .. && check_site _site) &&
       node scripts/replay-smoke.mjs ../_site
@@ -1677,6 +1678,27 @@ new = "    for artifact in artifacts.iter().take(0) {"
 if source.count(old) != 1:
     raise SystemExit(f"the copy loop appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# #316: the bakeoff tests' scratch directory named by the test alone again, so
+# every verify.sh on one machine shares it and two worktrees verifying at once
+# corrupt each other's fixtures (three bakeoff failures measured on #313 while
+# #315 verified beside it). A run cannot see a second run, so the protection is
+# the property: two scratches in one process differ, and each names its pid.
+inject_bakeoff_scratch_shared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = '            "bakeoff-{name}-{}-{}",'
+if source.count(old) != 1:
+    raise SystemExit(f"the scratch name appears {source.count(old)} times")
+source = source.replace(old, '            "bakeoff-{name}{}{}",', 1)
+source = source.replace("            std::process::id(),\n            MADE.fetch_add(1, Ordering::Relaxed)\n",
+                        '            "",\n            "",\n', 1)
+path.write_text(source, encoding="utf-8")
 EOF
 }
 inject_record_substrate_reference_unchecked() {
@@ -3086,6 +3108,47 @@ inject_exercise_recording_carried_disagrees() {
   edit_in_place 's/^"compaction": 1$/"compaction": 2/' exercise/src/drive/recorded/voxel-stress.json
 }
 
+# A snapshot no admission names, left in scripts/ (#257): a copy of the table
+# first-drive was admitted under, filed under an id nothing cites -- a rule
+# nothing is admitted under, which a reader cannot tell from one in force.
+inject_exercise_snapshot_orphaned() {
+  local snapshot
+  snapshot="$(grep -o 'scripts/hygiene-admitted-[0-9a-f]\{12\}-patterns\.tsv' exercise/src/drive/recorded/first-drive.admission.json | head -n 1)"
+  [ -n "$snapshot" ] && [ -f "$snapshot" ] || { echo "inject: first-drive's admission names no patterns snapshot" >&2; return 1; }
+  cp "$snapshot" scripts/hygiene-admitted-000000000000-patterns.tsv
+}
+
+# `admit` no longer removing what no admission names (#257): the call after a
+# written admission dropped, so an orphan outlives the admission that should
+# have cleared it. `verify` would still refuse the tree; admission.py's own
+# test is what says `admit` broke its promise.
+inject_exercise_admit_keeps_orphans() {
+  edit_in_place '/^    prune()$/d' exercise/scripts/admission.py
+}
+
+# An authored example replayed without its label (#272): the condition turned
+# around, so the kitchen sink plays with nothing over it to say it is not a
+# session (and a recording gets the label instead). Typecheck and lint pass it;
+# the story that replays the example reads the label before and after it plays.
+inject_exercise_example_replayed_without_label() {
+  edit_in_place 's/{example ? <PinnedExampleLabel \/> : null}/{!example ? <PinnedExampleLabel \/> : null}/' exercise/src/replay/Replay.tsx
+}
+
+# The label there, but not held: it scrolls away with the top of the page, so
+# most of the replay reads as a session. Only the browser smoke, scrolled to
+# the end of the built page, can see it.
+inject_exercise_example_label_scrolls_away() {
+  edit_in_place '/^  position: sticky;$/d' exercise/src/replay/replay.css
+}
+
+# An example bundled into the page's own code: its registry imported from the
+# page's entry, which carries the whole authored script in with it. Typecheck,
+# lint, tests and the scans pass it; the smoke finds the example's text in
+# replay/assets/, where only the page's code belongs.
+inject_exercise_example_bundled_into_page() {
+  edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
+}
+
 # The meter reading a progress frame's old, nested shape again (#288): what
 # the page did when it went blank on the rehearsal drive's first live frame.
 # The types are the format's now, so the read goes through a cast, as an
@@ -3134,8 +3197,8 @@ import pathlib
 
 path = pathlib.Path("scripts/hygiene.sh")
 source = path.read_text(encoding="utf-8")
-old = 'targets=(${text_files+"${text_files[@]}"})'
-new = 'targets=("${text_files[@]}")'
+old = '*) targets=(${prose_files+"${prose_files[@]}"}) ;;'
+new = '*) targets=("${prose_files[@]}") ;;'
 if source.count(old) != 1:
     raise SystemExit(f"the guard appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -3145,6 +3208,22 @@ EOF
 inject_hygiene() {
   bash scripts/seed-hygiene-fault.sh seeded-faults > /dev/null
   git add --all
+}
+
+# A data-URI payload read as prose again (#278): the views are never built,
+# so the committed fixture's base64, which spells a ticket-id shape, is read
+# with every pattern and the tree scan goes red on it.
+inject_hygiene_datauri_read_as_prose() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/hygiene-datauri.py')
+source = path.read_text(encoding="utf-8")
+old = '    if ";base64," not in text:\n        return None\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '    return None\n', 1), encoding="utf-8")
+EOF
 }
 
 inject_pages() {
@@ -3418,12 +3497,12 @@ p.write_text(s.replace(old, 'json.dumps({"exe": exe}, sort_keys=True,', 1), enco
 PYEOF
 }
 # #202: the recipe's shared-object pattern narrowed to bare `.so`, so a versioned library (libllama.so.0.4.1)
-# drops out of the engine fingerprint unseen.
+# -- and on macOS every .dylib (#29's I0) -- drops out of the engine fingerprint unseen.
 inject_admission_engine_pattern_narrowed() {
   python3 - <<'PYEOF'
 import pathlib
 p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
-old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$")'
+old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$|\\.dylib$")'
 assert old in s, "the pattern moved"
 p.write_text(s.replace(old, 'SHARED_OBJECT = re.compile(r"\\.so$")', 1), encoding="utf-8")
 PYEOF
@@ -7005,6 +7084,134 @@ prove_mechanics() {
   expect_exit "and it reads red with the binary flag restored" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/patterns-with-b.tsv" --tree "${box}/ticket-shape"
 
+  # A ticket-id shape inside an embedded image is bytes, not a ticket id
+  # (#278): the committed fixture's SVG, a real PNG in a data URI, reads clean;
+  # the same bytes with the data URI broken (`;b64,`) read red, so it is the
+  # image reading that clears them; a readable run after a made-up image
+  # prefix is prose and reads red (#279's review); and a credential shape
+  # after one still reads red, named against the file itself, because the
+  # credential rows read every original whole.
+  mkdir -p "${box}/datauri-in" "${box}/datauri-out" "${box}/datauri-credential" "${box}/datauri-readable"
+  cp "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" "${box}/datauri-in/"
+  expect_exit "a ticket-id shape in a data-URI payload is not a ticket id" 0 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/datauri-in"
+  sed 's/;base64,/;b64,/' "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" \
+    > "${box}/datauri-out/shape-outside-a-data-uri.svg"
+  expect_exit "and the same bytes outside a data URI read red" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/datauri-out"
+  # A 4-aligned readable run after an image prefix decodes as base64 and is
+  # no image by its bytes, so it is prose (#279's second review: a 5-character
+  # run failed the decode first and never reached the signature check).
+  printf 'Tracked in data:image/png;base64,%s%s for now.\n' 'D''IE' '42424' > "${box}/datauri-readable/x.md"
+  expect_exit "a readable run after a made-up image prefix reads red" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/datauri-readable"
+  # EVERY CHECK, AND ITS NEAR MISS (#279's third to fifth reviews): a payload
+  # is blanked only when its bytes are an image, so a readable run
+  # behind each image label alone, and behind a NEAR MISS of each check, is
+  # prose, one hit each: a format's start with an end wrong only in its first
+  # byte, an end with a start wrong only in its last, WebP with a correct size
+  # and one wrong tag, or a wrong size. So does a run glued onto a real GIF and
+  # then each character the delimiter lookahead refuses (GIF's trailer is one
+  # byte). Each run decodes strictly, so only the check it misses refuses it.
+  # Counted, so any one check removed or narrowed drops one (#279's fifth
+  # review).
+  mkdir -p "${box}/datauri-labels"
+  python3 - 'D''IE' > "${box}/datauri-labels/x.md" <<'EOF'
+import base64, sys
+t = sys.argv[1]
+run = f"/{t}4242"
+b64 = lambda raw: base64.b64encode(raw).decode()
+def framed(kind, start, end):
+    start += b"\0" * (-len(start) % 3)
+    end = b"\0" * (-len(end) % 3) + end
+    return f"a data:image/{kind};base64,{b64(start)}{run}{b64(end)} b"
+def webp(riff, tag, sized=True):
+    total = 12 + len(run) * 3 // 4
+    size = (total - 8 if sized else 0).to_bytes(4, "little")
+    return f"a data:image/webp;base64,{b64(riff + size + tag)}{run} b"
+png, iend = b"\x89PNG\r\n\x1a\n", b"IEND\xaeB`\x82"
+gif = b64(b"GIF89a\x00\x00;")
+lines = [f"a data:image/{kind};base64,{t}42424 b" for kind in ("png", "jpeg", "gif", "webp")]
+lines += [
+    framed("png", png, b"J" + iend[1:]),
+    framed("png", png[:-1] + b"\x0b", iend),
+    framed("jpeg", b"\xff\xd8\xff", b"\xfe\xd9"),
+    framed("jpeg", b"\xff\xd8\xfe", b"\xff\xd9"),
+    framed("gif", b"GIF89a", b""),
+    framed("gif", b"GIF89b", b";"),
+    webp(b"RIFF", b"WEBQ"),
+    webp(b"RIFX", b"WEBP"),
+    webp(b"RIFF", b"WEBP", sized=False),
+]
+lines += [f"a data:image/gif;base64,{gif}{run}AAA7{c}x b" for c in ".-_@:\\"]
+assert len(lines) == 19
+print("\n".join(lines))
+EOF
+  expect_exit "a readable run behind every image label, every check's near miss and every refused delimiter reads red once each" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-labels' 2>&1); \
+      [ \"\$(grep -c 'internal-ticket-id: ${box}/datauri-labels/x.md:' <<<\"\$out\")\" -eq 19 ]"
+  # Many prose views, each hit named against its own file, once: `prose-1:`
+  # is not a prefix of `prose-10` (#279's fourth review), so a view's name is
+  # matched with its colon; and two files sharing a basename, only one with a
+  # hit, keep apart, so a view's name is its own (the fifth review). Thirteen
+  # hits, thirteen distinct names, `a/x.svg` among them.
+  mkdir -p "${box}/datauri-many/a" "${box}/datauri-many/b"
+  python3 - "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" 'D''IE' "${box}/datauri-many" <<'EOF'
+import pathlib, re, sys
+payload = re.search(r"base64,([A-Za-z0-9+/=]+)", open(sys.argv[1]).read()).group(1)
+for n in range(1, 13):
+    pathlib.Path(sys.argv[3], f"f{n:02d}.svg").write_text(f'<img src="data:image/png;base64,{payload}"/> see {sys.argv[2]}-{n}\n')
+pathlib.Path(sys.argv[3], "a", "x.svg").write_text(f'<img src="data:image/png;base64,{payload}"/> see {sys.argv[2]}-13\n')
+pathlib.Path(sys.argv[3], "b", "x.svg").write_text(f'<img src="data:image/png;base64,{payload}"/> see nothing\n')
+EOF
+  expect_exit "thirteen hits beside images, two files sharing a name, are each named once against their own file" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-many' 2>&1); \
+      hits=\$(grep -oE 'internal-ticket-id: ${box}/datauri-many/(f[0-9]{2}\.svg|a/x\.svg):1:' <<<\"\$out\"); \
+      [ \"\$(wc -l <<<\"\$hits\")\" -eq 13 ] && [ \"\$(sort -u <<<\"\$hits\" | wc -l)\" -eq 13 ] \
+        && grep -q '/a/x\.svg:1:' <<<\"\$hits\""
+  # A hit in a decoded mirror's prose view is named `(decoded)` against its
+  # file (the mirror names it without its leading `/`): the prose views are
+  # mapped before the mirror rewrite.
+  mkdir -p "${box}/datauri-json"
+  python3 - "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" > "${box}/datauri-json/f.json" <<'EOF'
+import re, sys
+payload = re.search(r"base64,([A-Za-z0-9+/=]+)", open(sys.argv[1]).read()).group(1)
+print('{"x": "<img src=\\"data:image/png;base64,' + payload + '\\"/> see \\u0044' + 'IE-7"}')
+EOF
+  expect_exit "a hit in a decoded view beside an image is named against its file" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-json' 2>&1); \
+      grep -q 'internal-ticket-id: (decoded) ${box#/}/datauri-json/f.json:' <<<\"\$out\""
+  # A credential inside a payload that IS an image by its bytes -- the PNG
+  # signature, the shape, the IEND trailer -- is blanked from the prose, so
+  # only the credential rows' reading of the original finds it: the scan
+  # exits 1, exactly, naming the file itself.
+  python3 - 'AKIA' 'ABCDEFGHIJKLMNOP' > "${box}/datauri-credential/c.svg" <<'EOF'
+import base64, sys
+head = base64.b64encode(b"\x89PNG\r\n\x1a\n\x00").decode()
+tail = base64.b64encode(b"\x00IEND\xaeB`\x82").decode()
+print(f'<svg><image href="data:image/png;base64,{head}/{sys.argv[1]}{sys.argv[2]}/xx{tail}"/></svg>')
+EOF
+  expect_exit "a credential shape inside an image payload reads red, against its file" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-credential' 2>&1); rc=\$?; \
+      [ \"\$rc\" -eq 1 ] && grep -q 'aws-access-key-id: ${box}/datauri-credential/c.svg:1:' <<<\"\$out\""
+  # A hit in a prose view is named against its file, never the view: the
+  # fixture's real PNG, then a ticket-id shape on the same line.
+  mkdir -p "${box}/datauri-map"
+  python3 - "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" 'D''IE' > "${box}/datauri-map/x.svg" <<'EOF'
+import re, sys
+payload = re.search(r"base64,([A-Za-z0-9+/=]+)", open(sys.argv[1]).read()).group(1)
+print(f'<img src="data:image/png;base64,{payload}"/> see {sys.argv[2]}-7')
+EOF
+  expect_exit "a hit beside an image is named against its file" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-map' 2>&1); rc=\$?; \
+      [ \"\$rc\" -eq 1 ] && grep -q 'internal-ticket-id: ${box}/datauri-map/x.svg:1:' <<<\"\$out\""
+  # A scan removes its prose views: run with an empty TMPDIR of its own, a
+  # scan of a tree with an image leaves it empty.
+  mkdir -p "${box}/datauri-tmp"
+  expect_exit "a scan of a tree with an image leaves no prose view behind" 0 \
+    bash -c "TMPDIR='${box}/datauri-tmp' bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-map' >/dev/null 2>&1; \
+      [ -z \"\$(ls -A '${box}/datauri-tmp')\" ]"
+
   # The ledger renderer's verdict reaches the results check (#32 I2): a
   # renderer that exits 7 makes `check_results` exit 7 -- its own status,
   # which no other step of the check produces, so the assertion cannot pass
@@ -7882,7 +8089,28 @@ selftest() {
   # refuses outright.
   local -A SCOPE_INHERIT=()
   [ -z "$SELFTEST_SCOPE_PLAN" ] || load_scope_plan
-  scratch; SELFTEST_TARGET="${SCRATCH}/target"
+  # THE SANDBOXES' TARGET MAY BE A CACHED ONE (#306): CI names a directory a
+  # Cargo cache restores into, so the dependencies are compiled once per
+  # lockfile, toolchain and runner image rather than on every shard. Unset, a
+  # scratch of its own, as before. The workspace's own crates rebuild in every
+  # box either way: seeded_case touches lib.rs there, and each run's box is a
+  # new path, so nothing a cache holds can stand in for a crate a fault edited.
+  # ABSOLUTE ONLY: by here verify.sh has moved to ROOT, so a relative path
+  # would land somewhere the caller never named (as --census says of its own).
+  if [ -n "${VERIFY_SELFTEST_TARGET:-}" ]; then
+    case "$VERIFY_SELFTEST_TARGET" in
+      /*) ;;
+      *) echo "selftest: VERIFY_SELFTEST_TARGET must be an absolute path, not '$VERIFY_SELFTEST_TARGET'" >&2
+         exit "$EXIT_MISUSE" ;;
+    esac
+    mkdir -p -- "$VERIFY_SELFTEST_TARGET" &&
+      SELFTEST_TARGET="$(cd -- "$VERIFY_SELFTEST_TARGET" && pwd)" || {
+        echo "selftest: VERIFY_SELFTEST_TARGET ($VERIFY_SELFTEST_TARGET) is not a usable directory" >&2
+        exit "$EXIT_MISUSE"
+      }
+  else
+    scratch; SELFTEST_TARGET="${SCRATCH}/target"
+  fi
   scratch; SELFTEST_LOGS="$SCRATCH"
   # DERIVE MODE KEEPS ITS LOGS. `selftest_cleanup` removes every scratch it
   # registered, so an index written there would name files that no longer
@@ -8022,6 +8250,8 @@ selftest() {
     'capture::bakeoff::tests::a_cache_the_record_did_not_consume_is_refused \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
     'capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \.\.\. FAILED' 'lib/capture::bakeoff'
+  seeded_case "the bakeoff scratch shared by every run" test inject_bakeoff_scratch_shared \
+    'capture::bakeoff::tests::two_scratches_never_share_a_directory \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
     'capture::sense::tests::every_pre_registered_budget_is_one_its_fixture_demonstrates \.\.\. FAILED' 'lib/capture::sense'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
@@ -8223,6 +8453,8 @@ selftest() {
     'is unguarded; bash 3\.2 aborts on it'
   seeded_case "forbidden content in the tree"         hygiene  inject_hygiene \
     'hygiene: internal-ticket-id:'
+  seeded_case "a data-URI payload read as prose"      hygiene  inject_hygiene_datauri_read_as_prose \
+    'hygiene: internal-ticket-id: tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri\.svg:6:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
   seeded_case "a ledger row citing a missing directory" results inject_results_ledger_row_cites_missing_directory \
@@ -8255,6 +8487,16 @@ selftest() {
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a capture's carried field disagreeing with its events" exercise inject_exercise_recording_carried_disagrees \
     'voxel-stress: its carried field disagrees with its events'
+  seeded_case "a snapshot no admission names, left in place" exercise inject_exercise_snapshot_orphaned \
+    'admission: scripts/hygiene-admitted-000000000000-patterns\.tsv: a snapshot no admission names'
+  seeded_case "admit no longer removing what no admission names" exercise inject_exercise_admit_keeps_orphans \
+    'FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so'
+  seeded_case "an authored example replayed without its label" exercise inject_exercise_example_replayed_without_label \
+    'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
+  seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \
+    "replay-smoke: kitchen-sink's label is on the page but out of view"
+  seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
+    "replay-smoke: kitchen-sink is bundled into the page's code"
   seeded_case "the meter reading a progress frame's old shape" exercise inject_exercise_progress_read_nested \
     "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
   seeded_case "a turn stopped mid-prefill drawn as read in full" exercise inject_exercise_stopped_read_drawn_whole \

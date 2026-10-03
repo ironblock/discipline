@@ -162,11 +162,13 @@ mirror="$(mktemp -d)" || { echo "hygiene: mktemp -d failed" >&2; exit "$EXIT_BRO
 # when the scan reached its last line and said so; any other exit 0 is a scan
 # that stopped short, and is EXIT_BROKEN.
 matchfile=""
+datauri=""
 finished=0
 cleanup() {
   local rc=$?
   rm -rf -- "$mirror"
   [ -z "$matchfile" ] || rm -f -- "$matchfile"
+  [ -z "$datauri" ] || rm -rf -- "$datauri"
   [ "$finished" = 1 ] || [ "$rc" -ne 0 ] || rc="$EXIT_BROKEN"
   exit "$rc"
 }
@@ -224,6 +226,57 @@ if [ "$scan_all" = true ] && [ "${#binary_files[@]}" -gt 0 ]; then
   exit "$EXIT_DIRTY"
 fi
 
+# --- embedded images ---------------------------------------------------------
+# BINARY BYTES IN TEXT CLOTHING (#278). An image embedded in a text file as a
+# base64 data URI -- an SVG's `<feImage>` PNG -- is bytes, and #233 ruled a
+# shape inside bytes names nothing: the loose patterns find `internal-ticket-id`
+# in base64 at the rate they find it in random bytes. So the loose patterns
+# read each text file's PROSE: `hygiene-datauri.py` writes a view with every
+# payload that IS an image -- by its decoded bytes, not its label -- blanked,
+# line and column numbers unchanged, and names the original where nothing was
+# blanked. The `b` (credential) patterns still read every original, whole, as
+# #240 left them (#279's review: a credential cut at a view's edge escaped).
+# `check-history.py` scans its patch files through this script, so the history
+# reads the same. Under `scan: all` every pattern reads every byte.
+prose_files=(${text_files+"${text_files[@]}"})
+origins=()
+proses=()
+if [ "$scan_all" != true ] && [ "${#text_files[@]}" -gt 0 ]; then
+  datauri="$(mktemp -d)" || { echo "hygiene: mktemp -d failed" >&2; exit "$EXIT_BROKEN"; }
+  if ! printf '%s\0' ${text_files+"${text_files[@]}"} \
+       | python3 "${here}/hygiene-datauri.py" --into "$datauri" > "${datauri}/scan"; then
+    echo "hygiene: the prose views could not be built; a scan that reads an" \
+         "image as prose, or skips the file, is not this scan" >&2
+    exit "$EXIT_BROKEN"
+  fi
+  prose_files=()
+  i=0
+  while IFS= read -r -d '' path; do
+    prose_files+=("$path")
+    if [ "$path" != "${text_files[i]}" ]; then
+      origins+=("${text_files[i]}"); proses+=("$path")
+    fi
+    i=$((i + 1))
+  done < "${datauri}/scan"
+  if [ "$i" -ne "${#text_files[@]}" ]; then
+    echo "hygiene: the prose views name ${i} file(s) for ${#text_files[@]}; a scan" \
+         "that lost a file is not this scan" >&2
+    exit "$EXIT_BROKEN"
+  fi
+fi
+
+# A hit in a prose view is a hit in the file it came from.
+from_view() {
+  local line="$1" i=0
+  while [ "$i" -lt "${#origins[@]}" ]; do
+    case "$line" in
+      "${proses[i]}:"*) printf '%s' "${origins[i]}${line#"${proses[i]}"}"; return ;;
+    esac
+    i=$((i + 1))
+  done
+  printf '%s' "$line"
+}
+
 # --- scan --------------------------------------------------------------------
 # grep's output goes to a file rather than a command substitution: a match
 # inside a binary carries NUL bytes, which `$(...)` discards with a warning on
@@ -255,9 +308,9 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
   sed_flags="g"
   case "${flags:-}" in *i*) sed_flags="gI" ;; esac
 
-  targets=(${text_files+"${text_files[@]}"})
   case "${flags:-}" in
-    *b*) targets+=(${binary_files+"${binary_files[@]}"}) ;;
+    *b*) targets=(${text_files+"${text_files[@]}"} ${binary_files+"${binary_files[@]}"}) ;;
+    *) targets=(${prose_files+"${prose_files[@]}"}) ;;
   esac
   [ "${#targets[@]}" -gt 0 ] || continue
 
@@ -299,6 +352,7 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
           # A hit in the mirror is a hit in the file it was decoded from, and
           # says so. Reporting the temporary path would name a file that is
           # gone by the time anyone reads the message.
+          [ "${#origins[@]}" -eq 0 ] || line="$(from_view "$line")"
           case "$line" in
             "$mirror"/*) line="(decoded) ${line#"$mirror"/}" ;;
           esac
@@ -350,6 +404,7 @@ else
   echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
        "($((${#text_files[@]} - decoded_count)) text, ${#binary_files[@]} binary," \
        "the latter searched only for credential shapes;" \
+       "${#proses[@]} read as prose with their embedded images blanked;" \
        "${decoded_count} decoded view(s) scanned beside them)"
 fi
 finished=1
