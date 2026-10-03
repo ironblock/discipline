@@ -111,6 +111,9 @@ def cited() -> set[str]:
             # Compared as strings, so only the form admit writes is read: `./scripts/...`, or another case of it, is not.
             if path != SNAPSHOT[part].format(id=ident):
                 raise Unreadable(f'admission: {rel}: its table lists {path!r} where admit writes {SNAPSHOT[part].format(id=ident)!r}')
+            # admit writes a snapshot as a file; a link there reaches something else, which removing could break.
+            if (ROOT / path).is_symlink():
+                raise Unreadable(f'admission: {rel}: its table lists {path}, which is a link; admit writes a snapshot as a file')
         named.update(paths.values())
     return named
 
@@ -121,14 +124,15 @@ def orphans() -> list[pathlib.Path]:
     by_case = {path.casefold(): path for path in named}
 
     def respelled(f: pathlib.Path, rel: str) -> bool:
-        # A cited path reaches this file under another case of its own name (a case-insensitive disk): it is cited.
-        # Only that: a link, or another name for the same file, is a name nothing admits under.
-        if f.is_symlink() or rel.casefold() not in by_case:
+        # A cited path reaches this very entry under another case of its name (a case-insensitive disk): it is cited.
+        # Only that: the entries are compared, not what they lead to, so a link or another name is not.
+        if rel.casefold() not in by_case:
             return False
         try:
-            return os.path.samefile(f, ROOT / by_case[rel.casefold()])
+            mine, cited_entry = os.lstat(f), os.lstat(ROOT / by_case[rel.casefold()])
         except OSError:
             return False
+        return (mine.st_dev, mine.st_ino) == (cited_entry.st_dev, cited_entry.st_ino)
 
     found = [f for f in (ROOT / 'scripts').rglob('hygiene-admitted-*') if f.is_file() or f.is_symlink()]
     return sorted(f for f in found if (rel := f.relative_to(ROOT).as_posix()) not in named and not respelled(f, rel))
@@ -141,7 +145,7 @@ def prune() -> None:
         if orphan.parent != ROOT / 'scripts':
             print(f'admission: {rel}: named like a snapshot no admission names, below scripts/ where admit never writes one; not removed')
             continue
-        orphan.unlink()
+        orphan.unlink(missing_ok=True)
         print(f'admission: removed {rel}: a snapshot no admission names')
 
 

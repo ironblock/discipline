@@ -153,6 +153,23 @@ class Admission(unittest.TestCase):
             self.assertIn(f'admission: removed {name}: a snapshot no admission names', run.stdout)
         self.assertEqual(sorted(self.snapshots()), self.cited)
 
+    def test_a_cited_snapshot_that_is_a_link_stops_every_command(self):
+        data = self.site()
+        cited = self.box / next(p for p in self.cited if p.endswith('-patterns.tsv'))
+        target = cited.with_name('hygiene-admitted-000000000000-patterns.tsv')
+        cited.rename(target)
+        cited.symlink_to(target.name)
+        self.unread(f'its table lists {cited.relative_to(self.box).as_posix()}, which is a link', ('admit', 'fixture'), ('verify', data), ('tables', data))
+        self.assertTrue(target.exists())
+
+    def test_a_digest_that_is_not_a_string_stops_every_command(self):
+        data = self.site()
+        for copy in (self.recording.with_name('fixture.admission.json'), pathlib.Path(data) / 'fixture.admission.json'):
+            admission = json.loads(copy.read_text(encoding='utf-8'))
+            admission['table']['hashes']['sha256'] = None
+            copy.write_text(json.dumps(admission, indent=2) + '\n', encoding='utf-8')
+        self.unread('its table gives a snapshot digest that is not a string', ('admit', 'fixture'), ('verify', data), ('tables', data))
+
     def test_an_unreadable_admission_says_the_way_out(self):
         (self.box / 'exercise/src/drive/recorded/stray.admission.json').write_text('{', encoding='utf-8')
         run = self.run_admission('admit', 'fixture')
