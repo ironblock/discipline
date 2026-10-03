@@ -46,7 +46,9 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::session::{CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session};
+use super::session::{
+    CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session, Settlement,
+};
 use crate::client::stream::Streaming;
 use crate::digest::sha256;
 use crate::formats::record::json::{self, Value};
@@ -227,6 +229,18 @@ pub struct Server {
 }
 
 impl Server {
+    /// Stop accepting, and give the open streams up to `grace` to finish:
+    /// an `/events` stream closes itself once it has delivered `ended`, so
+    /// a page sees the session's last line before the process exits (#291).
+    pub fn finish(self, grace: Duration) {
+        let live = Arc::clone(&self.live);
+        drop(self);
+        let until = Instant::now() + grace;
+        while live.load(Ordering::SeqCst) > 0 && Instant::now() < until {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     /// Serve `session` on `listener`.
     ///
     /// # Errors
@@ -509,6 +523,13 @@ impl<S: Streaming + 'static> Serving<S> {
                 next = logged.seq + 1;
             }
             if stream.write_all(out.as_bytes()).is_err() || stream.flush().is_err() {
+                return;
+            }
+            // Once ended, nothing more is logged (#291): a stream that has
+            // delivered the last line, `ended`, is done, and closes.
+            if self.session.settlement() == Settlement::Ended
+                && self.session.events_from(next).is_empty()
+            {
                 return;
             }
         }

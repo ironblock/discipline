@@ -285,12 +285,13 @@ fn serve(args: &[String]) -> ExitCode {
     };
     let session = std::sync::Arc::new(Session::open(transport, shape));
     let opened = session.opened();
+    let watching = std::sync::Arc::clone(&session);
     let config = Config {
         allowed_origins,
         credential,
         ..Config::default()
     };
-    let (server, log, record_held) = match started(
+    let running = match started(
         session,
         listener,
         config,
@@ -303,19 +304,34 @@ fn serve(args: &[String]) -> ExitCode {
     println!(
         "{}",
         announcement(
-            &server.addr().to_string(),
+            &running.server.addr().to_string(),
             opened,
             substrate,
             engine.as_ref(),
-            log_path.as_deref().zip(log),
-            record_file.as_deref().zip(record_held),
+            log_path.as_deref().zip(running.log_held),
+            record_file.as_deref().zip(running.record_held),
         )
     );
-    // Serves until the process is stopped. The server's threads do the work;
-    // this one only keeps the process, and the server, alive.
-    loop {
-        std::thread::park();
+    ended(&watching, running)
+}
+
+/// Serve until the session ends, then let the writers finish, close the
+/// listener, give open streams a moment to deliver `ended`, and exit 0 --
+/// so `ended` is the log's last line and a recipe need not interrupt (#291).
+fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
+    let mut next = 0;
+    while session.settlement() != diet::drive::session::Settlement::Ended {
+        next += session
+            .wait_from(next, std::time::Duration::from_secs(60))
+            .len() as u64;
     }
+    // The log was written as each line was appended; the record, once,
+    // after `ended`. A record that cannot be written exits 3 on its own.
+    if let Some(writer) = running.record_writer {
+        let _ = writer.join();
+    }
+    running.server.finish(std::time::Duration::from_secs(5));
+    ExitCode::SUCCESS
 }
 
 /// The file at `path`, opened for writing (created if absent) but NOT yet
@@ -398,9 +414,9 @@ fn started(
         ((String, std::fs::File), bool),
         diet::formats::record::Regime,
     )>,
-) -> Result<(Server, Option<bool>, Option<bool>), ExitCode> {
+) -> Result<Running, ExitCode> {
     let render = diet::drive::session::render;
-    let (log, record_held, emptied) =
+    let (log_held, record_kept, emptied) =
         started_writers(&session, render, log, record).map_err(|why| fail(EXIT_OUTPUT, &why))?;
     let server = Server::start(listener, session, config, render).map_err(|why| {
         fail(
@@ -408,7 +424,13 @@ fn started(
             &emptied.named(format!("the server did not start: {why}")),
         )
     })?;
-    Ok((server, log, record_held))
+    let (record_held, record_writer) = record_kept.unzip();
+    Ok(Running {
+        server,
+        log_held,
+        record_held,
+        record_writer,
+    })
 }
 
 /// The log and the record, started once the address is bound and before
@@ -426,9 +448,16 @@ fn started_writers(
         ((String, std::fs::File), bool),
         diet::formats::record::Regime,
     )>,
-) -> Result<(Option<bool>, Option<bool>, diet::drive::serve::Emptied), String> {
+) -> Result<
+    (
+        Option<bool>,
+        Option<(bool, std::thread::JoinHandle<()>)>,
+        diet::drive::serve::Emptied,
+    ),
+    String,
+> {
     let mut emptied = diet::drive::serve::Emptied::default();
-    let record_held = record
+    let record_kept = record
         .map(|(((path, file), held), regime)| {
             let sidecar = format!("{path}.unspellable.json");
             let stale = std::path::Path::new(&sidecar).exists();
@@ -442,8 +471,8 @@ fn started_writers(
                     .map_err(|why| emptied.named(format!("{sidecar} cannot be removed: {why}")))?;
                 emptied.push(format!("the previous sidecar at {sidecar}"));
             }
-            keep_record(std::sync::Arc::clone(session), regime, (path, file));
-            Ok::<_, String>(held || stale)
+            let writer = keep_record(std::sync::Arc::clone(session), regime, (path, file));
+            Ok::<_, String>((held || stale, writer))
         })
         .transpose()?;
     let log_held = log
@@ -457,7 +486,18 @@ fn started_writers(
             Ok::<_, String>(truncated)
         })
         .transpose()?;
-    Ok((log_held, record_held, emptied))
+    Ok((log_held, record_kept, emptied))
+}
+
+/// The server, running, and what the caller announces and waits on.
+struct Running {
+    server: Server,
+    /// Whether naming the log emptied a file that held something.
+    log_held: Option<bool>,
+    /// Whether naming the record emptied anything.
+    record_held: Option<bool>,
+    /// The record's writer, which reports once the session has ended.
+    record_writer: Option<std::thread::JoinHandle<()>>,
 }
 
 /// The session's record, written once, when it settles `ended` (`--record`,
@@ -468,7 +508,7 @@ fn keep_record(
     session: std::sync::Arc<Session<HttpStream>>,
     regime: diet::formats::record::Regime,
     (path, file): (String, std::fs::File),
-) {
+) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let mut next = 0;
         while session.settlement() != diet::drive::session::Settlement::Ended {
@@ -491,7 +531,7 @@ fn keep_record(
                 std::process::exit(i32::from(EXIT_OUTPUT));
             }
         }
-    });
+    })
 }
 
 /// Project the ended session, check the record reads back, and write it and
