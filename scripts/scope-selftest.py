@@ -177,10 +177,12 @@ def top_level_code(text: str) -> str:
     left open -- or in the header usage() prints as --help. The top level is
     compared whole when bash -n cannot parse it, when a line starts with `}`
     (a closer the function pattern left behind), when a matched function does
-    not parse alone as a complete unit (cut short), or when the text defines
-    an alias (#323). Whole re-proves; it never skips. What this cannot see: a
-    function match that runs long, past its real closer, swallowing top- level
-    code into the function (#317).
+    not parse alone as a complete unit (cut short), or when the text can turn
+    alias expansion on or defines an alias (#323). Whole re-proves; it never
+    skips. A function match that runs long past its real closer compares the
+    whole file (#317). What this cannot see (#329): a closer whose line
+    balances its braces or continues onto the next, and the one-line pattern's
+    matches.
     """
     # A function match that ran long past its real closer has swallowed the
     # top-level code after it, which is then in no unit's text the plan reads
@@ -200,12 +202,16 @@ def top_level_code(text: str) -> str:
     if any(line.startswith("}") for line in lines) or not functions_parse(text):
         return outside
     # An alias can open a quote or a heredoc bash -n never sees, since bash -n
-    # expands none (#310: N7b, N10). It can only expand once DEFINED, so the
-    # check is on the definition -- by the `alias` builtin or BASH_ALIASES,
-    # anywhere outside a comment line -- not on the many spellings that turn
-    # expansion on (#323: a split or computed option name, a `#!/bin/sh`
-    # shebang's POSIX mode).
-    if any(ALIAS_DEFINITION.search(line) for line in text.split("\n") if not line.lstrip().startswith("#")):
+    # expands none (#310: N7b, N10). Two checks, as a union: the spellings
+    # that turn expansion on (#314; case-sensitive, as verify.sh's comments
+    # say POSIX), and an alias's DEFINITION -- by the `alias` builtin or
+    # BASH_ALIASES, outside a comment line -- for a switch no spelling shows
+    # (#323: a split or computed option name, a `#!/bin/sh` shebang's POSIX
+    # mode). Neither alone: #328's review defined aliases in ways no regex
+    # sees (`alias -- q=`, a sourced file) under a literal switch.
+    if re.search(r"_aliases|expand_al|\bposix\b|POSIXLY_CORRECT", text) or any(
+        ALIAS_DEFINITION.search(line) for line in text.split("\n") if not line.lstrip().startswith("#")
+    ):
         return outside
     # A top level bash -n cannot parse whole compares whole (#308's fifth
     # review): its first error hides every open quote after it from the check
@@ -889,6 +895,16 @@ def _top_level_comments():
         ("shopt -s \"expand_\"\"aliases\"\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
         ("o=expand_; shopt -s ${o}aliases\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
         ("POSIXLY_CORRECT=1\nBASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #328's review: a literal switch with a definition no regex sees, and
+        # definition forms each held: in a function body, via `builtin`, a
+        # quoted name.
+        ("shopt -s expand_aliases\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("set -o posix\n'alias' q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("POSIXLY_CORRECT=1\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("define() {\n  alias q=\"echo '\"\n}\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("builtin alias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("alias 'q'=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("set -o \"pos\"ix\nBASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
         # #317: a function match that runs long past a closer written
         # otherwise -- a trailing comment, `};`, indented, a heredoc on it --
         # swallows the top-level code after it.
@@ -909,7 +925,9 @@ def _top_level_comments():
     # And the fix stays on for the tree it was written for: today's verify.sh
     # does not fall back to comparing its top level whole (#310).
     today = (ROOT / "verify.sh").read_text(encoding="utf-8")
-    if top_level_code(today) == outside_functions(today):
+    # Whole is either the top level or, for a match that ran long (#317), the
+    # file: neither may be what today's verify.sh compares (#327's review).
+    if top_level_code(today) in (outside_functions(today), today):
         return "this verify.sh's top level is compared whole, so #305's fix is off"
     # usage() prints the header, line 2 to the first empty line (#310): an
     # edit there is read; a comment after it is not.
