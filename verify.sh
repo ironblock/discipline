@@ -4009,6 +4009,36 @@ path.write_text(source.replace(old, '```js`x\n## Results\n<!--\n## Test\n-->\nTh
 EOF
 }
 
+# A `## Results` hidden by a `<!--` no renderer opens (#265's review at e3f12a8): read as a comment here, shown by GitHub.
+inject_results_section_hidden_by_unclosed_comment() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'The run used the <!-- marker.\n\n## Results\n\n<!--\n## Test\n-->\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A `## Results` hidden by a fence opened inside an HTML block (#265's review at e3f12a8): no fence to a renderer.
+inject_results_section_hidden_by_fence_in_html() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '<div>\n```\n</div>\n\n## Results\n\n<!--\n## Test\n-->\nThe rate was [uncited: a sample, 0.241].\n\n<div>\n```\n</div>\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
 # Braces split by an HTML comment (#265's fifth review): a reader sees `{{`.
 inject_results_braces_split_by_markup() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
@@ -8892,6 +8922,10 @@ selftest() {
     "carries a comment marker .<!--. inside a code span.*\[results\.heading-unread\]"
   seeded_case "a fence whose info string holds a backtick" results inject_results_backtick_fence_info_backtick \
     "carries a backtick fence whose info string holds a backtick.*\[results\.heading-unread\]"
+  seeded_case "a section hidden by an unclosed comment" results inject_results_section_hidden_by_unclosed_comment \
+    "'## Results', is a section heading this linter reads as hidden in a comment or a fence.*\[results\.heading-unread\]"
+  seeded_case "a section hidden by a fence in an HTML block" results inject_results_section_hidden_by_fence_in_html \
+    "'## Results', is a section heading this linter reads as hidden in a comment or a fence.*\[results\.heading-unread\]"
   seeded_case "a figure after a hash" results inject_results_figure_after_hash \
     "the Conclusion section types the figure\(s\) '0\.142'.*\[results\.figure-typed\]"
   seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \

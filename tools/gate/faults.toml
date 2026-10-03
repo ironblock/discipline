@@ -3279,6 +3279,24 @@ legacy_signature = "carries a backtick fence whose info string holds a backtick.
 migrated = false
 
 [[fault]]
+id = "results.results_section_hidden_by_unclosed_comment"
+kind = "seeded-gate"
+check = "results"
+label = "a section hidden by an unclosed comment"
+failure_class = "results.heading-unread"
+legacy_signature = "'## Results', is a section heading this linter reads as hidden in a comment or a fence.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_section_hidden_by_fence_in_html"
+kind = "seeded-gate"
+check = "results"
+label = "a section hidden by a fence in an HTML block"
+failure_class = "results.heading-unread"
+legacy_signature = "'## Results', is a section heading this linter reads as hidden in a comment or a fence.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
 id = "results.results_figure_after_hash"
 kind = "seeded-gate"
 check = "results"

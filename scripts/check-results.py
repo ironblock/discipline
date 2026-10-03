@@ -1106,6 +1106,24 @@ def lint_figures(
                 f"line {at + 1} of the body, {line[:60]!r}, carries {why}; this linter cannot read "
                 f"which headings a renderer shows past it, so a referenced body may not (#63)",
             )
+    # EVERY SECTION LINE IS ONE A RENDERER SHOWS (#265's review at e3f12a8):
+    # `rendered_headings` blanks `<!--` to the next `-->` across blocks and
+    # opens a fence inside an HTML block, where no renderer does -- an
+    # unclosed `<!--` in a paragraph, in an attribute or a link destination,
+    # or a fence in a `<div>`, hid a `## Results` GitHub shows. The whitelist
+    # refuses every other line that renders as a heading, so once each
+    # `## <section>` line must be one this linter reads as shown, the two
+    # readings coincide.
+    shown_at = rendered_headings(body)
+    for at, line in enumerate(lines):
+        if SECTION_LINE.fullmatch(line) and at not in shown_at:
+            clean = False
+            fail(
+                "results.heading-unread",
+                f"line {at + 1} of the body, {line!r}, is a section heading this linter reads as "
+                f"hidden in a comment or a fence; a renderer may show it, so a referenced body's "
+                f"section headings stand outside both (#63)",
+            )
     # SECTIONS FROM THE RAW LINES (#265's fifth review): where a section
     # starts is read from the lines the whitelist and the renderer read, never
     # from decoded text -- an escaped or comment-hidden `## Observation` in
