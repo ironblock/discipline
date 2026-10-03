@@ -1,0 +1,1 @@
+a `tool_call` named `read` carries `argv`: only a `bash` call ran a command

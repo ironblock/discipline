@@ -449,6 +449,14 @@ impl<'a> Walk<'a> {
                     );
                 }
             }
+            // A tool call (v3): the record's tool rows are not projected
+            // from the log yet, so each is named rather than dropped.
+            Line::ToolCall { .. } => self.name(
+                line.seq,
+                "tool_call",
+                "a tool call: this projection does not carry it into the record yet".to_owned(),
+                None,
+            ),
             // Carried by the rows above: a delta by its response's text, a
             // settlement and a settled turn by the turn and response rows.
             Line::Delta { .. }
@@ -675,6 +683,7 @@ mod tests {
                 content: "you are the trunk".to_owned(),
             }],
             serving: None,
+            claim: None,
         }
     }
 
@@ -868,6 +877,7 @@ mod tests {
                 Line::Cancelled {
                     request: 3,
                     partial: "Hel".to_owned(),
+                    reasoning: None,
                 },
             ),
             (

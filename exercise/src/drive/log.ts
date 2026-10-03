@@ -159,6 +159,9 @@ export type IdleGap = V0.IdleGapLine;
  */
 export type ProgressFrame = V0.ProgressLine;
 
+/** A call the model made, at its outcome (v3, #297): carried, not yet drawn. */
+export type ToolCall = V0.ToolCallLine;
+
 // ------------------------------------------------------------------ AHEAD kinds
 
 /** AHEAD (R2's later bump, DoD 2): a tool call began. */
@@ -253,6 +256,7 @@ export type LogLine =
   | TurnSettled
   | IdleGap
   | ProgressFrame
+  | ToolCall
   | ToolBegin
   | ToolEnd
   | Fork
@@ -284,6 +288,7 @@ export const NEEDS_OF: { readonly [K in Kind]: readonly Need[] } = {
   'turn.settled': ['R2'],
   'idle.gap': ['R2'],
   progress: ['R3'],
+  tool_call: ['R2'],
   'tool.begin': ['R2'],
   'tool.end': ['R2'],
   fork: ['R4'],
