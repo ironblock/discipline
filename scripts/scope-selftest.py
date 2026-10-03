@@ -69,10 +69,23 @@ FUNCTION = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{\n(.*?)^\}\n", re.M | re
 # ...and the one-line form, `check_parity() { python3 scripts/...; }`, which
 # ten of the checks are spelled in.
 ONE_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{ (.*) \}\n", re.M)
-# An alias defined: `alias name=...` (also `\alias`, `builtin alias`, `eval
-# alias ...`), or BASH_ALIASES assigned. A definition hidden in a split or
-# computed string (`eval "al""ias ..."`) is not seen (#323).
-ALIAS_DEFINITION = re.compile(r"(?<![\w-])alias\s+(?:-p\s+)?[^\s=;|&]+=|BASH_ALIASES")
+# An alias defined by the builtin: `alias name=...` (also `\alias`, `builtin
+# alias`, `eval alias ...`). BASH_ALIASES is main's spelling check's, searched
+# in the whole text. A definition hidden in a split or computed string (`eval
+# "al""ias ..."`) is not seen (#323).
+ALIAS_DEFINITION = re.compile(r"(?<![\w-])alias\s+(?:-p\s+)?[^\s=;|&]+=")
+def code_lines(text: str) -> list[str]:
+    """`text`'s lines but its comment lines -- where a line that continues
+    the one before (an odd run of backslashes ends it) is code, `#` first or
+    not (#328's delta review: `x=1\\` then `#; alias q=...`)."""
+    kept, carried = [], False
+    for line in text.split("\n"):
+        if carried or not line.lstrip().startswith("#"):
+            kept.append(line)
+        carried = (len(line) - len(line.rstrip("\\"))) % 2 == 1
+    return kept
+
+
 SCRIPT = re.compile(r"scripts/[A-Za-z0-9_./-]+")
 CALL = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 
@@ -209,8 +222,11 @@ def top_level_code(text: str) -> str:
     # (#323: a split or computed option name, a `#!/bin/sh` shebang's POSIX
     # mode). Neither alone: #328's review defined aliases in ways no regex
     # sees (`alias -- q=`, a sourced file) under a literal switch.
-    if re.search(r"_aliases|expand_al|\bposix\b|POSIXLY_CORRECT", text) or any(
-        ALIAS_DEFINITION.search(line) for line in text.split("\n") if not line.lstrip().startswith("#")
+    # main's predicate VERBATIM, then the definition check OR'd beside it, so
+    # the union is a superset of main by construction (#328's delta review:
+    # moving BASH_ALIASES out of this whole-text search regressed).
+    if re.search(r"_aliases|expand_al|\bposix\b|POSIXLY_CORRECT|BASH_ALIASES", text) or any(
+        ALIAS_DEFINITION.search(line) for line in code_lines(text)
     ):
         return outside
     # A top level bash -n cannot parse whole compares whole (#308's fifth
@@ -905,6 +921,14 @@ def _top_level_comments():
         ("builtin alias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
         ("alias 'q'=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
         ("set -o \"pos\"ix\nBASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #328's delta review: BASH_ALIASES and an alias on a continued `#`
+        # line, and each spelling alternative held alone -- split around
+        # `_aliases`, around `expand_al`, and spelled inside a function body.
+        ("set -o \"pos\"ix\nx=1\\\n#; BASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("set -o \"pos\"ix\nx=1\\\n#; alias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("shopt -s \"expand\"_aliases\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("shopt -s expand_al\"iases\"\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("on() {\n  shopt -s expand_aliases\n}\non\nalias -- q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
         # #317: a function match that runs long past a closer written
         # otherwise -- a trailing comment, `};`, indented, a heredoc on it --
         # swallows the top-level code after it.
