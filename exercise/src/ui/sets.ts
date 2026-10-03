@@ -131,6 +131,7 @@ export const settleOf = registry<SettleReason>({
   max_steps: { label: 'stopped at the step limit', level: 'warn' },
   timeout: { label: 'timed out', level: 'bad' },
   failed: { label: 'a request failed', level: 'bad' },
+  capped: { label: 'hit max tokens, so no answer', level: 'warn' },
 });
 
 /** Why a request produced no response. Every one is a failure; the label says which. */
