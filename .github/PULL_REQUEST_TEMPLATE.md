@@ -14,7 +14,7 @@
 
 ## Scope
 
-<!-- REQUIRED. Paste what `python3 scripts/pr-scope.py --base origin/main`
+<!-- REQUIRED. Paste what `python3 scripts/pr-scope.py --base origin/HEAD`
      prints: `material` or `chore`, why, and the checks the diff touches.
      The diff decides -- never the branch name, never a label (#276).
 

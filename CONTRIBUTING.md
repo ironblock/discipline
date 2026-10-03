@@ -26,6 +26,8 @@ What runs where:
 
 Who cuts a release: the maintainer, or Dispatch on the maintainer's word, as a pull request from the integration branch into the release branch. It is reviewed and armed like any other pull request once its full run is green, merged with `--no-ff`, and the merge is tagged.
 
+`origin/HEAD` is set when a repository is cloned and is never moved after that, so an existing clone runs `git remote set-head origin --auto` once after the default branch changes; until it does, `origin/HEAD` still names the old default.
+
 Nothing that runs spells either branch: workflows read `github.event.repository.default_branch`, scripts read `origin/HEAD` or the table, and `scripts/check-ci-coverage.py` refuses a literal anywhere else in the workflows, `scripts/` and `verify.sh` (outside its seeded-fault bodies); code elsewhere -- `exercise/`, `diet/`, `substrates/` -- is not scanned, so a branch name there is a review finding. The exceptions are the places that cannot take an expression -- a trigger's `branches:` list and `verify.yml`'s `cancel-in-progress` -- and the check holds each to the table.
 
 
