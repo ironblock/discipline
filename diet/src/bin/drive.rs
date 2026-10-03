@@ -325,16 +325,24 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
             .wait_from(next, std::time::Duration::from_secs(60))
             .len() as u64;
     }
-    // The log was written as each line was appended; the record, once,
-    // after `ended`. A record that cannot be written exits 3 on its own.
-    if let Some(writer) = running.record_writer
-        && writer.join().is_err()
-    {
-        // A writer that panicked never reached its own exit 3.
-        return fail(
-            EXIT_OUTPUT,
-            "the record could not be written: its writer panicked",
-        );
+    // The log was written as each line was appended; the record is written
+    // here, once, after `ended` and before the server stops -- in order, on
+    // this thread, so nothing races the exit (#315's second review).
+    if let Some((regime, (path, file))) = running.record {
+        match written_record(session, &regime, &path, file) {
+            Ok(report) => {
+                let _ = std::io::Write::write_all(
+                    &mut std::io::stdout().lock(),
+                    format!("{report}\n").as_bytes(),
+                );
+            }
+            Err(why) => {
+                return fail(
+                    EXIT_OUTPUT,
+                    &format!("the record could not be written: {why}"),
+                );
+            }
+        }
     }
     running.server.finish(std::time::Duration::from_secs(5));
     ExitCode::SUCCESS
@@ -447,12 +455,12 @@ fn started(
             &emptied.named(format!("the server did not start: {why}")),
         )
     })?;
-    let (record_held, record_writer) = record_kept.unzip();
+    let (record_held, record) = record_kept.unzip();
     Ok(Running {
         server,
         log_held,
         record_held,
-        record_writer,
+        record,
     })
 }
 
@@ -474,7 +482,10 @@ fn started_writers(
 ) -> Result<
     (
         Option<bool>,
-        Option<(bool, std::thread::JoinHandle<()>)>,
+        Option<(
+            bool,
+            (diet::formats::record::Regime, (String, std::fs::File)),
+        )>,
         diet::drive::serve::Emptied,
     ),
     String,
@@ -494,8 +505,7 @@ fn started_writers(
                     .map_err(|why| emptied.named(format!("{sidecar} cannot be removed: {why}")))?;
                 emptied.push(format!("the previous sidecar at {sidecar}"));
             }
-            let writer = keep_record(std::sync::Arc::clone(session), regime, (path, file));
-            Ok::<_, String>((held || stale, writer))
+            Ok::<_, String>((held || stale, (regime, (path, file))))
         })
         .transpose()?;
     let log_held = log
@@ -519,46 +529,13 @@ struct Running {
     log_held: Option<bool>,
     /// Whether naming the record emptied anything.
     record_held: Option<bool>,
-    /// The record's writer, which reports once the session has ended.
-    record_writer: Option<std::thread::JoinHandle<()>>,
-}
-
-/// The session's record, written once, when it settles `ended` (`--record`,
-/// #157): projected from its own log, beside a sidecar naming everything
-/// the record could not spell, both digests reported on stdout. A record
-/// that cannot be written stops the process, as a log that cannot be does.
-fn keep_record(
-    session: std::sync::Arc<Session<HttpStream>>,
-    regime: diet::formats::record::Regime,
-    (path, file): (String, std::fs::File),
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || {
-        let mut next = 0;
-        while session.settlement() != diet::drive::session::Settlement::Ended {
-            next += session
-                .wait_from(next, std::time::Duration::from_secs(60))
-                .len() as u64;
-        }
-        match written_record(&session, &regime, &path, file) {
-            Ok(report) => {
-                let _ = std::io::Write::write_all(
-                    &mut std::io::stdout().lock(),
-                    format!("{report}\n").as_bytes(),
-                );
-            }
-            Err(why) => {
-                let _ = fail(
-                    EXIT_OUTPUT,
-                    &format!("the record could not be written: {why}"),
-                );
-                std::process::exit(i32::from(EXIT_OUTPUT));
-            }
-        }
-    })
+    /// The record's regime and file, emptied, written once the session has
+    /// ended.
+    record: Option<(diet::formats::record::Regime, (String, std::fs::File))>,
 }
 
 /// Project the ended session, check the record reads back, and write it and
-/// its sidecar: the line `keep_record` reports.
+/// its sidecar: the line `serve` reports once the session has ended.
 fn written_record(
     session: &Session<HttpStream>,
     regime: &diet::formats::record::Regime,
