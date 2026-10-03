@@ -508,6 +508,15 @@ impl<S: Streaming + 'static> Serving<S> {
         }
         let mut next = first;
         while !self.stopping.load(Ordering::SeqCst) {
+            // Once ended, nothing more is logged (#291): a stream past the
+            // last line, `ended`, is done, and closes -- at once, not after
+            // a heartbeat, which a browser reconnecting after the close
+            // would otherwise wait out.
+            if self.session.settlement() == Settlement::Ended
+                && self.session.events_from(next).is_empty()
+            {
+                return;
+            }
             let batch = self.session.wait_from(next, self.config.heartbeat);
             let mut out = String::new();
             if batch.is_empty() {
@@ -523,13 +532,6 @@ impl<S: Streaming + 'static> Serving<S> {
                 next = logged.seq + 1;
             }
             if stream.write_all(out.as_bytes()).is_err() || stream.flush().is_err() {
-                return;
-            }
-            // Once ended, nothing more is logged (#291): a stream that has
-            // delivered the last line, `ended`, is done, and closes.
-            if self.session.settlement() == Settlement::Ended
-                && self.session.events_from(next).is_empty()
-            {
                 return;
             }
         }
@@ -1490,6 +1492,33 @@ mod tests {
         }
         let document = data.join("\n") + "\n";
         crate::formats::log::parse(&document).expect("the stream is a log the format reads");
+    }
+
+    #[test]
+    fn a_stream_opened_after_ended_past_its_last_line_closes_at_once() {
+        // #315's review: a browser reconnecting after the close asks from
+        // past `ended`; it is closed at once, not after a heartbeat.
+        let (session, server) = serve(
+            Canned::new([]),
+            Config {
+                heartbeat: Duration::from_secs(30),
+                ..quick()
+            },
+        );
+        assert_eq!(session.end(None), Ok(()));
+        let past = session.events_from(0).len();
+        let mut client = Client::send(
+            &server,
+            &events_request(&server, &format!("?from={past}"), ""),
+        );
+        let started = Instant::now();
+        client.read_until(Duration::from_secs(5), |_| false);
+        assert!(client.closed, "{}", client.read);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
     }
 
     #[test]

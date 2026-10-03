@@ -327,8 +327,14 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
     }
     // The log was written as each line was appended; the record, once,
     // after `ended`. A record that cannot be written exits 3 on its own.
-    if let Some(writer) = running.record_writer {
-        let _ = writer.join();
+    if let Some(writer) = running.record_writer
+        && writer.join().is_err()
+    {
+        // A writer that panicked never reached its own exit 3.
+        return fail(
+            EXIT_OUTPUT,
+            "the record could not be written: its writer panicked",
+        );
     }
     running.server.finish(std::time::Duration::from_secs(5));
     ExitCode::SUCCESS
