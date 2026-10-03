@@ -19,17 +19,14 @@ const response = {
 describe('progress frames, synthesized from a response’s timings', () => {
   const made = frames(response, 1000, 7000);
 
-  it('fill the new part of the prompt over prefill, the warm part there from the start', () => {
-    const prefill = made.filter((f) => f.t <= 3000);
-    expect(prefill[0]).toMatchObject({ t: 1000, request: 'q', prompt: { total: 16000, cache: 12000, processed: 0 }, decoded: 0 });
-    expect(prefill.at(-1)?.prompt.processed).toBe(4000);
-    expect(prefill.every((f, i) => i === 0 || f.t - (prefill[i - 1]?.t ?? 0) === FRAME_MS)).toBe(true);
+  it('are the log’s own shape: the cache counted in from the start, the prompt read when processed reaches total', () => {
+    expect(made[0]).toEqual({ kind: 'progress', t: 1000, request: 'q', total: 16000, cache: 12000, processed: 12000, time_ms: 0 });
+    expect(made.at(-1)).toEqual({ kind: 'progress', t: 3000, request: 'q', total: 16000, cache: 12000, processed: 16000, time_ms: 2000 });
+    expect(made.every((f, i) => i === 0 || f.t - (made[i - 1]?.t ?? 0) === FRAME_MS)).toBe(true);
   });
 
-  it('then count tokens decoded, up to all of them by the response', () => {
-    expect(made.at(-1)).toMatchObject({ t: 7000, decoded: 100, prompt: { processed: 4000 } });
-    const decoded = made.map((f) => f.decoded);
-    expect(decoded.every((d, i) => i === 0 || d >= (decoded[i - 1] ?? 0))).toBe(true);
+  it('stop at the first token, as a served log’s do: nothing frames what is generated', () => {
+    expect(made.every((f) => f.t <= 3000)).toBe(true);
   });
 });
 
@@ -40,21 +37,22 @@ describe('the meter a running request carries', () => {
     { kind: 'ask', t: 0, turn: 1, text: 'hi' },
     { kind: 'request', t: 1000, id: 'q', lane: 'trunk', slot: 0, turn: 1 },
   ];
-  const frame = (t: number, processed: number, decoded = 0) => ({ kind: 'progress', t, request: 'q', prompt: { total: 16000, cache: 12000, processed }, decoded });
+  // A warm prompt, as llama.cpp frames one: processed starts at the cache and ends at the total.
+  const frame = (t: number, fresh: number, time_ms: number) => ({ kind: 'progress', t, request: 'q', total: 16000, cache: 12000, processed: 12000 + fresh, time_ms });
   const assistant = (rows: readonly Record<string, unknown>[]) => fold(log([...base, ...rows])).eras[0]?.nodes.find((n) => n.kind === 'assistant');
 
-  it('says how far prefill has got, and how fast, held at the most it has seen', () => {
-    const node = assistant([frame(1000, 0), frame(2000, 2000), frame(2250, 1500)]);
-    expect(node?.kind === 'assistant' && node.meter).toMatchObject({ total: 16000, cache: 12000, processed: 2000, ppRate: 2000 });
+  it('says how far prefill has got, held at the most it has seen, and how fast by the server’s clock', () => {
+    const node = assistant([frame(1000, 0, 0), frame(2000, 2000, 1000), frame(2250, 1500, 1250)]);
+    expect(node?.kind === 'assistant' && node.meter).toEqual({ at: 2250, total: 16000, cache: 12000, processed: 14000, ppRate: 2000 });
   });
 
-  it('counts tokens decoded, and how fast, while it generates', () => {
-    const node = assistant([frame(3000, 4000, 0), frame(5000, 4000, 50)]);
-    expect(node?.kind === 'assistant' && node.meter).toMatchObject({ decoded: 50, tgRate: 25 });
+  it('has no rate before the server has timed anything', () => {
+    const node = assistant([frame(1000, 0, 0)]);
+    expect(node?.kind === 'assistant' && node.meter).toEqual({ at: 1000, total: 16000, cache: 12000, processed: 12000 });
   });
 
   it('has none once the response is in: its timings say the rest', () => {
-    const node = assistant([frame(2000, 2000), { ...response, t: 7000 }]);
+    const node = assistant([frame(2000, 2000, 1000), { ...response, t: 7000 }]);
     expect(node?.kind === 'assistant' && node.meter).toBeUndefined();
   });
 });

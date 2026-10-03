@@ -820,6 +820,12 @@ mod tests {
     /// about confinement fails instead.
     const REQUIRED: &str = "DIET_REQUIRE_SANDBOX";
 
+    /// A host path of this process's own (#316): a fixed one is shared by every
+    /// verify on the machine, so another run's escape would fail this one's.
+    fn outside_path() -> String {
+        format!("/tmp/outside-{}", std::process::id())
+    }
+
     /// The six seeded escapes, and the three controls without which they
     /// prove nothing.
     ///
@@ -884,8 +890,8 @@ mod tests {
 
         let mut denied = 0_usize;
 
-        // Row two: a write outside the tree.
-        let outside = run(&["sh", "-c", "echo x > /tmp/outside"]);
+        // Row two: a write outside the tree, to a host path of our own (#316).
+        let outside = run(&["sh", "-c", &format!("echo x > {}", outside_path())]);
         assert_ne!(outside.exit, Some(0), "the write was denied");
         let denials = outside.denials();
         assert!(
@@ -897,7 +903,7 @@ mod tests {
             outside.stderr
         );
         assert!(
-            !std::path::Path::new("/tmp/outside").exists(),
+            !std::path::Path::new(&outside_path()).exists(),
             "and nothing reached the host"
         );
         denied += 1;

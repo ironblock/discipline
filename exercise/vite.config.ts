@@ -9,7 +9,7 @@ import { playwright } from '@vitest/browser-playwright';
 import type { Plugin, ProxyOptions } from 'vite';
 import { defineConfig } from 'vitest/config';
 
-import { PUBLISHED } from './src/replay/published.ts';
+import { EXAMPLES, PUBLISHED } from './src/replay/published.ts';
 import { wrap } from './src/replay/payload.ts';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,9 +36,13 @@ const proxied = drive ? Object.fromEntries(['/events', '/commands'].map((route) 
 // path Pages serves it from. Each published recording is written beside it as
 // `data/<name>.js` (src/replay/payload.ts), with its admission -- the table it
 // was scanned under and its digests (scripts/admission.py) -- beside that: never
-// imported, so never bundled. A published recording with no admission does
-// not build.
-const recorded = (file: string) => path.join(dirname, 'src/drive/recorded', file);
+// imported, so never bundled. Each authored example (#272) the same way, from
+// src/drive/examples/. A published recording or example with no admission
+// does not build.
+const published = [
+  ...PUBLISHED.map((name) => ({ name, dir: 'src/drive/recorded' })),
+  ...EXAMPLES.map((name) => ({ name, dir: 'src/drive/examples' })),
+];
 const replayPayload: Plugin = {
   name: 'exercise:replay-payload',
   apply: 'build',
@@ -51,10 +55,10 @@ const replayPayload: Plugin = {
       delete bundle['replay.html'];
       this.emitFile({ type: 'asset', fileName: 'index.html', source: html.source });
     }
-    for (const name of PUBLISHED) {
-      const admission = recorded(`${name}.admission.json`);
-      if (!existsSync(admission)) this.error(`exercise/src/drive/recorded/${name}.json: published but never admitted (no ${name}.admission.json beside it; scripts/admission.py admit ${name})`);
-      this.emitFile({ type: 'asset', fileName: `data/${name}.js`, source: wrap(readFileSync(recorded(`${name}.json`), 'utf8')) });
+    for (const { name, dir } of published) {
+      const admission = path.join(dirname, dir, `${name}.admission.json`);
+      if (!existsSync(admission)) this.error(`exercise/${dir}/${name}.json: published but never admitted (no ${name}.admission.json beside it; scripts/admission.py admit ${name})`);
+      this.emitFile({ type: 'asset', fileName: `data/${name}.js`, source: wrap(readFileSync(path.join(dirname, dir, `${name}.json`), 'utf8')) });
       this.emitFile({ type: 'asset', fileName: `data/${name}.admission.json`, source: readFileSync(admission, 'utf8') });
     }
   },

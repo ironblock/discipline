@@ -1,0 +1,18 @@
+# contcheck.py output against the live production server on rtx6000ada-host (port of the production line, key set),
+# 2026-10-03. First block: b8-e486f80 with MTP n=3 (before the revert, ~06:55Z). Second block: b7-e7051ef right
+# after the revert (started 06:58:39Z, exe 41e6591d710fd4b5...), concurrent half only (the script's solo half ran too;
+# its lines were not kept).
+## b8-e486f80, MTP n=3
+solo 0 a=0.41 'of Midway in June 1942, the IJN found itself lacking sufficient carrier capacity to support its operations. To compensate for this deficit, the Imperi'
+solo 1 a=0.46 'The initial North Korean offensive, launched on August 31, was designed to break the UN defensive line and collapse the Pusan Perimeter. The 2nd Infan'
+solo 2 a=0.44 "The departure of DJ Product © 1969 marked a significant shift in the band's sonic identity, signaling a move away from the heavy hip-hop influences th"
+solo 3 a=0.58 'The proliferation of ironclad battleship designs came to an end in the 1890s as navies reached a consensus on the design of the modern battleship. Thi'
+conc 0 a=0.74 'Based on the text provided, here is a summary of the information provided regarding Robert Boulter and Du Fu.\n\n### Robert Boulter\n**Robert Boulter** i'
+conc 1 a=0.74 'The 1st Battleship Division, which included the *Ise* and *Hyūga*, was part of the 1st Fleet. The ships were frequently exercised off the coasts of th'
+conc 2 a=0.62 'Based on the text provided, here is a summary of the events described in the text:\n\n### **1. Initial Situation and Initial Attack (August 31 – Septemb'
+conc 3 a=0.54 'The transition from the era of the ram to the era of the torpedo and the modern battleship marked the end of the ironclad era. By the late 19th centur'
+## b7-e7051ef after the revert, concurrent half
+conc 0 a=0.42 'of Midway in June 1942, the Ise class was repurposed as hybrid aircraft carriers. This conversion involved removing the aft main guns and replacing th'
+conc 1 a=0.45 'The initial North Korean offensive, which began on August 31, was characterized by a series of coordinated assaults designed to breach the UN defensiv'
+conc 2 a=0.46 "The departure of DJ Product © 1969 marked a significant shift in the band's sonic identity, signaling a move away from the heavy hip-hop influences th"
+conc 3 a=0.38 'signation of the modern battleship, a vessel that combined the heavy armor and firepower of the ironclad with the speed and maneuverability of the cru'

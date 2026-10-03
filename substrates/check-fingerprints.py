@@ -40,7 +40,7 @@ substrate whose `engine_identity` is a 64-hex digest carries exactly one of:
     (a static binary, stated as measured, or a digest that is not of an exe).
 
 THE RECIPE, one for both sides: every regular shared-object file (a name ending
-`.so` or `.so.<n>...`, symlinks resolved and counted once, keyed by the real
+`.so` or `.so.<n>...`, or on macOS `.dylib`, symlinks resolved and counted once, keyed by the real
 file's basename) in the executable's own directory -- the build's output. Read
 from a running process (`--read-engine-pid PID`), the directory is the one
 /proc/<pid>/exe resolves into, and every shared object the process maps from
@@ -85,7 +85,7 @@ def digest_of(entry: dict, fields: list[str]) -> str:
 
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
-SHARED_OBJECT = re.compile(r"\.so(\.\d+)*$")
+SHARED_OBJECT = re.compile(r"\.so(\.\d+)*$|\.dylib$")
 ENGINE_FORMS = ("engine_libraries", "engine_libraries_unreadable", "engine_single_digest_suffices")
 
 
@@ -292,6 +292,14 @@ def _reader_cases():
         r = read_engine(str(d / "server"))
         cases.append(("the recipe hashes every shared object in the directory, a versioned name included",
                       sorted(r["libraries"]) == ["libggml-cuda.so", "libllama.so.0.4.1"]))
+        (d / "libggml-cpu.0.24.0.dylib").write_bytes(b"cpu")
+        (d / "libggml-cpu.0.dylib").symlink_to("libggml-cpu.0.24.0.dylib")
+        (d / "libggml-cpu.dylib").symlink_to("libggml-cpu.0.24.0.dylib")
+        r_mac = read_engine(str(d / "server"))
+        cases.append(("on macOS the recipe hashes each .dylib once, by its real file's name",
+                      sorted(r_mac["libraries"]) == ["libggml-cpu.0.24.0.dylib", "libggml-cuda.so", "libllama.so.0.4.1"]))
+        for n in ("libggml-cpu.dylib", "libggml-cpu.0.dylib", "libggml-cpu.0.24.0.dylib"):
+            (d / n).unlink()
         cases.append(("the recipe's fingerprint is the exe and its libraries",
                       r["engine_fingerprint"] == engine_fingerprint(r["exe"], r["libraries"])))
         (pathlib.Path(tmp) / "elsewhere.so").write_bytes(b"outside")

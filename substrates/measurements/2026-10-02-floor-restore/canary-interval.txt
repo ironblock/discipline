@@ -1,0 +1,1 @@
+35/36 at z = 2.576 (#114's 99% level), Wilson: [0.8007, 0.9967]; canary.txt prints the tool's own 95% interval

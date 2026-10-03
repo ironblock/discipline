@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 142
+mechanics_assertions = 153
 unseedable_guards = 2
 migrated = 0
 
@@ -8323,3 +8323,539 @@ failure_class = "wiring.pages-condition"
 legacy_signature = "pages.yml: the deploy's condition has text outside its"
 migrated = false
 
+[[fault]]
+id = "test.bakeoff_scratch_shared"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "the bakeoff scratch shared by every run"
+failure_class = "test.fixture-path-shared"
+legacy_signature = "capture::bakeoff::tests::two_scratches_never_share_a_directory \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "ci.ci_check_seconds_over_budget"
+kind = "seeded-gate"
+check = "ci"
+label = "a check re-measured past its job's budget"
+failure_class = "wiring.job-over-budget"
+legacy_signature = "pkg-repo\\.yml: its checks' measured seconds per job are [0-9]+ s, past the 300 s budget \\(.*hygiene 341\\.2 s"
+migrated = false
+[[fault]]
+id = "ci.ci_check_seconds_unmeasured"
+kind = "seeded-gate"
+check = "ci"
+label = "a check with no measured seconds"
+failure_class = "wiring.check-unmeasured"
+legacy_signature = "`hygiene` has no measured seconds"
+migrated = false
+[[fault]]
+id = "ci.ci_injection_shard_drops_one"
+kind = "seeded-gate"
+check = "ci"
+label = "an injection no shard applies"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "`injections`.s 2 shards run none of 1 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_shard_drops_one"
+kind = "seeded-gate"
+check = "ci"
+label = "a results directory no shard re-derives"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "`recompute`.s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_workflow_without_shard"
+kind = "seeded-gate"
+check = "ci"
+label = "a sharded job never told its shard"
+failure_class = "wiring.shard-not-passed"
+legacy_signature = "pkg-injections\\.yml: .injections. is sharded, and its workflow is not the sharded form"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_count_one"
+kind = "seeded-gate"
+check = "ci"
+label = "a split into one shard"
+failure_class = "wiring.shard-count"
+legacy_signature = ".recompute..s shard count is .1., not a whole number of 2 or more"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_matrix_not_the_table"
+kind = "seeded-gate"
+check = "ci"
+label = "a sharded matrix that is not the table"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml: .recompute. is sharded, and its workflow is not the sharded form"
+migrated = false
+[[fault]]
+id = "ci.ci_check_runs_one_shard"
+kind = "seeded-gate"
+check = "ci"
+label = "a check that runs one shard whatever"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_workflow_line_separator"
+kind = "seeded-gate"
+check = "ci"
+label = "a line separator YAML does not split on"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
+migrated = false
+[[fault]]
+id = "ci.ci_listing_unmarked"
+kind = "seeded-gate"
+check = "ci"
+label = "a listing with no line of its own"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute.: verify\\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_runs_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "a shard that runs fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_applies_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier that applies fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections..s 2 shards run none of 2 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_wrapper_shard_one_when_running"
+kind = "seeded-gate"
+check = "ci"
+label = "a wrapper that runs shard 1 when not listing"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s shards run [0-9]+ member\\(s\\) more than once"
+migrated = false
+[[fault]]
+id = "ci.ci_caller_in_block_scalar"
+kind = "seeded-gate"
+check = "ci"
+label = "a package's call kept in a block scalar"
+failure_class = "wiring.uncalled"
+legacy_signature = "pkg-recompute\\.yml exists but verify\\.yml never calls it"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "a recompute skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_reports_a_skip"
+kind = "seeded-gate"
+check = "ci"
+label = "a member reported as skipped"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_switched_off"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census allowed to fail"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_off_behind_a_comment"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's census off behind a comment"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_step_removed"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census renamed away"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "mech.a-member-reported-skipped-is-not-counted-as-run"
+kind = "mechanics"
+check = "parity"
+label = "a member reported skipped is not counted as run"
+failure_class = "shard.census-outcome"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-dry-census-row-is-refused-where-the-shards-really-ran"
+kind = "mechanics"
+check = "parity"
+label = "a dry census row is refused where the shards really ran"
+failure_class = "shard.census-dry-row"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "drive.projection-rebuilds-without-the-answer"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-rebuilds-without-the-answer"
+failure_class = "drive.projection-rebuilds-without-the-answer"
+migrated = false
+
+[[fault]]
+id = "drive.projection-derives-on-an-uncited-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-derives-on-an-uncited-engine"
+failure_class = "drive.projection-derives-on-an-uncited-engine"
+migrated = false
+
+[[fault]]
+id = "drive.projection-prefill-on-an-uncited-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-prefill-on-an-uncited-engine"
+failure_class = "drive.projection-prefill-on-an-uncited-engine"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-an-unspellable"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-an-unspellable"
+failure_class = "drive.projection-drops-an-unspellable"
+migrated = false
+
+[[fault]]
+id = "drive.projection-guesses-an-unrebuilt-head"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-guesses-an-unrebuilt-head"
+failure_class = "drive.projection-guesses-an-unrebuilt-head"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-records-without-a-regimen"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-records-without-a-regimen"
+failure_class = "drive.serve-bin-records-without-a-regimen"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-never-writes-the-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-never-writes-the-record"
+failure_class = "drive.serve-bin-never-writes-the-record"
+migrated = false
+
+[[fault]]
+id = "drive.session-writes-usage-beside-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-writes-usage-beside-timings"
+failure_class = "drive.session-writes-usage-beside-timings"
+migrated = false
+
+[[fault]]
+id = "drive.session-write-through-skips-the-lines-before-it"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-write-through-skips-the-lines-before-it"
+failure_class = "drive.session-write-through-skips-the-lines-before-it"
+migrated = false
+
+[[fault]]
+id = "drive.session-append-leaves-the-sink-unfed"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-append-leaves-the-sink-unfed"
+failure_class = "drive.session-append-leaves-the-sink-unfed"
+migrated = false
+
+[[fault]]
+id = "drive.serve-log-writes-after-a-failure"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-log-writes-after-a-failure"
+failure_class = "drive.serve-log-writes-after-a-failure"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-an-unanswered-request"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-an-unanswered-request"
+failure_class = "drive.projection-drops-an-unanswered-request"
+migrated = false
+
+[[fault]]
+id = "drive.projection-cites-a-literal-on-any-binary"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-cites-a-literal-on-any-binary"
+failure_class = "drive.projection-cites-a-literal-on-any-binary"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-reports-a-digest-of-other-bytes"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-reports-a-digest-of-other-bytes"
+failure_class = "drive.serve-bin-reports-a-digest-of-other-bytes"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-record"
+failure_class = "drive.serve-bin-leaves-an-earlier-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-sidecar"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-sidecar"
+failure_class = "drive.serve-bin-leaves-an-earlier-sidecar"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-only-a-held-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-only-a-held-record"
+failure_class = "drive.serve-bin-announces-only-a-held-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-every-record-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-every-record-emptied"
+failure_class = "drive.serve-bin-announces-every-record-emptied"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-empties-the-record-before-the-bind"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-empties-the-record-before-the-bind"
+failure_class = "drive.serve-bin-empties-the-record-before-the-bind"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-forgets-what-it-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-forgets-what-it-emptied"
+failure_class = "drive.serve-bin-forgets-what-it-emptied"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_snapshot_orphaned"
+kind = "seeded-gate"
+check = "exercise"
+label = "a snapshot no admission names, left in place"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "admission: scripts/hygiene-admitted-000000000000-patterns\\.tsv: a snapshot no admission names"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_admit_keeps_orphans"
+kind = "seeded-gate"
+check = "exercise"
+label = "admit no longer removing what no admission names"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_replayed_without_label"
+kind = "seeded-gate"
+check = "exercise"
+label = "an authored example replayed without its label"
+failure_class = "exercise.example-unlabelled"
+legacy_signature = "FAIL.*Replay\\.stories\\.tsx > an authored example, under its label for the whole replay"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_label_scrolls_away"
+kind = "seeded-gate"
+check = "exercise"
+label = "an example's label scrolling away"
+failure_class = "exercise.example-unlabelled"
+legacy_signature = "replay-smoke: kitchen-sink's label is on the page but out of view"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_bundled_into_page"
+kind = "seeded-gate"
+check = "exercise"
+label = "an example bundled into the page's code"
+failure_class = "exercise.payload-bundled"
+legacy_signature = "replay-smoke: kitchen-sink is bundled into the page's code"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_progress_read_nested"
+kind = "seeded-gate"
+check = "exercise"
+label = "the meter reading a progress frame's old shape"
+failure_class = "exercise.progress-shape"
+legacy_signature = "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
+migrated = false
+
+[[fault]]
+id = "drive.session-settles-a-capped-turn-final"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-settles-a-capped-turn-final"
+failure_class = "drive.session-settles-a-capped-turn-final"
+migrated = false
+
+[[fault]]
+id = "drive.session-writes-a-capped-response-uncapped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-writes-a-capped-response-uncapped"
+failure_class = "drive.session-writes-a-capped-response-uncapped"
+migrated = false
+
+[[fault]]
+id = "drive.projection-answers-a-capped-call"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-answers-a-capped-call"
+failure_class = "drive.projection-answers-a-capped-call"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-usage-hides-serve"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-usage-hides-serve"
+failure_class = "drive.serve-bin-usage-hides-serve"
+migrated = false
+
+[[fault]]
+id = "client.canned-ignores-its-finish-reason"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-ignores-its-finish-reason"
+failure_class = "client.canned-ignores-its-finish-reason"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-cap-cuts-reasoning"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-cap-cuts-reasoning"
+failure_class = "drive.serve-bin-cap-cuts-reasoning"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-a-capped-calls-prefill"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-a-capped-calls-prefill"
+failure_class = "drive.projection-drops-a-capped-calls-prefill"
+migrated = false
+[[fault]]
+id = "hygiene.hygiene_datauri_read_as_prose"
+kind = "seeded-gate"
+check = "hygiene"
+label = "a data-URI payload read as prose"
+failure_class = "hygiene.forbidden-pattern"
+legacy_signature = "hygiene: internal-ticket-id: tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri\\.svg:6:"
+migrated = false
+
+[[fault]]
+id = "mech.a-ticket-id-shape-in-a-data-uri-payload-is-not-a-ticket-id"
+kind = "mechanics"
+check = "-"
+label = "a ticket-id shape in a data-URI payload is not a ticket id"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.and-the-same-bytes-outside-a-data-uri-read-red"
+kind = "mechanics"
+check = "-"
+label = "and the same bytes outside a data URI read red"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.a-readable-run-after-a-made-up-image-prefix-reads-red"
+kind = "mechanics"
+check = "-"
+label = "a readable run after a made-up image prefix reads red"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.a-hit-beside-an-image-is-named-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a hit beside an image is named against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-scan-of-a-tree-with-an-image-leaves-no-prose-view-behind"
+kind = "mechanics"
+check = "-"
+label = "a scan of a tree with an image leaves no prose view behind"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-readable-run-behind-every-image-label-every-check-s-near-miss-and-every-refused-delimiter-reads-red-once-each"
+kind = "mechanics"
+check = "-"
+label = "a readable run behind every image label, every check's near miss and every refused delimiter reads red once each"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.thirteen-hits-beside-images-two-files-sharing-a-name-are-each-named-once-against-their-own-file"
+kind = "mechanics"
+check = "-"
+label = "thirteen hits beside images, two files sharing a name, are each named once against their own file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-hit-in-a-decoded-view-beside-an-image-is-named-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a hit in a decoded view beside an image is named against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-credential-shape-inside-an-image-payload-reads-red-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a credential shape inside an image payload reads red, against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false

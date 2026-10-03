@@ -1,0 +1,9 @@
+note: baseline was captured with --hash-models; hashing to match it (a size+mtime check against a sha256 baseline reports drift that is only a difference in representation)
+baseline digest: 7117e838a6657c55
+current  digest: 4b194a74ff6ab263
+
+SUBSTRATE DRIFT — 2 field(s) changed:
+  deployment_digest: 'e3307b110e1c656633f655bb3b6cf9123a45dbac788ac8a9421e407c56dae88e' -> '361661fde059f7ea116edd4ed236bae54bc5dd4b3e49733e440b478354b68dd4'
+  kargs: 'BOOT_IMAGE=(hd1,gpt2)/ostree/default-869dec79aa6329549429fb90f906156bf9b8c771dce4123b0fcfa1d9e9105df5/vmlinuz-7.2.7-ogc1.1.fc44.x86_64 ostree=/ostree/boot.1/default/869dec79aa6329549429fb90f906156bf9b8c771dce4123b0fcfa1d9e9105df5/0 rhgb quiet root=UUID=<redacted> vconsole.keymap=us rootflags=subvol=root rw bluetooth.disable_ertm=1 firmware_class.path=/usr/local/lib/firmware nvme_core.default_ps_max_latency_us=0' -> 'BOOT_IMAGE=(hd1,gpt2)/ostree/default-0c1e8f68802f72d371f724563e8e1d10e3d1840b520a9d6a8e10bba0865b2325/vmlinuz-7.2.7-ogc1.1.fc44.x86_64 ostree=/ostree/boot.0/default/0c1e8f68802f72d371f724563e8e1d10e3d1840b520a9d6a8e10bba0865b2325/0 rhgb quiet root=UUID=<redacted> vconsole.keymap=us rootflags=subvol=root rw bluetooth.disable_ertm=1 firmware_class.path=/usr/local/lib/firmware nvme_core.default_ps_max_latency_us=0'
+
+Any fixture expected-rate measured on the baseline is now unverified.

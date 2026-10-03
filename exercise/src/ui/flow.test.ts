@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import { edgeOf, flowText, readingOf, writingOf, writtenApart } from './flow.ts';
 
-const meter = { at: 0, total: 17_830, cache: 1_410, processed: 7_900, decoded: 0 };
+// `processed` counts the warm part in, as the log's frames do: 7,900 of the 16,420 new tokens read.
+const meter = { at: 0, total: 17_830, cache: 1_410, processed: 1_410 + 7_900 };
 
 describe('a flow: tokens in or out, and how long they took', () => {
   it('reads as new tokens, the time they took, and the rate derived from those two', () => {
@@ -22,14 +23,17 @@ describe('a flow: tokens in or out, and how long they took', () => {
     expect(edgeOf({ progress: 'prefill' })).toBeUndefined();
   });
 
-  it('counts writing from the first token, not the request', () => {
-    const f = writingOf({ progress: 'streaming', meter: { ...meter, at: 14_000, decoded: 50 }, startedAt: 1_000, writingSince: 13_000 }, 15_000);
-    expect(f).toMatchObject({ n: 50, ms: 2_000, running: true });
+  it('times writing from the first token, not the request, and says only how long: nothing counts it before the timings (#288)', () => {
+    const f = writingOf({ progress: 'streaming', meter: { ...meter, at: 12_000 }, startedAt: 1_000, writingSince: 13_000 }, 13_400);
+    expect(f).toEqual({ phase: 'tg', ms: 400, running: true });
+    expect(flowText(f!)).toBe('writing · 400 ms');
   });
 
-  it('says only how long it has written, until a frame since the first token says how much', () => {
-    const stale = writingOf({ progress: 'streaming', meter: { ...meter, at: 12_000, decoded: 0 }, startedAt: 1_000, writingSince: 13_000 }, 13_400);
-    expect(flowText(stale!)).toBe('writing · 400 ms');
+  it('reads none of a warm prompt as new until the frames go past the cache', () => {
+    const cold = { ...meter, processed: meter.cache };
+    expect(readingOf({ progress: 'prefill', meter: cold, startedAt: 1_000 }, 1_500)).toMatchObject({ n: 0, of: 16_420 });
+    expect(edgeOf({ progress: 'prefill', meter: cold })?.read).toBe(0);
+    expect(edgeOf({ progress: 'prefill', meter: { ...meter, processed: meter.total } })?.read).toBe(1);
   });
 
   it('splits what was written into the text and the calls where the drive said the calls began, and not where it did not', () => {

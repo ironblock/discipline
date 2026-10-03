@@ -145,7 +145,7 @@ reproducible from a parts list, and the manifest should not imply it is."""
 display_name = "ironblock's 2019 Mac Pro"
 entry_type = "x86-workstation"
 hardware_fingerprint = "f0efb982fe1e4793ba9cf832e32bf30759d358da42e0362251a023c095dc480a"
-role = "the data seat's workstation; a host that serves no model, and the machine whose CPU cores ran the sense bakeoff's four encoder cells and counted the judge states in laya's tokens (#165)"
+role = "the data seat's workstation; it serves no model in production, and its CPU cores ran the sense bakeoff's four encoder cells, counted the judge states in laya's tokens (#165), and served the drive endpoint's engine and weights on demand for #29's tool-call captures"
 measured = "2026-09-05"
 
 model_identifier = "MacPro7,1"
@@ -537,7 +537,7 @@ os_deployment_digest = "e3307b110e1c656633f655bb3b6cf9123a45dbac788ac8a9421e407c
 os_deployment_checksum = "d1e67933bd2b2253fb29e63960a58d17e058ca974217f87486dd5241cc69576e"
 os_deployment_checksum_note = "the booted deployment's own checksum, read 2026-10-01 by rpm-ostree status --json; the capture records the base-checksum above"
 kernel = "7.2.7-ogc1.1.fc44.x86_64"
-pinned_by = "substrate capture of 2026-10-01 (--hash-models), taken after the restore of that day: the machine rebooted 2026-09-30T05:18:53Z, during its owner's scheduled use, into operating system image 44.20260928.1, and production was dark until the provisioning script restored it (first health 2026-10-01T05:05:44Z; #143)"
+pinned_by = "substrate capture of 2026-10-01 (--hash-models), taken after the restore of that day: the machine rebooted 2026-09-30T05:18:53Z, during reserved use, into operating system image 44.20260928.1, and production was dark until the provisioning script restored it (first health 2026-10-01T05:05:44Z; #143)"
 os_update_note = """
 The 2026-09-20 instance recorded 44.20260928 as staged; the image booted is 44.20260928.1, and no digest of the staged one was recorded to show them one image. Against the 2026-09-20 capture, `fingerprint --check` drifts in three fields, kernel, deployment digest and kargs, and in nothing else: launch flags and the three model files' digests are identical."""
 engine_identity_measured = true
@@ -549,6 +549,28 @@ accelerator_driver_read_note = "read 2026-10-01 from the driver library the rest
 canary = """
 Canary e0827, k = 36, one draw at registration (2026-10-01, after the restore): 36/36, 99% Wilson [0.844, 1.000] (z = 2.576, #114's rule), read against the 2026-09-20 instance's pooled baseline, PASS. That comparison is a stopgap, not #114's rule: #114 pools per instance and this instance has no pool yet; only the interval's level is #114's. Under #114's rule this instance's own pool begins with that draw; the draw is not committed, so it is not yet poolable."""
 admission_note = "the floor's admission (substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/) stands on this instance: its fingerprint is engine, weights, template, serving line and reasoning state, and an operating-system change is instance state. This is Dispatch's interim reading of planning's admission fingerprint (#143, comment 5884256685), posted there for planning to refine; the admission record itself is not edited here, since its manifest digest pins its files"
+current = false
+current_note = "superseded 2026-10-02 by the 2026-10-02 instance: the box booted operating system image 44.20260929"
+
+[[substrate.accel24-beellama-qwen27b-q4kxl.instance]]
+id = "2026-10-02"
+os_deployment_version = "44.20260929"
+os_deployment_digest = "361661fde059f7ea116edd4ed236bae54bc5dd4b3e49733e440b478354b68dd4"
+os_deployment_checksum = "2fd9934e890d6173846ba5a4c7baa43341ca28831b944999056942bd24fb0eda"
+os_deployment_checksum_note = "the booted deployment's own checksum, read 2026-10-02 by rpm-ostree status --json (substrates/measurements/2026-10-02-floor-restore/os.txt); the capture records the base-checksum above; the image's own timestamp is 2026-09-30T11:07:16Z, and 44.20260928.1 stays present as the rollback"
+kernel = "7.2.7-ogc1.1.fc44.x86_64"
+pinned_by = "substrate capture of 2026-10-02 (--hash-models), taken after the restore of that day: the box slept after the 2026-10-01 window and was rebooted 2026-10-02T23:13Z into operating system image 44.20260929, and the provisioning script restored production (first health 2026-10-02T23:16:02Z; #143). The capture is committed with home paths collapsed to ~ and the root filesystem UUID in kargs redacted, as substrates/measurements/2026-10-02-floor-restore/substrate-2026-10-02-postupdate.json (sha256 d6e08c2840c0c97ee64aa55b8f6ab010555d4a7531b204b48b97228d35993465); the raw capture, kept privately like the earlier ones, hashes to f2a6ca42810abb9dd8b250db729d64a44c0acaea38465b367514e2910d33d192"
+os_update_note = """
+Against the 2026-10-01 capture, `fingerprint --check` drifts in two fields, deployment digest and kargs, and in nothing else: in kargs only the ostree deployment path moved (the kernel stays 7.2.7-ogc1.1), and launch flags and the three model files' digests (re-hashed) are identical (substrates/measurements/2026-10-02-floor-restore/fingerprint-check.txt)."""
+engine_identity_measured = true
+engine_identity_measured_on = "2026-10-02"
+engine_identity_measured_how = """
+The running server's binary hashed through `/proc/<pid>/exe` (process found by `pgrep -x`) returned the substrate's engine digest (substrates/measurements/2026-10-02-floor-restore/process.txt)."""
+accelerator_driver_read = "615.71.09"
+accelerator_driver_read_note = "read 2026-10-02 from the driver library the restored process maps (libcuda.so.615.71.09, substrates/measurements/2026-10-02-floor-restore/os.txt), unchanged from the 2026-10-01 read"
+canary = """
+Canary e0827, k = 36, one draw at registration (2026-10-02, after the restore): 35/36, 99% Wilson [0.801, 0.997] (z = 2.576, #114's rule), read against the 2026-09-20 instance's pooled baseline, PASS (substrates/measurements/2026-10-02-floor-restore/canary.txt; the 99% interval in canary-interval.txt). The same stopgap as the 2026-10-01 instance's: #114 pools per instance and this instance has no pool yet; only the interval's level is #114's. This draw is committed sample by sample (canary.txt: 36 hit-or-miss lines, the miss at sample 22), so under #114's rule it is the first draw of this instance's own pool."""
+admission_note = "the floor's admission stands on this instance as on the 2026-10-01 one: engine, weights, template, serving line and reasoning state are unchanged, and an operating-system change is instance state (Dispatch's interim reading, #143, comment 5884256685)"
 current = true
 
 [substrate.accel24-llamacpp-qwen38-27b-iq3s]
@@ -695,10 +717,10 @@ equipment = "rtx6000ada-host"
 description = "Qwen3.8-Flash-Next GSQ-RCO at Q2_0 on the 48 GiB accelerator, served by llama.cpp (ironblock's fork) with a Q4_K_M MTP speculative draft; the interactive drive's endpoint, and the substrate of one claim fired by ruling, #142's, whose rule never depends on token identity (2026-09-29); admission generally is #143's Q13"
 pinned = true
 engine_name = "llama.cpp (github.com/ironblock/llama.cpp)"
-engine_identity = "f316bc7fac028eff006d9111f7748b6d1c65d7abc9cd4ef8e48e2bf49826f12b"
-engine_identity_is = "sha256 of the running llama-server binary, read through /proc/<pid>/exe of the production process (started 2026-10-01T01:10:27Z) by check-fingerprints.py --read-engine-pid at about 2026-10-01T16:10Z, by the inference seat; the executable is a stub, so engine_libraries and engine_fingerprint are the engine (#205)"
-engine_commit = "e486f802d3b46d9aa98b38d162e952b150cb5082"
-engine_commit_is = "the serving checkout's HEAD, clean tree, read 2026-10-01 by the inference seat: e7051ef plus one commit, 'qwen4exp: fix per-block QSA bias indexing when a unified cache holds several sequences' (src/llama-memory-hybrid-idx.cpp, +24/-2; upstream llama.cpp PR #29166); the q8-sparse-fa patch unchanged (e7051ef an ancestor, no flash-attention file differs). The server reports it as /props build_info b8-e486f80, whose commit part this field resolves by prefix"
+engine_identity = "41e6591d710fd4b5d81468264bb973a9f0575665dda2f27c69d5e370424d69bb"
+engine_identity_is = "sha256 of the running llama-server binary, read through /proc/<pid>/exe of the production process restarted after the 2026-10-03 revert (process_started 2026-10-03T06:58:31Z) by check-fingerprints.py --read-engine-pid, by the inference seat (substrates/measurements/2026-10-03-ada48-concurrency/revert-process-read.json; #143 5966611289); the executable is a stub, so engine_libraries and engine_fingerprint are the engine (#205). The same build as instance 2026-09-28"
+engine_commit = "e7051efc8002847f7269c5606318431179b5904e"
+engine_commit_is = "the build production was reverted to on 2026-10-03 (the inference seat, #143 5966611289): the 2026-09-28 engine, its fingerprint read from the reverted process equal to instance 2026-09-28's; e486f80, the one commit on top of it, is withdrawn (hazard_regime_boundary). e7051ef carries the q8-sparse-fa patch: the 2026-10-01 reading of e486f80's checkout (the inference seat) found it e7051ef plus one commit with that patch unchanged, e7051ef an ancestor and no flash-attention file differing"
 weights_main = ["69820c02ec7d0b45ef2ebb19d6620299db749fe2aded7f39f93c6b88b199b720", "316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113"]
 weights_main_file = "Qwen3.8-Flash-Next-GSQ-RCO-Q2_0, two shards (00001-of-00002, 00002-of-00002)"
 weights_draft = "b646ef60eaae2a9ed849e75f15f399629ca22633555e99e809959e95f22a1575"
@@ -709,26 +731,27 @@ serving_slots = 4
 serving_context_is = "the unified pool (--kv-unified) shared by the four slots, not a per-slot figure, as on the two linux-pc entries; read off the serving flags, not measured on this host (no depth probe has run here)"
 serving_flags = "-ngl 99, -t 16, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, -np 4, --kv-unified, --jinja, --spec-type draft-mtp, --spec-draft-ngl 99, --spec-draft-n-max 3, --spec-draft-p-min 0.0, --api-key set; no --reasoning-format, so reasoning streams as reasoning_content and the template preserves it"
 serving_flags_are = "read off the running process's command line on 2026-09-28 and identical to the machine's recorded launch file; model paths and the key withheld. On 2026-10-01 the running command line equals the launch file byte for byte and differs from the 2026-09-28 line only in the executable's checkout directory: model paths, draft and every flag identical (the inference seat)"
-hazards = "greedy output with the MTP draft is not bit-exact with the spec-off path on this hybrid architecture: on five prompts, 36 of 2,327 positions (1.5%) disagree, the first between tokens 21 and 101, and every disagreement is a flip to the spec-off path's second-ranked token at a top-2 margin of 0.007-0.320 logits; which side of a near-tie is taken depends on the verify schedule (substrates/measurements/2026-09-29-ada-invariance/ and 2026-09-29-ada-invariance-ground-truth/). Acceptance at greedy is exact equality with the verify batch's argmax by source (e7051ef common/sampling.cpp:678-706); this build fills no probs on speculated tokens, so the verify batch's logits are unmeasured. Spec-off greedy output was bitwise reproducible within and across processes, and spec-on across processes on one prompt. Separately, with the draft off a same-binary teacher-forced rerun disagrees with a prior run's logits on the top token at about 2.1-2.4% of positions (the inference seat's measurement). Concurrency is untested here (these measurements were taken on e7051ef and not re-taken on e486f80; for concurrency see hazard_regime_boundary). Nothing may be gated on token identity. A hybrid recurrent model, so warm reuse after a divergence depends on where checkpoints land"
+hazards = "greedy output with the MTP draft is not bit-exact with the spec-off path on this hybrid architecture: on five prompts, 36 of 2,327 positions (1.5%) disagree, the first between tokens 21 and 101, and every disagreement is a flip to the spec-off path's second-ranked token at a top-2 margin of 0.007-0.320 logits; which side of a near-tie is taken depends on the verify schedule (substrates/measurements/2026-09-29-ada-invariance/ and 2026-09-29-ada-invariance-ground-truth/). Acceptance at greedy is exact equality with the verify batch's argmax by source (e7051ef common/sampling.cpp:678-706); this build fills no probs on speculated tokens, so the verify batch's logits are unmeasured. Spec-off greedy output was bitwise reproducible within and across processes, and spec-on across processes on one prompt. Separately, with the draft off a same-binary teacher-forced rerun disagrees with a prior run's logits on the top token at about 2.1-2.4% of positions (the inference seat's measurement). These measurements were taken on e7051ef; for concurrency see hazard_regime_boundary. Nothing may be gated on token identity. A hybrid recurrent model, so warm reuse after a divergence depends on where checkpoints land"
 hazards_corrected = "an earlier text gave 'the argmax flips about 2% per step, measured by the inference seat'; that figure was another team's vLLM measurement, not this machine's, corrected by the inference seat 2026-09-28; the 2026-09-28 text then read 'run-to-run nondeterminism of the same order exists here without speculation ... the speculation-specific component is unmeasured', replaced 2026-09-29 by the on/off/off measurement; the 2026-09-29 text first read 'speculation is not output-invariant here', re-worded the same day after the ground-truth reads showed every divergence to be a near-tie flipped to the runner-up"
-hazard_regime_boundary = "planning (#143, 2026-10-01): the unified-cache concurrency bug -- a sequence's QSA block bias taking another sequence's visibility under -np > 1 (upstream llama.cpp #29166) -- was fixed in production at 2026-09-30 23:20Z (the inference seat: the launch file was written 23:19:50Z and the swap relaunched the server about ten seconds later; the first e486f80 process was replaced at 2026-10-01T00:12:58Z and no log records its exact start). Every multi-stream result on this substrate before that moment carries the hazard; single-stream results do not. Every claim fired here so far ran at concurrency 1. Instance 2026-09-28 (e7051ef) is before the boundary and instance 2026-10-01 (e486f80, the process started 2026-10-01T01:10:27Z) after it; the earlier e486f80 processes (about 23:20Z to 00:12:58Z, and 00:20:51Z to 01:01:27Z) were not fingerprinted"
+hazard_regime_boundary = "the build e486f80 (e7051ef plus the cherry-picked upstream llama.cpp PR #29166, 'fix per-block QSA bias indexing') CROSS-CONTAMINATES concurrent requests: it builds the per-block visibility map for one sequence per stream and applies it to every token, and under --kv-unified the four slots share one stream. Measured 2026-10-03 by the inference seat (substrates/measurements/2026-10-03-ada48-concurrency/; #143 5966611289): four ~10,000-token passages asked to continue, greedy, thinking off -- on e486f80, with and without MTP, concurrent request 1 continued request 0's passage and request 2 request 1's, while each was correct alone; on e7051ef every request continued its own passage, alone and four at once. By the inference seat's source reading (#143 5966611289), the hazard needs more than one sequence in a ubatch: -np > 1 with concurrent requests whose context reaches a full QSA block; no threshold was measured. The inference seat also reports a first-sentence lookup correct under concurrency at 2k and 10k on e486f80 (substrates/measurements/2026-10-03-ada48-concurrency/README-concurrency.md), with no outputs committed. Span: e486f80 served production from 2026-09-30 about 23:20Z (instance 2026-10-01) to 2026-10-03T06:58:30Z, when production was reverted to e7051ef (instance 2026-10-03). Multi-stream results inside the span carry the hazard; single-stream results do not, and e7051ef before and after the span is clean by that measurement. Every claim fired here ran at concurrency 1 and before the span (results/2026-09-29-false-nomination-edit-rate-second-substrate)"
+hazard_regime_boundary_corrected = "the 2026-10-01 text read the boundary backwards: it called e486f80 the fix (#29166) and said multi-stream results BEFORE 2026-09-30 23:20Z carried the hazard; the inference seat's 2026-10-03 measurement showed e486f80 to be the contaminating build and e7051ef clean"
 hazard_spec_draft_fit = "with -fit on and no --spec-draft-ngl 99, llama.cpp silently places the MTP draft head on the host, not the card; an L40S's 'could not fit' was this, not capacity (planning, #143, comment 5922544337 (2026-10-01), from the inference seat's serving status; a fact the record carries, not measured by the data seat). This entry's serving line gives --spec-draft-ngl 99 (serving_flags)"
 hazard_kv_sparse_patch = "q8_0 KV without the q8-sparse-fa patch disables the sparse-attention decode path entirely: every token is a dense scan of the whole pool (planning, #143, comment 5922544337 (2026-10-01), from the inference seat's serving status; a fact the record carries, not measured by the data seat). This entry's engines carry the patch: engine_commit_is records e486f80 as e7051ef plus one commit with the q8-sparse-fa patch unchanged; a build without it is a different engine"
 dialect_sampler_echo = "none on the chat endpoint: /v1/chat/completions replies carry no generation_settings (or other sampler echo) in any committed capture -- R3.0's unstreamed reply, diet/client/fixtures/llama-server-e7051ef-unstreamed.http, sha256 d9d2e92ee5c067736d60da5baf56edc71e14c3de4a5965e1e7a89eaa895b4727, and the streamed captures -- and no request flag that might add one was tried. So the llama.cpp dialect declares no echo site here, and a sampler pin sent to this endpoint is unverified by echo (#159; what a record does with that is #143's cell rule). The native /completion reply did carry generation_settings in a probe on 2026-09-29; that reply was not captured"
 engine_libraries_read = "process"
-engine_libraries_is = "read from the running production process, 2026-10-01T16:10Z, by the inference seat with check-fingerprints.py from main at cd8096d (rc 0): the process maps exactly the eight shared objects in its directory, each the inode hashed; equal field for field to the data seat's read of the same process at 04:52Z (substrates/measurements/2026-10-01-engine-libraries/ada48-running-2026-10-01-process.json), plus process_started; substrates/measurements/2026-10-01-ada48-e486f80/process-read.json"
-engine_fingerprint = "d88870420043d190e40ac518ddec21e62464814084614123c82aa99d4384dfd0"
+engine_libraries_is = "read from the reverted production process, 2026-10-03, by the inference seat with check-fingerprints.py from main (--read-engine-pid): the process maps exactly the eight shared objects in its directory (substrates/measurements/2026-10-03-ada48-concurrency/revert-process-read.json, sha256 09b72e684c75e7997dad70c759ac8ec7702f0d382156e1a78ae97d2ce1fffc1a)"
+engine_fingerprint = "a08e5511390e70f9b92401284a5587a20163a9528a14982ecf8589d88290dea4"
 engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
 
 [substrate.ada48-llamacpp-qwen38flashnext-q20.engine_libraries]
-"libggml-base.so.0.24.0" = "06b34aeb236b33336173711d2fd6eeb1659f12b8fc80ee5839438a6cbf67bf3f"
-"libggml-cpu.so.0.24.0" = "ed746c0908f89977c2dfd925e7722ebe372f81704d378dc79b55898a24dc519d"
-"libggml-cuda.so.0.24.0" = "727bdc273a67255442fb712da4d190de1d2541e1265cb82d21429bf9187542ee"
-"libggml.so.0.24.0" = "ee5310db5558bc46826a9d9990cff7e02ffc40082b1815b2d20fef23e21ee963"
-"libllama-common.so.0.4.1" = "0f9cf135bd2db832becbcb3e2aab17abe52a8a01ad2ef5cd62d87a379d2f6811"
-"libllama-server-impl.so" = "75c943ce656e96f7e2b10df562c2a180ef8ee52a2a03666d7e94b855257b358f"
-"libllama.so.0.4.1" = "95b5f2b577a7dffcbe00dc8436a16eff601bcf890ac3b48e1672a4e010fd3680"
-"libmtmd.so.0.4.1" = "42557b20041eb4bc112b98ea4bb00d11b45019da1d4d115b1bc380269654cf7f"
+"libggml-base.so.0.24.0" = "2002376d7915eb8dc201babcbfc6f9c44687080fd19483da8a538cc6126e421c"
+"libggml-cpu.so.0.24.0" = "f9960dd7d5e4593f93487253946f4c6b8560987e78aed220fc99a95299350408"
+"libggml-cuda.so.0.24.0" = "24ab8ce0f363870f41a3fcfac476813fe5fa6802e10476e05b6571fbe8eba99f"
+"libggml.so.0.24.0" = "f6eac071174bf8496e8ab0383c85c7c3aca4601ddaac1f3c647c22f0d7f3f7ce"
+"libllama-common.so.0.4.1" = "8c190d27eb88ba4d0f788b36589f70fef6a957ae7f14f3683bd9e8ebe16051ab"
+"libllama-server-impl.so" = "21bf075bfcb588a924fdf05d330f10ceefe9b919c7430b5d63cb364e55d056e2"
+"libllama.so.0.4.1" = "8a5f48903ad9fd0819aaf1ac47618f21e4b895ae72c4f968171bccc3f5ad61cb"
+"libmtmd.so.0.4.1" = "d212c7914885b838d01028f6b5460a747b04a38f26f0df4d63ebf7071714240b"
 
 [[substrate.ada48-llamacpp-qwen38flashnext-q20.instance]]
 id = "2026-09-28"
@@ -739,7 +762,7 @@ pinned_by = "the #117 Q10 measurements of 2026-09-28: the running binary, comman
 engine_identity = "41e6591d710fd4b5d81468264bb973a9f0575665dda2f27c69d5e370424d69bb"
 engine_commit = "e7051efc8002847f7269c5606318431179b5904e"
 engine_fingerprint = "a08e5511390e70f9b92401284a5587a20163a9528a14982ecf8589d88290dea4"
-engine_is = "the engine this instance ran, kept here since the substrate's engine fields now name the 2026-10-01 build: the exe read through /proc/<pid>/exe on 2026-09-28; the fingerprint over the exe and the eight libraries read from disk on 2026-10-01 (substrates/measurements/2026-10-01-engine-libraries/ada48-2026-09-28-build-disk.json), not from a process, which no read of 2026-09-28 recorded"
+engine_is = "the engine this instance ran, the build the substrate's engine fields name again since the 2026-10-03 revert (instance 2026-10-03 runs it): the exe read through /proc/<pid>/exe on 2026-09-28; the fingerprint over the exe and the eight libraries read from disk on 2026-10-01 (substrates/measurements/2026-10-01-engine-libraries/ada48-2026-09-28-build-disk.json), not from a process, which no read of 2026-09-28 recorded"
 current = false
 current_note = "the engine changed on 2026-09-30 at about 23:20Z (hazard_regime_boundary): a changed engine is a new instance"
 
@@ -753,12 +776,31 @@ accelerator_driver_read = "615.71.09"
 os_kernel_cuda_read = "2026-10-01T16:13:18Z, by the inference seat, fresh: /etc/os-release, uname -r, nvcc --version, the driver"
 engine_build_info = "b8-e486f80"
 engine_build_info_is = "/props build_info as the server reported it on 2026-10-01 (the data seat's read at 03:06:11Z, substrates/measurements/2026-09-29-r30-captures/build-info.json, C0b; the inference seat's at about 16:10Z); its commit part resolves to engine_commit by prefix, which is the commit path a start-time check would take; until #218 (the weights-set resolver) merges, the drive's registry read refuses this substrate earlier, at its two-shard main, so the check is not reached"
+engine_identity = "f316bc7fac028eff006d9111f7748b6d1c65d7abc9cd4ef8e48e2bf49826f12b"
+engine_commit = "e486f802d3b46d9aa98b38d162e952b150cb5082"
+engine_fingerprint = "d88870420043d190e40ac518ddec21e62464814084614123c82aa99d4384dfd0"
+engine_is = "the engine this instance ran, kept here since the substrate's engine fields name e7051ef again after the 2026-10-03 revert: the process read of 2026-10-01 (substrates/measurements/2026-10-01-ada48-e486f80/process-read.json); its eight libraries' digests are in that file"
 process_started = "2026-10-01T01:10:27Z"
-process_started_is = "the running production process, from the production launch file (health ok 01:10:35Z); two maintenance windows since 2026-09-30 23:20Z, 2026-10-01T00:12:58Z-00:20:51Z and 01:01:27Z-01:10:35Z, each restored to this line"
+process_started_is = "the running production process, from the production launch file (health ok 01:10:35Z); two maintenance windows since 2026-09-30 23:20Z, 2026-10-01T00:12:58Z-00:20:51Z and 01:01:27Z-01:10:35Z, each restored to this line. On 2026-10-03 production was stopped at 06:56:19Z for the side-port diagnosis (diag-1003.log, which does not name the process it stopped, so whether this instance's process ran until then is not recorded); a restored e486f80 process, pid 656859, served from 06:58:06Z (diag-1003.log) until the revert stopped it at 06:58:30Z (#143 5966611289), and was not fingerprinted (substrates/measurements/2026-10-03-ada48-concurrency/)"
 cmdline_sha256 = "5b4d0b7168d3d56e98942bf89a44a287434e3d3fc7d0b776d90574b20c66dd96"
 cmdline_sha256_is = "sha256 of /proc/<pid>/cmdline as read (NUL-separated); the same line space-joined without its trailing space hashes 472d346a6739686157c599180dea345a29eafe3d2db093ccf1e68f8f0d4b9548 and the launch file as stored ce7c3bb47cf8373316352e4b6df4202e8b834fcd8b863ba9b3c14cb1b08078a0; the lines carry paths and the key, so only digests are published"
 weights_read = "re-hashed 2026-10-01 by the inference seat, the mapped inodes equal to the hashed files: weights_main's two shards and weights_draft as the entry states"
 pinned_by = "the inference seat's reads of 2026-10-01 at the maintainer's request (relayed by Dispatch): the process read (substrates/measurements/2026-10-01-ada48-e486f80/process-read.json, sha256 3e799b6e...), the command line, /props, the weights and the OS; no stop or start, all four slots idle at 16:09:00Z and 16:11:56Z"
+current = false
+current_note = "superseded 2026-10-03T06:58:30Z, when production was reverted to e7051ef: this instance's engine, e486f80, cross-contaminates concurrent requests under -np > 1 (hazard_regime_boundary; #143 5966611289). Multi-stream use of this instance, 2026-09-30 about 23:20Z to 2026-10-03T06:58:30Z, carries the hazard"
+
+[[substrate.ada48-llamacpp-qwen38flashnext-q20.instance]]
+id = "2026-10-03"
+engine_identity = "41e6591d710fd4b5d81468264bb973a9f0575665dda2f27c69d5e370424d69bb"
+engine_commit = "e7051efc8002847f7269c5606318431179b5904e"
+engine_fingerprint = "a08e5511390e70f9b92401284a5587a20163a9528a14982ecf8589d88290dea4"
+engine_is = "the revert to the 2026-09-28 build: the process read of the restarted production server (substrates/measurements/2026-10-03-ada48-concurrency/revert-process-read.json, sha256 09b72e68...), its fingerprint equal to instance 2026-09-28's, which was read from disk; this read ties the running process to that build"
+engine_build_info = "b7-e7051ef"
+engine_build_info_is = "the inference seat's label for the reverted server in substrates/measurements/2026-10-03-ada48-concurrency/runs-production-1003.txt; no /props read after the revert is committed, so this is not a read; it agrees with the exe and engine_fingerprint, which tie the process to the 2026-09-28 build"
+process_started = "2026-10-03T06:58:31Z"
+process_started_is = "from the process read; the server was stopped at 06:58:30Z and answered health at 06:58:39Z, so production was down about 9 s for the revert (#143 5966611289). Earlier the same morning production was down 06:56:19Z-06:58:06Z for the side-port diagnosis and restored to e486f80 (substrates/measurements/2026-10-03-ada48-concurrency/diag-1003.log)"
+serving_is = "the revert launched from the 2026-09-28 launch file (#143 5966611289), so the running command line is instance 2026-09-28's, which the 2026-10-01 command line equalled but for the executable's checkout directory (serving_flags_are); weights unchanged, by the inference seat's statement, not re-read by the data seat; os, kernel, cuda and driver were not re-read and are taken from instance 2026-10-01 (whether the host rebooted in between is not recorded); the process maps libcudart.so.13.4.92, libcublas.so.13.8.0.4 and libcuda.so.615.71.09 (revert-process-read.json)"
+pinned_by = "the inference seat's revert of 2026-10-03 and its process read of the reverted server (substrates/measurements/2026-10-03-ada48-concurrency/; #143 5966611289)"
 current = true
 
 [substrate.canned]
@@ -790,6 +832,53 @@ reproducible_because = "as for `canned`: replay the acts and the same bytes play
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
 engine_build_info = "canned-188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
 engine_build_info_is = "derived, not read from a server: canned::build_info(), \"canned-\" + the entry's acts digest (weights_acts_sha256, equal to engine_identity); the acts the crate plays now, so the canned server reports this literal at GET /props"
+
+# The drive endpoint's engine commit and weights on this host's CPU, served for #29's I0
+# captures (a streamed tool call and its turn 2); not a claim substrate.
+[substrate.macpro-llamacpp-qwen38flashnext-q20-cpu]
+equipment = "mac-pro-2019"
+description = "Qwen3.8-Flash-Next GSQ-RCO at Q2_0 with its Q4_K_M MTP draft, the same weights as ada48-llamacpp-qwen38flashnext-q20, served on this host's CPU by ironblock's llama.cpp fork at the same commit; #29's I0 tool-call captures (substrates/measurements/2026-10-02-i0-tool-call-captures/), not a claim substrate"
+pinned = true
+engine_name = "llama.cpp (github.com/ironblock/llama.cpp)"
+engine_identity = "e501161173eddeac41d0d3249cc3056f32d591a309d941bb1bcb905be6c99bff"
+engine_identity_is = "sha256 of the llama-server executable, a stub over the seven .dylib libraries beside it, built on this host 2026-10-02 (cmake Release, GGML_METAL=OFF, GGML_BLAS=OFF, LLAMA_CURL=OFF; AppleClang 21.0.0) and read from disk by check-fingerprints.py --read-engine"
+engine_commit = "e486f802d3b46d9aa98b38d162e952b150cb5082"
+engine_commit_is = "the build checkout's HEAD, clean, the commit the drive endpoint's production serves (ada48-llamacpp-qwen38flashnext-q20, instance 2026-10-01); the server reports system_fingerprint b11102-e486f802d, its build counter being this full clone's commit count"
+weights_main = ["69820c02ec7d0b45ef2ebb19d6620299db749fe2aded7f39f93c6b88b199b720", "316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113"]
+weights_main_file = "Qwen3.8-Flash-Next-GSQ-RCO-Q2_0, two shards (00001-of-00002, 00002-of-00002), hashed 2026-10-02 on this host: byte-identical to ada48-llamacpp-qwen38flashnext-q20's"
+weights_draft = "b646ef60eaae2a9ed849e75f15f399629ca22633555e99e809959e95f22a1575"
+weights_draft_file = "mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf, byte-identical to the drive endpoint's draft"
+sampler_card = "none on the serving line; each request sets its own"
+serving_context = 16384
+serving_slots = 4
+serving_context_is = "the unified pool (--kv-unified) shared by the four slots, read off the serving flags"
+serving_flags = "-c 16384, -t 12, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, -np 4, --kv-unified, --jinja, --spec-type draft-mtp, --spec-draft-n-max 3, --spec-draft-p-min 0.0, --alias qwen3.8-flash-next, bound to 127.0.0.1, no key; no -ngl (CPU), no --reasoning-format, as on the drive endpoint"
+hazards = "not the drive endpoint: the same engine commit and weights on a different backend (CPU here, CUDA there) and a smaller context, so its timings and any token-level output are this host's, not the endpoint's. The endpoint's model and draft hazards are taken to carry over, not measured here: the same MTP draft on the same hybrid recurrent model, where the endpoint measured greedy output not bit-exact with its spec-off path (on its card at e7051ef) and warm reuse after a divergence depending on where checkpoints land; nothing may be gated on token identity (ada48-llamacpp-qwen38flashnext-q20, hazards). Its engine is e486f80, the build that cross-contaminates concurrent requests under -np > 1 (ada48-llamacpp-qwen38flashnext-q20, hazard_regime_boundary): the I0 captures ran one request at a time and are unaffected, and any concurrent use of this build is not; what it was used for, how llama-server streams and parses a tool call, is decided by the commit's server and chat parser, which the two share. Served on demand for the captures and stopped after; no process runs between captures"
+engine_libraries_read = "disk"
+engine_libraries_is = "read from disk after the build by check-fingerprints.py --read-engine with the .dylib recipe added in the same change (substrates/measurements/2026-10-02-i0-tool-call-captures/engine-read.json); the captures ran from this build, unmodified"
+engine_fingerprint = "30053225c3ffeeaa9a95b9f0df78b5e8755093d83e9f74c7339a4679b1d037d7"
+engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+
+[substrate.macpro-llamacpp-qwen38flashnext-q20-cpu.engine_libraries]
+"libggml-base.0.24.0.dylib" = "6361a3f3e2a41e7682aeb2b7cf3ad735ab5b98075d3865346641ab2528cface6"
+"libggml-cpu.0.24.0.dylib" = "db9acb61fd3615f94360a683b67b2f9486f8d9b0d511bb8a937ad43b5e8ad9d2"
+"libggml.0.24.0.dylib" = "19e970877d76df14ca085d2a3ca18c16cdf80b6b3daf62214ade4b9d62a992ff"
+"libllama-common.0.4.1.dylib" = "6518a0d28b20bc34e2eda876f8b0ad956625bb103350e5026db857ba7dfa4cdc"
+"libllama-server-impl.dylib" = "1ca197db52bed3b6a711d39d4236b22ad92a801b82e29eb16a7e06a3b5ef9fb2"
+"libllama.0.4.1.dylib" = "07a447e75136722b09eacabeee2176c03790f77ba847efe48d7bd2cd641e3448"
+"libmtmd.0.4.1.dylib" = "4a8956e4f660dc831526552dd81eafa5d98731298a87299e0101a1f4eb26a7bf"
+
+[[substrate.macpro-llamacpp-qwen38flashnext-q20-cpu.instance]]
+id = "2026-10-02"
+os = "macOS 26.6.2 (25G83)"
+kernel = "Darwin 25.6.0"
+engine_build_info = "b11102-e486f802d"
+engine_build_info_is = "system_fingerprint on every chunk of the three captures"
+pinned_by = "the I0 captures of 2026-10-02: the executable and its libraries read from disk after the build, the weights hashed on this host, the serving line as launched"
+current = false
+current_note = "served on demand for the I0 captures only, as the registry's other per-window servers are recorded; no process runs between captures"
+served = "2026-10-02T12:28:23Z/2026-10-02T12:30:50Z"
+served_is = "the first and last chunk created timestamps across the three captures; the process was started before and stopped after them, by PID, and its start was not recorded"
 
 # laya's tokenizer, run on this host's CPU to count the archive's judge states in
 # laya's own tokens (#165). Like the encoder cells below it serves nothing.
