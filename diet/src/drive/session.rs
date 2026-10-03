@@ -518,6 +518,12 @@ impl State {
         // running from this refusal.
         self.carried = None;
         let during = self.settlement;
+        // Once ended, nothing more is logged: `ended` is the log's last line,
+        // so a reader that waits for it has the whole session (#291). The
+        // caller still answers the refusal.
+        if during == Settlement::Ended {
+            return because;
+        }
         self.push(Event::Refused {
             command,
             because,
@@ -616,7 +622,8 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// [`Refusal::InFlight`] while a turn or a capture is in flight, and
-    /// [`Refusal::Ended`] once the session has ended; either is also logged.
+    /// [`Refusal::Ended`] once the session has ended. The first is logged; the
+    /// second is not, so `ended` stays the log's last line (#291).
     /// [`Rejected::BadGap`] when `gap` cannot be logged, and then nothing is.
     pub fn ask(&self, text: &str, gap: Option<IdleGap>) -> Result<Admitted, Rejected> {
         let mut state = self.shared.lock();
@@ -701,8 +708,8 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// [`Rejected::NoSuchTurn`] for a turn never admitted (not logged), and
     /// [`Rejected::BadGap`] when `gap` cannot be logged (nothing is).
-    /// Otherwise refused, and logged: [`Refusal::Ended`] once the session
-    /// has ended, [`Refusal::Stale`] for a turn older than the latest, and
+    /// Otherwise refused: [`Refusal::Ended`] once the session has ended (not
+    /// logged, #291), and, logged, [`Refusal::Stale`] for a turn older than the latest, and
     /// [`Refusal::NothingInFlight`] when the latest turn has no call in
     /// flight.
     pub fn cancel(&self, turn: u32, gap: Option<IdleGap>) -> Result<(), Rejected> {
@@ -739,8 +746,8 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// Always: [`Refusal::SeamNotBuilt`], or [`Refusal::Ended`] once the
-    /// session has ended. Logged either way; a refused command's `gap` is
+    /// Always: [`Refusal::SeamNotBuilt`], logged, or [`Refusal::Ended`] once
+    /// the session has ended, not logged (#291). A refused command's `gap` is
     /// neither logged nor closed.
     pub fn declare_seam(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
@@ -761,8 +768,8 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// [`Refusal::InFlight`] while a turn or a capture is in flight -- stop
-    /// it first -- and [`Refusal::Ended`] if it already ended; logged, and the
-    /// refused `gap` is neither logged nor closed. Or [`Rejected::BadGap`]
+    /// it first -- logged -- and [`Refusal::Ended`] if it already ended, not
+    /// logged (#291); the refused `gap` is neither logged nor closed. Or [`Rejected::BadGap`]
     /// when an admitted end's `gap` cannot be logged: then it does not end,
     /// and nothing is logged.
     pub fn end(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
@@ -2069,11 +2076,20 @@ pub(in crate::drive) mod tests {
                     Refusal::SeamNotBuilt,
                     Settlement::Awaiting
                 ),
-                (CommandKind::Ask, Refusal::Ended, Settlement::Ended),
-                (CommandKind::Cancel, Refusal::Ended, Settlement::Ended),
-                (CommandKind::DeclareSeam, Refusal::Ended, Settlement::Ended),
-                (CommandKind::End, Refusal::Ended, Settlement::Ended),
             ]
+        );
+        // Every command after `end` was refused, and none was logged:
+        // `ended` is the last line (#291).
+        assert!(
+            matches!(
+                session.events_from(0).last().map(|logged| &logged.event),
+                Some(Event::Settled {
+                    to: Settlement::Ended,
+                    ..
+                })
+            ),
+            "{:?}",
+            session.events_from(0).last()
         );
         assert_eq!(
             session.shared.transport.sent().len(),

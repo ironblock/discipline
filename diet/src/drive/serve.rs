@@ -1505,9 +1505,11 @@ mod tests {
             .iter()
             .filter(|logged| matches!(logged.event, Event::Refused { .. }))
             .count();
+        // The two before `end` are logged; the one after is answered and not
+        // logged, so `ended` stays the log's last line (#291).
         assert_eq!(
-            refusals, 3,
-            "a refusal answered over HTTP is not in the log"
+            refusals, 2,
+            "a refusal answered over HTTP before the end is not in the log"
         );
     }
 
