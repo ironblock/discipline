@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 152
+mechanics_assertions = 153
 unseedable_guards = 2
 migrated = 0
 
@@ -270,6 +270,26 @@ legacy_signature = "sed forms only GNU accepts"
 migrated = false
 
 [[fault]]
+id = "test.bakeoff_writes_a_second_product"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "a second directory of one product"
+failure_class = "results.product-shared"
+legacy_signature = "capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_infers_an_absence"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "an absence the assembler inferred"
+failure_class = "results.claim-field-undeclared"
+legacy_signature = "capture::bakeoff::tests::a_missing_declaration_is_refused_before_anything_is_written \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
 id = "test.bakeoff_digest_unchecked"
 kind = "seeded-gate"
 check = "test"
@@ -287,16 +307,6 @@ target = "lib/capture::bakeoff"
 label = "the assembled directory's evidence is elsewhere"
 failure_class = "results.evidence-not-attached"
 legacy_signature = "capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \\.\\.\\. FAILED"
-migrated = false
-
-[[fault]]
-id = "test.bakeoff_scratch_shared"
-kind = "seeded-gate"
-check = "test"
-target = "lib/capture::bakeoff"
-label = "the bakeoff scratch shared by every run"
-failure_class = "test.fixture-path-shared"
-legacy_signature = "capture::bakeoff::tests::two_scratches_never_share_a_directory \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -1682,6 +1692,15 @@ kind = "mechanics"
 check = "results"
 label = "a record diet refuses gets no verdict from the linter"
 failure_class = "results.linter-judged-the-format"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.post-hoc-is-derived-from-the-two-times-both-ways"
+kind = "mechanics"
+check = "results"
+label = "post-hoc is derived from the two times, both ways"
+failure_class = "results.clean"
 legacy_signature = ""
 migrated = false
 
@@ -3073,6 +3092,114 @@ legacy_signature = "but the committed file hashes to"
 migrated = false
 
 [[fault]]
+id = "results.results_claim_field_undeclared"
+kind = "seeded-gate"
+check = "results"
+label = "a claim field neither given nor absent"
+failure_class = "results.claim-field-undeclared"
+legacy_signature = "neither gives .claim_issue. nor declares it in .absent.*\\[results\\.claim-field-undeclared\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_product_shared"
+kind = "seeded-gate"
+check = "results"
+label = "one record in two directories"
+failure_class = "results.product-shared"
+legacy_signature = ".product_sha256. [0-9a-f]{64} is declared here and by .*\\[results\\.product-shared\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_supersession_cycle"
+kind = "seeded-gate"
+check = "results"
+label = "a two-directory supersession cycle"
+failure_class = "results.supersession-cycle"
+legacy_signature = ".supersedes. closes a cycle: [^ ]+ -> [^ ]+ -> [^ ]+; .*\\[results\\.supersession-cycle\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_supersedes_the_template"
+kind = "seeded-gate"
+check = "results"
+label = "a supersession of the template"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".supersedes. is [0-9a-f]{64}, which 0 directory\\(ies\\) beside this one declare.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_product_spelled_twice_over"
+kind = "seeded-gate"
+check = "results"
+label = "a product spelled a second way"
+failure_class = "results.product-spelling"
+legacy_signature = ".product_sha256. is spelled 1 time\\(s\\) in the front-matter, as .product_sha256 = \"[0-9a-f]{64}\" # the report.*\\[results\\.product-spelling\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_supersedes_dangling"
+kind = "seeded-gate"
+check = "results"
+label = "a supersession that names no product"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".supersedes. is a{64}, which 0 directory\\(ies\\) beside this one declare.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_issue_not_digits"
+kind = "seeded-gate"
+check = "results"
+label = "an issue number with a leading zero"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".claim_issue. is .0114.; an issue number is a string of digits.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_field_both"
+kind = "seeded-gate"
+check = "results"
+label = "a claim field given and absent"
+failure_class = "results.claim-field-both"
+legacy_signature = ".claim_issue. is both given and declared absent.*\\[results\\.claim-field-both\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_window_start_unsourced"
+kind = "seeded-gate"
+check = "results"
+label = "a window start with no source"
+failure_class = "results.window-start-unsourced"
+legacy_signature = ".window_start. gives no .window_start_from.*\\[results\\.window-start-unsourced\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_rule_ratified_at_malformed"
+kind = "seeded-gate"
+check = "results"
+label = "a ratification time not in UTC"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".rule_ratified\\.at. is .2026-09-25 03:29., not an ISO-8601 UTC time.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_rule_ratified_of_missing"
+kind = "seeded-gate"
+check = "results"
+label = "a ratification of a file not here"
+failure_class = "results.claim-field-malformed"
+legacy_signature = "is of .nowhere\\.toml., which is not a file here.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_provenance_nested"
+kind = "seeded-gate"
+check = "results"
+label = "a provenance key in the wrong table"
+failure_class = "results.claim-field-nested"
+legacy_signature = ".derivation\\.rule_ratified_note.: .rule_ratified_note. belongs at the top level.*\\[results\\.claim-field-nested\\]"
+migrated = false
+
+[[fault]]
 id = "test.regimen_nested_table_flattened"
 kind = "seeded-gate"
 check = "test"
@@ -4000,166 +4127,6 @@ legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyon
 migrated = false
 
 [[fault]]
-id = "ci.ci_check_seconds_over_budget"
-kind = "seeded-gate"
-check = "ci"
-label = "a check re-measured past its job's budget"
-failure_class = "wiring.job-over-budget"
-legacy_signature = "pkg-repo\\.yml: its checks' measured seconds per job are [0-9]+ s, past the 300 s budget \\(.*hygiene 341\\.2 s"
-migrated = false
-[[fault]]
-id = "ci.ci_check_seconds_unmeasured"
-kind = "seeded-gate"
-check = "ci"
-label = "a check with no measured seconds"
-failure_class = "wiring.check-unmeasured"
-legacy_signature = "`hygiene` has no measured seconds"
-migrated = false
-[[fault]]
-id = "ci.ci_injection_shard_drops_one"
-kind = "seeded-gate"
-check = "ci"
-label = "an injection no shard applies"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = "`injections`.s 2 shards run none of 1 member\\(s\\), so nothing runs them"
-migrated = false
-[[fault]]
-id = "ci.ci_recompute_shard_drops_one"
-kind = "seeded-gate"
-check = "ci"
-label = "a results directory no shard re-derives"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = "`recompute`.s 3 shards run none of 3 member\\(s\\), so nothing runs them"
-migrated = false
-[[fault]]
-id = "ci.ci_sharded_workflow_without_shard"
-kind = "seeded-gate"
-check = "ci"
-label = "a sharded job never told its shard"
-failure_class = "wiring.shard-not-passed"
-legacy_signature = "pkg-injections\\.yml: .injections. is sharded, and its workflow is not the sharded form"
-migrated = false
-[[fault]]
-id = "ci.ci_shard_count_one"
-kind = "seeded-gate"
-check = "ci"
-label = "a split into one shard"
-failure_class = "wiring.shard-count"
-legacy_signature = ".recompute..s shard count is .1., not a whole number of 2 or more"
-migrated = false
-[[fault]]
-id = "ci.ci_sharded_matrix_not_the_table"
-kind = "seeded-gate"
-check = "ci"
-label = "a sharded matrix that is not the table"
-failure_class = "wiring.shard-matrix"
-legacy_signature = "pkg-recompute\\.yml: .recompute. is sharded, and its workflow is not the sharded form"
-migrated = false
-[[fault]]
-id = "ci.ci_check_runs_one_shard"
-kind = "seeded-gate"
-check = "ci"
-label = "a check that runs one shard whatever"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute..s 3 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
-migrated = false
-[[fault]]
-id = "ci.ci_sharded_workflow_line_separator"
-kind = "seeded-gate"
-check = "ci"
-label = "a line separator YAML does not split on"
-failure_class = "wiring.shard-matrix"
-legacy_signature = "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
-migrated = false
-[[fault]]
-id = "ci.ci_listing_unmarked"
-kind = "seeded-gate"
-check = "ci"
-label = "a listing with no line of its own"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute.: verify\\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED"
-migrated = false
-[[fault]]
-id = "ci.ci_recompute_runs_fewer_than_listed"
-kind = "seeded-gate"
-check = "ci"
-label = "a shard that runs fewer than it lists"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute..s 3 shards run none of 3 member\\(s\\), so nothing runs them"
-migrated = false
-[[fault]]
-id = "ci.ci_injections_applies_fewer_than_listed"
-kind = "seeded-gate"
-check = "ci"
-label = "an applier that applies fewer than it lists"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = ".injections..s 2 shards run none of 2 member\\(s\\), so nothing runs them"
-migrated = false
-[[fault]]
-id = "ci.ci_recompute_wrapper_shard_one_when_running"
-kind = "seeded-gate"
-check = "ci"
-label = "a wrapper that runs shard 1 when not listing"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute..s shards run [0-9]+ member\\(s\\) more than once"
-migrated = false
-[[fault]]
-id = "ci.ci_caller_in_block_scalar"
-kind = "seeded-gate"
-check = "ci"
-label = "a package's call kept in a block scalar"
-failure_class = "wiring.uncalled"
-legacy_signature = "pkg-recompute\\.yml exists but verify\\.yml never calls it"
-migrated = false
-[[fault]]
-id = "ci.ci_recompute_skips_after_the_dry_branch"
-kind = "seeded-gate"
-check = "ci"
-label = "a recompute skip the dry census cannot see"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
-migrated = false
-[[fault]]
-id = "ci.ci_injections_skips_after_the_dry_branch"
-kind = "seeded-gate"
-check = "ci"
-label = "an applier skip the dry census cannot see"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = ".injections, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
-migrated = false
-[[fault]]
-id = "ci.ci_recompute_reports_a_skip"
-kind = "seeded-gate"
-check = "ci"
-label = "a member reported as skipped"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = "recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to"
-migrated = false
-[[fault]]
-id = "ci.ci_shard_census_switched_off"
-kind = "seeded-gate"
-check = "ci"
-label = "the gate's shard census allowed to fail"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = "the gate job does not run check-shard-census\\.py"
-migrated = false
-[[fault]]
-id = "ci.ci_shard_census_off_behind_a_comment"
-kind = "seeded-gate"
-check = "ci"
-label = "the gate's census off behind a comment"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = "the gate job does not run check-shard-census\\.py"
-migrated = false
-[[fault]]
-id = "ci.ci_shard_census_step_removed"
-kind = "seeded-gate"
-check = "ci"
-label = "the gate's shard census renamed away"
-failure_class = "wiring.shard-incomplete"
-legacy_signature = "the gate job does not run check-shard-census\\.py"
-migrated = false
-[[fault]]
 id = "ci.ci_pages_publishes_on_its_own_trigger"
 kind = "seeded-gate"
 check = "ci"
@@ -4301,22 +4268,6 @@ kind = "mechanics"
 check = "resolver"
 label = "a conformance fixture does not"
 failure_class = "resolver.data-is-not-a-source"
-legacy_signature = ""
-migrated = false
-[[fault]]
-id = "mech.a-member-reported-skipped-is-not-counted-as-run"
-kind = "mechanics"
-check = "parity"
-label = "a member reported skipped is not counted as run"
-failure_class = "shard.census-outcome"
-legacy_signature = ""
-migrated = false
-[[fault]]
-id = "mech.a-dry-census-row-is-refused-where-the-shards-really-ran"
-kind = "mechanics"
-check = "parity"
-label = "a dry census row is refused where the shards really ran"
-failure_class = "shard.census-dry-row"
 legacy_signature = ""
 migrated = false
 [[fault]]
@@ -8119,6 +8070,446 @@ failure_class = "drive.serve-bin-empties-the-log-before-it-starts"
 migrated = false
 
 [[fault]]
+id = "drive.session-drops-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-drops-timings"
+failure_class = "drive.session-drops-timings"
+migrated = false
+
+[[fault]]
+id = "drive.session-response-reasoning-dropped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-response-reasoning-dropped"
+failure_class = "drive.session-response-reasoning-dropped"
+migrated = false
+
+[[fault]]
+id = "drive.session-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-drops-progress"
+failure_class = "drive.session-drops-progress"
+migrated = false
+
+[[fault]]
+id = "drive.session-overflow-logged-as-server"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-overflow-logged-as-server"
+failure_class = "drive.session-overflow-logged-as-server"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-timings-line-drops-the-cache-count"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-timings-line-drops-the-cache-count"
+failure_class = "drive.session-a-timings-line-drops-the-cache-count"
+migrated = false
+
+[[fault]]
+id = "drive.session-logs-progress-after-the-end"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-logs-progress-after-the-end"
+failure_class = "drive.session-logs-progress-after-the-end"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-timings-line-drops-a-draft-count"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-timings-line-drops-a-draft-count"
+failure_class = "drive.session-a-timings-line-drops-a-draft-count"
+migrated = false
+
+[[fault]]
+id = "adapters.compaction-read-as-a-turn"
+kind = "lane-fault"
+check = "lanes"
+label = "adapters.compaction-read-as-a-turn"
+failure_class = "adapters.compaction-read-as-a-turn"
+migrated = false
+[[fault]]
+id = "exercise.exercise_story_assertion"
+kind = "seeded-gate"
+check = "exercise"
+label = "a story's assertion broken in place"
+failure_class = "exercise.story"
+legacy_signature = "expected '2\\.0' to be '2\\.1'"
+migrated = false
+
+[[fault]]
+id = "mech.every-catcher-a-lane-fault-declares-is-listed"
+kind = "mechanics"
+check = "-"
+label = "every catcher a lane fault declares is listed"
+failure_class = "lanes.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-lane-fault-whose-second-catcher-did-not-fail-is-not-red"
+kind = "mechanics"
+check = "-"
+label = "a lane fault whose second catcher did not fail is not red"
+failure_class = "lanes.catcher-not-seen-red"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.and-with-only-the-catcher-that-failed-it-is"
+kind = "mechanics"
+check = "-"
+label = "and with only the catcher that failed, it is"
+failure_class = "lanes.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_deploy_group_quoted_key"
+kind = "seeded-gate"
+check = "ci"
+label = "a quoted extra key in the deploy job's group"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploy_second_group_tagged"
+kind = "seeded-gate"
+check = "ci"
+label = "a second group in the deploy job, tagged"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly .!!str concurrency"
+migrated = false
+
+[[fault]]
+id = "client.stub-leaves-props-unanswered"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stub-leaves-props-unanswered"
+failure_class = "client.stub-leaves-props-unanswered"
+migrated = false
+
+[[fault]]
+id = "client.stub-closes-an-extra-call-silently"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stub-closes-an-extra-call-silently"
+failure_class = "client.stub-closes-an-extra-call-silently"
+migrated = false
+
+[[fault]]
+id = "drive.engine-skips-a-canned-substrate"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-skips-a-canned-substrate"
+failure_class = "drive.engine-skips-a-canned-substrate"
+migrated = false
+
+[[fault]]
+id = "drive.canned-build-info-names-other-acts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-build-info-names-other-acts"
+failure_class = "drive.canned-build-info-names-other-acts"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_recording_carried_disagrees"
+kind = "seeded-gate"
+check = "exercise"
+label = "a capture's carried field disagreeing with its events"
+failure_class = "exercise.recording-carried"
+legacy_signature = "voxel-stress: its carried field disagrees with its events"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_flow_collection_hides_a_group"
+kind = "seeded-gate"
+check = "ci"
+label = "a flow collection hiding a second group"
+failure_class = "wiring.pages-yaml-duplicate"
+legacy_signature = "pages.yml: jobs.deploy: duplicate key .concurrency."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_deploy_job"
+kind = "seeded-gate"
+check = "ci"
+label = "a second deploy job"
+failure_class = "wiring.pages-yaml-duplicate"
+legacy_signature = "pages.yml: jobs: duplicate key .deploy."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_document"
+kind = "seeded-gate"
+check = "ci"
+label = "a second YAML document"
+failure_class = "wiring.pages-yaml-documents"
+legacy_signature = "pages.yml: holds 2 YAML documents, not one"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_quoted_merge_key"
+kind = "seeded-gate"
+check = "ci"
+label = "a quoted merge key over the guards"
+failure_class = "wiring.pages-yaml-merge"
+legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly .<<."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_job"
+kind = "seeded-gate"
+check = "ci"
+label = "a second job that publishes"
+failure_class = "wiring.pages-second-job"
+legacy_signature = "pages.yml: jobs other than .deploy. .publish-too."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_check_step_skipped"
+kind = "seeded-gate"
+check = "ci"
+label = "the check step skipped"
+failure_class = "wiring.pages-step-skipped"
+legacy_signature = "pages.yml: the check step carries if, so it may not run as written"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_site_written_after_its_check"
+kind = "seeded-gate"
+check = "ci"
+label = "the site written after its check"
+failure_class = "wiring.pages-site-written"
+legacy_signature = "pages.yml: a step between ./verify.sh --site _site and the upload"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_upload_always"
+kind = "seeded-gate"
+check = "ci"
+label = "the upload run whatever the check said"
+failure_class = "wiring.pages-step-forced"
+legacy_signature = "pages.yml: a step from the check on carries .if:. .actions/upload-pages-artifact"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_trigger_any_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "the trigger on any branch"
+failure_class = "wiring.pages-trigger"
+legacy_signature = "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_checkout_not_the_run"
+kind = "seeded-gate"
+check = "ci"
+label = "the checkout not the run's sha"
+failure_class = "wiring.pages-checkout"
+legacy_signature = "pages.yml: the site is not checked against the sha that run built"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_condition_outside_its_braces"
+kind = "seeded-gate"
+check = "ci"
+label = "the condition with text outside its braces"
+failure_class = "wiring.pages-condition"
+legacy_signature = "pages.yml: the deploy's condition has text outside its"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_scratch_shared"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "the bakeoff scratch shared by every run"
+failure_class = "test.fixture-path-shared"
+legacy_signature = "capture::bakeoff::tests::two_scratches_never_share_a_directory \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "ci.ci_check_seconds_over_budget"
+kind = "seeded-gate"
+check = "ci"
+label = "a check re-measured past its job's budget"
+failure_class = "wiring.job-over-budget"
+legacy_signature = "pkg-repo\\.yml: its checks' measured seconds per job are [0-9]+ s, past the 300 s budget \\(.*hygiene 341\\.2 s"
+migrated = false
+[[fault]]
+id = "ci.ci_check_seconds_unmeasured"
+kind = "seeded-gate"
+check = "ci"
+label = "a check with no measured seconds"
+failure_class = "wiring.check-unmeasured"
+legacy_signature = "`hygiene` has no measured seconds"
+migrated = false
+[[fault]]
+id = "ci.ci_injection_shard_drops_one"
+kind = "seeded-gate"
+check = "ci"
+label = "an injection no shard applies"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "`injections`.s 2 shards run none of 1 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_shard_drops_one"
+kind = "seeded-gate"
+check = "ci"
+label = "a results directory no shard re-derives"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "`recompute`.s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_workflow_without_shard"
+kind = "seeded-gate"
+check = "ci"
+label = "a sharded job never told its shard"
+failure_class = "wiring.shard-not-passed"
+legacy_signature = "pkg-injections\\.yml: .injections. is sharded, and its workflow is not the sharded form"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_count_one"
+kind = "seeded-gate"
+check = "ci"
+label = "a split into one shard"
+failure_class = "wiring.shard-count"
+legacy_signature = ".recompute..s shard count is .1., not a whole number of 2 or more"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_matrix_not_the_table"
+kind = "seeded-gate"
+check = "ci"
+label = "a sharded matrix that is not the table"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml: .recompute. is sharded, and its workflow is not the sharded form"
+migrated = false
+[[fault]]
+id = "ci.ci_check_runs_one_shard"
+kind = "seeded-gate"
+check = "ci"
+label = "a check that runs one shard whatever"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_workflow_line_separator"
+kind = "seeded-gate"
+check = "ci"
+label = "a line separator YAML does not split on"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
+migrated = false
+[[fault]]
+id = "ci.ci_listing_unmarked"
+kind = "seeded-gate"
+check = "ci"
+label = "a listing with no line of its own"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute.: verify\\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_runs_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "a shard that runs fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_applies_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier that applies fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections..s 2 shards run none of 2 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_wrapper_shard_one_when_running"
+kind = "seeded-gate"
+check = "ci"
+label = "a wrapper that runs shard 1 when not listing"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s shards run [0-9]+ member\\(s\\) more than once"
+migrated = false
+[[fault]]
+id = "ci.ci_caller_in_block_scalar"
+kind = "seeded-gate"
+check = "ci"
+label = "a package's call kept in a block scalar"
+failure_class = "wiring.uncalled"
+legacy_signature = "pkg-recompute\\.yml exists but verify\\.yml never calls it"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "a recompute skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_reports_a_skip"
+kind = "seeded-gate"
+check = "ci"
+label = "a member reported as skipped"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_switched_off"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census allowed to fail"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_off_behind_a_comment"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's census off behind a comment"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_step_removed"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census renamed away"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "mech.a-member-reported-skipped-is-not-counted-as-run"
+kind = "mechanics"
+check = "parity"
+label = "a member reported skipped is not counted as run"
+failure_class = "shard.census-outcome"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-dry-census-row-is-refused-where-the-shards-really-ran"
+kind = "mechanics"
+check = "parity"
+label = "a dry census row is refused where the shards really ran"
+failure_class = "shard.census-dry-row"
+legacy_signature = ""
+migrated = false
+[[fault]]
 id = "drive.projection-rebuilds-without-the-answer"
 kind = "lane-fault"
 check = "lanes"
@@ -8279,161 +8670,6 @@ failure_class = "drive.serve-bin-forgets-what-it-emptied"
 migrated = false
 
 [[fault]]
-id = "drive.session-drops-timings"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.session-drops-timings"
-failure_class = "drive.session-drops-timings"
-migrated = false
-
-[[fault]]
-id = "drive.session-response-reasoning-dropped"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.session-response-reasoning-dropped"
-failure_class = "drive.session-response-reasoning-dropped"
-migrated = false
-
-[[fault]]
-id = "drive.session-drops-progress"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.session-drops-progress"
-failure_class = "drive.session-drops-progress"
-migrated = false
-
-[[fault]]
-id = "drive.session-overflow-logged-as-server"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.session-overflow-logged-as-server"
-failure_class = "drive.session-overflow-logged-as-server"
-migrated = false
-
-[[fault]]
-id = "drive.session-a-timings-line-drops-the-cache-count"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.session-a-timings-line-drops-the-cache-count"
-failure_class = "drive.session-a-timings-line-drops-the-cache-count"
-migrated = false
-
-[[fault]]
-id = "drive.session-logs-progress-after-the-end"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.session-logs-progress-after-the-end"
-failure_class = "drive.session-logs-progress-after-the-end"
-migrated = false
-
-[[fault]]
-id = "drive.session-a-timings-line-drops-a-draft-count"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.session-a-timings-line-drops-a-draft-count"
-failure_class = "drive.session-a-timings-line-drops-a-draft-count"
-migrated = false
-
-[[fault]]
-id = "adapters.compaction-read-as-a-turn"
-kind = "lane-fault"
-check = "lanes"
-label = "adapters.compaction-read-as-a-turn"
-failure_class = "adapters.compaction-read-as-a-turn"
-migrated = false
-[[fault]]
-id = "exercise.exercise_story_assertion"
-kind = "seeded-gate"
-check = "exercise"
-label = "a story's assertion broken in place"
-failure_class = "exercise.story"
-legacy_signature = "expected '2\\.0' to be '2\\.1'"
-migrated = false
-
-[[fault]]
-id = "mech.every-catcher-a-lane-fault-declares-is-listed"
-kind = "mechanics"
-check = "-"
-label = "every catcher a lane fault declares is listed"
-failure_class = "lanes.clean"
-expected_exit = "0"
-migrated = false
-[[fault]]
-id = "mech.a-lane-fault-whose-second-catcher-did-not-fail-is-not-red"
-kind = "mechanics"
-check = "-"
-label = "a lane fault whose second catcher did not fail is not red"
-failure_class = "lanes.catcher-not-seen-red"
-expected_exit = "1"
-migrated = false
-[[fault]]
-id = "mech.and-with-only-the-catcher-that-failed-it-is"
-kind = "mechanics"
-check = "-"
-label = "and with only the catcher that failed, it is"
-failure_class = "lanes.clean"
-expected_exit = "0"
-migrated = false
-[[fault]]
-id = "ci.ci_pages_deploy_group_quoted_key"
-kind = "seeded-gate"
-check = "ci"
-label = "a quoted extra key in the deploy job's group"
-failure_class = "wiring.pages-concurrency-extra-key"
-legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_deploy_second_group_tagged"
-kind = "seeded-gate"
-check = "ci"
-label = "a second group in the deploy job, tagged"
-failure_class = "wiring.pages-concurrency-extra-key"
-legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly .!!str concurrency"
-migrated = false
-
-[[fault]]
-id = "client.stub-leaves-props-unanswered"
-kind = "lane-fault"
-check = "lanes"
-label = "client.stub-leaves-props-unanswered"
-failure_class = "client.stub-leaves-props-unanswered"
-migrated = false
-
-[[fault]]
-id = "client.stub-closes-an-extra-call-silently"
-kind = "lane-fault"
-check = "lanes"
-label = "client.stub-closes-an-extra-call-silently"
-failure_class = "client.stub-closes-an-extra-call-silently"
-migrated = false
-
-[[fault]]
-id = "drive.engine-skips-a-canned-substrate"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.engine-skips-a-canned-substrate"
-failure_class = "drive.engine-skips-a-canned-substrate"
-migrated = false
-
-[[fault]]
-id = "drive.canned-build-info-names-other-acts"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.canned-build-info-names-other-acts"
-failure_class = "drive.canned-build-info-names-other-acts"
-migrated = false
-
-[[fault]]
-id = "exercise.exercise_recording_carried_disagrees"
-kind = "seeded-gate"
-check = "exercise"
-label = "a capture's carried field disagreeing with its events"
-failure_class = "exercise.recording-carried"
-legacy_signature = "voxel-stress: its carried field disagrees with its events"
-migrated = false
-
-[[fault]]
 id = "exercise.exercise_snapshot_orphaned"
 kind = "seeded-gate"
 check = "exercise"
@@ -8494,105 +8730,6 @@ check = "exercise"
 label = "the meter reading a progress frame's old shape"
 failure_class = "exercise.progress-shape"
 legacy_signature = "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_flow_collection_hides_a_group"
-kind = "seeded-gate"
-check = "ci"
-label = "a flow collection hiding a second group"
-failure_class = "wiring.pages-yaml-duplicate"
-legacy_signature = "pages.yml: jobs.deploy: duplicate key .concurrency."
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_second_deploy_job"
-kind = "seeded-gate"
-check = "ci"
-label = "a second deploy job"
-failure_class = "wiring.pages-yaml-duplicate"
-legacy_signature = "pages.yml: jobs: duplicate key .deploy."
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_second_document"
-kind = "seeded-gate"
-check = "ci"
-label = "a second YAML document"
-failure_class = "wiring.pages-yaml-documents"
-legacy_signature = "pages.yml: holds 2 YAML documents, not one"
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_quoted_merge_key"
-kind = "seeded-gate"
-check = "ci"
-label = "a quoted merge key over the guards"
-failure_class = "wiring.pages-yaml-merge"
-legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly .<<."
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_second_job"
-kind = "seeded-gate"
-check = "ci"
-label = "a second job that publishes"
-failure_class = "wiring.pages-second-job"
-legacy_signature = "pages.yml: jobs other than .deploy. .publish-too."
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_check_step_skipped"
-kind = "seeded-gate"
-check = "ci"
-label = "the check step skipped"
-failure_class = "wiring.pages-step-skipped"
-legacy_signature = "pages.yml: the check step carries if, so it may not run as written"
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_site_written_after_its_check"
-kind = "seeded-gate"
-check = "ci"
-label = "the site written after its check"
-failure_class = "wiring.pages-site-written"
-legacy_signature = "pages.yml: a step between ./verify.sh --site _site and the upload"
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_upload_always"
-kind = "seeded-gate"
-check = "ci"
-label = "the upload run whatever the check said"
-failure_class = "wiring.pages-step-forced"
-legacy_signature = "pages.yml: a step from the check on carries .if:. .actions/upload-pages-artifact"
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_trigger_any_branch"
-kind = "seeded-gate"
-check = "ci"
-label = "the trigger on any branch"
-failure_class = "wiring.pages-trigger"
-legacy_signature = "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_checkout_not_the_run"
-kind = "seeded-gate"
-check = "ci"
-label = "the checkout not the run's sha"
-failure_class = "wiring.pages-checkout"
-legacy_signature = "pages.yml: the site is not checked against the sha that run built"
-migrated = false
-
-[[fault]]
-id = "ci.ci_pages_condition_outside_its_braces"
-kind = "seeded-gate"
-check = "ci"
-label = "the condition with text outside its braces"
-failure_class = "wiring.pages-condition"
-legacy_signature = "pages.yml: the deploy's condition has text outside its"
 migrated = false
 
 [[fault]]
