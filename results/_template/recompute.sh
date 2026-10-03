@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Gate 0 for this directory: every number the report states re-derives from
-# the artefacts committed beside it.
+# Gate 0 for this directory: every number the front-matter states re-derives
+# from the artefacts committed beside it, and so does the product every
+# referenced figure in the body renders from (#63) -- the linter renders those
+# at check time, so re-deriving the product re-derives them.
 #
 # The linter checks that the report agrees with the record's SUMMARY row. That
 # is agreement between two things the same run wrote, and a summary is a claim
