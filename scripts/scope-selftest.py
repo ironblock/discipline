@@ -49,6 +49,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import tempfile
 import tomllib
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -148,6 +149,26 @@ def functions(text: str) -> dict[str, str]:
 def outside_functions(text: str) -> str:
     """verify.sh with every top-level function removed: its own top-level code."""
     return ONE_LINE.sub("", FUNCTION.sub("", text))
+
+
+def top_level_code(text: str) -> str:
+    """`outside_functions` without its comment and blank lines (#305).
+
+    The comment above each injection lives between functions, so adding or
+    re-wording one changed `<top-level>` and re-proved every fault: 803 on
+    #293's run, for 27 comment lines and 2 blank ones. A comment is not
+    machinery. A line inside a heredoc may begin with `#` and still be read,
+    so a top level whose code opens one (a `<<` in a comment does not) is
+    compared whole, as before.
+    """
+    outside = outside_functions(text)
+    code = [
+        line for line in outside.split("\n")
+        if line.strip() and (line.startswith("#!") or not line.lstrip().startswith("#"))
+    ]
+    if any("<<" in line for line in code):
+        return outside
+    return "\n".join(code)
 
 
 def without_cases(body: str) -> str:
@@ -468,7 +489,7 @@ def changed_since(since: str, root: pathlib.Path) -> tuple[set[str], set[str]]:
             raise Unusable(f"verify.sh at {since} could not be read")
         new = (root / "verify.sh").read_text(encoding="utf-8")
         units = changed_functions(old.stdout, new)
-        if outside_functions(old.stdout) != outside_functions(new):
+        if top_level_code(old.stdout) != top_level_code(new):
             units.add("<top-level>")
         before, after = case_lines(old.stdout), case_lines(new)
         units |= {f"case:{i}" for i in set(before) | set(after) if before.get(i) != after.get(i)}
@@ -631,6 +652,41 @@ def _machinery():
         rerun, inherit = _decide(changed_files=files, changed_units=units)
         if inherit:
             return f"{sorted(files | units)} changed and {sorted(inherit)} was still inherited"
+    return None
+
+
+@fixture("a comment or blank line between functions is not a top-level change")
+def _top_level_comments():
+    # #305: every injection's comment sits between functions, so a PR that
+    # added one re-proved all 800 faults. Code there still counts, and so does
+    # anything in a top-level heredoc, where a `#` line is read.
+    base = "#!/usr/bin/env bash\nset -e\n# one\ninject_a() {\n  :\n}\nX=1\n"
+    commented = base.replace("# one\n", "# one, re-worded, `<<-` named\n\n# and a new block\n")
+    if top_level_code(base) != top_level_code(commented):
+        return "a comment-only change between functions read as a top-level change"
+    # And through `changed_since`, on a repository of two commits: the plan
+    # reads the units from there.
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        git = lambda *args: subprocess.run(["git", "-c", "user.name=f", "-c", "user.email=f@f", *args],
+                                           cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+        git("init", "-q")
+        (root / "verify.sh").write_text(base, encoding="utf-8")
+        git("add", "verify.sh"); git("commit", "-qm", "base")
+        since = git("rev-parse", "HEAD")
+        (root / "verify.sh").write_text(commented, encoding="utf-8")
+        git("commit", "-qam", "comments")
+        if "<top-level>" in changed_since(since, root)[1]:
+            return "changed_since read a comment-only change as `<top-level>`"
+        (root / "verify.sh").write_text(commented.replace("X=1", "X=2"), encoding="utf-8")
+        git("commit", "-qam", "code")
+        if "<top-level>" not in changed_since(since, root)[1]:
+            return "changed_since missed a code change between functions"
+    if top_level_code(base) == top_level_code(base.replace("X=1", "X=2")):
+        return "a code change between functions was not seen"
+    heredoc = base + "cat <<'EOF'\n# read\nEOF\n"
+    if top_level_code(heredoc) == top_level_code(heredoc.replace("# read", "# changed")):
+        return "a `#` line in a top-level heredoc was skipped"
     return None
 
 
