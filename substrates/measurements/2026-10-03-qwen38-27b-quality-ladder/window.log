@@ -1,0 +1,34 @@
+2026-10-03T20:32:08Z corpus code a23ee6968f5cb387
+2026-10-03T20:32:08Z corpus prose 173c87a53759e020
+2026-10-03T20:32:13Z floor pid=17820; slots: [False, False]
+2026-10-03T20:32:14Z DOWNTIME START floor stopped vram=21 mem_avail=29G
+2026-10-03T20:33:59Z ref code ngl=52 rc=0 1.43.256.893 I Final estimate: PPL = 1.6489 +/- 0.01523
+2026-10-03T20:34:06Z base-code.kld 12199858100 471fe3d21ee07cc5
+2026-10-03T20:35:49Z ref prose ngl=52 rc=0 1.41.210.533 I Final estimate: PPL = 6.3432 +/- 0.10130
+2026-10-03T20:35:57Z base-prose.kld 12199858100 1cc5037cb35395a9
+2026-10-03T20:36:49Z main IQ2_XS code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.797884 ± 0.017725|Mean KLD: 0.153315 ± 0.003316|Same top p: 91.834 ± 0.175 %|
+2026-10-03T20:37:39Z main IQ2_XS prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 6.513033 ± 0.098848|Mean KLD: 0.242084 ± 0.005306|Same top p: 81.269 ± 0.249 %|
+2026-10-03T20:38:31Z main IQ2_S code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.749643 ± 0.016905|Mean KLD: 0.117494 ± 0.002748|Same top p: 93.014 ± 0.163 %|
+2026-10-03T20:39:21Z main IQ2_S prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 6.333838 ± 0.096129|Mean KLD: 0.177228 ± 0.004738|Same top p: 84.192 ± 0.233 %|
+2026-10-03T20:40:14Z main IQ3_XXS code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.734891 ± 0.016863|Mean KLD: 0.098972 ± 0.002664|Same top p: 93.918 ± 0.152 %|
+2026-10-03T20:41:04Z main IQ3_XXS prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 6.299271 ± 0.096400|Mean KLD: 0.125246 ± 0.004040|Same top p: 86.773 ± 0.216 %|
+2026-10-03T20:41:58Z main IQ3_S code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.688997 ± 0.015881|Mean KLD: 0.054196 ± 0.001530|Same top p: 95.432 ± 0.133 %|
+2026-10-03T20:42:47Z main IQ3_S prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 6.130506 ± 0.093413|Mean KLD: 0.085991 ± 0.003666|Same top p: 89.757 ± 0.193 %|
+2026-10-03T20:43:37Z bee IQ2_XS code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.797640 ± 0.017713|Mean KLD: 0.153260 ± 0.003312|Same top p: 91.882 ± 0.174 %|
+2026-10-03T20:44:24Z bee IQ2_XS prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 6.512097 ± 0.098816|Mean KLD: 0.241817 ± 0.005303|Same top p: 81.347 ± 0.249 %|
+2026-10-03T20:45:17Z bee IQ2_S code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.749728 ± 0.016898|Mean KLD: 0.117547 ± 0.002753|Same top p: 92.937 ± 0.163 %|
+2026-10-03T20:46:04Z bee IQ2_S prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 6.333895 ± 0.096148|Mean KLD: 0.176109 ± 0.004579|Same top p: 84.253 ± 0.232 %|
+2026-10-03T20:46:53Z bee IQ3_XXS code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.734595 ± 0.016850|Mean KLD: 0.098781 ± 0.002652|Same top p: 93.828 ± 0.154 %|
+2026-10-03T20:47:40Z bee IQ3_XXS prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 6.295362 ± 0.096292|Mean KLD: 0.126413 ± 0.004212|Same top p: 86.720 ± 0.217 %|
+2026-10-03T20:48:30Z bee IQ3_S code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.689303 ± 0.015895|Mean KLD: 0.054343 ± 0.001539|Same top p: 95.457 ± 0.133 %|
+2026-10-03T20:49:15Z bee IQ3_S prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 6.134633 ± 0.093542|Mean KLD: 0.084678 ± 0.003518|Same top p: 89.733 ± 0.194 %|
+2026-10-03T20:49:51Z exl3 4.00 equivalence, full logits rc=0 [eq-full] loaded in 22s; VRAM used 15.6 GiB|RESULT eq-full base-code.kld: PPL(Q) 2.097876 PPL(base) 2.082067 Mean KLD 0.008502 ± 0.000388 99.9% KLD 0.323833 Median KLD 0.000609 Same top 97.777 ± 0.230 % n=4094|
+2026-10-03T20:50:18Z exl3 4.00 equivalence, last-only rc=0 [eq-last] loaded in 14s; VRAM used 15.6 GiB|RESULT eq-last base-code.kld: PPL(Q) 2.097876 PPL(base) 2.082067 Mean KLD 0.008502 ± 0.000388 99.9% KLD 0.323833 Median KLD 0.000609 Same top 97.777 ± 0.230 % n=4094|
+2026-10-03T20:52:24Z exl3 4.00 rc=0 [exl3-4.00] loaded in 14s; VRAM used 15.6 GiB|RESULT exl3-4.00 base-code.kld: PPL(Q) 1.659990 PPL(base) 1.648707 Mean KLD 0.017153 ± 0.000583 99.9% KLD 1.319785 Median KLD 0.000268 Same top 97.525 ± 0.099 % n=24564|RESULT exl3-4.00 base-prose.kld: PPL(Q) 6.256322 PPL(base) 6.331690 Mean KLD 0.022305 ± 0.001973 99.9% KLD 2.576856 Median KLD 0.004029 Same top 95.432 ± 0.133 % n=24564|
+2026-10-03T20:54:30Z exl3 5.00 rc=0 [exl3-5.00] loaded in 15s; VRAM used 18.4 GiB|RESULT exl3-5.00 base-code.kld: PPL(Q) 1.655544 PPL(base) 1.648707 Mean KLD 0.005618 ± 0.000223 99.9% KLD 0.466916 Median KLD 0.000093 Same top 98.526 ± 0.077 % n=24564|RESULT exl3-5.00 base-prose.kld: PPL(Q) 6.364240 PPL(base) 6.331690 Mean KLD 0.008970 ± 0.001516 99.9% KLD 0.627734 Median KLD 0.001327 Same top 97.529 ± 0.099 % n=24564|
+2026-10-03T20:54:46Z exl3 6.00 rc=1     raise RuntimeError("Insufficient VRAM in split for model and cache")|RuntimeError: Insufficient VRAM in split for model and cache|
+2026-10-03T20:54:46Z arms done
+2026-10-03T20:54:46Z restore: begin
+2026-10-03T20:55:06Z provision-diet rc=0
+2026-10-03T20:55:06Z restored: pid=86206 exe=980845d60ae7a820 vram=23066
+2026-10-03T20:55:06Z END

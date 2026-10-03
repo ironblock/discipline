@@ -1,0 +1,64 @@
+0.00.138.611 I common_init_result: fitting params to device memory ...
+0.00.138.613 I common_init_result: (for bugs during this step try to reproduce them with -fit off, or provide --verbose logs if the bug only occurs with -fit on)
+0.06.283.390 W llama_context: n_ctx_seq (4096) < n_ctx_train (262144) -- the full capacity of the model will not be utilized
+0.06.318.210 I common_init_from_params: warming up the model with an empty run - please wait ... (--no-warmup to disable)
+TCQ decode: context-adaptive V alpha enabled
+0.06.533.331 I 
+0.06.533.407 I system_info: n_threads = 8 (n_threads_batch = 8) / 16 | CUDA : ARCHS = 750,800,860,890,900,1200,1210 | USE_GRAPHS = 1 | PEER_MAX_BATCH_SIZE = 128 | CPU : SSE3 = 1 | SSSE3 = 1 | AVX = 1 | AVX2 = 1 | F16C = 1 | FMA = 1 | BMI2 = 1 | LLAMAFILE = 1 | OPENMP = 1 | REPACK = 1 | 
+0.06.669.927 I kl_divergence: computing over 12 chunks, n_ctx=4096, batch_size=512, n_seq=1
+0.10.564.859 I kl_divergence: 3.89 seconds per pass - ETA 0.77 minutes
+
+chunk             PPL               ln(PPL(Q)/PPL(base))          KL Divergence              Δp RMS            Same top p
+   1       1.9937 ±    0.0722       0.01733 ±    0.00711       0.04275 ±    0.00220     6.842 ±  0.330 %    94.235 ±  0.515 %
+   2       2.1313 ±    0.0571       0.02338 ±    0.00576       0.05134 ±    0.00204     7.336 ±  0.280 %    93.967 ±  0.372 %
+   3       2.0178 ±    0.0418       0.02908 ±    0.00535       0.05906 ±    0.00252     8.665 ±  0.295 %    93.845 ±  0.307 %
+   4       1.9012 ±    0.0335       0.03861 ±    0.00621       0.07197 ±    0.00376     9.579 ±  0.296 %    94.126 ±  0.260 %
+   5       1.8683 ±    0.0291       0.05455 ±    0.00597       0.09384 ±    0.00408    10.589 ±  0.285 %    93.512 ±  0.243 %
+   6       1.8278 ±    0.0257       0.05728 ±    0.00560       0.10090 ±    0.00392    11.078 ±  0.267 %    93.535 ±  0.222 %
+   7       1.8209 ±    0.0238       0.05578 ±    0.00510       0.09996 ±    0.00355    10.958 ±  0.248 %    93.531 ±  0.206 %
+   8       1.8101 ±    0.0220       0.05797 ±    0.00484       0.10685 ±    0.00346    11.389 ±  0.236 %    93.387 ±  0.194 %
+   9       1.7862 ±    0.0205       0.05351 ±    0.00444       0.10357 ±    0.00320    11.064 ±  0.220 %    93.557 ±  0.181 %
+  10       1.7689 ±    0.0191       0.05346 ±    0.00418       0.10211 ±    0.00297    10.983 ±  0.208 %    93.644 ±  0.171 %
+  11       1.7694 ±    0.0182       0.05382 ±    0.00404       0.10295 ±    0.00284    10.920 ±  0.197 %    93.609 ±  0.163 %
+  12       1.7346 ±    0.0169       0.05078 ±    0.00376       0.09878 ±    0.00265    10.667 ±  0.188 %    93.828 ±  0.154 %
+
+====== Perplexity statistics ======
+Mean PPL(Q)                   :   1.734595 ±   0.016850
+Mean PPL(base)                :   1.648707 ±   0.015217
+Cor(ln(PPL(Q)), ln(PPL(base))):  92.25%
+Mean ln(PPL(Q)/PPL(base))     :   0.050782 ±   0.003759
+Mean PPL(Q)/PPL(base)         :   1.052094 ±   0.003955
+Mean PPL(Q)-PPL(base)         :   0.085888 ±   0.006512
+
+====== KL divergence statistics ======
+Mean    KLD:   0.098781 ±   0.002652
+Maximum KLD:  15.310068
+99.9%   KLD:   5.076000
+99.0%   KLD:   1.864748
+95.0%   KLD:   0.453355
+90.0%   KLD:   0.194723
+Median  KLD:   0.001704
+10.0%   KLD:   0.000026
+ 5.0%   KLD:   0.000009
+ 1.0%   KLD:   0.000001
+ 0.1%   KLD:  -0.000001
+Minimum KLD:  -0.000004
+
+====== Token probability statistics ======
+Mean    Δp: -1.312 ± 0.068 %
+Maximum Δp: 92.348%
+99.9%   Δp: 62.033%
+99.0%   Δp: 24.084%
+95.0%   Δp:  6.692%
+90.0%   Δp:  2.007%
+75.0%   Δp:  0.073%
+Median  Δp: -0.002%
+25.0%   Δp: -0.369%
+10.0%   Δp: -5.609%
+ 5.0%   Δp: -13.960%
+ 1.0%   Δp: -50.612%
+ 0.1%   Δp: -93.186%
+Minimum Δp: -99.948%
+RMS Δp    : 10.667 ± 0.188 %
+Same top p: 93.828 ± 0.154 %
+
