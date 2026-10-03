@@ -1,0 +1,32 @@
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-SC_3.00bpw_H4
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+[exl3-SC_3.00bpw_H4] loaded in 21s; VRAM used 12.4 GiB
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 1/12 running KLD 0.02662 PPL 1.9931 (5s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 2/12 running KLD 0.03214 PPL 2.1300 (9s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 3/12 running KLD 0.03738 PPL 2.0139 (14s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 4/12 running KLD 0.04499 PPL 1.8787 (18s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 5/12 running KLD 0.05486 PPL 1.8250 (23s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 6/12 running KLD 0.05918 PPL 1.7800 (27s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 7/12 running KLD 0.05910 PPL 1.7713 (32s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 8/12 running KLD 0.06482 PPL 1.7606 (37s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 9/12 running KLD 0.06278 PPL 1.7413 (41s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 10/12 running KLD 0.06169 PPL 1.7236 (46s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 11/12 running KLD 0.06162 PPL 1.7240 (50s)
+[exl3-SC_3.00bpw_H4] base-code.kld chunk 12/12 running KLD 0.05910 PPL 1.6934 (55s)
+RESULT exl3-SC_3.00bpw_H4 base-code.kld: PPL(Q) 1.693440 PPL(base) 1.648707 Mean KLD 0.059097 ± 0.001709 99.9% KLD 3.700806 Median KLD 0.001009 Same top 95.208 ± 0.136 % n=24564
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 1/12 running KLD 0.04764 PPL 6.9854 (5s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 2/12 running KLD 0.04626 PPL 6.8458 (9s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 3/12 running KLD 0.04770 PPL 5.4325 (14s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 4/12 running KLD 0.08192 PPL 5.8325 (18s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 5/12 running KLD 0.09984 PPL 6.1329 (23s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 6/12 running KLD 0.08776 PPL 6.1840 (27s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 7/12 running KLD 0.07977 PPL 6.3215 (32s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 8/12 running KLD 0.07424 PPL 6.4239 (37s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 9/12 running KLD 0.07038 PPL 6.4371 (41s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 10/12 running KLD 0.07187 PPL 6.1292 (46s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 11/12 running KLD 0.07676 PPL 6.2409 (50s)
+[exl3-SC_3.00bpw_H4] base-prose.kld chunk 12/12 running KLD 0.07380 PPL 6.2678 (55s)
+RESULT exl3-SC_3.00bpw_H4 base-prose.kld: PPL(Q) 6.267763 PPL(base) 6.331690 Mean KLD 0.073799 ± 0.003499 99.9% KLD 5.431699 Median KLD 0.021560 Same top 90.193 ± 0.190 % n=24564

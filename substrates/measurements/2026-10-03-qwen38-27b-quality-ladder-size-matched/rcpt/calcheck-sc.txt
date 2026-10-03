@@ -1,0 +1,4 @@
+cal_trace rows=217 meta={'rows': 217, 'input_tokens': 103662, 'output_tokens': 509290} decoded_chars=2122166
+corpus code.txt windows=1500 found_in_cal_trace=0
+corpus prose.txt windows=1289 found_in_cal_trace=0
+7a3436f016f3f1822bc5de1cdbb23797965c145411b3c5c600fb27812d87dd2d  cal_trace.json (turboderp/Qwen3.8-27B-exl3 main, the self-calibration trace calcheck_sc.py read)
