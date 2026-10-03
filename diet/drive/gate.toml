@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 208
+faults = 213
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3350,4 +3350,81 @@ becomes = '''
                     }) => timings.as_ref(),'''
 catches = [
     "drive::projection::tests::on_a_cited_engine_a_capped_turn_keeps_its_prefill_and_the_next_turn_is_rowed",
+]
+
+[[fault]]
+id = "drive.session-logs-a-refusal-after-the-end"
+failure_class = "drive.session-logs-a-refusal-after-the-end"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        if during == Settlement::Ended {
+            return because;'''
+becomes = '''
+        if false && during == Settlement::Ended {
+            return because;'''
+catches = [
+    "drive::serve::tests::a_refused_command_is_409_with_its_tag_and_is_in_the_log",
+    "drive::session::tests::a_command_with_nothing_to_act_on_is_refused_and_logged",
+]
+
+[[fault]]
+id = "drive.serve-bin-serves-on-after-ended"
+failure_class = "drive.serve-bin-serves-on-after-ended"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    ended(&watching, running)
+}'''
+becomes = '''
+    let _alive = (&watching, running);
+    loop {
+        std::thread::park();
+    }
+}'''
+catches = [
+    "a_drive_server_exits_0_after_ended_and_ended_is_its_logs_last_line",
+]
+
+[[fault]]
+id = "drive.serve-events-outlive-ended"
+failure_class = "drive.serve-events-outlive-ended"
+target = "diet/src/drive/serve.rs"
+expect_exit = 101
+anchor = '''
+            if self.session.settlement() == Settlement::Ended
+'''
+becomes = '''
+            if false && self.session.settlement() == Settlement::Ended
+'''
+catches = [
+    "drive::serve::tests::an_events_stream_closes_itself_once_it_has_delivered_ended",
+]
+
+[[fault]]
+id = "drive.session-drops-its-serving"
+failure_class = "drive.session-drops-its-serving"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            serving: serving.as_ref().map(|serving| log::Serving {'''
+becomes = '''
+            serving: serving.as_ref().filter(|_| false).map(|serving| log::Serving {'''
+catches = [
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.serve-bin-assumes-one-stream"
+failure_class = "drive.serve-bin-assumes-one-stream"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+            concurrency: Concurrency::Undeclared,
+            dialect: Dialect::llama_cpp(),'''
+becomes = '''
+            concurrency: Concurrency::Declared(1),
+            dialect: Dialect::llama_cpp(),'''
+catches = [
+    "a_served_drive_streams_a_real_servers_answer_over_sse",
 ]
