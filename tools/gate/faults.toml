@@ -8762,3 +8762,11 @@ check = "lanes"
 label = "drive.serve-bin-assumes-one-stream"
 failure_class = "drive.serve-bin-assumes-one-stream"
 migrated = false
+
+[[fault]]
+id = "drive.serve-bin-exits-before-the-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-exits-before-the-record"
+failure_class = "drive.serve-bin-exits-before-the-record"
+migrated = false

@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 213
+faults = 214
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3399,6 +3399,7 @@ becomes = '''
             if false && self.session.settlement() == Settlement::Ended
 '''
 catches = [
+    "drive::serve::tests::a_stream_opened_after_ended_past_its_last_line_closes_at_once",
     "drive::serve::tests::an_events_stream_closes_itself_once_it_has_delivered_ended",
 ]
 
@@ -3428,4 +3429,24 @@ becomes = '''
             dialect: Dialect::llama_cpp(),'''
 catches = [
     "a_served_drive_streams_a_real_servers_answer_over_sse",
+]
+
+[[fault]]
+id = "drive.serve-bin-exits-before-the-record"
+failure_class = "drive.serve-bin-exits-before-the-record"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    if let Some(writer) = running.record_writer
+        && writer.join().is_err()
+    {'''
+becomes = '''
+    if let Some(writer) = running.record_writer
+        && {
+            drop(writer);
+            false
+        }
+    {'''
+catches = [
+    "a_drive_server_records_a_two_turn_session_that_check_record_reads",
 ]
