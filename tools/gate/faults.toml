@@ -8917,3 +8917,11 @@ check = "lanes"
 label = "drive.serve-bin-assumes-one-stream"
 failure_class = "drive.serve-bin-assumes-one-stream"
 migrated = false
+
+[[fault]]
+id = "drive.floor-regimen-names-other-hardware"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.floor-regimen-names-other-hardware"
+failure_class = "drive.floor-regimen-names-other-hardware"
+migrated = false

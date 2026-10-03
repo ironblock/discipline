@@ -2745,6 +2745,39 @@ mod tests {
         assert_eq!(found.found, "2026-09-13");
     }
 
+    /// #287's floor regimen and worked head, as shipped: the regimen crosses
+    /// into a regime naming its registered substrate, its declared hardware
+    /// is the registry's for that substrate (or `serve` would refuse it), and
+    /// the head carries no timestamp, so a recording's prefix does not expire.
+    #[test]
+    fn the_floor_regimen_and_head_ship_as_a_drive_can_start() {
+        let regimen = crate::formats::regimen::parse(include_str!("../../drive/floor.toml"))
+            .expect("the floor regimen parses");
+        // As `serve --regimen` reads it: resolved against the registry.
+        let declared =
+            crate::drive::regimen::regime_registered(&regimen, crate::drive::registry::REGISTRY)
+                .expect("the floor regimen resolves as serve reads it");
+        let substrate = &declared.substrates[0];
+        assert_eq!(substrate.id, "accel24-beellama-qwen27b-q4kxl");
+        let registered =
+            crate::drive::registry::identity(crate::drive::registry::REGISTRY, &substrate.id)
+                .expect("the floor substrate is registered");
+        assert_eq!(
+            substrate.hardware_fingerprint,
+            registered.hardware_fingerprint
+        );
+
+        let sending = RequestShape {
+            messages: vec![
+                Message::new(Role::System, include_str!("../../drive/heads/floor.md")),
+                Message::new(Role::User, "the turn"),
+            ],
+            ..shape()
+        };
+        linted_head(&sending, 1, MAIN)
+            .unwrap_or_else(|why| panic!("the floor head carries a timestamp: {why}"));
+    }
+
     /// The lint fires BEFORE the call, and the drive stops.
     ///
     /// A dated regime tag is how this arrives in practice -- an arm named for
