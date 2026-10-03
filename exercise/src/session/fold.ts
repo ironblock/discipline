@@ -49,7 +49,7 @@ export interface UserNode extends Provenance {
   readonly endedAt: number;
   /**
    * Its turn ended without an answer: `diet` sends the model only finished turns (#29, Q12, keeping D13 for
-   * `cancelled` and `failed`), so from here on this is not in what the model reads (#289). The fact is the log's
+   * `cancelled`, `failed` and `timeout`), so from here on this is not in what the model reads (#289). The fact is the log's
    * `turn.settled`, and this is its word. A capped turn is `failed` (#290, ruled 5969941559).
    */
   readonly outOfContext?: OffTrunk;
@@ -58,7 +58,7 @@ export interface UserNode extends Provenance {
 export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled' | 'failed';
 
 /** The settle words that leave a turn off the trunk. */
-export type OffTrunk = 'cancelled' | 'failed';
+export type OffTrunk = 'cancelled' | 'failed' | 'timeout';
 
 /** Why a generation stopped: the response's `finish_reason` as llama.cpp spells it, or `cancelled` for a stopped call. */
 export type Stop = Open<'stop' | 'tool_calls' | 'length' | 'cancelled'>;
@@ -113,7 +113,7 @@ export interface AssistantNode extends Provenance, Generation {
   readonly turn: number;
   /**
    * Its turn ended without an answer: `diet` sends the model only finished turns (#29, Q12, keeping D13 for
-   * `cancelled` and `failed`), so from here on this is not in what the model reads (#289). The fact is the log's
+   * `cancelled`, `failed` and `timeout`), so from here on this is not in what the model reads (#289). The fact is the log's
    * `turn.settled`, and this is its word. A capped turn is `failed` (#290, ruled 5969941559).
    */
   readonly outOfContext?: OffTrunk;
@@ -403,7 +403,7 @@ export function fold(lines: readonly LogLine[]): Session {
   const unknown = new Map<string, number>();
   const settles = new Map<number, LineOf<'turn.settled'>>();
   const offTrunk = new Map<number, OffTrunk>();
-  /** Turns whose trunk response hit the output cap. */
+  /** Turns whose latest trunk response hit the output cap. */
   const cappedTurns = new Set<number>();
   const gaps: Folded<GapNode>[] = [];
   let lastSettled: number | undefined;
@@ -451,6 +451,8 @@ export function fold(lines: readonly LogLine[]): Session {
         generations.set(e.seq, { request: e, deltas: [], frames: [] });
         if (e.lane === 'trunk') {
           if (!firstRequestOfTurn.has(e.turn)) firstRequestOfTurn.set(e.turn, e.seq);
+          // A later step on the trunk: the cap that matters is the latest step's.
+          cappedTurns.delete(e.turn);
           era().slots.push({ kind: 'assistant', request: e.seq });
         } else if (e.fork !== undefined) {
           const f = forks.get(e.fork);
@@ -490,7 +492,7 @@ export function fold(lines: readonly LogLine[]): Session {
       }
       case 'turn.settled':
         settles.set(e.seq, e);
-        if (e.reason === 'cancelled' || e.reason === 'failed') offTrunk.set(e.turn, e.reason as OffTrunk);
+        if (e.reason === 'cancelled' || e.reason === 'failed' || e.reason === 'timeout') offTrunk.set(e.turn, e.reason as OffTrunk);
         lastSettled = e.seq;
         if (openTurn === e.turn) openTurn = undefined;
         // A turn that ended on its own, or was cancelled (the message says so), needs no mark.

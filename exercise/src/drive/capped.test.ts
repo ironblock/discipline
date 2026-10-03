@@ -49,15 +49,28 @@ describe('a capped turn (#290)', () => {
     expect(answer?.kind === 'assistant' && answer.text).toBe('The answer');
   });
 
+  it('is read from the turn’s latest trunk response: a step capped before one that failed is not a capped turn', () => {
+    const log = read('drive/fixtures/a-capped-turn.jsonl');
+    const settle = log.findIndex((l) => l.kind === 'turn.settled');
+    const at = log[settle]!.t;
+    // A second step on the trunk after the capped one, whose request then failed.
+    const step = [
+      { kind: 'request', lane: 'trunk', seq: 100, t: at, turn: 1 },
+      { kind: 'request.failed', message: 'the server went away', partial: '', reason: 'transport', request: 100, seq: 101, t: at },
+    ] as unknown as LogLine[];
+    const end = fold([...log.slice(0, settle), ...step, ...log.slice(settle)]).eras.flatMap((era) => era.nodes).find((n) => n.kind === 'settled');
+    expect(end?.kind === 'settled' && end.reason).toBe('failed');
+    expect(end?.kind === 'settled' && 'capped' in end).toBe(false);
+  });
+
   it('is not read from the settle word alone: a failed request is not capped', () => {
     const end = nodesOf('formats/log/fixtures/valid/a-turn-whose-connection-failed.jsonl').find((n) => n.kind === 'settled');
     expect(end?.kind === 'settled' && end.reason).toBe('failed');
     expect(end?.kind === 'settled' && 'capped' in end).toBe(false);
   });
 
-  it('is not read from capped alone: a capped response on a turn settled final draws no turn end', () => {
+  it('is not read from capped alone: a capped response on a turn settled final stays in the model’s context', () => {
     const nodes = nodesOf('formats/log/fixtures/valid/a-v2-capped-response.jsonl');
-    expect(nodes.filter((n) => n.kind === 'settled')).toEqual([]);
     expect(nodes.filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => 'outOfContext' in n)).toEqual([false, false]);
   });
 });

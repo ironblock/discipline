@@ -170,3 +170,14 @@ export const ServedCapped: Story = {
     await expect(end.textContent).not.toContain('a request failed');
   },
 };
+
+/** The same turn with the finish spelled `max_tokens`, diet's other capped spelling: the badge reads `capped`, not the word. */
+export const ServedCappedMaxTokens: Story = {
+  name: '?drive: a turn capped under another finish spelling, still hit max tokens',
+  args: { drive: true, web: serving(capped.replace('"finish_reason":"length"', '"finish_reason":"max_tokens"')) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-turnend')).not.toBeNull());
+    const answer = canvasElement.querySelector('.ex-trunk [data-tone="assistant"]') as HTMLElement;
+    await expect(answer.querySelector('.ex-stop[data-level="warn"]')?.textContent).toBe('hit max tokens');
+  },
+};

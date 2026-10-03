@@ -55,8 +55,9 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
 }
 
 /**
- * A cancelled turn's mark, on its ask and on what answered it (#289): the words are the surface's, the fact the
- * log's -- `diet` sends the model only finished turns, so a cancelled one is gone from what it reads next.
+ * The mark of a turn that ended without an answer -- cancelled, failed (a capped one among them), timed out -- on its
+ * ask and on what answered it (#289): the words are the surface's, the fact the log's -- `diet` sends the model only
+ * finished turns, so such a turn is gone from what it reads next.
  */
 const outOfContext = (why: OffTrunk) => ({
   value: <span className="ex-context-out">not in the model's context</span>,
@@ -216,7 +217,7 @@ function AssistantBody({
  * a reason from a newer drive -- drawn across the trunk where the turn stopped.
  */
 export function TurnEnd({ node }: { readonly node: Folded<SettledNode> }) {
-  // `failed` with `capped` is a capped turn (#290, ruled 5969297103), in log v3's word for it (#297).
+  // `failed` with `capped` is a capped turn (#290, ruled 5969297103), drawn under the settle word #297 proposes for it.
   const settled = settleOf(node.capped ? 'capped' : node.reason);
   return (
     <div
