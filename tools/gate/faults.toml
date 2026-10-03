@@ -290,6 +290,16 @@ legacy_signature = "capture::bakeoff::tests::the_assembled_directory_is_one_the_
 migrated = false
 
 [[fault]]
+id = "test.bakeoff_scratch_shared"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "the bakeoff scratch shared by every run"
+failure_class = "test.fixture-path-shared"
+legacy_signature = "capture::bakeoff::tests::two_scratches_never_share_a_directory \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
 id = "test.bakeoff_budget_unfixtured"
 kind = "seeded-gate"
 check = "test"

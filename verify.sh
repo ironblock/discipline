@@ -1680,6 +1680,27 @@ if source.count(old) != 1:
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
+
+# #316: the bakeoff tests' scratch directory named by the test alone again, so
+# every verify.sh on one machine shares it and two worktrees verifying at once
+# corrupt each other's fixtures (three bakeoff failures measured on #313 while
+# #315 verified beside it). A run cannot see a second run, so the protection is
+# the property: two scratches in one process differ, and each names its pid.
+inject_bakeoff_scratch_shared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = '            "bakeoff-{name}-{}-{}",'
+if source.count(old) != 1:
+    raise SystemExit(f"the scratch name appears {source.count(old)} times")
+source = source.replace(old, '            "bakeoff-{name}{}{}",', 1)
+source = source.replace("            std::process::id(),\n            MADE.fetch_add(1, Ordering::Relaxed)\n",
+                        '            "",\n            "",\n', 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
 inject_record_substrate_reference_unchecked() {
   python3 - <<'EOF'
 import pathlib
@@ -8077,6 +8098,8 @@ selftest() {
     'capture::bakeoff::tests::a_cache_the_record_did_not_consume_is_refused \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
     'capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \.\.\. FAILED' 'lib/capture::bakeoff'
+  seeded_case "the bakeoff scratch shared by every run" test inject_bakeoff_scratch_shared \
+    'capture::bakeoff::tests::two_scratches_never_share_a_directory \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
     'capture::sense::tests::every_pre_registered_budget_is_one_its_fixture_demonstrates \.\.\. FAILED' 'lib/capture::sense'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
