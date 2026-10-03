@@ -145,7 +145,7 @@ reproducible from a parts list, and the manifest should not imply it is."""
 display_name = "ironblock's 2019 Mac Pro"
 entry_type = "x86-workstation"
 hardware_fingerprint = "f0efb982fe1e4793ba9cf832e32bf30759d358da42e0362251a023c095dc480a"
-role = "the data seat's workstation; a host that serves no model, and the machine whose CPU cores ran the sense bakeoff's four encoder cells and counted the judge states in laya's tokens (#165)"
+role = "the data seat's workstation; it serves no model in production, and its CPU cores ran the sense bakeoff's four encoder cells, counted the judge states in laya's tokens (#165), and served the drive endpoint's engine and weights on demand for #29's tool-call captures"
 measured = "2026-09-05"
 
 model_identifier = "MacPro7,1"
@@ -812,6 +812,53 @@ reproducible_because = "as for `canned`: replay the acts and the same bytes play
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
 engine_build_info = "canned-188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
 engine_build_info_is = "derived, not read from a server: canned::build_info(), \"canned-\" + the entry's acts digest (weights_acts_sha256, equal to engine_identity); the acts the crate plays now, so the canned server reports this literal at GET /props"
+
+# The drive endpoint's engine commit and weights on this host's CPU, served for #29's I0
+# captures (a streamed tool call and its turn 2); not a claim substrate.
+[substrate.macpro-llamacpp-qwen38flashnext-q20-cpu]
+equipment = "mac-pro-2019"
+description = "Qwen3.8-Flash-Next GSQ-RCO at Q2_0 with its Q4_K_M MTP draft, the same weights as ada48-llamacpp-qwen38flashnext-q20, served on this host's CPU by ironblock's llama.cpp fork at the same commit; #29's I0 tool-call captures (substrates/measurements/2026-10-02-i0-tool-call-captures/), not a claim substrate"
+pinned = true
+engine_name = "llama.cpp (github.com/ironblock/llama.cpp)"
+engine_identity = "e501161173eddeac41d0d3249cc3056f32d591a309d941bb1bcb905be6c99bff"
+engine_identity_is = "sha256 of the llama-server executable, a stub over the seven .dylib libraries beside it, built on this host 2026-10-02 (cmake Release, GGML_METAL=OFF, GGML_BLAS=OFF, LLAMA_CURL=OFF; AppleClang 21.0.0) and read from disk by check-fingerprints.py --read-engine"
+engine_commit = "e486f802d3b46d9aa98b38d162e952b150cb5082"
+engine_commit_is = "the build checkout's HEAD, clean, the commit the drive endpoint's production serves (ada48-llamacpp-qwen38flashnext-q20, instance 2026-10-01); the server reports system_fingerprint b11102-e486f802d, its build counter being this full clone's commit count"
+weights_main = ["69820c02ec7d0b45ef2ebb19d6620299db749fe2aded7f39f93c6b88b199b720", "316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113"]
+weights_main_file = "Qwen3.8-Flash-Next-GSQ-RCO-Q2_0, two shards (00001-of-00002, 00002-of-00002), hashed 2026-10-02 on this host: byte-identical to ada48-llamacpp-qwen38flashnext-q20's"
+weights_draft = "b646ef60eaae2a9ed849e75f15f399629ca22633555e99e809959e95f22a1575"
+weights_draft_file = "mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf, byte-identical to the drive endpoint's draft"
+sampler_card = "none on the serving line; each request sets its own"
+serving_context = 16384
+serving_slots = 4
+serving_context_is = "the unified pool (--kv-unified) shared by the four slots, read off the serving flags"
+serving_flags = "-c 16384, -t 12, -ctk q8_0, -ctv q8_0, -fa on, -b 1024, -ub 512, -np 4, --kv-unified, --jinja, --spec-type draft-mtp, --spec-draft-n-max 3, --spec-draft-p-min 0.0, --alias qwen3.8-flash-next, bound to 127.0.0.1, no key; no -ngl (CPU), no --reasoning-format, as on the drive endpoint"
+hazards = "not the drive endpoint: the same engine commit and weights on a different backend (CPU here, CUDA there) and a smaller context, so its timings and any token-level output are this host's, not the endpoint's. The endpoint's model and draft hazards are taken to carry over, not measured here: the same MTP draft on the same hybrid recurrent model, where the endpoint measured greedy output not bit-exact with its spec-off path (on its card at e7051ef) and warm reuse after a divergence depending on where checkpoints land; nothing may be gated on token identity (ada48-llamacpp-qwen38flashnext-q20, hazards); what it was used for, how llama-server streams and parses a tool call, is decided by the commit's server and chat parser, which the two share. Served on demand for the captures and stopped after; no process runs between captures"
+engine_libraries_read = "disk"
+engine_libraries_is = "read from disk after the build by check-fingerprints.py --read-engine with the .dylib recipe added in the same change (substrates/measurements/2026-10-02-i0-tool-call-captures/engine-read.json); the captures ran from this build, unmodified"
+engine_fingerprint = "30053225c3ffeeaa9a95b9f0df78b5e8755093d83e9f74c7339a4679b1d037d7"
+engine_fingerprint_is = "sha256 of the exe digest and every library digest, canonically serialised (check-fingerprints.py, engine_fingerprint)"
+
+[substrate.macpro-llamacpp-qwen38flashnext-q20-cpu.engine_libraries]
+"libggml-base.0.24.0.dylib" = "6361a3f3e2a41e7682aeb2b7cf3ad735ab5b98075d3865346641ab2528cface6"
+"libggml-cpu.0.24.0.dylib" = "db9acb61fd3615f94360a683b67b2f9486f8d9b0d511bb8a937ad43b5e8ad9d2"
+"libggml.0.24.0.dylib" = "19e970877d76df14ca085d2a3ca18c16cdf80b6b3daf62214ade4b9d62a992ff"
+"libllama-common.0.4.1.dylib" = "6518a0d28b20bc34e2eda876f8b0ad956625bb103350e5026db857ba7dfa4cdc"
+"libllama-server-impl.dylib" = "1ca197db52bed3b6a711d39d4236b22ad92a801b82e29eb16a7e06a3b5ef9fb2"
+"libllama.0.4.1.dylib" = "07a447e75136722b09eacabeee2176c03790f77ba847efe48d7bd2cd641e3448"
+"libmtmd.0.4.1.dylib" = "4a8956e4f660dc831526552dd81eafa5d98731298a87299e0101a1f4eb26a7bf"
+
+[[substrate.macpro-llamacpp-qwen38flashnext-q20-cpu.instance]]
+id = "2026-10-02"
+os = "macOS 26.6.2 (25G83)"
+kernel = "Darwin 25.6.0"
+engine_build_info = "b11102-e486f802d"
+engine_build_info_is = "system_fingerprint on every chunk of the three captures"
+pinned_by = "the I0 captures of 2026-10-02: the executable and its libraries read from disk after the build, the weights hashed on this host, the serving line as launched"
+current = false
+current_note = "served on demand for the I0 captures only, as the registry's other per-window servers are recorded; no process runs between captures"
+served = "2026-10-02T12:28:23Z/2026-10-02T12:30:50Z"
+served_is = "the first and last chunk created timestamps across the three captures; the process was started before and stopped after them, by PID, and its start was not recorded"
 
 # laya's tokenizer, run on this host's CPU to count the archive's judge states in
 # laya's own tokens (#165). Like the encoder cells below it serves nothing.

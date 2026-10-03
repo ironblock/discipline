@@ -3401,12 +3401,12 @@ p.write_text(s.replace(old, 'json.dumps({"exe": exe}, sort_keys=True,', 1), enco
 PYEOF
 }
 # #202: the recipe's shared-object pattern narrowed to bare `.so`, so a versioned library (libllama.so.0.4.1)
-# drops out of the engine fingerprint unseen.
+# -- and on macOS every .dylib (#29's I0) -- drops out of the engine fingerprint unseen.
 inject_admission_engine_pattern_narrowed() {
   python3 - <<'PYEOF'
 import pathlib
 p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
-old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$")'
+old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$|\\.dylib$")'
 assert old in s, "the pattern moved"
 p.write_text(s.replace(old, 'SHARED_OBJECT = re.compile(r"\\.so$")', 1), encoding="utf-8")
 PYEOF
