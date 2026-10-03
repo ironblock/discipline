@@ -1493,6 +1493,25 @@ mod tests {
     }
 
     #[test]
+    fn an_events_stream_closes_itself_once_it_has_delivered_ended() {
+        // #291: a page following the log sees `ended`, then the stream ends,
+        // while the server itself keeps running -- the close is the stream's
+        // own, not the server's stop.
+        let (session, server) = serve(Canned::new([]), quick());
+        let mut client = Client::send(&server, &events_request(&server, "?from=0", ""));
+        assert!(client.read_until(Duration::from_secs(5), |read| { read.contains("Started") }));
+        assert_eq!(session.end(None), Ok(()));
+        client.read_until(Duration::from_secs(5), |_| false);
+        assert!(
+            client.closed,
+            "the stream stayed open after ended: {}",
+            client.read
+        );
+        assert!(client.read.contains("to: Ended"), "{}", client.read);
+        drop(server);
+    }
+
+    #[test]
     fn a_refused_command_is_409_with_its_tag_and_is_in_the_log() {
         let gate = Gate::new();
         let (session, server) = serve(
