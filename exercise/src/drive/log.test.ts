@@ -13,15 +13,21 @@ import type { LogLine } from './log.ts';
  * checked in its CI -- so what is left to hold here is the surface's half:
  * every fixture folds, into a session, with no line the fold counts as
  * unknown. A kind `diet` gains fails here before it fails in a session.
+ *
+ * The events are READ BY `diet`: each fixture's `.expected.json` is what
+ * `diet check-log` projects from it, pinned by the conformance corpus. A
+ * second reader here, splitting the raw text, would need a second rule for
+ * a torn final line (#230), which `diet`'s reader sets aside and counts.
  */
 const valid = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../diet/formats/log/fixtures/valid');
 const fixtures = readdirSync(valid).filter((f) => f.endsWith('.jsonl')).sort();
 
 const logOf = (file: string): LogLine[] =>
-  readFileSync(path.join(valid, file), 'utf8')
-    .split('\n')
-    .filter((line) => line !== '')
-    .map((line) => JSON.parse(line) as LogLine);
+  (
+    JSON.parse(readFileSync(path.join(valid, file.replace(/\.jsonl$/, '.expected.json')), 'utf8')) as {
+      events: LogLine[];
+    }
+  ).events;
 
 describe("diet's valid v0 logs, as the surface reads them", () => {
   it('finds the fixtures', () => {
@@ -50,6 +56,12 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     const answer = fold(logOf('a-cancelled-turn.jsonl')).eras[0]?.nodes.find((n) => n.kind === 'assistant');
     expect(answer?.kind === 'assistant' && answer.progress).toBe('cancelled');
     expect(answer?.kind === 'assistant' && answer.text).toBe('Hel');
+  });
+
+  it('marks a cancelled turn’s ask and answer as out of the model’s context, and an answered one’s not (#289)', () => {
+    const marks = (file: string) => (fold(logOf(file)).eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, 'outOfContext' in n && n.outOfContext === true]);
+    expect(marks('a-cancelled-turn.jsonl')).toEqual([['user', true], ['assistant', true]]);
+    expect(marks('an-answered-turn.jsonl')).toEqual([['user', false], ['assistant', false]]);
   });
 
   it('folds a reasoning delta as reasoning, not answer', () => {

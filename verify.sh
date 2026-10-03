@@ -9,11 +9,14 @@
 #   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
 #   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
+#   verify.sh --site DIR      check a built site as Pages would serve it (#32): check_site
 #   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
 #   verify.sh --selftest --scope-plan F re-prove only what plan F does not inherit (#112)
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum
 #   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
+#
+# The `ci` check needs `ruby`: rule 10 parses pages.yml with psych (#256).
 #
 # THE SCOPES ARE A HARVEST, NOT A LIST. Every `test` case declares which tests
 # it needs, and there are 181 of them; a flag that makes the gate run LESS is a
@@ -64,11 +67,13 @@ set -euo pipefail
 
 readonly EXIT_FAIL=1
 readonly EXIT_MISUSE=2
+# A run under VERIFY_LIST_MEMBERS: members listed, nothing checked (#262).
+readonly EXIT_LISTED=3
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
-readonly CHECKS=(fmt clippy test library results recompute admission regimen lanes metadata hygiene pages ci history injections resolver derive parity)
+readonly CHECKS=(fmt clippy test library results recompute admission regimen lanes metadata hygiene pages exercise ci history injections bsd resolver derive parity)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -87,6 +92,8 @@ readonly REQUIRED_PAGES_CLASSES=(
 )
 
 FAILED=()
+# Each check this run ran, as `name:seconds`, for report_wall_clock (#262).
+CHECKS_TOOK=()
 
 # --------------------------------------------------------------------------
 # checks
@@ -224,7 +231,32 @@ build_diet() {
 # The report contract, with the record's format verdict dispatched to
 # `diet check-record` through the resolver. The linter prints which binary
 # answered; it does not read run.jsonl itself.
-check_results() { build_diet && python3 scripts/check-results.py --root results; }
+# The results linter over every directory, and the ledger page drawn from what
+# it passed (#32 I2): check-results.py emits the ledger only if every
+# directory passes, and exercise/scripts/render-ledger.py draws _site/ledger
+# from it, refusing -- naming the directory -- a row with no word, no product
+# digest, or no directory behind it. Each step's own exit status is the
+# check's: the renderer's verdict reaches it (`RENDER_LEDGER` names the
+# renderer, so the mechanics assertion can stand one in). The page links the
+# commit it was rendered from; a tree with no commit (the selftest's box)
+# links main.
+check_results() {
+  build_diet || return
+  local ledger rc=0
+  ledger="$(mktemp)" || return 2
+  python3 scripts/check-results.py --root results --ledger "$ledger" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    python3 "${RENDER_LEDGER:-exercise/scripts/render-ledger.py}" "$ledger" _site/ledger --results results \
+      --commit "$(git rev-parse --verify --quiet HEAD || echo main)" || rc=$?
+  fi
+  # And the page as published, under the Pages table (#32 I3): it is checked
+  # here, where the gate can fail, and not first at deploy time.
+  if [ "$rc" -eq 0 ]; then
+    bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree _site/ledger || rc=$?
+  fi
+  rm -f "$ledger"
+  return "$rc"
+}
 
 # Every regimen.toml under results/ must parse as a `regimen` document. This
 # is what keeps diet/formats load-bearing: the format is used on the
@@ -308,13 +340,28 @@ check_regimen() {
 # --root is the check's own parameter and `results` is its default; it is
 # spelled out because a seeded case below depends on this being the root the
 # check reads.
-check_recompute() { python3 scripts/check-recompute.py --root results; }
+# VERIFY_LIST_MEMBERS makes each check that can be sharded print the members
+# it would run and run none (#262): scripts/check-ci-coverage.py asks THIS
+# function, under VERIFY_CHECK_SHARD, so the wiring from the job's env to the
+# script is on the path it proves complete, not beside it.
+check_recompute() {
+  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} \
+    ${VERIFY_LIST_MEMBERS:+--names}
+}
 
 # A rung's admission word, derived from its admission directory rather than trusted as written (#183): the
 # derivation's own fixtures first, then every admission.toml in the tree re-verified through its own
 # admission-recompute.sh and its word compared with the word its results derive under planning's rule (#143).
+#
+# The registry's fingerprints first (#202): every equipment entry's hardware fingerprint covers its declared
+# fields, and every substrate whose engine is one exe digest also pins the libraries beside it (or says why one
+# digest suffices), with an engine_fingerprint that recomputes from them. This checks the REGISTRY: a library
+# digest edited under a held exe reads as a changed fingerprint. Whether a host still runs what the registry
+# pins is a read on the host (`check-fingerprints.py --read-engine-pid`), which no gate here can take.
 check_admission() {
-  python3 substrates/admission/derive_admission.py --selftest &&
+  python3 substrates/check-fingerprints.py --selftest &&
+    python3 substrates/check-fingerprints.py &&
+    python3 substrates/admission/derive_admission.py --selftest &&
     python3 substrates/admission/derive_admission.py --all
 }
 
@@ -337,13 +384,96 @@ check_lanes() { python3 scripts/apply-lane-faults.py --verify; }
 
 check_metadata() { python3 scripts/check-repo-metadata.py; }
 
-check_hygiene() { bash scripts/hygiene.sh; }
+# ...and the scanner itself stays honest on the shell a stock Mac runs (#236):
+# CI cannot run bash 3.2, so this reads hygiene.sh for what keeps it so.
+check_hygiene() {
+  python3 scripts/check-hygiene-portable.py &&
+    bash scripts/hygiene.sh
+}
 
 # The site published to gh-pages is static, and this is what makes that a gate
 # rather than a promise: no subresource from another origin, no network call,
 # no form, no credential shapes.
 check_pages() {
   bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree pages
+}
+
+# The web surface in exercise/: its typecheck, its lint, and every story as a
+# browser test (Vitest runs each Storybook story in Chromium, the plain unit
+# tests in Node). It needs Node, at the version exercise/package.json
+# declares. The install is frozen to the
+# lockfile; the browser is fetched only when the machine does not have it yet,
+# and only after the cheap steps pass.
+#
+# pnpm is the one `packageManager` pins, run as the JavaScript package through
+# npx -- never whichever pnpm the host installed (#194). A host's pnpm at any
+# other version switches to the pinned one by itself, and pnpm 11's switch,
+# whichever build is running, resolves the pinned release with its native
+# build (@pnpm/exe) and refuses to run unless this platform's binary is among
+# them. pnpm has published none for macOS on Intel after 11.0.4, so on such a
+# host the check could not run at all. Through npx the pinned version runs as
+# itself and switches to nothing. A pin that cannot be had fails here, first,
+# naming the pin.
+check_exercise() {
+  (
+    cd exercise || exit
+    local pinned
+    # A pin's `+sha512...` suffix, if it ever carries one, is dropped, not checked: npx takes a version only.
+    pinned="$(node -p "require('./package.json').packageManager.split('+')[0]")" || exit
+    pnpm() { npx --yes "$pinned" "$@"; }
+    pnpm --version &&
+      pnpm install --frozen-lockfile &&
+      pnpm typecheck &&
+      pnpm lint &&
+      pnpm exec playwright install chromium &&
+      pnpm test &&
+      python3 scripts/test_render_ledger.py &&
+      python3 scripts/test_admission.py &&
+      pnpm build:replay &&
+      (cd .. && check_site _site) &&
+      node scripts/replay-smoke.mjs ../_site
+  )
+}
+
+# The published site (#32), DIR as Pages would serve it: two tables over its
+# two parts, then the recordings' admissions. The shell -- everything but the
+# recordings -- under the Pages table, small and curated. Each recording under
+# the table that admitted it (#32, ruling 1; the ruling on #210): the snapshot
+# its admission names, scripts/hygiene-admitted-<id>-patterns.tsv and its
+# siblings, not the live table, which may have moved on -- so the recordings
+# are not scanned under the Pages table, nor rewritten to pass it, nor failed
+# by a later table nobody admitted them under. Then each recording against its
+# admission (exercise/scripts/admission.py): the recording that was admitted,
+# under the snapshot as it was written. Called by check_exercise over the
+# build, and by pages.yml over what it is about to publish. A hit names the
+# site's own path.
+check_site() {
+  local site="${1:?check_site: name the site directory}"
+  local data="${site}/replay/data" shell log groups patterns hashes rc=0
+  local -a payloads
+  shell="$(mktemp -d)" || return 2
+  log="$(mktemp)" || { rm -rf "$shell"; return 2; }
+  if ! { cp -R "${site}/." "${shell}/" && rm -rf "${shell}/replay/data"; }; then
+    rm -rf "$shell" "$log"
+    return 2
+  fi
+  bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree "$shell" > "$log" 2>&1 || rc=$?
+  sed "s|${shell}|${site}|g" "$log"
+  rm -rf "$shell"
+  [ "$rc" -eq 0 ] || { rm -f "$log"; return "$rc"; }
+  # Each admitted table, over the recordings it governs, in a box of their own.
+  groups="$(python3 exercise/scripts/admission.py tables "$data")" || { rc=$?; rm -f "$log"; return "$rc"; }
+  while IFS=$'\t' read -r patterns hashes rest; do
+    IFS=$'\t' read -r -a payloads <<< "$rest"
+    shell="$(mktemp -d)" || { rm -f "$log"; return 2; }
+    cp -- "${payloads[@]}" "$shell/" || { rm -rf "$shell" "$log"; return 2; }
+    bash scripts/hygiene.sh --patterns "$patterns" --hashes "$hashes" --tree "$shell" > "$log" 2>&1 || rc=$?
+    sed "s|${shell}|${data}|g" "$log"
+    rm -rf "$shell"
+    [ "$rc" -eq 0 ] || { rm -f "$log"; return "$rc"; }
+  done <<< "$groups"
+  rm -f "$log"
+  python3 exercise/scripts/admission.py verify "$data"
 }
 
 # The wiring between these checks and the CI that runs them. CI can go green
@@ -354,6 +484,9 @@ check_pages() {
 # workflow that runs it and a seeded fault of its own, and this is not a new
 # concern -- it is the same question `check-ci-coverage.py` already asks, about
 # the same workflows, one file further along.
+#
+# It needs `ruby` as well as python3: rule 10 reads pages.yml through Ruby's
+# YAML parser, psych (#256). Without it the check exits 2, naming why.
 check_ci() { python3 scripts/check-ci-coverage.py; }
 
 # What `--range` hands the history check, and empty unless it was given.
@@ -393,7 +526,16 @@ check_history() {
 # and applying all of them made that one case 225 s on the runner.
 VERIFY_INJECTION_SCOPE=""
 check_injections() {
-  python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"}
+  python3 scripts/check-injections.py . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"} \
+    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} ${VERIFY_LIST_MEMBERS:+--names}
+}
+
+# The same applier run with a BSD-shaped `sed` first on PATH (#75): the
+# structural lint keeps `sed` out of injection bodies, and this is what proves
+# the one spelling left, `edit_in_place`, portable by execution.
+check_bsd() {
+  bash scripts/check-bsd-sed.sh . ${VERIFY_INJECTION_SCOPE:+--only "$VERIFY_INJECTION_SCOPE"} \
+    ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} ${VERIFY_LIST_MEMBERS:+--names}
 }
 
 # The merge resolver, exercised on fixtures before it is trusted to resolve a
@@ -434,9 +576,18 @@ check_parity() { python3 scripts/check-fault-manifest.py; }
 run_check() {
   local name="$1"
   printf '\n=== %s ===\n' "$name"
-  local rc=0
+  local rc=0 began="$SECONDS"
   "check_${name}" || rc=$?
-  if [ "$rc" -eq 0 ]; then
+  CHECKS_TOOK+=("${name}:$(( SECONDS - began ))")
+  if [ "$rc" -eq 0 ] && [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then
+    # LISTED, NEVER PASS (#268's second review): under VERIFY_LIST_MEMBERS a
+    # check prints its members and runs nothing, and a run that ran nothing
+    # must not read as one that passed -- in a CI job's env it would turn the
+    # job into a green no-op. The run exits EXIT_LISTED, which only the
+    # coverage check's member listing expects.
+    printf -- '--- %s: LISTED (members printed, nothing run)\n' "$name"
+    FAILED+=("${name} (listed its members, ran nothing)")
+  elif [ "$rc" -eq 0 ]; then
     printf -- '--- %s: PASS (exit 0)\n' "$name"
   else
     printf -- '--- %s: FAIL (exit %d)\n' "$name" "$rc"
@@ -447,6 +598,9 @@ run_check() {
 # The declared wall-clock budget, beside check-owners.tsv, which is where this
 # repository keeps what CI is held to. Named here; read at the bottom.
 readonly GATE_BUDGET=".github/gate-budget.tsv"
+# What each check was measured to cost on CI (#262), which the coverage check
+# holds every package to; printed beside what each check took this run.
+readonly CHECK_SECONDS=".github/check-seconds.tsv"
 
 # One line, on every run, saying what this run cost against what CI is allowed
 # to cost. THE RUN IS NEVER FAILED ON IT: a slow gate is not a wrong gate, and
@@ -460,7 +614,24 @@ readonly GATE_BUDGET=".github/gate-budget.tsv"
 # checks. What it does NOT measure is the runner's own overhead around it --
 # checkout, apt, the toolchain.
 report_wall_clock() {
-  local elapsed="$SECONDS" budget="" key value
+  local elapsed="$SECONDS" budget="" key value entry check took expected
+  # EACH CHECK AGAINST ITS MEASURED ROW (#262), before the run's total. The
+  # coverage check refuses a package from the table, never from a live run;
+  # this line is where a check drifting from its row shows first. Under
+  # VERIFY_CHECK_SHARD the row is the whole check, so a shard expects its
+  # share of it.
+  if [ -f "${ROOT}/${CHECK_SECONDS}" ]; then
+    for entry in ${CHECKS_TOOK+"${CHECKS_TOOK[@]}"}; do
+      check="${entry%%:*}" took="${entry#*:}"
+      expected="$(awk -F'\t' -v c="$check" -v shard="${VERIFY_CHECK_SHARD:-}" '
+        !/^#/ && $1 == c {
+          n = 1; if (shard ~ /^[0-9]+\/[0-9]+$/) { split(shard, p, "/"); n = p[2] }
+          printf "%.0f", $2 / n; found = 1
+        } END { if (!found) printf "none" }' "${ROOT}/${CHECK_SECONDS}")"
+      printf 'verify: %s took %ds; %s measures %ss%s\n' "$check" "$took" "$CHECK_SECONDS" "$expected" \
+        "${VERIFY_CHECK_SHARD:+ for shard ${VERIFY_CHECK_SHARD}}"
+    done
+  fi
   if [ -f "${ROOT}/${GATE_BUDGET}" ]; then
     while IFS=$'\t' read -r key value || [ -n "${key:-}" ]; do
       case "$key" in
@@ -784,6 +955,22 @@ SELFTEST_BOX=""
 # check and one injection, so that derivation would name every one of them
 # `lanes.lane_fault`; the id they are actually registered under comes from the
 # lane manifest instead, and the generator passes it.
+# EVERY signature `expect` carries is in `log`, one ERE per line (#239). A
+# hand-written case carries one; a lane fault carries one per catcher, and a
+# fault is red for its own reason only when each catcher it declares failed.
+# The first one missing is left in LOG_MISSING for the caller to name.
+LOG_MISSING=""
+log_carries_every() {
+  local expect="$1" log="$2" signature
+  while IFS= read -r signature; do
+    grep -qE -- "$signature" "$log" || { LOG_MISSING="$signature"; return 1; }
+  done <<< "$expect"
+}
+
+# A lane fault's signatures as `apply-lane-faults.py --list` joins them (by
+# the ASCII unit separator), one per line, for `log_carries_every`.
+catcher_signatures() { printf '%s' "${1//$'\x1f'/$'\n'}"; }
+
 seeded_case() {
   local label="$1" check="$2" inject="$3" expect="$4" scope="${5-}" ident="${6-}"
   local box="$SELFTEST_BOX"
@@ -818,13 +1005,13 @@ seeded_case() {
       return
     fi
     scoped=(--scope "$scope")
-  elif [ "$check" = "injections" ] && [ -n "$scope" ]; then
+  elif { [ "$check" = "injections" ] || [ "$check" = "bsd" ]; } && [ -n "$scope" ]; then
     scoped=(--scope "$scope")
   elif [ -n "$scope" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
-    SELFTEST_BROKEN+=("${label}: only the test and injections checks take a scope")
-    not_red "$ident" "$check" "only the test and injections checks take a scope"
+    SELFTEST_BROKEN+=("${label}: only the test, injections and bsd checks take a scope")
+    not_red "$ident" "$check" "only the test, injections and bsd checks take a scope"
     return
   fi
   # One log per case, kept for the run, because the box itself is overwritten
@@ -949,10 +1136,10 @@ seeded_case() {
     SELFTEST_BROKEN+=("${label}: the gate did not fire")
     not_red "$ident" "$check" "the gate did not fire"
     sed -n '1,40p' "$log" >&2
-  elif ! grep -qE -- "$expect" "$log"; then
+  elif ! log_carries_every "$expect" "$log"; then
     printf 'WRONG  %4ds verify.sh --only %-8s exit %-3d  %s  <-- RED, BUT NOT FOR ITS OWN FAULT\n' \
       "$(( SECONDS - started ))" "$check" "$rc" "$label"
-    printf '      the log carries no match for: %s\n' "$expect"
+    printf '      the log carries no match for: %s\n' "$LOG_MISSING"
     SELFTEST_BROKEN+=("${label}: red for the wrong reason")
     not_red "$ident" "$check" "red for the wrong reason"
     sed -n '1,40p' "$log" >&2
@@ -989,6 +1176,35 @@ edit_in_place() {
       return 1
     fi
   done
+}
+
+# The one portable spelling made GNU-only, in the one spelling no text scan
+# can see (#75): the command's NAME assembled from two strings, so the lint in
+# scripts/check-injections.py, which reads words, never reads `sed`. GNU edits
+# the file in place and every injection still changes the tree, so the
+# `injections` check stays green; under BSD semantics the expression is taken
+# as `-i`'s suffix and every injection that calls `edit_in_place` is inert.
+# Only running the corpus under the shim sees it.
+inject_bsd_edit_in_place_gnu_only() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+start = source.index("edit_in_place() {\n")
+end = source.index("\n}\n", start) + 3
+name = '"s""ed"'
+body = (
+    "edit_in_place() {\n"
+    '  local expression="$1"; shift\n'
+    "  local file\n"
+    '  for file in "$@"; do\n'
+    f'    {name} -i "$expression" "$file" || return 1\n'
+    "  done\n"
+    "}\n"
+)
+path.write_text(source[:start] + body + source[end:], encoding="utf-8")
+EOF
 }
 
 # One generic injection for every lane-declared fault, rather than one bash
@@ -1166,6 +1382,100 @@ source = path.read_text(encoding="utf-8")
 old = "let result = ComparisonVerdict::from_tag(&written).ok_or("
 new = "let result = ComparisonVerdict::from_tag(&written).or(Some(ComparisonVerdict::Inconclusive)).ok_or("
 assert source.count(old) == 1
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A projector's digest left unchecked: a file name would pass as its identity
+# (#211's review, B1).
+inject_record_weights_projector_undigested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "for digest in main.iter().chain(draft.iter()) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The integer arm of the duration rule: without its sign check, unsigned_abs
+# turns -40 into 40 and the sign is lost silently (#211's review, B2).
+inject_record_timings_negative_integer_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "Some(Value::Integer(n)) if n >= 0 => Ok(Some(Millis::Whole("
+new = "Some(Value::Integer(n)) => Ok(Some(Millis::Whole("
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A response's timings taking any key: the server's own arithmetic on its
+# numbers would then pass as evidence (#92).
+inject_record_timings_unknown_key_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "if let Some(key) = fields.keys().next() {\n        return Err(SchemaError::UnknownField {\n            of,\n            field: format!(\"timings.{key}\"),"
+new = "if let Some(key) = fields.keys().next().filter(|_| false) {\n        return Err(SchemaError::UnknownField {\n            of,\n            field: format!(\"timings.{key}\"),"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A negative decimal duration read as a duration (#92).
+inject_record_timings_negative_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "Some(Value::Decimal(d)) if !d.as_str().starts_with('-') => Ok(Some(Millis::Exact(d))),"
+new = "Some(Value::Decimal(d)) if true || !d.as_str().starts_with('-') => Ok(Some(Millis::Exact(d))),"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# One weights file read in two spellings, a string and a list of one: two
+# records of one substrate would then differ (#92).
+inject_record_weights_one_file_list_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "Some(Value::Array(items)) if items.len() < 2 => {"
+new = "Some(Value::Array(items)) if items.len() < 1 => {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A draft's digest left unchecked: a file name would pass as its identity (#92).
+inject_record_weights_draft_undigested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "for digest in main.iter().chain(projector.iter()) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
@@ -1370,6 +1680,27 @@ if source.count(old) != 1:
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
+
+# #316: the bakeoff tests' scratch directory named by the test alone again, so
+# every verify.sh on one machine shares it and two worktrees verifying at once
+# corrupt each other's fixtures (three bakeoff failures measured on #313 while
+# #315 verified beside it). A run cannot see a second run, so the protection is
+# the property: two scratches in one process differ, and each names its pid.
+inject_bakeoff_scratch_shared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = '            "bakeoff-{name}-{}-{}",'
+if source.count(old) != 1:
+    raise SystemExit(f"the scratch name appears {source.count(old)} times")
+source = source.replace(old, '            "bakeoff-{name}{}{}",', 1)
+source = source.replace("            std::process::id(),\n            MADE.fetch_add(1, Ordering::Relaxed)\n",
+                        '            "",\n            "",\n', 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
 inject_record_substrate_reference_unchecked() {
   python3 - <<'EOF'
 import pathlib
@@ -1508,8 +1839,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/log.rs")
 source = path.read_text(encoding="utf-8")
-old = "if !requests.contains(request) =>"
-new = "if false && !requests.contains(request) =>"
+old = "if !requests.contains(&request) {"
+new = "if false && !requests.contains(&request) {"
 if source.count(old) != 1:
     raise SystemExit(f"the rule appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -1524,6 +1855,224 @@ path = pathlib.Path("diet/src/formats/log.rs")
 source = path.read_text(encoding="utf-8")
 old = "if *from != state {"
 new = "if false && *from != state {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v1 (#117 R3.2, the courier patch from track three): what arrived in v1
+# is scoped by the version a log declares, and each new rule is disabled in
+# turn. Measured by track three before the courier; wired here.
+
+inject_log_v1_content_read_in_a_v0_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if let Some(why) = beyond(line, declared) {'
+new = '        if let Some(why) = beyond(line, declared).filter(|_| false) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A torn FINAL line refused (#230): the tail is never set aside, so a log whose
+# writer was killed mid-write is refused at its last line rather than read
+# through its last complete event.
+inject_log_torn_final_line_refused() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "    if is_a_torn_write(tail) {"
+new = "    if is_a_torn_write(tail) && false {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A torn line accepted ANYWHERE (#230): every line that starts an object and
+# does not finish it is dropped, not only the last, so a log torn in the
+# middle reads as whole -- the amendment was for the final line only.
+inject_log_torn_middle_line_accepted() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "    let (complete, torn) = set_aside_a_torn_tail(text);"
+new = (
+    "    let kept: String = text\n"
+    "        .split_inclusive('\\n')\n"
+    "        .filter(|l| {\n"
+    "            let b = l.trim_end_matches('\\n');\n"
+    "            !is_a_torn_write(b)\n"
+    "        })\n"
+    "        .collect();\n"
+    "    let (complete, torn) = set_aside_a_torn_tail(&kept);"
+)
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_progress_read_in_a_v0_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        Kind::Progress => 1,'
+new = '        Kind::Progress => 0,'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_context_overflow_read_in_a_v0_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    i64::from(context_overflow)'
+new = '    i64::from(false && context_overflow)'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_response_reasoning_read_in_a_v0_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '                may_v1("reasoning", Text),'
+new = '                may("reasoning", Text),'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_progress_after_its_request_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            if ended.contains(&request) {'
+new = '            if matches!(event, Event::Delta { .. }) && ended.contains(&request) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_progress_citing_a_non_request_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if !requests.contains(&request) {'
+new = '    if !matches!(event, Event::Progress { .. }) && !requests.contains(&request) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_negative_count_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '                .map_err(|_| format!("`{key}.{field}` is negative")),'
+new = '                .or(Ok::<_, String>(Some(0))),'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_negative_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Some(Value::Decimal(d)) if d.as_str().starts_with('-') => {"
+new = "            Some(Value::Decimal(d)) if false && d.as_str().starts_with('-') => {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The integer arm of the same rule: a negative whole millisecond falls through
+# to `Millis::new`, whose refusal reads as "absent" -- the value is dropped, not
+# refused. Found by #192's review; the decimal fixture never reached this arm.
+inject_log_timings_negative_integer_ms_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = "            Some(Value::Integer(n)) if *n < 0 => {"
+new = "            Some(Value::Integer(n)) if false && *n < 0 => {"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_ms_as_text_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Some(_) => Err(format!("`{key}.{field}` is not a number")),'
+new = '            Some(_) => Ok(None),'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_unknown_key_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            .find(|field| !TIMINGS.iter().any(|f| f.key == field.as_str()))'
+new = '            .find(|_| false)'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_timings_declares_a_key_nothing_writes() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    may_v1("draft_n_accepted", Holds::Count),\n];'
+new = '    may_v1("draft_n_accepted", Holds::Count),\n    may_v1("prompt_per_token_ms", Holds::Millis),\n];'
 if source.count(old) != 1:
     raise SystemExit(f"the rule appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
@@ -1605,8 +2154,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/formats/record/mod.rs")
 source = path.read_text(encoding="utf-8")
-old = '            let text = take_string(&mut members, of, "sha256")?;\n            if !digest_ok(&text) {'
-new = '            let text = take_string(&mut members, of, "sha256")?;\n            if false && !digest_ok(&text) {'
+old = "    for digest in main.iter().chain(draft.iter()).chain(projector.iter()) {"
+new = "    for digest in draft.iter().chain(projector.iter()) {"
 if source.count(old) != 1:
     raise SystemExit(f"the weights check appears {source.count(old)} times")
 path.write_text(source.replace(old, new), encoding="utf-8")
@@ -2476,9 +3025,197 @@ inject_metadata() {
   edit_in_place 's/"name": "claim"/"name": "claim-renamed"/' .github/labels.json
 }
 
+# A type error in the surface. `tsc` prints `error TS2322` for exactly this --
+# a string where a number was declared -- and prints nothing like it on a
+# clean tree, so the signature is the fault's own.
+inject_exercise_type_error() {
+  printf '\nexport const seededFault: number = %s;\n' "'not a number'" >> exercise/src/ui/format.ts
+}
+
+# #32's replay page (track five's faults, carried here by courier). Each
+# breaks one rule of the published site in the tree, and `check_exercise` --
+# which builds the page, scans it with `check_site` and opens it in Chromium
+# -- must say so in its own words.
+
+# An authored session put back on the published list.
+inject_exercise_published_list_carries_authored_session() {
+  edit_in_place "s/\['first-drive', 'cancelled-capture', 'step-limit'\] as const/['first-drive', 'cancelled-capture', 'step-limit', 'kitchen-sink'] as const/" exercise/src/replay/published.ts
+}
+
+# One event of a published recording with no kind: the failure names the file.
+inject_exercise_recording_corrupt_event() {
+  edit_in_place '/^"kind": "session.start",$/d' exercise/src/drive/recorded/step-limit.json
+}
+
+# A network call in the shell the page is built from.
+inject_exercise_shell_carries_network_call() {
+  printf "\nvoid fetch('/x');\n" >> exercise/src/replay.tsx
+}
+
+# The modulepreload polyfill back on: Rolldown's injected text calls fetch().
+inject_exercise_modulepreload_polyfill_on() {
+  edit_in_place 's/modulePreload: { polyfill: false }/modulePreload: { polyfill: true }/' exercise/vite.config.ts
+}
+
+# A credential shape in a published recording, built here at run time so this
+# file carries none. The genesis table, which governs the recordings, sees it.
+inject_exercise_payload_carries_credential() {
+  local token
+  token="$(printf '%s%s' 'ghp_' '0123456789abcdefghijklmnopqrstuvwxyz')"
+  edit_in_place "s|^\"Scrubbed: |\"${token} Scrubbed: |" exercise/src/drive/recorded/step-limit.json
+}
+
+# A published recording edited after it was admitted.
+inject_exercise_recording_edited_after_admission() {
+  edit_in_place 's/^"title": "A drive that ran into the step limit",$/"title": "A drive that ran into the step limit, edited",/' exercise/src/drive/recorded/step-limit.json
+}
+
+# The recording loaded beside the page's bundle (assets/) rather than from its
+# base: the path the build never writes.
+inject_exercise_replay_loads_beside_its_bundle() {
+  edit_in_place 's|new URL(`${import.meta.env.BASE_URL}data/${name}.js`, document.baseURI)|new URL(`data/${name}.js`, import.meta.url)|' exercise/src/replay.tsx
+}
+
+# A published recording's admitted table edited: a snapshot is written once.
+# The snapshot is the one first-drive's admission names -- not the first a
+# listing finds, which, once a re-admission writes a newer snapshot, may be
+# one nothing cites any more (#255's selftest shard 8).
+inject_exercise_admitted_table_edited() {
+  local snapshot
+  snapshot="$(grep -o 'scripts/hygiene-admitted-[0-9a-f]\{12\}-patterns\.tsv' exercise/src/drive/recorded/first-drive.admission.json | head -n 1)"
+  [ -n "$snapshot" ] && [ -f "$snapshot" ] || { echo "inject: first-drive's admission names no patterns snapshot" >&2; return 1; }
+  printf '# edited after it was admitted\n' >> "$snapshot"
+}
+
+# A published recording whose admission is gone.
+inject_exercise_published_without_admission() {
+  rm -- exercise/src/drive/recorded/step-limit.admission.json
+}
+
+# A pnpm the check cannot have: the class #194 was, on the hosts it was on --
+# the pinned pnpm unobtainable there -- made true on every host by pinning a
+# version that was never published. The signature is npm's own `notarget`
+# line, not pnpm's `[ERROR]`: a check that went back to the host's pnpm
+# would fail here too, but not in these words, and the case would say so.
+inject_exercise_pnpm_unobtainable() {
+  edit_in_place 's/"packageManager": "pnpm@[^"]*"/"packageManager": "pnpm@0.0.0-unpublished"/' exercise/package.json
+}
+
+# A capture whose `carried` field disagrees with its events (#173): it says
+# two compactions where its events hold one. The replay test folds the events
+# and compares with the field, not with the header's prose.
+inject_exercise_recording_carried_disagrees() {
+  edit_in_place 's/^"compaction": 1$/"compaction": 2/' exercise/src/drive/recorded/voxel-stress.json
+}
+
+# A snapshot no admission names, left in scripts/ (#257): a copy of the table
+# first-drive was admitted under, filed under an id nothing cites -- a rule
+# nothing is admitted under, which a reader cannot tell from one in force.
+inject_exercise_snapshot_orphaned() {
+  local snapshot
+  snapshot="$(grep -o 'scripts/hygiene-admitted-[0-9a-f]\{12\}-patterns\.tsv' exercise/src/drive/recorded/first-drive.admission.json | head -n 1)"
+  [ -n "$snapshot" ] && [ -f "$snapshot" ] || { echo "inject: first-drive's admission names no patterns snapshot" >&2; return 1; }
+  cp "$snapshot" scripts/hygiene-admitted-000000000000-patterns.tsv
+}
+
+# `admit` no longer removing what no admission names (#257): the call after a
+# written admission dropped, so an orphan outlives the admission that should
+# have cleared it. `verify` would still refuse the tree; admission.py's own
+# test is what says `admit` broke its promise.
+inject_exercise_admit_keeps_orphans() {
+  edit_in_place '/^    prune()$/d' exercise/scripts/admission.py
+}
+
+# An authored example replayed without its label (#272): the condition turned
+# around, so the kitchen sink plays with nothing over it to say it is not a
+# session (and a recording gets the label instead). Typecheck and lint pass it;
+# the story that replays the example reads the label before and after it plays.
+inject_exercise_example_replayed_without_label() {
+  edit_in_place 's/{example ? <PinnedExampleLabel \/> : null}/{!example ? <PinnedExampleLabel \/> : null}/' exercise/src/replay/Replay.tsx
+}
+
+# The label there, but not held: it scrolls away with the top of the page, so
+# most of the replay reads as a session. Only the browser smoke, scrolled to
+# the end of the built page, can see it.
+inject_exercise_example_label_scrolls_away() {
+  edit_in_place '/^  position: sticky;$/d' exercise/src/replay/replay.css
+}
+
+# An example bundled into the page's own code: its registry imported from the
+# page's entry, which carries the whole authored script in with it. Typecheck,
+# lint, tests and the scans pass it; the smoke finds the example's text in
+# replay/assets/, where only the page's code belongs.
+inject_exercise_example_bundled_into_page() {
+  edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
+}
+
+# The meter reading a progress frame's old, nested shape again (#288): what
+# the page did when it went blank on the rehearsal drive's first live frame.
+# The types are the format's now, so the read goes through a cast, as an
+# older shape kept anywhere else would; typecheck and lint pass it, and any
+# fold of a progress line -- served, or synthesized for a replay -- sees it.
+inject_exercise_progress_read_nested() {
+  edit_in_place 's|    processed: top.processed,|    processed: (top as unknown as { prompt: { processed: number } }).prompt.processed,|' exercise/src/session/fold.ts
+}
+
+# #32 I2's emitter mutated (track five's faults, carried here by courier): a
+# ledger row the renderer must refuse, naming the directory. The fixture loop
+# never reaches the renderer, and a record diet accepted cannot lack a word,
+# so the emitter is the one place a wrong row can come from.
+
+# A ledger row citing a directory that is not there.
+inject_results_ledger_row_cites_missing_directory() {
+  edit_in_place 's/"directory": directory.name,/"directory": directory.name + "-stale",/' scripts/check-results.py
+}
+
+# A ledger row with no word.
+inject_results_ledger_row_without_word() {
+  edit_in_place '/"result": front.get("result"),/d' scripts/check-results.py
+}
+
+# #32 I3 (track five's fault, carried here by courier): the ledger page pulls
+# in an outside stylesheet. Only the Pages table refuses it, and check_results
+# runs that table over the page it rendered, so it fails here and not first at
+# deploy time.
+inject_results_ledger_page_calls_out() {
+  edit_in_place 's#^<meta charset="utf-8">$#<meta charset="utf-8"><link rel="stylesheet" href="https://example.org/ledger.css">#' exercise/scripts/render-ledger.py
+}
+
+# An array expansion left bare: on bash 3.2 an empty array aborts the scan
+# under `set -u`, and the scan read clean having scanned nothing (#236).
+inject_hygiene_unguarded_expansion() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/hygiene.sh")
+source = path.read_text(encoding="utf-8")
+old = '*) targets=(${prose_files+"${prose_files[@]}"}) ;;'
+new = '*) targets=("${prose_files[@]}") ;;'
+if source.count(old) != 1:
+    raise SystemExit(f"the guard appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_hygiene() {
   bash scripts/seed-hygiene-fault.sh seeded-faults > /dev/null
   git add --all
+}
+
+# A data-URI payload read as prose again (#278): the views are never built,
+# so the committed fixture's base64, which spells a ticket-id shape, is read
+# with every pattern and the tree scan goes red on it.
+inject_hygiene_datauri_read_as_prose() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/hygiene-datauri.py')
+source = path.read_text(encoding="utf-8")
+old = '    if ";base64," not in text:\n        return None\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '    return None\n', 1), encoding="utf-8")
+EOF
 }
 
 inject_pages() {
@@ -2725,6 +3462,51 @@ p = pathlib.Path("substrates/admission/derive_admission.py"); s = p.read_text(en
 old = '    if missing:\n        raise ValueError'
 assert old in s, "the rule moved"
 p.write_text(s.replace(old, '    if False:\n        raise ValueError', 1), encoding="utf-8")
+PYEOF
+}
+# #202: one library of the DoD 1 engine rebuilt while its exe stub holds. The exe digest alone would not move;
+# the engine fingerprint must.
+inject_admission_engine_library_changed() {
+  python3 - <<'PYEOF'
+import pathlib, re
+p = pathlib.Path("substrates/registry.toml"); s = p.read_text(encoding="utf-8")
+head = "[substrate.ada48-llamacpp-qwen38flashnext-q20.engine_libraries]\n"
+i = s.index(head) + len(head)
+m = re.compile(r'^("libggml-cuda[^"]*" = ")([0-9a-f])', re.M).search(s, i)
+assert m, "the library table moved"
+flip = "0" if m.group(2) != "0" else "1"
+p.write_text(s[:m.start(2)] + flip + s[m.end(2):], encoding="utf-8")
+PYEOF
+}
+# #202: the recipe narrowed back to the exe alone, the defect it exists to close.
+inject_admission_engine_recipe_exe_only() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'json.dumps({"exe": exe, "libraries": libraries}, sort_keys=True,'
+assert old in s, "the recipe moved"
+p.write_text(s.replace(old, 'json.dumps({"exe": exe}, sort_keys=True,', 1), encoding="utf-8")
+PYEOF
+}
+# #202: the recipe's shared-object pattern narrowed to bare `.so`, so a versioned library (libllama.so.0.4.1)
+# -- and on macOS every .dylib (#29's I0) -- drops out of the engine fingerprint unseen.
+inject_admission_engine_pattern_narrowed() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$|\\.dylib$")'
+assert old in s, "the pattern moved"
+p.write_text(s.replace(old, 'SHARED_OBJECT = re.compile(r"\\.so$")', 1), encoding="utf-8")
+PYEOF
+}
+# planning (#143, 5922544337): a pruned model's entry declares its calibration mix; the rule removed.
+inject_admission_pruned_mix_unrequired() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'elif sub.get("pruned") is True and not (isinstance(sub.get("calibration_mix"), str) and sub["calibration_mix"].strip()):'
+assert old in s, "the rule moved"
+p.write_text(s.replace(old, 'elif False:', 1), encoding="utf-8")
 PYEOF
 }
 # An admission record one level deeper than the glob looks.
@@ -3289,10 +4071,491 @@ inject_ci() {
   edit_in_place '/^hygiene\t/d' .github/check-owners.tsv
 }
 
+# A package-mirror step left unbounded: a hung `apt-get update` then holds a
+# selftest shard until GitHub's six-hour job limit (#222's run 36884660921).
+inject_ci_apt_step_unbounded() {
+  edit_in_place '/^        timeout-minutes: 5$/d' .github/workflows/gate-selftest.yml
+}
+
 # The trunk's own run cancelled by the next merge (#112): the census a pull
 # request is scoped against goes stale while CI stays green.
 inject_ci_trunk_run_cancelled() {
   edit_in_place "s/^  cancel-in-progress: .*/  cancel-in-progress: true/" .github/workflows/verify.yml
+}
+
+# #32 I3's deploy (track five's faults, carried here by courier): each guard
+# pages.yml holds, broken.
+
+# Deploys on a verify run whatever its conclusion.
+inject_ci_pages_deploys_on_any_conclusion() {
+  edit_in_place "s/github.event.workflow_run.conclusion == 'success' && //" .github/workflows/pages.yml
+}
+
+# Deploys on a verify run that was not a push.
+inject_ci_pages_deploys_on_any_event() {
+  edit_in_place "s/ && github.event.workflow_run.event == 'push'//" .github/workflows/pages.yml
+}
+
+# Deploys a fork's code: a pull request from a fork's `main` matches the branch filter by name.
+inject_ci_pages_deploys_forks() {
+  edit_in_place "s/ && github.event.workflow_run.head_repository.full_name == github.repository//" .github/workflows/pages.yml
+}
+
+# The guards joined by || rather than &&: any one of them is enough.
+inject_ci_pages_guards_either() {
+  edit_in_place "s/== 'success' && github/== 'success' || github/" .github/workflows/pages.yml
+}
+
+# Uploads the site without checking it.
+inject_ci_pages_uploads_unchecked() {
+  edit_in_place '/run: .\/verify.sh --site _site/d' .github/workflows/pages.yml
+}
+
+# Publishes whatever sha the run checked, though a later run has passed.
+inject_ci_pages_publishes_an_older_sha() {
+  edit_in_place 's/^\( *\)newest="\$(gh api .*$/\1newest="$RUN_NUMBER"/' .github/workflows/pages.yml
+}
+
+# The newest-run comparison turned round: an older run publishes over a newer
+# one that passed, and the newest one refuses. Only rule 10's stub-gh run of
+# the step sees it; the step's text is all still there.
+inject_ci_pages_newest_run_compared_backwards() {
+  edit_in_place 's/\[ "\$newest" -le "\$RUN_NUMBER" \]/[ "$newest" -ge "$RUN_NUMBER" ]/' .github/workflows/pages.yml
+}
+
+# #244 (track five's faults, ruled with the PR): the deploy's concurrency group
+# where a skipped run reaches it, and no group at all.
+
+# The group at the workflow level, beside the job's: a run whose deploy is
+# skipped enters it and cancels a deploy waiting there (measured on #244).
+inject_ci_pages_concurrency_at_workflow_level() {
+  edit_in_place '/^  id-token: write$/{n;s/^$/concurrency: pages/;}' .github/workflows/pages.yml
+}
+
+# The deploy job's group gone, all three lines: two deploys may run at once.
+inject_ci_pages_deploys_not_serialized() {
+  edit_in_place '/^    concurrency:$/,/^      cancel-in-progress: false$/d' .github/workflows/pages.yml
+}
+
+# The deploy job's group cancelling: a newer deploy stops one mid-publish.
+inject_ci_pages_deploy_group_cancels() {
+  edit_in_place '/^      group: pages$/{n;s/cancel-in-progress: false/cancel-in-progress: true/;}' .github/workflows/pages.yml
+}
+
+# A key past a blank line in the deploy job's group: YAML keeps it in the
+# group, so `queue: max` holds every waiting deploy rather than the newest.
+inject_ci_pages_deploy_group_key_past_a_blank() {
+  edit_in_place '/^      cancel-in-progress: false$/a\
+\
+      queue: max' .github/workflows/pages.yml
+}
+
+# An extra key in the deploy job's group, quoted: YAML reads 'queue' as queue
+# (#251).
+inject_ci_pages_deploy_group_quoted_key() {
+  edit_in_place "/^      cancel-in-progress: false\$/a\\
+      'queue': max" .github/workflows/pages.yml
+}
+
+# A second `concurrency` key in the deploy job, spelled with a tag: YAML keeps
+# the last of two, so this one -- `queue: max` in it -- is the group (#251).
+inject_ci_pages_deploy_second_group_tagged() {
+  edit_in_place '/^    runs-on: ubuntu-latest$/a\
+    !!str concurrency: {group: pages, cancel-in-progress: false, queue: max}' .github/workflows/pages.yml
+}
+
+# #256: what the text read of rule 10 could not see, and the parse does.
+
+# A flow collection that runs past the deploy block (libyaml does not hold a
+# flow's lines to the block's indentation), carrying a second `concurrency`
+# -- the one YAML keeps -- after it.
+inject_ci_pages_flow_collection_hides_a_group() {
+  edit_in_place 's/^    runs-on: ubuntu-latest$/    runs-on: [ubuntu-latest,/
+/^    runs-on: \[ubuntu-latest,$/a\
+  self-hosted]\
+    "concurrency": {group: pages, cancel-in-progress: false, queue: max}' .github/workflows/pages.yml
+}
+
+# A second `deploy` job after the first: YAML keeps the last, which has no
+# guard, no check and no group.
+inject_ci_pages_second_deploy_job() {
+  edit_in_place '$a\
+  deploy:\
+    runs-on: ubuntu-latest\
+    steps:\
+      - run: "true"' .github/workflows/pages.yml
+}
+
+# A second YAML document after the first: which one a reader takes is the
+# reader's choice.
+inject_ci_pages_second_document() {
+  edit_in_place '$a\
+---\
+jobs: {deploy: {runs-on: ubuntu-latest, steps: [{run: "true"}]}}' .github/workflows/pages.yml
+}
+
+# A quoted merge key: psych merges `"<<"` as it does `<<`, so this one
+# replaces the deploy job's guards with `true` (#258's review).
+inject_ci_pages_quoted_merge_key() {
+  edit_in_place '/^    runs-on: ubuntu-latest$/a\
+    "<<": {if: "true"}' .github/workflows/pages.yml
+}
+
+# A second job that uploads and publishes with none of the deploy job's checks.
+inject_ci_pages_second_job() {
+  edit_in_place '$a\
+  publish-too:\
+    runs-on: ubuntu-latest\
+    steps:\
+      - uses: actions/upload-pages-artifact@v3' .github/workflows/pages.yml
+}
+
+# The check step skipped: the site uploads unchecked.
+inject_ci_pages_check_step_skipped() {
+  edit_in_place '/^        run: \.\/verify\.sh --site _site$/i\
+        if: false' .github/workflows/pages.yml
+}
+
+# #258's second review: the slips a maintainer could make.
+
+# A step between the check and the upload that writes to the site.
+inject_ci_pages_site_written_after_its_check() {
+  edit_in_place '/^      - uses: actions\/configure-pages@v5$/i\
+      - run: echo example.org > _site/CNAME\
+' .github/workflows/pages.yml
+}
+
+# The upload made to run whatever the check said.
+inject_ci_pages_upload_always() {
+  edit_in_place '/^      - uses: actions\/upload-pages-artifact@v3$/a\
+        if: always()' .github/workflows/pages.yml
+}
+
+# The trigger's branch filter gone: a passing push run on any branch publishes.
+inject_ci_pages_trigger_any_branch() {
+  edit_in_place '/^    branches: \[main\]$/d' .github/workflows/pages.yml
+}
+
+# The site checked against main's tip rather than the sha that built it.
+inject_ci_pages_checkout_not_the_run() {
+  edit_in_place 's/^          ref: \${{ github.event.workflow_run.head_sha }}$/          ref: main/' .github/workflows/pages.yml
+}
+
+# #258's third review: the job's condition with text outside its `${{ }}` --
+# here a leading space -- is a non-empty string to GitHub, always true.
+inject_ci_pages_condition_outside_its_braces() {
+  edit_in_place 's/^    if: \(github\.event\.workflow_run\.conclusion.*\)$/    if: " ${{ \1 }}"/' .github/workflows/pages.yml
+}
+
+# THE BUDGET HOLDS EVERY PACKAGE, AND A SPLIT RUNS EVERY MEMBER (#262).
+
+# A check re-measured past what its package's budget holds: hygiene at 341 s.
+inject_ci_check_seconds_over_budget() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/check-seconds.tsv')
+source = path.read_text(encoding="utf-8")
+old = 'hygiene\t141.2\t'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'hygiene\t341.2\t', 1), encoding="utf-8")
+EOF
+}
+
+# A check with no measured row: nothing can hold its job to the budget.
+inject_ci_check_seconds_unmeasured() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/check-seconds.tsv')
+source = path.read_text(encoding="utf-8")
+old = '\nhygiene\t141.2\t'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '\nunmeasured-hygiene\t141.2\t', 1), encoding="utf-8")
+EOF
+}
+
+# The applier's shard filter dropping one injection from every shard: declared, and run by nothing (#239's lesson).
+inject_ci_injection_shard_drops_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-injections.py')
+source = path.read_text(encoding="utf-8")
+old = 'applied = [name for name in applied if gatelib.in_shard(name, *shard)]'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'applied = [name for name in applied if gatelib.in_shard(name, *shard) and name != names[-1]]', 1), encoding="utf-8")
+EOF
+}
+
+# recompute's shard filter dropping one directory from every shard.
+inject_ci_recompute_shard_drops_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = 'directories = [p for p in directories if gatelib.in_shard(p.name, *shard)]'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'directories = [p for p in directories if gatelib.in_shard(p.name, *shard)][1:]', 1), encoding="utf-8")
+EOF
+}
+
+# A line separator YAML does not split on (#268's third review): the run
+# step's last line a bash comment to the runner, two lines to a reader that
+# splits as Python does -- a shard green having run nothing.
+inject_ci_sharded_workflow_line_separator() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/pkg-recompute.yml')
+source = path.read_text(encoding="utf-8")
+old = '          ./verify.sh "${args[@]}"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '          #\u2028' + old, 1), encoding="utf-8")
+EOF
+}
+
+# A listing with no LISTING line of its own: what a check that ignored
+# `--names` and ran would print, which verify.sh still calls LISTED.
+inject_ci_listing_unmarked() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = 'print("\\n".join([gatelib.LISTING, *(p.name for p in directories)]))'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'print("\\n".join(p.name for p in directories))', 1), encoding="utf-8")
+EOF
+}
+
+# THE RUNTIME CENSUS'S FAULTS (#262, ruled on #268): the fourth review's
+# three reproductions, each an edit below the listing's `return` or in the
+# wrapper, so what a shard lists is whole and what it runs is not.
+inject_ci_recompute_runs_fewer_than_listed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = '        print("\\n".join([gatelib.LISTING, *(p.name for p in directories)]))\n        return 0\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '    if shard is not None:\n        directories = directories[1:]\n', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_injections_applies_fewer_than_listed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-injections.py')
+source = path.read_text(encoding="utf-8")
+old = '        print("\\n".join([gatelib.LISTING, *applied]))\n        return 0\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '    applied = applied[:-1]\n', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_recompute_wrapper_shard_one_when_running() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('verify.sh')
+source = path.read_text(encoding="utf-8")
+old = '  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} \\\n'
+new = '  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$(if [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then echo "$VERIFY_CHECK_SHARD"; else echo "1/${VERIFY_CHECK_SHARD#*/}"; fi)"} \\\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A package dropped from the gate (#268's fourth review): its caller job and
+# its `needs` entry deleted together, and the `uses:` line kept alive inside
+# an env block scalar, where a regex over the whole file once read it as a call.
+inject_ci_caller_in_block_scalar() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+edits = [
+    ("  recompute:\n    uses: ./.github/workflows/pkg-recompute.yml\n\n", ""),
+    ("injections, recompute, selftest]", "injections, selftest]"),
+    ("          NEEDS: ${{ toJSON(needs) }}\n",
+     "          NEEDS: ${{ toJSON(needs) }}\n          CALLED_ELSEWHERE: |\n            uses: ./.github/workflows/pkg-recompute.yml\n"),
+]
+for old, new in edits:
+    if source.count(old) != 1:
+        raise SystemExit(f"the anchor appears {source.count(old)} times")
+    source = source.replace(old, new, 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
+
+# The fifth review's routes (#268): a member skipped after the census's dry
+# branch and before its outcome, so a dry census is whole and the real run is
+# not; and the gate's census switched off by a key after its `run:`.
+inject_ci_recompute_skips_after_the_dry_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = '        gatelib.record_ran(directory.name, one(directory))\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '        if shard is not None and directory == directories[0]:\n            continue\n' + old, 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_injections_skips_after_the_dry_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-injections.py')
+source = path.read_text(encoding="utf-8")
+old = '            outcome = one(name)\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '            if shard is not None and name == applied[-1]:\n                continue\n' + old, 1), encoding="utf-8")
+EOF
+}
+
+# A member reported honestly as skipped (#268's sixth review): the row says
+# `skipped`, and an outcome no check runs a member to is not a run.
+inject_ci_recompute_reports_a_skip() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/check-recompute.py')
+source = path.read_text(encoding="utf-8")
+old = '        timing = (directory.name, time.monotonic())\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '        if shard is not None and directory == directories[0]:\n            return "skipped"\n', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_shard_census_switched_off() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+old = 'python3 scripts/check-shard-census.py "${{ runner.temp }}/members"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + chr(10) + '        continue-on-error: true', 1), encoding="utf-8")
+EOF
+}
+
+# The gate's census of the sharded packages renamed out of its pinned form.
+# A comment, then a key the census step still carries (#268's eighth review):
+# YAML reads the comment at any indent, and a reader that ended the gate job
+# at it saw the census step last and exact.
+inject_ci_shard_census_off_behind_a_comment() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+old = 'python3 scripts/check-shard-census.py "${{ runner.temp }}/members"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + chr(10) + '  # the verdict is the job results step above' + chr(10) + '        continue-on-error: true', 1), encoding="utf-8")
+EOF
+}
+
+inject_ci_shard_census_step_removed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/verify.yml')
+source = path.read_text(encoding="utf-8")
+old = "      - name: Every sharded member was run by exactly one shard\n"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "      - name: census\n", 1), encoding="utf-8")
+EOF
+}
+
+# A sharded package whose workflow never passes the shard: every job runs all of it.
+inject_ci_sharded_workflow_without_shard() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/pkg-injections.yml')
+source = path.read_text(encoding="utf-8")
+old = '          VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '          SHARD_IGNORED: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n', 1), encoding="utf-8")
+EOF
+}
+
+# A shard count of 1: a split that splits nothing.
+inject_ci_shard_count_one() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/check-owners.tsv')
+source = path.read_text(encoding="utf-8")
+old = 'recompute\trecompute\t3\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'recompute\trecompute\t1\n', 1), encoding="utf-8")
+EOF
+}
+
+# A sharded job's matrix hardcoded: shards 2 and 3 never start, every rule still reading the table (#268's review).
+inject_ci_sharded_matrix_not_the_table() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('.github/workflows/pkg-recompute.yml')
+source = path.read_text(encoding="utf-8")
+old = 'shard: ${{ fromJSON(needs.plan.outputs.shards) }}'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'shard: [1]', 1), encoding="utf-8")
+EOF
+}
+
+# A check function that runs shard 1 whatever its job is told: two thirds of the directories run nowhere (#268's review).
+inject_ci_check_runs_one_shard() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("verify.sh")
+source = path.read_text(encoding="utf-8")
+# Anchored on the function's own line break, which the quoted copy below
+# spells as an escape, so the anchor names the function and not this body.
+old = 'check_recompute() {\n  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"}'
+new = 'check_recompute() {\n  python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "1/${VERIFY_CHECK_SHARD#*/}"}'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Publishes on a trigger of its own, beside the gate.
+inject_ci_pages_publishes_on_its_own_trigger() {
+  edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
+}
+
+# The ledger the deploy publishes, uploaded by nothing.
+inject_ci_pages_ledger_not_uploaded() {
+  edit_in_place 's/^          name: site-ledger$/          name: site-ledger-renamed/' .github/workflows/pkg-diet.yml
 }
 
 # A branch filter on the PULL-REQUEST trigger. On `push` the same filter is
@@ -5592,6 +6855,14 @@ if source.count(old) != 1:
 path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
+# One story's assertion broken in place: the kitchen sink's receipt expecting
+# 2.1 side calls an ask where the session makes 2.0. Typecheck and lint pass
+# it; only the browser tests -- every story run in Chromium -- can see it
+# (#175). The signature is Vitest's failure message for that assertion, which
+# only this fault prints; the story's FAIL line would name any of its failures.
+inject_exercise_story_assertion() {
+  edit_in_place "s/row('side-calls-per-ask')).toBe('2.0')/row('side-calls-per-ask')).toBe('2.1')/" exercise/src/stories/KitchenSink.stories.tsx
+}
 
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
@@ -5728,14 +6999,21 @@ prove_patterns() {
 # reverted-and-still-green before this existed.
 expect_exit() {
   local label="$1" want="$2"; shift 2
-  local rc=0
-  "$@" > /dev/null 2>&1 || rc=$?
+  local rc=0 said
+  # Kept, and shown only when the exit is wrong (#208): a mechanics case that
+  # fails once on the runner and passes everywhere else is diagnosed from the
+  # one log that saw it, or not at all. Discarding the output made "BAD exit 1"
+  # the whole record of a failure nobody could then reproduce.
+  said="$(mktemp)" || said=/dev/null
+  "$@" > "$said" 2>&1 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     printf 'OK    exit %-3d  %s\n' "$rc" "$label"
   else
     printf 'BAD   exit %-3d (wanted %d)  %s\n' "$rc" "$want" "$label"
+    [ "$said" = /dev/null ] || tail -n 40 "$said" | sed 's/^/      | /'
     SELFTEST_BROKEN+=("mechanics: ${label}")
   fi
+  [ "$said" = /dev/null ] || rm -f "$said"
 }
 
 prove_mechanics() {
@@ -5750,13 +7028,193 @@ prove_mechanics() {
   expect_exit "a credential inside a binary is caught" 1 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-secret"
 
+  # THE BSD CHECK REFUSES TO RUN UNDER GNU SEMANTICS (#75): a shim it cannot
+  # execute, or one that edits a file through GNU's `-i` spelling, would grade
+  # every injection under GNU and call them portable. Both are exit 2, before
+  # a single injection runs, so each case needs only the script and its shim.
+  local bsd; scratch; bsd="$SCRATCH"
+  mkdir -p "${bsd}/unrunnable/scripts/bsd-sed" "${bsd}/gnu-shaped/scripts/bsd-sed"
+  cp "${ROOT}/scripts/check-bsd-sed.sh" "${bsd}/unrunnable/scripts/"
+  cp "${ROOT}/scripts/bsd-sed/sed" "${bsd}/unrunnable/scripts/bsd-sed/sed"
+  chmod 000 "${bsd}/unrunnable/scripts/bsd-sed/sed"
+  expect_exit "the bsd check will not run without an executable shim" 2 \
+    bash "${bsd}/unrunnable/scripts/check-bsd-sed.sh" "${bsd}/unrunnable"
+  cp "${ROOT}/scripts/check-bsd-sed.sh" "${bsd}/gnu-shaped/scripts/"
+  printf '#!/bin/sh\nfor real in /usr/bin/sed /bin/sed; do [ -x "$real" ] && break; done\n' \
+    > "${bsd}/gnu-shaped/scripts/bsd-sed/sed"
+  printf '[ "$1" = -i ] && { shift; f="$2"; "$real" "$1" "$f" > "$f.t" && mv "$f.t" "$f"; exit; }\nexec "$real" "$@"\n' \
+    >> "${bsd}/gnu-shaped/scripts/bsd-sed/sed"
+  chmod +x "${bsd}/gnu-shaped/scripts/bsd-sed/sed"
+  expect_exit "nor with a shim that edits through GNU's -i" 2 \
+    bash "${bsd}/gnu-shaped/scripts/check-bsd-sed.sh" "${bsd}/gnu-shaped"
+
   # ...but an ordinary binary must not trip the loose heuristics. Over-strict
   # is a failure too: a gate that cries wolf on every binary gets switched off.
+  #
+  # The arbitrary bytes are FIXED, not drawn from /dev/urandom (#233): a fresh
+  # random 64 KiB made this verdict a lottery -- one shard of twenty read
+  # exit 1 on 2c97097 while the other nineteen passed the same case. A SHA-256
+  # counter stream is the same bytes on every machine and every Python, and is
+  # still a binary nothing in the tree resembles.
   mkdir -p "${box}/bin-clean"
   cp "$(command -v git)" "${box}/bin-clean/git.bin"
-  head -c 65536 /dev/urandom > "${box}/bin-clean/random.bin"
+  python3 -c 'import hashlib, sys; sys.stdout.buffer.write(b"".join(hashlib.sha256(b"#233 an ordinary binary %d" % i).digest() for i in range(2048)))' \
+    > "${box}/bin-clean/random.bin"
   expect_exit "an ordinary binary does not false-positive" 0 \
     bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/bin-clean"
+
+  # A ticket-id SHAPE inside binary bytes is not a ticket id (#233): a blob
+  # the runner drew from /dev/urandom, whose bytes spell \x06DIE9 from offset
+  # 18692 (the D at 18693). It reads clean -- and red with the `b` flag restored, so the
+  # decision is held by the fixture and not by the table's comment alone.
+  mkdir -p "${box}/ticket-shape"
+  cp "${ROOT}/tests/fixtures/hygiene-binary/ticket-id-shape-in-random-bytes.bin" "${box}/ticket-shape/"
+  expect_exit "a ticket-id shape in binary bytes is not a ticket id" 0 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/ticket-shape"
+  sed 's/^internal-ticket-id\ti\t/internal-ticket-id\tib\t/' "${ROOT}/scripts/hygiene-patterns.tsv" \
+    > "${box}/patterns-with-b.tsv"
+  expect_exit "and it reads red with the binary flag restored" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --patterns "${box}/patterns-with-b.tsv" --tree "${box}/ticket-shape"
+
+  # A ticket-id shape inside an embedded image is bytes, not a ticket id
+  # (#278): the committed fixture's SVG, a real PNG in a data URI, reads clean;
+  # the same bytes with the data URI broken (`;b64,`) read red, so it is the
+  # image reading that clears them; a readable run after a made-up image
+  # prefix is prose and reads red (#279's review); and a credential shape
+  # after one still reads red, named against the file itself, because the
+  # credential rows read every original whole.
+  mkdir -p "${box}/datauri-in" "${box}/datauri-out" "${box}/datauri-credential" "${box}/datauri-readable"
+  cp "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" "${box}/datauri-in/"
+  expect_exit "a ticket-id shape in a data-URI payload is not a ticket id" 0 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/datauri-in"
+  sed 's/;base64,/;b64,/' "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" \
+    > "${box}/datauri-out/shape-outside-a-data-uri.svg"
+  expect_exit "and the same bytes outside a data URI read red" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/datauri-out"
+  # A 4-aligned readable run after an image prefix decodes as base64 and is
+  # no image by its bytes, so it is prose (#279's second review: a 5-character
+  # run failed the decode first and never reached the signature check).
+  printf 'Tracked in data:image/png;base64,%s%s for now.\n' 'D''IE' '42424' > "${box}/datauri-readable/x.md"
+  expect_exit "a readable run after a made-up image prefix reads red" 1 \
+    bash "${ROOT}/scripts/hygiene.sh" --tree "${box}/datauri-readable"
+  # EVERY CHECK, AND ITS NEAR MISS (#279's third to fifth reviews): a payload
+  # is blanked only when its bytes are an image, so a readable run
+  # behind each image label alone, and behind a NEAR MISS of each check, is
+  # prose, one hit each: a format's start with an end wrong only in its first
+  # byte, an end with a start wrong only in its last, WebP with a correct size
+  # and one wrong tag, or a wrong size. So does a run glued onto a real GIF and
+  # then each character the delimiter lookahead refuses (GIF's trailer is one
+  # byte). Each run decodes strictly, so only the check it misses refuses it.
+  # Counted, so any one check removed or narrowed drops one (#279's fifth
+  # review).
+  mkdir -p "${box}/datauri-labels"
+  python3 - 'D''IE' > "${box}/datauri-labels/x.md" <<'EOF'
+import base64, sys
+t = sys.argv[1]
+run = f"/{t}4242"
+b64 = lambda raw: base64.b64encode(raw).decode()
+def framed(kind, start, end):
+    start += b"\0" * (-len(start) % 3)
+    end = b"\0" * (-len(end) % 3) + end
+    return f"a data:image/{kind};base64,{b64(start)}{run}{b64(end)} b"
+def webp(riff, tag, sized=True):
+    total = 12 + len(run) * 3 // 4
+    size = (total - 8 if sized else 0).to_bytes(4, "little")
+    return f"a data:image/webp;base64,{b64(riff + size + tag)}{run} b"
+png, iend = b"\x89PNG\r\n\x1a\n", b"IEND\xaeB`\x82"
+gif = b64(b"GIF89a\x00\x00;")
+lines = [f"a data:image/{kind};base64,{t}42424 b" for kind in ("png", "jpeg", "gif", "webp")]
+lines += [
+    framed("png", png, b"J" + iend[1:]),
+    framed("png", png[:-1] + b"\x0b", iend),
+    framed("jpeg", b"\xff\xd8\xff", b"\xfe\xd9"),
+    framed("jpeg", b"\xff\xd8\xfe", b"\xff\xd9"),
+    framed("gif", b"GIF89a", b""),
+    framed("gif", b"GIF89b", b";"),
+    webp(b"RIFF", b"WEBQ"),
+    webp(b"RIFX", b"WEBP"),
+    webp(b"RIFF", b"WEBP", sized=False),
+]
+lines += [f"a data:image/gif;base64,{gif}{run}AAA7{c}x b" for c in ".-_@:\\"]
+assert len(lines) == 19
+print("\n".join(lines))
+EOF
+  expect_exit "a readable run behind every image label, every check's near miss and every refused delimiter reads red once each" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-labels' 2>&1); \
+      [ \"\$(grep -c 'internal-ticket-id: ${box}/datauri-labels/x.md:' <<<\"\$out\")\" -eq 19 ]"
+  # Many prose views, each hit named against its own file, once: `prose-1:`
+  # is not a prefix of `prose-10` (#279's fourth review), so a view's name is
+  # matched with its colon; and two files sharing a basename, only one with a
+  # hit, keep apart, so a view's name is its own (the fifth review). Thirteen
+  # hits, thirteen distinct names, `a/x.svg` among them.
+  mkdir -p "${box}/datauri-many/a" "${box}/datauri-many/b"
+  python3 - "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" 'D''IE' "${box}/datauri-many" <<'EOF'
+import pathlib, re, sys
+payload = re.search(r"base64,([A-Za-z0-9+/=]+)", open(sys.argv[1]).read()).group(1)
+for n in range(1, 13):
+    pathlib.Path(sys.argv[3], f"f{n:02d}.svg").write_text(f'<img src="data:image/png;base64,{payload}"/> see {sys.argv[2]}-{n}\n')
+pathlib.Path(sys.argv[3], "a", "x.svg").write_text(f'<img src="data:image/png;base64,{payload}"/> see {sys.argv[2]}-13\n')
+pathlib.Path(sys.argv[3], "b", "x.svg").write_text(f'<img src="data:image/png;base64,{payload}"/> see nothing\n')
+EOF
+  expect_exit "thirteen hits beside images, two files sharing a name, are each named once against their own file" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-many' 2>&1); \
+      hits=\$(grep -oE 'internal-ticket-id: ${box}/datauri-many/(f[0-9]{2}\.svg|a/x\.svg):1:' <<<\"\$out\"); \
+      [ \"\$(wc -l <<<\"\$hits\")\" -eq 13 ] && [ \"\$(sort -u <<<\"\$hits\" | wc -l)\" -eq 13 ] \
+        && grep -q '/a/x\.svg:1:' <<<\"\$hits\""
+  # A hit in a decoded mirror's prose view is named `(decoded)` against its
+  # file (the mirror names it without its leading `/`): the prose views are
+  # mapped before the mirror rewrite.
+  mkdir -p "${box}/datauri-json"
+  python3 - "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" > "${box}/datauri-json/f.json" <<'EOF'
+import re, sys
+payload = re.search(r"base64,([A-Za-z0-9+/=]+)", open(sys.argv[1]).read()).group(1)
+print('{"x": "<img src=\\"data:image/png;base64,' + payload + '\\"/> see \\u0044' + 'IE-7"}')
+EOF
+  expect_exit "a hit in a decoded view beside an image is named against its file" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-json' 2>&1); \
+      grep -q 'internal-ticket-id: (decoded) ${box#/}/datauri-json/f.json:' <<<\"\$out\""
+  # A credential inside a payload that IS an image by its bytes -- the PNG
+  # signature, the shape, the IEND trailer -- is blanked from the prose, so
+  # only the credential rows' reading of the original finds it: the scan
+  # exits 1, exactly, naming the file itself.
+  python3 - 'AKIA' 'ABCDEFGHIJKLMNOP' > "${box}/datauri-credential/c.svg" <<'EOF'
+import base64, sys
+head = base64.b64encode(b"\x89PNG\r\n\x1a\n\x00").decode()
+tail = base64.b64encode(b"\x00IEND\xaeB`\x82").decode()
+print(f'<svg><image href="data:image/png;base64,{head}/{sys.argv[1]}{sys.argv[2]}/xx{tail}"/></svg>')
+EOF
+  expect_exit "a credential shape inside an image payload reads red, against its file" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-credential' 2>&1); rc=\$?; \
+      [ \"\$rc\" -eq 1 ] && grep -q 'aws-access-key-id: ${box}/datauri-credential/c.svg:1:' <<<\"\$out\""
+  # A hit in a prose view is named against its file, never the view: the
+  # fixture's real PNG, then a ticket-id shape on the same line.
+  mkdir -p "${box}/datauri-map"
+  python3 - "${ROOT}/tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri.svg" 'D''IE' > "${box}/datauri-map/x.svg" <<'EOF'
+import re, sys
+payload = re.search(r"base64,([A-Za-z0-9+/=]+)", open(sys.argv[1]).read()).group(1)
+print(f'<img src="data:image/png;base64,{payload}"/> see {sys.argv[2]}-7')
+EOF
+  expect_exit "a hit beside an image is named against its file" 0 \
+    bash -c "out=\$(bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-map' 2>&1); rc=\$?; \
+      [ \"\$rc\" -eq 1 ] && grep -q 'internal-ticket-id: ${box}/datauri-map/x.svg:1:' <<<\"\$out\""
+  # A scan removes its prose views: run with an empty TMPDIR of its own, a
+  # scan of a tree with an image leaves it empty.
+  mkdir -p "${box}/datauri-tmp"
+  expect_exit "a scan of a tree with an image leaves no prose view behind" 0 \
+    bash -c "TMPDIR='${box}/datauri-tmp' bash '${ROOT}/scripts/hygiene.sh' --tree '${box}/datauri-map' >/dev/null 2>&1; \
+      [ -z \"\$(ls -A '${box}/datauri-tmp')\" ]"
+
+  # The ledger renderer's verdict reaches the results check (#32 I2): a
+  # renderer that exits 7 makes `check_results` exit 7 -- its own status,
+  # which no other step of the check produces, so the assertion cannot pass
+  # for a reason that is not the renderer's. And, beside it, the real
+  # renderer passes. The pipe rule (AGENTS.md), on the step after the linter.
+  printf '#!/usr/bin/env python3\nimport sys\nsys.exit(7)\n' > "${box}/renderer-exits-7.py"
+  results_with_renderer() { (cd "$ROOT" && RENDER_LEDGER="$1" check_results); }
+  expect_exit "the ledger renderer's own exit status reaches the results check" 7 \
+    results_with_renderer "${box}/renderer-exits-7.py"
+  expect_exit "the results check passes with the real ledger renderer" 0 \
+    results_with_renderer "${ROOT}/exercise/scripts/render-ledger.py"
 
   # The pattern-table exemption is scoped to scripts/. Any other file that
   # happens to be named that way is still scanned.
@@ -6240,6 +7698,9 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
   (
     cd "${fake}/repo"
     git init --quiet
+    # The scans below run the copied scripts, which write __pycache__ here;
+    # ignored, so each `git add --all` commits only what its case names.
+    printf '__pycache__/\n' > .gitignore
     printf 'a\n' > a.txt && git add --all && seed_commit --message 'base'
     git update-ref refs/remotes/origin/main HEAD
     printf 'b\n' > b.txt && git add --all && seed_commit --message 'second'
@@ -6404,6 +7865,42 @@ STRICT
   expect_exit "history: the same literal in an author line is not content" 0 \
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
         GITHUB_EVENT_PATH="${fake}/pr-in-author.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+
+  # ONE BINARY PATH BLINDS NOTHING BESIDE IT (#233's review). A commit's patch
+  # used to be one file, and a file holding a NUL is searched only by the `b`
+  # patterns -- so a ticket id in a text hunk went unseen whenever the same
+  # commit added a binary. Patches are written one file per path now.
+  local fake_mixed
+  (
+    cd "${fake}/repo"
+    printf 'x\000y\000\n' > blob.bin
+    printf 'see %s for the plan\n' "$token" > notes.txt
+    git add --all && seed_commit --message 'a binary beside a text hunk'
+  )
+  fake_mixed="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_author" "$fake_mixed" > "${fake}/pr-mixed.json"
+  expect_exit "history: an id in a text hunk beside a binary path is a finding" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-mixed.json" \
+      python3 "${fake}/repo/scripts/check-history.py"
+
+  # A BINARY'S NAME IS TEXT (#240's second review). A path's name sits in its
+  # patch part's header, beside its content -- so a NUL in the content made
+  # the name unscanned. The commit's paths are written as a text file too.
+  local fake_named
+  (
+    cd "${fake}/repo"
+    printf 'x\000y\000\n' > "${token}.bin"
+    git add --all && seed_commit --message 'a binary under a named path'
+  )
+  fake_named="$(git -C "${fake}/repo" rev-parse HEAD)"
+  printf '{"pull_request":{"base":{"sha":"%s"},"head":{"sha":"%s"},"title":"t","body":"clean"}}' \
+    "$fake_mixed" "$fake_named" > "${fake}/pr-named.json"
+  expect_exit "history: an id in a binary path's name is a finding" 1 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=pull_request \
+        GITHUB_EVENT_PATH="${fake}/pr-named.json" \
       python3 "${fake}/repo/scripts/check-history.py"
 
   # `--range` REACHES THE CHECK, AND BEATS THE INFERRED ANSWER. A flag that
@@ -6584,7 +8081,28 @@ selftest() {
   # refuses outright.
   local -A SCOPE_INHERIT=()
   [ -z "$SELFTEST_SCOPE_PLAN" ] || load_scope_plan
-  scratch; SELFTEST_TARGET="${SCRATCH}/target"
+  # THE SANDBOXES' TARGET MAY BE A CACHED ONE (#306): CI names a directory a
+  # Cargo cache restores into, so the dependencies are compiled once per
+  # lockfile, toolchain and runner image rather than on every shard. Unset, a
+  # scratch of its own, as before. The workspace's own crates rebuild in every
+  # box either way: seeded_case touches lib.rs there, and each run's box is a
+  # new path, so nothing a cache holds can stand in for a crate a fault edited.
+  # ABSOLUTE ONLY: by here verify.sh has moved to ROOT, so a relative path
+  # would land somewhere the caller never named (as --census says of its own).
+  if [ -n "${VERIFY_SELFTEST_TARGET:-}" ]; then
+    case "$VERIFY_SELFTEST_TARGET" in
+      /*) ;;
+      *) echo "selftest: VERIFY_SELFTEST_TARGET must be an absolute path, not '$VERIFY_SELFTEST_TARGET'" >&2
+         exit "$EXIT_MISUSE" ;;
+    esac
+    mkdir -p -- "$VERIFY_SELFTEST_TARGET" &&
+      SELFTEST_TARGET="$(cd -- "$VERIFY_SELFTEST_TARGET" && pwd)" || {
+        echo "selftest: VERIFY_SELFTEST_TARGET ($VERIFY_SELFTEST_TARGET) is not a usable directory" >&2
+        exit "$EXIT_MISUSE"
+      }
+  else
+    scratch; SELFTEST_TARGET="${SCRATCH}/target"
+  fi
   scratch; SELFTEST_LOGS="$SCRATCH"
   # DERIVE MODE KEEPS ITS LOGS. `selftest_cleanup` removes every scratch it
   # registered, so an index written there would name files that no longer
@@ -6644,6 +8162,18 @@ selftest() {
     'record/fixtures/invalid/regime-missing-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a comparison's word left open"        test     inject_record_comparison_word_open \
     'record/fixtures/invalid/comparison-word-outside-its-four\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a weights projector named rather than digested" test inject_record_weights_projector_undigested \
+    'record/fixtures/invalid/weights-projector-named-not-digested\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a negative whole-millisecond duration read" test inject_record_timings_negative_integer_ms_read \
+    'record/fixtures/invalid/timings-duration-that-is-a-negative-integer\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a timings key the server does not send read" test inject_record_timings_unknown_key_read \
+    'record/fixtures/invalid/timings-key-the-server-does-not-send\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a negative timings duration read" test inject_record_timings_negative_ms_read \
+    'record/fixtures/invalid/timings-duration-that-is-negative\.jsonl' 'test:conformance/formats::record'
+  seeded_case "one weights file spelled as a list read" test inject_record_weights_one_file_list_read \
+    'record/fixtures/invalid/weights-of-one-file-spelled-as-a-list\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a weights draft named rather than digested" test inject_record_weights_draft_undigested \
+    'record/fixtures/invalid/weights-draft-named-not-digested\.jsonl' 'test:conformance/formats::record'
   seeded_case "a summary kind's fields made advisory" test     inject_record_summary_kind_fields_advisory \
     'record/fixtures/invalid/recompute-summary-carries-turns\.jsonl' 'test:conformance/formats::record'
   seeded_case "a recompute summary with no product digest" test inject_record_recompute_digest_optional \
@@ -6668,6 +8198,34 @@ selftest() {
     'a_reference_to_anything_but_an_earlier_request_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
   seeded_case "a log settlement that leaves a state it is not in" test inject_log_settlement_chain_unchecked \
     'a_settlement_that_does_not_leave_the_state_it_is_in_is_refused \.\.\. FAILED' 'lib/formats::log::tests'
+  seeded_case "v1 content read in a log that declares v0" test inject_log_v1_content_read_in_a_v0_log \
+    'log/fixtures/invalid/a-v0-log-carrying-timings\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a progress line read in a log that declares v0" test inject_log_progress_read_in_a_v0_log \
+    'log/fixtures/invalid/a-v0-log-carrying-progress\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a torn final line refused"           test     inject_log_torn_final_line_refused \
+    'log/fixtures/valid/a-torn-final-line\.jsonl: rejected' 'test:conformance/formats::log'
+  seeded_case "a torn middle line accepted"          test     inject_log_torn_middle_line_accepted \
+    'log/fixtures/invalid/a-torn-line-before-the-end\.jsonl: accepted' 'test:conformance/formats::log'
+  seeded_case "a context_overflow read in a log that declares v0" test inject_log_context_overflow_read_in_a_v0_log \
+    'log/fixtures/invalid/a-v0-log-carrying-a-context-overflow\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a response's reasoning read in a log that declares v0" test inject_log_response_reasoning_read_in_a_v0_log \
+    'log/fixtures/invalid/a-v0-log-carrying-a-response-reasoning\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a log progress line after its request ended read" test inject_log_progress_after_its_request_read \
+    'log/fixtures/invalid/a-progress-after-its-request-ended\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a log progress line citing anything read as a request" test inject_log_progress_citing_a_non_request_read \
+    'log/fixtures/invalid/a-progress-citing-a-line-that-is-not-a-request\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a negative timings count read as a count" test inject_log_timings_negative_count_read \
+    'log/fixtures/invalid/a-timings-count-that-is-negative\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a negative timings duration read as a duration" test inject_log_timings_negative_ms_read \
+    'log/fixtures/invalid/a-timings-duration-that-is-negative\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a negative whole-millisecond duration read as absent" test inject_log_timings_negative_integer_ms_read \
+    'log/fixtures/invalid/a-timings-duration-that-is-a-negative-integer\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a timings duration written as text read as absent" test inject_log_timings_ms_as_text_read \
+    'log/fixtures/invalid/a-timings-duration-written-as-text\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a timings key the server does not send read" test inject_log_timings_unknown_key_read \
+    'log/fixtures/invalid/a-timings-key-the-server-does-not-send\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a timings key declared that no line writes" test inject_log_timings_declares_a_key_nothing_writes \
+    'the_schema_is_what_every_kind_writes \.\.\. FAILED' 'lib/formats::log::tests'
   seeded_case "a head change that is not a change"    test     inject_record_prefix_change_not_a_change \
     'record/fixtures/invalid/prefix-change-that-is-not-a-change\.jsonl' 'test:conformance/formats::record'
   seeded_case "the miss classes reordered"           test     inject_record_prefix_precedence_reordered \
@@ -6684,6 +8242,8 @@ selftest() {
     'capture::bakeoff::tests::a_cache_the_record_did_not_consume_is_refused \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
     'capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \.\.\. FAILED' 'lib/capture::bakeoff'
+  seeded_case "the bakeoff scratch shared by every run" test inject_bakeoff_scratch_shared \
+    'capture::bakeoff::tests::two_scratches_never_share_a_directory \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "a budget no fixture demonstrates"      test     inject_bakeoff_budget_unfixtured \
     'capture::sense::tests::every_pre_registered_budget_is_one_its_fixture_demonstrates \.\.\. FAILED' 'lib/capture::sense'
   seeded_case "a row that links to itself"            test     inject_record_self_link_allowed \
@@ -6815,6 +8375,14 @@ selftest() {
     'FAIL  derive: a refuted parity fire bars'
   seeded_case "a constitutional cell not required" admission inject_admission_constitutional_unrequired \
     'FAIL  derive refuses a record missing a constitutional cell'
+  seeded_case "an engine library changed under a held exe" admission inject_admission_engine_library_changed \
+    'ada48-llamacpp-qwen38flashnext-q20: engine_fingerprint changed'
+  seeded_case "the engine recipe narrowed to the exe" admission inject_admission_engine_recipe_exe_only \
+    'FAIL  engine: a library changed with the exe held changes the fingerprint'
+  seeded_case "the engine recipe's library pattern narrowed" admission inject_admission_engine_pattern_narrowed \
+    'FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included'
+  seeded_case "a pruned entry's calibration mix not required" admission inject_admission_pruned_mix_unrequired \
+    'FAIL  engine: a pruned entry with no calibration mix is refused'
   seeded_case "an admission record the glob cannot see" admission inject_admission_record_moved \
     'admission.record-not-found'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
@@ -6839,6 +8407,8 @@ selftest() {
     'but the committed file hashes to'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing  exit=' inject_that_changes_nothing
+  seeded_case "the one portable spelling made GNU-only" bsd    inject_bsd_edit_in_place_gnu_only \
+    '^  inject_exercise_pnpm_unobtainable  exit=' inject_exercise_pnpm_unobtainable
   seeded_case "a nested table flattened"              test     inject_regimen_nested_table_flattened \
     'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
@@ -6871,10 +8441,56 @@ selftest() {
     'a pin that can be silently ignored is not a pin'
   seeded_case "template label nothing defines"        metadata inject_metadata \
     'assigns label'
+  seeded_case "a hygiene expansion bash 3.2 aborts on" hygiene inject_hygiene_unguarded_expansion \
+    'is unguarded; bash 3\.2 aborts on it'
   seeded_case "forbidden content in the tree"         hygiene  inject_hygiene \
     'hygiene: internal-ticket-id:'
+  seeded_case "a data-URI payload read as prose"      hygiene  inject_hygiene_datauri_read_as_prose \
+    'hygiene: internal-ticket-id: tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri\.svg:6:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
+  seeded_case "a ledger row citing a missing directory" results inject_results_ledger_row_cites_missing_directory \
+    'render-ledger: [0-9a-z-]+-stale: no such directory'
+  seeded_case "a ledger row with no word"              results inject_results_ledger_row_without_word \
+    'render-ledger: [0-9a-z-]+: row carries no result'
+  seeded_case "the ledger page pulls in an outside stylesheet" results inject_results_ledger_page_calls_out \
+    'hygiene: external-stylesheet:'
+  seeded_case "a type error in the web surface"       exercise inject_exercise_type_error \
+    'error TS2322'
+  seeded_case "an authored session on the published list" exercise inject_exercise_published_list_carries_authored_session \
+    'FAIL.*published\.test\.ts.*publishes the three recorded whole, and never an authored session'
+  seeded_case "a published recording's event with no kind" exercise inject_exercise_recording_corrupt_event \
+    'exercise/src/drive/recorded/step-limit\.json: not a recording: event 0 has no kind or time'
+  seeded_case "a network call in the replay page's shell" exercise inject_exercise_shell_carries_network_call \
+    'hygiene: network-call: _site/replay/assets/'
+  seeded_case "the modulepreload polyfill back on"     exercise inject_exercise_modulepreload_polyfill_on \
+    'hygiene: network-call: _site/replay/assets/'
+  seeded_case "a credential shape in a published recording" exercise inject_exercise_payload_carries_credential \
+    'hygiene: github-token: _site/replay/data/step-limit\.js'
+  seeded_case "a published recording edited after admission" exercise inject_exercise_recording_edited_after_admission \
+    'admission: exercise/src/drive/recorded/step-limit\.json: edited since it was admitted'
+  seeded_case "the recording loaded beside the bundle" exercise inject_exercise_replay_loads_beside_its_bundle \
+    'replay-smoke: step-limit did not load'
+  seeded_case "a published recording's admitted table edited" exercise inject_exercise_admitted_table_edited \
+    'admission: exercise/src/drive/recorded/[a-z-]+\.json: its admitted table scripts/hygiene-admitted-[0-9a-f]{12}-patterns\.tsv is not the one admitted'
+  seeded_case "a published recording with no admission" exercise inject_exercise_published_without_admission \
+    "expected \[ 'step-limit' \] to deeply equal \[\]"
+  seeded_case "a pinned pnpm the host cannot have"    exercise inject_exercise_pnpm_unobtainable \
+    'notarget No matching version found for pnpm@0\.0\.0-unpublished'
+  seeded_case "a capture's carried field disagreeing with its events" exercise inject_exercise_recording_carried_disagrees \
+    'voxel-stress: its carried field disagrees with its events'
+  seeded_case "a snapshot no admission names, left in place" exercise inject_exercise_snapshot_orphaned \
+    'admission: scripts/hygiene-admitted-000000000000-patterns\.tsv: a snapshot no admission names'
+  seeded_case "admit no longer removing what no admission names" exercise inject_exercise_admit_keeps_orphans \
+    'FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so'
+  seeded_case "an authored example replayed without its label" exercise inject_exercise_example_replayed_without_label \
+    'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
+  seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \
+    "replay-smoke: kitchen-sink's label is on the page but out of view"
+  seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
+    "replay-smoke: kitchen-sink is bundled into the page's code"
+  seeded_case "the meter reading a progress frame's old shape" exercise inject_exercise_progress_read_nested \
+    "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
@@ -6895,8 +8511,102 @@ selftest() {
     'results are present and none recomputed'
   seeded_case "a check no workflow runs"              ci       inject_ci \
     'has no owner in check-owners\.tsv'
+  seeded_case "the site deployed whatever the gate said" ci inject_ci_pages_deploys_on_any_conclusion \
+    "pages.yml: deploys on a workflow_run whatever its conclusion"
+  seeded_case "the site deployed from a run not a push" ci inject_ci_pages_deploys_on_any_event \
+    "pages.yml: deploys on a run that was not a push"
+  seeded_case "the site deployed from a fork's code" ci inject_ci_pages_deploys_forks \
+    "pages.yml: deploys a run of a fork's code"
+  seeded_case "the deploy guards joined by ||" ci inject_ci_pages_guards_either \
+    "pages.yml: the deploy's condition is not exactly its guards joined by &&"
+  seeded_case "the site uploaded unchecked" ci inject_ci_pages_uploads_unchecked \
+    "pages.yml: upload-pages-artifact is not preceded by \./verify\.sh --site _site"
+  seeded_case "the site published though a later run passed" ci inject_ci_pages_publishes_an_older_sha \
+    "pages.yml: publishes without checking that no later verify run on main has passed"
+  seeded_case "the newest-run comparison turned round" ci inject_ci_pages_newest_run_compared_backwards \
+    "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
+  seeded_case "the deploy's group at the workflow level" ci inject_ci_pages_concurrency_at_workflow_level \
+    "pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters"
+  seeded_case "the deploy job's group gone" ci inject_ci_pages_deploys_not_serialized \
+    "pages.yml: the deploy job holds no .pages. concurrency group"
+  seeded_case "the deploy job's group cancelling" ci inject_ci_pages_deploy_group_cancels \
+    "pages.yml: the deploy job's .pages. group does not say cancel-in-progress: false"
+  seeded_case "a key past a blank line in the deploy job's group" ci inject_ci_pages_deploy_group_key_past_a_blank \
+    "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+  seeded_case "a quoted extra key in the deploy job's group" ci inject_ci_pages_deploy_group_quoted_key \
+    "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+  seeded_case "a second group in the deploy job, tagged" ci inject_ci_pages_deploy_second_group_tagged \
+    "pages.yml: the deploy job carries a key not spelled plainly .!!str concurrency"
+  seeded_case "a flow collection hiding a second group" ci inject_ci_pages_flow_collection_hides_a_group \
+    "pages.yml: jobs.deploy: duplicate key .concurrency."
+  seeded_case "a second deploy job" ci inject_ci_pages_second_deploy_job \
+    "pages.yml: jobs: duplicate key .deploy."
+  seeded_case "a second YAML document" ci inject_ci_pages_second_document \
+    "pages.yml: holds 2 YAML documents, not one"
+  seeded_case "a quoted merge key over the guards" ci inject_ci_pages_quoted_merge_key \
+    "pages.yml: the deploy job carries a key not spelled plainly .<<."
+  seeded_case "a second job that publishes" ci inject_ci_pages_second_job \
+    "pages.yml: jobs other than .deploy. .publish-too."
+  seeded_case "the check step skipped" ci inject_ci_pages_check_step_skipped \
+    "pages.yml: the check step carries if, so it may not run as written"
+  seeded_case "the site written after its check" ci inject_ci_pages_site_written_after_its_check \
+    "pages.yml: a step between ./verify.sh --site _site and the upload"
+  seeded_case "the upload run whatever the check said" ci inject_ci_pages_upload_always \
+    "pages.yml: a step from the check on carries .if:. .actions/upload-pages-artifact"
+  seeded_case "the trigger on any branch" ci inject_ci_pages_trigger_any_branch \
+    "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+  seeded_case "the checkout not the run's sha" ci inject_ci_pages_checkout_not_the_run \
+    "pages.yml: the site is not checked against the sha that run built"
+  seeded_case "the condition with text outside its braces" ci inject_ci_pages_condition_outside_its_braces \
+    "pages.yml: the deploy's condition has text outside its"
+  seeded_case "a check re-measured past its job's budget" ci inject_ci_check_seconds_over_budget \
+    "pkg-repo\\.yml: its checks' measured seconds per job are [0-9]+ s, past the 300 s budget \\(.*hygiene 341\\.2 s"
+  seeded_case "a check with no measured seconds"       ci inject_ci_check_seconds_unmeasured \
+    '`hygiene` has no measured seconds'
+  seeded_case "an injection no shard applies"          ci inject_ci_injection_shard_drops_one \
+    '`injections`.s 2 shards run none of 1 member\(s\), so nothing runs them'
+  seeded_case "a results directory no shard re-derives" ci inject_ci_recompute_shard_drops_one \
+    '`recompute`.s 3 shards run none of 3 member\(s\), so nothing runs them'
+  seeded_case "a sharded job never told its shard"     ci inject_ci_sharded_workflow_without_shard \
+    'pkg-injections\.yml: .injections. is sharded, and its workflow is not the sharded form'
+  seeded_case "a split into one shard"                 ci inject_ci_shard_count_one \
+    '.recompute..s shard count is .1., not a whole number of 2 or more'
+  seeded_case "a sharded matrix that is not the table" ci inject_ci_sharded_matrix_not_the_table \
+    'pkg-recompute\.yml: .recompute. is sharded, and its workflow is not the sharded form'
+  seeded_case "a check that runs one shard whatever"   ci inject_ci_check_runs_one_shard \
+    '.recompute..s 3 shards run none of [0-9]+ member\(s\), so nothing runs them'
+  seeded_case "a line separator YAML does not split on" ci inject_ci_sharded_workflow_line_separator \
+    "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
+  seeded_case "a listing with no line of its own"      ci inject_ci_listing_unmarked \
+    '.recompute.: verify\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED'
+  seeded_case "a shard that runs fewer than it lists"  ci inject_ci_recompute_runs_fewer_than_listed \
+    '.recompute..s 3 shards run none of 3 member\(s\), so nothing runs them'
+  seeded_case "an applier that applies fewer than it lists" ci inject_ci_injections_applies_fewer_than_listed \
+    '.injections..s 2 shards run none of 2 member\(s\), so nothing runs them'
+  seeded_case "a wrapper that runs shard 1 when not listing" ci inject_ci_recompute_wrapper_shard_one_when_running \
+    '.recompute..s shards run [0-9]+ member\(s\) more than once'
+  seeded_case "a package's call kept in a block scalar" ci inject_ci_caller_in_block_scalar \
+    'pkg-recompute\.yml exists but verify\.yml never calls it'
+  seeded_case "a recompute skip the dry census cannot see" ci inject_ci_recompute_skips_after_the_dry_branch \
+    '.recompute, run for real..s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
+  seeded_case "an applier skip the dry census cannot see" ci inject_ci_injections_skips_after_the_dry_branch \
+    '.injections, run for real..s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
+  seeded_case "a member reported as skipped"           ci inject_ci_recompute_reports_a_skip \
+    'recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to'
+  seeded_case "the gate's shard census allowed to fail" ci inject_ci_shard_census_switched_off \
+    'the gate job does not run check-shard-census\.py'
+  seeded_case "the gate's census off behind a comment" ci inject_ci_shard_census_off_behind_a_comment \
+    'the gate job does not run check-shard-census\.py'
+  seeded_case "the gate's shard census renamed away"   ci inject_ci_shard_census_step_removed \
+    'the gate job does not run check-shard-census\.py'
+  seeded_case "the site published on a trigger of its own" ci inject_ci_pages_publishes_on_its_own_trigger \
+    "pages.yml: publishes on a trigger of its own"
+  seeded_case "the ledger published but never uploaded" ci inject_ci_pages_ledger_not_uploaded \
+    "pages.yml: publishes site-ledger, which no workflow the gate runs uploads"
   seeded_case "pull requests filtered by branch"      ci       inject_ci_pr_branch_filter \
     'carries .branches: \[main\]. and is reached'
+  seeded_case "a package-mirror step left unbounded"  ci       inject_ci_apt_step_unbounded \
+    'runs apt-get with no .timeout-minutes.'
   seeded_case "the trunk's run cancelled by a merge"  ci       inject_ci_trunk_run_cancelled \
     'cancels a push run on the trunk'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
@@ -7183,6 +8893,8 @@ selftest() {
     'record/fixtures/invalid/fork-names-an-undeclared-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a canned substrate that need not say which acts" test inject_record_canned_acts_optional \
     'record/fixtures/invalid/canned-with-no-acts-digest\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a story's assertion broken in place"   exercise inject_exercise_story_assertion \
+    "expected '2\\.0' to be '2\\.1'"
 
   echo
   echo "--- results fixtures, checked directly ---"
@@ -7238,9 +8950,11 @@ selftest() {
   # written. `LANE_FAULT_LANE`/`LANE_FAULT_ID` are read by `inject_lane_fault`
   # in the subshell `seeded_case` runs it in.
   #
-  # The signature is the fault's OWN FIRST `catches` NAME, read out of the
-  # manifest -- never typed here -- so a case cannot go WRONG by drifting
-  # from prose nobody re-checks against a run. `check` is always `lanes`:
+  # The signatures are the fault's OWN `catches` NAMES, EVERY ONE (#239),
+  # read out of the manifest -- never typed here -- so a case cannot go
+  # WRONG by drifting from prose nobody re-checks against a run. It used to
+  # be the first name alone, and every catcher after it was declared and
+  # never checked: one that stopped catching was invisible to the gate. `check` is always `lanes`:
   # every lane fault is proven through the one check that runs every
   # registered lane's own command, whichever lane the fault belongs to.
   # The signature is used verbatim as an ERE against the fault's own log --
@@ -7276,8 +8990,12 @@ selftest() {
   # in: zero.
   sc_call="seeded_case"
   sc_inject="inject_lane_fault"
+  local lane_faults=0 lane_catchers=0
   while IFS=$'\t' read -r lane fault_id signature failure_class || [ -n "${lane:-}" ]; do
     [ -n "$lane" ] || continue
+    signature="$(catcher_signatures "$signature")"
+    lane_faults=$(( lane_faults + 1 ))
+    lane_catchers=$(( lane_catchers + $(grep -c '' <<< "$signature") ))
     LANE_FAULT_LANE="$lane" LANE_FAULT_ID="$fault_id"
     # `fault_id` is already lane-prefixed (every gate.toml declares it that
     # way), so `${lane}.` here duplicated it -- "lane: isolation.isolation.…"
@@ -7292,6 +9010,8 @@ selftest() {
     # arguments and does not name them.
     "$sc_call" "lane: ${fault_id}" lanes "$sc_inject" "$signature" "" "$fault_id"
   done < <(python3 "${ROOT}/scripts/apply-lane-faults.py" --list)
+  printf 'lanes: %d lane fault(s), %d catcher(s) enforced -- every one each fault declares\n' \
+    "$lane_faults" "$lane_catchers"
 
   prove_mechanics
 
@@ -7669,6 +9389,19 @@ PYEOF
       && DIET_BIN='${depless}/a-nested-trees-dep-info/diet-bin' \
       python3 '${ROOT}/scripts/resolve-diet.py'"
 
+  # --- a mechanics case that fails says why (#208) ---
+  #
+  # A case that failed once on the runner left only "BAD exit 1": expect_exit
+  # discarded the command's output, so the one log that saw the failure could
+  # not name it. Defined in a subshell so its BAD lands nowhere but here.
+  # ...and only then: a case that passes prints its OK line and nothing else.
+  expect_exit "a mechanics case that fails shows the command's own words" 0 \
+    bash -c "eval \"\$(sed -n '/^expect_exit() {/,/^}/p' '${ROOT}/verify.sh')\"; \
+      SELFTEST_BROKEN=(); out=\$(expect_exit probe 0 sh -c 'echo the-reason-it-failed >&2; exit 3'); \
+      grep -qF 'the-reason-it-failed' <<<\"\$out\" || exit 1; \
+      hit=\$(expect_exit quiet 0 sh -c 'echo noise-a-hit-must-not-print'); \
+      [ \"\$hit\" = 'OK    exit 0    quiet' ]"
+
   # --- the resolver's own suite cannot report a pass it did not measure ---
   #
   # 0 from `check-merge-gate.py` is the only thing standing between a lane
@@ -7872,6 +9605,21 @@ for k in range(1, SHARDS + 1):
     f"shard\t9\nshards\t{SHARDS}\ntotal\t{total}\n", encoding="utf-8"
 )
 EOF
+  # A DRY ROW IS NOT A RUN (#262, ruled on #268): the coverage check's local
+  # census records members without running them, and the gate's census on CI
+  # refuses such a row, so a job that set VERIFY_CENSUS_DRY is red.
+  expect_exit "a dry census row is refused where the shards really ran" 0 \
+    bash -c "cd '${ROOT}' && d=\$(mktemp -d) && trap 'rm -rf \"\${d:?}\"' EXIT \
+      && mkdir \"\$d/members-recompute-1\" && printf 'dry\tx\n' > \"\$d/members-recompute-1/members-ran.tsv\" \
+      && ! out=\$(python3 scripts/check-shard-census.py \"\$d\" 2>&1) && grep -q 'a DRY row' <<<\"\$out\""
+
+  # AN OUTCOME IS READ (#268's sixth review): a row whose outcome is not one
+  # its check runs a member to -- `skipped` -- is refused, not counted as run.
+  expect_exit "a member reported skipped is not counted as run" 0 \
+    bash -c "cd '${ROOT}' && d=\$(mktemp -d) && trap 'rm -rf \"\${d:?}\"' EXIT \
+      && mkdir \"\$d/members-recompute-1\" && printf 'ran\tx\tskipped\n' > \"\$d/members-recompute-1/members-ran.tsv\" \
+      && ! out=\$(python3 scripts/check-shard-census.py \"\$d\" 2>&1) && grep -q 'came back .skipped., which is not an outcome' <<<\"\$out\""
+
   expect_exit "shards that between them ran every fault are a whole" 0 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/whole"
   expect_exit "a shard that skipped a fault it was assigned" 1 \
@@ -7973,6 +9721,48 @@ EOF
   expect_exit "a command the shell cannot find is still a finding, not broken" 1 \
     python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/wrecked" --verify
 
+  # EVERY CATCHER A LANE FAULT DECLARES IS ENFORCED, NOT THE FIRST (#239). A
+  # synthetic lane whose command fails exactly one test, read the way the
+  # generated cases read it: the signatures `--list` emits, required in the
+  # log `--verify` writes. A fault declaring a second catcher that did not
+  # fail is not red for its own reason; with only the one that failed, it is.
+  local lane_log="${lanes_root}/catchers.log"
+  mkdir -p "${lanes_root}/catchers/tools/gate" "${lanes_root}/catchers/diet/alpha"
+  cp "${lanes_root}/present/tools/gate/lanes.toml" "${lanes_root}/catchers/tools/gate/lanes.toml"
+  printf 'x = 1\n' > "${lanes_root}/catchers/diet/alpha/src.rs"
+  write_catchers_lane() {
+    cat > "${lanes_root}/catchers/diet/alpha/gate.toml" <<EOF
+[package]
+name = "synthetic-alpha"
+check = "test"
+command = "printf 'test alpha::tests::first ... FAILED\\\\ntest alpha::tests::second ... ok\\\\n'; exit 101"
+faults = 1
+
+[[fault]]
+id = "alpha.synthetic"
+target = "diet/alpha/src.rs"
+anchor = "x = 1"
+becomes = "x = 2"
+expect_exit = 1
+catches = [$1]
+EOF
+  }
+  lane_fault_red() {
+    local listed
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/catchers" --verify \
+      > "$lane_log" 2>&1 && return 2
+    listed="$(python3 "${ROOT}/scripts/apply-lane-faults.py" --root "${lanes_root}/catchers" --list)" \
+      || return 2
+    log_carries_every "$(catcher_signatures "$(cut -f3 <<< "$listed")")" "$lane_log"
+  }
+  write_catchers_lane '"alpha::tests::first", "alpha::tests::second"'
+  expect_exit "every catcher a lane fault declares is listed" 0 \
+    bash -c '[ "$(python3 "$1" --root "$2" --list | cut -f3 | tr "\037" "\n" | grep -c "FAILED")" -eq 2 ]' \
+    _ "${ROOT}/scripts/apply-lane-faults.py" "${lanes_root}/catchers"
+  expect_exit "a lane fault whose second catcher did not fail is not red" 1 lane_fault_red
+  write_catchers_lane '"alpha::tests::first"'
+  expect_exit "and with only the catcher that failed, it is" 0 lane_fault_red
+
   # --- nothing is read from a half-merged file ---
   #
   # This gate has two inputs and both of them conflict routinely: `faults.toml`
@@ -8051,6 +9841,14 @@ EOF
     bash "${ROOT}/verify.sh" --only injections --scope inject_this_repository_does_not_define
   expect_exit "a shard outside 1..N is a misuse" 2 \
     bash "${ROOT}/verify.sh" --selftest --shard 9/8
+  # --site checks a site and nothing else, in either order, and names a
+  # directory that is not there (#32 I3).
+  expect_exit "--site beside --selftest is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --site "${ROOT}/pages" --selftest
+  expect_exit "--selftest beside --site is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --selftest --site "${ROOT}/pages"
+  expect_exit "--site naming no directory is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --site "${ROOT}/this-site-is-not-here"
 }
 
 # --------------------------------------------------------------------------
@@ -8059,6 +9857,7 @@ EOF
 
 selected=()
 mode="all"
+SITE_DIR=""
 shard_arg=""
 
 while [ "$#" -gt 0 ]; do
@@ -8072,7 +9871,9 @@ while [ "$#" -gt 0 ]; do
       selected+=("$2")
       shift 2
       ;;
-    --selftest) mode="selftest"; shift ;;
+    --selftest)
+      [ "$mode" != "site" ] || { echo "verify: --site checks a site and nothing else" >&2; exit "$EXIT_MISUSE"; }
+      mode="selftest"; shift ;;
     --derive-scopes)
       [ "$#" -ge 2 ] || { echo "verify: --derive-scopes needs a directory" >&2; exit "$EXIT_MISUSE"; }
       SELFTEST_DERIVE="$2"
@@ -8139,6 +9940,17 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
+    --site)
+      [ "$#" -ge 2 ] || { echo "verify: --site needs the site's directory" >&2; exit "$EXIT_MISUSE"; }
+      # Resolved here, against the directory the caller is in, as --census is.
+      case "$2" in
+        /*) SITE_DIR="$2" ;;
+        *)  SITE_DIR="$(pwd)/$2" ;;
+      esac
+      [ "$mode" != "selftest" ] || { echo "verify: --site checks a site and nothing else" >&2; exit "$EXIT_MISUSE"; }
+      mode="site"
+      shift 2
+      ;;
     --list) printf '%s\n' "${CHECKS[@]}"; exit 0 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "verify: unknown argument '$1'" >&2; usage >&2; exit "$EXIT_MISUSE" ;;
@@ -8146,6 +9958,23 @@ while [ "$#" -gt 0 ]; do
 done
 
 cd "$ROOT"
+
+# `--site DIR`: the published site, checked as pages.yml checks it before it
+# publishes (#32). Alone: a site check that also ran other checks, or ran
+# under a selftest's flags, would be a different question answered.
+# `--site` given beside `--selftest`, in either order, is refused rather than
+# letting whichever came last decide.
+if [ -n "$SITE_DIR" ]; then
+  if [ "$mode" != "site" ] || [ "${#selected[@]}" -ne 0 ] || [ -n "$VERIFY_SCOPE_GIVEN" ] ||
+     [ -n "$VERIFY_HISTORY_RANGE" ] || [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ] ||
+     [ -n "$SELFTEST_SCOPE_PLAN" ] || [ -n "$SELFTEST_DERIVE" ]; then
+    echo "verify: --site checks a site and nothing else" >&2
+    exit "$EXIT_MISUSE"
+  fi
+  [ -d "$SITE_DIR" ] || { echo "verify: --site ${SITE_DIR}: no such directory" >&2; exit "$EXIT_MISUSE"; }
+  check_site "$SITE_DIR"
+  exit $?
+fi
 
 # `--shard` and `--census` describe a selftest run. Silently ignoring them on
 # an ordinary run would let a workflow think it had sharded a gate that in
@@ -8164,7 +9993,7 @@ fi
 # be a misuse rather than silently no scope at all.
 if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
   if [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ]; then
-    echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+    echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
     exit "$EXIT_MISUSE"
   fi
   case "${selected[0]}" in
@@ -8176,18 +10005,18 @@ if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
       }
       VERIFY_TEST_SCOPE="$VERIFY_SCOPE"
       ;;
-    injections)
+    injections|bsd)
       case "$VERIFY_SCOPE" in
         inject_*[!a-z0-9_]*|inject_) ;;
         inject_*) VERIFY_INJECTION_SCOPE="$VERIFY_SCOPE" ;;
       esac
       [ -n "$VERIFY_INJECTION_SCOPE" ] || {
-        echo "verify: --scope '$VERIFY_SCOPE': the injections check takes one injection's name, inject_..." >&2
+        echo "verify: --scope '$VERIFY_SCOPE': the ${selected[0]} check takes one injection's name, inject_..." >&2
         exit "$EXIT_MISUSE"
       }
       ;;
     *)
-      echo "verify: --scope narrows one check, so it needs exactly --only test or --only injections" >&2
+      echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
       exit "$EXIT_MISUSE"
       ;;
   esac
@@ -8234,6 +10063,18 @@ for name in "${selected[@]}"; do
 done
 
 echo
+if [ -n "${VERIFY_LIST_MEMBERS:-}" ]; then
+  # A check that FAILED under the listing keeps its failure's exit (#268's
+  # third review): exit 3 says every selected check listed, and nothing else.
+  listed=0
+  for failure in "${FAILED[@]}"; do
+    case "$failure" in *"(listed its members, ran nothing)") listed=$(( listed + 1 )) ;; esac
+  done
+  if [ "$listed" -eq "${#FAILED[@]}" ]; then
+    printf 'verify: VERIFY_LIST_MEMBERS is set, so %d check(s) listed their members and none ran\n' "${#selected[@]}"
+    exit "$EXIT_LISTED"
+  fi
+fi
 if [ "${#FAILED[@]}" -gt 0 ]; then
   printf 'verify: %d of %d check(s) failed:\n' "${#FAILED[@]}" "${#selected[@]}"
   printf '  - %s\n' "${FAILED[@]}"

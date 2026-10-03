@@ -23,6 +23,11 @@ known_defects = [
 ]
 targets_checked = 142
 targets_matched = 142
+claim_issue = "114"
+rule_ratified = { comment = "5826194082", at = "2026-09-25T03:29:00Z", digest = "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2" }
+window_start = "2026-09-27T23:16:29Z"
+window_start_from = "window/run.start"
+absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }
 
 [regime]
 arm = "false-nomination-edit-rate-four-arms-six-rungs"

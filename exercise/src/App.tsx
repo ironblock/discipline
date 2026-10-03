@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { CannedTransport } from './drive/canned.ts';
 import { HttpTransport } from './drive/http.ts';
+import type { Web } from './drive/http.ts';
 import { ReplayTransport } from './drive/recorded.ts';
 import { SESSIONS } from './drive/sessions.ts';
 import type { SessionName } from './drive/sessions.ts';
@@ -12,11 +13,8 @@ import { useSession } from './session/useSession.ts';
 import { SessionView } from './ui/SessionView.tsx';
 import type { Surface } from './ui/surface.tsx';
 
-/**
- * The phases a person may move between. The predecessor's list, until the
- * regimen's phase graph reaches the surface with the seam (#117 R6).
- */
-export const PHASES = ['orient', 'spec', 'plan', 'build', 'review'] as const;
+export { PHASES } from './ui/phases.ts';
+import { PHASES } from './ui/phases.ts';
 
 const EXPECTS: Readonly<Record<string, string>> = {
   send: 'canned: the script expects an ask next (type anything; the model side is scripted)',
@@ -26,12 +24,23 @@ const EXPECTS: Readonly<Record<string, string>> = {
 /**
  * The harness: driving `diet`'s session over HTTP (`drive`, #117 I5), or on
  * the canned transport, or replaying a recorded session, which plays and
- * takes no commands.
+ * takes no commands. `web` stands in for the browser's own `EventSource` and
+ * `fetch` while driving, so a story can serve the page a log (#288).
  */
-export function App({ speed = 1, recording, drive = false }: { readonly speed?: number; readonly recording?: SessionName; readonly drive?: boolean }) {
+export function App({
+  speed = 1,
+  recording,
+  drive = false,
+  web,
+}: {
+  readonly speed?: number;
+  readonly recording?: SessionName;
+  readonly drive?: boolean;
+  readonly web?: Web;
+}) {
   const transport = useMemo(
-    () => (drive ? new HttpTransport() : recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
-    [speed, recording, drive],
+    () => (drive ? new HttpTransport('', web) : recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
+    [speed, recording, drive, web],
   );
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);
@@ -40,7 +49,8 @@ export function App({ speed = 1, recording, drive = false }: { readonly speed?: 
   // refused because work was in flight blocks the person from there.
   const gap = useIdleGap(session);
   const dispatch = async (command: Command) => {
-    const idleGap = gap.carry(command.kind === 'ask' ? 'ask' : command.kind === 'seam' ? 'seam' : 'cancel');
+    // A command's kind is the word for what it ends the gap with (the format's `GapEnd`): ask, seam, cancel, end.
+    const idleGap = gap.carry(command.kind);
     const ack = await transport.dispatch(command, idleGap ? { idle_gap: idleGap } : undefined);
     if (ack.ok) gap.admitted();
     else if (ack.refused === 'in-flight' || ack.refused === 'busy') gap.refused();

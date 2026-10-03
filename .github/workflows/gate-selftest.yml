@@ -139,6 +139,24 @@ jobs:
       - name: Resolve the pinned toolchain
         run: cargo --version
 
+      # A CARGO CACHE WHERE THE FAULTS BUILD (#306). Every sandbox builds into
+      # one target, VERIFY_SELFTEST_TARGET below, and this restores into that
+      # directory -- not the checkout's target/, which no fault builds in. Keyed
+      # on Cargo.lock, rust-toolchain.toml and rustc (the action's own key)
+      # and the runner image, which rides in `shared-key`: with `shared-key`
+      # set the action ignores `key` (#309's review). The workspace's crates
+      # rebuild in every box regardless, and the action drops them before
+      # saving. Shard 1 saves, and only it: the others would race to write
+      # the same key.
+      - name: Name the runner image for the cache key
+        run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+      - name: Restore the Cargo cache the sandboxes build into
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: ". -> target/selftest"
+          shared-key: selftest-${{ env.RUNNER_IMAGE }}
+          save-if: ${{ matrix.shard == 1 }}
+
       # The isolation lane's seeded faults need a sandbox to execute
       # against, same as `pkg-diet.yml`'s own copy of these three steps --
       # without `bwrap` the lane asserts a correct REFUSAL and passes, which
@@ -149,7 +167,15 @@ jobs:
       # it, not just whichever one draws an isolation fault -- sharding is a
       # division of labour, never a selection, per this file's own header,
       # so which shard that lands on is not something to predict.
+      # BOUNDED, because a hung package mirror is not a test result: on
+      # 2026-10-01 four selftest shards sat in `apt-get update` at the archive
+      # fetch until GitHub's six-hour job limit cancelled them (#222's run
+      # 36884660921). Measured over 1,050 runs of this step in the 60 latest
+      # successful verify runs (#232's review): median 11 s, p95 24 s, p99
+      # 54 s, max 100 s, the tail all inside that incident's window. Five
+      # minutes is three times the slowest seen: a step this slow has hung.
       - name: Install the sandbox the isolation lane confines with
+        timeout-minutes: 5
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
 
       # THE ONE RELAXED CONTROL, NAMED, per `pkg-diet.yml` and its ruling on
@@ -170,6 +196,24 @@ jobs:
       - name: Declare this a host where the sandbox is required
         run: echo "DIET_REQUIRE_SANDBOX=1" >> "$GITHUB_ENV"
 
+      # The web surface's seeded faults run `verify.sh --only exercise` in a
+      # sandbox, which installs its dependencies and typechecks: it needs Node,
+      # and runs the pnpm exercise/package.json pins through npx (#194). The
+      # host pnpm here serves only setup-node's pnpm cache. Every shard
+      # gets them, for the reason every shard gets bubblewrap above. These
+      # are steps around the selftest, so .github/gate-budget.tsv's
+      # `runner_overhead_seconds` is due a re-measure on the first run that
+      # has them.
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: exercise/package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: exercise/pnpm-lock.yaml
+
       - name: The scope plan this pull request's plan job derived
         if: github.event_name == 'pull_request'
         uses: actions/download-artifact@v4
@@ -178,6 +222,8 @@ jobs:
           path: ${{ runner.temp }}
 
       - name: ./verify.sh --selftest --shard ${{ matrix.shard }}
+        env:
+          VERIFY_SELFTEST_TARGET: ${{ github.workspace }}/target/selftest
         run: >-
           ./verify.sh --selftest
           --shard ${{ matrix.shard }}/${{ strategy.job-total }}

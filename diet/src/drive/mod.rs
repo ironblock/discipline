@@ -95,7 +95,10 @@
 //! with.
 
 pub mod canned;
+pub mod engine;
+pub mod projection;
 pub mod regimen;
+pub mod registry;
 pub mod script;
 pub mod serve;
 pub mod session;
@@ -2882,6 +2885,10 @@ mod tests {
                 // manifest; a catcher living beside it has to be findable
                 // here too.
                 include_str!("regimen.rs"),
+                // The registry's substrate identity (#157 Q2).
+                include_str!("engine.rs"),
+                include_str!("projection.rs"),
+                include_str!("registry.rs"),
                 // The interactive session and its HTTP surface (#117 R2).
                 include_str!("serve.rs"),
                 include_str!("session.rs"),

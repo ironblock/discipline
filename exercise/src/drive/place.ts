@@ -105,7 +105,7 @@ export class Placer {
         return lines;
       }
       case 'progress':
-        return [{ kind: 'progress', t: e.t, request: this.#ref(e.request), prompt: e.prompt, decoded: e.decoded }];
+        return [{ kind: 'progress', t: e.t, request: this.#ref(e.request), total: e.total, cache: e.cache, processed: e.processed, time_ms: e.time_ms }];
       case 'response': {
         const request = this.#ref(e.to_request);
         // Its own label names its request, as a v0 reference to an answer would.

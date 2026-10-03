@@ -64,8 +64,20 @@ jobs:
   pages:
     uses: ./.github/workflows/pkg-pages.yml
 
+  exercise:
+    uses: ./.github/workflows/pkg-exercise.yml
+
   repo:
     uses: ./.github/workflows/pkg-repo.yml
+
+  bsd:
+    uses: ./.github/workflows/pkg-bsd.yml
+
+  injections:
+    uses: ./.github/workflows/pkg-injections.yml
+
+  recompute:
+    uses: ./.github/workflows/pkg-recompute.yml
 
   selftest:
     uses: ./.github/workflows/gate-selftest.yml
@@ -78,7 +90,7 @@ jobs:
 
   gate:
     name: gate
-    needs: [diet, pages, repo, selftest]
+    needs: [diet, pages, exercise, repo, bsd, injections, recompute, selftest]
     if: always()
     runs-on: ubuntu-latest
     # `actions: read` on top of the workflow's `contents: read`, because this
@@ -138,3 +150,15 @@ jobs:
 
       - name: Every fault was run by exactly one shard
         run: python3 scripts/check-selftest-census.py "${{ runner.temp }}/census"
+
+      # The same question of the sharded packages (#262, ruled on #268): did
+      # their shards, between them, RUN every member of their check exactly
+      # once -- read from what each shard's run loop recorded, never from a
+      # listing, against the unsplit listing verify.sh gives here.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: members-*
+          path: ${{ runner.temp }}/members
+
+      - name: Every sharded member was run by exactly one shard
+        run: python3 scripts/check-shard-census.py "${{ runner.temp }}/members"

@@ -1,51 +1,123 @@
 name: pages
 
-# Publishes the static placeholder through the Pages *Actions* pipeline, which
-# is how this repository's Pages is configured -- there is no gh-pages branch
-# to push to, and pushing one would leave a branch GitHub ignores while the
-# deploy reported success.
+# Publishes the site the gate built and passed, through the Pages *Actions*
+# pipeline -- there is no gh-pages branch, and pushing one would leave a branch
+# GitHub ignores while the deploy reported success (#32).
+#
+# Downstream of the gate's verdict, never beside it: this runs when a `verify`
+# run on main has COMPLETED, and publishes only if that run SUCCEEDED, was a
+# PUSH, and ran this repository's own code. `workflow_run`'s branch filter
+# matches a branch NAME, so a pull request from a fork's `main` matches it
+# too: the event and repository guards are what keep a pull request's code --
+# a fork's above all, run here with `pages: write` -- from publishing. And it
+# publishes only the newest site the gate has passed: if a later `verify` run
+# on main has already succeeded, this one -- a re-run of an older push run, or
+# one that finished late -- must not deploy its older sha over that newer one.
+# A later run that is still running, or that failed, does not stop it: the
+# last good site is published, and a busy main is not a red deploy.
+#
+# It builds nothing: that very run's `exercise` job built the replay and its
+# `diet` job (the `results` check) the ledger, and uploaded them as artifacts
+# (`site-replay`, `site-ledger`); this downloads them by the run's id, lays
+# them beside the landing page, and checks the whole site with
+# `./verify.sh --site` -- the shell under the Pages table, each recording under
+# the table that admitted it, each recording against its admission -- before it
+# uploads anything. So it needs the repository at the sha that run checked,
+# bash and the runner's own python3, and no toolchain.
+# scripts/check-ci-coverage.py holds the guards and the order, mechanically.
 #
 # Static only. Nothing here reaches a network, a model, or a secret; the
 # id-token permission exists so deploy-pages can prove to Pages that this
-# workflow produced the artifact, not to reach anything.
+# workflow produced the artifact, and actions: read so it can fetch another
+# run's artifacts.
 
 on:
-  push:
+  workflow_run:
+    workflows: [verify]
+    types: [completed]
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
 
 jobs:
   deploy:
     name: publish
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_repository.full_name == github.repository
+    # One deploy at a time, and a newer waiting one replaces an older one --
+    # on the JOB, not the workflow (#244). Every completion of a verify run on
+    # main starts a run of this workflow, and a workflow-level group admits the
+    # runs whose job the `if:` above then skips: measured on a throwaway, such
+    # a run cancelled the deploy waiting behind a running one. With the group
+    # on the job, the one measured run whose job was skipped did not enter it,
+    # and the waiting deploy was not cancelled. One at a time is the group's
+    # documented meaning ("only a single job or workflow using the same
+    # concurrency group will run at a time"), and the default queue keeps one
+    # waiting deploy.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # The sha that run checked: the site is that sha's, and so are the
+      # admissions and tables it is checked against.
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
 
-      # Publishing must not be able to route around the gate. Without this the
-      # site could serve a surface `./verify.sh --only pages` rejects.
-      - name: Gate the surface
-        run: ./verify.sh --only pages
+      - name: Fetch the replay and the ledger that run built
+        uses: actions/download-artifact@v4
+        with:
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          pattern: site-*
+          path: _artifacts
 
-      - uses: actions/configure-pages@v5
+      # Only the newest site the gate passed is published. A re-run of an
+      # older push run completes too, and would otherwise put its older site
+      # over a newer one; so this refuses only if a LATER verify run on main
+      # (a higher run number; a re-run keeps its number) has already
+      # succeeded -- that run publishes instead. A later run still running, or
+      # failed, does not block this one (#32; superseding #215's tip-of-main
+      # test, which refused whenever main moved during a run).
+      - name: Publish only the newest run the gate passed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+        run: |
+          set -euo pipefail
+          newest="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/verify.yml/runs?branch=main&event=push&status=success&per_page=1" --jq '.workflow_runs[0].run_number')"
+          case "$newest" in
+            '' | *[!0-9]*) echo "::error::the newest successful verify run on main came back as '${newest}', not a run number; publishing nothing"; exit 1 ;;
+          esac
+          # A LOWER number than this run's is not refused: the list can lag a
+          # run that has only just completed, and no later run has passed.
+          [ "$newest" -le "$RUN_NUMBER" ] || { echo "::error::verify run ${newest} on main has passed since this one (${RUN_NUMBER}); it publishes, not this one"; exit 1; }
 
       - name: Assemble the site
         run: |
           set -euo pipefail
+          for part in replay ledger; do
+            [ -d "_artifacts/site-${part}" ] || { echo "::error::the run built no site-${part}; nothing is published without it"; exit 1; }
+          done
           rm -rf _site
           cp -r pages _site
-          ls -la _site
+          cp -r _artifacts/site-replay _site/replay
+          cp -r _artifacts/site-ledger _site/ledger
+          find _site -type f | sort
+
+      # The site checked as a whole, over exactly what is about to be
+      # uploaded: the landing page, the replay and the ledger together.
+      - name: Check the site
+        run: ./verify.sh --site _site
+
+      - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:

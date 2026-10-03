@@ -1,0 +1,37 @@
+# The candidate rung's admission record (#143): the three results planning named, cited by digest. The word is derived
+# from the results by substrates/admission/derive_admission.py (#183), which verify.sh's admission check runs. Each result's
+# manifest_sha256 is the sha256 of its file manifest, as the floor's admission.toml defines it. admission-recompute.sh re-derives all of it.
+substrate = "accel24-llamacpp-qwen38-27b-iq3s"
+fingerprint = "9d84a552fc940b7fc6909f9fea0f1fa420129d638b97af4fdbd38cfda3086af1"
+word = "admitted"
+word_derived_by = "substrates/admission/derive_admission.py (#183)"
+rule = "planning, #143, comment 5882266710: admitted requires supported on the parity fire, no cliff on the depth probe, every cell green; comment 5885436821: an unadjudicated cell holds the word; comment 5884256685: an n/a (reason) cell is declared with its reason; comment 5885752512: a canary reading baseline is a rung's first draw"
+known_defects = [
+  "The parity fire's own 95% interval, [-0.008232, 0.112803], straddles zero: the parity word supported rests on a point estimate whose interval reaches the sign the rule would call refuted (the one sentence the ruled rule writes beside the word, #143 comment 5921525110). The comparison row against the floor is inconclusive, negative (-0.051377), the directional prediction independent not met.",
+  "The canary cell reads baseline, the rung's first draw (Q5): the parity window's draws before and after the fire (36 of 36 each, PASS against that baseline) are recorded in the parity result (window/canary-*.log), not re-cut into this cell.",
+  "The checkpoint cell was measured on the candidate process that served the parity fire, with production stopped (the window's line, not a production line); its reference is CPU-only on this rung's binary, and its reference file is byte-identical to the floor's CPU reference of 2026-09-29 (the CPU path gives the same bits on both engines). A GPU-derived reference on this rung's binary was not taken; the floor's ruling for a CPU-derived tolerance (replace it in the next window that takes the card) applies here too.",
+  "A disclosed regime difference, pre-registered: the candidate's template renders reasoning effort xhigh by default and the floor's renders no level; the fire ran at the rung's rendered state.",
+  "Two of the checkpoint cell's ties are weaker than a direct hash: the CPU reference's weights are tied through the window's identity read (seatb_weights) and the box window script, which hashed and loaded the same file path, the script being not committed; and the measured candidate is tied to the process that served the fire only by the exe prefix in the window log -- the pid tie checked here links the launch line to the identity read, both written at launch, not the fire to the measurement.",
+  "The word, admitted, is the one substrates/admission/derive_admission.py derives from the three results (#183); verify.sh's admission check refuses the record if they differ.",
+]
+
+[results.cells]
+path = "substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94"
+recompute = "recompute.sh"
+manifest_sha256 = "199c9bd24ced5d116a0b8f8930bcc2647b6a6776c5db22378bbd41692bbbabb7"
+merged_in = "#178 (cells), #180 (effort and the refusal row), #185 (checkpoint_restore unadjudicated), this PR (checkpoint_restore measured)"
+words = { identity = "pass", kwarg_delivery = "pass", rendered_effort = "n/a (a capability fact of the template, recorded as data on the registry entry's effort fields, not a cell word: planning on #143, 2026-09-29)", canary = "baseline", output_invariance = "pass", headroom = "pass", checkpoint_restore = "pass" }
+
+[results.depth]
+path = "substrates/admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/depth"
+recompute = "recompute.sh"
+manifest_sha256 = "3a488da76d1923f0685743fdc9dc01fabaa3bbf963ddabfe8b4f43fa8a47f83c"
+merged_in = "#184"
+word = "pass"
+
+[results.parity]
+path = "results/2026-10-01-extraction-acceptance-parity-candidate"
+recompute = "recompute.sh"
+manifest_sha256 = "3d4ac379368f04cce743a74044fde4d16888d16102876c3a47003e419b09585e"
+merged_in = "this PR"
+word = "supported"

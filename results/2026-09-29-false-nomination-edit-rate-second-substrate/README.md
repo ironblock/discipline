@@ -19,6 +19,7 @@ known_defects = [
   "One model reply quotes two of the research program's ticket ids from the archived context; in rows.jsonl and in the same reply as shown to the judge (judge/batches/batch-11.json) each is replaced by [ticket id withheld]. The judge saw the unredacted text; no applier and not the comparison reads reply text, and recompute.sh re-derives both products from the scrubbed files. scrub.json records every scrubbed file's pre-scrub sha256 and substitution counts.",
   "The request's model field is the server's alias, qwen3.8-flash-next, where stage 2 sent Qwen3.6-27B; every other field of each request is the fork's archived parameters, as in stage 2.",
   "The start row's weights digest is the first of the model's two main-weight shards; both are listed in its sampler card.",
+  "Corrected (#201): record v1 as fired could hold one digest, and the start row named the first shard alone; the line above is that first text, kept. Since the record bump of #211 the start row spells the weights as a set -- both main shards in the registry's order and the MTP draft. No digest pins run.jsonl itself; the artefacts recompute.sh checks re-hash unchanged, and the word and every recomputed figure are unchanged.",
   "The research program's instrument ran from its checkout at 15f4874 rather than the declared 406f835; nomination_framing.py is byte-identical (4e6ce98f...), and between the two commits only canary.py and canary_pool.py changed, neither of which the instrument imports.",
   "beside.py is stage 2's with its input renamed from stage2.json to word.json and nothing else; beside.json is read by nothing.",
   "Monitors beside the run, gating nothing: /slots polled 5,996 times over the run, never with two slots busy, so no other client's work overlapped a fork; per-request attribution is not possible, the rows carrying no timestamps. nvidia-smi every 5 s: median SM clock 2,505 MHz, maximum 90 C, the throttle reasons mostly software thermal slowdown and the software power cap (window/smi.csv).",
@@ -28,6 +29,12 @@ known_defects = [
 ]
 targets_checked = 252
 targets_matched = 252
+claim_issue = "142"
+rule_ratified = { comment = "5826194082", at = "2026-09-25T03:29:00Z", digest = "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2" }
+rule_ratified_note = "the decision rule is stage 2's, byte for byte, ratified on #114; the comparison rule (comparison-rule.toml) was declared on #142 (5877139712), and no ratification comment of #142's own pre-registration exists"
+window_start = "2026-09-29T03:57:42Z"
+window_start_from = "window/run.start, the measured run's first fork; the headroom re-check that decided the excluded forks began earlier, 03:43:27Z (window/fire.log line 2)"
+absent = { supersedes = "nothing replaced: endpoint 1 beside stage 2's word, never in its place (5883192343)" }
 
 [regime]
 arm = "false-nomination-edit-rate-four-arms-six-rungs"

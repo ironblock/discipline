@@ -32,7 +32,7 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
   const output = node.output ?? '';
   // What it printed, taken apart once per output, not once per render: every block re-renders on every event
   // of a session, and splitting and encoding a long output each time was most of a replay's script (scripts/perf.mjs).
-  const printed = useMemo(() => (output === '' ? [] : output.split('\n')), [output]);
+  const printed = useMemo(() => (output === '' ? [] : output.replace(/\n$/, '').split('\n')), [output]);
   const said = useMemo(() => (output === '' ? 'no output' : `${count(lines(output))} ${lines(output) === 1 ? 'line' : 'lines'} · ${bytes(output)}`), [output]);
   const hidden = Math.max(0, script.length - PEEK) + Math.max(0, printed.length - PEEK);
   const apart = first && caller ? writtenApart(caller) : undefined;

@@ -22,6 +22,8 @@
 .ex-failure[data-level='bad'],
 .ex-stop[data-level='bad'] { color: var(--bad); }
 .ex-stop[data-level='warn'] { color: var(--warn); }
+/* A cancelled turn's ask and answer: gone from what the model reads next (#289). */
+.ex-context-out { color: var(--warn); }
 
 /* Where a turn stopped without finishing: a quiet rule across the trunk, the reason in its level's colour. */
 .ex-turnend {

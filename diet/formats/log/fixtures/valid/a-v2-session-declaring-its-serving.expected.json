@@ -1,0 +1,84 @@
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "opened": 1790000000000,
+      "seq": 0,
+      "serving": {
+        "concurrency": 1,
+        "dialect": "llama.cpp"
+      },
+      "t": 0,
+      "version": 2
+    },
+    {
+      "kind": "ask",
+      "seq": 1,
+      "t": 5,
+      "text": "say hello",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "head_sha256": "cb9529945d65852540453c264cd6e1fb4bc6b427f17e2ed698904ecf0a35cc4d",
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 3,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 3,
+      "seq": 4,
+      "t": 20,
+      "text": "Hello"
+    },
+    {
+      "capped": false,
+      "finish_reason": "stop",
+      "kind": "response",
+      "seq": 5,
+      "t": 25,
+      "text": "Hello",
+      "timings": {
+        "cache_n": 42,
+        "draft_n": 48,
+        "draft_n_accepted": 40,
+        "predicted_ms": 390.261,
+        "predicted_n": 55,
+        "prompt_ms": 196.41,
+        "prompt_n": 30
+      },
+      "to_request": 3
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 6,
+      "t": 30,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 7,
+      "t": 35,
+      "to": "awaiting"
+    }
+  ],
+  "torn": 0
+}

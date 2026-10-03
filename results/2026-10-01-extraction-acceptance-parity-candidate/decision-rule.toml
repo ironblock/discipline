@@ -1,0 +1,30 @@
+# The decision rule for the candidate rung's parity fire (#143): planning's
+# pre-registration (comment 5894139110) as ruled on its four gaps (comment
+# 5921525110), ratified by the maintainer. Written as a file after the fire,
+# transcribing that text; the operative form is apply.py with the candidate
+# config, both pinned below and merged (#191) before the first fork.
+
+[claim]
+effect = "deduped gate-accept rate, seat B minus seat A, pooled over the extraction forks both seats counted (paired), from integer tallies"
+band = [0.024877, 0.21789]
+band_derived_by = "the archived row's band, #115's band.json (e32eae7a...), by band.py a2427d81... over the archived row's committed tallies; every rung is compared to the archived row"
+
+[rule]
+supported = "the fire's effect lands within the band"
+refuted = "outside the band with the sign reversed (effect <= 0)"
+inconclusive = "outside the band with the sign preserved"
+disclosure = "a refuted or inconclusive word carries the archived baseline's unmeasured-parts disclosure, as on #115"
+applier_sha256 = "15ebefc2818872fcbfae27ee9fa5057c744f7177d55f9571dadbb98ae8102999"
+config_sha256 = "de499089de7f9c707486286450ef4ddadbb3c43e01e5fb743433032d4949c578"
+
+[readings]
+pooling = "paired, over the intersection of the forks both seats counted; the intersection's size and each seat's counted total are reported"
+counted_fork_floor = "25 of 31, on the intersection: below it the word is unadjudicated"
+seat_a_floor = "10 accepted fields, in the fire and in the band's own fire"
+harness_stops = "a 5xx, a repeated 4xx or a connection failure ends the replay with no run.end: that seat is unadjudicated"
+timeouts = "a timeout leaves a fork missing; the pinned harness's per-fork timeout is 2400 s, both arms' turn_timeout_s"
+refusals = "a content refusal is a counted fork"
+interview_misses = "reported; the fire is void only if a planned fork ran with a request other than the planned one (candidate-planned-requests.json); mis-routing leaves the seat unadjudicated"
+interval = "the fire's own paired interval, by band.py's method, reported beside the word as a number; its one sentence is that it straddles zero (the band-edge sentence withdrawn)"
+refuted_reachable = "the archived band does not straddle zero, so refuted is reachable"
+one_fire = "exactly one fire per seat, the first"

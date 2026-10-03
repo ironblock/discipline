@@ -246,50 +246,6 @@ pub(super) fn is_timeout(error: &io::Error) -> bool {
 
 impl Transport for Http {
     fn send(&self, body: &str, deadline: Instant) -> Result<HttpReply, TransportFailure> {
-        // How long the call actually took is what a timeout reports. The
-        // budget it was given is already in the regimen; the elapsed time is
-        // the measurement, and reporting the budget back as though it were
-        // one is a number that always agrees with itself.
-        let started = Instant::now();
-        let remaining = |now: Instant| deadline.checked_duration_since(now);
-
-        let Some(budget) = remaining(started) else {
-            return Err(TransportFailure::Timeout {
-                after: started.elapsed(),
-            });
-        };
-
-        let address = (self.endpoint.host.as_str(), self.endpoint.port)
-            .to_socket_addrs()
-            .map_err(|why| TransportFailure::Connect(why.to_string()))?
-            .next()
-            .ok_or_else(|| {
-                TransportFailure::Connect("the host resolves to no address".to_owned())
-            })?;
-
-        let mut stream = TcpStream::connect_timeout(&address, budget).map_err(|why| {
-            if is_timeout(&why) {
-                TransportFailure::Timeout {
-                    after: started.elapsed(),
-                }
-            } else {
-                TransportFailure::Connect(why.to_string())
-            }
-        })?;
-
-        // Both directions carry the deadline. A socket with a read timeout and
-        // no write timeout stalls forever against a server that never drains
-        // its receive buffer, which is a hang that looks like a slow model.
-        let Some(budget) = remaining(Instant::now()) else {
-            return Err(TransportFailure::Timeout {
-                after: started.elapsed(),
-            });
-        };
-        stream
-            .set_write_timeout(Some(budget))
-            .and_then(|()| stream.set_read_timeout(Some(budget)))
-            .map_err(|why| TransportFailure::Connect(why.to_string()))?;
-
         let request = format!(
             "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\n\
              Accept: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
@@ -299,60 +255,7 @@ impl Transport for Http {
             body.len(),
             body
         );
-        stream
-            .write_all(request.as_bytes())
-            .and_then(|()| stream.flush())
-            .map_err(|why| {
-                if is_timeout(&why) {
-                    TransportFailure::Timeout {
-                        after: started.elapsed(),
-                    }
-                } else {
-                    TransportFailure::Write(why.to_string())
-                }
-            })?;
-
-        let mut raw = Vec::new();
-        let mut buffer = [0_u8; 16 * 1024];
-        loop {
-            // Re-arm the read timeout on every pass. A single `set_read_timeout`
-            // bounds each read, not the call: a server dribbling one byte per
-            // interval would never trip it, and this loop would be the stall it
-            // exists to catch.
-            let Some(budget) = remaining(Instant::now()) else {
-                return Err(TransportFailure::Timeout {
-                    after: started.elapsed(),
-                });
-            };
-            stream
-                .set_read_timeout(Some(budget))
-                .map_err(|why| TransportFailure::Read(why.to_string()))?;
-
-            match stream.read(&mut buffer) {
-                Ok(0) => break,
-                Ok(count) => {
-                    raw.extend_from_slice(&buffer[..count]);
-                    if raw.len() > self.reply_cap {
-                        let cap = self.reply_cap;
-                        return Err(TransportFailure::Read(format!(
-                            "the reply passed {cap} bytes and was not finished"
-                        )));
-                    }
-                    if let Some(reply) = complete(&raw)? {
-                        return Ok(reply);
-                    }
-                }
-                Err(why) if why.kind() == io::ErrorKind::Interrupted => {}
-                Err(why) if is_timeout(&why) => {
-                    return Err(TransportFailure::Timeout {
-                        after: started.elapsed(),
-                    });
-                }
-                Err(why) => return Err(TransportFailure::Read(why.to_string())),
-            }
-        }
-
-        finish(&raw)
+        exchange(&self.endpoint, &request, self.reply_cap, deadline)
     }
 
     fn describes(&self) -> String {
@@ -361,6 +264,113 @@ impl Transport for Http {
             self.endpoint.host, self.endpoint.port, self.endpoint.path
         )
     }
+}
+
+/// Write `request` to `endpoint`'s host and port, and read one reply of at
+/// most `reply_cap` bytes, giving up at `deadline`. One connection, closed
+/// after.
+pub(super) fn exchange(
+    endpoint: &Endpoint,
+    request: &str,
+    reply_cap: usize,
+    deadline: Instant,
+) -> Result<HttpReply, TransportFailure> {
+    // How long the call actually took is what a timeout reports. The
+    // budget it was given is already in the regimen; the elapsed time is
+    // the measurement, and reporting the budget back as though it were
+    // one is a number that always agrees with itself.
+    let started = Instant::now();
+    let remaining = |now: Instant| deadline.checked_duration_since(now);
+
+    let Some(budget) = remaining(started) else {
+        return Err(TransportFailure::Timeout {
+            after: started.elapsed(),
+        });
+    };
+
+    let address = (endpoint.host.as_str(), endpoint.port)
+        .to_socket_addrs()
+        .map_err(|why| TransportFailure::Connect(why.to_string()))?
+        .next()
+        .ok_or_else(|| TransportFailure::Connect("the host resolves to no address".to_owned()))?;
+
+    let mut stream = TcpStream::connect_timeout(&address, budget).map_err(|why| {
+        if is_timeout(&why) {
+            TransportFailure::Timeout {
+                after: started.elapsed(),
+            }
+        } else {
+            TransportFailure::Connect(why.to_string())
+        }
+    })?;
+
+    // Both directions carry the deadline. A socket with a read timeout and
+    // no write timeout stalls forever against a server that never drains
+    // its receive buffer, which is a hang that looks like a slow model.
+    let Some(budget) = remaining(Instant::now()) else {
+        return Err(TransportFailure::Timeout {
+            after: started.elapsed(),
+        });
+    };
+    stream
+        .set_write_timeout(Some(budget))
+        .and_then(|()| stream.set_read_timeout(Some(budget)))
+        .map_err(|why| TransportFailure::Connect(why.to_string()))?;
+
+    stream
+        .write_all(request.as_bytes())
+        .and_then(|()| stream.flush())
+        .map_err(|why| {
+            if is_timeout(&why) {
+                TransportFailure::Timeout {
+                    after: started.elapsed(),
+                }
+            } else {
+                TransportFailure::Write(why.to_string())
+            }
+        })?;
+
+    let mut raw = Vec::new();
+    let mut buffer = [0_u8; 16 * 1024];
+    loop {
+        // Re-arm the read timeout on every pass. A single `set_read_timeout`
+        // bounds each read, not the call: a server dribbling one byte per
+        // interval would never trip it, and this loop would be the stall it
+        // exists to catch.
+        let Some(budget) = remaining(Instant::now()) else {
+            return Err(TransportFailure::Timeout {
+                after: started.elapsed(),
+            });
+        };
+        stream
+            .set_read_timeout(Some(budget))
+            .map_err(|why| TransportFailure::Read(why.to_string()))?;
+
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(count) => {
+                raw.extend_from_slice(&buffer[..count]);
+                if raw.len() > reply_cap {
+                    let cap = reply_cap;
+                    return Err(TransportFailure::Read(format!(
+                        "the reply passed {cap} bytes and was not finished"
+                    )));
+                }
+                if let Some(reply) = complete(&raw)? {
+                    return Ok(reply);
+                }
+            }
+            Err(why) if why.kind() == io::ErrorKind::Interrupted => {}
+            Err(why) if is_timeout(&why) => {
+                return Err(TransportFailure::Timeout {
+                    after: started.elapsed(),
+                });
+            }
+            Err(why) => return Err(TransportFailure::Read(why.to_string())),
+        }
+    }
+
+    finish(&raw)
 }
 
 /// Where the headers end, if they have.

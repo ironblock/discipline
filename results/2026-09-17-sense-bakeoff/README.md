@@ -7,6 +7,9 @@ pre_registration_sha256 = "82b03174df245e6111299b382f3e0519e61cc041c3febac5b973e
 controls_run = ["scoring-extremes", "shuffled-label-null"]
 known_defects = ["v1 declared the shuffled-label null under controls_run and the runner that wrote this directory did not execute it: report.json carries the null's parameters and no band. Ruled on #17 (5743190831, 2026-09-19): corrected by this superseding note, not by an edit of the numbers; the assembler's correction, to declare only the nulls it runs, is track one's and is not on main as of a7d2148."]
 targets_checked = 12
+claim_issue = "24"
+rule_ratified = { comment = "5654868940", at = "2026-09-13T17:27:11Z", digest = "dd65d56811c51968c5bddb18323e3956bb2a39b25730522136778c5f4c160632" }
+absent = { supersedes = "nothing replaced: the base run of #24; its adjudication sits beside it", window_start = "not recorded: run.jsonl, the cache metas and report.json carry no time" }
 
 [regime]
 arm = "sense-bakeoff-four-embedders"

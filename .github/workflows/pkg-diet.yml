@@ -26,6 +26,12 @@ jobs:
           cargo clippy --version
           cargo fmt --version
 
+      # NO CARGO CACHE HERE (#306): measured over two cold/warm pairs it did
+      # not move this job -- its checks step read 84 s cold, 77 and 64 s warm,
+      # then 66 s cold and 77 and 77 s warm on the image-keyed cache -- since
+      # what it builds is the workspace's own crates, which no cache holds.
+      # The issue's rule: a cache that moves nothing is reverted.
+
       # The isolation lane's six seeded escapes need a sandbox to execute
       # against. Without `bwrap` the lane asserts a correct REFUSAL and
       # passes -- the "0 of 6 executed" case -- so a confinement gate that
@@ -35,7 +41,15 @@ jobs:
       # since it is the isolation lane's own requirement. "Green means it was
       # there all along; red means a confinement gate that never confined,
       # which is the one outcome worth two lines of YAML to rule out."
+      # BOUNDED, because a hung package mirror is not a test result: on
+      # 2026-10-01 four selftest shards sat in `apt-get update` at the archive
+      # fetch until GitHub's six-hour job limit cancelled them (#222's run
+      # 36884660921). Measured over 1,050 runs of this step in the 60 latest
+      # successful verify runs (#232's review): median 11 s, p95 24 s, p99
+      # 54 s, max 100 s, the tail all inside that incident's window. Five
+      # minutes is three times the slowest seen: a step this slow has hung.
       - name: Install the sandbox the isolation lane confines with
+        timeout-minutes: 5
         run: sudo apt-get update && sudo apt-get install -y bubblewrap
 
       # Diagnostic, never fatal, and run BEFORE the sysctl below so the log
@@ -121,6 +135,16 @@ jobs:
           printf 'checks owned by diet: %s\n' "${checks[*]}"
           ./verify.sh "${args[@]}"
 
+      # The results ledger this run rendered from what the results check passed
+      # (#32): what pages.yml publishes if this run passes on a push to main,
+      # downloaded by run id.
+      - name: Keep the results ledger this run rendered
+        uses: actions/upload-artifact@v4
+        with:
+          name: site-ledger
+          path: _site/ledger
+          if-no-files-found: error
+
   # #78, rows 1 and 4 (ruled 2026-09-14): the wasm32 build of the read side,
   # proven against native in a wasm runtime, and the trap control proven
   # against a real failure rather than assumed. A sibling job, not a step
@@ -144,6 +168,18 @@ jobs:
           rustup target add wasm32-unknown-unknown
           cargo --version
           rustc --version
+
+      # A Cargo cache (#306), keyed on Cargo.lock, rust-toolchain.toml, rustc
+      # and the runner image (the image in `shared-key`, since the action
+      # ignores `key` beside it). Its gain is the wasm-bindgen CLI the next
+      # step installs: 76-78 s compiled, 0 s restored, the job 154-158 s cold
+      # and 45-58 s warm.
+      - name: Name the runner image for the cache key
+        run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+      - name: Restore the Cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: diet-wasm-${{ env.RUNNER_IMAGE }}
 
       # The version is the exact one `diet/wasm/Cargo.toml` pins the crate to --
       # `wasm-bindgen`'s bindgen format is an unstable schema shared between

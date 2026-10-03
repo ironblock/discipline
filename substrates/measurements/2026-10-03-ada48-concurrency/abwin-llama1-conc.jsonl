@@ -1,0 +1,6 @@
+{"tag": "llama1", "depth": 10000, "conc": 2, "rep": 0, "wall_s": 22.0, "per_req": [63.76, 12.72], "agg_wall": 23.3, "pn": [10376, 4], "pp": [584, 2], "a": 0.406, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 2, "rep": 1, "wall_s": 4.8, "per_req": [62.86, 60.54], "agg_wall": 107.7, "pn": [4, 4], "pp": [38, 23], "a": 0.374, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 2, "rep": 2, "wall_s": 4.8, "per_req": [62.07, 60.42], "agg_wall": 107.3, "pn": [4, 4], "pp": [23, 40], "a": 0.369, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 47.6, "per_req": [5.54, 5.54, 9.35, 16.86], "agg_wall": 21.5, "pn": [4, 4, 9851, 10081], "pp": [14, 19, 501, 315], "a": 0.0, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 16.4, "per_req": [17.05, 17.05, 17.05, 17.05], "agg_wall": 62.3, "pn": [4, 4, 4, 4], "pp": [12, 15, 21, 33], "a": 0.0, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 16.0, "per_req": [17.56, 17.56, 17.56, 17.56], "agg_wall": 64.0, "pn": [4, 4, 4, 4], "pp": [12, 15, 21, 34], "a": 0.0, "errors": []}

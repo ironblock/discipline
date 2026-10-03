@@ -1,0 +1,264 @@
+{
+  "physics": {
+    "probes": {
+      "A": [
+        {
+          "turn": 2,
+          "next_turn_reprefill_tokens": 332,
+          "surviving_cache_n": 109,
+          "drive_recorded_cache_n": 371,
+          "drive_recorded_prompt_n": 70,
+          "prompt_ms": 643.313
+        },
+        {
+          "turn": 3,
+          "next_turn_reprefill_tokens": 4523,
+          "surviving_cache_n": 0,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 4523,
+          "prompt_ms": 3845.575
+        },
+        {
+          "turn": 4,
+          "next_turn_reprefill_tokens": 286,
+          "surviving_cache_n": 5248,
+          "drive_recorded_cache_n": 5177,
+          "drive_recorded_prompt_n": 357,
+          "prompt_ms": 667.622
+        },
+        {
+          "turn": 5,
+          "next_turn_reprefill_tokens": 10061,
+          "surviving_cache_n": 0,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 10061,
+          "prompt_ms": 8427.034
+        }
+      ],
+      "B": [
+        {
+          "turn": 2,
+          "next_turn_reprefill_tokens": 332,
+          "surviving_cache_n": 109,
+          "drive_recorded_cache_n": 371,
+          "drive_recorded_prompt_n": 70,
+          "prompt_ms": 648.753
+        },
+        {
+          "turn": 3,
+          "next_turn_reprefill_tokens": 4523,
+          "surviving_cache_n": 0,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 4523,
+          "prompt_ms": 3767.15
+        },
+        {
+          "turn": 4,
+          "next_turn_reprefill_tokens": 286,
+          "surviving_cache_n": 5248,
+          "drive_recorded_cache_n": 5177,
+          "drive_recorded_prompt_n": 357,
+          "prompt_ms": 580.825
+        },
+        {
+          "turn": 5,
+          "next_turn_reprefill_tokens": 10061,
+          "surviving_cache_n": 0,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 10061,
+          "prompt_ms": 8327.779
+        }
+      ],
+      "C": [
+        {
+          "turn": 2,
+          "next_turn_reprefill_tokens": 332,
+          "surviving_cache_n": 109,
+          "drive_recorded_cache_n": 371,
+          "drive_recorded_prompt_n": 70,
+          "prompt_ms": 426.263
+        },
+        {
+          "turn": 3,
+          "next_turn_reprefill_tokens": 4523,
+          "surviving_cache_n": 0,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 4523,
+          "prompt_ms": 3869.757
+        },
+        {
+          "turn": 4,
+          "next_turn_reprefill_tokens": 357,
+          "surviving_cache_n": 5177,
+          "drive_recorded_cache_n": 5177,
+          "drive_recorded_prompt_n": 357,
+          "prompt_ms": 501.289
+        },
+        {
+          "turn": 5,
+          "next_turn_reprefill_tokens": 70,
+          "surviving_cache_n": 9991,
+          "drive_recorded_cache_n": 0,
+          "drive_recorded_prompt_n": 10061,
+          "prompt_ms": 203.755
+        }
+      ]
+    },
+    "warmth": {
+      "A": {
+        "warm_calls": 72,
+        "cache_n_delta_min": -114,
+        "cache_n_delta_max": 90
+      },
+      "B": {
+        "warm_calls": 72,
+        "cache_n_delta_min": -114,
+        "cache_n_delta_max": 90
+      },
+      "C": {
+        "warm_calls": 72,
+        "cache_n_delta_min": -114,
+        "cache_n_delta_max": 0
+      }
+    },
+    "forks": {
+      "A": {
+        "by_lane": {
+          "extraction": {
+            "n": 31,
+            "prompt_n": 44682,
+            "prompt_ms": 55216.081999999995,
+            "predicted_n": 44981,
+            "predicted_ms": 639451.635,
+            "cold": 8,
+            "no_timings": 0
+          },
+          "interview": {
+            "n": 80,
+            "prompt_n": 14207,
+            "prompt_ms": 44792.20099999999,
+            "predicted_n": 17363,
+            "predicted_ms": 273827.82699999993,
+            "cold": 3,
+            "no_timings": 0
+          }
+        },
+        "capture_round_wall_s": {
+          "2": 444.24,
+          "3": 7.55,
+          "4": 554.85,
+          "5": 21.49
+        }
+      },
+      "B": {
+        "by_lane": {
+          "extraction": {
+            "n": 31,
+            "prompt_n": 32711,
+            "prompt_ms": 140740.673,
+            "predicted_n": 49031,
+            "predicted_ms": 2329323.3239999996,
+            "cold": 0,
+            "no_timings": 0
+          },
+          "interview": {
+            "n": 67,
+            "prompt_n": 54116,
+            "prompt_ms": 79719.46599999999,
+            "predicted_n": 15277,
+            "predicted_ms": 236063.42699999994,
+            "cold": 13,
+            "no_timings": 0
+          }
+        },
+        "capture_round_wall_s": {
+          "2": 887.95,
+          "3": 5.49,
+          "4": 1896.16,
+          "5": 10.28
+        }
+      },
+      "C": {
+        "by_lane": {
+          "interview": {
+            "n": 56,
+            "prompt_n": 50193,
+            "prompt_ms": 54885.196,
+            "predicted_n": 11164,
+            "predicted_ms": 243745.245,
+            "cold": 15,
+            "no_timings": 0
+          }
+        },
+        "capture_round_wall_s": {
+          "2": 97.43,
+          "3": 2.1,
+          "4": 198.26,
+          "5": 7.34
+        }
+      }
+    }
+  },
+  "quality": {
+    "tallies": {
+      "A": {
+        "facts_offered": 1177,
+        "facts_accepted_raw": 52,
+        "facts_accepted_deduped": 52,
+        "gate_accept_rate_raw": 0.044,
+        "gate_accept_rate_deduped": 0.044
+      },
+      "B": {
+        "facts_offered": 2227,
+        "facts_accepted_raw": 256,
+        "facts_accepted_deduped": 181,
+        "gate_accept_rate_raw": 0.115,
+        "gate_accept_rate_deduped": 0.081
+      },
+      "C": {
+        "spans": 321
+      }
+    },
+    "degenerate_forks": {
+      "A": [],
+      "B": [
+        {
+          "fork_id": "e0077",
+          "turn": 2,
+          "step": 5,
+          "fact_lines": 13,
+          "accepted_raw": 42,
+          "excess": 29
+        },
+        {
+          "fork_id": "e0129",
+          "turn": 2,
+          "step": 12,
+          "fact_lines": 16,
+          "accepted_raw": 23,
+          "excess": 7
+        },
+        {
+          "fork_id": "e0377",
+          "turn": 4,
+          "step": 7,
+          "fact_lines": 28,
+          "accepted_raw": 67,
+          "excess": 39
+        }
+      ]
+    },
+    "min_overlap_chars": 4,
+    "overlap_containment": {
+      "A\u2229C": 18,
+      "B\u2229C": 70
+    },
+    "overlap_bases": {
+      "A\u2229B:A-items": 52,
+      "A\u2229C:A-items": 52,
+      "B\u2229C:B-items": 180
+    },
+    "sources_with_any_output": 31
+  },
+  "judge_panel": "NOT RUN \u2014 mechanism-fact axis needs the panel protocol (separate pass, per the design comment)"
+}

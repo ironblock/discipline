@@ -145,7 +145,7 @@ pub(crate) use vocabulary;
 /// generation that hits its cap is a typed outcome and is never graded as
 /// wrong or malformed; a reason NOT in this list is carried as the server
 /// spelled it and decided by nobody.
-const CAPPED_FINISH_REASONS: &[&str] = &["length", "max_tokens"];
+pub(crate) const CAPPED_FINISH_REASONS: &[&str] = &["length", "max_tokens"];
 
 vocabulary! {
     /// Why an attempt exists after the first one.
@@ -677,6 +677,12 @@ impl<T: Transport> Client<T> {
             id: id.to_owned(),
             cache: cache.clone(),
         });
+        if let Some(timings) = parsed.timings {
+            journal.push(Entry::Timings {
+                id: id.to_owned(),
+                timings,
+            });
+        }
 
         let echo = Echo {
             dialect: self.serving.dialect.name.clone(),
@@ -878,6 +884,32 @@ mod tests {
         let mut ids = IdSource::new("turn-1/main");
         let call = client.call(shape, "main", &mut ids);
         (call, stub.received())
+    }
+
+    #[test]
+    fn a_llama_cpp_reply_journals_its_timings() {
+        // C5, the drive endpoint's own unstreamed reply (`d9d2e92e…`).
+        let reply =
+            include_bytes!("../../client/fixtures/llama-server-e7051ef-unstreamed.http").to_vec();
+        let (call, _) = drive(
+            vec![Act::Raw(reply)],
+            &shaped(SamplerCard::empty(), 5_000, 20_000, 0),
+            Dialect::llama_cpp(),
+            Concurrency::Declared(1),
+        );
+        let timings: Vec<&super::stream::Timings> = call
+            .journal
+            .entries()
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Timings { timings, .. } => Some(timings),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(timings.len(), 1, "{:?}", call.journal.entries());
+        assert_eq!(timings[0].cache_n, Some(42));
+        assert_eq!(timings[0].prompt_n, Some(30));
+        assert!(timings[0].draft_n.is_some(), "C5 decodes speculatively");
     }
 
     /// The common case, so every other test's setup can be trusted.
@@ -1838,6 +1870,8 @@ mod tests {
             (EntryKind::Failed, Decision::Named),
             (EntryKind::Unreadable, Decision::Named),
             (EntryKind::Cache, Decision::Named),
+            // Alone, it has no response row to ride on (#92), so it is named.
+            (EntryKind::Timings, Decision::Named),
         ];
 
         assert_eq!(
@@ -1848,6 +1882,239 @@ mod tests {
         for (kind, decision) in expected {
             assert_eq!(decide(kind), decision, "{}", kind.tag());
         }
+    }
+
+    /// Put one unspellable item's ask to the record's own reader: a key must
+    /// be refused as an unknown field on its row, a kind as an unknown kind,
+    /// and the item's prose must name what its data asks for. Whether it was
+    /// probed: an exempt item is not.
+    fn the_record_refuses(item: &journal::Unspellable) -> bool {
+        use crate::formats::record::{ParseError, SchemaError};
+        use journal::Ask;
+
+        let start = include_str!("../../formats/record/fixtures/valid/minimal.jsonl");
+        let rows = |request: &str, response: &str| {
+            format!("{}\n{request}\n{response}\n", start.trim_end())
+        };
+        let request = r#"{"record":"request","id":"q1","lane":"main","substrate":"local","head_sha256":"85c4ae51186ca1ee36eee21c92ea5dbcece090e3064325d1fab9a70c28412eed"}"#;
+        let response = r#"{"record":"response","id":"a1","to_request":"q1","output_tokens":512}"#;
+        assert!(
+            crate::formats::record::parse(&rows(request, response)).is_ok(),
+            "the probe's own record must be valid, or every refusal below is about it"
+        );
+        let with_key = |line: &str, key: &str| line.replacen('{', &format!("{{\"{key}\":1,"), 1);
+
+        let named = match item.asks {
+            Ask::Key { row, key } => Some(format!("`{row}.{key}")),
+            Ask::Kind(kind) => Some(format!("`{kind}`")),
+            Ask::Exempt(_) => None,
+        };
+        if let Some(named) = named {
+            assert!(
+                item.what.contains(&named),
+                "`{}`'s prose does not name {named}`, which its data asks for: {}",
+                item.kind.tag(),
+                item.what
+            );
+        }
+        match item.asks {
+            Ask::Key { row, key } => {
+                let document = match row {
+                    _ if row == "start" => format!(
+                        "{}\n{request}\n{response}\n",
+                        with_key(start.trim_end(), key)
+                    ),
+                    _ if row == "request" => rows(&with_key(request, key), response),
+                    _ if row == "response" => rows(request, &with_key(response, key)),
+                    _ => panic!(
+                        "`{}` asks for a key on `{row}`, which the probe does not build",
+                        item.what
+                    ),
+                };
+                match crate::formats::record::parse(&document) {
+                    Err(ParseError::Schema(SchemaError::UnknownField { field, .. }))
+                        if field == key => {}
+                    other => panic!(
+                        "`lost()` names `{row}.{key}`, which the record now spells \
+                     (or refuses for another reason): {other:?}"
+                    ),
+                }
+                true
+            }
+            Ask::Kind(kind) => {
+                let document = format!("{}{{\"record\":\"{kind}\"}}\n", rows(request, response));
+                match crate::formats::record::parse(&document) {
+                    Err(ParseError::Schema(SchemaError::UnknownKind(tag))) if tag == kind => {}
+                    other => panic!(
+                        "`lost()` names the kind `{kind}`, which the record now names: {other:?}"
+                    ),
+                }
+                true
+            }
+            Ask::Exempt(_) => false,
+        }
+    }
+
+    /// EVERY UNSPELLABLE ITEM IS ONE THE RECORD REFUSES (#117 R3, D8). Each
+    /// item's `asks` is put to the record's OWN reader: a key it names must
+    /// be refused as an unknown field on that row, and a kind it names as an
+    /// unknown kind. The day the record learns to spell one, this fails --
+    /// "`lost()` names `response.timings`, which the record now spells" --
+    /// and the projection has to write it. Comparing `lost()` with a list of
+    /// its own (the test above) could never notice that.
+    ///
+    /// A nested key is probed at the top-level key the row would carry it
+    /// under (`start.serving`, not `serving.concurrency`): the outer refusal
+    /// covers the inner key, because a record that refuses `serving` cannot
+    /// hold anything inside it. An exempt item is listed with its reason, and
+    /// is not probed. Each item's prose must name the same change its data
+    /// asks for, so the two cannot drift apart.
+    #[test]
+    fn every_unspellable_item_is_one_the_record_refuses() {
+        use journal::Ask;
+
+        // One of every kind, then the per-row losses: a pinned sampler, a
+        // retry's reason, an unreported count and a capped answer.
+        let mut journal = journal::Journal::new();
+        for kind in EntryKind::ALL {
+            journal.push(sample(*kind));
+        }
+        let Entry::Issued { head, lane, .. } = sample(EntryKind::Issued) else {
+            panic!("`sample` builds an issued request");
+        };
+        journal.push(Entry::Issued {
+            id: "r/2".to_owned(),
+            lane,
+            retry_of: Some("r/1".to_owned()),
+            because: Some(RetryReason::Timeout),
+            sampler: card(),
+            head,
+        });
+        journal.push(Entry::Received {
+            to_request: "r/2".to_owned(),
+            output_tokens: None,
+            capped: true,
+        });
+        let unspellable = journal::project(&journal, SUBSTRATE).unspellable;
+
+        let mut probed = 0;
+        let mut exempt = Vec::new();
+        for item in &unspellable {
+            if the_record_refuses(item) {
+                probed += 1;
+            } else if let Ask::Exempt(why) = item.asks {
+                exempt.push((item.kind.tag(), why));
+            }
+        }
+        assert!(
+            !unspellable.iter().any(|item| item.asks
+                == Ask::Key {
+                    row: "response",
+                    key: "timings"
+                }),
+            "`response.timings` is spelled since #92, so nothing asks for it"
+        );
+        let exempt_kinds: Vec<&str> = exempt.iter().map(|(kind, _)| *kind).collect();
+        assert_eq!(
+            exempt_kinds,
+            [
+                EntryKind::Issued.tag(),
+                EntryKind::Received.tag(),
+                EntryKind::TimedOut.tag()
+            ],
+            "exempt, each with its reason: issued versus arrived, an unreported \
+             count, the timeout projected to nothing -- {exempt:?}"
+        );
+        assert_eq!(
+            probed, 12,
+            "every item that asks for a key or a kind is probed"
+        );
+    }
+
+    /// A journalled timings is written onto the response row of the request
+    /// it measured, key for key, with a duration's digits exactly as the
+    /// server wrote them (#92, R3's `DoD` 5). Timings with no row to ride on,
+    /// or a value the record cannot spell, are named, never dropped.
+    #[test]
+    fn a_journalled_timings_rides_on_its_responses_row_digit_for_digit() {
+        use super::stream::{Millis, Timings};
+        use crate::formats::record::{self, json::Decimal};
+
+        let count = |n| Some(record::Count::new(n).expect("in bounds"));
+        let measured = Timings {
+            prompt_n: Some(12),
+            cache_n: Some(3_000),
+            prompt_ms: Some(Millis::new("41.10").expect("a decimal")),
+            predicted_n: Some(40),
+            predicted_ms: Some(Millis::new("1500").expect("an integer")),
+            draft_n: None,
+            draft_n_accepted: Some(0),
+        };
+        let mut journal = journal::Journal::new();
+        for (id, timings) in [("r/1", measured.clone()), ("r/2", measured.clone())] {
+            journal.push(Entry::Timings {
+                id: id.to_owned(),
+                timings,
+            });
+        }
+        journal.push(Entry::Received {
+            to_request: "r/1".to_owned(),
+            output_tokens: count(40),
+            capped: false,
+        });
+        let projection = journal::project(&journal, SUBSTRATE);
+
+        let Some(Event::Response { timings, .. }) = projection.events.first() else {
+            panic!("the response row: {:?}", projection.events);
+        };
+        assert_eq!(
+            timings.as_ref(),
+            Some(&record::Timings {
+                prompt_n: count(12),
+                cache_n: count(3_000),
+                prompt_ms: Some(record::Millis::Exact(
+                    Decimal::new("41.10").expect("a decimal")
+                )),
+                predicted_n: count(40),
+                predicted_ms: Some(record::Millis::Whole(
+                    record::Count::new(1500).expect("in bounds")
+                )),
+                draft_n: None,
+                draft_n_accepted: count(0),
+            }),
+            "every key the server sent, and no key it did not"
+        );
+        assert!(
+            projection
+                .unspellable
+                .iter()
+                .any(|item| item.kind == EntryKind::Timings && item.what.contains("no response")),
+            "r/2's timings had no row, and that is named: {:?}",
+            projection.unspellable
+        );
+
+        let mut past = journal::Journal::new();
+        past.push(Entry::Timings {
+            id: "r/1".to_owned(),
+            timings: Timings {
+                prompt_n: Some(u64::MAX),
+                ..measured
+            },
+        });
+        past.push(Entry::Received {
+            to_request: "r/1".to_owned(),
+            output_tokens: count(40),
+            capped: false,
+        });
+        let projection = journal::project(&past, SUBSTRATE);
+        assert!(
+            projection
+                .unspellable
+                .iter()
+                .any(|item| item.kind == EntryKind::Timings && item.what.contains("past what")),
+            "a value past the record's bound is named, not silently dropped: {:?}",
+            projection.unspellable
+        );
     }
 
     /// One entry of each kind. Written out rather than derived, because a
@@ -1916,6 +2183,10 @@ mod tests {
                     cached_tokens: None,
                     cached_path: None,
                 },
+            },
+            EntryKind::Timings => Entry::Timings {
+                id,
+                timings: super::stream::Timings::default(),
             },
         }
     }
@@ -2009,6 +2280,7 @@ mod tests {
                 "outcome.failed",
                 "outcome.unreadable",
                 "cache.observed",
+                "timings.observed",
             ]
         );
     }

@@ -272,6 +272,9 @@ pub struct Dialect {
     /// would make the control pass by construction on any server whose field
     /// this client cannot find.
     pub reasoning: Option<String>,
+    /// Where the server reports what it measured of the request: llama.cpp's
+    /// `timings` object (#117 R3, D1), read with its own keys and digits.
+    pub timings: Option<String>,
 }
 
 impl Dialect {
@@ -292,6 +295,8 @@ impl Dialect {
             cached_tokens: Some("usage.prompt_tokens_details.cached_tokens".to_owned()),
             finish_reason: Some("choices.0.finish_reason".to_owned()),
             reasoning: Some("choices.0.message.reasoning_content".to_owned()),
+            // Not a key the published surface sends.
+            timings: None,
         }
     }
 
@@ -316,6 +321,8 @@ impl Dialect {
             cached_tokens: Some("timings.cache_n".to_owned()),
             finish_reason: Some("choices.0.finish_reason".to_owned()),
             reasoning: Some("choices.0.message.reasoning_content".to_owned()),
+            // C5 carries it, as the stream's last chunk does.
+            timings: Some("timings".to_owned()),
         }
     }
 }

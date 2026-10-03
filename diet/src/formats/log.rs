@@ -1,4 +1,4 @@
-//! The session event log, v0 (#117, ruled 2026-09-26).
+//! The session event log, v2 (#157, #30 I0), which reads v1 and v0.
 //!
 //! `diet/formats/log/grammar.pest` says what a log document is: one event
 //! per line, in the record's value space. This module is its one reader and
@@ -7,9 +7,33 @@
 //!
 //! Every line carries `seq` (its position, the primary key), `t`
 //! (milliseconds since the session opened) and `kind`. The vocabulary is
-//! CLOSED: an unknown kind is not a line of v0, and a later kind is a
-//! versioned bump, because a line nobody can conformance-test is a line two
+//! CLOSED: an unknown kind is not a line of any version, and a later kind is
+//! a versioned bump, because a line nobody can conformance-test is a line two
 //! readers can disagree about.
+//!
+//! # Versions
+//!
+//! v1 (#117 R3, `diet/drive/plans/r3-proposal.md` D7) adds a `response`'s
+//! `timings` and `reasoning`, the `progress` kind, and the `request.failed`
+//! reason `context_overflow`. The writer writes [`VERSION`]; the reader
+//! reads every version in [`READS`]. What arrived in v1 is scoped by the
+//! version `session.start` declares: a whole log that declares 0 and carries
+//! a v1 kind, key or tag is refused ([`parse`]). [`line`] reads a line alone
+//! -- a reader resuming mid-log never sees `session.start` -- so it reads the
+//! union, and the scoping is the whole-log reader's.
+//!
+//! v2 (#157 and #30's I0, applied from the #117 courier) adds a `response`'s
+//! `usage` (for a server that reports no `timings`; never both,
+//! [`at_most_one`]) and `capped`, a `session.start`'s `serving`, and a
+//! `request`'s `head_sha256`. A log that declares 0 or 1 and carries one is
+//! refused the same way.
+//!
+//! # A torn final line
+//!
+//! A writer killed mid-write leaves the start of an event with no line break
+//! after it. [`read`] sets that one torn FINAL line aside and counts it
+//! (`torn: 1`); the log's truth ends at the last complete event (#230). A
+//! torn line anywhere else is refused, as any line no version reads is.
 //!
 //! The draft is `diet/drive/plans/r2c-proposal.md`, D4, as ruled on #117:
 //! names from a ruling first, then the record, then the drive's own tags. A
@@ -34,8 +58,17 @@ use super::record::vocabulary;
 #[grammar = "../formats/number.pest"]
 struct LogParser;
 
-/// The version this module reads and writes, as `session.start` states it.
-pub const VERSION: i64 = 0;
+/// The version this module writes, as `session.start` states it.
+pub const VERSION: i64 = 2;
+
+/// Every version this module reads.
+pub const READS: &[i64] = &[0, 1, 2];
+
+/// How recent an input event must be, at the moment a turn settles, for the
+/// person to count as already present: `notice` is then zero (Q4 (a), ruled
+/// on #117, comment 5883557987). Declared here so the fold can name it and a
+/// later session can change it as data rather than as a reading.
+pub const PRESENCE_WINDOW_MS: u64 = 2000;
 
 vocabulary! {
     /// What each line is.
@@ -66,6 +99,8 @@ vocabulary! {
         /// A person's idle gap after a settled turn, as the surface measured
         /// it (Q4, ruled on #117 2026-09-27).
         IdleGap => "idle.gap",
+        /// The server's count of a call's prompt prefilled so far (v1).
+        Progress => "progress",
     }
 }
 
@@ -158,6 +193,10 @@ vocabulary! {
         Transport => "transport",
         /// The thread making it crashed.
         Crashed => "crashed",
+        /// The server refused it before any prefill, because the prompt is
+        /// longer than its context -- read from the refusal's typed field,
+        /// never its message (v1; R3.0's C3).
+        ContextOverflow => "context_overflow",
     }
 }
 
@@ -200,12 +239,18 @@ pub enum Piece {
 pub enum Event {
     /// The session opened.
     SessionStart {
+        /// The format version the log declares: one of [`READS`]. A writer
+        /// writes [`VERSION`].
+        version: i64,
         /// When: milliseconds since the Unix epoch.
         opened: u64,
         /// The model name requests are sent with -- a name, not an identity.
         model: String,
         /// The messages the trunk starts from.
         head: Vec<HeadMessage>,
+        /// What serves the session, as the client declares it (v2, #30
+        /// D7/N10): its dialect, and its concurrency when declared.
+        serving: Option<Serving>,
     },
     /// An ask was admitted.
     Ask {
@@ -227,6 +272,10 @@ pub enum Event {
         turn: u32,
         /// The lane it was made on.
         lane: Lane,
+        /// The sha256 of the head of the request as sent: the bytes its
+        /// body starts with, as the client hashes them (v2, ruled on #157,
+        /// so a live record's request names the prefix it sent).
+        head_sha256: Option<String>,
     },
     /// A command was refused.
     Refused {
@@ -257,6 +306,17 @@ pub enum Event {
         text: String,
         /// Why the server stopped, as it spelled it, if it said.
         finish_reason: Option<String>,
+        /// The whole reasoning, as its deltas streamed it, byte for byte;
+        /// absent when none arrived (v1, D4).
+        reasoning: Option<String>,
+        /// What the server measured of the call, as it reported it (v1, D1).
+        timings: Option<Timings>,
+        /// The server's token counts, as it reported them, for a dialect
+        /// whose server reports no `timings` (v2, ruled on #157).
+        usage: Option<Usage>,
+        /// Whether the answer stopped at its output cap (v2, #30 D3/N10);
+        /// absent when the writer did not say.
+        capped: Option<bool>,
     },
     /// A call was stopped.
     Cancelled {
@@ -285,13 +345,25 @@ pub enum Event {
         /// How it ended.
         reason: SettleReason,
     },
-    /// An idle gap, emitted by the surface once, when the gap ends. Integer
-    /// milliseconds on the surface's monotonic clock; durations only, never
-    /// content (Q4).
+    /// An idle gap, emitted by the surface once, at the command that is
+    /// finally admitted. Integer milliseconds on the surface's monotonic
+    /// clock; durations only, never content (Q4, as ruled on #117 in
+    /// comments 5883557987 and 5885438738).
+    ///
+    /// A refused command ends no gap: the person is still in it, about to
+    /// retry. The gap continues, the refusal's span is added to `blocked`,
+    /// and the gap is logged once, at the command finally admitted. The gap
+    /// measures the person, not the server. The surface's *expectation* of
+    /// admission decides only whether an attempt is made; it never decides
+    /// whether a gap ends.
     IdleGap {
         /// The `seq` of the `turn.settled` that opened the gap.
         opened_by: u64,
-        /// From the settling to the first sign the person is present.
+        /// From the settling to the first sign the person is present: an
+        /// input event, the settled block entering the viewport after the gap
+        /// opened, or a scroll by hand (wheel, touch, pointer, keys -- never
+        /// the page's own follow-to-bottom). Zero when an input event came
+        /// within [`PRESENCE_WINDOW_MS`] before the settling.
         notice: u64,
         /// From the end of `notice` to the first keystroke or seam click.
         read: u64,
@@ -300,12 +372,113 @@ pub enum Event {
         /// The time the page was hidden, taken out of the phase it
         /// interrupted.
         away: u64,
-        /// From the first send refused because work was in flight to the
-        /// accepted send.
+        /// From the first held or refused attempt to the accepted send. A
+        /// held attempt emits nothing itself.
         blocked: u64,
         /// What ended it.
         ended_by: GapEnd,
     },
+    /// The server's count of a call's prompt, prefilled so far: one line per
+    /// progress frame the server streams, before the call's first delta (v1,
+    /// D2; its keys are the frame's own, R3.0's C1).
+    Progress {
+        /// The `seq` of the `request` it counts.
+        request: u64,
+        /// Prompt tokens in all.
+        total: u64,
+        /// Prompt tokens reused from the slot's cache.
+        cache: u64,
+        /// Prompt tokens processed so far.
+        processed: u64,
+        /// Milliseconds of prefill so far, by the server's clock.
+        time_ms: u64,
+    },
+}
+
+/// A call's token counts as the server reported them in its `usage`
+/// object, keys as the server names them (v2). Carried only for a dialect
+/// whose server reports no `timings`: on llama.cpp they equal `timings`,
+/// measured on #157, and carrying both would let them disagree.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Usage {
+    /// Prompt tokens, cached or not.
+    pub prompt_tokens: u64,
+    /// Tokens generated.
+    pub completion_tokens: u64,
+    /// Prompt tokens reused from a cache, where the server reports them.
+    pub cached_tokens: Option<u64>,
+}
+
+/// What serves a session, as the client declares it (v2, #30 D7/N10).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Serving {
+    /// The client's dialect, by its name.
+    pub dialect: String,
+    /// How many requests the server serves at once, when declared. Absent
+    /// is undeclared, never one.
+    pub concurrency: Option<u64>,
+}
+
+/// A call's timings as the server reported them: llama.cpp's `timings`
+/// object, keys as the server names them (v1, D1). Each is absent when the
+/// server did not send it -- never zero -- and nothing here is computed from
+/// anything else.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Timings {
+    /// Prompt tokens prefilled.
+    pub prompt_n: Option<u64>,
+    /// Prompt tokens reused from the slot's cache.
+    pub cache_n: Option<u64>,
+    /// How long the prefill took.
+    pub prompt_ms: Option<Millis>,
+    /// Tokens generated.
+    pub predicted_n: Option<u64>,
+    /// How long generating them took.
+    pub predicted_ms: Option<Millis>,
+    /// Tokens a speculative decoder drafted: in-band evidence of that
+    /// regime (Q3, ruled). A missing key says nothing about speculation.
+    pub draft_n: Option<u64>,
+    /// How many of them were accepted.
+    pub draft_n_accepted: Option<u64>,
+}
+
+/// A duration in milliseconds as the digits the server wrote: a
+/// non-negative integer or exact decimal of the record's value space, never
+/// a float (v1; #162, disclosure 9 ruled).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Millis(String);
+
+impl Millis {
+    /// The number written as `text`, or nothing when it is not a
+    /// non-negative integer or exact decimal the record's grammar reads.
+    #[must_use]
+    pub fn new(text: &str) -> Option<Self> {
+        let number = json::line(&format!("{{\"n\":{text}}}")).ok()?;
+        match number.get("n")? {
+            Value::Integer(n) if *n >= 0 => Some(Self(text.to_owned())),
+            Value::Decimal(d) if !d.as_str().starts_with('-') && d.as_str() == text => {
+                Some(Self(text.to_owned()))
+            }
+            _ => None,
+        }
+    }
+
+    /// The digits, as written.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// As the record's value space holds it.
+    fn to_value(&self) -> Value {
+        match json::line(&format!("{{\"n\":{}}}", self.0))
+            .ok()
+            .and_then(|mut object| object.remove("n"))
+        {
+            Some(value) => value,
+            None => unreachable!("a Millis is only ever built from text the grammar reads"),
+        }
+    }
 }
 
 /// One line of a log.
@@ -346,19 +519,298 @@ impl std::error::Error for LogError {}
 /// # Errors
 ///
 /// When the text is not one object line of the record's value space, or the
-/// object is not a line of v0.
+/// object is not a line of any version this reader reads.
 pub fn line(text: &str) -> Result<Line, String> {
     let object = json::line(text).map_err(|err| err.to_string())?;
     from_object(&object)
 }
 
-/// Read a whole log, including the rules that span lines.
+/// A whole log as read: its complete events, and how many torn lines were
+/// set aside after them -- 0, or 1 when the final line was cut short.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Read {
+    /// Every complete event, in file order.
+    pub lines: Vec<Line>,
+    /// Torn final lines set aside: 0 or 1.
+    pub torn: usize,
+}
+
+/// How a scan of a value-space object stopped short of finishing it.
+enum Stop {
+    /// The text ran out with every byte so far a valid start.
+    Ended,
+    /// A byte no object of the value space has there.
+    Invalid,
+}
+
+/// A scan of the record's value space (`diet/formats/record/grammar.pest`)
+/// that reports WHERE it stopped, which a parse that fails cannot: pest names
+/// the start of the failing token, not whether the text merely ran out.
+struct Prefix<'a> {
+    text: &'a str,
+    at: usize,
+}
+
+impl Prefix<'_> {
+    fn peek(&self) -> Result<u8, Stop> {
+        self.text
+            .as_bytes()
+            .get(self.at)
+            .copied()
+            .ok_or(Stop::Ended)
+    }
+
+    fn eat(&mut self, byte: u8) -> Result<(), Stop> {
+        if self.peek()? == byte {
+            self.at += 1;
+            Ok(())
+        } else {
+            Err(Stop::Invalid)
+        }
+    }
+
+    fn space(&mut self) {
+        while matches!(self.text.as_bytes().get(self.at), Some(b' ' | b'\t')) {
+            self.at += 1;
+        }
+    }
+
+    fn object(&mut self) -> Result<(), Stop> {
+        self.eat(b'{')?;
+        self.space();
+        if self.peek()? == b'}' {
+            self.at += 1;
+            return Ok(());
+        }
+        loop {
+            self.string()?;
+            self.space();
+            self.eat(b':')?;
+            self.space();
+            self.value()?;
+            self.space();
+            match self.peek()? {
+                b',' => {
+                    self.at += 1;
+                    self.space();
+                }
+                b'}' => {
+                    self.at += 1;
+                    return Ok(());
+                }
+                _ => return Err(Stop::Invalid),
+            }
+        }
+    }
+
+    fn array(&mut self) -> Result<(), Stop> {
+        self.eat(b'[')?;
+        self.space();
+        if self.peek()? == b']' {
+            self.at += 1;
+            return Ok(());
+        }
+        loop {
+            self.value()?;
+            self.space();
+            match self.peek()? {
+                b',' => {
+                    self.at += 1;
+                    self.space();
+                }
+                b']' => {
+                    self.at += 1;
+                    return Ok(());
+                }
+                _ => return Err(Stop::Invalid),
+            }
+        }
+    }
+
+    fn value(&mut self) -> Result<(), Stop> {
+        match self.peek()? {
+            b'{' => self.object(),
+            b'[' => self.array(),
+            b'"' => self.string(),
+            b't' => self.word(b"true"),
+            b'f' => self.word(b"false"),
+            b'-' | b'0'..=b'9' => self.number(),
+            _ => Err(Stop::Invalid),
+        }
+    }
+
+    fn word(&mut self, word: &[u8]) -> Result<(), Stop> {
+        word.iter().try_for_each(|byte| self.eat(*byte))
+    }
+
+    fn string(&mut self) -> Result<(), Stop> {
+        self.eat(b'"')?;
+        loop {
+            match self.peek()? {
+                b'"' => {
+                    self.at += 1;
+                    return Ok(());
+                }
+                b'\\' => {
+                    self.at += 1;
+                    match self.peek()? {
+                        b'"' | b'\\' | b'/' | b'b' | b'f' | b'n' | b'r' | b't' => self.at += 1,
+                        b'u' => {
+                            self.at += 1;
+                            for _ in 0..4 {
+                                if !self.peek()?.is_ascii_hexdigit() {
+                                    return Err(Stop::Invalid);
+                                }
+                                self.at += 1;
+                            }
+                        }
+                        _ => return Err(Stop::Invalid),
+                    }
+                }
+                0x00..=0x1f => return Err(Stop::Invalid),
+                _ => self.at += 1,
+            }
+        }
+    }
+
+    /// A number is read whole, then judged: complete, by the grammar's own
+    /// `integer` and `decimal`; cut off by the end of the text, by whether
+    /// some number of the value space starts that way.
+    fn number(&mut self) -> Result<(), Stop> {
+        let start = self.at;
+        while matches!(
+            self.text.as_bytes().get(self.at),
+            Some(b'-' | b'0'..=b'9' | b'.')
+        ) {
+            self.at += 1;
+        }
+        let token = &self.text[start..self.at];
+        if self.at == self.text.len() {
+            return Err(if starts_a_number(token) {
+                Stop::Ended
+            } else {
+                Stop::Invalid
+            });
+        }
+        let whole = |rule| {
+            LogParser::parse(rule, token)
+                .ok()
+                .and_then(|mut pairs| pairs.next())
+                .is_some_and(|pair| pair.as_span().end() == token.len())
+        };
+        if whole(Rule::integer) || whole(Rule::decimal) {
+            Ok(())
+        } else {
+            Err(Stop::Invalid)
+        }
+    }
+}
+
+/// Whether some number of the value space starts with `token`: a sign, then
+/// `0` or a nonzero digit and digits, then a point and digits.
+fn starts_a_number(token: &str) -> bool {
+    let unsigned = token.strip_prefix('-').unwrap_or(token);
+    let (whole, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    let whole_ok = whole.is_empty() && !unsigned.contains('.')
+        || whole == "0"
+        || (whole.starts_with(|c: char| c.is_ascii_digit() && c != '0')
+            && whole.bytes().all(|b| b.is_ascii_digit()));
+    whole_ok && fraction.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Whether `text` is a STRICT PREFIX of an object the record's GRAMMAR
+/// accepts: every byte a valid continuation, and the text ending before the
+/// object does. Syntax only: a prefix the grammar could finish but the value
+/// reader would then refuse (a duplicate key, a lone surrogate, nesting past
+/// the depth limit) is still torn here, and none is what a writer of valid
+/// events leaves. That is what a writer killed mid-write leaves, and nothing
+/// else is: a complete object, an object with anything after it, and a byte
+/// no object has there are not torn writes.
+fn is_a_torn_write(text: &str) -> bool {
+    text.starts_with('{') && matches!(Prefix { text, at: 0 }.object(), Err(Stop::Ended))
+}
+
+/// A log's text from its bytes. A writer killed mid-write can cut a
+/// character as well as an event, so bytes that end inside a UTF-8 sequence
+/// are read up to the cut -- but only when what is left of the final line is
+/// a torn write ([`is_a_torn_write`]) that the cut character itself
+/// continues -- that is, the cut is inside a string or a key; any other
+/// invalid UTF-8 is refused as it is in every format.
 ///
 /// # Errors
 ///
-/// [`LogError`] naming the first line that is not v0, or the first rule a
-/// line breaks.
+/// When the bytes are not UTF-8 and are not a log cut inside a character.
+pub fn decode(bytes: &[u8]) -> Result<&str, std::str::Utf8Error> {
+    let err = match std::str::from_utf8(bytes) {
+        Ok(text) => return Ok(text),
+        Err(err) => err,
+    };
+    if err.error_len().is_none()
+        && let Ok(text) = std::str::from_utf8(&bytes[..err.valid_up_to()])
+        // The cut character itself must continue the tail: a non-ASCII byte
+        // stands only inside a string, so the tail with a whole character
+        // where the cut one was must still be a torn write. Without this, a
+        // partial byte after a number, a brace or a closing quote read as a
+        // kill (#259's second review).
+        && is_a_torn_write(&format!(
+            "{}\u{e9}",
+            &text[text.rfind('\n').map_or(0, |at| at + 1)..]
+        ))
+    {
+        return Ok(text);
+    }
+    Err(err)
+}
+
+/// A TORN FINAL LINE (#230, amending ruling 4 for the final line only): the
+/// tail after the last line break, when it is a strict prefix of an object
+/// ([`is_a_torn_write`]). The file's truth ends at the last complete event
+/// before it. Any other final line is read and checked like every line --
+/// a complete event is an event, anything else is refused -- and a torn
+/// line anywhere but last is followed by a line break and is refused where
+/// it is.
+fn set_aside_a_torn_tail(text: &str) -> (&str, usize) {
+    let tail = &text[text.rfind('\n').map_or(0, |at| at + 1)..];
+    if is_a_torn_write(tail) {
+        (&text[..text.len() - tail.len()], 1)
+    } else {
+        (text, 0)
+    }
+}
+
+/// Read a whole log, including the rules that span lines, setting aside a
+/// torn final line and counting it.
+///
+/// # Errors
+///
+/// [`LogError`] naming the first line no version reads, or the first rule a
+/// line breaks -- and when the only line is torn, since then no event is
+/// complete.
+pub fn read(text: &str) -> Result<Read, LogError> {
+    let (complete, torn) = set_aside_a_torn_tail(text);
+    if complete.is_empty() && torn == 1 {
+        return Err(LogError {
+            line: 1,
+            why: "the only line is torn: no event in the log is complete".to_owned(),
+        });
+    }
+    Ok(Read {
+        lines: parse_complete(complete)?,
+        torn,
+    })
+}
+
+/// Read a whole log, including the rules that span lines: [`read`]'s
+/// complete events, a torn final line set aside.
+///
+/// # Errors
+///
+/// As [`read`].
 pub fn parse(text: &str) -> Result<Vec<Line>, LogError> {
+    read(text).map(|read| read.lines)
+}
+
+fn parse_complete(text: &str) -> Result<Vec<Line>, LogError> {
     let document = LogParser::parse(Rule::log_document, text).map_err(|err| {
         let line = match err.line_col {
             pest::error::LineColLocation::Pos((line, _))
@@ -408,10 +860,21 @@ pub fn render(line: &Line) -> String {
 ///
 /// # Errors
 ///
-/// When `source` is not a v0 log.
+/// When `source` is not a log this reader reads.
 pub fn project(source: &str) -> Result<Value, String> {
-    parse(source)
-        .map(|lines| Value::Array(lines.iter().map(to_value).collect()))
+    read(source)
+        .map(|read| {
+            Value::Object(BTreeMap::from([
+                (
+                    "events".to_owned(),
+                    Value::Array(read.lines.iter().map(to_value).collect()),
+                ),
+                (
+                    "torn".to_owned(),
+                    Value::Integer(i64::try_from(read.torn).unwrap_or(i64::MAX)),
+                ),
+            ]))
+        })
         .map_err(|err| err.to_string())
 }
 
@@ -420,13 +883,11 @@ pub fn project(source: &str) -> Result<Value, String> {
 // ---------------------------------------------------------------------------
 
 /// The first line is `session.start`: it carries the version, so a reader
-/// knows what it is reading before it reads anything else.
-fn begins_with_the_session(lines: &[Line]) -> Result<(), LogError> {
-    if matches!(
-        lines.first().map(|line| &line.event),
-        Some(Event::SessionStart { .. })
-    ) {
-        Ok(())
+/// knows what it is reading before it reads anything else. The version it
+/// declares.
+fn begins_with_the_session(lines: &[Line]) -> Result<i64, LogError> {
+    if let Some(Event::SessionStart { version, .. }) = lines.first().map(|line| &line.event) {
+        Ok(*version)
     } else {
         Err(LogError {
             line: 1,
@@ -473,6 +934,40 @@ fn ends_once(event: &Event, request: u64, ended: &mut BTreeSet<u64>) -> Result<(
     ))
 }
 
+/// A line about a call cites an earlier `request`. A `delta` or a
+/// `progress` cites one still in flight; a `response`, `cancelled` or
+/// `request.failed` ends it, once.
+fn cites(event: &Event, requests: &BTreeSet<u64>, ended: &mut BTreeSet<u64>) -> Result<(), String> {
+    let request = match event {
+        Event::Delta { request, .. }
+        | Event::Progress { request, .. }
+        | Event::Cancelled { request, .. }
+        | Event::RequestFailed { request, .. } => *request,
+        Event::Response { to_request, .. } => *to_request,
+        _ => return Ok(()),
+    };
+    if !requests.contains(&request) {
+        return Err(format!("seq {request} is not an earlier `request`"));
+    }
+    match event {
+        Event::Delta { .. } | Event::Progress { .. } => {
+            if ended.contains(&request) {
+                let kind = if matches!(event, Event::Delta { .. }) {
+                    Kind::Delta
+                } else {
+                    Kind::Progress
+                };
+                return Err(format!(
+                    "a `{}` for request {request}, which has already ended",
+                    kind.tag()
+                ));
+            }
+            Ok(())
+        }
+        _ => ends_once(event, request, ended),
+    }
+}
+
 /// `seq` counts from 0 without a gap, and `t` never goes back.
 fn in_order(line: &Line, index: usize, last_t: u64) -> Result<(), String> {
     if line.seq != index as u64 {
@@ -487,13 +982,55 @@ fn in_order(line: &Line, index: usize, last_t: u64) -> Result<(), String> {
     Ok(())
 }
 
+/// What in `line` arrived after the version the log declares, if anything:
+/// its kind, a key it carries, or a tag it holds -- each read off
+/// [`introduced`], [`schema`]'s `since` and [`tag_introduced`], the one
+/// declaration of what arrived when.
+fn beyond(line: &Line, declared: i64) -> Option<String> {
+    let Value::Object(object) = to_value(line) else {
+        return None;
+    };
+    let kind = match object.get("kind") {
+        Some(Value::String(tag)) => Kind::from_tag(tag)?,
+        _ => return None,
+    };
+    let arrived = |since: i64, what: String| {
+        (since > declared).then(|| {
+            format!("{what}, which arrived in v{since}, and this log declares v{declared}")
+        })
+    };
+    if let Some(why) = arrived(introduced(kind), format!("a `{}` line", kind.tag())) {
+        return Some(why);
+    }
+    for field in schema(kind) {
+        let Some(value) = object.get(field.key) else {
+            continue;
+        };
+        if let Some(why) = arrived(
+            field.since,
+            format!("`{}` carries `{}`", kind.tag(), field.key),
+        ) {
+            return Some(why);
+        }
+        if let (Holds::Tag(tags), Value::String(tag)) = (field.holds, value)
+            && let Some(why) = arrived(
+                tag_introduced(tags, tag),
+                format!("`{}`'s `{}` is `{tag}`", kind.tag(), field.key),
+            )
+        {
+            return Some(why);
+        }
+    }
+    None
+}
+
 /// Every rule that no single line can break alone.
 fn check(lines: &[Line]) -> Result<(), LogError> {
     let at = |index: usize, why: String| LogError {
         line: index + 1,
         why,
     };
-    begins_with_the_session(lines)?;
+    let declared = begins_with_the_session(lines)?;
     let mut state = State::Awaiting;
     let mut turns = 0_u32;
     let mut settled = BTreeSet::new();
@@ -505,6 +1042,9 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
     let mut last_t = 0_u64;
     for (index, line) in lines.iter().enumerate() {
         in_order(line, index, last_t).map_err(|why| at(index, why))?;
+        if let Some(why) = beyond(line, declared) {
+            return Err(at(index, why));
+        }
         last_t = line.t;
         match &line.event {
             Event::SessionStart { .. } if index > 0 => {
@@ -555,33 +1095,12 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 gap_once(*opened_by, &settlings, latest_settling, &mut gapped)
                     .map_err(|why| at(index, why))?;
             }
-            Event::Delta { request, .. }
-            | Event::Response {
-                to_request: request,
-                ..
-            }
-            | Event::Cancelled { request, .. }
-            | Event::RequestFailed { request, .. }
-                if !requests.contains(request) =>
-            {
-                return Err(at(
-                    index,
-                    format!("seq {request} is not an earlier `request`"),
-                ));
-            }
-            Event::Delta { request, .. } if ended.contains(request) => {
-                return Err(at(
-                    index,
-                    format!("a `delta` for request {request}, which has already ended"),
-                ));
-            }
-            Event::Response {
-                to_request: request,
-                ..
-            }
-            | Event::Cancelled { request, .. }
-            | Event::RequestFailed { request, .. } => {
-                ends_once(&line.event, *request, &mut ended).map_err(|why| at(index, why))?;
+            event @ (Event::Delta { .. }
+            | Event::Progress { .. }
+            | Event::Response { .. }
+            | Event::Cancelled { .. }
+            | Event::RequestFailed { .. }) => {
+                cites(event, &requests, &mut ended).map_err(|why| at(index, why))?;
             }
             _ => {}
         }
@@ -597,6 +1116,9 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
 const COMMON: &[&str] = &["seq", "t", "kind"];
 
 /// A line from its object: every key it must have, none it may not.
+///
+/// One arm per kind, the mirror of [`to_value`]'s.
+#[allow(clippy::too_many_lines)]
 fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
     let fields = Fields(object);
     let kind_tag = fields.string("kind")?;
@@ -613,15 +1135,20 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
     let event = match kind {
         Kind::SessionStart => {
             let version = fields.integer("version")?;
-            if version != VERSION {
+            if !READS.contains(&version) {
                 return Err(format!(
-                    "version {version}, where this reader reads {VERSION}"
+                    "version {version}, where this reader reads {READS:?}"
                 ));
             }
             Event::SessionStart {
+                version,
                 opened: fields.count("opened")?,
                 model: fields.string("model")?,
                 head: fields.head("head")?,
+                serving: match object.get("serving") {
+                    None => None,
+                    Some(_) => Some(fields.serving("serving")?),
+                },
             }
         }
         Kind::Ask => Event::Ask {
@@ -635,6 +1162,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
         Kind::Request => Event::Request {
             turn: fields.turn("turn")?,
             lane: fields.tag("lane", Lane::from_tag)?,
+            head_sha256: fields.optional_digest("head_sha256")?,
         },
         Kind::Refused => Event::Refused {
             command: fields.tag("command", Command::from_tag)?,
@@ -661,6 +1189,21 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             to_request: fields.count("to_request")?,
             text: fields.string("text")?,
             finish_reason: fields.optional_string("finish_reason")?,
+            reasoning: fields.optional_string("reasoning")?,
+            timings: match object.get("timings") {
+                None => None,
+                Some(_) => Some(fields.timings("timings")?),
+            },
+            usage: match (object.get("usage"), object.get("timings")) {
+                (None, _) => None,
+                (Some(_), None) => Some(fields.usage("usage")?),
+                (Some(_), Some(_)) => {
+                    return Err("a response carries both `timings` and `usage`: `usage` is \
+                                carried only for a server that reports no timings (#157)"
+                        .to_owned());
+                }
+            },
+            capped: fields.optional_flag("capped")?,
         },
         Kind::Cancelled => Event::Cancelled {
             request: fields.count("request")?,
@@ -691,6 +1234,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             away: fields.count("away")?,
             blocked: fields.count("blocked")?,
             ended_by: fields.tag("ended_by", GapEnd::from_tag)?,
+        },
+        Kind::Progress => Event::Progress {
+            request: fields.count("request")?,
+            total: fields.count("total")?,
+            cache: fields.count("cache")?,
+            processed: fields.count("processed")?,
+            time_ms: fields.count("time_ms")?,
         },
     };
     Ok(Line {
@@ -803,6 +1353,22 @@ pub enum Holds {
     Head,
     /// One tag of a closed vocabulary.
     Tag(Tags),
+    /// A non-negative number of milliseconds: an integer, or an exact
+    /// decimal as written ([`Millis`]).
+    Millis,
+    /// A `response`'s [`Timings`]: an object of the keys [`TIMINGS`]
+    /// declares, every one optional.
+    Timings,
+    /// A JSON boolean (v2).
+    Flag,
+    /// A sha256: 64 lowercase hex digits (v2).
+    Digest,
+    /// A `response`'s [`Usage`]: an object of the keys [`USAGE`] declares,
+    /// its two counts required and its cache count optional (v2).
+    Usage,
+    /// A `session.start`'s [`Serving`]: an object of the keys [`SERVING`]
+    /// declares (v2).
+    Serving,
 }
 
 /// One key a kind carries.
@@ -814,6 +1380,8 @@ pub struct Field {
     pub holds: Holds,
     /// Whether every line of the kind carries it.
     pub required: bool,
+    /// The version it arrived in.
+    pub since: i64,
 }
 
 const fn must(key: &'static str, holds: Holds) -> Field {
@@ -821,6 +1389,7 @@ const fn must(key: &'static str, holds: Holds) -> Field {
         key,
         holds,
         required: true,
+        since: 0,
     }
 }
 
@@ -829,16 +1398,113 @@ const fn may(key: &'static str, holds: Holds) -> Field {
         key,
         holds,
         required: false,
+        since: 0,
     }
 }
+
+/// An optional key that arrived in v1.
+const fn may_v1(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 1,
+    }
+}
+
+/// An optional key that arrived in v2.
+const fn may_v2(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 2,
+    }
+}
+
+/// A key that arrived in v2 and is required wherever its object is written.
+const fn must_v2(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 2,
+    }
+}
+
+/// The keys a `response`'s `usage` carries, as the server names them
+/// (`prompt_tokens_details.cached_tokens` flattened to `cached_tokens`).
+/// A server that sends `usage` sends both counts; only the cache count is
+/// optional. Arrived in v2.
+pub const USAGE: &[Field] = &[
+    must_v2("prompt_tokens", Holds::Count),
+    must_v2("completion_tokens", Holds::Count),
+    may_v2("cached_tokens", Holds::Count),
+];
+
+/// The keys a `session.start`'s `serving` carries: its dialect, always, and
+/// its concurrency when declared. Arrived in v2.
+pub const SERVING: &[Field] = &[
+    must_v2("dialect", Holds::Text),
+    may_v2("concurrency", Holds::Count),
+];
+
+/// Whether `text` is a sha256 as this format writes one.
+fn is_a_digest(text: &str) -> bool {
+    text.len() == 64
+        && text
+            .chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+}
+
+/// The keys of the object a key holds, for the holders that are objects.
+#[must_use]
+pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
+    match holds {
+        Holds::Timings => Some(TIMINGS),
+        Holds::Usage => Some(USAGE),
+        Holds::Serving => Some(SERVING),
+        _ => None,
+    }
+}
+
+/// The version a kind arrived in.
+#[must_use]
+pub fn introduced(kind: Kind) -> i64 {
+    match kind {
+        Kind::Progress => 1,
+        _ => 0,
+    }
+}
+
+/// The version a tag of `tags` arrived in.
+#[must_use]
+pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
+    let context_overflow =
+        tags == Tags::FailReason && FailReason::from_tag(tag) == Some(FailReason::ContextOverflow);
+    i64::from(context_overflow)
+}
+
+/// The keys a `response`'s `timings` may carry, as the server names them
+/// (D1, and Q3 for the draft pair). Every one is optional and arrived in v1.
+pub const TIMINGS: &[Field] = &[
+    may_v1("prompt_n", Holds::Count),
+    may_v1("cache_n", Holds::Count),
+    may_v1("prompt_ms", Holds::Millis),
+    may_v1("predicted_n", Holds::Count),
+    may_v1("predicted_ms", Holds::Millis),
+    may_v1("draft_n", Holds::Count),
+    may_v1("draft_n_accepted", Holds::Count),
+];
 
 /// Every key a kind carries beyond `seq`, `t` and `kind`, and what each
 /// holds. THE ONE DECLARATION: the reader's key check ([`keys`]), the
 /// TypeScript bindings ([`typescript`]) and the test that pins this table
 /// against what [`render`] actually writes all read it.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn schema(kind: Kind) -> &'static [Field] {
-    use Holds::{Count, Head, Tag, Text, Version};
+    use Holds::{Count, Head, Tag, Text, Timings, Version};
     match kind {
         Kind::SessionStart => {
             const F: &[Field] = &[
@@ -846,6 +1512,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("opened", Count),
                 must("model", Text),
                 must("head", Head),
+                may_v2("serving", Holds::Serving),
             ];
             F
         }
@@ -858,7 +1525,11 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             F
         }
         Kind::Request => {
-            const F: &[Field] = &[must("turn", Count), must("lane", Tag(Tags::Lane))];
+            const F: &[Field] = &[
+                must("turn", Count),
+                must("lane", Tag(Tags::Lane)),
+                may_v2("head_sha256", Holds::Digest),
+            ];
             F
         }
         Kind::Refused => {
@@ -886,6 +1557,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("to_request", Count),
                 must("text", Text),
                 may("finish_reason", Text),
+                may_v1("reasoning", Text),
+                may_v1("timings", Timings),
+                may_v2("usage", Holds::Usage),
+                may_v2("capped", Holds::Flag),
             ];
             F
         }
@@ -919,6 +1594,16 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
+        Kind::Progress => {
+            const F: &[Field] = &[
+                must("request", Count),
+                must("total", Count),
+                must("cache", Count),
+                must("processed", Count),
+                must("time_ms", Count),
+            ];
+            F
+        }
     }
 }
 
@@ -927,6 +1612,18 @@ pub fn schema(kind: Kind) -> &'static [Field] {
 pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
     match kind {
         Kind::Delta => &["text", "reasoning"],
+        _ => &[],
+    }
+}
+
+/// Optional keys of which a line of `kind` carries at most one. A
+/// `response`'s `usage` is carried only for a server that reports no
+/// `timings` (#157): on llama.cpp the two are equal, and a line carrying
+/// both would let them disagree.
+#[must_use]
+pub fn at_most_one(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::Response => &["timings", "usage"],
         _ => &[],
     }
 }
@@ -941,9 +1638,17 @@ pub const BINDINGS: &str = "formats/log/log.ts";
 
 fn ts_holds(holds: Holds) -> String {
     match holds {
-        Holds::Count => "number".to_owned(),
-        Holds::Text => "string".to_owned(),
-        Holds::Version => VERSION.to_string(),
+        Holds::Count | Holds::Millis => "number".to_owned(),
+        Holds::Text | Holds::Digest => "string".to_owned(),
+        Holds::Version => READS
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(" | "),
+        Holds::Timings => "Timings".to_owned(),
+        Holds::Flag => "boolean".to_owned(),
+        Holds::Usage => "Usage".to_owned(),
+        Holds::Serving => "Serving".to_owned(),
         Holds::Head => "HeadMessage[]".to_owned(),
         Holds::Tag(tags) => tags.name().to_owned(),
     }
@@ -968,8 +1673,8 @@ fn ts_name(kind: Kind) -> String {
 ///
 /// # Panics
 ///
-/// If [`exactly_one`] names a key [`schema`] does not declare for the same
-/// kind -- a table defect, and one the schema's own test refuses first.
+/// If [`exactly_one`] or [`at_most_one`] names a key [`schema`] does not
+/// declare for the same kind -- a table defect, and one the schema's own test refuses first.
 #[must_use]
 pub fn typescript() -> String {
     use std::fmt::Write as _;
@@ -978,10 +1683,17 @@ pub fn typescript() -> String {
         "// GENERATED from diet/src/formats/log.rs -- do not edit by hand.\n\
          // Regenerate: cargo test -p discipline-diet --lib \
          formats::log::tests::write_the_bindings -- --ignored\n\
-         // A number here is an integer in the log; the reader refuses one past\n\
-         // i64, and a JavaScript number is exact only to 2^53.\n\n",
+         // A count here is an integer in the log; the reader refuses one past\n\
+         // i64, and a JavaScript number is exact only to 2^53. A `timings`\n\
+         // millisecond may carry a fraction, written as the server wrote it.\n\n",
     );
-    let _ = write!(out, "export const VERSION = {VERSION};\n\n");
+    let _ = writeln!(out, "export const VERSION = {VERSION};");
+    let reads: Vec<String> = READS.iter().map(ToString::to_string).collect();
+    let _ = writeln!(out, "export const READS = [{}] as const;", reads.join(", "));
+    let _ = write!(
+        out,
+        "export const PRESENCE_WINDOW_MS = {PRESENCE_WINDOW_MS};\n\n"
+    );
     out.push_str("export type Kind =\n");
     for kind in Kind::ALL {
         let _ = writeln!(out, "  | \"{}\"", kind.tag());
@@ -995,14 +1707,23 @@ pub fn typescript() -> String {
         out.push_str(";\n\n");
     }
     out.push_str("export interface HeadMessage {\n  role: Role;\n  content: string;\n}\n\n");
+    for (name, fields) in [("Timings", TIMINGS), ("Usage", USAGE), ("Serving", SERVING)] {
+        let _ = writeln!(out, "export interface {name} {{");
+        for field in fields {
+            let optional = if field.required { "" } else { "?" };
+            let _ = writeln!(out, "  {}{optional}: {};", field.key, ts_holds(field.holds));
+        }
+        out.push_str("}\n\n");
+    }
     for kind in Kind::ALL {
         let name = ts_name(*kind);
         let one = exactly_one(*kind);
+        let some = at_most_one(*kind);
         let _ = writeln!(out, "export type {name} = {{");
         out.push_str("  seq: number;\n  t: number;\n");
         let _ = writeln!(out, "  kind: \"{}\";", kind.tag());
         for field in schema(*kind) {
-            if one.contains(&field.key) {
+            if one.contains(&field.key) || some.contains(&field.key) {
                 continue;
             }
             let optional = if field.required { "" } else { "?" };
@@ -1022,6 +1743,25 @@ pub fn typescript() -> String {
                     .expect("`exactly_one` names only keys the schema declares");
                 let _ = write!(out, "{{ {key}: {}", ts_holds(holds));
                 for other in one.iter().filter(|o| *o != key) {
+                    let _ = write!(out, "; {other}?: never");
+                }
+                out.push_str(" }");
+            }
+            out.push(')');
+        }
+        if !some.is_empty() {
+            out.push_str(" & (");
+            for (index, key) in some.iter().enumerate() {
+                if index > 0 {
+                    out.push_str(" | ");
+                }
+                let holds = schema(*kind)
+                    .iter()
+                    .find(|f| f.key == *key)
+                    .map(|f| f.holds)
+                    .expect("`at_most_one` names only keys the schema declares");
+                let _ = write!(out, "{{ {key}?: {}", ts_holds(holds));
+                for other in some.iter().filter(|o| *o != key) {
                     let _ = write!(out, "; {other}?: never");
                 }
                 out.push_str(" }");
@@ -1052,11 +1792,13 @@ fn to_value(line: &Line) -> Value {
     put("t", count(line.t));
     let kind = match &line.event {
         Event::SessionStart {
+            version,
             opened,
             model,
             head,
+            serving,
         } => {
-            put("version", Value::Integer(VERSION));
+            put("version", Value::Integer(*version));
             put("opened", count(*opened));
             put("model", text(model));
             put(
@@ -1072,6 +1814,13 @@ fn to_value(line: &Line) -> Value {
                         .collect(),
                 ),
             );
+            if let Some(serving) = serving {
+                let mut object = BTreeMap::from([("dialect".to_owned(), text(&serving.dialect))]);
+                if let Some(concurrency) = serving.concurrency {
+                    object.insert("concurrency".to_owned(), count(concurrency));
+                }
+                put("serving", Value::Object(object));
+            }
             Kind::SessionStart
         }
         Event::Ask { turn, text: asked } => {
@@ -1084,9 +1833,16 @@ fn to_value(line: &Line) -> Value {
             put("to", text(to.tag()));
             Kind::Settlement
         }
-        Event::Request { turn, lane } => {
+        Event::Request {
+            turn,
+            lane,
+            head_sha256,
+        } => {
             put("turn", count(u64::from(*turn)));
             put("lane", text(lane.tag()));
+            if let Some(digest) = head_sha256 {
+                put("head_sha256", text(digest));
+            }
             Kind::Request
         }
         Event::Refused {
@@ -1115,11 +1871,35 @@ fn to_value(line: &Line) -> Value {
             to_request,
             text: answer,
             finish_reason,
+            reasoning,
+            timings,
+            usage,
+            capped,
         } => {
             put("to_request", count(*to_request));
             put("text", text(answer));
             if let Some(reason) = finish_reason {
                 put("finish_reason", text(reason));
+            }
+            if let Some(reasoning) = reasoning {
+                put("reasoning", text(reasoning));
+            }
+            if let Some(timings) = timings {
+                put("timings", timings_value(timings));
+            }
+            if let Some(usage) = usage {
+                let object = [
+                    ("prompt_tokens", Some(usage.prompt_tokens)),
+                    ("completion_tokens", Some(usage.completion_tokens)),
+                    ("cached_tokens", usage.cached_tokens),
+                ]
+                .into_iter()
+                .filter_map(|(key, value)| value.map(|value| (key.to_owned(), count(value))))
+                .collect();
+                put("usage", Value::Object(object));
+            }
+            if let Some(capped) = capped {
+                put("capped", Value::Boolean(*capped));
             }
             Kind::Response
         }
@@ -1169,8 +1949,49 @@ fn to_value(line: &Line) -> Value {
             put("ended_by", text(ended_by.tag()));
             Kind::IdleGap
         }
+        Event::Progress {
+            request,
+            total,
+            cache,
+            processed,
+            time_ms,
+        } => {
+            put("request", count(*request));
+            put("total", count(*total));
+            put("cache", count(*cache));
+            put("processed", count(*processed));
+            put("time_ms", count(*time_ms));
+            Kind::Progress
+        }
     };
     put("kind", text(kind.tag()));
+    Value::Object(object)
+}
+
+/// A [`Timings`] as the record's value space holds it: only the keys the
+/// server sent.
+fn timings_value(timings: &Timings) -> Value {
+    let mut object = BTreeMap::new();
+    let counts = [
+        ("prompt_n", timings.prompt_n),
+        ("cache_n", timings.cache_n),
+        ("predicted_n", timings.predicted_n),
+        ("draft_n", timings.draft_n),
+        ("draft_n_accepted", timings.draft_n_accepted),
+    ];
+    for (key, value) in counts {
+        if let Some(value) = value {
+            object.insert(key.to_owned(), count(value));
+        }
+    }
+    for (key, value) in [
+        ("prompt_ms", &timings.prompt_ms),
+        ("predicted_ms", &timings.predicted_ms),
+    ] {
+        if let Some(value) = value {
+            object.insert(key.to_owned(), value.to_value());
+        }
+    }
     Value::Object(object)
 }
 
@@ -1225,7 +2046,114 @@ impl Fields<'_> {
 
     fn tag<T>(&self, key: &str, from_tag: fn(&str) -> Option<T>) -> Result<T, String> {
         let tag = self.string(key)?;
-        from_tag(&tag).ok_or_else(|| format!("`{key}` is `{tag}`, which v0 does not name"))
+        from_tag(&tag).ok_or_else(|| format!("`{key}` is `{tag}`, which no version names"))
+    }
+
+    /// A `response`'s `timings`: an object of [`TIMINGS`]' keys, each a
+    /// count or a non-negative number of milliseconds.
+    fn timings(&self, key: &str) -> Result<Timings, String> {
+        let Value::Object(object) = self.get(key)? else {
+            return Err(format!("`{key}` is not an object"));
+        };
+        if let Some(unknown) = object
+            .keys()
+            .find(|field| !TIMINGS.iter().any(|f| f.key == field.as_str()))
+        {
+            return Err(format!("`{key}` carries no `{unknown}`"));
+        }
+        let count = |field: &str| match object.get(field) {
+            None => Ok(None),
+            Some(Value::Integer(n)) => u64::try_from(*n)
+                .map(Some)
+                .map_err(|_| format!("`{key}.{field}` is negative")),
+            Some(_) => Err(format!("`{key}.{field}` is not a count")),
+        };
+        let millis = |field: &str| match object.get(field) {
+            None => Ok(None),
+            Some(Value::Integer(n)) if *n < 0 => {
+                Err(format!("`{key}.{field}` is a negative whole number"))
+            }
+            Some(Value::Decimal(d)) if d.as_str().starts_with('-') => {
+                Err(format!("`{key}.{field}` is negative"))
+            }
+            Some(Value::Integer(n)) => Ok(Millis::new(&n.to_string())),
+            Some(Value::Decimal(d)) => Ok(Millis::new(d.as_str())),
+            Some(_) => Err(format!("`{key}.{field}` is not a number")),
+        };
+        Ok(Timings {
+            prompt_n: count("prompt_n")?,
+            cache_n: count("cache_n")?,
+            prompt_ms: millis("prompt_ms")?,
+            predicted_n: count("predicted_n")?,
+            predicted_ms: millis("predicted_ms")?,
+            draft_n: count("draft_n")?,
+            draft_n_accepted: count("draft_n_accepted")?,
+        })
+    }
+
+    fn optional_digest(&self, key: &str) -> Result<Option<String>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::String(digest)) if is_a_digest(digest) => Ok(Some(digest.clone())),
+            Some(_) => Err(format!(
+                "`{key}` is not a sha256 of 64 lowercase hex digits"
+            )),
+        }
+    }
+
+    fn optional_flag(&self, key: &str) -> Result<Option<bool>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::Boolean(flag)) => Ok(Some(*flag)),
+            Some(_) => Err(format!("`{key}` is not a boolean")),
+        }
+    }
+
+    /// The object at `key`, refusing a key `declared` does not name.
+    fn object(&self, key: &str, declared: &[Field]) -> Result<&BTreeMap<String, Value>, String> {
+        let Value::Object(object) = self.get(key)? else {
+            return Err(format!("`{key}` is not an object"));
+        };
+        if let Some(unknown) = object
+            .keys()
+            .find(|field| !declared.iter().any(|f| f.key == field.as_str()))
+        {
+            return Err(format!("`{key}` carries no `{unknown}`"));
+        }
+        Ok(object)
+    }
+
+    /// A `response`'s `usage`: an object of [`USAGE`]' keys, each a count.
+    fn usage(&self, key: &str) -> Result<Usage, String> {
+        let inner = Fields(self.object(key, USAGE)?);
+        let count = |field: &str| inner.count(field).map_err(|why| format!("`{key}`: {why}"));
+        Ok(Usage {
+            prompt_tokens: count("prompt_tokens")?,
+            completion_tokens: count("completion_tokens")?,
+            cached_tokens: match inner.0.get("cached_tokens") {
+                None => None,
+                Some(_) => Some(count("cached_tokens")?),
+            },
+        })
+    }
+
+    /// A `session.start`'s `serving`: its dialect, and its concurrency when
+    /// declared.
+    fn serving(&self, key: &str) -> Result<Serving, String> {
+        let inner = Fields(self.object(key, SERVING)?);
+        Ok(Serving {
+            dialect: inner
+                .string("dialect")
+                .map_err(|why| format!("`{key}`: {why}"))?,
+            concurrency: match inner.0.get("concurrency") {
+                None => None,
+                Some(_) => Some(
+                    inner
+                        .count("concurrency")
+                        .map_err(|why| format!("`{key}`: {why}"))?,
+                ),
+            },
+        })
     }
 
     fn head(&self, key: &str) -> Result<Vec<HeadMessage>, String> {
@@ -1265,8 +2193,10 @@ mod tests {
             seq: 0,
             t: 0,
             event: Event::SessionStart {
+                version: VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
+                serving: None,
                 head: vec![HeadMessage {
                     role: Role::System,
                     content: "you are the trunk".to_owned(),
@@ -1291,6 +2221,7 @@ mod tests {
             Event::Request {
                 turn: 1,
                 lane: Lane::Trunk,
+                head_sha256: None,
             },
             Event::Delta {
                 request: 3,
@@ -1329,6 +2260,7 @@ mod tests {
             Event::Request {
                 turn: 2,
                 lane: Lane::Trunk,
+                head_sha256: None,
             },
             Event::RequestFailed {
                 request: 13,
@@ -1365,15 +2297,74 @@ mod tests {
             Event::Request {
                 turn: 3,
                 lane: Lane::Trunk,
+                head_sha256: None,
+            },
+            Event::Progress {
+                request: 20,
+                total: 9276,
+                cache: 0,
+                processed: 0,
+                time_ms: 0,
+            },
+            Event::Progress {
+                request: 20,
+                total: 9276,
+                cache: 0,
+                processed: 9276,
+                time_ms: 6086,
+            },
+            Event::Delta {
+                request: 20,
+                piece: Piece::Reasoning("weighing it\n".to_owned()),
             },
             Event::Response {
                 to_request: 20,
                 text: "Done.".to_owned(),
                 finish_reason: Some("stop".to_owned()),
+                reasoning: Some("weighing it\n".to_owned()),
+                usage: None,
+                capped: None,
+                timings: Some(Timings {
+                    prompt_n: Some(89),
+                    cache_n: Some(0),
+                    prompt_ms: Millis::new("297.198"),
+                    predicted_n: Some(312),
+                    predicted_ms: Millis::new("2591"),
+                    draft_n: Some(312),
+                    draft_n_accepted: Some(207),
+                }),
             },
             Event::TurnSettled {
                 turn: 3,
                 reason: SettleReason::Final,
+            },
+            Event::Settlement {
+                from: State::Turn,
+                to: State::Awaiting,
+            },
+            Event::Ask {
+                turn: 4,
+                text: "a very long one".to_owned(),
+            },
+            Event::Settlement {
+                from: State::Awaiting,
+                to: State::Turn,
+            },
+            Event::Request {
+                turn: 4,
+                lane: Lane::Trunk,
+                head_sha256: None,
+            },
+            Event::RequestFailed {
+                request: 29,
+                reason: FailReason::ContextOverflow,
+                message: "request (262149 tokens) exceeds the available context size".to_owned(),
+                status: Some(400),
+                partial: None,
+            },
+            Event::TurnSettled {
+                turn: 4,
+                reason: SettleReason::Failed,
             },
             Event::Settlement {
                 from: State::Turn,
@@ -1394,9 +2385,22 @@ mod tests {
     /// Whether `value` is what `holds` says a key holds.
     fn written_as(holds: Holds, value: &Value) -> bool {
         match (holds, value) {
-            (Holds::Count, Value::Integer(n)) => *n >= 0,
-            (Holds::Version, Value::Integer(n)) => *n == VERSION,
-            (Holds::Text, Value::String(_)) => true,
+            (Holds::Count | Holds::Millis, Value::Integer(n)) => *n >= 0,
+            (Holds::Version, Value::Integer(n)) => READS.contains(n),
+            (Holds::Millis, Value::Decimal(d)) => !d.as_str().starts_with('-'),
+            (Holds::Timings | Holds::Usage | Holds::Serving, Value::Object(object)) => {
+                let declared = object_fields(holds).expect("an object holder");
+                object.iter().all(|(key, value)| {
+                    declared
+                        .iter()
+                        .find(|f| f.key == key)
+                        .is_some_and(|f| written_as(f.holds, value))
+                }) && declared
+                    .iter()
+                    .all(|f| !f.required || object.contains_key(f.key))
+            }
+            (Holds::Text, Value::String(_)) | (Holds::Flag, Value::Boolean(_)) => true,
+            (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
             (Holds::Tag(tags), Value::String(tag)) => tags.tags().contains(&tag.as_str()),
             (Holds::Head, Value::Array(messages)) => messages.iter().all(|m| match m {
                 Value::Object(message) => {
@@ -1454,6 +2458,7 @@ mod tests {
     fn the_schema_is_what_every_kind_writes() {
         let mut written: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
         let mut omitted: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+        let (mut nested_written, mut nested_omitted) = (BTreeSet::new(), BTreeSet::new());
         for line in corpus() {
             let Value::Object(object) = to_value(&line) else {
                 panic!("a line is an object");
@@ -1482,6 +2487,19 @@ mod tests {
                 );
                 if let Holds::Tag(tags) = field.holds {
                     the_reader_reads_it_as(&object, key, tags);
+                }
+                // Into a nested object: its keys, one level down, get the
+                // same written-somewhere, omitted-somewhere pin.
+                if let (Some(inner_fields), Value::Object(inner)) =
+                    (object_fields(field.holds), value)
+                {
+                    for nested in inner_fields {
+                        if inner.contains_key(nested.key) {
+                            nested_written.insert((field.key, nested.key));
+                        } else {
+                            nested_omitted.insert((field.key, nested.key));
+                        }
+                    }
                 }
                 written.entry(kind.tag()).or_default().insert(key.clone());
             }
@@ -1523,7 +2541,110 @@ mod tests {
                     kind.tag()
                 );
             }
+            for key in at_most_one(*kind) {
+                assert!(
+                    schema(*kind).iter().any(|f| f.key == *key && !f.required),
+                    "`{}`: `at_most_one` names `{key}`, which is not an optional key",
+                    kind.tag()
+                );
+            }
         }
+        every_nested_key_is_written_and_omitted_as_declared(&nested_written, &nested_omitted);
+    }
+
+    /// The nested half of [`the_schema_is_what_every_kind_writes`]: every key
+    /// of every object holder is written somewhere, and is left out
+    /// somewhere exactly when it is optional.
+    fn every_nested_key_is_written_and_omitted_as_declared(
+        nested_written: &BTreeSet<(&str, &str)>,
+        nested_omitted: &BTreeSet<(&str, &str)>,
+    ) {
+        for (outer, inner_fields) in [("timings", TIMINGS), ("usage", USAGE), ("serving", SERVING)]
+        {
+            for inner in inner_fields {
+                assert!(
+                    nested_written.contains(&(outer, inner.key)),
+                    "`{outer}.{}` is declared and no line writes it",
+                    inner.key
+                );
+                assert_eq!(
+                    nested_omitted.contains(&(outer, inner.key)),
+                    !inner.required,
+                    "`{outer}.{}`: declared {}, and {}",
+                    inner.key,
+                    if inner.required {
+                        "required"
+                    } else {
+                        "optional"
+                    },
+                    if inner.required {
+                        "a line leaves it out"
+                    } else {
+                        "every line writes it"
+                    }
+                );
+            }
+        }
+    }
+
+    /// A LOG CUT INSIDE A CHARACTER (#230): the bytes of a torn write that
+    /// ends mid-sequence read up to the cut, and the tail is set aside; the
+    /// same partial byte after a COMPLETE event is not a torn write and stays
+    /// a refusal, as does invalid UTF-8 anywhere else.
+    #[test]
+    fn a_log_cut_inside_a_character_is_a_torn_write_and_nothing_else_is() {
+        let head = "{\"head\":[{\"content\":\"x\",\"role\":\"system\"}],\"kind\":\"session.start\",\"model\":\"m\",\"opened\":1,\"seq\":0,\"t\":0,\"version\":0}\n";
+        let mut cut = head.as_bytes().to_vec();
+        cut.extend_from_slice(b"{\"kind\":\"ask\",\"seq\":1,\"t\":5,\"text\":\"caf\xc3");
+        let text = decode(&cut).expect("a write cut inside a character decodes to the cut");
+        let read = read(text).expect("and reads through its last complete event");
+        assert_eq!((read.lines.len(), read.torn), (1, 1));
+
+        let mut after_an_event = head.as_bytes().to_vec();
+        after_an_event.push(0xc3);
+        assert!(
+            decode(&after_an_event).is_err(),
+            "a partial byte after a complete event"
+        );
+
+        // A partial byte where no text can stand -- after a number, a brace,
+        // a closing quote, an escape's backslash, inside `\u`, or inside
+        // `true` -- is no torn write, whatever the bytes before it.
+        for after in [
+            &b"{\"kind\":\"ask\",\"seq\":9,\"t\":4"[..],
+            b"{\"kind\":\"ask\",\"seq\":9,\"t\":",
+            b"{",
+            b"{\"kind\":\"ask\",\"x\":tr",
+            b"{\"kind\":\"ask\",\"text\":\"caf\"",
+            b"{\"kind\":\"ask\",\"text\":\"\\",
+            b"{\"kind\":\"ask\",\"text\":\"\\u00",
+        ] {
+            let mut bytes = head.as_bytes().to_vec();
+            bytes.extend_from_slice(after);
+            bytes.push(0xc3);
+            assert!(
+                decode(&bytes).is_err(),
+                "a cut character after {:?}",
+                String::from_utf8_lossy(after)
+            );
+        }
+        // And inside a key, or two bytes of three, it is one.
+        for inside in [&b"{\"te\xc3"[..], b"{\"kind\":\"ask\",\"text\":\"\xe6\x97"] {
+            let mut bytes = head.as_bytes().to_vec();
+            bytes.extend_from_slice(inside);
+            assert!(
+                decode(&bytes).is_ok(),
+                "a cut inside {:?}",
+                String::from_utf8_lossy(inside)
+            );
+        }
+
+        let mut in_the_middle = head.as_bytes().to_vec();
+        in_the_middle.extend_from_slice(b"{\"kind\":\"ask\",\"text\":\"\xc3\n");
+        assert!(
+            decode(&in_the_middle).is_err(),
+            "invalid UTF-8 before the last line break"
+        );
     }
 
     /// `exactly_one` IS WHAT THE READER ENFORCES: for every line that writes
@@ -1655,8 +2776,11 @@ mod tests {
         );
 
         let projected_without_message = |text: &str| -> Value {
-            let Value::Array(lines) = project(text).expect("a valid fixture projects") else {
-                panic!("a log projects to an array");
+            let Value::Object(mut read) = project(text).expect("a valid fixture projects") else {
+                panic!("a log projects to an object");
+            };
+            let Some(Value::Array(lines)) = read.remove("events") else {
+                panic!("a log's projection carries its events");
             };
             Value::Array(
                 lines
@@ -1725,6 +2849,23 @@ mod tests {
     }
 
     #[test]
+    fn a_v0_log_carrying_what_arrived_in_v1_is_refused_and_line_reads_it() {
+        // The whole-log reader scopes by the version `session.start` states;
+        // the per-line reader, which a resuming reader uses, reads the union.
+        let mut lines = every_event();
+        let Event::SessionStart { version, .. } = &mut lines[0].event else {
+            panic!("the first line opens the session");
+        };
+        *version = 0;
+        let document: String = lines.iter().map(|line| render(line) + "\n").collect();
+        let refused = parse(&document).expect_err("v1 content was read as v0");
+        assert!(refused.why.contains("arrived in v1"), "{refused}");
+        for line in &lines {
+            assert_eq!(super::line(&render(line)).as_ref(), Ok(line));
+        }
+    }
+
+    #[test]
     fn a_gap_in_seq_is_refused() {
         let mut lines = every_event();
         lines.remove(4);
@@ -1766,7 +2907,11 @@ mod tests {
         assert_eq!(
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
-             cancelled request.failed turn.settled idle.gap"
+             cancelled request.failed turn.settled idle.gap progress"
+        );
+        assert_eq!(
+            tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
+            "server timeout transport crashed context_overflow"
         );
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),

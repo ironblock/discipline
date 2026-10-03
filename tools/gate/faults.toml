@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 126
+mechanics_assertions = 152
 unseedable_guards = 2
 migrated = 0
 
@@ -171,6 +171,66 @@ legacy_signature = "record/fixtures/invalid/comparison-word-outside-its-four\\.j
 migrated = false
 
 [[fault]]
+id = "test.record_weights_projector_undigested"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a weights projector named rather than digested"
+failure_class = "record.weights-projector-undigested"
+legacy_signature = "record/fixtures/invalid/weights-projector-named-not-digested\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_timings_negative_integer_ms_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a negative whole-millisecond duration read"
+failure_class = "record.timings-negative-ms-read"
+legacy_signature = "record/fixtures/invalid/timings-duration-that-is-a-negative-integer\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_timings_unknown_key_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a timings key the server does not send read"
+failure_class = "record.timings-unknown-key-read"
+legacy_signature = "record/fixtures/invalid/timings-key-the-server-does-not-send\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_timings_negative_ms_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a negative timings duration read"
+failure_class = "record.timings-negative-ms-read"
+legacy_signature = "record/fixtures/invalid/timings-duration-that-is-negative\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_weights_one_file_list_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "one weights file spelled as a list read"
+failure_class = "record.weights-second-spelling-read"
+legacy_signature = "record/fixtures/invalid/weights-of-one-file-spelled-as-a-list\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.record_weights_draft_undigested"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a weights draft named rather than digested"
+failure_class = "record.weights-draft-undigested"
+legacy_signature = "record/fixtures/invalid/weights-draft-named-not-digested\\.jsonl"
+migrated = false
+
+[[fault]]
 id = "test.record_summary_kind_fields_advisory"
 kind = "seeded-gate"
 check = "test"
@@ -227,6 +287,16 @@ target = "lib/capture::bakeoff"
 label = "the assembled directory's evidence is elsewhere"
 failure_class = "results.evidence-not-attached"
 legacy_signature = "capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_scratch_shared"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "the bakeoff scratch shared by every run"
+failure_class = "test.fixture-path-shared"
+legacy_signature = "capture::bakeoff::tests::two_scratches_never_share_a_directory \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -588,6 +658,15 @@ legacy_signature = "inject_that_changes_nothing  exit="
 migrated = false
 
 [[fault]]
+id = "bsd.bsd_edit_in_place_gnu_only"
+kind = "seeded-gate"
+check = "bsd"
+label = "the one portable spelling made GNU-only"
+failure_class = "gate.injection-inert-under-bsd"
+legacy_signature = "^  inject_exercise_pnpm_unobtainable  exit="
+migrated = false
+
+[[fault]]
 id = "test.record_empty_payload_dropped"
 kind = "seeded-gate"
 check = "test"
@@ -847,6 +926,15 @@ legacy_signature = "assigns label"
 migrated = false
 
 [[fault]]
+id = "hygiene.hygiene_unguarded_expansion"
+kind = "seeded-gate"
+check = "hygiene"
+label = "a hygiene expansion bash 3.2 aborts on"
+failure_class = "hygiene.scanner-not-portable"
+legacy_signature = "is unguarded; bash 3\\.2 aborts on it"
+migrated = false
+
+[[fault]]
 id = "hygiene.hygiene"
 kind = "seeded-gate"
 check = "hygiene"
@@ -862,6 +950,132 @@ check = "pages"
 label = "external subresource on the site"
 failure_class = "pages.forbidden-pattern"
 legacy_signature = "hygiene: external-subresource:"
+migrated = false
+
+[[fault]]
+id = "results.results_ledger_row_cites_missing_directory"
+kind = "seeded-gate"
+check = "results"
+label = "a ledger row citing a missing directory"
+failure_class = "results.ledger-directory"
+legacy_signature = "render-ledger: [0-9a-z-]+-stale: no such directory"
+migrated = false
+
+[[fault]]
+id = "results.results_ledger_row_without_word"
+kind = "seeded-gate"
+check = "results"
+label = "a ledger row with no word"
+failure_class = "results.ledger-word"
+legacy_signature = "render-ledger: [0-9a-z-]+: row carries no result"
+migrated = false
+
+[[fault]]
+id = "results.results_ledger_page_calls_out"
+kind = "seeded-gate"
+check = "results"
+label = "the ledger page pulls in an outside stylesheet"
+failure_class = "results.ledger-pages-table"
+legacy_signature = "hygiene: external-stylesheet:"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_type_error"
+kind = "seeded-gate"
+check = "exercise"
+label = "a type error in the web surface"
+failure_class = "exercise.typecheck"
+legacy_signature = "error TS2322"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_published_list_carries_authored_session"
+kind = "seeded-gate"
+check = "exercise"
+label = "an authored session on the published list"
+failure_class = "exercise.replay-published"
+legacy_signature = "FAIL.*published\\.test\\.ts.*publishes the three recorded whole, and never an authored session"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_recording_corrupt_event"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording's event with no kind"
+failure_class = "exercise.replay-recording"
+legacy_signature = "exercise/src/drive/recorded/step-limit\\.json: not a recording: event 0 has no kind or time"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_shell_carries_network_call"
+kind = "seeded-gate"
+check = "exercise"
+label = "a network call in the replay page's shell"
+failure_class = "exercise.replay-shell"
+legacy_signature = "hygiene: network-call: _site/replay/assets/"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_modulepreload_polyfill_on"
+kind = "seeded-gate"
+check = "exercise"
+label = "the modulepreload polyfill back on"
+failure_class = "exercise.replay-shell"
+legacy_signature = "hygiene: network-call: _site/replay/assets/"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_payload_carries_credential"
+kind = "seeded-gate"
+check = "exercise"
+label = "a credential shape in a published recording"
+failure_class = "exercise.replay-payload"
+legacy_signature = "hygiene: github-token: _site/replay/data/step-limit\\.js"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_recording_edited_after_admission"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording edited after admission"
+failure_class = "exercise.replay-admission"
+legacy_signature = "admission: exercise/src/drive/recorded/step-limit\\.json: edited since it was admitted"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_replay_loads_beside_its_bundle"
+kind = "seeded-gate"
+check = "exercise"
+label = "the recording loaded beside the bundle"
+failure_class = "exercise.replay-load"
+legacy_signature = "replay-smoke: step-limit did not load"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_admitted_table_edited"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording's admitted table edited"
+failure_class = "exercise.replay-admission"
+legacy_signature = "admission: exercise/src/drive/recorded/[a-z-]+\\.json: its admitted table scripts/hygiene-admitted-[0-9a-f]{12}-patterns\\.tsv is not the one admitted"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_published_without_admission"
+kind = "seeded-gate"
+check = "exercise"
+label = "a published recording with no admission"
+failure_class = "exercise.replay-admission"
+legacy_signature = "expected \\[ 'step-limit' \\] to deeply equal \\[\\]"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_pnpm_unobtainable"
+kind = "seeded-gate"
+check = "exercise"
+label = "a pinned pnpm the host cannot have"
+failure_class = "exercise.pnpm"
+legacy_signature = "notarget No matching version found for pnpm@0\\.0\\.0-unpublished"
 migrated = false
 
 [[fault]]
@@ -1373,6 +1587,51 @@ migrated = false
 
 
 [[fault]]
+id = "mech.the-ledger-renderer-s-own-exit-status-reaches-the-results-check"
+kind = "mechanics"
+check = "results"
+label = "the ledger renderer's own exit status reaches the results check"
+failure_class = "results.ledger-verdict-lost"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.the-results-check-passes-with-the-real-ledger-renderer"
+kind = "mechanics"
+check = "results"
+label = "the results check passes with the real ledger renderer"
+failure_class = "results.ledger-verdict-lost"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.site-beside-selftest-is-a-misuse"
+kind = "mechanics"
+check = "repo"
+label = "--site beside --selftest is a misuse"
+failure_class = "usage.site-misuse"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.selftest-beside-site-is-a-misuse"
+kind = "mechanics"
+check = "repo"
+label = "--selftest beside --site is a misuse"
+failure_class = "usage.site-misuse"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.site-naming-no-directory-is-a-misuse"
+kind = "mechanics"
+check = "repo"
+label = "--site naming no directory is a misuse"
+failure_class = "usage.site-misuse"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
 id = "mech.cargo-build-target-dir-is-where-cargo-built"
 kind = "mechanics"
 check = "regimen"
@@ -1498,12 +1757,44 @@ failure_class = "hygiene.forbidden-pattern"
 expected_exit = "1"
 migrated = false
 [[fault]]
+id = "mech.the-bsd-check-will-not-run-without-an-executable-shim"
+kind = "mechanics"
+check = "-"
+label = "the bsd check will not run without an executable shim"
+failure_class = "bsd.shim-not-in-force"
+expected_exit = "2"
+migrated = false
+[[fault]]
+id = "mech.nor-with-a-shim-that-edits-through-gnu-s-i"
+kind = "mechanics"
+check = "-"
+label = "nor with a shim that edits through GNU's -i"
+failure_class = "bsd.shim-not-in-force"
+expected_exit = "2"
+migrated = false
+[[fault]]
 id = "mech.an-ordinary-binary-does-not-false-positive"
 kind = "mechanics"
 check = "-"
 label = "an ordinary binary does not false-positive"
 failure_class = "hygiene.clean"
 expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-ticket-id-shape-in-binary-bytes-is-not-a-ticket-id"
+kind = "mechanics"
+check = "-"
+label = "a ticket-id shape in binary bytes is not a ticket id"
+failure_class = "hygiene.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.and-it-reads-red-with-the-binary-flag-restored"
+kind = "mechanics"
+check = "-"
+label = "and it reads red with the binary flag restored"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
 migrated = false
 [[fault]]
 id = "mech.a-patterns-tsv-outside-scripts-is-still-scanned"
@@ -1631,6 +1922,24 @@ check = "-"
 label = "history: the same literal in an author line is not content"
 failure_class = "history.clean"
 expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-an-id-in-a-text-hunk-beside-a-binary-path-is-a-finding"
+kind = "mechanics"
+check = "-"
+label = "history: an id in a text hunk beside a binary path is a finding"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.history-an-id-in-a-binary-path-s-name-is-a-finding"
+kind = "mechanics"
+check = "-"
+label = "history: an id in a binary path's name is a finding"
+failure_class = "history.forbidden-pattern"
+expected_exit = "1"
 migrated = false
 
 [[fault]]
@@ -3533,6 +3842,38 @@ failure_class = "admission.rule-broken"
 legacy_signature = "FAIL  derive: a refuted parity fire bars"
 migrated = false
 [[fault]]
+id = "admission.admission_engine_library_changed"
+kind = "seeded-gate"
+check = "admission"
+label = "an engine library changed under a held exe"
+failure_class = "admission.engine-fingerprint-changed"
+legacy_signature = "ada48-llamacpp-qwen38flashnext-q20: engine_fingerprint changed"
+migrated = false
+[[fault]]
+id = "admission.admission_engine_recipe_exe_only"
+kind = "seeded-gate"
+check = "admission"
+label = "the engine recipe narrowed to the exe"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: a library changed with the exe held changes the fingerprint"
+migrated = false
+[[fault]]
+id = "admission.admission_engine_pattern_narrowed"
+kind = "seeded-gate"
+check = "admission"
+label = "the engine recipe's library pattern narrowed"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: the recipe hashes every shared object in the directory, a versioned name included"
+migrated = false
+[[fault]]
+id = "admission.admission_pruned_mix_unrequired"
+kind = "seeded-gate"
+check = "admission"
+label = "a pruned entry's calibration mix not required"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: a pruned entry with no calibration mix is refused"
+migrated = false
+[[fault]]
 id = "admission.admission_constitutional_unrequired"
 kind = "seeded-gate"
 check = "admission"
@@ -3565,12 +3906,290 @@ failure_class = "gate.derive-accepts-a-fast-green"
 legacy_signature = "a scope naming another target selected something"
 migrated = false
 [[fault]]
+id = "ci.ci_pages_deploys_on_any_conclusion"
+kind = "seeded-gate"
+check = "ci"
+label = "the site deployed whatever the gate said"
+failure_class = "wiring.pages-conclusion"
+legacy_signature = "pages.yml: deploys on a workflow_run whatever its conclusion"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_deploys_on_any_event"
+kind = "seeded-gate"
+check = "ci"
+label = "the site deployed from a run not a push"
+failure_class = "wiring.pages-event"
+legacy_signature = "pages.yml: deploys on a run that was not a push"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_deploys_forks"
+kind = "seeded-gate"
+check = "ci"
+label = "the site deployed from a fork's code"
+failure_class = "wiring.pages-fork"
+legacy_signature = "pages.yml: deploys a run of a fork's code"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_guards_either"
+kind = "seeded-gate"
+check = "ci"
+label = "the deploy guards joined by ||"
+failure_class = "wiring.pages-conjunction"
+legacy_signature = "pages.yml: the deploy's condition is not exactly its guards joined by &&"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_uploads_unchecked"
+kind = "seeded-gate"
+check = "ci"
+label = "the site uploaded unchecked"
+failure_class = "wiring.pages-unchecked-upload"
+legacy_signature = "pages.yml: upload-pages-artifact is not preceded by \\./verify\\.sh --site _site"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_publishes_an_older_sha"
+kind = "seeded-gate"
+check = "ci"
+label = "the site published though a later run passed"
+failure_class = "wiring.pages-older-sha"
+legacy_signature = "pages.yml: publishes without checking that no later verify run on main has passed"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_newest_run_compared_backwards"
+kind = "seeded-gate"
+check = "ci"
+label = "the newest-run comparison turned round"
+failure_class = "wiring.pages-newest-run-comparison"
+legacy_signature = "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_concurrency_at_workflow_level"
+kind = "seeded-gate"
+check = "ci"
+label = "the deploy's group at the workflow level"
+failure_class = "wiring.pages-concurrency-placement"
+legacy_signature = "pages.yml: a workflow-level concurrency group, which a run whose deploy is skipped still enters"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploys_not_serialized"
+kind = "seeded-gate"
+check = "ci"
+label = "the deploy job's group gone"
+failure_class = "wiring.pages-concurrency-missing"
+legacy_signature = "pages.yml: the deploy job holds no .pages. concurrency group"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploy_group_cancels"
+kind = "seeded-gate"
+check = "ci"
+label = "the deploy job's group cancelling"
+failure_class = "wiring.pages-concurrency-cancels"
+legacy_signature = "pages.yml: the deploy job's .pages. group does not say cancel-in-progress: false"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploy_group_key_past_a_blank"
+kind = "seeded-gate"
+check = "ci"
+label = "a key past a blank line in the deploy job's group"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+migrated = false
+
+[[fault]]
+id = "ci.ci_check_seconds_over_budget"
+kind = "seeded-gate"
+check = "ci"
+label = "a check re-measured past its job's budget"
+failure_class = "wiring.job-over-budget"
+legacy_signature = "pkg-repo\\.yml: its checks' measured seconds per job are [0-9]+ s, past the 300 s budget \\(.*hygiene 341\\.2 s"
+migrated = false
+[[fault]]
+id = "ci.ci_check_seconds_unmeasured"
+kind = "seeded-gate"
+check = "ci"
+label = "a check with no measured seconds"
+failure_class = "wiring.check-unmeasured"
+legacy_signature = "`hygiene` has no measured seconds"
+migrated = false
+[[fault]]
+id = "ci.ci_injection_shard_drops_one"
+kind = "seeded-gate"
+check = "ci"
+label = "an injection no shard applies"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "`injections`.s 2 shards run none of 1 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_shard_drops_one"
+kind = "seeded-gate"
+check = "ci"
+label = "a results directory no shard re-derives"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "`recompute`.s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_workflow_without_shard"
+kind = "seeded-gate"
+check = "ci"
+label = "a sharded job never told its shard"
+failure_class = "wiring.shard-not-passed"
+legacy_signature = "pkg-injections\\.yml: .injections. is sharded, and its workflow is not the sharded form"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_count_one"
+kind = "seeded-gate"
+check = "ci"
+label = "a split into one shard"
+failure_class = "wiring.shard-count"
+legacy_signature = ".recompute..s shard count is .1., not a whole number of 2 or more"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_matrix_not_the_table"
+kind = "seeded-gate"
+check = "ci"
+label = "a sharded matrix that is not the table"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml: .recompute. is sharded, and its workflow is not the sharded form"
+migrated = false
+[[fault]]
+id = "ci.ci_check_runs_one_shard"
+kind = "seeded-gate"
+check = "ci"
+label = "a check that runs one shard whatever"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_sharded_workflow_line_separator"
+kind = "seeded-gate"
+check = "ci"
+label = "a line separator YAML does not split on"
+failure_class = "wiring.shard-matrix"
+legacy_signature = "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
+migrated = false
+[[fault]]
+id = "ci.ci_listing_unmarked"
+kind = "seeded-gate"
+check = "ci"
+label = "a listing with no line of its own"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute.: verify\\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_runs_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "a shard that runs fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_applies_fewer_than_listed"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier that applies fewer than it lists"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections..s 2 shards run none of 2 member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_wrapper_shard_one_when_running"
+kind = "seeded-gate"
+check = "ci"
+label = "a wrapper that runs shard 1 when not listing"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute..s shards run [0-9]+ member\\(s\\) more than once"
+migrated = false
+[[fault]]
+id = "ci.ci_caller_in_block_scalar"
+kind = "seeded-gate"
+check = "ci"
+label = "a package's call kept in a block scalar"
+failure_class = "wiring.uncalled"
+legacy_signature = "pkg-recompute\\.yml exists but verify\\.yml never calls it"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "a recompute skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".recompute, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_injections_skips_after_the_dry_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "an applier skip the dry census cannot see"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = ".injections, run for real..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+migrated = false
+[[fault]]
+id = "ci.ci_recompute_reports_a_skip"
+kind = "seeded-gate"
+check = "ci"
+label = "a member reported as skipped"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "recorded .[^ ]+. as .skipped., which is not an outcome .recompute. runs a member to"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_switched_off"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census allowed to fail"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_off_behind_a_comment"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's census off behind a comment"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "ci.ci_shard_census_step_removed"
+kind = "seeded-gate"
+check = "ci"
+label = "the gate's shard census renamed away"
+failure_class = "wiring.shard-incomplete"
+legacy_signature = "the gate job does not run check-shard-census\\.py"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_publishes_on_its_own_trigger"
+kind = "seeded-gate"
+check = "ci"
+label = "the site published on a trigger of its own"
+failure_class = "wiring.pages-own-trigger"
+legacy_signature = "pages.yml: publishes on a trigger of its own"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_ledger_not_uploaded"
+kind = "seeded-gate"
+check = "ci"
+label = "the ledger published but never uploaded"
+failure_class = "wiring.pages-part-not-uploaded"
+legacy_signature = "pages.yml: publishes site-ledger, which no workflow the gate runs uploads"
+migrated = false
+[[fault]]
 id = "ci.ci_pr_branch_filter"
 kind = "seeded-gate"
 check = "ci"
 label = "pull requests filtered by branch"
 failure_class = "wiring.pull-request-branch-filtered"
 legacy_signature = "carries .branches: \\[main\\]. and is reached"
+migrated = false
+[[fault]]
+id = "ci.ci_apt_step_unbounded"
+kind = "seeded-gate"
+check = "ci"
+label = "a package-mirror step left unbounded"
+failure_class = "wiring.mirror-step-unbounded"
+legacy_signature = "runs apt-get with no .timeout-minutes."
 migrated = false
 [[fault]]
 id = "ci.ci_trunk_run_cancelled"
@@ -3682,6 +4301,22 @@ kind = "mechanics"
 check = "resolver"
 label = "a conformance fixture does not"
 failure_class = "resolver.data-is-not-a-source"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-member-reported-skipped-is-not-counted-as-run"
+kind = "mechanics"
+check = "parity"
+label = "a member reported skipped is not counted as run"
+failure_class = "shard.census-outcome"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-dry-census-row-is-refused-where-the-shards-really-ran"
+kind = "mechanics"
+check = "parity"
+label = "a dry census row is refused where the shards really ran"
+failure_class = "shard.census-dry-row"
 legacy_signature = ""
 migrated = false
 [[fault]]
@@ -4161,6 +4796,15 @@ check = "resolver"
 label = "a resolver suite that collected nothing is not a pass"
 failure_class = "resolver.suite-cannot-run"
 expected_exit = "2"
+migrated = false
+
+[[fault]]
+id = "mech.a-mechanics-case-that-fails-shows-the-command-s-own-words"
+kind = "mechanics"
+check = "selftest"
+label = "a mechanics case that fails shows the command's own words"
+failure_class = "selftest.mechanics-output-shown"
+expected_exit = "0"
 migrated = false
 
 [[fault]]
@@ -5135,6 +5779,14 @@ failure_class = "isolation.the-escape-census-under-reports"
 migrated = false
 
 [[fault]]
+id = "isolation.busy-runner-never-retried"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.busy-runner-never-retried"
+failure_class = "isolation.busy-runner-never-retried"
+migrated = false
+
+[[fault]]
 id = "seam.cadence-fires-always"
 kind = "lane-fault"
 check = "lanes"
@@ -5708,6 +6360,146 @@ target = "lib/formats::log::tests"
 label = "a log settlement that leaves a state it is not in"
 failure_class = "log.settlement-chain-unchecked"
 legacy_signature = "a_settlement_that_does_not_leave_the_state_it_is_in_is_refused \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.log_v1_content_read_in_a_v0_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "v1 content read in a log that declares v0"
+failure_class = "log.v1-content-read-in-a-v0-log"
+legacy_signature = "log/fixtures/invalid/a-v0-log-carrying-timings\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_progress_read_in_a_v0_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a progress line read in a log that declares v0"
+failure_class = "log.progress-read-in-a-v0-log"
+legacy_signature = "log/fixtures/invalid/a-v0-log-carrying-progress\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_torn_final_line_refused"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a torn final line refused"
+failure_class = "log.torn-final-line-refused"
+legacy_signature = "log/fixtures/valid/a-torn-final-line\\.jsonl: rejected"
+migrated = false
+
+[[fault]]
+id = "test.log_torn_middle_line_accepted"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a torn middle line accepted"
+failure_class = "log.torn-middle-line-accepted"
+legacy_signature = "log/fixtures/invalid/a-torn-line-before-the-end\\.jsonl: accepted"
+migrated = false
+
+[[fault]]
+id = "test.log_context_overflow_read_in_a_v0_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a context_overflow read in a log that declares v0"
+failure_class = "log.context-overflow-read-in-a-v0-log"
+legacy_signature = "log/fixtures/invalid/a-v0-log-carrying-a-context-overflow\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_response_reasoning_read_in_a_v0_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a response's reasoning read in a log that declares v0"
+failure_class = "log.response-reasoning-read-in-a-v0-log"
+legacy_signature = "log/fixtures/invalid/a-v0-log-carrying-a-response-reasoning\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_progress_after_its_request_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a log progress line after its request ended read"
+failure_class = "log.progress-after-its-request-read"
+legacy_signature = "log/fixtures/invalid/a-progress-after-its-request-ended\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_progress_citing_a_non_request_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a log progress line citing anything read as a request"
+failure_class = "log.progress-citing-a-non-request-read"
+legacy_signature = "log/fixtures/invalid/a-progress-citing-a-line-that-is-not-a-request\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_negative_count_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a negative timings count read as a count"
+failure_class = "log.timings-negative-count-read"
+legacy_signature = "log/fixtures/invalid/a-timings-count-that-is-negative\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_negative_integer_ms_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a negative whole-millisecond duration read as absent"
+failure_class = "log.timings-negative-ms-read"
+legacy_signature = "log/fixtures/invalid/a-timings-duration-that-is-a-negative-integer\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_negative_ms_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a negative timings duration read as a duration"
+failure_class = "log.timings-negative-ms-read"
+legacy_signature = "log/fixtures/invalid/a-timings-duration-that-is-negative\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_ms_as_text_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a timings duration written as text read as absent"
+failure_class = "log.timings-ms-as-text-read"
+legacy_signature = "log/fixtures/invalid/a-timings-duration-written-as-text\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_unknown_key_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a timings key the server does not send read"
+failure_class = "log.timings-unknown-key-read"
+legacy_signature = "log/fixtures/invalid/a-timings-key-the-server-does-not-send\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_timings_declares_a_key_nothing_writes"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::log::tests"
+label = "a timings key declared that no line writes"
+failure_class = "log.timings-declares-a-key-nothing-writes"
+legacy_signature = "the_schema_is_what_every_kind_writes \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
@@ -6335,6 +7127,102 @@ failure_class = "client.canned-plays-reasoning-as-text"
 migrated = false
 
 [[fault]]
+id = "client.streaming-body-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "client.streaming-body-drops-progress"
+failure_class = "client.streaming-body-drops-progress"
+migrated = false
+
+[[fault]]
+id = "client.stream-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-drops-progress"
+failure_class = "client.stream-drops-progress"
+migrated = false
+
+[[fault]]
+id = "client.stream-delivers-a-partial-progress-frame"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-delivers-a-partial-progress-frame"
+failure_class = "client.stream-delivers-a-partial-progress-frame"
+migrated = false
+
+[[fault]]
+id = "client.refusal-classified-from-its-message"
+kind = "lane-fault"
+check = "lanes"
+label = "client.refusal-classified-from-its-message"
+failure_class = "client.refusal-classified-from-its-message"
+migrated = false
+
+[[fault]]
+id = "client.stream-refusal-never-classified"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-refusal-never-classified"
+failure_class = "client.stream-refusal-never-classified"
+migrated = false
+
+[[fault]]
+id = "client.canned-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-drops-progress"
+failure_class = "client.canned-drops-progress"
+migrated = false
+
+[[fault]]
+id = "client.stream-an-error-events-class-dropped"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-an-error-events-class-dropped"
+failure_class = "client.stream-an-error-events-class-dropped"
+migrated = false
+
+[[fault]]
+id = "client.canned-refusal-never-classified"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-refusal-never-classified"
+failure_class = "client.canned-refusal-never-classified"
+migrated = false
+
+[[fault]]
+id = "client.stream-delivers-a-frame-with-no-total"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-delivers-a-frame-with-no-total"
+failure_class = "client.stream-delivers-a-frame-with-no-total"
+migrated = false
+
+[[fault]]
+id = "client.stream-delivers-a-frame-with-no-cache"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-delivers-a-frame-with-no-cache"
+failure_class = "client.stream-delivers-a-frame-with-no-cache"
+migrated = false
+
+[[fault]]
+id = "client.stream-delivers-a-frame-with-no-processed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-delivers-a-frame-with-no-processed"
+failure_class = "client.stream-delivers-a-frame-with-no-processed"
+migrated = false
+
+[[fault]]
+id = "client.stream-a-chunks-progress-after-its-text"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stream-a-chunks-progress-after-its-text"
+failure_class = "client.stream-a-chunks-progress-after-its-text"
+migrated = false
+
+[[fault]]
 id = "client.stream-drops-the-timings-chunk"
 kind = "lane-fault"
 check = "lanes"
@@ -6388,6 +7276,86 @@ kind = "lane-fault"
 check = "lanes"
 label = "client.dialect-declares-an-echo-site-the-chat-reply-lacks"
 failure_class = "client.dialect-declares-an-echo-site-the-chat-reply-lacks"
+migrated = false
+
+[[fault]]
+id = "client.journal-drops-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "client.journal-drops-timings"
+failure_class = "client.journal-drops-timings"
+migrated = false
+
+[[fault]]
+id = "client.projection-drops-the-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "client.projection-drops-the-timings"
+failure_class = "client.projection-drops-the-timings"
+migrated = false
+
+[[fault]]
+id = "client.projection-leaves-rowless-timings-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.projection-leaves-rowless-timings-unnamed"
+failure_class = "client.projection-leaves-rowless-timings-unnamed"
+migrated = false
+
+[[fault]]
+id = "client.projection-leaves-unspellable-timings-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.projection-leaves-unspellable-timings-unnamed"
+failure_class = "client.projection-leaves-unspellable-timings-unnamed"
+migrated = false
+
+[[fault]]
+id = "client.reply-reads-no-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "client.reply-reads-no-timings"
+failure_class = "client.reply-reads-no-timings"
+migrated = false
+
+[[fault]]
+id = "client.dialect-declares-no-timings-path"
+kind = "lane-fault"
+check = "lanes"
+label = "client.dialect-declares-no-timings-path"
+failure_class = "client.dialect-declares-no-timings-path"
+migrated = false
+
+[[fault]]
+id = "client.unspellable-asks-for-a-key-the-record-has"
+kind = "lane-fault"
+check = "lanes"
+label = "client.unspellable-asks-for-a-key-the-record-has"
+failure_class = "client.unspellable-asks-for-a-key-the-record-has"
+migrated = false
+
+[[fault]]
+id = "client.unspellable-item-the-record-spells"
+kind = "lane-fault"
+check = "lanes"
+label = "client.unspellable-item-the-record-spells"
+failure_class = "client.unspellable-item-the-record-spells"
+migrated = false
+
+[[fault]]
+id = "client.unspellable-ask-disagrees-with-its-prose"
+kind = "lane-fault"
+check = "lanes"
+label = "client.unspellable-ask-disagrees-with-its-prose"
+failure_class = "client.unspellable-ask-disagrees-with-its-prose"
+migrated = false
+
+[[fault]]
+id = "client.issued-retry-reason-unnamed"
+kind = "lane-fault"
+check = "lanes"
+label = "client.issued-retry-reason-unnamed"
+failure_class = "client.issued-retry-reason-unnamed"
 migrated = false
 
 [[fault]]
@@ -6783,9 +7751,974 @@ failure_class = "drive.canned-registry-scan-reads-nothing"
 migrated = false
 
 [[fault]]
+id = "drive.registry-scan-reads-a-list-as-absent"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-scan-reads-a-list-as-absent"
+failure_class = "drive.registry-scan-reads-a-list-as-absent"
+migrated = false
+
+[[fault]]
+id = "drive.registry-resolves-any-id"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-resolves-any-id"
+failure_class = "drive.registry-resolves-any-id"
+migrated = false
+
+[[fault]]
+id = "drive.registry-takes-one-shard-of-many"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-takes-one-shard-of-many"
+failure_class = "drive.registry-takes-one-shard-of-many"
+migrated = false
+
+[[fault]]
+id = "drive.registry-drops-the-projector"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-drops-the-projector"
+failure_class = "drive.registry-drops-the-projector"
+migrated = false
+
+[[fault]]
+id = "drive.registry-drops-the-draft"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-drops-the-draft"
+failure_class = "drive.registry-drops-the-draft"
+migrated = false
+
+[[fault]]
+id = "drive.registry-calls-one-file-a-set"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-calls-one-file-a-set"
+failure_class = "drive.registry-calls-one-file-a-set"
+migrated = false
+
+[[fault]]
+id = "drive.registry-takes-an-empty-list"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-takes-an-empty-list"
+failure_class = "drive.registry-takes-an-empty-list"
+migrated = false
+
+[[fault]]
+id = "drive.registry-resolves-a-sidecar-as-one-file"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-resolves-a-sidecar-as-one-file"
+failure_class = "drive.registry-resolves-a-sidecar-as-one-file"
+migrated = false
+
+[[fault]]
+id = "drive.registry-reads-a-draft-list-as-absent"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-reads-a-draft-list-as-absent"
+failure_class = "drive.registry-reads-a-draft-list-as-absent"
+migrated = false
+
+[[fault]]
+id = "drive.registry-keeps-a-quote-in-an-item"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-keeps-a-quote-in-an-item"
+failure_class = "drive.registry-keeps-a-quote-in-an-item"
+migrated = false
+
+[[fault]]
+id = "drive.registry-takes-any-string-as-a-digest"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-takes-any-string-as-a-digest"
+failure_class = "drive.registry-takes-any-string-as-a-digest"
+migrated = false
+
+[[fault]]
+id = "drive.regime-ignores-a-hardware-disagreement"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.regime-ignores-a-hardware-disagreement"
+failure_class = "drive.regime-ignores-a-hardware-disagreement"
+migrated = false
+
+[[fault]]
+id = "drive.regime-keeps-the-regimens-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.regime-keeps-the-regimens-engine"
+failure_class = "drive.regime-keeps-the-regimens-engine"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-regimen"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-regimen"
+failure_class = "drive.serve-bin-ignores-the-regimen"
+migrated = false
+
+[[fault]]
+id = "drive.registry-files-a-bad-headers-keys-under-the-last-table"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-files-a-bad-headers-keys-under-the-last-table"
+failure_class = "drive.registry-files-a-bad-headers-keys-under-the-last-table"
+migrated = false
+
+[[fault]]
+id = "drive.registry-keeps-quotes-in-an-id"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-keeps-quotes-in-an-id"
+failure_class = "drive.registry-keeps-quotes-in-an-id"
+migrated = false
+
+[[fault]]
+id = "drive.registry-drops-the-engine-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.registry-drops-the-engine-commit"
+failure_class = "drive.registry-drops-the-engine-commit"
+migrated = false
+
+[[fault]]
+id = "drive.regime-drops-the-chat-template"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.regime-drops-the-chat-template"
+failure_class = "drive.regime-drops-the-chat-template"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-no-registry-digest"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-no-registry-digest"
+failure_class = "drive.serve-bin-announces-no-registry-digest"
+migrated = false
+
+[[fault]]
+id = "client.props-asked-under-the-endpoints-path"
+kind = "lane-fault"
+check = "lanes"
+label = "client.props-asked-under-the-endpoints-path"
+failure_class = "client.props-asked-under-the-endpoints-path"
+migrated = false
+
+[[fault]]
+id = "drive.engine-passes-a-dirty-build"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-passes-a-dirty-build"
+failure_class = "drive.engine-passes-a-dirty-build"
+migrated = false
+
+[[fault]]
+id = "drive.engine-takes-a-short-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-takes-a-short-commit"
+failure_class = "drive.engine-takes-a-short-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-passes-another-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-passes-another-commit"
+failure_class = "drive.engine-passes-another-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-accepts-a-malformed-registered-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-a-malformed-registered-commit"
+failure_class = "drive.engine-accepts-a-malformed-registered-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-asks-before-the-registry-refuses"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-asks-before-the-registry-refuses"
+failure_class = "drive.engine-asks-before-the-registry-refuses"
+migrated = false
+
+[[fault]]
+id = "drive.engine-reads-a-refused-props"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-reads-a-refused-props"
+failure_class = "drive.engine-reads-a-refused-props"
+migrated = false
+
+[[fault]]
+id = "drive.engine-compares-the-commit-before-the-literal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-compares-the-commit-before-the-literal"
+failure_class = "drive.engine-compares-the-commit-before-the-literal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-passes-another-literal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-passes-another-literal"
+failure_class = "drive.engine-passes-another-literal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-accepts-an-empty-literal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-an-empty-literal"
+failure_class = "drive.engine-accepts-an-empty-literal"
+migrated = false
+
+[[fault]]
+id = "drive.engine-names-both-paths-alike"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-names-both-paths-alike"
+failure_class = "drive.engine-names-both-paths-alike"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-skips-the-engine-check"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-skips-the-engine-check"
+failure_class = "drive.serve-bin-skips-the-engine-check"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-binds-before-the-engine-check"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-binds-before-the-engine-check"
+failure_class = "drive.serve-bin-binds-before-the-engine-check"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-no-engine-build"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-no-engine-build"
+failure_class = "drive.serve-bin-announces-no-engine-build"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-no-engine-identity"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-no-engine-identity"
+failure_class = "drive.serve-bin-announces-no-engine-identity"
+migrated = false
+
+[[fault]]
+id = "drive.engine-accepts-a-non-hex-registered-commit"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-accepts-a-non-hex-registered-commit"
+failure_class = "drive.engine-accepts-a-non-hex-registered-commit"
+migrated = false
+
+[[fault]]
+id = "drive.engine-echoes-the-whole-body"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-echoes-the-whole-body"
+failure_class = "drive.engine-echoes-the-whole-body"
+migrated = false
+
+[[fault]]
+id = "drive.engine-refusal-omits-what-was-expected"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-refusal-omits-what-was-expected"
+failure_class = "drive.engine-refusal-omits-what-was-expected"
+migrated = false
+
+[[fault]]
+id = "drive.engine-calls-no-commit-a-suffix"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-calls-no-commit-a-suffix"
+failure_class = "drive.engine-calls-no-commit-a-suffix"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+failure_class = "drive.serve-bin-asks-the-engine-before-the-usage-refusal"
+migrated = false
+
+[[fault]]
+id = "drive.serve-log-drops-a-line"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-log-drops-a-line"
+failure_class = "drive.serve-log-drops-a-line"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-ignores-the-log-flag"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-ignores-the-log-flag"
+failure_class = "drive.serve-bin-ignores-the-log-flag"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-hides-a-truncated-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-hides-a-truncated-log"
+failure_class = "drive.serve-bin-hides-a-truncated-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-panics-printing-a-failure"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-panics-printing-a-failure"
+failure_class = "drive.serve-bin-panics-printing-a-failure"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-keeps-serving-a-stopped-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-keeps-serving-a-stopped-log"
+failure_class = "drive.serve-bin-keeps-serving-a-stopped-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-misreports-an-uncreatable-log"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-misreports-an-uncreatable-log"
+failure_class = "drive.serve-bin-misreports-an-uncreatable-log"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-empties-the-log-before-it-starts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-empties-the-log-before-it-starts"
+failure_class = "drive.serve-bin-empties-the-log-before-it-starts"
+migrated = false
+
+[[fault]]
+id = "drive.projection-rebuilds-without-the-answer"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-rebuilds-without-the-answer"
+failure_class = "drive.projection-rebuilds-without-the-answer"
+migrated = false
+
+[[fault]]
+id = "drive.projection-derives-on-an-uncited-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-derives-on-an-uncited-engine"
+failure_class = "drive.projection-derives-on-an-uncited-engine"
+migrated = false
+
+[[fault]]
+id = "drive.projection-prefill-on-an-uncited-engine"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-prefill-on-an-uncited-engine"
+failure_class = "drive.projection-prefill-on-an-uncited-engine"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-an-unspellable"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-an-unspellable"
+failure_class = "drive.projection-drops-an-unspellable"
+migrated = false
+
+[[fault]]
+id = "drive.projection-guesses-an-unrebuilt-head"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-guesses-an-unrebuilt-head"
+failure_class = "drive.projection-guesses-an-unrebuilt-head"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-records-without-a-regimen"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-records-without-a-regimen"
+failure_class = "drive.serve-bin-records-without-a-regimen"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-never-writes-the-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-never-writes-the-record"
+failure_class = "drive.serve-bin-never-writes-the-record"
+migrated = false
+
+[[fault]]
+id = "drive.session-writes-usage-beside-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-writes-usage-beside-timings"
+failure_class = "drive.session-writes-usage-beside-timings"
+migrated = false
+
+[[fault]]
+id = "drive.session-write-through-skips-the-lines-before-it"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-write-through-skips-the-lines-before-it"
+failure_class = "drive.session-write-through-skips-the-lines-before-it"
+migrated = false
+
+[[fault]]
+id = "drive.session-append-leaves-the-sink-unfed"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-append-leaves-the-sink-unfed"
+failure_class = "drive.session-append-leaves-the-sink-unfed"
+migrated = false
+
+[[fault]]
+id = "drive.serve-log-writes-after-a-failure"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-log-writes-after-a-failure"
+failure_class = "drive.serve-log-writes-after-a-failure"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-an-unanswered-request"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-an-unanswered-request"
+failure_class = "drive.projection-drops-an-unanswered-request"
+migrated = false
+
+[[fault]]
+id = "drive.projection-cites-a-literal-on-any-binary"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-cites-a-literal-on-any-binary"
+failure_class = "drive.projection-cites-a-literal-on-any-binary"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-reports-a-digest-of-other-bytes"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-reports-a-digest-of-other-bytes"
+failure_class = "drive.serve-bin-reports-a-digest-of-other-bytes"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-record"
+failure_class = "drive.serve-bin-leaves-an-earlier-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-leaves-an-earlier-sidecar"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-leaves-an-earlier-sidecar"
+failure_class = "drive.serve-bin-leaves-an-earlier-sidecar"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-only-a-held-record"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-only-a-held-record"
+failure_class = "drive.serve-bin-announces-only-a-held-record"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-announces-every-record-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-announces-every-record-emptied"
+failure_class = "drive.serve-bin-announces-every-record-emptied"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-empties-the-record-before-the-bind"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-empties-the-record-before-the-bind"
+failure_class = "drive.serve-bin-empties-the-record-before-the-bind"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-forgets-what-it-emptied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-forgets-what-it-emptied"
+failure_class = "drive.serve-bin-forgets-what-it-emptied"
+migrated = false
+
+[[fault]]
+id = "drive.session-drops-timings"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-drops-timings"
+failure_class = "drive.session-drops-timings"
+migrated = false
+
+[[fault]]
+id = "drive.session-response-reasoning-dropped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-response-reasoning-dropped"
+failure_class = "drive.session-response-reasoning-dropped"
+migrated = false
+
+[[fault]]
+id = "drive.session-drops-progress"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-drops-progress"
+failure_class = "drive.session-drops-progress"
+migrated = false
+
+[[fault]]
+id = "drive.session-overflow-logged-as-server"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-overflow-logged-as-server"
+failure_class = "drive.session-overflow-logged-as-server"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-timings-line-drops-the-cache-count"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-timings-line-drops-the-cache-count"
+failure_class = "drive.session-a-timings-line-drops-the-cache-count"
+migrated = false
+
+[[fault]]
+id = "drive.session-logs-progress-after-the-end"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-logs-progress-after-the-end"
+failure_class = "drive.session-logs-progress-after-the-end"
+migrated = false
+
+[[fault]]
+id = "drive.session-a-timings-line-drops-a-draft-count"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-a-timings-line-drops-a-draft-count"
+failure_class = "drive.session-a-timings-line-drops-a-draft-count"
+migrated = false
+
+[[fault]]
 id = "adapters.compaction-read-as-a-turn"
 kind = "lane-fault"
 check = "lanes"
 label = "adapters.compaction-read-as-a-turn"
 failure_class = "adapters.compaction-read-as-a-turn"
+migrated = false
+[[fault]]
+id = "exercise.exercise_story_assertion"
+kind = "seeded-gate"
+check = "exercise"
+label = "a story's assertion broken in place"
+failure_class = "exercise.story"
+legacy_signature = "expected '2\\.0' to be '2\\.1'"
+migrated = false
+
+[[fault]]
+id = "mech.every-catcher-a-lane-fault-declares-is-listed"
+kind = "mechanics"
+check = "-"
+label = "every catcher a lane fault declares is listed"
+failure_class = "lanes.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-lane-fault-whose-second-catcher-did-not-fail-is-not-red"
+kind = "mechanics"
+check = "-"
+label = "a lane fault whose second catcher did not fail is not red"
+failure_class = "lanes.catcher-not-seen-red"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.and-with-only-the-catcher-that-failed-it-is"
+kind = "mechanics"
+check = "-"
+label = "and with only the catcher that failed, it is"
+failure_class = "lanes.clean"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_deploy_group_quoted_key"
+kind = "seeded-gate"
+check = "ci"
+label = "a quoted extra key in the deploy job's group"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job's .pages. group carries keys beyond group and cancel-in-progress .queue."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploy_second_group_tagged"
+kind = "seeded-gate"
+check = "ci"
+label = "a second group in the deploy job, tagged"
+failure_class = "wiring.pages-concurrency-extra-key"
+legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly .!!str concurrency"
+migrated = false
+
+[[fault]]
+id = "client.stub-leaves-props-unanswered"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stub-leaves-props-unanswered"
+failure_class = "client.stub-leaves-props-unanswered"
+migrated = false
+
+[[fault]]
+id = "client.stub-closes-an-extra-call-silently"
+kind = "lane-fault"
+check = "lanes"
+label = "client.stub-closes-an-extra-call-silently"
+failure_class = "client.stub-closes-an-extra-call-silently"
+migrated = false
+
+[[fault]]
+id = "drive.engine-skips-a-canned-substrate"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.engine-skips-a-canned-substrate"
+failure_class = "drive.engine-skips-a-canned-substrate"
+migrated = false
+
+[[fault]]
+id = "drive.canned-build-info-names-other-acts"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.canned-build-info-names-other-acts"
+failure_class = "drive.canned-build-info-names-other-acts"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_recording_carried_disagrees"
+kind = "seeded-gate"
+check = "exercise"
+label = "a capture's carried field disagreeing with its events"
+failure_class = "exercise.recording-carried"
+legacy_signature = "voxel-stress: its carried field disagrees with its events"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_snapshot_orphaned"
+kind = "seeded-gate"
+check = "exercise"
+label = "a snapshot no admission names, left in place"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "admission: scripts/hygiene-admitted-000000000000-patterns\\.tsv: a snapshot no admission names"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_admit_keeps_orphans"
+kind = "seeded-gate"
+check = "exercise"
+label = "admit no longer removing what no admission names"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_replayed_without_label"
+kind = "seeded-gate"
+check = "exercise"
+label = "an authored example replayed without its label"
+failure_class = "exercise.example-unlabelled"
+legacy_signature = "FAIL.*Replay\\.stories\\.tsx > an authored example, under its label for the whole replay"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_label_scrolls_away"
+kind = "seeded-gate"
+check = "exercise"
+label = "an example's label scrolling away"
+failure_class = "exercise.example-unlabelled"
+legacy_signature = "replay-smoke: kitchen-sink's label is on the page but out of view"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_bundled_into_page"
+kind = "seeded-gate"
+check = "exercise"
+label = "an example bundled into the page's code"
+failure_class = "exercise.payload-bundled"
+legacy_signature = "replay-smoke: kitchen-sink is bundled into the page's code"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_progress_read_nested"
+kind = "seeded-gate"
+check = "exercise"
+label = "the meter reading a progress frame's old shape"
+failure_class = "exercise.progress-shape"
+legacy_signature = "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_flow_collection_hides_a_group"
+kind = "seeded-gate"
+check = "ci"
+label = "a flow collection hiding a second group"
+failure_class = "wiring.pages-yaml-duplicate"
+legacy_signature = "pages.yml: jobs.deploy: duplicate key .concurrency."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_deploy_job"
+kind = "seeded-gate"
+check = "ci"
+label = "a second deploy job"
+failure_class = "wiring.pages-yaml-duplicate"
+legacy_signature = "pages.yml: jobs: duplicate key .deploy."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_document"
+kind = "seeded-gate"
+check = "ci"
+label = "a second YAML document"
+failure_class = "wiring.pages-yaml-documents"
+legacy_signature = "pages.yml: holds 2 YAML documents, not one"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_quoted_merge_key"
+kind = "seeded-gate"
+check = "ci"
+label = "a quoted merge key over the guards"
+failure_class = "wiring.pages-yaml-merge"
+legacy_signature = "pages.yml: the deploy job carries a key not spelled plainly .<<."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_second_job"
+kind = "seeded-gate"
+check = "ci"
+label = "a second job that publishes"
+failure_class = "wiring.pages-second-job"
+legacy_signature = "pages.yml: jobs other than .deploy. .publish-too."
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_check_step_skipped"
+kind = "seeded-gate"
+check = "ci"
+label = "the check step skipped"
+failure_class = "wiring.pages-step-skipped"
+legacy_signature = "pages.yml: the check step carries if, so it may not run as written"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_site_written_after_its_check"
+kind = "seeded-gate"
+check = "ci"
+label = "the site written after its check"
+failure_class = "wiring.pages-site-written"
+legacy_signature = "pages.yml: a step between ./verify.sh --site _site and the upload"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_upload_always"
+kind = "seeded-gate"
+check = "ci"
+label = "the upload run whatever the check said"
+failure_class = "wiring.pages-step-forced"
+legacy_signature = "pages.yml: a step from the check on carries .if:. .actions/upload-pages-artifact"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_trigger_any_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "the trigger on any branch"
+failure_class = "wiring.pages-trigger"
+legacy_signature = "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_checkout_not_the_run"
+kind = "seeded-gate"
+check = "ci"
+label = "the checkout not the run's sha"
+failure_class = "wiring.pages-checkout"
+legacy_signature = "pages.yml: the site is not checked against the sha that run built"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_condition_outside_its_braces"
+kind = "seeded-gate"
+check = "ci"
+label = "the condition with text outside its braces"
+failure_class = "wiring.pages-condition"
+legacy_signature = "pages.yml: the deploy's condition has text outside its"
+migrated = false
+
+[[fault]]
+id = "drive.session-settles-a-capped-turn-final"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-settles-a-capped-turn-final"
+failure_class = "drive.session-settles-a-capped-turn-final"
+migrated = false
+
+[[fault]]
+id = "drive.session-writes-a-capped-response-uncapped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-writes-a-capped-response-uncapped"
+failure_class = "drive.session-writes-a-capped-response-uncapped"
+migrated = false
+
+[[fault]]
+id = "drive.projection-answers-a-capped-call"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-answers-a-capped-call"
+failure_class = "drive.projection-answers-a-capped-call"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-usage-hides-serve"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-usage-hides-serve"
+failure_class = "drive.serve-bin-usage-hides-serve"
+migrated = false
+
+[[fault]]
+id = "client.canned-ignores-its-finish-reason"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-ignores-its-finish-reason"
+failure_class = "client.canned-ignores-its-finish-reason"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-cap-cuts-reasoning"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-cap-cuts-reasoning"
+failure_class = "drive.serve-bin-cap-cuts-reasoning"
+migrated = false
+
+[[fault]]
+id = "drive.projection-drops-a-capped-calls-prefill"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-a-capped-calls-prefill"
+failure_class = "drive.projection-drops-a-capped-calls-prefill"
+migrated = false
+[[fault]]
+id = "hygiene.hygiene_datauri_read_as_prose"
+kind = "seeded-gate"
+check = "hygiene"
+label = "a data-URI payload read as prose"
+failure_class = "hygiene.forbidden-pattern"
+legacy_signature = "hygiene: internal-ticket-id: tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri\\.svg:6:"
+migrated = false
+
+[[fault]]
+id = "mech.a-ticket-id-shape-in-a-data-uri-payload-is-not-a-ticket-id"
+kind = "mechanics"
+check = "-"
+label = "a ticket-id shape in a data-URI payload is not a ticket id"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.and-the-same-bytes-outside-a-data-uri-read-red"
+kind = "mechanics"
+check = "-"
+label = "and the same bytes outside a data URI read red"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.a-readable-run-after-a-made-up-image-prefix-reads-red"
+kind = "mechanics"
+check = "-"
+label = "a readable run after a made-up image prefix reads red"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.a-hit-beside-an-image-is-named-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a hit beside an image is named against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-scan-of-a-tree-with-an-image-leaves-no-prose-view-behind"
+kind = "mechanics"
+check = "-"
+label = "a scan of a tree with an image leaves no prose view behind"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-readable-run-behind-every-image-label-every-check-s-near-miss-and-every-refused-delimiter-reads-red-once-each"
+kind = "mechanics"
+check = "-"
+label = "a readable run behind every image label, every check's near miss and every refused delimiter reads red once each"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.thirteen-hits-beside-images-two-files-sharing-a-name-are-each-named-once-against-their-own-file"
+kind = "mechanics"
+check = "-"
+label = "thirteen hits beside images, two files sharing a name, are each named once against their own file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-hit-in-a-decoded-view-beside-an-image-is-named-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a hit in a decoded view beside an image is named against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-credential-shape-inside-an-image-payload-reads-red-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a credential shape inside an image payload reads red, against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
 migrated = false

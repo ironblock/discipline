@@ -9,17 +9,21 @@ export function ms(value: number): string {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-/** How long something took, or has taken so far: tenths of a second under a minute, so a live count moves. */
+/**
+ * How long something took, or has taken so far: tenths of a second under a minute, so a live count moves.
+ * The unit is chosen by what the value rounds to, as `ms` does: no `60.0 s`.
+ */
 export function took(value: number): string {
-  if (value < 1000) return `${Math.round(value)} ms`;
-  if (value < 60_000) return `${(value / 1000).toFixed(1)} s`;
-  const s = Math.floor(value / 1000);
+  if (Math.round(value) < 1000) return `${Math.round(value)} ms`;
+  if (Math.round(value / 100) < 600) return `${(value / 1000).toFixed(1)} s`;
+  const s = Math.round(value / 1000);
   return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
 }
 
 export function tokens(value: number): string {
   if (value < 1000) return `${value}`;
-  if (value < 10_000) return `${(value / 1000).toFixed(1)}k`;
+  // By what it rounds to, so 9,999 is `10k`, never `10.0k`.
+  if (Math.round(value / 100) < 100) return `${(value / 1000).toFixed(1)}k`;
   return `${Math.round(value / 100) / 10}k`;
 }
 
@@ -44,6 +48,7 @@ export function bytes(text: string): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** As `wc -l` counts a file that ends its last line: a trailing newline ends a line, it does not start one. */
 export function lines(text: string): number {
-  return text === '' ? 0 : text.split('\n').length;
+  return text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
 }

@@ -54,6 +54,15 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
   );
 }
 
+/**
+ * A cancelled turn's mark, on its ask and on what answered it (#289): the words are the surface's, the fact the
+ * log's -- `diet` sends the model only finished turns, so a cancelled one is gone from what it reads next.
+ */
+const OUT_OF_CONTEXT = {
+  value: <span className="ex-context-out">not in the model's context</span>,
+  title: "this turn was cancelled, and the drive sends the model only finished turns: it will not read this ask or its answer",
+};
+
 /** A person's ask. Its header says what it will cost to read: the new tokens it put in front of the model. */
 export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
   return (
@@ -69,6 +78,7 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
             ),
           }
         : {})}
+      stats={[node.outOfContext && OUT_OF_CONTEXT]}
       provenance={node}
       id={node.id}
       actions={<Copy text={node.text} />}
@@ -137,6 +147,7 @@ export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<A
             ),
             title: 'why generation stopped',
           },
+        node.outOfContext && OUT_OF_CONTEXT,
       ]}
       provenance={node}
       id={node.id}

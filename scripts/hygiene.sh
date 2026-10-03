@@ -152,10 +152,30 @@ fi
 # scanned, and this is a second view of the same files. A file carrying no
 # encoded strings has no view and no mirror file, so the mirror is small.
 mirror="$(mktemp -d)" || { echo "hygiene: mktemp -d failed" >&2; exit "$EXIT_BROKEN"; }
-trap 'rm -rf -- "$mirror"' EXIT
+# ONE trap for both temporaries, and it keeps the status it was called with
+# (#236). Two `trap ... EXIT` lines used to replace each other, leaking the
+# mirror; and a trap ending in `rm` turned an abort under `set -u` into exit 0
+# on bash 3.2 -- a scan that died having scanned nothing read as clean.
+#
+# AND $? CANNOT CARRY THE ABORT: on bash 3.2 an EXIT trap reached through a
+# `set -u` abort sees $? = 0 (measured). So a zero status counts as clean only
+# when the scan reached its last line and said so; any other exit 0 is a scan
+# that stopped short, and is EXIT_BROKEN.
+matchfile=""
+datauri=""
+finished=0
+cleanup() {
+  local rc=$?
+  rm -rf -- "$mirror"
+  [ -z "$matchfile" ] || rm -f -- "$matchfile"
+  [ -z "$datauri" ] || rm -rf -- "$datauri"
+  [ "$finished" = 1 ] || [ "$rc" -ne 0 ] || rc="$EXIT_BROKEN"
+  exit "$rc"
+}
+trap cleanup EXIT
 
 decoded_count=0
-if ! decoded_count="$(printf '%s\0' "${scanned[@]}" \
+if ! decoded_count="$(printf '%s\0' ${scanned+"${scanned[@]}"} \
       | python3 "${here}/hygiene-decode.py" --into "$mirror")"; then
   echo "hygiene: the decoded view could not be built; a scan that skips it is" \
        "a scan of the escaping, not of the content" >&2
@@ -168,7 +188,7 @@ while IFS= read -r -d '' path; do decoded_files+=("$path"); done \
 
 # Check readability once, up front. Otherwise the first pattern's grep fails,
 # its stderr is discarded, and the scan dies with a status and no filename.
-for path in "${scanned[@]}"; do
+for path in ${scanned+"${scanned[@]}"}; do
   [ -r "$path" ] || {
     echo "hygiene: cannot read ${path}; a file the scan cannot open is not clean" >&2
     exit "$EXIT_BROKEN"
@@ -186,7 +206,7 @@ binary_files=()
 for path in ${decoded_files+"${decoded_files[@]}"}; do
   text_files+=("$path")
 done
-for path in "${scanned[@]}"; do
+for path in ${scanned+"${scanned[@]}"}; do
   if grep -Iq . -- "$path" 2>/dev/null || [ ! -s "$path" ]; then
     text_files+=("$path")
   else
@@ -198,7 +218,7 @@ done
 # Reporting it as clean would be a lie, and scanning it byte-wise would find
 # nothing in a UTF-16 document however hostile its contents.
 if [ "$scan_all" = true ] && [ "${#binary_files[@]}" -gt 0 ]; then
-  for path in "${binary_files[@]}"; do
+  for path in ${binary_files+"${binary_files[@]}"}; do
     echo "hygiene: unscannable-encoding: ${path}: not scannable text;" \
          "this surface must be UTF-8" >&2
   done
@@ -206,12 +226,62 @@ if [ "$scan_all" = true ] && [ "${#binary_files[@]}" -gt 0 ]; then
   exit "$EXIT_DIRTY"
 fi
 
+# --- embedded images ---------------------------------------------------------
+# BINARY BYTES IN TEXT CLOTHING (#278). An image embedded in a text file as a
+# base64 data URI -- an SVG's `<feImage>` PNG -- is bytes, and #233 ruled a
+# shape inside bytes names nothing: the loose patterns find `internal-ticket-id`
+# in base64 at the rate they find it in random bytes. So the loose patterns
+# read each text file's PROSE: `hygiene-datauri.py` writes a view with every
+# payload that IS an image -- by its decoded bytes, not its label -- blanked,
+# line and column numbers unchanged, and names the original where nothing was
+# blanked. The `b` (credential) patterns still read every original, whole, as
+# #240 left them (#279's review: a credential cut at a view's edge escaped).
+# `check-history.py` scans its patch files through this script, so the history
+# reads the same. Under `scan: all` every pattern reads every byte.
+prose_files=(${text_files+"${text_files[@]}"})
+origins=()
+proses=()
+if [ "$scan_all" != true ] && [ "${#text_files[@]}" -gt 0 ]; then
+  datauri="$(mktemp -d)" || { echo "hygiene: mktemp -d failed" >&2; exit "$EXIT_BROKEN"; }
+  if ! printf '%s\0' ${text_files+"${text_files[@]}"} \
+       | python3 "${here}/hygiene-datauri.py" --into "$datauri" > "${datauri}/scan"; then
+    echo "hygiene: the prose views could not be built; a scan that reads an" \
+         "image as prose, or skips the file, is not this scan" >&2
+    exit "$EXIT_BROKEN"
+  fi
+  prose_files=()
+  i=0
+  while IFS= read -r -d '' path; do
+    prose_files+=("$path")
+    if [ "$path" != "${text_files[i]}" ]; then
+      origins+=("${text_files[i]}"); proses+=("$path")
+    fi
+    i=$((i + 1))
+  done < "${datauri}/scan"
+  if [ "$i" -ne "${#text_files[@]}" ]; then
+    echo "hygiene: the prose views name ${i} file(s) for ${#text_files[@]}; a scan" \
+         "that lost a file is not this scan" >&2
+    exit "$EXIT_BROKEN"
+  fi
+fi
+
+# A hit in a prose view is a hit in the file it came from.
+from_view() {
+  local line="$1" i=0
+  while [ "$i" -lt "${#origins[@]}" ]; do
+    case "$line" in
+      "${proses[i]}:"*) printf '%s' "${origins[i]}${line#"${proses[i]}"}"; return ;;
+    esac
+    i=$((i + 1))
+  done
+  printf '%s' "$line"
+}
+
 # --- scan --------------------------------------------------------------------
 # grep's output goes to a file rather than a command substitution: a match
 # inside a binary carries NUL bytes, which `$(...)` discards with a warning on
 # stderr. A file keeps grep's exit status ours to read and keeps the noise out.
 matchfile="$(mktemp)" || { echo "hygiene: mktemp failed" >&2; exit "$EXIT_BROKEN"; }
-trap 'rm -f -- "$matchfile"' EXIT
 
 patterns=0
 hits=0
@@ -238,9 +308,9 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
   sed_flags="g"
   case "${flags:-}" in *i*) sed_flags="gI" ;; esac
 
-  targets=("${text_files[@]}")
   case "${flags:-}" in
-    *b*) targets+=(${binary_files+"${binary_files[@]}"}) ;;
+    *b*) targets=(${text_files+"${text_files[@]}"} ${binary_files+"${binary_files[@]}"}) ;;
+    *) targets=(${prose_files+"${prose_files[@]}"}) ;;
   esac
   [ "${#targets[@]}" -gt 0 ] || continue
 
@@ -248,7 +318,7 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
   while [ "$start" -lt "${#targets[@]}" ]; do
     part=("${targets[@]:start:CHUNK}")
     rc=0
-    grep "${opts[@]}" -e "$regex" -- "${part[@]}" > "$matchfile" 2>/dev/null || rc=$?
+    grep ${opts+"${opts[@]}"} -e "$regex" -- ${part+"${part[@]}"} > "$matchfile" 2>/dev/null || rc=$?
 
     case "$rc" in
       0)
@@ -282,6 +352,7 @@ while IFS=$'\t' read -r label flags regex || [ -n "${label:-}" ]; do
           # A hit in the mirror is a hit in the file it was decoded from, and
           # says so. Reporting the temporary path would name a file that is
           # gone by the time anyone reads the message.
+          [ "${#origins[@]}" -eq 0 ] || line="$(from_view "$line")"
           case "$line" in
             "$mirror"/*) line="(decoded) ${line#"$mirror"/}" ;;
           esac
@@ -314,7 +385,7 @@ fi
 # derives itself. A pattern can be given a looser boundary to reach through an
 # escape; a digest cannot, so this half needs the decoding more than the other.
 digests=0
-printf '%s\0' "${scanned[@]}" \
+printf '%s\0' ${scanned+"${scanned[@]}"} \
   | python3 "${here}/check-hashes.py" --table "$hashes_file" || digests=$?
 case "$digests" in
   0) : ;;
@@ -333,5 +404,7 @@ else
   echo "hygiene: ${#scanned[@]} file(s) clean against ${patterns} pattern(s)" \
        "($((${#text_files[@]} - decoded_count)) text, ${#binary_files[@]} binary," \
        "the latter searched only for credential shapes;" \
+       "${#proses[@]} read as prose with their embedded images blanked;" \
        "${decoded_count} decoded view(s) scanned beside them)"
 fi
+finished=1

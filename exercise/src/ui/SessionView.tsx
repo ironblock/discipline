@@ -147,13 +147,18 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
         : [],
     [session, curtain],
   );
-  // What is pointed at (or focused), and the chain it lights (chain.ts); the address's target when nothing is.
+  // What is pointed at, else what is focused, and the chain it lights (chain.ts); the address's target when
+  // neither is. Two states, not one: a pointer over nothing that points -- which Chromium also reports under a
+  // mouse left still while the page moves beneath it -- falls back to the focus rather than taking it away.
   const [pointed, setPointed] = useState<Pointed>({});
+  const [focused, setFocused] = useState<Pointed>({});
   const hot = useMemo(() => {
     const sideOf = new Map([...session.branches.values()].flat().map((b) => [b.id, b] as const));
-    const aimed: Pointed =
-      pointed.node !== undefined || pointed.branches !== undefined || pointed.entry !== undefined
-        ? pointed
+    const some = (p: Pointed) => p.node !== undefined || p.branches !== undefined || p.entry !== undefined;
+    const aimed: Pointed = some(pointed)
+      ? pointed
+      : some(focused)
+        ? focused
         : target === undefined
           ? // A side call opened under its message is lit, with its bar and what it wrote, until something else is pointed at.
             opened.length > 0
@@ -167,10 +172,14 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                 ? { node: target }
                 : {};
     return chain(aimed, wires, (node) => (session.branches.get(node) ?? []).map((b) => b.id), (branch) => sideOf.get(branch)?.at);
-  }, [wires, pointed, target, session, opened]);
+  }, [wires, pointed, focused, target, session, opened]);
   const pointAt = (el: Element | null) => {
     const next = el ? pointedAt(el) : {};
     if (!samePointed(pointed, next)) setPointed(next);
+  };
+  const focusAt = (el: Element | null) => {
+    const next = el ? pointedAt(el) : {};
+    if (!samePointed(focused, next)) setFocused(next);
   };
   const liveEntries = session.memory.filter((m) => m.state === 'live').length;
   const unseen = session.memory.filter((m) => isUnseen(m, seenThrough)).length;
@@ -222,7 +231,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
         key: net.key,
         node: first?.at ?? '',
         lane: first?.lane ?? '',
-        pending: net.key.endsWith('>pending'),
+        pending: net.pending,
         d: lines?.d ?? '',
         dots: lines?.dots ?? [],
         source: net.source,
@@ -448,9 +457,9 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
         data-wiring={wiring ? 'harness' : undefined}
         onPointerOver={(e) => pointAt(e.target as Element)}
         onPointerLeave={() => pointAt(null)}
-        onFocus={(e) => pointAt(e.target)}
+        onFocus={(e) => focusAt(e.target)}
         onBlur={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget)) pointAt(null);
+          if (!e.currentTarget.contains(e.relatedTarget)) focusAt(null);
         }}
       >
         {prefs.memoryLines === 'on' ? <Links wires={wires} hot={hot} {...(wiring ? { wiring } : {})} revision={[session, placed, seamPad, drawer, drawerOpen, condensed]} /> : null}

@@ -1,0 +1,8 @@
+HTTP/1.1 200 OK
+Connection: close
+Content-Type: application/json; charset=utf-8
+Server: llama.cpp
+Content-Length: 684
+Access-Control-Allow-Origin: 
+
+{"choices":[{"finish_reason":"stop","index":0,"message":{"role":"assistant","content":"11"}}],"created":1790892377,"model":"Qwen3.6-27B","system_fingerprint":"b0-unknown-dirty","object":"chat.completion","usage":{"completion_tokens":3,"prompt_tokens":42,"total_tokens":45,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":0,"visible_tokens":3}},"id":"chatcmpl-hQxFwu1oPbH4wYa3C3wspoP344utTWWn","timings":{"cache_n":0,"prompt_n":42,"prompt_ms":351.078,"prompt_per_token_ms":8.359,"prompt_per_second":119.63153487259243,"predicted_n":3,"predicted_ms":62.926,"predicted_per_token_ms":20.975333333333335,"predicted_per_second":47.67504688046276}}

@@ -72,4 +72,39 @@ cp "$R/band.json" "$tmp/band-x.json"; printf ' ' >> "$tmp/band-x.json"
 python3 -c "import json,sys;m=json.load(open(sys.argv[1]));m['apply']['seat_a_floor']=1000;json.dump(m,open(sys.argv[2],'w'))" "$C" "$tmp/floor.json"
 w=$(cd "$R" && python3 -B "$here/apply.py" "$tmp/floor.json" archived band.json . box.json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin)['word'])")
 [ "$w" = unadjudicated ] && say "ok    apply.py reads its seat-A floor from the config (1000: unadjudicated)" || { say "FAIL  apply.py with a floor of 1000 read $w"; bad=1; }
+python3 -c "import json,sys;m=json.load(open(sys.argv[1]));m['apply']['counted_fork_floor']=32;json.dump(m,open(sys.argv[2],'w'))" "$C" "$tmp/cf.json"
+w=$(cd "$R" && python3 -B "$here/apply.py" "$tmp/cf.json" archived band.json . box.json 2>/dev/null | python3 -c "import json,sys;print(json.load(sys.stdin)['word'])")
+[ "$w" = unadjudicated ] && say "ok    apply.py reads its counted-fork floor from the config (32 of 31: unadjudicated)" || { say "FAIL  apply.py with a counted-fork floor of 32 read $w"; bad=1; }
+# #115's byte parity on every switch setting: paired pooling and the fire's interval, the verdict unchanged
+python3 -c "import json,sys;m=json.load(open(sys.argv[1]));m['apply']['pool']='paired';m['apply']['report_refire_interval']=True;json.dump(m,open(sys.argv[2],'w'))" "$C" "$tmp/sw.json"
+( cd "$R" && python3 -B "$here/apply.py" "$tmp/sw.json" archived band.json . box.json --interval-out "$tmp/iv.json" ) > "$tmp/verdict-sw.json" 2>/dev/null
+if cmp -s "$tmp/verdict-sw.json" "$R/verdict.json" && python3 -c "import json,sys;d=json.load(open(sys.argv[1]));lo,hi=d['interval'];s=lo<0<hi;sys.exit(0 if d['forks']==31 and d['straddles_zero']==s and (d['sentence'] is not None)==s else 1)" "$tmp/iv.json" "$R/band.json"; then
+  say "ok    #115's verdict.json byte-identical with paired pooling and the interval on; the interval written beside it"
+else say "FAIL  a switch changed #115's verdict, or the interval file is wrong"; bad=1; fi
+( cd "$R" && python3 -B "$here/apply.py" "$tmp/sw.json" archived band.json . box.json ) > /dev/null 2>&1; rc=$?
+[ $rc = 2 ] && say "ok    apply.py refuses to report the interval with nowhere to write it (rc 2)" || { say "FAIL  an interval with no --interval-out exited $rc"; bad=1; }
+# the candidate's committed plan (planning's interview-miss rule): every planned fork in both of #115's fires ran
+# with its planned request; a fire with one planned request changed fails; a plan not the pinned bytes is refused
+K="$here/configs/extraction-acceptance-inverts-candidate.json"
+for fire in "$root/results/2026-09-25-extraction-acceptance-parity" "$root/results/2026-08-10-extraction-acceptance-inverts"; do
+  python3 -B "$here/apply.py" --check-plan "$K" "$fire" > /dev/null 2>&1 && say "ok    the candidate's plan holds over $(basename "$fire")'s seats" || { say "FAIL  the candidate's plan does not hold over $(basename "$fire")"; bad=1; }
+done
+mkdir -p "$tmp/chg/seat-a" "$tmp/chg/seat-b"; cp "$R/seat-b/events.jsonl" "$tmp/chg/seat-b/"
+python3 -c "
+import json,sys
+ev=[json.loads(l) for l in open(sys.argv[1])]
+q=[e for e in ev if e.get('event')=='fork.request' and e.get('lane')=='extraction'][-1]
+q['messages'][-1]['content']+=' '
+open(sys.argv[2],'w').write(''.join(json.dumps(e)+'\n' for e in ev))" "$R/seat-a/events.jsonl" "$tmp/chg/seat-a/events.jsonl"
+python3 -B "$here/apply.py" --check-plan "$K" "$tmp/chg" > /dev/null 2>&1; rc=$?
+[ $rc = 1 ] && say "ok    a planned request changed in a fire fails the plan (rc 1)" || { say "FAIL  a changed planned request read rc $rc"; bad=1; }
+cp -R "$here/configs" "$tmp/cfg"; printf ' ' >> "$tmp/cfg/candidate-planned-requests.json"
+python3 -B "$here/apply.py" --check-plan "$tmp/cfg/extraction-acceptance-inverts-candidate.json" "$R" > /dev/null 2>&1; rc=$?
+[ $rc = 2 ] && say "ok    a plan that is not the pinned bytes is refused (rc 2)" || { say "FAIL  an unpinned plan read rc $rc"; bad=1; }
+cp -R "$here/configs" "$tmp/cfg1"; python3 -c "
+import json,hashlib,sys
+d=sys.argv[1]; p=d+'/candidate-planned-requests.json'; j=json.load(open(p)); del j['seats']['B']; open(p,'w').write(json.dumps(j))
+c=d+'/extraction-acceptance-inverts-candidate.json'; k=json.load(open(c)); k['apply']['planned_requests']['sha256']=hashlib.sha256(open(p,'rb').read()).hexdigest(); json.dump(k,open(c,'w'))" "$tmp/cfg1"
+( cd "$R" && python3 -B "$here/apply.py" "$tmp/cfg1/extraction-acceptance-inverts-candidate.json" archived band.json . box.json --interval-out "$tmp/iv1.json" ) > /dev/null 2>&1; rc=$?
+[ $rc = 2 ] && say "ok    a plan naming one seat only is refused, even re-pinned (rc 2)" || { say "FAIL  a one-seat plan read rc $rc"; bad=1; }
 echo "parity selftest: $([ $bad = 0 ] && echo 'all pass' || echo 'failing')"; exit $bad

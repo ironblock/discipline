@@ -442,6 +442,26 @@ def main() -> int:
     # unportable body is a finding whatever was asked for.
     args = sys.argv[1:]
     only = None
+    # `--shard K/N` applies the injections whose name hashes to K of N
+    # (#262): the applier copies and restores the whole tree per injection,
+    # and one job applying every one is past the wall-clock budget. Every
+    # injection lands in exactly one shard; the static questions below run in
+    # every shard, since they cost seconds and a finding is a finding.
+    shard = None
+    # `--names` prints the injections this invocation would apply, one per
+    # line, and applies none: what scripts/check-ci-coverage.py reads to prove
+    # a declared split complete through this filter, not through a copy of it.
+    names_only = "--names" in args
+    if names_only:
+        args.remove("--names")
+    if "--shard" in args:
+        at = args.index("--shard")
+        spec = args[at + 1] if at + 1 < len(args) else ""
+        shard = gatelib.shard_arg(spec)
+        if shard is None:
+            print(f"check-injections: --shard {spec!r} is not K/N with 1 <= K <= N", file=sys.stderr)
+            return 2
+        del args[at : at + 2]
     if "--only" in args:
         at = args.index("--only")
         if at + 1 >= len(args):
@@ -531,9 +551,9 @@ def main() -> int:
     # This is the same technique `inject_injection_needs_gnu_sed` uses to
     # plant its own fault without tripping the lint while editing it, and the
     # reviewer's sharpest point is that its presence in this tree proves the
-    # authors knew text scanning is defeatable this way. What actually closes
-    # it is running the corpus under BSD semantics -- #75 -- and until that
-    # exists, this residue is declared and not defended.
+    # authors knew text scanning is defeatable this way. What closes it is
+    # running the corpus under BSD semantics: the `bsd` check
+    # (scripts/check-bsd-sed.sh, #75), whose seeded fault is this spelling.
     offset = {}
     running = 1
     for piece in text.split("\n"):
@@ -580,21 +600,31 @@ def main() -> int:
             )
             return 1
         applied = [only]
+    if shard is not None:
+        applied = [name for name in applied if gatelib.in_shard(name, *shard)]
+    if names_only:
+        print("\n".join([gatelib.LISTING, *applied]))
+        return 0
 
     tracked = tracked_files(root)
     helpers = "\n".join(match.group(0) for match in HELPERS.finditer(text))
 
     inert = []
+    finished = 0
     box = Path(tempfile.mkdtemp(prefix="check-injections."))
     try:
         populate(box, root, tracked)
         pristine = digests(box)
         before = fingerprint(box, pristine)
-        for name in applied:
+        # ONE INJECTION, TO ITS OUTCOME (#262, #268's fifth review): the census
+        # row is written from what this returns, so an injection the loop
+        # skips writes no row -- a row written on entry said only that the
+        # loop reached it.
+        def one(name: str) -> str:
             body = re.search(rf"^{name}\(\) \{{\n.*?^\}}\n", text, re.M | re.S)
             if body is None:
                 inert.append((name, 2, "its body could not be extracted"))
-                continue
+                return "inert"
             run = subprocess.run(
                 ["bash", "-c", f"set -e\n{helpers}\n{body.group(0)}\ncd {box}\n{name}\n"],
                 capture_output=True,
@@ -609,9 +639,11 @@ def main() -> int:
             # was reported as fine here, while the selftest graded the check
             # against the half-made tree and called it a gate that did not
             # fire. Found by running it, after item 3 renamed `substrate`.
+            outcome = "applied"
             if fingerprint(box) == before or run.returncode != 0:
                 tail = (run.stderr or "").strip().splitlines()[-1:] or [""]
                 inert.append((name, run.returncode, tail[0][:80]))
+                outcome = "inert"
             restore(box, root, pristine)
             # The box is shared now, so its cleanliness is a precondition of
             # every case after this one rather than a detail of this one. An
@@ -619,6 +651,17 @@ def main() -> int:
             # "this gate never fires" is the one verdict that must never be
             # reached by accident.
             if fingerprint(box) != before:
+                return "unrestored"
+            return outcome
+
+        for name in applied:
+            if gatelib.census_dry():
+                gatelib.record_ran(name)
+                continue
+            outcome = one(name)
+            gatelib.record_ran(name, outcome)
+            finished += 1
+            if outcome == "unrestored":
                 print(
                     f"check-injections: the sandbox could not be put back after "
                     f"{name}, so nothing after it can be trusted",
@@ -629,7 +672,8 @@ def main() -> int:
         shutil.rmtree(box, ignore_errors=True)
 
     print(
-        f"check-injections: {len(applied)} of {len(names)} injection(s) applied, "
+        f"check-injections: {finished if not gatelib.census_dry() else 0} of {len(names)} injection(s) applied"
+        f"{f' (shard {shard[0]} of {shard[1]})' if shard else ''}, "
         f"{len(inert)} that change nothing or do not finish; every struct literal "
         f"inside one names every field its type declares"
     )

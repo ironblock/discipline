@@ -1,0 +1,27 @@
+{
+ "read": "disk",
+ "exe": "41e6591d710fd4b5d81468264bb973a9f0575665dda2f27c69d5e370424d69bb",
+ "exe_bytes": 17872,
+ "exe_mtime": "2026-09-26T01:14:30Z",
+ "libraries": {
+  "libggml-base.so.0.24.0": "2002376d7915eb8dc201babcbfc6f9c44687080fd19483da8a538cc6126e421c",
+  "libggml-cpu.so.0.24.0": "f9960dd7d5e4593f93487253946f4c6b8560987e78aed220fc99a95299350408",
+  "libggml-cuda.so.0.24.0": "24ab8ce0f363870f41a3fcfac476813fe5fa6802e10476e05b6571fbe8eba99f",
+  "libggml.so.0.24.0": "f6eac071174bf8496e8ab0383c85c7c3aca4601ddaac1f3c647c22f0d7f3f7ce",
+  "libllama-common.so.0.4.1": "8c190d27eb88ba4d0f788b36589f70fef6a957ae7f14f3683bd9e8ebe16051ab",
+  "libllama-server-impl.so": "21bf075bfcb588a924fdf05d330f10ceefe9b919c7430b5d63cb364e55d056e2",
+  "libllama.so.0.4.1": "8a5f48903ad9fd0819aaf1ac47618f21e4b895ae72c4f968171bccc3f5ad61cb",
+  "libmtmd.so.0.4.1": "d212c7914885b838d01028f6b5460a747b04a38f26f0df4d63ebf7071714240b"
+ },
+ "library_mtimes": {
+  "libggml-base.so.0.24.0": "2026-09-26T01:11:04Z",
+  "libggml-cpu.so.0.24.0": "2026-09-26T01:11:13Z",
+  "libggml-cuda.so.0.24.0": "2026-09-26T01:13:38Z",
+  "libggml.so.0.24.0": "2026-09-26T01:13:40Z",
+  "libllama-common.so.0.4.1": "2026-09-26T01:14:10Z",
+  "libllama-server-impl.so": "2026-09-26T01:14:30Z",
+  "libllama.so.0.4.1": "2026-09-26T01:13:51Z",
+  "libmtmd.so.0.4.1": "2026-09-26T01:14:05Z"
+ },
+ "engine_fingerprint": "a08e5511390e70f9b92401284a5587a20163a9528a14982ecf8589d88290dea4"
+}

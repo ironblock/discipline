@@ -93,7 +93,8 @@ pub mod policy;
 use std::error::Error;
 use std::fmt::{self, Write as _};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
+use std::time::{Duration, Instant};
 
 use crate::client::vocabulary;
 
@@ -492,13 +493,15 @@ impl Confinement {
             return Err(NotRun::Nothing);
         };
 
-        let output = Command::new(program)
-            .args(rest)
-            .current_dir(worktree)
-            .output()
-            .map_err(|why| NotRun::Runner {
-                said: format!("{program} could not be run: {why}"),
-            })?;
+        let output = output_of(|| {
+            Command::new(program)
+                .args(rest)
+                .current_dir(worktree)
+                .output()
+        })
+        .map_err(|why| NotRun::Runner {
+            said: format!("{program} could not be run: {why}"),
+        })?;
 
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         if let Self::Sandbox(runner) = self
@@ -516,6 +519,38 @@ impl Confinement {
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr,
         })
+    }
+}
+
+/// How long a runner that is still open for writing is waited for (#88).
+///
+/// Linux refuses to execute a file open for writing (ETXTBSY). A runner
+/// written moments before is open for writing for as long as any process
+/// holds a descriptor on it, and a `fork` elsewhere in this process copies
+/// every descriptor into the child until that child execs. So the refusal
+/// is a window, not a verdict: the spawn is retried across it, and past
+/// this bound the refusal is reported as before.
+///
+/// What is retried is the program THIS process executes. Under the sandbox
+/// that is the runner, and a busy command inside it is refused by the
+/// runner's own exec, which is the command's result (exit and stderr), not
+/// a spawn this process can retry.
+const BUSY_PATIENCE: Duration = Duration::from_millis(500);
+
+/// `spawn`'s output, retried while the program is busy being written, for
+/// at most [`BUSY_PATIENCE`].
+fn output_of(spawn: impl Fn() -> std::io::Result<Output>) -> std::io::Result<Output> {
+    let give_up = Instant::now() + BUSY_PATIENCE;
+    loop {
+        match spawn() {
+            Err(why)
+                if why.kind() == std::io::ErrorKind::ExecutableFileBusy
+                    && Instant::now() < give_up =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            done => return done,
+        }
     }
 }
 
@@ -785,6 +820,12 @@ mod tests {
     /// about confinement fails instead.
     const REQUIRED: &str = "DIET_REQUIRE_SANDBOX";
 
+    /// A host path of this process's own (#316): a fixed one is shared by every
+    /// verify on the machine, so another run's escape would fail this one's.
+    fn outside_path() -> String {
+        format!("/tmp/outside-{}", std::process::id())
+    }
+
     /// The six seeded escapes, and the three controls without which they
     /// prove nothing.
     ///
@@ -849,8 +890,8 @@ mod tests {
 
         let mut denied = 0_usize;
 
-        // Row two: a write outside the tree.
-        let outside = run(&["sh", "-c", "echo x > /tmp/outside"]);
+        // Row two: a write outside the tree, to a host path of our own (#316).
+        let outside = run(&["sh", "-c", &format!("echo x > {}", outside_path())]);
         assert_ne!(outside.exit, Some(0), "the write was denied");
         let denials = outside.denials();
         assert!(
@@ -862,7 +903,7 @@ mod tests {
             outside.stderr
         );
         assert!(
-            !std::path::Path::new("/tmp/outside").exists(),
+            !std::path::Path::new(&outside_path()).exists(),
             "and nothing reached the host"
         );
         denied += 1;
@@ -1035,6 +1076,84 @@ mod tests {
                 .is_err(),
             "and unconfined too, where the guard did fire"
         );
+    }
+
+    /// The retry across ETXTBSY, on any platform: busy twice and then run
+    /// is a run, on the third try; busy throughout is refused within the
+    /// bound; anything else is reported at once (#88).
+    #[test]
+    fn a_busy_runner_is_retried_within_a_bound_and_nothing_else_is() {
+        use std::cell::Cell;
+        use std::io;
+        use std::os::unix::process::ExitStatusExt as _;
+        let ran = || {
+            Ok(process::Output {
+                status: process::ExitStatus::from_raw(0),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            })
+        };
+        let busy = || io::Error::from(io::ErrorKind::ExecutableFileBusy);
+
+        let tries = Cell::new(0);
+        let output = super::output_of(|| {
+            tries.set(tries.get() + 1);
+            if tries.get() < 3 { Err(busy()) } else { ran() }
+        });
+        assert!(
+            output.is_ok() && tries.get() == 3,
+            "{output:?} after {}",
+            tries.get()
+        );
+
+        let started = std::time::Instant::now();
+        let refused = super::output_of(|| Err(busy())).expect_err("busy throughout");
+        assert_eq!(refused.kind(), io::ErrorKind::ExecutableFileBusy);
+        assert!(
+            started.elapsed() >= super::BUSY_PATIENCE,
+            "it waited the bound"
+        );
+        assert!(
+            started.elapsed() < super::BUSY_PATIENCE * 4,
+            "and no longer"
+        );
+
+        let tries = Cell::new(0);
+        let refused = super::output_of(|| {
+            tries.set(tries.get() + 1);
+            Err(io::Error::from(io::ErrorKind::NotFound))
+        })
+        .expect_err("not found");
+        assert_eq!((refused.kind(), tries.get()), (io::ErrorKind::NotFound, 1));
+    }
+
+    /// #88: Linux refuses to execute a file that is still open for writing
+    /// (ETXTBSY), and in a test process another thread's `fork` can hold a
+    /// freshly written runner's write descriptor until that child execs. A
+    /// runner held open across the run, then closed, must still run.
+    /// Linux only: macOS executes a file open for writing, so this cannot
+    /// fail there.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_runner_still_open_for_writing_runs_once_it_is_closed() {
+        let ground = Ground::make("busy");
+        let at = ground.outside.join("stand-in");
+        let runner = Confinement::Sandbox(stand_in_runner(&at));
+        let held = fs::OpenOptions::new()
+            .write(true)
+            .open(&at)
+            .expect("held for writing");
+        let closer = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            drop(held);
+        });
+        let ran = runner.run(
+            &Policy::merged_usr(),
+            &ground.tree,
+            &argv(&["sh", "-c", "exit 0"]),
+        );
+        closer.join().expect("the closer");
+        assert!(ran.is_ok(), "{ran:?}");
     }
 
     #[test]

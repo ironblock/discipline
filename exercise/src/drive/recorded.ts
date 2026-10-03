@@ -7,7 +7,7 @@
  * reads, side calls that answered as the agent, junk in working memory. The
  * OpenCode session ran no side calls: its are stitched on and say so.
  *
- * A recording carries no deltas (they were never recorded); `placed()`
+ * The recordings are read in `recordings.ts`. A recording carries no deltas (they were never recorded); `placed()`
  * synthesizes them the way the canned transport does, so a moment mid-answer
  * shows the answer mid-stream.
  */
@@ -18,40 +18,57 @@ import type { LogLine } from './log.ts';
 import { place } from './place.ts';
 import type { EventOf, Unplaced } from './script.ts';
 import type { Ack, DriveTransport } from './transport.ts';
-import firstDrive from './recorded/first-drive.json?raw';
-import cancelledCapture from './recorded/cancelled-capture.json?raw';
-import stepLimit from './recorded/step-limit.json?raw';
-import voxelStress from './recorded/voxel-stress.json?raw';
 
 export interface Recording {
   readonly title: string;
   /** What the migration decided, rather than the record. */
   readonly migration: readonly string[];
+  /**
+   * The events of a kind this vocabulary does not have, carried under their
+   * own name, with how many of each: what a fold of the events must leave
+   * unknown, no more and no less (#173). Written by the migration beside
+   * `migration`, whose prose says the same.
+   */
+  readonly carried: Readonly<Record<string, number>>;
   readonly events: readonly Unplaced[];
 }
 
-function load(text: string): Recording {
-  const parsed = JSON.parse(text) as Partial<Recording>;
+/** Where a recording lives in the repository, by name: what a failure to read one names (#32, ruling 9). */
+export const recordingPath = (name: string) => `exercise/src/drive/recorded/${name}.json`;
+
+/** Where an authored example's committed text lives (#272), by name: what a failure to read one names. */
+export const examplePath = (name: string) => `exercise/src/drive/examples/${name}.json`;
+
+/**
+ * A recording read from its text, or an error that names its file: a build
+ * that fails on a recording says which one, not only an event's index. The
+ * recordings themselves are in `recordings.ts`, so that a page can load one
+ * without carrying the others (the replay page, `replay.tsx`). An authored
+ * example is read the same way and names its own file (`examplePath`, #272).
+ */
+export function load(name: string, text: string, file = recordingPath(name)): Recording {
+  const fail = (why: string) => new Error(`${file}: not a recording: ${why}`);
+  let parsed: Partial<Recording>;
+  try {
+    parsed = JSON.parse(text) as Partial<Recording>;
+  } catch (err) {
+    throw fail(`not JSON (${(err as Error).message})`);
+  }
   if (typeof parsed.title !== 'string' || !Array.isArray(parsed.migration) || !Array.isArray(parsed.events)) {
-    throw new Error('not a recording: expected title, migration and events');
+    throw fail('expected title, migration and events');
+  }
+  const carried = parsed.carried as unknown;
+  if (
+    typeof carried !== 'object' || carried === null || Array.isArray(carried) ||
+    !Object.entries(carried).every(([kind, n]) => kind !== '' && Number.isInteger(n) && (n as number) > 0)
+  ) {
+    throw fail('expected carried: {kind: count}, each kind named and each count a whole number above 0');
   }
   for (const [i, e] of parsed.events.entries()) {
-    if (typeof e?.kind !== 'string' || typeof e.t !== 'number') throw new Error(`not a recording: event ${i} has no kind or time`);
+    if (typeof e?.kind !== 'string' || typeof e.t !== 'number') throw fail(`event ${i} has no kind or time`);
   }
   return parsed as Recording;
 }
-
-export const RECORDINGS = {
-  'first-drive': load(firstDrive),
-  /** A capture round the person cancelled: `capture.cancelled`, which the vocabulary does not have yet. */
-  'cancelled-capture': load(cancelledCapture),
-  /** A turn that ran into the step limit (30 steps). */
-  'step-limit': load(stepLimit),
-  /** OpenCode, native tool calls, several per step, six tools; its side calls authored (stitch-sides.py). */
-  'voxel-stress': load(voxelStress),
-} as const;
-
-export type RecordingName = keyof typeof RECORDINGS;
 
 /** The whole log, with synthesized deltas, placed in order. */
 export function placed(recording: Recording): readonly LogLine[] {

@@ -2096,6 +2096,7 @@ mod tests {
             to_request: to.to_owned(),
             output_tokens: Count::new(1).expect("a small count"),
             text: Some(text.to_owned()),
+            timings: None,
         }
     }
 

@@ -75,7 +75,8 @@ const SERVE: &str = "serve";
 fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
-         \x20                       [--listen IP] [--port N] [--auth-file FILE]\n\
+         \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
+         \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\n",
     );
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
@@ -89,32 +90,62 @@ fn serve_usage() -> String {
     out.push_str("--auth-file names a file holding user:password; every request must then\n");
     out.push_str("present it as Basic auth. --listen off loopback refuses to start without\n");
     out.push_str("it, and a wildcard (0.0.0.0, ::) is refused: name one interface.\n");
+    out.push_str("--record FILE (needs --regimen) writes the session's record there once it\n");
+    out.push_str("ends, projected from its log, beside FILE.unspellable.json naming what\n");
+    out.push_str("the record could not spell; both digests are reported on stdout.\n");
+    out.push_str("--max-output-tokens defaults to 8192, room for a reasoning model's thinking\n");
+    out.push_str("(measured on the floor, #290); a turn that hits it is logged capped.\n");
+    out.push_str("--log FILE writes the session's log there as each line is appended, the\n");
+    out.push_str("same lines GET /events streams; nothing is written without it.\n");
+    out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
+    out.push_str("resolved from the registry, and an unregistered one refuses to start.\n");
+    out.push_str("The server's GET /props build_info must be the registry's engine_build_info\n");
+    out.push_str("for the substrate exactly, or else name its engine_commit, or serve refuses\n");
+    out.push_str("to start. A canned substrate's literal is canned-<acts sha256>, which only\n");
+    out.push_str("this crate's own canned server reports.\n");
     out
 }
 
-/// `diet-drive serve`: one interactive session, over HTTP + SSE, on loopback
-/// unless `--listen` names another address.
-///
-/// Fail-closed (#117 R2c, I7): off loopback it will not start without a
-/// credential, so nothing here binds a session that runs the model beyond the
-/// machine it is on for anyone who can reach it. A wildcard is refused: D17's
-/// `Host` check answers to the bound address, and a wildcard has none.
-fn serve(args: &[String]) -> ExitCode {
+/// `serve`'s output cap when `--max-output-tokens` is not given: room for
+/// a reasoning model's thinking before its answer. Measured on the floor
+/// (#290, comment 5969377550): the rehearsal's three turns capped at 512
+/// finished at 3,561, 408 and 1,873 completion tokens at a cap of 4096,
+/// one sample each; 8192 leaves the largest more than twice its room.
+const SERVE_MAX_OUTPUT_TOKENS: u32 = 8192;
+
+/// What `serve`'s flags say.
+struct ServeArgs {
+    endpoint: String,
+    model: String,
+    head: String,
+    key_file: Option<String>,
+    auth_file: Option<String>,
+    regimen_file: Option<String>,
+    log_file: Option<String>,
+    record_file: Option<String>,
+    listen: IpAddr,
+    port: u16,
+    allowed_origins: Vec<String>,
+    max_output_tokens: u32,
+}
+
+/// `serve`'s flags, or nothing when they are not a usage it takes.
+fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut endpoint = None;
     let mut model = None;
     let mut head = None;
     let mut key_file = None;
     let mut auth_file = None;
+    let mut regimen_file = None;
+    let mut log_file = None;
+    let mut record_file = None;
     let mut listen = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
-    let mut max_output_tokens: u32 = 512;
+    let mut max_output_tokens: u32 = SERVE_MAX_OUTPUT_TOKENS;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
-        let Some(value) = given.next() else {
-            eprint!("{}", serve_usage());
-            return ExitCode::from(EXIT_USAGE);
-        };
+        let value = given.next()?;
         let parsed = if flag == "--endpoint" {
             endpoint = Some(value.clone());
             true
@@ -129,6 +160,15 @@ fn serve(args: &[String]) -> ExitCode {
             true
         } else if flag == "--auth-file" {
             auth_file = Some(value.clone());
+            true
+        } else if flag == "--regimen" {
+            regimen_file = Some(value.clone());
+            true
+        } else if flag == "--log" {
+            log_file = Some(value.clone());
+            true
+        } else if flag == "--record" {
+            record_file = Some(value.clone());
             true
         } else if flag == "--listen" {
             value.parse().map(|given| listen = given).is_ok()
@@ -146,11 +186,48 @@ fn serve(args: &[String]) -> ExitCode {
             false
         };
         if !parsed {
-            eprint!("{}", serve_usage());
-            return ExitCode::from(EXIT_USAGE);
+            return None;
         }
     }
-    let (Some(endpoint), Some(model), Some(head)) = (endpoint, model, head) else {
+    Some(ServeArgs {
+        endpoint: endpoint?,
+        model: model?,
+        head: head?,
+        key_file,
+        auth_file,
+        regimen_file,
+        log_file,
+        record_file,
+        listen,
+        port,
+        allowed_origins,
+        max_output_tokens,
+    })
+}
+
+/// `diet-drive serve`: one interactive session, over HTTP + SSE, on loopback
+/// unless `--listen` names another address.
+///
+/// Fail-closed (#117 R2c, I7): off loopback it will not start without a
+/// credential, so nothing here binds a session that runs the model beyond the
+/// machine it is on for anyone who can reach it. A wildcard is refused: D17's
+/// `Host` check answers to the bound address, and a wildcard has none.
+fn serve(args: &[String]) -> ExitCode {
+    let Some(ServeArgs {
+        endpoint,
+        model,
+        head,
+        key_file,
+        auth_file,
+        regimen_file,
+        log_file,
+        record_file,
+        listen,
+        port,
+        allowed_origins,
+        max_output_tokens,
+    }) = serve_args(args)
+    else {
         eprint!("{}", serve_usage());
         return ExitCode::from(EXIT_USAGE);
     };
@@ -163,12 +240,19 @@ fn serve(args: &[String]) -> ExitCode {
         Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
     };
     let shape = trunk(model, system, max_output_tokens);
+    let regime = match regimen_file.as_deref().map(registered_regime).transpose() {
+        Ok(regime) => regime,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    if record_file.is_some() && regime.is_none() {
+        return fail(EXIT_USAGE, RECORD_NEEDS_A_REGIMEN);
+    }
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
-    let listener = match listener(listen, port, credential.is_some()) {
-        Ok(listener) => listener,
+    let listen = match listen_on(listen, credential.is_some()) {
+        Ok(listen) => listen,
         Err(refused) => return refused,
     };
     let mut transport = HttpStream::new(endpoint);
@@ -178,6 +262,27 @@ fn serve(args: &[String]) -> ExitCode {
             Err(why) => return fail(EXIT_INPUT, &why),
         }
     }
+    // The engine check, before anything binds: the server must run the
+    // engine the registry pins for the regimen's substrate (#157).
+    let substrate = regime
+        .as_ref()
+        .map(|regime| regime.substrates[0].id.as_str());
+    let engine = match substrate
+        .map(|id| diet::drive::engine::check_served(&transport, id))
+        .transpose()
+    {
+        Ok(build) => build,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    let log_path = log_file;
+    let (log_file, record) = match outputs(log_path.as_deref(), record_file.as_deref()) {
+        Ok(opened) => opened,
+        Err(why) => return fail(EXIT_OUTPUT, &why),
+    };
+    let listener = match listener(listen, port) {
+        Ok(listener) => listener,
+        Err(refused) => return refused,
+    };
     let session = std::sync::Arc::new(Session::open(transport, shape));
     let opened = session.opened();
     let config = Config {
@@ -185,16 +290,259 @@ fn serve(args: &[String]) -> ExitCode {
         credential,
         ..Config::default()
     };
-    let server = match Server::start(listener, session, config, diet::drive::session::render) {
-        Ok(server) => server,
-        Err(why) => return fail(EXIT_HALT, &format!("the server did not start: {why}")),
+    let (server, log, record_held) = match started(
+        session,
+        listener,
+        config,
+        log_path.as_deref().zip(log_file),
+        record.zip(regime.clone()),
+    ) {
+        Ok(started) => started,
+        Err(code) => return code,
     };
-    println!("{}", announcement(&server.addr().to_string(), opened));
+    println!(
+        "{}",
+        announcement(
+            &server.addr().to_string(),
+            opened,
+            substrate,
+            engine.as_ref(),
+            log_path.as_deref().zip(log),
+            record_file.as_deref().zip(record_held),
+        )
+    );
     // Serves until the process is stopped. The server's threads do the work;
     // this one only keeps the process, and the server, alive.
     loop {
         std::thread::park();
     }
+}
+
+/// The file at `path`, opened for writing (created if absent) but NOT yet
+/// emptied, and whether it holds anything. It is emptied only once the
+/// server's address is bound, so a start refused there leaves an operator's
+/// file as it was.
+fn created(path: &str) -> Result<(std::fs::File, bool), String> {
+    let truncated = std::fs::metadata(path).is_ok_and(|held| held.len() > 0);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)
+        .map(|file| (file, truncated))
+        .map_err(|why| format!("{path} cannot be written: {why}"))
+}
+
+/// The session's log, written to `file` as each line is appended (`--log`,
+/// #157), by the appending thread itself: a line is in the file before its
+/// append returns, so a kill tears at most the line being written (#230,
+/// ruled: no signal handler). Unbuffered, one write per line. A write that
+/// fails stops the process: a log that quietly stopped would be a shorter
+/// log claiming to be the session's.
+fn keep_log(
+    session: &Session<HttpStream>,
+    render: diet::drive::serve::Render,
+    file: std::fs::File,
+) {
+    diet::drive::serve::write_through(session, render, file, |why| {
+        let _ = fail(EXIT_OUTPUT, &format!("the log could not be written: {why}"));
+        std::process::exit(i32::from(EXIT_OUTPUT));
+    });
+}
+
+/// Why `--record` without `--regimen` is a usage refusal.
+const RECORD_NEEDS_A_REGIMEN: &str =
+    "--record needs --regimen: a record's `start` names the regime it ran under";
+
+/// The files `--log` and `--record` name, opened before anything binds and
+/// emptied only later, each with whether it held anything; the record's with
+/// its path.
+#[allow(clippy::type_complexity)]
+fn outputs(
+    log: Option<&str>,
+    record: Option<&str>,
+) -> Result<
+    (
+        Option<(std::fs::File, bool)>,
+        Option<((String, std::fs::File), bool)>,
+    ),
+    String,
+> {
+    let log = log.map(created).transpose()?;
+    let record = match record {
+        Some(path) => {
+            let (file, held) = created(path)?;
+            Some(((path.to_owned(), file), held))
+        }
+        None => None,
+    };
+    Ok((log, record))
+}
+
+/// The writers, then the server. The writers start once the address is
+/// bound and before the server does: no command can append a line before
+/// the log's sink is in place (#264's review). Any refusal before this --
+/// the engine check, the bind -- leaves an existing log, record and sidecar
+/// as they were; the bind's refusal, coming after the outputs are opened,
+/// creates an absent one empty. A failure from here on
+/// names what it had already emptied (#264, ruled (i)): the writers empty
+/// the record, then its sidecar, then the log, and the server starts last.
+/// One render for the stream and the log, so they are one text.
+#[allow(clippy::type_complexity)]
+fn started(
+    session: std::sync::Arc<Session<HttpStream>>,
+    listener: std::net::TcpListener,
+    config: Config,
+    log: Option<(&str, (std::fs::File, bool))>,
+    record: Option<(
+        ((String, std::fs::File), bool),
+        diet::formats::record::Regime,
+    )>,
+) -> Result<(Server, Option<bool>, Option<bool>), ExitCode> {
+    let render = diet::drive::session::render;
+    let (log, record_held, emptied) =
+        started_writers(&session, render, log, record).map_err(|why| fail(EXIT_OUTPUT, &why))?;
+    let server = Server::start(listener, session, config, render).map_err(|why| {
+        fail(
+            EXIT_HALT,
+            &emptied.named(format!("the server did not start: {why}")),
+        )
+    })?;
+    Ok((server, log, record_held))
+}
+
+/// The log and the record, started once the address is bound and before
+/// the server starts. Both are emptied now: the log is written from the
+/// session's first line on, and the record waits for the session to end --
+/// with an earlier run's record and sidecar gone, so a session that never
+/// ends leaves nothing that reads as its own (#264's review). Whether naming
+/// each emptied something.
+#[allow(clippy::type_complexity)]
+fn started_writers(
+    session: &std::sync::Arc<Session<HttpStream>>,
+    render: diet::drive::serve::Render,
+    log: Option<(&str, (std::fs::File, bool))>,
+    record: Option<(
+        ((String, std::fs::File), bool),
+        diet::formats::record::Regime,
+    )>,
+) -> Result<(Option<bool>, Option<bool>, diet::drive::serve::Emptied), String> {
+    let mut emptied = diet::drive::serve::Emptied::default();
+    let record_held = record
+        .map(|(((path, file), held), regime)| {
+            let sidecar = format!("{path}.unspellable.json");
+            let stale = std::path::Path::new(&sidecar).exists();
+            file.set_len(0)
+                .map_err(|why| format!("the record cannot be emptied: {why}"))?;
+            if held {
+                emptied.push(format!("the previous record at {path}"));
+            }
+            if stale {
+                std::fs::remove_file(&sidecar)
+                    .map_err(|why| emptied.named(format!("{sidecar} cannot be removed: {why}")))?;
+                emptied.push(format!("the previous sidecar at {sidecar}"));
+            }
+            keep_record(std::sync::Arc::clone(session), regime, (path, file));
+            Ok::<_, String>(held || stale)
+        })
+        .transpose()?;
+    let log_held = log
+        .map(|(path, (file, truncated))| {
+            file.set_len(0)
+                .map_err(|why| emptied.named(format!("the log cannot be emptied: {why}")))?;
+            if truncated {
+                emptied.push(format!("the previous log at {path}"));
+            }
+            keep_log(session, render, file);
+            Ok::<_, String>(truncated)
+        })
+        .transpose()?;
+    Ok((log_held, record_held, emptied))
+}
+
+/// The session's record, written once, when it settles `ended` (`--record`,
+/// #157): projected from its own log, beside a sidecar naming everything
+/// the record could not spell, both digests reported on stdout. A record
+/// that cannot be written stops the process, as a log that cannot be does.
+fn keep_record(
+    session: std::sync::Arc<Session<HttpStream>>,
+    regime: diet::formats::record::Regime,
+    (path, file): (String, std::fs::File),
+) {
+    std::thread::spawn(move || {
+        let mut next = 0;
+        while session.settlement() != diet::drive::session::Settlement::Ended {
+            next += session
+                .wait_from(next, std::time::Duration::from_secs(60))
+                .len() as u64;
+        }
+        match written_record(&session, &regime, &path, file) {
+            Ok(report) => {
+                let _ = std::io::Write::write_all(
+                    &mut std::io::stdout().lock(),
+                    format!("{report}\n").as_bytes(),
+                );
+            }
+            Err(why) => {
+                let _ = fail(
+                    EXIT_OUTPUT,
+                    &format!("the record could not be written: {why}"),
+                );
+                std::process::exit(i32::from(EXIT_OUTPUT));
+            }
+        }
+    });
+}
+
+/// Project the ended session, check the record reads back, and write it and
+/// its sidecar: the line `keep_record` reports.
+fn written_record(
+    session: &Session<HttpStream>,
+    regime: &diet::formats::record::Regime,
+    path: &str,
+    mut file: std::fs::File,
+) -> Result<String, String> {
+    use diet::drive::projection;
+    use diet::formats::record::{self, Record};
+    let engine =
+        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
+            .ok()
+            .and_then(|identity| projection::cited(&identity));
+    let lines: Vec<_> = session
+        .events_from(0)
+        .iter()
+        .map(diet::drive::session::line_of)
+        .collect();
+    let projected = projection::project(&lines, regime, engine)?;
+    let text = record::render(&Record {
+        events: projected.events.clone(),
+    });
+    record::parse(&text)
+        .map_err(|why| format!("the projected record does not read back: {why:?}"))?;
+    let sidecar = projection::sidecar(&projected) + "\n";
+    let sidecar_path = format!("{path}.unspellable.json");
+    file.set_len(0)
+        .and_then(|()| std::io::Write::write_all(&mut file, text.as_bytes()))
+        .map_err(|why| format!("{path}: {why}"))?;
+    std::fs::write(&sidecar_path, &sidecar).map_err(|why| format!("{sidecar_path}: {why}"))?;
+    let mut report = BTreeMap::from([
+        ("record".to_owned(), Value::String(path.to_owned())),
+        (
+            "record_sha256".to_owned(),
+            Value::String(diet::digest::sha256_hex(text.as_bytes())),
+        ),
+        ("sidecar".to_owned(), Value::String(sidecar_path)),
+        (
+            "sidecar_sha256".to_owned(),
+            Value::String(diet::digest::sha256_hex(sidecar.as_bytes())),
+        ),
+    ]);
+    if let Value::Object(fields) = projection::sidecar_value(&projected) {
+        report.extend(fields);
+    }
+    let mut out = String::new();
+    json::render(&Value::Object(report), &mut out);
+    Ok(out)
 }
 
 /// The session's trunk: the system message, and nothing else fixed yet.
@@ -215,13 +563,10 @@ fn trunk(model: String, system: String, max_output_tokens: u32) -> RequestShape 
     }
 }
 
-/// The listener `serve` binds: on `listen`, which is refused when it is a
-/// wildcard, or off loopback with no credential (fail-closed, I7).
-fn listener(
-    listen: IpAddr,
-    port: u16,
-    credentialed: bool,
-) -> Result<std::net::TcpListener, ExitCode> {
+/// The address `serve` may listen on: `listen`, refused when it is a
+/// wildcard, or off loopback with no credential (fail-closed, I7). A usage
+/// refusal, so it is made before anything touches the network.
+fn listen_on(listen: IpAddr, credentialed: bool) -> Result<IpAddr, ExitCode> {
     // `::ffff:0.0.0.0` is the IPv4 wildcard, and `::ffff:127.0.0.1` loopback:
     // judged as IPv6, the first would pass the wildcard check.
     let listen = listen.to_canonical();
@@ -243,6 +588,11 @@ fn listener(
             ),
         ));
     }
+    Ok(listen)
+}
+
+/// The listener `serve` binds on `listen`, already admitted by [`listen_on`].
+fn listener(listen: IpAddr, port: u16) -> Result<std::net::TcpListener, ExitCode> {
     std::net::TcpListener::bind((listen, port)).map_err(|why| {
         fail(
             EXIT_HALT,
@@ -253,19 +603,69 @@ fn listener(
 
 /// The first line `serve` prints: where it listens and when it opened, as
 /// JSON.
-fn announcement(listening: &str, opened: u64) -> String {
+fn announcement(
+    listening: &str,
+    opened: u64,
+    substrate: Option<&str>,
+    engine: Option<&diet::drive::engine::Passed>,
+    log: Option<(&str, bool)>,
+    record: Option<(&str, bool)>,
+) -> String {
+    let mut fields = BTreeMap::from([
+        ("listening".to_owned(), Value::String(listening.to_owned())),
+        (
+            "opened".to_owned(),
+            Value::Integer(i64::try_from(opened).unwrap_or(i64::MAX)),
+        ),
+    ]);
+    if let Some(substrate) = substrate {
+        fields.insert("substrate".to_owned(), Value::String(substrate.to_owned()));
+        // Which registry answered (#204): its text's digest, for a reader
+        // who has this line and not the binary.
+        fields.insert(
+            "registry_sha256".to_owned(),
+            Value::String(diet::drive::registry::registry_sha256()),
+        );
+    }
+    // The `build_info` the engine check passed, as the server reported it,
+    // and how: on both paths, so a reader never infers the path from a
+    // missing field.
+    if let Some(engine) = engine {
+        fields.insert(
+            "engine_build".to_owned(),
+            Value::String(engine.build_info.clone()),
+        );
+        fields.insert(
+            "engine_identity".to_owned(),
+            Value::String(engine.identity.tag().to_owned()),
+        );
+    }
+    // Where the log is written, and whether naming it emptied a file that
+    // held something (ruled on #230).
+    if let Some((path, truncated)) = log {
+        fields.insert("log".to_owned(), Value::String(path.to_owned()));
+        fields.insert("log_truncated".to_owned(), Value::Boolean(truncated));
+    }
+    // And the record's: whether naming it emptied a record or removed a
+    // sidecar an earlier run left.
+    if let Some((path, truncated)) = record {
+        fields.insert("record".to_owned(), Value::String(path.to_owned()));
+        fields.insert("record_truncated".to_owned(), Value::Boolean(truncated));
+    }
     let mut out = String::new();
-    json::render(
-        &Value::Object(BTreeMap::from([
-            ("listening".to_owned(), Value::String(listening.to_owned())),
-            (
-                "opened".to_owned(),
-                Value::Integer(i64::try_from(opened).unwrap_or(i64::MAX)),
-            ),
-        ])),
-        &mut out,
-    );
+    json::render(&Value::Object(fields), &mut out);
     out
+}
+
+/// The regime the regimen at `path` declares, its substrate resolved from the
+/// registry this program was built with (#157 Q2).
+fn registered_regime(path: &str) -> Result<diet::formats::record::Regime, String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    let regimen =
+        regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
+    diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
+        .map_err(|why| format!("{path}: {why}"))
 }
 
 /// The endpoint's key, from a FILE: an argument is readable by anyone who
@@ -309,7 +709,10 @@ fn is_an_origin(value: &str) -> bool {
 
 fn usage() -> String {
     let mut out =
-        String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n\n");
+        String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n");
+    // The interactive server, which the first form's usage once hid (#290).
+    out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");
+    out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n\n");
     out.push_str("Runs the pinned three-turn script through <regimen> in <worktree>\n");
     out.push_str("and writes the record to <output.jsonl>. With no endpoint the canned\n");
     out.push_str("server answers on loopback -- no model, no network out.\n\n");
@@ -469,7 +872,7 @@ fn answering(given: Option<&String>) -> Result<(Option<Stub>, Endpoint), (u8, St
     let (served, url) = if let Some(endpoint) = given {
         (None, endpoint.clone())
     } else {
-        let stub = Stub::serving(canned::acts())
+        let stub = Stub::serving_with_props(canned::acts(), &canned::build_info())
             .map_err(|why| (EXIT_HALT, format!("the canned server did not bind: {why}")))?;
         let url = stub.url();
         (Some(stub), url)
@@ -625,7 +1028,9 @@ fn fail(code: u8, why: &str) -> ExitCode {
         ),
         &mut out,
     );
-    println!("{out}");
+    // Never a panicking print: a reader that closed stdout must not stop the
+    // caller from exiting with its code (the log's writer above all).
+    let _ = std::io::Write::write_all(&mut std::io::stdout().lock(), format!("{out}\n").as_bytes());
     ExitCode::from(code)
 }
 

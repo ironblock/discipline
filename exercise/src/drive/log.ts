@@ -147,21 +147,19 @@ export type TurnSettled = Omit<V0.TurnSettledLine, 'reason'> & { readonly reason
 /** A person's idle gap after a settled turn, as the surface measured it (Q4). */
 export type IdleGap = V0.IdleGapLine;
 
-// ------------------------------------------------------------------ AHEAD kinds
-
 /**
- * AHEAD (R3): where a request is, right now -- how much of its prompt is
- * read, and how many tokens it has generated. From llama.cpp's stream if it
- * carries prompt progress, else its `/slots`, polled once a second while
- * busy (ruled 2026-09-26; the surface's ask, R3's scope). Transient.
+ * Where a request's prefill is, right now: the format's own `progress` line
+ * (diet/formats/log, v1 D2), one per frame the server streams before the
+ * call's first delta. Its keys are llama.cpp's: `total` prompt tokens, the
+ * `cache` reused, `processed` so far COUNTING THE CACHE IN (a warm turn's
+ * first frame reads `processed == cache`, its last `processed == total`;
+ * measured on #288), and `time_ms` of prefill by the server's clock. It says
+ * nothing of generation. The surface read an older, nested shape of its own
+ * until #288, and went blank on the first live frame.
  */
-export interface ProgressFrame extends At {
-  readonly kind: 'progress';
-  /** The `seq` of the `request`. */
-  readonly request: number;
-  readonly prompt: { readonly total: number; readonly cache: number; readonly processed: number };
-  readonly decoded: number;
-}
+export type ProgressFrame = V0.ProgressLine;
+
+// ------------------------------------------------------------------ AHEAD kinds
 
 /** AHEAD (R2's later bump, DoD 2): a tool call began. */
 export interface ToolBegin extends At {

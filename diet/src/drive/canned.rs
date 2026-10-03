@@ -191,6 +191,15 @@ pub fn acts_digest() -> String {
     digest_of(&acts())
 }
 
+/// What the canned server answers `GET /props` with as its `build_info`:
+/// `canned-` and the digest of the acts it plays. The registry's canned
+/// entries declare it as their `engine_build_info`, so the engine check ties
+/// a canned regime to the canned server like any other (#219 item 11).
+#[must_use]
+pub fn build_info() -> String {
+    format!("canned-{}", acts_digest())
+}
+
 /// The digest of any act list, which is what makes [`acts_digest`] checkable.
 ///
 /// Split out because a digest that ignored its input would move the record and
@@ -359,11 +368,10 @@ mod tests {
         Act, DEV_LOOP, acts, acts_as_first_registered, acts_digest, digest_of, hardware_fingerprint,
     };
 
-    const REGISTRY: &str = include_str!("../../../substrates/registry.toml");
+    use crate::drive::registry::REGISTRY;
 
     /// Every `[kind.id]` table of a TOML document, with its one-line string
-    /// values. A scan, not a TOML reader: diet has none (the regimen is its
-    /// own format). Lines inside a `"""` string are skipped.
+    /// values: `drive::registry`'s scan, the one copy of it.
     ///
     /// BY RULE (#162), every field read here stays a one-line
     /// `key = "value"` string in the registry and in `dev-loop.toml`:
@@ -374,36 +382,10 @@ mod tests {
     /// on a missing key, and `every_registered_canned_digest_is_acts_this_crate_keeps`
     /// counts the canned entries it read against the raw text.
     fn tables(document: &str) -> BTreeMap<String, BTreeMap<String, String>> {
-        let mut tables = BTreeMap::new();
-        let mut current = String::new();
-        let mut in_long_string = false;
-        for line in document.lines() {
-            if line.matches("\"\"\"").count() % 2 == 1 {
-                in_long_string = !in_long_string;
-                continue;
-            }
-            if in_long_string {
-                continue;
-            }
-            if let Some(name) = line
-                .strip_prefix('[')
-                .and_then(|rest| rest.strip_suffix(']'))
-            {
-                current = name.to_owned();
-                continue;
-            }
-            let Some((key, value)) = line.split_once(" = \"") else {
-                continue;
-            };
-            let Some(value) = value.strip_suffix('"') else {
-                continue;
-            };
-            tables
-                .entry(current.clone())
-                .or_insert_with(BTreeMap::new)
-                .insert(key.trim().to_owned(), value.to_owned());
-        }
-        tables
+        crate::drive::registry::tables(document)
+            .into_iter()
+            .map(|(name, table)| (name, table.strings))
+            .collect()
     }
 
     /// The registry's value of `key` in table `table`.
@@ -469,6 +451,12 @@ mod tests {
                 assert_eq!(
                     registered(&registry, table, "engine_identity"),
                     acts,
+                    "[{table}]"
+                );
+                // The literal its server would report (#219 item 11).
+                assert_eq!(
+                    registered(&registry, table, "engine_build_info"),
+                    format!("canned-{acts}"),
                     "[{table}]"
                 );
                 current_is_registered |= *acts == acts_digest();

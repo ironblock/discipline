@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 72
+faults = 98
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -199,15 +199,17 @@ failure_class = "client.timeout-projects-a-response"
 target = "diet/src/client/journal.rs"
 expect_exit = 101
 anchor = '''
-        Entry::TimedOut { .. } => Some(
+        Entry::TimedOut { .. } => Some((
             "a timeout as a typed outcome. Deliberately projected to NOTHING: a response \
              with an empty string is exactly the defect this client exists to stop, so a \
              timed-out request has no response row at all until the schema has one",
-        ),'''
+            Exempt("no row is written to carry a key: the timeout is projected to nothing"),
+        )),'''
 becomes = '''
         Entry::TimedOut { .. } => None,'''
 catches = [
     "client::tests::every_journal_entry_kind_is_decided_by_the_projection",
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
 ]
 
 [[fault]]
@@ -224,12 +226,14 @@ becomes = '''
                     to_request: id.clone(),
                     output_tokens: Count::default(),
                     text: Some(String::new()),
+                    timings: None,
                 });
             }
             // Everything else loses all or nothing, and `lost` is the'''
 catches = [
     "client::tests::a_stall_past_the_deadline_is_a_typed_timeout_and_never_an_empty_answer",
     "client::tests::every_journal_entry_kind_is_decided_by_the_projection",
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
 ]
 
 [[fault]]
@@ -417,9 +421,9 @@ failure_class = "client.reply-cap-ignored"
 target = "diet/src/client/transport.rs"
 expect_exit = 101
 anchor = '''
-                    if raw.len() > self.reply_cap {'''
+                if raw.len() > reply_cap {'''
 becomes = '''
-                    if false && raw.len() > self.reply_cap {'''
+                if false && raw.len() > reply_cap {'''
 catches = [
     "client::tests::a_reply_past_the_declared_cap_is_refused_rather_than_read_forever",
 ]
@@ -447,16 +451,18 @@ failure_class = "client.issued-is-recorded-only-on-success"
 target = "diet/src/client/journal.rs"
 expect_exit = 101
 anchor = '''
-                note(
-                    EntryKind::Issued,
-                    "the difference between a request the client ISSUED and one that \
-                     reached the substrate: the record's `request` means the second, \
-                     and a connection refused produces the first",
-                );'''
+    note(
+        EntryKind::Issued,
+        "the difference between a request the client ISSUED and one that \
+             reached the substrate: the record's `request` means the second, \
+             and a connection refused produces the first",
+        Ask::Exempt("a meaning of the `request` row, not a key it lacks"),
+    );'''
 becomes = '''
 '''
 catches = [
     "client::tests::a_request_that_never_reached_a_server_is_still_a_request_the_client_issued",
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
     "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
 ]
 
@@ -661,9 +667,15 @@ catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_canned_stream_held_mid_answer_is_woken_by_a_cancel_and_says_so",
     "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
-    "client::stream::tests::a_timings_chunk_before_a_cancel_is_not_a_finished_call",
     "client::stream::tests::asking_runs_every_stopper_once_and_asking_again_runs_none",
 ]
+# Not `a_timings_chunk_before_a_cancel_is_not_a_finished_call` (#92's review):
+# its stub writes the timings chunk separately, and when that chunk lands on a
+# read AFTER the cancel, the post-read flag check returns `Cancelled` without a
+# stopper (stream.rs's `if cancel.is_asked()` after a read). It catches this
+# fault only when both chunks arrive in one read -- a property of TCP's split,
+# not of the code. It missed once in track three's run; it stays a catcher of
+# what it tests, which is not the stopper.
 
 [[fault]]
 id = "client.cancel-misses-a-late-stopper"
@@ -692,10 +704,17 @@ anchor = '''
         cancel.on_cancel(move || close(&waker));'''
 becomes = '''
         cancel.on_cancel(move || drop(waker));'''
+# A third name, `a_timings_chunk_before_a_cancel_is_not_a_finished_call`,
+# catches this fault only by timing: its stub writes the timings chunk with
+# no pause after the piece, and the call blocks (red) only if that chunk is
+# read before the cancel is asked; if it arrives after, the read wakes, sees
+# the cancel, and the test passes (selftest shard 15 of run 37021427242, on
+# a branch that does not touch the client). Its subject is the timings
+# chunk, not the socket, so it is dropped, as #252's ruling (b) dropped one:
+# the two below catch the fault on every schedule.
 catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
-    "client::stream::tests::a_timings_chunk_before_a_cancel_is_not_a_finished_call",
 ]
 
 [[fault]]
@@ -710,6 +729,9 @@ becomes = '''
 catches = [
     "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
     "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
+    "client::stream::tests::a_chunks_progress_comes_before_that_chunks_text",
+    "client::stream::tests::a_progress_frame_missing_a_count_is_not_delivered",
+    "client::stream::tests::a_stub_with_props_answers_them_before_and_after_its_acts",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
     "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
     "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
@@ -718,6 +740,7 @@ catches = [
     "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
     "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
 ]
 
@@ -733,6 +756,7 @@ becomes = '''
 catches = [
     "client::stream::tests::a_cancel_mid_stream_closes_the_connection_and_the_server_sees_it",
     "client::stream::tests::a_chunk_boundary_inside_an_event_is_invisible_to_the_reader",
+    "client::stream::tests::a_chunks_progress_comes_before_that_chunks_text",
     "client::stream::tests::a_close_framed_stream_whose_last_bytes_are_a_bare_cr_is_read_when_it_closes",
     "client::stream::tests::a_stop_asked_while_a_piece_is_delivered_is_a_cancel_not_a_failure",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
@@ -740,6 +764,7 @@ catches = [
     "client::stream::tests::an_event_ended_by_a_bare_cr_as_the_last_bytes_of_the_stream_is_read",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
 ]
 
 [[fault]]
@@ -772,6 +797,7 @@ becomes = '''
         if status == 0 {
             self.refusal.extend_from_slice(&decoded);'''
 catches = [
+    "client::stream::tests::a_context_overflow_is_classified_from_its_typed_field",
     "client::stream::tests::a_status_other_than_200_is_a_rejection_carrying_what_the_server_said",
 ]
 
@@ -786,6 +812,9 @@ becomes = '''
             let event: Vec<u8> = std::mem::take(&mut self.pending);'''
 catches = [
     "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
+    "client::stream::tests::a_chunks_progress_comes_before_that_chunks_text",
+    "client::stream::tests::a_progress_frame_missing_a_count_is_not_delivered",
+    "client::stream::tests::a_stub_with_props_answers_them_before_and_after_its_acts",
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
     "client::stream::tests::a_timing_the_record_cannot_spell_is_absent",
     "client::stream::tests::a_timing_the_server_did_not_send_is_absent_not_zero",
@@ -793,6 +822,7 @@ catches = [
     "client::stream::tests::the_last_timings_a_stream_carries_is_the_one_reported",
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::stream::tests::the_real_servers_stream_read_one_byte_at_a_time_says_the_same",
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
     "client::stream::tests::timings_on_the_last_chunk_with_choices_are_read_too",
 ]
 
@@ -802,9 +832,9 @@ failure_class = "client.streaming-body-drops-usage"
 target = "diet/src/client/wire.rs"
 expect_exit = 101
 anchor = '''
-    format!("{open},\"stream\":true,\"stream_options\":{{\"include_usage\":true}}}}")'''
+        "{open},\"stream\":true,\"stream_options\":{{\"include_usage\":true}},\'''
 becomes = '''
-    format!("{open},\"stream\":true}}")'''
+        "{open},\"stream\":true,\'''
 catches = [
     "client::stream::tests::the_real_servers_stream_is_read_piece_by_piece",
     "client::wire::tests::a_streaming_body_is_the_body_with_streaming_asked_for_and_the_same_head",
@@ -945,6 +975,7 @@ becomes = '''
                 let _ = piece;'''
 catches = [
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
 ]
 
 [[fault]]
@@ -1013,6 +1044,7 @@ becomes = '''
                 format!("X-Unused: {}\r\n", key.len())'''
 catches = [
     "client::stream::tests::a_bearer_credential_is_sent_as_an_authorization_header_and_only_then",
+    "client::stream::tests::props_is_asked_at_the_servers_root_with_the_bearer",
 ]
 
 [[fault]]
@@ -1147,6 +1179,7 @@ becomes = '''
             draft_n: None,'''
 catches = [
     "client::stream::tests::a_thinking_models_reply_streams_its_reasoning_apart_from_its_answer",
+    "client::tests::a_llama_cpp_reply_journals_its_timings",
 ]
 
 [[fault]]
@@ -1212,6 +1245,7 @@ becomes = '''
         (integer || decimal).then(|| Self(if integer { format!("{text}.0") } else { text.to_owned() }))'''
 catches = [
     "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
 ]
 
 [[fault]]
@@ -1225,6 +1259,7 @@ becomes = '''
         (integer || decimal).then(|| Self(text.split('.').next().unwrap_or(text).to_owned()))'''
 catches = [
     "client::stream::tests::a_timings_digits_survive_the_transport",
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
 ]
 
 [[fault]]
@@ -1240,4 +1275,449 @@ becomes = '''
             sampler_echo: Some("generation_settings".to_owned()),'''
 catches = [
     "client::wire::tests::the_llama_cpp_chat_reply_has_no_sampler_echo_site",
+]
+
+[[fault]]
+id = "client.streaming-body-drops-progress"
+failure_class = "client.streaming-body-drops-progress"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+         \"return_progress\":true}}"'''
+becomes = '''
+         \"return_progress\":false}}"'''
+catches = [
+    "client::wire::tests::a_streaming_body_is_the_body_with_streaming_asked_for_and_the_same_head",
+]
+
+[[fault]]
+id = "client.stream-drops-progress"
+failure_class = "client.stream-drops-progress"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        if let Some(progress) = value.get("prompt_progress").and_then(Progress::read) {'''
+becomes = '''
+        if let Some(progress) = value.get("prompt_progress").and_then(Progress::read).filter(|_| false) {'''
+catches = [
+    "client::stream::tests::a_chunks_progress_comes_before_that_chunks_text",
+    "client::stream::tests::the_servers_prefill_progress_arrives_frame_by_frame_before_its_answer",
+]
+
+[[fault]]
+id = "client.stream-delivers-a-partial-progress-frame"
+failure_class = "client.stream-delivers-a-partial-progress-frame"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            time_ms: count("time_ms")?,'''
+becomes = '''
+            time_ms: count("time_ms").unwrap_or(0),'''
+catches = [
+    "client::stream::tests::a_progress_frame_missing_a_count_is_not_delivered",
+]
+
+[[fault]]
+id = "client.refusal-classified-from-its-message"
+failure_class = "client.refusal-classified-from-its-message"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        let typed = value.pointer("/error/type").and_then(Value::as_str)?;'''
+becomes = '''
+        let typed = value.pointer("/error/message").map(|_| "exceed_context_size_error")?;'''
+catches = [
+    "client::stream::tests::a_canned_refusal_is_classified_as_a_served_one_is",
+    "client::stream::tests::a_refusal_whose_message_mentions_context_is_not_an_overflow",
+]
+
+[[fault]]
+id = "client.stream-refusal-never-classified"
+failure_class = "client.stream-refusal-never-classified"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            class: Rejection::of(&body),
+            body,
+        }
+    }'''
+becomes = '''
+            class: None,
+            body,
+        }
+    }'''
+catches = [
+    "client::stream::tests::a_context_overflow_is_classified_from_its_typed_field",
+]
+
+[[fault]]
+id = "client.canned-drops-progress"
+failure_class = "client.canned-drops-progress"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                Step::Progress(progress) => on_delta(Piece::Progress(progress)),'''
+becomes = '''
+                Step::Progress(_) => {}'''
+catches = [
+    "client::stream::tests::a_canned_stream_plays_its_progress_before_its_answer",
+]
+
+[[fault]]
+id = "client.stream-an-error-events-class-dropped"
+failure_class = "client.stream-an-error-events-class-dropped"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                class: Rejection::of(data),'''
+becomes = '''
+                class: None,'''
+catches = [
+    "client::stream::tests::an_error_event_inside_a_stream_is_classified_from_its_typed_field",
+]
+
+[[fault]]
+id = "client.canned-refusal-never-classified"
+failure_class = "client.canned-refusal-never-classified"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                        class: Rejection::of(&body),'''
+becomes = '''
+                        class: None,'''
+catches = [
+    "client::stream::tests::a_canned_refusal_is_classified_as_a_served_one_is",
+]
+
+[[fault]]
+id = "client.stream-delivers-a-frame-with-no-total"
+failure_class = "client.stream-delivers-a-frame-with-no-total"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            total: count("total")?,'''
+becomes = '''
+            total: count("total").unwrap_or(0),'''
+catches = [
+    "client::stream::tests::a_progress_frame_missing_a_count_is_not_delivered",
+]
+
+[[fault]]
+id = "client.stream-delivers-a-frame-with-no-cache"
+failure_class = "client.stream-delivers-a-frame-with-no-cache"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            cache: count("cache")?,'''
+becomes = '''
+            cache: count("cache").unwrap_or(0),'''
+catches = [
+    "client::stream::tests::a_progress_frame_missing_a_count_is_not_delivered",
+]
+
+[[fault]]
+id = "client.stream-delivers-a-frame-with-no-processed"
+failure_class = "client.stream-delivers-a-frame-with-no-processed"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            processed: count("processed")?,'''
+becomes = '''
+            processed: count("processed").unwrap_or(0),'''
+catches = [
+    "client::stream::tests::a_progress_frame_missing_a_count_is_not_delivered",
+]
+
+[[fault]]
+id = "client.stream-a-chunks-progress-after-its-text"
+failure_class = "client.stream-a-chunks-progress-after-its-text"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+        // Before the frame's delta: it counts the prefill the delta follows.
+        if let Some(progress) = value.get("prompt_progress").and_then(Progress::read) {
+            on_delta(Piece::Progress(progress));
+        }
+        // On whichever chunk carries it, the last one winning: the usage
+        // chunk (`choices: []`) when usage was asked for, the last chunk with
+        // choices when it was not (`wire.rs`, `streaming_body`).
+        if let Some(timings) = value.get("timings").filter(|timings| timings.is_object()) {
+            self.timings = Some(Timings::read(timings));
+        }
+        if let Some(choice) = value
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+        {
+            // Measured on e7051ef (#117, Q10): with no `--reasoning-format`,
+            // a thinking model streams `reasoning_content` deltas first and
+            // `content` deltas after, one field per event. Both are read, and
+            // each is delivered as what it is.
+            if let Some(piece) = choice
+                .pointer("/delta/reasoning_content")
+                .and_then(Value::as_str)
+                && !piece.is_empty()
+            {
+                on_delta(Piece::Reasoning(piece));
+            }
+            if let Some(piece) = choice.pointer("/delta/content").and_then(Value::as_str)
+                && !piece.is_empty()
+            {
+                on_delta(Piece::Text(piece));
+            }
+            if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+                self.finish_reason = Some(reason.to_owned());
+            }
+        }'''
+becomes = '''
+        // On whichever chunk carries it, the last one winning: the usage
+        // chunk (`choices: []`) when usage was asked for, the last chunk with
+        // choices when it was not (`wire.rs`, `streaming_body`).
+        if let Some(timings) = value.get("timings").filter(|timings| timings.is_object()) {
+            self.timings = Some(Timings::read(timings));
+        }
+        if let Some(choice) = value
+            .get("choices")
+            .and_then(Value::as_array)
+            .and_then(|choices| choices.first())
+        {
+            // Measured on e7051ef (#117, Q10): with no `--reasoning-format`,
+            // a thinking model streams `reasoning_content` deltas first and
+            // `content` deltas after, one field per event. Both are read, and
+            // each is delivered as what it is.
+            if let Some(piece) = choice
+                .pointer("/delta/reasoning_content")
+                .and_then(Value::as_str)
+                && !piece.is_empty()
+            {
+                on_delta(Piece::Reasoning(piece));
+            }
+            if let Some(piece) = choice.pointer("/delta/content").and_then(Value::as_str)
+                && !piece.is_empty()
+            {
+                on_delta(Piece::Text(piece));
+            }
+            if let Some(reason) = choice.get("finish_reason").and_then(Value::as_str) {
+                self.finish_reason = Some(reason.to_owned());
+            }
+        }
+        // Before the frame's delta: it counts the prefill the delta follows.
+        if let Some(progress) = value.get("prompt_progress").and_then(Progress::read) {
+            on_delta(Piece::Progress(progress));
+        }'''
+catches = [
+    "client::stream::tests::a_chunks_progress_comes_before_that_chunks_text",
+]
+
+[[fault]]
+id = "client.journal-drops-timings"
+failure_class = "client.journal-drops-timings"
+target = "diet/src/client/mod.rs"
+expect_exit = 101
+anchor = '''
+        if let Some(timings) = parsed.timings {
+            journal.push(Entry::Timings {'''
+becomes = '''
+        if let Some(timings) = parsed.timings.filter(|_| false) {
+            journal.push(Entry::Timings {'''
+catches = [
+    "client::tests::a_llama_cpp_reply_journals_its_timings",
+]
+
+[[fault]]
+id = "client.reply-reads-no-timings"
+failure_class = "client.reply-reads-no-timings"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+            .filter(|timings| timings.is_object())
+            .map(Timings::read),'''
+becomes = '''
+            .filter(|_| false)
+            .map(Timings::read),'''
+catches = [
+    "client::tests::a_llama_cpp_reply_journals_its_timings",
+]
+
+[[fault]]
+id = "client.dialect-declares-no-timings-path"
+failure_class = "client.dialect-declares-no-timings-path"
+target = "diet/src/client/shape.rs"
+expect_exit = 101
+anchor = '''
+            timings: Some("timings".to_owned()),'''
+becomes = '''
+            timings: None,'''
+catches = [
+    "client::tests::a_llama_cpp_reply_journals_its_timings",
+]
+
+[[fault]]
+id = "client.unspellable-asks-for-a-key-the-record-has"
+failure_class = "client.unspellable-asks-for-a-key-the-record-has"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+            Key {
+                row: "response",
+                key: "cache",
+            },'''
+becomes = '''
+            Key {
+                row: "response",
+                key: "text",
+            },'''
+catches = [
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
+]
+
+[[fault]]
+id = "client.unspellable-item-the-record-spells"
+failure_class = "client.unspellable-item-the-record-spells"
+target = "diet/src/formats/record/mod.rs"
+expect_exit = 101
+anchor = '''
+            timings: take_timings(&mut members, of)?,
+        },
+        Kind::Fork => Event::Fork {'''
+becomes = '''
+            timings: {
+                // Re-pointed by #92's record bump: the record now spells
+                // `timings`, so the item taken and dropped is `capped_at`,
+                // which `lost()` still names and the record still refuses.
+                members.remove("capped_at");
+                take_timings(&mut members, of)?
+            },
+        },
+        Kind::Fork => Event::Fork {'''
+catches = [
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
+]
+
+[[fault]]
+id = "client.unspellable-ask-disagrees-with-its-prose"
+failure_class = "client.unspellable-ask-disagrees-with-its-prose"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+            Key {
+                row: "response",
+                key: "cache",
+            },'''
+becomes = '''
+            Key {
+                row: "request",
+                key: "cache",
+            },'''
+catches = [
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
+]
+
+[[fault]]
+id = "client.issued-retry-reason-unnamed"
+failure_class = "client.issued-retry-reason-unnamed"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+    if a_retry {'''
+becomes = '''
+    if false && a_retry {'''
+catches = [
+    "client::tests::every_unspellable_item_is_one_the_record_refuses",
+    "client::tests::the_record_projection_names_every_fact_record_v0_cannot_carry",
+]
+
+[[fault]]
+id = "client.projection-drops-the-timings"
+failure_class = "client.projection-drops-the-timings"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+                        .and_then(|timings| spelled_timings(timings, &mut note)),'''
+becomes = '''
+                        .and_then(|_| None),'''
+catches = [
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
+]
+
+[[fault]]
+id = "client.projection-leaves-rowless-timings-unnamed"
+failure_class = "client.projection-leaves-rowless-timings-unnamed"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+    if timings_of.keys().any(|id| !answered.contains(id)) {'''
+becomes = '''
+    if false && timings_of.keys().any(|id| !answered.contains(id)) {'''
+catches = [
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
+    "client::tests::every_journal_entry_kind_is_decided_by_the_projection",
+]
+
+[[fault]]
+id = "client.projection-leaves-unspellable-timings-unnamed"
+failure_class = "client.projection-leaves-unspellable-timings-unnamed"
+target = "diet/src/client/journal.rs"
+expect_exit = 101
+anchor = '''
+    if spelled.is_none() {'''
+becomes = '''
+    if false && spelled.is_none() {'''
+catches = [
+    "client::tests::a_journalled_timings_rides_on_its_responses_row_digit_for_digit",
+]
+
+[[fault]]
+id = "client.props-asked-under-the-endpoints-path"
+failure_class = "client.props-asked-under-the-endpoints-path"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+            "GET /props HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\n\'''
+becomes = '''
+            "GET /v1/props HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\n\'''
+catches = [
+    "client::stream::tests::a_stub_with_props_answers_them_before_and_after_its_acts",
+    "client::stream::tests::props_is_asked_at_the_servers_root_with_the_bearer",
+]
+
+[[fault]]
+id = "client.stub-leaves-props-unanswered"
+failure_class = "client.stub-leaves-props-unanswered"
+target = "diet/src/client/stub.rs"
+expect_exit = 101
+anchor = '''
+            write_reply(&mut stream, 200, props, Closing::Yes);
+            continue;'''
+becomes = '''
+            let _ = props;
+            continue;'''
+catches = [
+    "client::stream::tests::a_stub_with_props_answers_them_before_and_after_its_acts",
+]
+
+[[fault]]
+id = "client.stub-closes-an-extra-call-silently"
+failure_class = "client.stub-closes-an-extra-call-silently"
+target = "diet/src/client/stub.rs"
+expect_exit = 101
+anchor = '''
+            write_reply(&mut stream, 503, "beyond the stub's script", Closing::Yes);'''
+becomes = '''
+            let _ = &mut stream;'''
+catches = [
+    "client::stream::tests::a_stub_with_props_answers_them_before_and_after_its_acts",
+]
+
+[[fault]]
+id = "client.canned-ignores-its-finish-reason"
+failure_class = "client.canned-ignores-its-finish-reason"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                Step::FinishReason(reason) => finish_reason = reason,'''
+becomes = '''
+                Step::FinishReason(_) => {}'''
+catches = [
+    "client::stream::tests::a_canned_stream_finishes_with_the_reason_it_is_given",
 ]

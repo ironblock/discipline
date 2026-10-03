@@ -22,6 +22,7 @@ use std::fmt::{self, Write as _};
 use serde_json::Value;
 
 use super::shape::{Dialect, Pin, RequestShape};
+use super::stream::Timings;
 
 /// What came back, read through the dialect's declared paths.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -57,6 +58,9 @@ pub struct Reply {
     pub echo_site_declared: bool,
     /// Whether the declared echo site was present in the reply.
     pub echo_site_present: bool,
+    /// What the server measured of the request, read at the dialect's
+    /// declared `timings` path, when it is there and an object.
+    pub timings: Option<Timings>,
 }
 
 /// A value the server reported for one of its settings.
@@ -179,6 +183,11 @@ pub fn body(shape: &RequestShape) -> String {
 /// last chunk and NO `usage` at all, and a record's token counts are
 /// required; with it, one extra chunk carries both.
 ///
+/// `return_progress` asks for the server's prefill progress: measured on the
+/// drive endpoint (`e7051ef`, #117 R3.0's C1), it then streams a
+/// `prompt_progress` object on the chunks before the answer, and the reply
+/// is otherwise unchanged.
+///
 /// # Panics
 ///
 /// Never: [`body`] closes its object as the last thing it writes.
@@ -188,7 +197,10 @@ pub fn streaming_body(shape: &RequestShape) -> String {
     let open = whole
         .strip_suffix('}')
         .expect("`body` closes its object as the last thing it writes");
-    format!("{open},\"stream\":true,\"stream_options\":{{\"include_usage\":true}}}}")
+    format!(
+        "{open},\"stream\":true,\"stream_options\":{{\"include_usage\":true}},\
+         \"return_progress\":true}}"
+    )
 }
 
 /// The FROZEN HEAD of `shape`: everything a server can reuse from its cache.
@@ -327,6 +339,12 @@ pub fn read(dialect: &Dialect, text: &str) -> Result<Reply, WireError> {
             .as_deref()
             .and_then(|path| at(&root, path))
             .and_then(as_text),
+        timings: dialect
+            .timings
+            .as_deref()
+            .and_then(|path| at(&root, path))
+            .filter(|timings| timings.is_object())
+            .map(Timings::read),
         output_tokens: at(&root, "usage.completion_tokens").and_then(as_count),
         prompt_tokens: dialect
             .prompt_tokens
@@ -751,5 +769,9 @@ mod tests {
             parsed["stream_options"]["include_usage"],
             serde_json::Value::Bool(true)
         );
+        // Prefill progress, asked for by the flag R3.0's C1 sent: the
+        // capture-replay tests cannot notice a dropped flag, because what
+        // they replay does not depend on what was asked.
+        assert_eq!(parsed["return_progress"], serde_json::Value::Bool(true));
     }
 }

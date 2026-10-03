@@ -10,7 +10,8 @@ rule = "planning, #143, comment 5882266710: admitted requires all three words pa
 known_defects = [
   "The parity fire (#115, 2026-09-25) predates the fingerprint recipe. It ties to this fingerprint through the same engine digest (980845d6...), the same provisioning line, and a fingerprint check reading SUBSTRATE IDENTICAL before and after the fire (its window/fingerprint-*.log); whether that check hashed the models is not recorded. The capture it checked against is named by digest (6df6adc2ae5a8819), which the registry's 2026-09-20 instance does not carry, so the instance is transcribed, not derived (that record's own known defect). The served template's digest was not read at the fire.",
   "The cells' headroom word was n/a as #178 wrote it and is now pass, the reference line (Dispatch, #143, comment 5889255742). The checkpoint_restore word was unreported as #178 wrote it, then unadjudicated (Dispatch, #143, comment 5887164395; #185), and is now pass: #186's instrument, run on this fingerprint with production up (#143, comment 5889021276), the floor's warm against cold 0.083 within a tolerance of 0.617.",
-  "The checkpoint cell's tolerance is CPU-derived: the reference ran CPU-only because production occupies the card. It is not monotone in continuation length (0.617 at 513 tokens here, 0.80 at 6 here; 0.31 at 90 in #186's unrecorded one-off run). A GPU reference on the same binary replaces it in the next window that takes the card; a replaced tolerance re-derives the cell and then this admission word on the same fingerprint, with no fingerprint event; if the re-derived cell fails, the word becomes not admitted (checkpoint_restore) until a passing re-run (Dispatch, #143, comment 5889255742).",
+  "The checkpoint cell's tolerance was CPU-derived (0.617 at a matched 513 tokens; not monotone in continuation length) and is now GPU-derived, as ruled (Dispatch, #143, comment 5889255742): the same dense 1.7B on this rung's binary with the card free, matched in length, in the candidate's parity window of 2026-10-01, reads 1.151, and the floor's own warm-against-cold 0.083 is within it. A replaced tolerance re-derives the cell on the same fingerprint with no fingerprint event; the cell still reads pass, so the word is unchanged. The CPU-derived files stay in raw/ as the superseded reference.",
+  "The GPU reference's weights are tied, as the candidate's CPU reference's are, through the window's identity read (seatb_weights) and the box window script that hashed and loaded the same file path; the script is not committed.",
   "The headroom cell's 1,208 MiB, the pass line the candidate is measured against, is one reading by the inference seat (comment 5883986293), in no raw file of this tree; idle readings here are 892 and 1,126 MiB free.",
   "The tolerance's two parts beyond D12's literal single known-good draw (the reference's cold-against-cold, and the largest of three reference warm draws) are the instrument's rule as built and reviewed (#186), accepted (Dispatch, #143, comment 5889255742). Both were inert here: the reference's cold floor was 0 and its three draws were identical, so under D12's literal text the word is the same.",
   "The word, admitted, is the one substrates/admission/derive_admission.py derives from the three results (#183); verify.sh's admission check refuses the record if they differ. The recompute also refuses admitted while any cited result is not passing, and refuses a word and a held reason together.",
@@ -20,8 +21,8 @@ known_defects = [
 [results.cells]
 path = "substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c"
 recompute = "recompute.sh"
-manifest_sha256 = "8525fcac05d726e317d8379ffb7719525e6ceebec195c3c0445ff548e2325dc4"
-merged_in = "#178 (cells), #180 (effort and the refusal row), #185 (checkpoint_restore unadjudicated), this PR (checkpoint_restore measured)"
+manifest_sha256 = "edbbedbf275d12992a376b8ffad97919ffc09a46d160662cb04564a3dd624bc7"
+merged_in = "#178 (cells), #180 (effort and the refusal row), #185 (checkpoint_restore unadjudicated), #187 (checkpoint_restore measured), this PR (its tolerance GPU-derived)"
 words = { identity = "pass", kwarg_delivery = "pass", rendered_effort = "n/a (a capability fact of the template, recorded as data on the registry entry's effort fields, not a cell word: planning on #143, 2026-09-29)", canary = "pass", output_invariance = "pass", headroom = "pass", checkpoint_restore = "pass" }
 
 [results.depth]
@@ -34,6 +35,6 @@ word = "pass"
 [results.parity]
 path = "results/2026-09-25-extraction-acceptance-parity"
 recompute = "recompute.sh"
-manifest_sha256 = "780dfac7da4872d43c4f0dfcb06d757f80a1ce14ecd7073be4f0989aa4819555"
+manifest_sha256 = "a615bdefc7939c151f3ca9b60a792ab3ca77ea9c09fdd5db131322b17ecca3d8"
 merged_in = "#115's record"
 word = "supported"

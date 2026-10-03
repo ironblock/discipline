@@ -33,9 +33,9 @@
 //! request arrives and a write timeout for as long as it is written to, and
 //! there is a cap on how many there are at once (D11).
 //!
-//! How a logged event is written is a parameter, [`Render`]: the log's own
-//! format (`diet/formats/log`, I1) is not built yet, and nothing here reads an
-//! event's kind.
+//! How a logged event is written is a parameter, [`Render`] -- the binary
+//! passes `session::render`, the log format's own writer (`diet/formats/log`)
+//! -- and nothing here reads an event's kind.
 
 use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
@@ -54,6 +54,63 @@ use crate::formats::record::json::{self, Value};
 /// How one logged event is written as the `data:` of its server-sent event.
 /// It must not contain a line break: one event, one `data:` line.
 pub type Render = fn(&Logged) -> String;
+
+/// Write `session`'s log to `out` as each line is appended (`--log`, #157):
+/// each line's `render`, then a line break, in one write, flushed -- byte for
+/// byte the `data:` text `GET /events` streams, one line each, from the
+/// first. The write is the appending thread's own ([`Session::write_through`],
+/// #230), so a line is written before its append returns; a kill can tear
+/// only the line being written. The first write that fails is handed to
+/// `failed`, and nothing is written after it.
+pub fn write_through<S: Streaming + 'static>(
+    session: &Session<S>,
+    render: Render,
+    mut out: impl io::Write + Send + 'static,
+    mut failed: impl FnMut(io::Error) + Send + 'static,
+) {
+    let mut broken = false;
+    session.write_through(Box::new(move |logged| {
+        if broken {
+            return;
+        }
+        let line = render(logged);
+        debug_assert!(!line.contains('\n'), "one event, one line: {line}");
+        if let Err(why) = out
+            .write_all(format!("{line}\n").as_bytes())
+            .and_then(|()| out.flush())
+        {
+            broken = true;
+            failed(why);
+        }
+    }));
+}
+
+/// What starting a session's writers emptied that held something -- a
+/// previous record, its sidecar, a previous log -- so that a failure after
+/// it says so: a previous record lost without a trace is what the first real
+/// drive would meet (#264, ruled (i)).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Emptied(Vec<String>);
+
+impl Emptied {
+    /// Note that `what` was emptied.
+    pub fn push(&mut self, what: String) {
+        self.0.push(what);
+    }
+
+    /// `why`, and what was already emptied before it, when anything was.
+    #[must_use]
+    pub fn named(&self, why: String) -> String {
+        if self.0.is_empty() {
+            why
+        } else {
+            format!(
+                "{why}; already emptied before this failure: {}",
+                self.0.join(", ")
+            )
+        }
+    }
+}
 
 /// How a server behaves at its edges.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -588,7 +645,7 @@ impl Command {
     }
 }
 
-/// An `idle_gap` object: exactly the log format's shape for one (v0, Q4),
+/// An `idle_gap` object: exactly the log format's shape for one (Q4),
 /// and nothing else. Durations are non-negative integers; `ended_by` is one
 /// of its words; `opened_by` is a sequence number.
 fn idle_gap(value: &Value) -> Option<IdleGap> {
@@ -1207,6 +1264,142 @@ mod tests {
         assert_eq!(asked(&session), 1);
     }
 
+    /// A writer whose bytes the test can read while the session holds it.
+    #[derive(Clone, Default)]
+    struct Shared(Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl Shared {
+        fn text(&self) -> String {
+            String::from_utf8(
+                self.0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone(),
+            )
+            .expect("text")
+        }
+    }
+
+    impl io::Write for Shared {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.0
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn the_written_log_is_every_line_rendered_as_it_is_appended() {
+        let session = Session::open(Canned::new([deltas(&["Hel", "lo"])]), template());
+        let written = Shared::default();
+        write_through(
+            &session,
+            crate::drive::session::render,
+            written.clone(),
+            |why| panic!("{why}"),
+        );
+        session.ask("one", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        assert_eq!(session.end(None), Ok(()));
+        let expected: String = session
+            .events_from(0)
+            .iter()
+            .map(|logged| crate::drive::session::render(logged) + "\n")
+            .collect();
+        assert_eq!(written.text(), expected);
+    }
+
+    #[test]
+    fn an_appended_line_is_written_before_its_append_returns() {
+        // #230, ruled: no signal handler; the log's write is the appending
+        // thread's own, so a line a command was answered for is in the file
+        // when the answer goes out, and a kill can tear only the line being
+        // written. Red against the tee thread this replaced, 5 runs of 5.
+        let session = Session::open(Canned::new([deltas(&["Hel", "lo"])]), template());
+        let written = Shared::default();
+        write_through(
+            &session,
+            crate::drive::session::render,
+            written.clone(),
+            |why| panic!("{why}"),
+        );
+        let admitted = session.ask("one", None).expect("accepted");
+        let held = written.text();
+        let asked = session.events_from(admitted.seq);
+        let line = crate::drive::session::render(&asked[0]);
+        assert!(
+            held.contains(&line),
+            "the ask's line, when ask returned: {held}"
+        );
+    }
+
+    #[test]
+    fn a_failed_log_write_is_handed_over_once_and_nothing_follows_it() {
+        struct Refusing(Arc<std::sync::Mutex<u32>>);
+        impl io::Write for Refusing {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                *self
+                    .0
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) += 1;
+                Err(io::Error::other("full"))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let session = Session::open(Canned::new([deltas(&["Hel", "lo"])]), template());
+        let tries = Arc::new(std::sync::Mutex::new(0));
+        let failures = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let told = Arc::clone(&failures);
+        write_through(
+            &session,
+            crate::drive::session::render,
+            Refusing(Arc::clone(&tries)),
+            move |why| {
+                told.lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .push(why.to_string());
+            },
+        );
+        session.ask("one", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        assert_eq!(
+            (
+                *tries
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner),
+                failures
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone()
+            ),
+            (1, vec!["full".to_owned()])
+        );
+    }
+
+    #[test]
+    fn a_failure_after_the_writers_names_what_they_emptied() {
+        // The `serve` binary's message for a failure after its writers start,
+        // `Server::start`'s among them, which cannot be made to fail from
+        // outside the process (#264, ruled (i)).
+        let mut emptied = Emptied::default();
+        assert_eq!(emptied.named("why".to_owned()), "why");
+        emptied.push("the previous record at r".to_owned());
+        emptied.push("the previous log at l".to_owned());
+        assert_eq!(
+            emptied.named("the server did not start: x".to_owned()),
+            "the server did not start: x; already emptied before this failure: the previous \
+             record at r, the previous log at l"
+        );
+    }
+
     #[test]
     fn every_data_line_is_one_log_line_and_its_id_is_opened_and_seq() {
         let gate = Gate::new();
@@ -1275,7 +1468,7 @@ mod tests {
             assert_eq!(*id, format!("{}-{}", session.opened(), read.seq), "{line}");
         }
         let document = data.join("\n") + "\n";
-        crate::formats::log::parse(&document).expect("the stream is a v0 log");
+        crate::formats::log::parse(&document).expect("the stream is a log the format reads");
     }
 
     #[test]

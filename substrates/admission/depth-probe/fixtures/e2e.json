@@ -104,8 +104,9 @@
     "n": 5,
     "pass": 4,
     "errors": 0,
-    "thinking_off": 1,
-    "truncated": 0
+    "thinking_off": 0,
+    "truncated": 0,
+    "invalid": 1
    },
    "retrieval": {
     "n": 1,

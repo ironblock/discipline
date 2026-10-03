@@ -25,6 +25,9 @@ These are captures C0–C5 of R3's plan (on #117), taken 2026-09-29 from 02:09:4
 | C3, overflow | `diet/client/fixtures/llama-server-e7051ef-context-overflow.http` | `634e1ce4…` |
 | C4 | not taken: its condition, no progress frames in C1, did not hold | — |
 | C5, unstreamed | `diet/client/fixtures/llama-server-e7051ef-unstreamed.http` | `d9d2e92e…` |
+| C0b, build id (2026-10-01) | `build-info.json`, `build-info.raw` (one GET `/props`, occupying no slot); `engine-read.json` | `18033075…` |
+| C0c, the floor's build id (2026-10-01) | `build-info-floor.json`, `build-info-floor.raw` (one GET `/props` on the floor's production, occupying no slot); `floor-tarball-stat.json` | `6ce8fc6d…` |
+| C0d, the floor's usage and timings (2026-10-01) | `C0d-unstreamed.http`, `C0d-streamed.http`, their request bodies, `notes-c0d.json` | `d61b492c…`, `f05eaaec…` |
 
 ## C0: the limits
 
@@ -73,3 +76,53 @@ What the reply does not carry, or carries twice:
 - **`prompt_n_cached` is absent**, as #156 found from the earlier captures.
 - **There is no `generation_settings`** in the chat reply, so the dialect's `sampler_echo` has nothing to read here.
 - `usage.prompt_tokens_details.cached_tokens` (42) duplicates `cache_n`.
+
+## C0b: the build id, taken later (2026-10-01)
+
+One read-only GET `/props` was made at 2026-10-01T03:06:11Z by `capture_c0b.py` against the production server of the same substrate. It relaunched nothing and changed nothing.
+
+- **What is kept.**
+  - `build_info`'s JSON token as received is in `build-info.raw`: `"b8-e486f80"`, 12 bytes, sha256 `cdee465ac3cfba84e14389b7d8eb9c22c8707449b9517dd7c7c7b4e70661e366`.
+  - Its decoded value `b8-e486f80` is 10 bytes, sha256 `f8a339722b87d1c1e1c77107ed73bfd74da8cbbbea252d6e965f58a5af6a3d17`.
+  - The full response is not kept, because it carries the model path. Only its digest and size are recorded in `build-info.json`.
+- **No other key carries a build or commit id.** At any depth of `/props`, no key name contains `build` or `commit`, and no string value is commit-shaped.
+- **This is not the engine of C0-C5.**
+  - C0-C5 ran on instance `2026-09-28`, engine `e7051ef`. The registry records that engine reporting itself as `system_fingerprint` `b7-e7051ef` on the chat reply.
+  - At C0b, `/props` `build_info` reads `b8-e486f80`. These are two fields; both read as `b<n>-<short sha>`.
+  - Read-only reads on the host minutes later, by hand-run commands rather than a committed script, are in `engine-read.json` (the commands are named in its `how`). No full response or path is kept there.
+    - The running binary's sha256 is `f316bc7f…`, not the registry's `41e6591d…`. It was built 2026-09-30T22:19Z and launched 2026-10-01T01:10Z.
+    - Its checkout's HEAD `e486f80` is one commit on top of `e7051ef`: a fix to QSA bias indexing when a unified cache holds several sequences, 1 file changed.
+    - The binary is a 17,872-byte stub, so the digests of its linked libraries are recorded beside it.
+  - C0b is therefore a receipt for the engine running on 2026-10-01. It is not evidence about C0-C5. The registry row (still `current` for `2026-09-28`) is not changed here; the new instance and the stub-pinning recipe are #202.
+
+## C0c: the floor's build id (2026-10-01)
+
+One read-only GET `/props` was made at 2026-10-01T06:47:22Z by `capture_c0c.py`, against the production server of `accel24-beellama-qwen27b-q4kxl`, on the instance after the 2026-09-30 reboot (proposed as `2026-10-01` in #206). It relaunched nothing.
+
+- **What is kept.**
+  - `build_info`'s JSON token as received is in `build-info-floor.raw`: `"b0-unknown-dirty"`, 18 bytes, sha256 `dc5729d0d9a8864ab71d6557a1f2ed02ad33c7ccf9b01428d96f9a61c151779d`.
+  - Its decoded value is 16 bytes, sha256 `c481b63c378b0d6d8ff78dacd19ee6baa1789192df1af649471b9d9fec72fb5a`.
+  - No other key carries a build or commit id.
+- **The engine names no commit, and no record fixes one.**
+  - The engine is an unpacked prebuilt release. The registry already recorded `b0-unknown-dirty` as its self-report.
+  - Upstream's release workflow force-moved the tag and replaced the release's assets on every successful push run: twelve from 2026-06-07 to 2026-06-17, and again on 2026-07-10. So no commit is measured. By upstream's record, the last run to publish before the tarball was written (2026-06-14T20:09Z, by its birth time on the host, `floor-tarball-stat.json`) built `3975b51b`, but that is not matched to the tarball's digest. The entry says so (`engine_commit_unknown`).
+  - Its identity is the binary's digest, and its libraries' digests once #205 merges.
+  - Under #157's ruling, the entry declares `engine_build_info = "b0-unknown-dirty"`. That is the literal a start-time check matches, and the check reports `engine_identity` as "unreported (literal matched)".
+
+## C0d: the floor's usage and timings (2026-10-01)
+
+These are two chat replies from the floor's production server (`accel24-beellama-qwen27b-q4kxl`, the beellama release, `system_fingerprint` `b0-unknown-dirty`), taken by `capture_c0d.py` at 2026-10-01T22:06:16Z. The capture was read-only and relaunched nothing. Each reply carries both `usage` and `timings`, so the record can see on this engine what #157 measured on two mainline builds: whether llama.cpp's usage counts equal its timing counts.
+
+- **What is kept:** the raw server-to-client bytes as received, and the request bodies. This server takes no key, and each prompt is one fixed short sentence opened by a nonce.
+- **`C0d-unstreamed.http`:** sha256 `d61b492cbbc3d457563bed1e2f7065b81b8612c8b3e849afc9a53a9104ef25ec`.
+  - `usage`: prompt 42, completion 3, cached 0.
+  - `timings`: `prompt_n` 42, `cache_n` 0, `predicted_n` 3.
+- **`C0d-streamed.http`:** `stream_options.include_usage`, sha256 `f05eaaec812054600d96b7c317c131c4c30d97805574742021aef746bfcd755e`. There are 5 `data:` events; the final one carries `usage` and `timings` together.
+  - `usage`: prompt 42, completion 3, cached 38.
+  - `timings`: `prompt_n` 4, `cache_n` 38, `predicted_n` 3.
+- **The three equalities hold in both replies:**
+  - `prompt_tokens = prompt_n + cache_n`;
+  - `completion_tokens = predicted_n`;
+  - `cached_tokens = cache_n`.
+
+  The streamed reply reused the unstreamed reply's prefix, so it tests the cache equality at a non-zero count (38).

@@ -14,7 +14,7 @@ import type { LogLine, Open } from './log.ts';
 /**
  * What a person can ask of the drive. Closed: the surface owns what it
  * sends, and a new command should break the build where it must be offered.
- * Named so far and not yet here: approve, deny, end, edit memory, retry,
+ * Named so far and not yet here: approve, deny, edit memory, retry,
  * annotate, a choice at ratify.
  */
 export type Command =
@@ -23,7 +23,9 @@ export type Command =
   /** Stop whatever is in flight, the trunk's call or a fork's. */
   | { readonly kind: 'cancel' }
   /** Declare a phase transition: ratify, render, refill. */
-  | { readonly kind: 'seam'; readonly to: string };
+  | { readonly kind: 'seam'; readonly to: string }
+  /** End the session: nothing more is asked of it (#289). */
+  | { readonly kind: 'end' };
 
 /** Why a command was not taken. Open: the drive may refuse for reasons the surface has not heard of. */
 export type Refusal = Open<

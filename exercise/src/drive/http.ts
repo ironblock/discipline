@@ -154,6 +154,8 @@ export class HttpTransport implements DriveTransport {
       case 'seam':
         // v0's declare-seam takes no phase: the one it moves to is the drive's to say.
         return { kind: 'declare-seam' };
+      case 'end':
+        return { kind: 'end' };
     }
   }
 

@@ -42,8 +42,8 @@
 //! is logged in the same critical section, so the log never says less than
 //! the state.
 //!
-//! **What this does not do yet**, and says: no timings or cache telemetry on
-//! a turn (R3), no fork in the capture gap (R4), no patches (R5), and no
+//! **What this does not do yet**, and says: no fork in the capture gap (R4),
+//! no patches (R5), and no
 //! seam -- [`Session::declare_seam`] is refused as [`Refusal::SeamNotBuilt`]
 //! until R6, so the command exists for the surface to wire and answers
 //! truthfully meanwhile. The log is in memory. It is a format,
@@ -56,8 +56,11 @@ use std::fmt;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use crate::client::CAPPED_FINISH_REASONS;
 use crate::client::shape::{Message, RequestShape, Role};
-use crate::client::stream::{Cancel, Ended as StreamEnded, Piece, Streaming};
+use crate::client::stream::{
+    Cancel, Ended as StreamEnded, Piece, Progress, Rejection, Streaming, Timings,
+};
 use crate::client::transport::TransportFailure;
 use crate::client::vocabulary;
 use crate::formats::log;
@@ -219,6 +222,9 @@ pub enum Event {
         turn: u32,
         /// The lane it was made on.
         lane: Lane,
+        /// The sha256 of the request's frozen head, as `client::head` hashes
+        /// it: what a live record's request names (#157).
+        head_sha256: String,
     },
     /// The settlement moved.
     Settled {
@@ -245,6 +251,14 @@ pub enum Event {
         /// The piece, as the server sent it.
         text: String,
     },
+    /// The server's count of the call's prompt, prefilled so far (#117 R3):
+    /// one per frame it streams, before the call's first piece.
+    Progress {
+        /// The sequence number of the [`Event::Requested`] it counts.
+        request: u64,
+        /// The frame, as the server sent it.
+        progress: Progress,
+    },
     /// A piece of the trunk's answer arrived.
     Delta {
         /// The sequence number of the [`Event::Requested`] it answers.
@@ -255,7 +269,8 @@ pub enum Event {
     /// A stop was asked for the call in flight. What the call did about it
     /// is the next terminal event of the turn, which may be any of them:
     /// [`Event::Cancelled`] if it stopped, [`Event::Answered`] if the answer
-    /// was already done, or [`Event::Rejected`], [`Event::Failed`] or
+    /// was already done, [`Event::Capped`] if the cap ended it first, or
+    /// [`Event::Rejected`], [`Event::Failed`] or
     /// [`Event::Crashed`] if the call ended some other way first.
     StopAsked {
         /// The turn the stop was asked for.
@@ -269,6 +284,29 @@ pub enum Event {
         text: String,
         /// Why the server stopped, as it spelled it, if it said.
         finish_reason: Option<String>,
+        /// The whole reasoning: every [`Event::Reasoning`] of this turn, in
+        /// order, byte for byte -- the same string the trunk carries.
+        reasoning: Option<String>,
+        /// What the server measured of the call, as it reported it.
+        timings: Option<Timings>,
+    },
+    /// The call hit its output cap (a `finish_reason` in the client's
+    /// [`crate::client::CAPPED_FINISH_REASONS`], `length` among them): what it
+    /// streamed is not an answer, so neither its ask nor `text` is on the
+    /// trunk, and the turn settles `failed`. Written as a `response` with
+    /// `capped` (ruled on #290, comment 5969297103; log v3's `capped` settle
+    /// word replaces `failed` here once it applies, #297).
+    Capped {
+        /// The sequence number of the [`Event::Requested`] it answers.
+        request: u64,
+        /// The text streamed before the cap, which may be none.
+        text: String,
+        /// Why the server stopped, as it spelled it.
+        finish_reason: Option<String>,
+        /// The reasoning streamed before the cap.
+        reasoning: Option<String>,
+        /// What the server measured of the call, as it reported it.
+        timings: Option<Timings>,
     },
     /// The turn was stopped. Neither its ask nor `partial` is on the trunk.
     Cancelled {
@@ -286,6 +324,9 @@ pub enum Event {
         status: u16,
         /// What the server said.
         body: String,
+        /// What kind of refusal its typed field says it is, if one this
+        /// client names.
+        class: Option<Rejection>,
         /// What arrived before the refusal.
         partial: String,
     },
@@ -383,7 +424,14 @@ struct State {
     /// A checked gap waiting for its admitted command's outcome: the next
     /// event pushed, under the same lock.
     pending_gap: Option<IdleGap>,
+    /// Where each event is written as it is appended (see
+    /// [`Session::write_through`]).
+    sink: Option<Sink>,
 }
+
+/// What is handed each logged event, on the appending thread, under the
+/// session's lock (see [`Session::write_through`]).
+pub type Sink = Box<dyn FnMut(&Logged) + Send>;
 
 impl State {
     fn push(&mut self, event: Event) -> u64 {
@@ -403,6 +451,9 @@ impl State {
             self.gap_open = Some(seq);
         }
         self.log.push(Logged { seq, t, event });
+        if let (Some(sink), Some(logged)) = (self.sink.as_mut(), self.log.last()) {
+            sink(logged);
+        }
         seq
     }
 
@@ -537,6 +588,7 @@ impl<S: Streaming + 'static> Session<S> {
             gap_open: None,
             carried: None,
             pending_gap: None,
+            sink: None,
         };
         state.push(Event::Started {
             opened,
@@ -590,6 +642,9 @@ impl<S: Streaming + 'static> Session<S> {
             text: text.to_owned(),
         });
         state.move_to(Settlement::Turn);
+        let mut shape = self.shared.template.clone();
+        shape.messages.clone_from(&state.trunk);
+        shape.messages.push(Message::new(Role::User, text));
         // Pushed here, under the lock that admits the ask, and never on the
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
@@ -597,6 +652,7 @@ impl<S: Streaming + 'static> Session<S> {
         let request = state.push(Event::Requested {
             turn,
             lane: Lane::Trunk,
+            head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
         });
         let cancel = Cancel::new();
         state.flight = Some(Flight {
@@ -604,9 +660,6 @@ impl<S: Streaming + 'static> Session<S> {
             request,
             cancel: cancel.clone(),
         });
-        let mut shape = self.shared.template.clone();
-        shape.messages.clone_from(&state.trunk);
-        shape.messages.push(Message::new(Role::User, text));
         drop(state);
         self.shared.changed.notify_all();
 
@@ -756,6 +809,19 @@ impl<S: Streaming + 'static> Session<S> {
         self.shared.lock().trunk.clone()
     }
 
+    /// Hand `sink` every event logged so far, then each one as it is
+    /// appended (`--log`, #157). It runs on the appending thread, under the
+    /// session's lock, so an append returns only after `sink` has returned
+    /// (#230, ruled: the write is the appender's own, not a thread's that
+    /// may lag it). A `sink` must not call back into the session.
+    pub fn write_through(&self, mut sink: Sink) {
+        let mut state = self.shared.lock();
+        for logged in &state.log {
+            sink(logged);
+        }
+        state.sink = Some(sink);
+    }
+
     /// Every event from sequence number `first` on.
     #[must_use]
     pub fn events_from(&self, first: u64) -> Vec<Logged> {
@@ -806,10 +872,11 @@ fn from(log: &[Logged], first: u64) -> Vec<Logged> {
     log[start..].to_vec()
 }
 
-/// A logged event as a line of the session log format, `diet/formats/log`
-/// v0 (#117, R2c I3). One exhaustive match, so an event with no line fails
+/// A logged event as a line of the session log format, `diet/formats/log`,
+/// at its current [`log::VERSION`] (#117, R2c I3). One exhaustive match, so an event with no line fails
 /// to compile, and every word goes through the format's own vocabulary.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn line_of(logged: &Logged) -> log::Line {
     let event = match &logged.event {
         Event::Started {
@@ -817,6 +884,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             model,
             head,
         } => log::Event::SessionStart {
+            version: log::VERSION,
             opened: *opened,
             model: model.clone(),
             head: head
@@ -826,16 +894,23 @@ pub fn line_of(logged: &Logged) -> log::Line {
                     content: message.content.clone(),
                 })
                 .collect(),
+            // v2's declaration, written once the session carries one (#30's I2).
+            serving: None,
         },
         Event::Asked { turn, text } => log::Event::Ask {
             turn: *turn,
             text: text.clone(),
         },
-        Event::Requested { turn, lane } => log::Event::Request {
+        Event::Requested {
+            turn,
+            lane,
+            head_sha256,
+        } => log::Event::Request {
             turn: *turn,
             lane: match lane {
                 Lane::Trunk => log::Lane::Trunk,
             },
+            head_sha256: Some(head_sha256.clone()),
         },
         Event::Settled { from, to } => log::Event::Settlement {
             from: state_of(*from),
@@ -863,10 +938,41 @@ pub fn line_of(logged: &Logged) -> log::Line {
             request,
             text,
             finish_reason,
+            reasoning,
+            timings,
         } => log::Event::Response {
             to_request: *request,
             text: text.clone(),
             finish_reason: finish_reason.clone(),
+            reasoning: reasoning.clone(),
+            timings: timings.as_ref().map(timings_line),
+            // v2's keys, written by the session once it carries them
+            // (`usage` for a dialect with no timings); `capped` is written
+            // only by a capped call, below.
+            usage: None,
+            capped: None,
+        },
+        Event::Capped {
+            request,
+            text,
+            finish_reason,
+            reasoning,
+            timings,
+        } => log::Event::Response {
+            to_request: *request,
+            text: text.clone(),
+            finish_reason: finish_reason.clone(),
+            reasoning: reasoning.clone(),
+            timings: timings.as_ref().map(timings_line),
+            usage: None,
+            capped: Some(true),
+        },
+        Event::Progress { request, progress } => log::Event::Progress {
+            request: *request,
+            total: progress.total,
+            cache: progress.cache,
+            processed: progress.processed,
+            time_ms: progress.time_ms,
         },
         Event::Cancelled { request, partial } => log::Event::Cancelled {
             request: *request,
@@ -876,10 +982,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
             request,
             status,
             body,
+            class,
             partial,
         } => log::Event::RequestFailed {
             request: *request,
-            reason: log::FailReason::Server,
+            reason: match class {
+                Some(Rejection::ContextOverflow) => log::FailReason::ContextOverflow,
+                None => log::FailReason::Server,
+            },
             message: body.clone(),
             status: Some(*status),
             partial: arrived(partial),
@@ -918,6 +1028,23 @@ pub fn line_of(logged: &Logged) -> log::Line {
 #[must_use]
 pub fn render(logged: &Logged) -> String {
     log::render(&line_of(logged))
+}
+
+/// A call's timings as the log carries them: the same keys, the
+/// milliseconds as the digits the server wrote.
+fn timings_line(timings: &Timings) -> log::Timings {
+    let millis = |ms: &Option<crate::client::stream::Millis>| {
+        ms.as_ref().and_then(|ms| log::Millis::new(ms.as_str()))
+    };
+    log::Timings {
+        prompt_n: timings.prompt_n,
+        cache_n: timings.cache_n,
+        prompt_ms: millis(&timings.prompt_ms),
+        predicted_n: timings.predicted_n,
+        predicted_ms: millis(&timings.predicted_ms),
+        draft_n: timings.draft_n,
+        draft_n_accepted: timings.draft_n_accepted,
+    }
 }
 
 /// A failed call's line: a timeout is `timeout`, every other transport
@@ -1035,6 +1162,7 @@ fn call<S: Streaming>(
                         text: text.to_owned(),
                     }
                 }
+                Piece::Progress(progress) => Event::Progress { request, progress },
             };
             shared.lock().push(event);
             shared.changed.notify_all();
@@ -1043,29 +1171,16 @@ fn call<S: Streaming>(
     let mut state = shared.lock();
     state.flight = None;
     match result {
-        Ok(StreamEnded::Finished { finish_reason, .. }) => {
-            state.trunk.push(Message::new(Role::User, ask));
-            // The reasoning goes back with the answer, byte for byte and
-            // untrimmed: measured on e7051ef (#117, Q10), dropping it
-            // diverges the next prompt at this turn, and a stray newline
-            // diverges it inside this turn.
-            let mut answer = Message::new(Role::Assistant, partial.clone());
-            answer.reasoning = (!reasoning.is_empty()).then_some(reasoning);
-            state.trunk.push(answer);
-            state.push(Event::Answered {
-                request,
-                text: partial,
-                finish_reason,
-            });
-            state.push(Event::TurnSettled {
-                turn,
-                reason: SettleReason::Final,
-            });
-            state.move_to(Settlement::Capture);
-            // R4's interviews run here. Until they exist there is nothing to
-            // capture, and the log says the session passed through.
-            state.move_to(Settlement::Awaiting);
-        }
+        Ok(StreamEnded::Finished {
+            finish_reason,
+            timings,
+        }) => settle_finished(
+            &mut state,
+            ask,
+            (request, turn),
+            (partial, reasoning),
+            (finish_reason, timings),
+        ),
         Ok(StreamEnded::Cancelled) => {
             state.push(Event::Cancelled { request, partial });
             state.push(Event::TurnSettled {
@@ -1074,11 +1189,16 @@ fn call<S: Streaming>(
             });
             state.move_to(Settlement::Awaiting);
         }
-        Ok(StreamEnded::Rejected { status, body }) => {
+        Ok(StreamEnded::Rejected {
+            status,
+            body,
+            class,
+        }) => {
             state.push(Event::Rejected {
                 request,
                 status,
                 body,
+                class,
                 partial,
             });
             state.push(Event::TurnSettled {
@@ -1100,6 +1220,64 @@ fn call<S: Streaming>(
     }
     drop(state);
     shared.changed.notify_all();
+}
+
+/// A call that finished. One its output cap ended is not an answer: off the
+/// trunk, settled `failed` (#290, ruled 5969297103), as a failed or
+/// cancelled call is (D13). On the floor a loop on a literal `</think>`
+/// followed truncated reasoning re-sent as history; whether that was the
+/// cause, the template, or both is unmeasured (#94). Any other is the
+/// turn's answer.
+fn settle_finished(
+    state: &mut State,
+    ask: String,
+    (request, turn): (u64, u32),
+    (partial, reasoning): (String, String),
+    (finish_reason, timings): (Option<String>, Option<Timings>),
+) {
+    if finish_reason
+        .as_deref()
+        .is_some_and(|reason| CAPPED_FINISH_REASONS.contains(&reason))
+    {
+        state.push(Event::Capped {
+            request,
+            text: partial,
+            finish_reason,
+            reasoning: (!reasoning.is_empty()).then_some(reasoning),
+            timings,
+        });
+        state.push(Event::TurnSettled {
+            turn,
+            reason: SettleReason::Failed,
+        });
+        state.move_to(Settlement::Awaiting);
+        return;
+    }
+    state.trunk.push(Message::new(Role::User, ask));
+    // The reasoning goes back with the answer, byte for byte and
+    // untrimmed: measured on e7051ef (#117, Q10), dropping it
+    // diverges the next prompt at this turn, and a stray newline
+    // diverges it inside this turn. ONE binding feeds the trunk and
+    // the response line, so the two cannot differ (R3.4).
+    let reasoning = (!reasoning.is_empty()).then_some(reasoning);
+    let mut answer = Message::new(Role::Assistant, partial.clone());
+    answer.reasoning.clone_from(&reasoning);
+    state.trunk.push(answer);
+    state.push(Event::Answered {
+        request,
+        text: partial,
+        finish_reason,
+        reasoning,
+        timings,
+    });
+    state.push(Event::TurnSettled {
+        turn,
+        reason: SettleReason::Final,
+    });
+    state.move_to(Settlement::Capture);
+    // R4's interviews run here. Until they exist there is nothing to
+    // capture, and the log says the session passed through.
+    state.move_to(Settlement::Awaiting);
 }
 
 /// How a failed call settles its turn: a call that ran out of time is a
@@ -1160,6 +1338,15 @@ pub(in crate::drive) mod tests {
     use crate::client::stream::{Canned, Gate, Step};
 
     const HEAD: &str = "you are the trunk";
+
+    /// The head digest of the first request a session on [`template`]
+    /// sends for `asked`: the template's messages and the ask, through
+    /// `client::head`, computed here apart from the session.
+    fn first_head(asked: &str) -> String {
+        let mut shape = template();
+        shape.messages.push(Message::new(Role::User, asked));
+        crate::client::head::Head::of(&shape).digest().to_owned()
+    }
 
     pub(in crate::drive) fn template() -> RequestShape {
         RequestShape {
@@ -1253,7 +1440,8 @@ pub(in crate::drive) mod tests {
                 },
                 Event::Requested {
                     turn: 1,
-                    lane: Lane::Trunk
+                    lane: Lane::Trunk,
+                    head_sha256: first_head("say hello"),
                 },
                 Event::Delta {
                     request: 3,
@@ -1270,7 +1458,9 @@ pub(in crate::drive) mod tests {
                 Event::Answered {
                     request: 3,
                     text: "Hello!".to_owned(),
-                    finish_reason: Some("stop".to_owned())
+                    finish_reason: Some("stop".to_owned()),
+                    reasoning: None,
+                    timings: None,
                 },
                 Event::TurnSettled {
                     turn: 1,
@@ -1486,6 +1676,7 @@ pub(in crate::drive) mod tests {
                 request: 3,
                 status: 503,
                 body: "busy".to_owned(),
+                class: None,
                 partial: "par".to_owned()
             }));
         assert!(
@@ -1493,6 +1684,154 @@ pub(in crate::drive) mod tests {
                 .any(|logged| matches!(logged.event, Event::Answered { .. })),
             "a refusal was logged as an answer"
         );
+        assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
+    }
+
+    /// The session's whole log so far, as the log format reads it.
+    fn whole_log(session: &Session<Canned>) -> Vec<log::Line> {
+        let document: String = session
+            .events_from(0)
+            .iter()
+            .map(|logged| render(logged) + "\n")
+            .collect();
+        log::parse(&document).expect("the session's log is a log the format reads")
+    }
+
+    #[test]
+    fn a_finished_turns_response_carries_the_servers_timings() {
+        let measured = Timings {
+            prompt_n: Some(18),
+            cache_n: Some(160),
+            prompt_ms: crate::client::stream::Millis::new("225.217"),
+            predicted_n: Some(66),
+            predicted_ms: crate::client::stream::Millis::new("557.106"),
+            draft_n: Some(72),
+            draft_n_accepted: Some(44),
+        };
+        let canned = Canned::new([vec![
+            Step::Delta("ok".to_owned()),
+            Step::Timings(measured.clone()),
+        ]]);
+        let session = Session::open(canned, template());
+        session.ask("first", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::Answered { timings: Some(timings), .. } if *timings == measured
+            )),
+            "the response dropped the server's timings"
+        );
+        let response = whole_log(&session)
+            .into_iter()
+            .find_map(|line| match line.event {
+                log::Event::Response { timings, .. } => Some(timings),
+                _ => None,
+            })
+            .expect("a response line");
+        assert_eq!(
+            response,
+            Some(log::Timings {
+                prompt_n: Some(18),
+                cache_n: Some(160),
+                prompt_ms: log::Millis::new("225.217"),
+                predicted_n: Some(66),
+                predicted_ms: log::Millis::new("557.106"),
+                draft_n: Some(72),
+                draft_n_accepted: Some(44),
+            }),
+            "every key, as the server sent it"
+        );
+    }
+
+    #[test]
+    fn the_responses_reasoning_is_its_deltas_byte_for_byte() {
+        let canned = Canned::new([vec![
+            Step::Reasoning("weighing\n".to_owned()),
+            Step::Reasoning(" it up \n".to_owned()),
+            Step::Delta("ok".to_owned()),
+        ]]);
+        let session = Session::open(canned, template());
+        session.ask("first", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let whole = "weighing\n it up \n".to_owned();
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::Answered { reasoning: Some(reasoning), .. } if *reasoning == whole
+            )),
+            "the response's reasoning is not its deltas, untrimmed"
+        );
+        assert_eq!(
+            session.trunk().last().and_then(|m| m.reasoning.clone()),
+            Some(whole),
+            "and it is the trunk's"
+        );
+    }
+
+    #[test]
+    fn progress_is_logged_before_the_first_delta_and_never_after_the_end() {
+        let frame = |processed| Progress {
+            total: 9276,
+            cache: 0,
+            processed,
+            time_ms: processed / 2,
+        };
+        let canned = Canned::new([vec![
+            Step::Progress(frame(1066)),
+            Step::Progress(frame(9276)),
+            Step::Delta("ok".to_owned()),
+        ]]);
+        let session = Session::open(canned, template());
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        let lines = whole_log(&session);
+        let at = |kind: fn(&log::Event) -> bool| -> Vec<usize> {
+            lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| kind(&line.event))
+                .map(|(index, _)| index)
+                .collect()
+        };
+        let progress = at(|e| matches!(e, log::Event::Progress { .. }));
+        let first_delta = at(|e| matches!(e, log::Event::Delta { .. }))[0];
+        let response = at(|e| matches!(e, log::Event::Response { .. }))[0];
+        assert_eq!(progress.len(), 2, "one line per frame: {lines:?}");
+        assert!(
+            progress
+                .iter()
+                .all(|index| *index < first_delta && *index < response),
+            "a progress line after the answer began: {lines:?}"
+        );
+    }
+
+    #[test]
+    fn an_overflow_is_request_failed_context_overflow_and_the_turn_failed() {
+        let overflow = r#"{"error":{"code":400,"message":"request (262149 tokens) exceeds the available context size (262144 tokens), try increasing it","type":"exceed_context_size_error","n_prompt_tokens":262149,"n_ctx":262144}}"#;
+        let canned = Canned::new([vec![Step::Reject(400, overflow.to_owned())]]);
+        let session = Session::open(canned, template());
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        let lines = whole_log(&session);
+        assert!(
+            lines.iter().any(|line| matches!(
+                line.event,
+                log::Event::RequestFailed {
+                    reason: log::FailReason::ContextOverflow,
+                    status: Some(400),
+                    ..
+                }
+            )),
+            "the overflow was not `context_overflow`: {lines:?}"
+        );
+        assert!(lines.iter().any(|line| matches!(
+            line.event,
+            log::Event::TurnSettled {
+                reason: log::SettleReason::Failed,
+                ..
+            }
+        )));
         assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
     }
 
@@ -1918,11 +2257,14 @@ pub(in crate::drive) mod tests {
         let requests: Vec<u64> = log
             .iter()
             .filter(|logged| {
-                logged.event
-                    == Event::Requested {
+                matches!(
+                    logged.event,
+                    Event::Requested {
                         turn: 1,
                         lane: Lane::Trunk,
+                        ..
                     }
+                )
             })
             .map(|logged| logged.seq)
             .collect();
@@ -2027,11 +2369,21 @@ pub(in crate::drive) mod tests {
             Event::Requested {
                 turn: 1,
                 lane: Lane::Trunk,
+                head_sha256: "a".repeat(64),
             },
             Event::Refused {
                 command: CommandKind::Cancel,
                 because: Refusal::Stale,
                 during: Settlement::Turn,
+            },
+            Event::Progress {
+                request: 3,
+                progress: Progress {
+                    total: 9276,
+                    cache: 0,
+                    processed: 1066,
+                    time_ms: 721,
+                },
             },
             Event::Reasoning {
                 request: 3,
@@ -2046,16 +2398,41 @@ pub(in crate::drive) mod tests {
                 request: 3,
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
+                reasoning: Some("thinking\n".to_owned()),
+                timings: Some(Timings {
+                    prompt_n: Some(89),
+                    cache_n: Some(0),
+                    prompt_ms: crate::client::stream::Millis::new("297.198"),
+                    predicted_n: Some(312),
+                    predicted_ms: crate::client::stream::Millis::new("2591"),
+                    draft_n: Some(312),
+                    draft_n_accepted: Some(207),
+                }),
             },
             Event::Cancelled {
                 request: 3,
                 partial: "Hel".to_owned(),
             },
+            Event::Capped {
+                request: 3,
+                text: String::new(),
+                finish_reason: Some("length".to_owned()),
+                reasoning: Some("thinking, cut".to_owned()),
+                timings: None,
+            },
             Event::Rejected {
                 request: 3,
                 status: 503,
                 body: "busy".to_owned(),
+                class: None,
                 partial: "Hel".to_owned(),
+            },
+            Event::Rejected {
+                request: 3,
+                status: 400,
+                body: "too long".to_owned(),
+                class: Some(Rejection::ContextOverflow),
+                partial: String::new(),
             },
             Event::Crashed {
                 request: 3,
@@ -2101,9 +2478,11 @@ pub(in crate::drive) mod tests {
                 Event::Failed { .. } => 12,
                 Event::TurnSettled { .. } => 13,
                 Event::IdleGap(_) => 14,
+                Event::Progress { .. } => 15,
+                Event::Capped { .. } => 16,
             });
         }
-        assert_eq!(kinds.len(), 15, "a variant has no sample");
+        assert_eq!(kinds.len(), 17, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -2121,8 +2500,10 @@ pub(in crate::drive) mod tests {
     fn the_lines_of_every_event() -> Vec<log::Event> {
         vec![
             log::Event::SessionStart {
+                version: log::VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
+                serving: None,
                 head: vec![log::HeadMessage {
                     role: log::Role::System,
                     content: HEAD.to_owned(),
@@ -2139,11 +2520,19 @@ pub(in crate::drive) mod tests {
             log::Event::Request {
                 turn: 1,
                 lane: log::Lane::Trunk,
+                head_sha256: Some("a".repeat(64)),
             },
             log::Event::Refused {
                 command: log::Command::Cancel,
                 because: log::Refusal::Stale,
                 during: log::State::Turn,
+            },
+            log::Event::Progress {
+                request: 3,
+                total: 9276,
+                cache: 0,
+                processed: 1066,
+                time_ms: 721,
             },
             log::Event::Delta {
                 request: 3,
@@ -2158,10 +2547,31 @@ pub(in crate::drive) mod tests {
                 to_request: 3,
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
+                reasoning: Some("thinking\n".to_owned()),
+                usage: None,
+                capped: None,
+                timings: Some(log::Timings {
+                    prompt_n: Some(89),
+                    cache_n: Some(0),
+                    prompt_ms: log::Millis::new("297.198"),
+                    predicted_n: Some(312),
+                    predicted_ms: log::Millis::new("2591"),
+                    draft_n: Some(312),
+                    draft_n_accepted: Some(207),
+                }),
             },
             log::Event::Cancelled {
                 request: 3,
                 partial: "Hel".to_owned(),
+            },
+            log::Event::Response {
+                to_request: 3,
+                text: String::new(),
+                finish_reason: Some("length".to_owned()),
+                reasoning: Some("thinking, cut".to_owned()),
+                timings: None,
+                usage: None,
+                capped: Some(true),
             },
             log::Event::RequestFailed {
                 request: 3,
@@ -2169,6 +2579,13 @@ pub(in crate::drive) mod tests {
                 message: "busy".to_owned(),
                 status: Some(503),
                 partial: Some("Hel".to_owned()),
+            },
+            log::Event::RequestFailed {
+                request: 3,
+                reason: log::FailReason::ContextOverflow,
+                message: "too long".to_owned(),
+                status: Some(400),
+                partial: None,
             },
             // Nothing arrived before this crash: no `partial` at all.
             log::Event::RequestFailed {
@@ -2202,6 +2619,168 @@ pub(in crate::drive) mod tests {
                 ended_by: log::GapEnd::Ask,
             },
         ]
+    }
+
+    #[test]
+    fn every_capped_finish_reason_the_client_knows_caps_a_turn() {
+        // One list, the client's, so the session and the scripted drive
+        // cannot disagree about what a cap is (#290).
+        for reason in crate::client::CAPPED_FINISH_REASONS {
+            let session = Session::open(
+                Canned::new([vec![
+                    Step::Delta("cut".to_owned()),
+                    Step::FinishReason((*reason).to_owned()),
+                ]]),
+                template(),
+            );
+            session.ask("go", None).expect("accepted");
+            let log = wait_until(&session, "the turn to settle", settled);
+            assert!(
+                log.iter()
+                    .any(|logged| matches!(logged.event, Event::Capped { .. })),
+                "{reason}: {log:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_capped_call_is_written_capped_settles_failed_and_stays_off_the_trunk() {
+        // #290, ruled (5969297103): a turn its output cap ended is not an
+        // answer. The rehearsal's 3 of 10 turns were all reasoning.
+        let session = Session::open(
+            Canned::new([
+                vec![
+                    Step::Reasoning("thinking, and thinking".to_owned()),
+                    Step::FinishReason("length".to_owned()),
+                ],
+                deltas(&["two"]),
+            ]),
+            template(),
+        );
+        session.ask("first", None).expect("accepted");
+        let log = wait_until(&session, "the capped turn to settle", settled);
+        let lines: Vec<log::Event> = log.iter().map(|logged| line_of(logged).event).collect();
+        assert!(
+            lines.iter().any(|line| matches!(
+                line,
+                log::Event::Response {
+                    capped: Some(true),
+                    finish_reason: Some(reason),
+                    ..
+                } if reason == "length"
+            )),
+            "{lines:?}"
+        );
+        assert!(
+            lines.iter().any(|line| matches!(
+                line,
+                log::Event::TurnSettled {
+                    turn: 1,
+                    reason: log::SettleReason::Failed
+                }
+            )),
+            "{lines:?}"
+        );
+        session.ask("second", None).expect("accepted");
+        let _ = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+                && settled(log)
+        });
+        // Neither the capped ask nor its reasoning went back as history.
+        assert_eq!(
+            session.shared.transport.sent()[1].messages,
+            template()
+                .messages
+                .into_iter()
+                .chain([user("second")])
+                .collect::<Vec<_>>()
+        );
+    }
+
+    /// A whole session with one capped turn, as the session logs it, with
+    /// `opened` and each `t` pinned so the text is the same on every run.
+    fn a_capped_session_log() -> String {
+        let session = Session::open(
+            Canned::new([vec![
+                Step::Reasoning("Let me think about this carefully".to_owned()),
+                Step::Delta("The answer".to_owned()),
+                Step::FinishReason("length".to_owned()),
+            ]]),
+            template(),
+        );
+        session.ask("what is the answer?", None).expect("accepted");
+        let _ = wait_until(&session, "the capped turn to settle", settled);
+        assert_eq!(session.end(None), Ok(()));
+        session
+            .events_from(0)
+            .into_iter()
+            .map(|mut logged| {
+                logged.t = logged.seq * 5;
+                if let Event::Started { opened, .. } = &mut logged.event {
+                    *opened = 1_790_000_000_000;
+                }
+                render(&logged) + "\n"
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_capped_turn_fixture_is_what_a_capped_session_logs() {
+        // The fixture the surface replays for its capped badge (#290, ruled
+        // 5969297103): `response` with `capped`, then `turn.settled` failed.
+        let fixture = include_str!("../../drive/fixtures/a-capped-turn.jsonl");
+        assert_eq!(a_capped_session_log(), fixture);
+        let read = log::parse(fixture).expect("the fixture is a log the format reads");
+        assert!(read.iter().any(|line| matches!(
+            line.event,
+            log::Event::Response {
+                capped: Some(true),
+                ..
+            }
+        )));
+    }
+
+    /// The writer's half of #249's rule: a server that reports `timings`
+    /// gets no `usage` on its response line -- on llama.cpp the two are equal
+    /// (measured on #157), and the reader refuses a line carrying both.
+    #[test]
+    fn a_response_with_timings_is_written_without_usage() {
+        let session = Session::open(
+            Canned::new([vec![
+                Step::Delta("Hello".to_owned()),
+                Step::Timings(crate::client::stream::Timings {
+                    prompt_n: Some(18),
+                    cache_n: Some(160),
+                    predicted_n: Some(66),
+                    ..crate::client::stream::Timings::default()
+                }),
+            ]]),
+            template(),
+        );
+        session.ask("say hello", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let responses: Vec<log::Line> = log
+            .iter()
+            .map(line_of)
+            .filter(|line| matches!(line.event, log::Event::Response { .. }))
+            .collect();
+        assert!(
+            matches!(
+                responses.as_slice(),
+                [log::Line {
+                    event: log::Event::Response {
+                        timings: Some(_),
+                        usage: None,
+                        ..
+                    },
+                    ..
+                }]
+            ),
+            "{responses:?}"
+        );
     }
 
     #[test]
@@ -2240,7 +2819,7 @@ pub(in crate::drive) mod tests {
     }
 
     #[test]
-    fn a_real_sessions_whole_log_is_a_v0_log() {
+    fn a_real_sessions_whole_log_is_a_log_the_format_reads() {
         // Every rule that spans lines included: an answer, a cancel, a
         // failure, a refusal by the server.
         let gate = Gate::new();
@@ -2252,9 +2831,13 @@ pub(in crate::drive) mod tests {
             vec![Step::Delta("par".to_owned()), Step::Hold(gate.clone())],
             vec![Step::Fail(TransportFailure::Connect("refused".to_owned()))],
             vec![Step::Reject(503, "busy".to_owned())],
+            vec![
+                Step::Reasoning("all of it".to_owned()),
+                Step::FinishReason("length".to_owned()),
+            ],
         ]);
         let session = Session::open(canned, template());
-        for turn in 1..=4_u32 {
+        for turn in 1..=5_u32 {
             session.ask("go", None).expect("accepted");
             if turn == 2 {
                 assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
@@ -2273,7 +2856,7 @@ pub(in crate::drive) mod tests {
             .iter()
             .map(|logged| render(logged) + "\n")
             .collect();
-        let read = log::parse(&document).expect("the session's log is a v0 log");
+        let read = log::parse(&document).expect("the session's log is a log the format reads");
         assert_eq!(read.len(), session.events_from(0).len());
     }
 
@@ -2346,7 +2929,7 @@ pub(in crate::drive) mod tests {
             Event::Asked { turn: 2, .. }
         ));
         let document: String = log.iter().map(|logged| render(logged) + "\n").collect();
-        log::parse(&document).expect("a log carrying a gap is a v0 log");
+        log::parse(&document).expect("a log carrying a gap is a log the format reads");
     }
 
     #[test]

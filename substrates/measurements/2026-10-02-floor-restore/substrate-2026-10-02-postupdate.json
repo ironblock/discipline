@@ -1,0 +1,56 @@
+{
+ "captured_at_uptime": "233.70",
+ "deployment_digest": "361661fde059f7ea116edd4ed236bae54bc5dd4b3e49733e440b478354b68dd4",
+ "deployment_version": "44.20260929",
+ "flags": {
+  "--cache-type-k": "q5_0",
+  "--cache-type-v": "q4_1",
+  "--chat-template-kwargs": "{\"preserve_thinking\":true}",
+  "--ctx-size": "160000",
+  "--flash-attn": "on",
+  "--image-min-tokens": "1024",
+  "--jinja": true,
+  "--kv-unified": true,
+  "--min-p": "0.0",
+  "--mlock": true,
+  "--mmproj": "~/Models/Qwen3.6/mmproj-BF16.gguf",
+  "--no-host": true,
+  "--no-mmap": true,
+  "--no-mmproj-offload": true,
+  "--reasoning": "on",
+  "--spec-dflash-cross-ctx": "1024",
+  "--spec-draft-model": "~/Models/Qwen3.6/Qwen3.6-27B-DFlash-IQ4_XS.gguf",
+  "--spec-draft-ngl": "all",
+  "--spec-type": "dflash",
+  "--temp": "0.6",
+  "--top-k": "20",
+  "--top-p": "1.0",
+  "-b": "2048",
+  "-m": "~/Models/Qwen3.6/Qwen3.6-27B-UD-Q4_K_XL.gguf",
+  "-ngl": "all",
+  "-np": "2",
+  "-ub": "512"
+ },
+ "informational": {
+  "--alias": "Qwen3.6-27B",
+  "--host": "0.0.0.0",
+  "--port": "8082"
+ },
+ "kargs": "BOOT_IMAGE=(hd1,gpt2)/ostree/default-0c1e8f68802f72d371f724563e8e1d10e3d1840b520a9d6a8e10bba0865b2325/vmlinuz-7.2.7-ogc1.1.fc44.x86_64 ostree=/ostree/boot.0/default/0c1e8f68802f72d371f724563e8e1d10e3d1840b520a9d6a8e10bba0865b2325/0 rhgb quiet root=UUID=<redacted> vconsole.keymap=us rootflags=subvol=root rw bluetooth.disable_ertm=1 firmware_class.path=/usr/local/lib/firmware nvme_core.default_ps_max_latency_us=0",
+ "kernel": "7.2.7-ogc1.1.fc44.x86_64",
+ "model_files": {
+  "~/Models/Qwen3.6/Qwen3.6-27B-DFlash-IQ4_XS.gguf": "sha256:08e4dffcd7893a4c15981ab2061afa128013731be60f1a6847785a3d630f7c8d",
+  "~/Models/Qwen3.6/Qwen3.6-27B-UD-Q4_K_XL.gguf": "sha256:ff6941ded525b34eb159496762c29dd0ec6e71dc31b74d57e75d871a03eec259",
+  "~/Models/Qwen3.6/mmproj-BF16.gguf": "sha256:05353347512982ee62317b9d8c89372bc815f4b4043580e7ef3ad411ec1a1cd3"
+ },
+ "pcie_links": {
+  "0000:00:01.1": "cap=8GT/s sta=8GT/s",
+  "0000:00:01.2": "cap=8GT/s sta=8GT/s",
+  "0000:01:00.0": "cap=16GT/s sta=8GT/s",
+  "0000:02:00.0": "cap=16GT/s sta=8GT/s",
+  "0000:03:01.0": "cap=8GT/s sta=8GT/s",
+  "0000:04:00.0": "cap=16GT/s sta=8GT/s"
+ },
+ "source_commit": "",
+ "substrate_label": ""
+}
