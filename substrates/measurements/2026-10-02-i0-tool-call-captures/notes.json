@@ -1,0 +1,57 @@
+{
+ "nonce": "be135a0c73102528",
+ "turn1": {
+  "request_sha256": "2c2c287041684fef263d12d240da6354cabc4da01850f0a5d2b0193d6d12c054",
+  "request_bytes": 677,
+  "response_sha256": "d72b1c064591fdcfed8126f92a31a9b599b3258645e49a61a3a0e5b1365e9b20",
+  "response_bytes": 5544,
+  "status_line": "HTTP/1.1 200 OK"
+ },
+ "turn1_assembled": {
+  "content": "",
+  "tool_calls": [
+   {
+    "id": "7GJeYs3ux1SaqFVPB5ee2AExFLbsukd7",
+    "name": "bash",
+    "arguments": "{\"command\":\"ls | wc -l\"}"
+   }
+  ],
+  "finish_reason": "tool_calls"
+ },
+ "turn2-user": {
+  "request_sha256": "17f9787e9cb50915c8fe23b4fe2f3f60735d76d332f731c8260313e26307aa9c",
+  "request_bytes": 795,
+  "response_sha256": "2bd5ceaf44b3826c99805e417ebcd289f53fcf5ad8f6755972c21ea1bf98f033",
+  "response_bytes": 5840,
+  "status_line": "HTTP/1.1 200 OK"
+ },
+ "turn2-openai": {
+  "request_sha256": "8c82a7a697cbf0e07f39b942ef4d22d5f5683dad51bb0b246771b832336d843c",
+  "request_bytes": 947,
+  "response_sha256": "5186d6e7ef5bde00ca27976239be0203b021630bedab0f42db6141713c193870",
+  "response_bytes": 5486,
+  "status_line": "HTTP/1.1 200 OK"
+ },
+ "turn2-user_receipt": {
+  "timings": {
+   "cache_n": 330,
+   "prompt_n": 37
+  },
+  "assembled": [
+   "There are **18** files in the current directory.",
+   [],
+   "stop"
+  ]
+ },
+ "turn2-openai_receipt": {
+  "timings": {
+   "cache_n": 330,
+   "prompt_n": 53
+  },
+  "assembled": [
+   "There are **18** files in the current directory.",
+   [],
+   "stop"
+  ]
+ }
+}

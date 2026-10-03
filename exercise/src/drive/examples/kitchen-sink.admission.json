@@ -1,0 +1,35 @@
+{
+  "example": "exercise/src/drive/examples/kitchen-sink.json",
+  "example_sha256": "ba8d8df0d626d907a716b7e164ecb97ae43ed5bf8f1e07111f78ac4ece17084e",
+  "table": {
+    "id": "849608749960",
+    "patterns": {
+      "path": "scripts/hygiene-admitted-849608749960-patterns.tsv",
+      "sha256": "7f364c6b4ec309016696488c28d70a773bfe352796acd6fe0ce0496e672782f9"
+    },
+    "exceptions": {
+      "path": "scripts/hygiene-admitted-849608749960-exceptions.tsv",
+      "sha256": "d6cb790d9144801ef99341b8b3ee758252cda0c26aa7e1bd8315b0b80f627332"
+    },
+    "hashes": {
+      "path": "scripts/hygiene-admitted-849608749960-hashes.txt",
+      "sha256": "3d0d8da5e532e11723bf71a5c218812fce29fd6322c126f11386683a5b58bdb3"
+    }
+  },
+  "taken_from": {
+    "patterns": {
+      "path": "scripts/hygiene-patterns.tsv",
+      "sha256": "7f364c6b4ec309016696488c28d70a773bfe352796acd6fe0ce0496e672782f9"
+    },
+    "exceptions": {
+      "path": "scripts/hygiene-exceptions.tsv",
+      "sha256": "d6cb790d9144801ef99341b8b3ee758252cda0c26aa7e1bd8315b0b80f627332"
+    },
+    "hashes": {
+      "path": "scripts/hygiene-hashes.txt",
+      "sha256": "3d0d8da5e532e11723bf71a5c218812fce29fd6322c126f11386683a5b58bdb3"
+    }
+  },
+  "cites": "the snapshot (table): the rule this example was admitted under. At admission it was the live genesis table (taken_from), byte for byte; the live table may move on, and this example stays under its snapshot until it is admitted again.",
+  "authored": "Authored: this is an example of everything working the way we think it should, not a real session"
+}

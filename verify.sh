@@ -3410,12 +3410,12 @@ p.write_text(s.replace(old, 'json.dumps({"exe": exe}, sort_keys=True,', 1), enco
 PYEOF
 }
 # #202: the recipe's shared-object pattern narrowed to bare `.so`, so a versioned library (libllama.so.0.4.1)
-# drops out of the engine fingerprint unseen.
+# -- and on macOS every .dylib (#29's I0) -- drops out of the engine fingerprint unseen.
 inject_admission_engine_pattern_narrowed() {
   python3 - <<'PYEOF'
 import pathlib
 p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
-old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$")'
+old = 'SHARED_OBJECT = re.compile(r"\\.so(\\.\\d+)*$|\\.dylib$")'
 assert old in s, "the pattern moved"
 p.write_text(s.replace(old, 'SHARED_OBJECT = re.compile(r"\\.so$")', 1), encoding="utf-8")
 PYEOF
@@ -6784,6 +6784,26 @@ EOF
 inject_exercise_story_assertion() {
   edit_in_place "s/row('side-calls-per-ask')).toBe('2.0')/row('side-calls-per-ask')).toBe('2.1')/" exercise/src/stories/KitchenSink.stories.tsx
 }
+# An authored example replayed without its label (#272): the condition turned
+# around, so the kitchen sink plays with nothing over it to say it is not a
+# session (and a recording gets the label instead). Typecheck and lint pass it;
+# the story that replays the example reads the label before and after it plays.
+inject_exercise_example_replayed_without_label() {
+  edit_in_place 's/{example ? <PinnedExampleLabel \/> : null}/{!example ? <PinnedExampleLabel \/> : null}/' exercise/src/replay/Replay.tsx
+}
+# The label there, but not held: it scrolls away with the top of the page, so
+# most of the replay reads as a session. Only the browser smoke, scrolled to
+# the end of the built page, can see it.
+inject_exercise_example_label_scrolls_away() {
+  edit_in_place '/^  position: sticky;$/d' exercise/src/replay/replay.css
+}
+# An example bundled into the page's own code: its registry imported from the
+# page's entry, which carries the whole authored script in with it. Typecheck,
+# lint, tests and the scans pass it; the smoke finds the example's text in
+# replay/assets/, where only the page's code belongs.
+inject_exercise_example_bundled_into_page() {
+  edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
+}
 
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
@@ -8653,6 +8673,12 @@ selftest() {
     'record/fixtures/invalid/canned-with-no-acts-digest\.jsonl' 'test:conformance/formats::record'
   seeded_case "a story's assertion broken in place"   exercise inject_exercise_story_assertion \
     "expected '2\\.0' to be '2\\.1'"
+  seeded_case "an authored example replayed without its label" exercise inject_exercise_example_replayed_without_label \
+    'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
+  seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \
+    "replay-smoke: kitchen-sink's label is on the page but out of view"
+  seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
+    "replay-smoke: kitchen-sink is bundled into the page's code"
 
   echo
   echo "--- results fixtures, checked directly ---"
