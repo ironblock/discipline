@@ -269,7 +269,8 @@ pub enum Event {
     /// A stop was asked for the call in flight. What the call did about it
     /// is the next terminal event of the turn, which may be any of them:
     /// [`Event::Cancelled`] if it stopped, [`Event::Answered`] if the answer
-    /// was already done, or [`Event::Rejected`], [`Event::Failed`] or
+    /// was already done, [`Event::Capped`] if the cap ended it first, or
+    /// [`Event::Rejected`], [`Event::Failed`] or
     /// [`Event::Crashed`] if the call ended some other way first.
     StopAsked {
         /// The turn the stop was asked for.
@@ -1222,9 +1223,11 @@ fn call<S: Streaming>(
 }
 
 /// A call that finished. One its output cap ended is not an answer: off the
-/// trunk, settled `failed` (#290, ruled 5969297103) -- a truncated reasoning
-/// sent back as history looped a model on `</think>` (#94's measured
-/// specimen). Any other is the turn's answer.
+/// trunk, settled `failed` (#290, ruled 5969297103), as a failed or
+/// cancelled call is (D13). On the floor a loop on a literal `</think>`
+/// followed truncated reasoning re-sent as history; whether that was the
+/// cause, the template, or both is unmeasured (#94). Any other is the
+/// turn's answer.
 fn settle_finished(
     state: &mut State,
     ask: String,
@@ -2618,9 +2621,6 @@ pub(in crate::drive) mod tests {
         ]
     }
 
-    /// The writer's half of #249's rule: a server that reports `timings`
-    /// gets no `usage` on its response line -- on llama.cpp the two are equal
-    /// (measured on #157), and the reader refuses a line carrying both.
     #[test]
     fn every_capped_finish_reason_the_client_knows_caps_a_turn() {
         // One list, the client's, so the session and the scripted drive
@@ -2743,6 +2743,9 @@ pub(in crate::drive) mod tests {
         )));
     }
 
+    /// The writer's half of #249's rule: a server that reports `timings`
+    /// gets no `usage` on its response line -- on llama.cpp the two are equal
+    /// (measured on #157), and the reader refuses a line carrying both.
     #[test]
     fn a_response_with_timings_is_written_without_usage() {
         let session = Session::open(
