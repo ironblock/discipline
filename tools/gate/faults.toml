@@ -8615,3 +8615,11 @@ check = "lanes"
 label = "client.canned-ignores-its-finish-reason"
 failure_class = "client.canned-ignores-its-finish-reason"
 migrated = false
+
+[[fault]]
+id = "drive.serve-bin-cap-cuts-reasoning"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-cap-cuts-reasoning"
+failure_class = "drive.serve-bin-cap-cuts-reasoning"
+migrated = false

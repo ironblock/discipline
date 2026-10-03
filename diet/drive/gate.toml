@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 206
+faults = 207
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3260,9 +3260,16 @@ failure_class = "drive.session-settles-a-capped-turn-final"
 target = "diet/src/drive/session.rs"
 expect_exit = 101
 anchor = '''
-    if finish_reason.as_deref() == Some(CAPPED) {'''
+    if finish_reason
+        .as_deref()
+        .is_some_and(|reason| CAPPED_FINISH_REASONS.contains(&reason))
+    {'''
 becomes = '''
-    if false && finish_reason.as_deref() == Some(CAPPED) {'''
+    if false
+        && finish_reason
+            .as_deref()
+            .is_some_and(|reason| CAPPED_FINISH_REASONS.contains(&reason))
+    {'''
 catches = [
     "drive::session::tests::a_capped_call_is_written_capped_settles_failed_and_stays_off_the_trunk",
 ]
@@ -3310,4 +3317,17 @@ becomes = '''
 '''
 catches = [
     "diet_drive_usage_names_the_serve_form",
+]
+
+[[fault]]
+id = "drive.serve-bin-cap-cuts-reasoning"
+failure_class = "drive.serve-bin-cap-cuts-reasoning"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+const SERVE_MAX_OUTPUT_TOKENS: u32 = 8192;'''
+becomes = '''
+const SERVE_MAX_OUTPUT_TOKENS: u32 = 512;'''
+catches = [
+    "a_drive_servers_default_cap_leaves_room_for_reasoning",
 ]
