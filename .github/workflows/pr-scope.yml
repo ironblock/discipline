@@ -29,7 +29,10 @@ jobs:
         run: |
           set -euo pipefail
           verdict="$(python3 scripts/pr-scope.py --base "origin/${BASE}" --head HEAD)"
-          printf '%s\n' "$verdict"
+          # Every line prefixed, so a path name carrying a newline cannot
+          # start a line the runner reads as a workflow command (#280's
+          # second review); the notice is one line.
+          printf '%s\n' "$verdict" | sed 's/^/pr-scope: /'
           printf '::notice title=pr-scope::%s\n' "$(printf '%s' "$verdict" | paste -sd ';' -)"
           {
             echo '### pr-scope'

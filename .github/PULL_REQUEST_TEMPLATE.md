@@ -28,11 +28,10 @@
 
      THE CHORE BRIEF, for its reviewer: hygiene of everything added, a
      person's schedule, habits or whereabouts among it, which no pattern
-     catches; the
-     licensing and provenance of every asset -- the tool that made it, the
-     tool's inputs, any embedded font or third-party element, and the licence
-     the repository may carry it under; and every rendering claim either
-     checked on a device or stated as unseen. -->
+     catches; the licensing and provenance of every asset -- the tool that
+     made it, the tool's inputs, any embedded font or third-party element, and
+     the licence the repository may carry it under; and every rendering claim
+     either checked on a device or stated as unseen. -->
 
 ## Acceptance
 
