@@ -64,6 +64,8 @@ These captures are I0 of #29's plan (comment 5943518924): a real llama-server st
 
 ## Not checked
 
+- **The e486f80 concurrency hazard does not reach these captures.** On 2026-10-03 the inference seat found that e486f80 lets concurrent requests see each other's context under `-np > 1` with `--kv-unified` (`substrates/measurements/2026-10-03-ada48-concurrency/`). Each capture here was one request at a time against an otherwise idle server, so no ubatch held more than one sequence.
+
 - One sample of each, at temperature 0.6. The fragmentation's dependence on the sampler, on longer arguments, and on parallel calls is not measured.
 - Thinking on was not captured, so a call after streamed `reasoning_content` is not represented.
 - The `openai` shape was sent second, into a cache that already held the `user` shape's turn 2. Its `cache_n` equals the `user` shape's, so it reused only the shared prefix.
