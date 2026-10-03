@@ -15,7 +15,8 @@ The page says no more about a rule than the record does: whether a rule file
 was written before its numbers is in its own header, not in the record, so
 the page does not call it pre-registered. The product digest is the link to
 the directory, at the commit the page was rendered from (--commit, else
-main).
+`HEAD`, which GitHub resolves to the default branch: no branch is named here,
+#326).
 
 Not yet: which issue a result answers, and which directory supersedes which.
 Neither is recorded in the results' front matter, and the page draws only what
@@ -142,7 +143,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument('ledger', type=pathlib.Path)
     parser.add_argument('out', type=pathlib.Path)
     parser.add_argument('--results', type=pathlib.Path, required=True)
-    parser.add_argument('--commit', default='main', help='the commit the page links into (default: main)')
+    parser.add_argument('--commit', default='HEAD', help='the commit the page links into (default: HEAD, the default branch)')
     args = parser.parse_args(argv)
     try:
         ledger = json.loads(args.ledger.read_text(encoding='utf-8'))
@@ -156,7 +157,7 @@ def main(argv: list[str]) -> int:
     if not rows:
         print(f'render-ledger: {args.ledger}: holds no result; a ledger of nothing is not a page', file=sys.stderr)
         return 2
-    if not re.fullmatch(r'[0-9a-f]{7,40}|main', args.commit):
+    if not re.fullmatch(r'[0-9a-f]{7,40}|HEAD', args.commit):
         print(f'render-ledger: --commit {args.commit!r} is not a commit', file=sys.stderr)
         return 2
     refused = [line for row in rows for line in refusals(row, args.results)]

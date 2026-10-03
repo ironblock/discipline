@@ -1,0 +1,26 @@
+# Which branch is which, declared once (#326).
+#
+# Format: constant<TAB>branch name
+#
+# The INTEGRATION branch is the repository's default branch: every pull
+# request targets it, a push to it runs the full selftest on `develop_shards`
+# (.github/gate-budget.tsv) and a newer push supersedes the run in flight, and
+# Pages publishes from it. Everything that RUNS reads it as the default branch
+# -- `github.event.repository.default_branch` in a workflow, `origin/HEAD` or
+# `gh repo view --json defaultBranchRef` in a script -- never from here. Its
+# row exists for scripts/check-ci-coverage.py alone: a `branches:` list cannot
+# take an expression, so the triggers spell it, and the check compares that
+# spelling to this row (ruled on #326, comment 5972929414, Q2).
+#
+# The RELEASE branch takes only release pull requests from the integration
+# branch. A pull request into it and a push to it run the full selftest on
+# `max_shards`, never cancelled and never scoped. Read from here by
+# scripts/scope-selftest.py --kind; spelled once more, in verify.yml's
+# `cancel-in-progress` expression, which cannot read a file, and checked
+# against this row there (Q1).
+#
+# Renaming either branch is an edit to this file, the trigger lists, and
+# that one expression, together; check-ci-coverage.py refuses any of them
+# left behind.
+integration_branch	develop
+release_branch	main

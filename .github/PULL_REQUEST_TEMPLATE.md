@@ -30,10 +30,14 @@
 <!-- Five things, each of which is VISIBLE on this pull request before it is
      merged. A reviewer should be able to tick every box by reading the thread
      and the checks tab, without asking anyone what happened. Merging is the
-     job of whoever owns the PR. -->
+     job of whoever owns the PR. The base branch is the integration branch
+     (the repository's default); a release PR, from it into the release
+     branch, is held to the same five, and its selftest is the full set, not
+     a scoped one (CONTRIBUTING.md, "Branches and releases"). -->
 
 - [ ] **CI is green on the head commit, including the `selftest` job.** Not
-      "green when I pushed": green on what is about to merge.
+      "green when I pushed": green on what is about to merge, into the base
+      branch this PR names.
 - [ ] **A fresh-instance review is recorded on this thread**, and every finding
       it raised is either fixed, refuted with a command and an exit code, or
       listed under *Known defects* with the reason it is deferred.

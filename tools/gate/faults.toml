@@ -4078,7 +4078,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "the site published though a later run passed"
 failure_class = "wiring.pages-older-sha"
-legacy_signature = "pages.yml: publishes without checking that no later verify run on main has passed"
+legacy_signature = "pages.yml: publishes without checking that no later verify run on its branch has passed"
 migrated = false
 
 [[fault]]
@@ -4205,6 +4205,46 @@ check = "ci"
 label = "one workflow renaming the trunk"
 failure_class = "wiring.trunk-disagreed"
 legacy_signature = "disagree about which branch is the trunk"
+migrated = false
+[[fault]]
+id = "ci.ci_pages_deploys_any_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "the site published from any branch"
+failure_class = "wiring.pages-branch"
+legacy_signature = "pages.yml: deploys a run on a branch that is not the default branch"
+migrated = false
+[[fault]]
+id = "ci.ci_release_run_cancelled"
+kind = "seeded-gate"
+check = "ci"
+label = "a release push made cancellable"
+failure_class = "wiring.release-run-cancelled"
+legacy_signature = "is not the one workflow-level expression"
+migrated = false
+[[fault]]
+id = "ci.ci_release_misspelled"
+kind = "seeded-gate"
+check = "ci"
+label = "the release branch misspelled in the cancel expression"
+failure_class = "wiring.release-disagreed"
+legacy_signature = "spells the release branch as mian"
+migrated = false
+[[fault]]
+id = "ci.ci_trigger_drops_a_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "a trigger dropping the integration branch"
+failure_class = "wiring.trigger-disagreed"
+legacy_signature = "repo-metadata.yml: its .push:. trigger names main, and"
+migrated = false
+[[fault]]
+id = "ci.ci_branch_literal_in_script"
+kind = "seeded-gate"
+check = "ci"
+label = "a branch spelled in a script"
+failure_class = "wiring.branch-literal"
+legacy_signature = "scope-selftest.py:[0-9]+: .*names a branch literally"
 migrated = false
 [[fault]]
 id = "derive.scope_ignores_touched"
@@ -8302,7 +8342,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "the trigger on any branch"
 failure_class = "wiring.pages-trigger"
-legacy_signature = "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+legacy_signature = "pages.yml: the workflow_run trigger is not exactly verify's runs completed on the declared branches"
 migrated = false
 
 [[fault]]

@@ -247,7 +247,7 @@ check_results() {
   python3 scripts/check-results.py --root results --ledger "$ledger" || rc=$?
   if [ "$rc" -eq 0 ]; then
     python3 "${RENDER_LEDGER:-exercise/scripts/render-ledger.py}" "$ledger" _site/ledger --results results \
-      --commit "$(git rev-parse --verify --quiet HEAD || echo main)" || rc=$?
+      --commit "$(git rev-parse --verify --quiet HEAD || echo HEAD)" || rc=$?
   fi
   # And the page as published, under the Pages table (#32 I3): it is checked
   # here, where the gate can fail, and not first at deploy time.
@@ -4447,7 +4447,7 @@ inject_ci_pages_upload_always() {
 
 # The trigger's branch filter gone: a passing push run on any branch publishes.
 inject_ci_pages_trigger_any_branch() {
-  edit_in_place '/^    branches: \[main\]$/d' .github/workflows/pages.yml
+  edit_in_place '/^    branches: \[main, develop\]$/d' .github/workflows/pages.yml
 }
 
 # The site checked against main's tip rather than the sha that built it.
@@ -4764,7 +4764,7 @@ EOF
 
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
-  edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
+  edit_in_place '/^    branches: \[main, develop\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
 }
 
 # The ledger the deploy publishes, uploaded by nothing.
@@ -4855,7 +4855,7 @@ import pathlib
 
 path = pathlib.Path(".github/workflows/verify.yml")
 source = path.read_text(encoding="utf-8")
-old = "  push:\n    branches: [main]\n"
+old = "  push:\n    branches: [main, develop]\n"
 if source.count(old) != 1:
     raise SystemExit("verify.yml: no single `push:` trigger to remove")
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
@@ -4869,7 +4869,7 @@ EOF
 # one namer left it quietly stops grading anything while still reporting a
 # pass -- which is the shape of both defects this whole file was extended for.
 inject_ci_trunk_uncorroborated() {
-  edit_in_place '/^    branches: \[main\]$/d' \
+  edit_in_place '/^    branches: \[main, develop\]$/d' \
     .github/workflows/pages.yml .github/workflows/repo-metadata.yml
 }
 
@@ -4880,7 +4880,86 @@ inject_ci_trunk_uncorroborated() {
 # knows what the trunk is called; the other workflows that name it do, and
 # they are what catches this.
 inject_ci_trunk_typo() {
-  edit_in_place 's|^    branches: \[main\]$|    branches: [mian]|' .github/workflows/verify.yml
+  edit_in_place 's|^    branches: \[main, develop\]$|    branches: [mian, develop]|' .github/workflows/verify.yml
+}
+
+# #326's faults: the branch table and everything that must agree with it.
+
+# The site published from whichever branch's run passed, not only the
+# default branch's: after the rename, a release push would deploy over the
+# working surface.
+inject_ci_pages_deploys_any_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/pages.yml")
+source = path.read_text(encoding="utf-8")
+old = " && github.event.workflow_run.head_branch == github.event.repository.default_branch"
+if source.count(old) != 1:
+    raise SystemExit("pages.yml: no single default-branch guard to remove")
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A push to the release branch made cancellable: the next release push would
+# cancel the run that makes the release branch green by construction.
+inject_ci_release_run_cancelled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+old = "(github.event_name == 'push' && github.ref_name != 'main')"
+if source.count(old) != 1:
+    raise SystemExit("verify.yml: no single push clause to widen")
+path.write_text(source.replace(old, "(github.event_name == 'push')", 1), encoding="utf-8")
+EOF
+}
+
+# The release branch's one spelling outside the table, misspelled: every
+# release push would be cancellable and every release pull request superseded.
+inject_ci_release_misspelled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+lines = path.read_text(encoding="utf-8").split("\n")
+hits = [i for i, line in enumerate(lines) if line.startswith("  cancel-in-progress: ")]
+if len(hits) != 1 or lines[hits[0]].count("'main'") != 2:
+    raise SystemExit("verify.yml: no single cancel expression spelling the release branch twice")
+lines[hits[0]] = lines[hits[0]].replace("'main'", "'mian'")
+path.write_text("\n".join(lines), encoding="utf-8")
+EOF
+}
+
+# A trigger that drops the integration branch: before the rename it changes
+# nothing, after it the labels sync from no push at all.
+inject_ci_trigger_drops_a_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/repo-metadata.yml")
+source = path.read_text(encoding="utf-8")
+old = "    branches: [main, develop]\n"
+if source.count(old) != 1:
+    raise SystemExit("repo-metadata.yml: no single two-branch trigger to narrow")
+path.write_text(source.replace(old, "    branches: [main]\n", 1), encoding="utf-8")
+EOF
+}
+
+# The release branch spelled in a script instead of read from the table: a
+# rename of the table would leave this script deciding by the old name.
+inject_ci_branch_literal_in_script() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/scope-selftest.py")
+source = path.read_text(encoding="utf-8")
+old = 'declared("release_branch", BRANCHES))'
+if source.count(old) != 1:
+    raise SystemExit("scope-selftest.py: no single read of the release branch to replace")
+path.write_text(source.replace(old, '"main")', 1), encoding="utf-8")
+EOF
 }
 
 # A gating workflow that narrows the test check to part of the suite. The job
@@ -7916,7 +7995,7 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
     # ignored, so each `git add --all` commits only what its case names.
     printf '__pycache__/\n' > .gitignore
     printf 'a\n' > a.txt && git add --all && seed_commit --message 'base'
-    git update-ref refs/remotes/origin/main HEAD
+    git update-ref refs/remotes/origin/HEAD HEAD
     printf 'b\n' > b.txt && git add --all && seed_commit --message 'second'
   )
   local fake_base fake_head
@@ -8766,7 +8845,7 @@ selftest() {
   seeded_case "the site uploaded unchecked" ci inject_ci_pages_uploads_unchecked \
     "pages.yml: upload-pages-artifact is not preceded by \./verify\.sh --site _site"
   seeded_case "the site published though a later run passed" ci inject_ci_pages_publishes_an_older_sha \
-    "pages.yml: publishes without checking that no later verify run on main has passed"
+    "pages.yml: publishes without checking that no later verify run on its branch has passed"
   seeded_case "the newest-run comparison turned round" ci inject_ci_pages_newest_run_compared_backwards \
     "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
   seeded_case "the deploy's group at the workflow level" ci inject_ci_pages_concurrency_at_workflow_level \
@@ -8798,7 +8877,7 @@ selftest() {
   seeded_case "the upload run whatever the check said" ci inject_ci_pages_upload_always \
     "pages.yml: a step from the check on carries .if:. .actions/upload-pages-artifact"
   seeded_case "the trigger on any branch" ci inject_ci_pages_trigger_any_branch \
-    "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+    "pages.yml: the workflow_run trigger is not exactly verify's runs completed on the declared branches"
   seeded_case "the checkout not the run's sha" ci inject_ci_pages_checkout_not_the_run \
     "pages.yml: the site is not checked against the sha that run built"
   seeded_case "the condition with text outside its braces" ci inject_ci_pages_condition_outside_its_braces \
@@ -8853,6 +8932,16 @@ selftest() {
     'runs apt-get with no .timeout-minutes.'
   seeded_case "the trunk's run cancelled by a merge"  ci       inject_ci_trunk_run_cancelled \
     'cancels a push run on the trunk'
+  seeded_case "the site published from any branch" ci inject_ci_pages_deploys_any_branch \
+    "pages.yml: deploys a run on a branch that is not the default branch"
+  seeded_case "a release push made cancellable" ci inject_ci_release_run_cancelled \
+    'is not the one workflow-level expression'
+  seeded_case "the release branch misspelled in the cancel expression" ci inject_ci_release_misspelled \
+    'spells the release branch as mian'
+  seeded_case "a trigger dropping the integration branch" ci inject_ci_trigger_drops_a_branch \
+    'repo-metadata.yml: its .push:. trigger names main, and'
+  seeded_case "a branch spelled in a script" ci inject_ci_branch_literal_in_script \
+    'scope-selftest.py:[0-9]+: .*names a branch literally'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
     'passes .--scope. to verify\.sh'
   seeded_case "CI narrowing the history check"        ci       inject_ci_ranged_history \
@@ -9455,7 +9544,7 @@ EOF
     cd "$pushes" && git init -q .
     git -c user.email=gate@example.invalid -c user.name=gate \
       commit -q --allow-empty -m "a trunk commit"
-    git update-ref refs/remotes/origin/main HEAD
+    git update-ref refs/remotes/origin/HEAD HEAD
     git -c user.email=gate@example.invalid -c user.name=gate \
       commit -q --allow-empty -m "one"
     git -c user.email=gate@example.invalid -c user.name=gate \

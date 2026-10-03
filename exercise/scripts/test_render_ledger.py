@@ -119,7 +119,7 @@ class Rendered(unittest.TestCase):
     def test_every_row_links_its_directory(self):
         _, page = self.render([row('2026-01-01-one'), row('2026-01-02-two', rules=())])
         for name in ('2026-01-01-one', '2026-01-02-two'):
-            self.assertIn(f'href="https://github.com/ironblock/discipline/tree/main/results/{name}"', page)
+            self.assertIn(f'href="https://github.com/ironblock/discipline/tree/HEAD/results/{name}"', page)
 
     def test_it_says_no_more_about_a_rule_than_the_record_does(self):
         _, page = self.render([row('2026-01-01-one'), row('2026-01-02-two', rules=())])
