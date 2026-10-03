@@ -1559,6 +1559,37 @@ path.write_text(source.replace(was, now, 1), encoding="utf-8")
 EOF
 }
 
+# The assembler inferring an absence the caller never declared (#32, ruled on
+# #271): an undeclared field written as absent, with no one having said why.
+inject_bakeoff_infers_an_absence() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = "(None, None) => Err(RunError::Undeclared(format!("
+new = "(None, None) => Ok(Declared::Absent(format!("
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The assembler writing a second directory of one product (#271, ruled):
+# its refusal disabled, so the same record assembles beside itself.
+inject_bakeoff_writes_a_second_product() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = "if siblings.iter().any(|sha| sha == product_sha256) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "if false && siblings.iter().any(|sha| sha == product_sha256) {", 1), encoding="utf-8")
+EOF
+}
+
 # The runner's digest comparison made advisory. The cache is still read, the
 # scores are still computed, and they are the scores of whatever bytes happen
 # to be on disk rather than of the bytes the record consumed -- which is a
@@ -3667,6 +3698,181 @@ source = readme.read_text(encoding="utf-8")
 row = 'kind = "reproducible-by-config"\n'
 assert row in source
 readme.write_text(source.replace(row, "", 1), encoding="utf-8")
+EOF
+}
+
+# THE CLAIM'S PROVENANCE FIELDS (#32): each broken once, in one directory.
+# A field neither given nor declared absent.
+inject_results_claim_field_undeclared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'claim_issue = "114"\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '', 1), encoding="utf-8")
+EOF
+}
+
+# One record in two directories (#271, ruled): two rows with one product,
+# which makes every supersession of it ambiguous.
+inject_results_product_shared() {
+  cp -R results/2026-09-27-false-nomination-edit-rate results/2026-09-27-false-nomination-edit-rate-again
+}
+
+# A two-directory supersession cycle (#271, ruled): the edit-rate claim
+# supersedes the framing claim, and the framing claim the edit-rate one.
+inject_results_supersession_cycle() {
+  python3 - <<'EOF'
+import pathlib
+
+edits = [
+    ("results/2026-09-27-false-nomination-edit-rate/README.md",
+     'absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }',
+     'supersedes = "ac427f76ee8fd3ae3f596158d7264d2c853ae937f3215f93ad6d00edc94be122"'),
+    ("results/2026-09-20-false-nomination-framing/README.md",
+     'absent = { supersedes = "nothing replaced: the first draw; (b)-v2 sits beside it" }',
+     'supersedes = "9f9afe1b72ca8860742cb037b4a154a9d53ec6c8f7f46d7bc2c4115da0c334b8"'),
+]
+for name, old, new in edits:
+    path = pathlib.Path(name)
+    source = path.read_text(encoding="utf-8")
+    if source.count(old) != 1:
+        raise SystemExit(f"{name}: the anchor appears {source.count(old)} times")
+    path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A supersession of the template's placeholder product (#271's fourth review,
+# its M1): the template is no product, so the digest resolves to nothing.
+inject_results_supersedes_the_template() {
+  python3 - <<'EOF'
+import pathlib, re
+
+template = pathlib.Path("results/_template/README.md").read_text(encoding="utf-8")
+sha = re.search(r'^product_sha256 = "([0-9a-f]{64})"$', template, re.M).group(1)
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, f'supersedes = "{sha}"', 1), encoding="utf-8")
+EOF
+}
+
+# A product spelled other than as its one canonical line (#271's fourth
+# review): a trailing comment is valid TOML and a second reading of the key.
+inject_results_product_spelled_twice_over() {
+  python3 - <<'EOF'
+import pathlib, re
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+line = re.search(r'^product_sha256 = "[0-9a-f]{64}"$', source, re.M)
+if line is None:
+    raise SystemExit("the product line moved")
+path.write_text(source.replace(line.group(0), line.group(0) + " # the report", 1), encoding="utf-8")
+EOF
+}
+
+# A supersession that names no product (#271, ruling (a)): a digest of the
+# right shape that no directory beside this one declares.
+inject_results_supersedes_dangling() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'supersedes = "' + "a" * 64 + '"', 1), encoding="utf-8")
+EOF
+}
+
+# An issue number with a leading zero: a second spelling of one id.
+inject_results_claim_issue_not_digits() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'claim_issue = "114"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'claim_issue = "0114"', 1), encoding="utf-8")
+EOF
+}
+
+# A field given and declared absent at once.
+inject_results_claim_field_both() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'absent = { supersedes ='
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'absent = { claim_issue = "declared absent as well", supersedes =', 1), encoding="utf-8")
+EOF
+}
+
+# A window start with no source: an invented number.
+inject_results_window_start_unsourced() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'window_start_from = "window/run.start"\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '', 1), encoding="utf-8")
+EOF
+}
+
+# A ratification time that is not ISO-8601 UTC.
+inject_results_rule_ratified_at_malformed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'at = "2026-09-25T03:29:00Z"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'at = "2026-09-25 03:29"', 1), encoding="utf-8")
+EOF
+}
+
+# A ratification digest of a file that is not here.
+inject_results_rule_ratified_of_missing() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'digest = "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2" }'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'digest = "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2", of = "nowhere.toml" }', 1), encoding="utf-8")
+EOF
+}
+
+# A provenance key in a table where nothing reads it.
+inject_results_claim_provenance_nested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = '[derivation]\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '[derivation]\nrule_ratified_note = "a caveat in the wrong table"\n', 1), encoding="utf-8")
 EOF
 }
 
@@ -8238,6 +8444,10 @@ selftest() {
     'record/fixtures/invalid/request-unhashed-in-a-live-record\.jsonl' 'test:conformance/formats::record'
   seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
     'sed forms only GNU accepts'
+  seeded_case "an absence the assembler inferred"     test     inject_bakeoff_infers_an_absence \
+    'capture::bakeoff::tests::a_missing_declaration_is_refused_before_anything_is_written \.\.\. FAILED' 'lib/capture::bakeoff'
+  seeded_case "a second directory of one product"    test     inject_bakeoff_writes_a_second_product \
+    'capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
     'capture::bakeoff::tests::a_cache_the_record_did_not_consume_is_refused \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
@@ -8405,6 +8615,30 @@ selftest() {
     'the template declares .historical-observation.'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
+  seeded_case "a claim field neither given nor absent" results inject_results_claim_field_undeclared \
+    'neither gives .claim_issue. nor declares it in .absent.*\[results\.claim-field-undeclared\]'
+  seeded_case "one record in two directories"       results inject_results_product_shared \
+    '.product_sha256. [0-9a-f]{64} is declared here and by .*\[results\.product-shared\]'
+  seeded_case "a two-directory supersession cycle"  results inject_results_supersession_cycle \
+    '.supersedes. closes a cycle: [^ ]+ -> [^ ]+ -> [^ ]+; .*\[results\.supersession-cycle\]'
+  seeded_case "a supersession of the template"       results inject_results_supersedes_the_template \
+    '.supersedes. is [0-9a-f]{64}, which 0 directory\(ies\) beside this one declare.*\[results\.claim-field-malformed\]'
+  seeded_case "a product spelled a second way"       results inject_results_product_spelled_twice_over \
+    '.product_sha256. is spelled 1 time\(s\) in the front-matter, as .product_sha256 = "[0-9a-f]{64}" # the report.*\[results\.product-spelling\]'
+  seeded_case "a supersession that names no product" results inject_results_supersedes_dangling \
+    '.supersedes. is a{64}, which 0 directory\(ies\) beside this one declare.*\[results\.claim-field-malformed\]'
+  seeded_case "an issue number with a leading zero"   results  inject_results_claim_issue_not_digits \
+    '.claim_issue. is .0114.; an issue number is a string of digits.*\[results\.claim-field-malformed\]'
+  seeded_case "a claim field given and absent"        results  inject_results_claim_field_both \
+    '.claim_issue. is both given and declared absent.*\[results\.claim-field-both\]'
+  seeded_case "a window start with no source"         results  inject_results_window_start_unsourced \
+    '.window_start. gives no .window_start_from.*\[results\.window-start-unsourced\]'
+  seeded_case "a ratification time not in UTC"        results  inject_results_rule_ratified_at_malformed \
+    '.rule_ratified\.at. is .2026-09-25 03:29., not an ISO-8601 UTC time.*\[results\.claim-field-malformed\]'
+  seeded_case "a ratification of a file not here"     results  inject_results_rule_ratified_of_missing \
+    'is of .nowhere\.toml., which is not a file here.*\[results\.claim-field-malformed\]'
+  seeded_case "a provenance key in the wrong table"   results  inject_results_claim_provenance_nested \
+    '.derivation\.rule_ratified_note.: .rule_ratified_note. belongs at the top level.*\[results\.claim-field-nested\]'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing  exit=' inject_that_changes_nothing
   seeded_case "the one portable spelling made GNU-only" bsd    inject_bsd_edit_in_place_gnu_only \
@@ -9159,6 +9393,28 @@ prove_selftest_mechanics() {
   local relay; scratch; relay="$SCRATCH"
   cp -r "${ROOT}/results/_template" "${relay}/2026-01-30-no-substrate"
   strip_substrates "${relay}/2026-01-30-no-substrate/run.jsonl"
+  # A copy of the template is a claim directory, so it declares its four
+  # provenance fields (#32): absent here, since the record refusal is the one
+  # failure this case reads.
+  python3 - "${relay}/2026-01-30-no-substrate/README.md" <<'EOF'
+import pathlib, sys
+
+path = pathlib.Path(sys.argv[1])
+source = path.read_text(encoding="utf-8")
+if not source.startswith("+++\n"):
+    raise SystemExit("the template's front-matter fence moved")
+absent = 'absent = { claim_issue = "a fixture", supersedes = "a fixture", rule_ratified = "a fixture", window_start = "a fixture" }\n'
+path.write_text("+++\n" + absent + source[len("+++\n"):], encoding="utf-8")
+EOF
+  # POST-HOC IS DERIVED, BOTH WAYS (#32): a rule ratified after its window
+  # opened reads post-hoc in the ledger (the 09-20 framing run), and one
+  # ratified before does not (the 09-27 edit-rate run).
+  expect_exit "post-hoc is derived from the two times, both ways" 0 \
+    bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
+      && ledger=\$(mktemp) && trap 'rm -f \"\${ledger:?}\"' EXIT \
+      && python3 scripts/check-results.py --root results --ledger \"\$ledger\" >/dev/null \
+      && python3 -c 'import json,sys; rows={r[\"directory\"]: r[\"provenance\"][\"post_hoc\"] for r in json.load(open(sys.argv[1]))[\"directories\"]}; sys.exit(0 if rows[\"2026-09-20-false-nomination-framing\"] is True and rows[\"2026-09-27-false-nomination-edit-rate\"] is False else 1)' \"\$ledger\""
+
   expect_exit "a record diet refuses gets no verdict from the linter" 0 \
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
       && out=\$(python3 scripts/check-results.py '${relay}/2026-01-30-no-substrate' 2>&1; true) \

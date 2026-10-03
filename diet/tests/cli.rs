@@ -386,6 +386,63 @@ fn the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A malformed declaration is a usage error, like a misspelled `--into`
+/// (#271 review): exit 2, nothing on stdout, nothing written.
+fn malformed_declarations_are_usage_errors(run_path: &str, into: &std::path::Path) {
+    let declared = |tail: &[&str]| -> (i32, String, String) {
+        let mut args = vec![
+            "bakeoff",
+            run_path,
+            "--into",
+            into.to_str().expect("a UTF-8 path"),
+        ];
+        args.extend_from_slice(tail);
+        run(&args)
+    };
+    for (tail, reason) in [
+        (&[][..], "neither given nor declared absent"),
+        (
+            &[
+                "--claim-issue",
+                "0114",
+                "--absent",
+                "supersedes=x",
+                "--absent",
+                "rule_ratified=x",
+            ][..],
+            "`claim_issue` is \"0114\"",
+        ),
+        (
+            &[
+                "--claim-issue",
+                "--absent",
+                "supersedes=x",
+                "--absent",
+                "rule_ratified=x",
+            ][..],
+            "`--claim-issue` takes a value",
+        ),
+    ] {
+        let (code, out, err) = declared(tail);
+        assert_eq!(code, 2, "{tail:?} was not a usage error: {out} {err}");
+        assert!(out.is_empty(), "a usage error printed a result: {out}");
+        assert!(
+            err.contains(reason),
+            "{tail:?}: the refusal does not say {reason:?}: {err}"
+        );
+        assert!(
+            !into.exists(),
+            "a refused assembly wrote its directory anyway"
+        );
+    }
+    // And no other command carries a declaration it would silently ignore.
+    let (code, _, _) = run(&["route", run_path, "--into", "x", "--claim-issue", "24"]);
+    assert_eq!(
+        code, 2,
+        "a declaration on a command that reads none was accepted"
+    );
+}
+
 /// `--into` is a SECOND ARGUMENT SHAPE through the same dispatch, and a shape
 /// is what a subprocess test catches.
 ///
@@ -400,6 +457,7 @@ fn the_bakeoff_verb_runs_the_bakeoff_and_not_another_lane() {
 /// So both directions: the flag spelled right assembles, and a flag spelled
 /// wrong is a usage error that writes NOTHING. Without the second, an arm that
 /// accepted any fourth argument would satisfy the first.
+
 #[test]
 fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {
     let dir = std::env::temp_dir().join(format!(
@@ -430,11 +488,23 @@ fn the_into_flag_assembles_a_directory_and_a_misspelling_writes_nothing() {
     );
 
     let into = dir.join("2026-01-01-a-sense-bakeoff");
+
+    // NO DECLARATION, NO DIRECTORY (#32, ruled on #271): the claim's
+    // provenance is the caller's to declare, field by field, and an assembly
+    // with none declared is refused before anything is written.
+    malformed_declarations_are_usage_errors(&run_path, &into);
+
     let (code, out, err) = run(&[
         "bakeoff",
         &run_path,
         "--into",
         into.to_str().expect("a UTF-8 path"),
+        "--claim-issue",
+        "24",
+        "--absent",
+        "supersedes=nothing replaced: the first run of this claim",
+        "--absent",
+        "rule_ratified=the bakeoff applies no rule; its endpoints are pre-registered",
     ]);
     assert_eq!(code, 0, "bakeoff --into: {err}");
     assert!(err.is_empty(), "bakeoff --into wrote to stderr: {err}");
