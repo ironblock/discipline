@@ -57,7 +57,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::client::CAPPED_FINISH_REASONS;
-use crate::client::shape::{Message, RequestShape, Role};
+use crate::client::shape::{Concurrency, Message, RequestShape, Role, Serving};
 use crate::client::stream::{
     Cancel, Ended as StreamEnded, Piece, Progress, Rejection, Streaming, Timings,
 };
@@ -207,6 +207,9 @@ pub enum Event {
         model: String,
         /// The messages the trunk starts from.
         head: Vec<Message>,
+        /// What serves the session, as its caller declared it: log v2's
+        /// `serving` (#292). `None` when nothing was declared.
+        serving: Option<Serving>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -518,6 +521,12 @@ impl State {
         // running from this refusal.
         self.carried = None;
         let during = self.settlement;
+        // Once ended, nothing more is logged: `ended` is the log's last line,
+        // so a reader that waits for it has the whole session (#291). The
+        // caller still answers the refusal.
+        if during == Settlement::Ended {
+            return because;
+        }
         self.push(Event::Refused {
             command,
             because,
@@ -572,6 +581,18 @@ impl<S: Streaming + 'static> Session<S> {
     /// trunk starts from, and its `limits.call` bounds each turn's call.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
+        Self::opened_as(transport, template, None)
+    }
+
+    /// [`Session::open`], declaring what serves it -- the dialect it speaks
+    /// and, when the operator declared it, its concurrency -- which the log's
+    /// `session.start` carries (#292).
+    #[must_use]
+    pub fn open_serving(transport: S, template: RequestShape, serving: Serving) -> Self {
+        Self::opened_as(transport, template, Some(serving))
+    }
+
+    fn opened_as(transport: S, template: RequestShape, serving: Option<Serving>) -> Self {
         let trunk = template.messages.clone();
         let opened = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -594,6 +615,7 @@ impl<S: Streaming + 'static> Session<S> {
             opened,
             model: template.model.clone(),
             head: template.messages.clone(),
+            serving,
         });
         Self {
             shared: Arc::new(Shared {
@@ -616,7 +638,8 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// [`Refusal::InFlight`] while a turn or a capture is in flight, and
-    /// [`Refusal::Ended`] once the session has ended; either is also logged.
+    /// [`Refusal::Ended`] once the session has ended. The first is logged; the
+    /// second is not, so `ended` stays the log's last line (#291).
     /// [`Rejected::BadGap`] when `gap` cannot be logged, and then nothing is.
     pub fn ask(&self, text: &str, gap: Option<IdleGap>) -> Result<Admitted, Rejected> {
         let mut state = self.shared.lock();
@@ -701,8 +724,8 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// [`Rejected::NoSuchTurn`] for a turn never admitted (not logged), and
     /// [`Rejected::BadGap`] when `gap` cannot be logged (nothing is).
-    /// Otherwise refused, and logged: [`Refusal::Ended`] once the session
-    /// has ended, [`Refusal::Stale`] for a turn older than the latest, and
+    /// Otherwise refused: [`Refusal::Ended`] once the session has ended (not
+    /// logged, #291), and, logged, [`Refusal::Stale`] for a turn older than the latest, and
     /// [`Refusal::NothingInFlight`] when the latest turn has no call in
     /// flight.
     pub fn cancel(&self, turn: u32, gap: Option<IdleGap>) -> Result<(), Rejected> {
@@ -739,8 +762,8 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// # Errors
     ///
-    /// Always: [`Refusal::SeamNotBuilt`], or [`Refusal::Ended`] once the
-    /// session has ended. Logged either way; a refused command's `gap` is
+    /// Always: [`Refusal::SeamNotBuilt`], logged, or [`Refusal::Ended`] once
+    /// the session has ended, not logged (#291). A refused command's `gap` is
     /// neither logged nor closed.
     pub fn declare_seam(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
@@ -761,8 +784,8 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// [`Refusal::InFlight`] while a turn or a capture is in flight -- stop
-    /// it first -- and [`Refusal::Ended`] if it already ended; logged, and the
-    /// refused `gap` is neither logged nor closed. Or [`Rejected::BadGap`]
+    /// it first -- logged -- and [`Refusal::Ended`] if it already ended, not
+    /// logged (#291); the refused `gap` is neither logged nor closed. Or [`Rejected::BadGap`]
     /// when an admitted end's `gap` cannot be logged: then it does not end,
     /// and nothing is logged.
     pub fn end(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
@@ -883,6 +906,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             opened,
             model,
             head,
+            serving,
         } => log::Event::SessionStart {
             version: log::VERSION,
             opened: *opened,
@@ -895,7 +919,13 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 })
                 .collect(),
             // v2's declaration, written once the session carries one (#30's I2).
-            serving: None,
+            serving: serving.as_ref().map(|serving| log::Serving {
+                dialect: serving.dialect.name.clone(),
+                concurrency: match serving.concurrency {
+                    Concurrency::Declared(streams) => Some(u64::from(streams)),
+                    Concurrency::Undeclared => None,
+                },
+            }),
         },
         Event::Asked { turn, text } => log::Event::Ask {
             turn: *turn,
@@ -2069,11 +2099,20 @@ pub(in crate::drive) mod tests {
                     Refusal::SeamNotBuilt,
                     Settlement::Awaiting
                 ),
-                (CommandKind::Ask, Refusal::Ended, Settlement::Ended),
-                (CommandKind::Cancel, Refusal::Ended, Settlement::Ended),
-                (CommandKind::DeclareSeam, Refusal::Ended, Settlement::Ended),
-                (CommandKind::End, Refusal::Ended, Settlement::Ended),
             ]
+        );
+        // Every command after `end` was refused, and none was logged:
+        // `ended` is the last line (#291).
+        assert!(
+            matches!(
+                session.events_from(0).last().map(|logged| &logged.event),
+                Some(Event::Settled {
+                    to: Settlement::Ended,
+                    ..
+                })
+            ),
+            "{:?}",
+            session.events_from(0).last()
         );
         assert_eq!(
             session.shared.transport.sent().len(),
@@ -2299,6 +2338,7 @@ pub(in crate::drive) mod tests {
             opened,
             model,
             head,
+            serving: None,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -2357,6 +2397,10 @@ pub(in crate::drive) mod tests {
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
                 head: vec![Message::new(Role::System, HEAD)],
+                serving: Some(Serving {
+                    concurrency: Concurrency::Declared(2),
+                    dialect: crate::client::shape::Dialect::llama_cpp(),
+                }),
             },
             Event::Asked {
                 turn: 1,
@@ -2503,7 +2547,10 @@ pub(in crate::drive) mod tests {
                 version: log::VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
-                serving: None,
+                serving: Some(log::Serving {
+                    dialect: "llama.cpp".to_owned(),
+                    concurrency: Some(2),
+                }),
                 head: vec![log::HeadMessage {
                     role: log::Role::System,
                     content: HEAD.to_owned(),
