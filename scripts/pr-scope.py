@@ -11,7 +11,7 @@ A diff is MATERIAL when any of these holds, and a CHORE otherwise:
     inputs outside them, measured on #280's third review), so the map is
     kept as a second reader, not as the rule that decides: a changed file reaches a
     fault's catcher, the selftest machinery, or -- with `--census`, the
-    latest `main` selftest's census -- a file a fault's injection touched.
+    latest full selftest's census -- a file a fault's injection touched.
     The map is `scope-selftest.py`'s own, read from there, never copied;
   * it changes `verify.sh`, the gate itself;
   * it touches the protocol: `PROTOCOL` below, declared here and nowhere
@@ -508,7 +508,7 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--base", required=True, help="what the PR is measured against")
     parser.add_argument("--head", default="HEAD")
-    parser.add_argument("--census", type=pathlib.Path, help="the latest main selftest's census directory")
+    parser.add_argument("--census", type=pathlib.Path, help="the base branch's latest full selftest's census directory")
     args = parser.parse_args(argv)
     try:
         files, links = changed(args.base, args.head)

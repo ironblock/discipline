@@ -14,7 +14,7 @@
 
 ## Scope
 
-<!-- REQUIRED. Paste what `python3 scripts/pr-scope.py --base origin/main`
+<!-- REQUIRED. Paste what `python3 scripts/pr-scope.py --base origin/HEAD`
      prints: `material` or `chore`, why, and the checks the diff touches.
      The diff decides -- never the branch name, never a label (#276).
 
@@ -58,14 +58,18 @@
 <!-- Five things, each of which is VISIBLE on this pull request before it is
      merged. A reviewer should be able to tick every box by reading the thread
      and the checks tab, without asking anyone what happened. Merging is the
-     job of whoever owns the PR. -->
+     job of whoever owns the PR. The base branch is the integration branch
+     (the repository's default); a release PR, from it into the release
+     branch, is held to the same five, and its selftest is the full set, not
+     a scoped one (CONTRIBUTING.md, "Branches and releases"). -->
 
 <!-- A chore owes the first two boxes and the hygiene and history checks; the
      rest are a material PR's. Mark the others "n/a: chore". For a chore, the
      second box's deferred findings go under "Notes". -->
 
 - [ ] **CI is green on the head commit, including the `selftest` job.** Not
-      "green when I pushed": green on what is about to merge.
+      "green when I pushed": green on what is about to merge, into the base
+      branch this PR names.
 - [ ] **A fresh-instance review is recorded on this thread**, and every finding
       it raised is either fixed, refuted with a command and an exit code, or
       listed under *Known defects* with the reason it is deferred.

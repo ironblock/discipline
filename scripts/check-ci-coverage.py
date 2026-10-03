@@ -17,6 +17,12 @@ and each has bitten real projects:
     history. Either is a gate running less than it says while reporting the
     same green. They are refused by one rule and one table, because the next
     such flag must be refused by adding a row rather than by remembering.
+  * A branch NAME spelled where it is not declared (#326). The integration
+    branch is the repository's default and is read as such at run time; the
+    release branch is declared once, in `.github/branches.tsv`. A trigger list
+    and `verify.yml`'s `cancel-in-progress` cannot take an expression, so
+    they spell the names, and are held to the table; anywhere else in a
+    workflow, `scripts/` or `verify.sh` a spelled name is refused.
   * A `paths:` filter on a gate workflow. A skipped job is not a failed job:
     `!failure()` passes on skipped, and a whole workflow filtered out leaves
     its required check pending forever. Path filtering is therefore banned on
@@ -35,6 +41,7 @@ pass. A pages.yml that is not YAML is a failure of the file: exit 1.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import pathlib
@@ -43,6 +50,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tokenize
 
 import gatelib
 
@@ -116,6 +124,37 @@ STEP_ITEM = re.compile(r"^\s*- [A-Za-z_-]+:")
 APT = re.compile(r"\bapt(-get)?\b")
 STEP_TIMEOUT = re.compile(r"^\s+timeout-minutes:\s*\d+\s*$")
 BUDGET = pathlib.Path(__file__).resolve().parent.parent / ".github" / "gate-budget.tsv"
+BRANCHES = pathlib.Path(__file__).resolve().parent.parent / ".github" / "branches.tsv"
+
+# The one expression that spells the release branch (#326, ruled Q1 on
+# 5972929414): a concurrency expression reads no file. It cancels a pull
+# request's older run unless the pull request is a release (into the release
+# branch while that is not the default branch), and an integration push's
+# older run, and never a run on the release branch. `{release}` is filled
+# from BRANCHES, so the expression and the table cannot drift apart.
+CANCEL_EXPRESSION = (
+    "${{{{ (github.event_name == 'pull_request' && (github.base_ref != '{release}' "
+    "|| github.base_ref == github.event.repository.default_branch)) || "
+    "(github.event_name == 'push' && github.ref_name != '{release}') }}}}"
+)
+
+# Where a branch's name may be spelled outside BRANCHES (#326, Q5 ruled (a)):
+# a trigger's `branches:` list and the expression above, each checked against
+# the table; comments and docstrings, which are prose and are edited by hand;
+# and verify.sh's seeded-fault bodies (its `inject_*` functions and
+# `seeded_case` lines), which are test inputs. Everything else that runs --
+# the workflows, scripts/*.py and *.sh, verify.sh -- reads the default branch
+# at run time or the release branch from BRANCHES.
+LITERAL_SCANNED = ("scripts/*.py", "scripts/*.sh")
+# The word as a branch: not part of a longer name, a call (`main(`), or a
+# file (`main.rs`). `origin/<name>` and `refs/heads/<name>` are refused.
+LITERAL_EXCEPT = (
+    # check-history.py's comparison base when a checkout has no origin/HEAD:
+    # a last resort that tries the default branch first, so a rename makes
+    # its second name merely unused, never wrong. Left as it is by #326's own
+    # text, and named here as the one exclusion (ruled Q9, 5972951319).
+    ("scripts/check-history.py", "default_branch"),
+)
 SECONDS_TABLE = pathlib.Path(__file__).resolve().parent.parent / ".github" / "check-seconds.tsv"
 
 # Each check a declared split may name (#262). Its members are asked of
@@ -437,7 +476,7 @@ def newest_run_step_verdicts(script: str) -> list[str]:
         ):
             stub.write_text(f"#!/bin/sh\necho '{newest}'\n", encoding="utf-8")
             stub.chmod(0o755)
-            env = {"PATH": f"{box}:/usr/bin:/bin", "GITHUB_REPOSITORY": "o/r", "RUN_NUMBER": this, "GH_TOKEN": "stub"}
+            env = {"PATH": f"{box}:/usr/bin:/bin", "GITHUB_REPOSITORY": "o/r", "RUN_NUMBER": this, "GH_TOKEN": "stub", "BRANCH": "trunk"}
             done = subprocess.run(["bash", "-c", script], env=env, capture_output=True, text=True)
             if (done.returncode == 0) != publishes:
                 said = "publishes" if done.returncode == 0 else f"refuses (exit {done.returncode})"
@@ -446,6 +485,124 @@ def newest_run_step_verdicts(script: str) -> list[str]:
                     f"{newest or 'none'} and this run is {this}; it must {'publish' if publishes else 'refuse'}"
                 )
     return failures
+
+
+def branch_table(failures: list[str]) -> tuple[str, str] | None:
+    """(integration, release) as BRANCHES declares them, or None, said why."""
+    if not BRANCHES.is_file():
+        failures.append(f"{BRANCHES.name}: missing; the release and integration branches are declared nowhere (#326)")
+        return None
+    rows: dict[str, str] = {}
+    for number, line in enumerate(BRANCHES.read_text(encoding="utf-8").split("\n"), 1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        key, tab, value = line.partition("\t")
+        if not tab or not re.fullmatch(r"[A-Za-z0-9._/-]+", value.strip()):
+            failures.append(f"{BRANCHES.name}:{number}: not `constant<TAB>branch name`")
+            continue
+        if key in rows:
+            failures.append(f"{BRANCHES.name}:{number}: `{key}` is declared twice")
+        rows[key] = value.strip()
+    missing = [k for k in ("integration_branch", "release_branch") if k not in rows]
+    if missing:
+        failures.append(f"{BRANCHES.name}: declares no {' or '.join(missing)} (#326)")
+        return None
+    if set(rows) - {"integration_branch", "release_branch"}:
+        failures.append(f"{BRANCHES.name}: declares {', '.join(sorted(set(rows) - {'integration_branch', 'release_branch'}))}, which nothing reads")
+    if rows["integration_branch"] == rows["release_branch"]:
+        failures.append(f"{BRANCHES.name}: the integration and release branches are both `{rows['release_branch']}`")
+        return None
+    return rows["integration_branch"], rows["release_branch"]
+
+
+def literal_pattern(names: tuple[str, ...]) -> re.Pattern:
+    """A branch's name as a branch, not inside a longer word, call or file."""
+    alternatives = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    return re.compile(rf"(?<![\w.-])({alternatives})(?![\w-]|\.\w|\()")
+
+
+def python_literals(path: pathlib.Path, pattern: re.Pattern, skip: set[int]) -> list[tuple[int, str]]:
+    """(line, text) for each string in a Python file that names a branch.
+
+    A docstring -- a string that is a statement of its own -- is prose, like
+    a comment, and is not read. A file that does not tokenize is reported as
+    such rather than passed.
+    """
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(path.read_text(encoding="utf-8")).readline))
+    except (tokenize.TokenError, SyntaxError) as err:
+        return [(0, f"does not tokenize ({err}), so its strings cannot be read")]
+    strings = (tokenize.STRING, getattr(tokenize, "FSTRING_MIDDLE", tokenize.STRING))
+    found = []
+    previous = tokenize.NEWLINE
+    for i, token in enumerate(tokens):
+        if token.type in strings and token.start[0] not in skip and pattern.search(token.string):
+            statement = previous in (tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT, tokenize.NL) and (
+                i + 1 < len(tokens) and tokens[i + 1].type in (tokenize.NEWLINE, tokenize.ENDMARKER))
+            if not statement:
+                found.append((token.start[0], token.string.strip()[:100]))
+        if token.type not in (tokenize.COMMENT, tokenize.NL):
+            previous = token.type
+    return found
+
+
+def function_lines(path: pathlib.Path, name: str) -> set[int]:
+    """The line numbers of a top-level Python function, for LITERAL_EXCEPT."""
+    lines = path.read_text(encoding="utf-8").split("\n")
+    inside, out = False, set()
+    for number, line in enumerate(lines, 1):
+        if line.startswith(f"def {name}("):
+            inside = True
+        elif inside and line and not line[0].isspace():
+            inside = False
+        if inside:
+            out.add(number)
+    return out
+
+
+def shell_literals(text: str, pattern: re.Pattern, verify: bool) -> list[tuple[int, str]]:
+    """(line, text) for each line of shell outside a comment that names a
+    branch; in verify.sh, outside its seeded-fault bodies too."""
+    found = []
+    inside = False
+    held = False
+    for number, line in enumerate(text.split("\n"), 1):
+        if verify:
+            if re.match(r"inject_[A-Za-z0-9_]*\(\) \{\s*$", line):
+                inside = True
+                continue
+            if inside:
+                inside = line != "}"
+                continue
+            if re.match(r"inject_[A-Za-z0-9_]*\(\) \{.*\}\s*$", line):
+                continue
+            stripped = line.strip()
+            if held or stripped.startswith("seeded_case"):
+                held = stripped.endswith("\\")
+                continue
+        code = line.strip()
+        if code.startswith("#"):
+            continue
+        code = re.sub(r"\s#\s.*$", "", code)
+        if pattern.search(code):
+            found.append((number, code[:100]))
+    return found
+
+
+def workflow_literals(text: str, pattern: re.Pattern, cancel: bool) -> list[tuple[int, str]]:
+    """(line, text) for each workflow line outside a comment that names a
+    branch, other than a trigger's `branches:` and the cancel expression."""
+    found = []
+    for number, line in enumerate(text.split("\n"), 1):
+        code = line.strip()
+        if code.startswith("#") or BRANCH_KEY.match(line):
+            continue
+        if cancel and code.startswith("cancel-in-progress:"):
+            continue
+        code = re.sub(r"\s#\s.*$", "", code)
+        if pattern.search(code):
+            found.append((number, code[:100]))
+    return found
 
 
 def main() -> int:
@@ -634,7 +791,7 @@ def main() -> int:
         if wf.name not in called:
             failures.append(f"{wf.name}: exists but {ROOT_WORKFLOW} never calls it")
 
-    # 8. a run on the trunk is never cancelled by the next push to it
+    # 8. a run on the release branch is never cancelled; an integration push is (#326)
     #
     #    The push-to-trunk run is the full selftest whose census every pull
     #    request's scope plan is read from (#112). `cancel-in-progress: true`
@@ -651,8 +808,33 @@ def main() -> int:
         failures.append(
             f"{ROOT_WORKFLOW}: `cancel-in-progress: true` cancels a push run on the "
             f"trunk when the next merge lands, and the next pull request is scoped "
-            f"against the census of an older commit. Cancel pull-request runs only"
+            f"against the census of an older commit. Cancel pull-request runs and "
+            f"integration-branch pushes only, by the one expression rule 8 names"
         )
+    #    ...and since #326 a push to the integration branch IS cancelled by the
+    #    next one, while a release pull request and a push to the release
+    #    branch never are. That is one expression, the one CANCEL_EXPRESSION
+    #    spells with the release branch BRANCHES declares, at the workflow
+    #    level and nowhere else: a second `cancel-in-progress` (a job's own)
+    #    could cancel what this one spares.
+    branches = branch_table(failures)
+    if branches:
+        integration, release = branches
+        wanted = CANCEL_EXPRESSION.format(release=release)
+        found = [m.group(1).split(" #", 1)[0].strip() for m in CANCEL_IN_PROGRESS.finditer(root_text)]
+        top = re.search(r"^concurrency:\n(?:  .*\n)*?  cancel-in-progress: (.+)$", root_text, re.M)
+        spelled = set(re.findall(r"'([^']*)'", top.group(1))) - {"pull_request", "push"} if top else set()
+        if len(found) != 1 or not top or top.group(1).strip() != wanted:
+            if top and spelled and spelled != {release}:
+                failures.append(
+                    f"{ROOT_WORKFLOW}: `cancel-in-progress` spells the release branch as "
+                    f"{', '.join(sorted(spelled))}, and {BRANCHES.name} declares `{release}` (#326)"
+                )
+            failures.append(
+                f"{ROOT_WORKFLOW}: `cancel-in-progress` is not the one workflow-level expression "
+                f"that supersedes pull requests and integration pushes and never cancels the "
+                f"release branch `{release}` (#326); it must read: {wanted}"
+            )
 
     # 9. the budget file declares what CI is held to
     #
@@ -679,10 +861,10 @@ def main() -> int:
     # 10. the site is published only from what the gate passed (#32 I3)
     #
     #    pages.yml runs downstream of a `verify` run and publishes only when
-    #    that run SUCCEEDED, was a PUSH and ran this repository's code -- a
-    #    branch filter matches a fork's `main` by name -- and only when no
-    #    LATER verify run on main has passed (by run number, read through the
-    #    API), so a re-run of an older push run cannot deploy over a newer one,
+    #    that run SUCCEEDED, was a PUSH on the DEFAULT branch (#326) and ran
+    #    this repository's code -- a branch filter matches a fork's branch of
+    #    the same name -- and only when no LATER verify push run on that
+    #    branch has passed (by run number, read through the API), so a re-run of an older push run cannot deploy over a newer one,
     #    while a later run still running does not block it. It checks the site
     #    with `./verify.sh --site _site` before it uploads, nothing lets a step
     #    fail and the job go on, and what it uploads is the site it checked.
@@ -706,10 +888,14 @@ def main() -> int:
         run_of = on.get("workflow_run") if isinstance(on.get("workflow_run"), dict) else {}
         if run_of.get("workflows") != ["verify"]:
             failures.append("pages.yml: does not run downstream of the `verify` workflow (workflow_run of verify)")
-        # Exactly: a run completed, on main. Without the branch filter a
-        # passing push run on any branch would publish (#258's review).
-        elif run_of != {"workflows": ["verify"], "types": ["completed"], "branches": ["main"]}:
-            failures.append(f"pages.yml: the workflow_run trigger is not exactly verify's runs completed on main (found {json.dumps(run_of, sort_keys=True)})")
+        # Exactly: a run completed, on one of the two declared branches (#326).
+        # Without the branch filter a passing push run on any branch would
+        # publish (#258's review); the deploy's condition narrows the two to
+        # whichever is the default.
+        elif (set(run_of) != {"workflows", "types", "branches"} or run_of.get("types") != ["completed"]
+              or not isinstance(run_of.get("branches"), list) or not branches
+              or sorted(run_of["branches"]) != sorted(branches)):
+            failures.append(f"pages.yml: the workflow_run trigger is not exactly verify's runs completed on the declared branches (found {json.dumps(run_of, sort_keys=True)})")
         if set(on) - {"workflow_run"}:
             failures.append("pages.yml: publishes on a trigger of its own, not only on a `verify` run's completion")
         if "concurrency" in doc:
@@ -735,6 +921,7 @@ def main() -> int:
             "github.event.workflow_run.conclusion == 'success'": "pages.yml: deploys on a workflow_run whatever its conclusion",
             "github.event.workflow_run.event == 'push'": "pages.yml: deploys on a run that was not a push",
             "github.event.workflow_run.head_repository.full_name == github.repository": "pages.yml: deploys a run of a fork's code",
+            "github.event.workflow_run.head_branch == github.event.repository.default_branch": "pages.yml: deploys a run on a branch that is not the default branch",
         }
         condition = deploy.get("if") if isinstance(deploy.get("if"), str) else ""
         # `${{ ... }}` around the WHOLE `if:` is the same expression to
@@ -804,13 +991,14 @@ def main() -> int:
         step = steps[at] if at is not None else {}
         script = step.get("run") if isinstance(step.get("run"), str) else ""
         env = step.get("env") if isinstance(step.get("env"), dict) else {}
-        query = r'^\s*newest="\$\(gh api "repos/\$\{GITHUB_REPOSITORY\}/actions/workflows/verify\.yml/runs\?branch=main&event=push&status=success&per_page=1"'
+        query = r'^\s*newest="\$\(gh api "repos/\$\{GITHUB_REPOSITORY\}/actions/workflows/verify\.yml/runs\?branch=\$\{BRANCH\}&event=push&status=success&per_page=1"'
         if (
             at is None or at > upload
             or not re.search(query, script, re.M)
-            or env != {"GH_TOKEN": "${{ github.token }}", "RUN_NUMBER": "${{ github.event.workflow_run.run_number }}"}
+            or env != {"GH_TOKEN": "${{ github.token }}", "RUN_NUMBER": "${{ github.event.workflow_run.run_number }}",
+                       "BRANCH": "${{ github.event.workflow_run.head_branch }}"}
         ):
-            failures.append("pages.yml: publishes without checking that no later verify run on main has passed")
+            failures.append("pages.yml: publishes without checking that no later verify run on its branch has passed")
         # And the step DECIDES as described: run under bash with a stub `gh`
         # answering a run number, it passes when no later run has passed (the
         # same number, or a lower one the list lags with) and refuses when one
@@ -1059,6 +1247,61 @@ def main() -> int:
                     f"pkg-{owner}.yml: its checks' measured seconds per job are {per_job:.0f} s, past the "
                     f"{budget} s budget ({shown}); split it in {OWNERS.name}, never by dropping a check"
                 )
+
+    # 15. every trigger names exactly the two declared branches (#326)
+    #
+    #    A `branches:` list cannot take an expression, so a trigger spells the
+    #    integration and release branches -- both, so the rename can happen in
+    #    either order -- and this holds each list to .github/branches.tsv.
+    #    Rule 6 holds the lists to each other; this holds them to the table,
+    #    so a list that drops a branch, or all of them renamed together but
+    #    the table not, is refused rather than agreed with.
+    if branches:
+        for wf in sorted(WORKFLOWS.glob("*.yml")):
+            state, listed = push_filter(wf.read_text(encoding="utf-8"))
+            if state == "named" and sorted(listed) != sorted(branches):
+                failures.append(
+                    f"{wf.name}: its `push:` trigger names {', '.join(listed) or 'nothing'}, and "
+                    f"{BRANCHES.name} declares {integration} and {release}; a trigger names both (#326)"
+                )
+        if not named.get(ROOT_WORKFLOW):
+            failures.append(f"{ROOT_WORKFLOW}: names no branch under `push:`, so neither declared branch is gated on a push (#326)")
+
+    # 16. no branch is named literally outside the table, the triggers and the
+    #     cancel expression (#326)
+    #
+    #    The integration branch is the repository's default and is read as
+    #    such at run time; the release branch is read from .github/branches.tsv.
+    #    A name spelled anywhere else is a second declaration that a rename
+    #    leaves behind. Read from code only (ruled Q5 (a)): comments and
+    #    docstrings are prose and edited by hand, and verify.sh's seeded-fault
+    #    bodies are test inputs. The names come from the table, so this rule
+    #    spells neither.
+    if branches:
+        pattern = literal_pattern(branches)
+        hits: list[str] = []
+        for wf in sorted(WORKFLOWS.glob("*.yml")):
+            for number, code in workflow_literals(wf.read_text(encoding="utf-8"), pattern, wf.name == ROOT_WORKFLOW):
+                hits.append(f".github/workflows/{wf.name}:{number}: {code}")
+        for glob in LITERAL_SCANNED:
+            for path in sorted(ROOT.glob(glob)):
+                rel = path.relative_to(ROOT).as_posix()
+                if path.suffix == ".py":
+                    skip = set()
+                    for where, function in LITERAL_EXCEPT:
+                        if where == rel:
+                            skip |= function_lines(path, function)
+                    found = python_literals(path, pattern, skip)
+                else:
+                    found = shell_literals(path.read_text(encoding="utf-8"), pattern, False)
+                hits += [f"{rel}:{number}: {code}" for number, code in found]
+        if VERIFY.is_file():
+            hits += [f"verify.sh:{number}: {code}" for number, code in shell_literals(VERIFY.read_text(encoding="utf-8"), pattern, True)]
+        for hit in hits:
+            failures.append(
+                f"{hit} -- names a branch literally; read the default branch at run time, or "
+                f"the release branch from {BRANCHES.name} (#326)"
+            )
 
     for message in failures:
         print(message, file=sys.stderr)

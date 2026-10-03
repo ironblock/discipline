@@ -89,7 +89,7 @@ class Census:
                     self.touched.append((parts[1], parts[2]))
                 continue
             # A fault the shard did not see red (#112). Its row is what the
-            # drift opener reads off a failed `main` shard; here it is simply
+            # drift opener reads off a failed full-run shard; here it is simply
             # not a whole, whatever else the census says.
             if key == "not_red":
                 if len(parts) != 4 or not parts[1] or not parts[2]:
