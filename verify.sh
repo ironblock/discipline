@@ -428,6 +428,7 @@ check_exercise() {
       pnpm exec playwright install chromium &&
       pnpm test &&
       python3 scripts/test_render_ledger.py &&
+      python3 scripts/test_admission.py &&
       pnpm build:replay &&
       (cd .. && check_site _site) &&
       node scripts/replay-smoke.mjs ../_site
@@ -3084,6 +3085,24 @@ inject_exercise_pnpm_unobtainable() {
 # and compares with the field, not with the header's prose.
 inject_exercise_recording_carried_disagrees() {
   edit_in_place 's/^"compaction": 1$/"compaction": 2/' exercise/src/drive/recorded/voxel-stress.json
+}
+
+# A snapshot no admission names, left in scripts/ (#257): a copy of the table
+# first-drive was admitted under, filed under an id nothing cites -- a rule
+# nothing is admitted under, which a reader cannot tell from one in force.
+inject_exercise_snapshot_orphaned() {
+  local snapshot
+  snapshot="$(grep -o 'scripts/hygiene-admitted-[0-9a-f]\{12\}-patterns\.tsv' exercise/src/drive/recorded/first-drive.admission.json | head -n 1)"
+  [ -n "$snapshot" ] && [ -f "$snapshot" ] || { echo "inject: first-drive's admission names no patterns snapshot" >&2; return 1; }
+  cp "$snapshot" scripts/hygiene-admitted-000000000000-patterns.tsv
+}
+
+# `admit` no longer removing what no admission names (#257): the call after a
+# written admission dropped, so an orphan outlives the admission that should
+# have cleared it. `verify` would still refuse the tree; admission.py's own
+# test is what says `admit` broke its promise.
+inject_exercise_admit_keeps_orphans() {
+  edit_in_place '/^    prune()$/d' exercise/scripts/admission.py
 }
 
 # An authored example replayed without its label (#272): the condition turned
@@ -8261,6 +8280,10 @@ selftest() {
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a capture's carried field disagreeing with its events" exercise inject_exercise_recording_carried_disagrees \
     'voxel-stress: its carried field disagrees with its events'
+  seeded_case "a snapshot no admission names, left in place" exercise inject_exercise_snapshot_orphaned \
+    'admission: scripts/hygiene-admitted-000000000000-patterns\.tsv: a snapshot no admission names'
+  seeded_case "admit no longer removing what no admission names" exercise inject_exercise_admit_keeps_orphans \
+    'FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so'
   seeded_case "an authored example replayed without its label" exercise inject_exercise_example_replayed_without_label \
     'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
   seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \

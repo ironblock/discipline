@@ -15,9 +15,9 @@ src/replay/published.ts) verbatim. Which line is required is decided by the
 list the name is on (PUBLISHED or EXAMPLES); a header carrying both, or
 neither, is not admitted.
 
-    python3 exercise/scripts/admission.py admit NAME     scan NAME; if clean, write its admission
+    python3 exercise/scripts/admission.py admit NAME     scan NAME; if clean, write its admission; then remove every snapshot no admission names
     python3 exercise/scripts/admission.py tables DIR     each admitted table, and the published recordings it governs
-    python3 exercise/scripts/admission.py verify DIR     every DIR/<name>.js against DIR/<name>.admission.json
+    python3 exercise/scripts/admission.py verify DIR     every DIR/<name>.js against DIR/<name>.admission.json, and no snapshot no admission names
 
 THE ADMITTED TABLE is a snapshot of the genesis table -- its patterns, its
 exceptions and its salted digests -- written once, by `admit` and nothing
@@ -30,22 +30,40 @@ three are always the same one. The snapshot is the admitted rule; the live
 table is the current rule. An admission names its snapshot and the live
 table it was taken from, and says which it cites.
 
+A SNAPSHOT NO ADMISSION NAMES is a rule nothing is admitted under, and a
+reader of scripts/ cannot tell it from one in force (#257). An admission
+names a snapshot by the three paths it lists under `table`, each exactly as
+`admit` writes it (`scripts/hygiene-admitted-<id>-...`, for the id beside
+them); every `*.admission.json` under exercise/src/drive/ counts. Any file
+under scripts/ whose name starts `hygiene-admitted-` and that no admission
+names -- whatever the rest of its name, and in any subdirectory -- is such a
+snapshot. `admit`, once it has run (admitted or refused), removes every one
+at scripts/' top level, where it writes them, and says which; one in a
+subdirectory it names and leaves, since that file is someone else's. `verify`
+refuses a tree that still holds either. An admission this script cannot read,
+or one listing a path in any other form, leaves what it names unknown: all
+three commands exit 2 naming it, and `admit` reads them before it writes
+anything, so it writes and removes nothing.
+
 `verify` reads every admission from the tree, never from the site it is
 checking, and holds the site to it: exactly the published recordings and
 examples (src/replay/published.ts) and nothing else in the payload directory; each
 payload's bytes the committed recording's, behind one prefix; the
 recording's digest the admitted one; each snapshot byte for byte the one
-admitted; and the site's copy of each admission the tree's.
+admitted; the site's copy of each admission the tree's; and no snapshot in
+scripts/ that no admission names.
 The scan is `verify.sh`'s `check_site`, which runs each snapshot over the
 recordings it governs (`tables`). A payload with no admission beside it
 fails: a recording whose admission is unknown does not publish.
 
-Exit 0 if every payload checks, 1 if any does not (each named), 2 if there was
-nothing to check or the check could not run -- a check of nothing is not a pass.
+Exit 0 if every payload checks and no snapshot is unnamed, 1 if any payload
+does not check or any snapshot is unnamed (each named), 2 if there was nothing
+to check or the check could not run -- a check of nothing is not a pass.
 """
 
 import hashlib
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -107,6 +125,68 @@ def published_names() -> list[str]:
     return recordings + examples
 
 
+class Unreadable(Exception):
+    """An admission whose snapshot paths cannot be read: what it names is unknown, so nothing may be removed."""
+
+
+def cited() -> set[str]:
+    """Every snapshot file an admission under exercise/src/drive/ names, by the paths it lists."""
+    named = set()
+    for admitted in sorted((ROOT / 'exercise/src/drive').rglob('*.admission.json')):
+        rel = admitted.relative_to(ROOT).as_posix()
+        try:
+            table = json.loads(admitted.read_text(encoding='utf-8'))['table']
+            ident = table['id']
+            paths = {part: table[part]['path'] for part in SNAPSHOT}
+            digests_given = [table[part]['sha256'] for part in SNAPSHOT]
+        except (OSError, ValueError, KeyError, TypeError) as err:
+            raise Unreadable(f'admission: {rel}: not an admission this script can read ({type(err).__name__}: {err})') from err
+        if not all(isinstance(d, str) for d in digests_given):
+            raise Unreadable(f'admission: {rel}: its table gives a snapshot digest that is not a string')
+        if not (isinstance(ident, str) and re.fullmatch(r'[0-9a-f]{12}', ident)):
+            raise Unreadable(f'admission: {rel}: its table id {ident!r} is not a snapshot id')
+        for part, path in paths.items():
+            # Compared as strings, so only the form admit writes is read: `./scripts/...`, or another case of it, is not.
+            if path != SNAPSHOT[part].format(id=ident):
+                raise Unreadable(f'admission: {rel}: its table lists {path!r} where admit writes {SNAPSHOT[part].format(id=ident)!r}')
+            # admit writes a snapshot as a file; a link there reaches something else, which removing could break.
+            if (ROOT / path).is_symlink():
+                raise Unreadable(f'admission: {rel}: its table lists {path}, which is a link; admit writes a snapshot as a file')
+        named.update(paths.values())
+    return named
+
+
+def orphans() -> list[pathlib.Path]:
+    """Every file under scripts/ named `hygiene-admitted-*` that no admission names."""
+    named = cited()
+    by_case = {path.casefold(): path for path in named}
+
+    def respelled(f: pathlib.Path, rel: str) -> bool:
+        # A cited path reaches this very entry under another case of its name (a case-insensitive disk): it is cited.
+        # Only that: the entries are compared, not what they lead to, so a link or another name is not.
+        if rel.casefold() not in by_case:
+            return False
+        try:
+            mine, cited_entry = os.lstat(f), os.lstat(ROOT / by_case[rel.casefold()])
+        except OSError:
+            return False
+        return (mine.st_dev, mine.st_ino) == (cited_entry.st_dev, cited_entry.st_ino)
+
+    found = [f for f in (ROOT / 'scripts').rglob('hygiene-admitted-*') if f.is_file() or f.is_symlink()]
+    return sorted(f for f in found if (rel := f.relative_to(ROOT).as_posix()) not in named and not respelled(f, rel))
+
+
+def prune() -> None:
+    """Remove the snapshots no admission names at scripts/' top level, each said by name; name and leave any deeper."""
+    for orphan in orphans():
+        rel = orphan.relative_to(ROOT).as_posix()
+        if orphan.parent != ROOT / 'scripts':
+            print(f'admission: {rel}: named like a snapshot no admission names, below scripts/ where admit never writes one; not removed')
+            continue
+        orphan.unlink(missing_ok=True)
+        print(f'admission: removed {rel}: a snapshot no admission names')
+
+
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
@@ -141,6 +221,7 @@ def scan(name: str, data: bytes, table: dict) -> int:
 
 
 def admit(name: str) -> int:
+    cited()  # every admission readable, before anything is written
     published_names()  # a name on both lists is refused before anything is written
     kind = kind_of(name)
     recording = kind['dir'] / f'{name}.json'
@@ -162,6 +243,7 @@ def admit(name: str) -> int:
     status = scan(name, data, table)
     if status != 0:
         print(f'admission: {rel}: not admitted; the genesis table finds something in it (exit {status})', file=sys.stderr)
+        prune()  # the snapshot this run wrote, if nothing else names it
         return 1
     admission = {
         kind['key']: rel,
@@ -174,12 +256,14 @@ def admit(name: str) -> int:
     out = kind['dir'] / f'{name}.admission.json'
     out.write_text(json.dumps(admission, indent=2) + '\n', encoding='utf-8')
     print(f'admission: {rel}: admitted under {table["patterns"]}, {out.relative_to(ROOT).as_posix()}')
+    prune()
     return 0
 
 
 def admissions(directory: str) -> tuple[list, list[str]]:
     """Each published recording's and example's payload in DIRECTORY with its admission from the tree, and every problem found."""
     data_dir = pathlib.Path(directory)
+    cited()  # every admission readable, before any is judged
     if not data_dir.is_dir():
         return [], []
     names = published_names()
@@ -262,13 +346,21 @@ def verify(directory: str) -> int:
             print(f'admission: {rel}: checked under its admitted table {admission["table"]["id"]}; the live table has moved on since')
     total = len(found) + len(problems)
     print(f'admission: {total - bad} of {total} published recording(s) and example(s) check against their admissions')
-    return 1 if bad else 0
+    # And no snapshot in scripts/ that nothing is admitted under (#257).
+    stray = orphans()
+    for orphan in stray:
+        print(f'admission: {orphan.relative_to(ROOT).as_posix()}: a snapshot no admission names; admission.py admit removes it', file=sys.stderr)
+    return 1 if bad or stray else 0
 
 
 def main(argv: list[str]) -> int:
     commands = {'admit': admit, 'tables': tables, 'verify': verify}
     if len(argv) == 3 and argv[1] in commands:
-        return commands[argv[1]](argv[2])
+        try:
+            return commands[argv[1]](argv[2])
+        except Unreadable as err:
+            print(f'{err}; the snapshots it names are unknown, so none is removed or judged. Restore that file from git, or delete it, then admit again.', file=sys.stderr)
+            return 2
     print(__doc__, file=sys.stderr)
     return 2
 
