@@ -8623,3 +8623,11 @@ check = "lanes"
 label = "drive.serve-bin-cap-cuts-reasoning"
 failure_class = "drive.serve-bin-cap-cuts-reasoning"
 migrated = false
+
+[[fault]]
+id = "drive.projection-drops-a-capped-calls-prefill"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-drops-a-capped-calls-prefill"
+failure_class = "drive.projection-drops-a-capped-calls-prefill"
+migrated = false
