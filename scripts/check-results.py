@@ -490,9 +490,17 @@ def check_run(directory: pathlib.Path) -> list[str]:
     # record's identity, read by every sibling's supersession and by diet's
     # assembler, which reads the line, not the TOML. So it is spelled once, at
     # the top level, as `product_sha256 = "<64 hex>"`, and nowhere else in the
-    # front-matter -- not in a table, not in a string.
-    spelled = [line for line in source.split("\n") if line.partition("=")[0].strip() == "product_sha256"]
-    if "product_sha256" in front and (len(spelled) != 1 or not PRODUCT_LINE.fullmatch(spelled[0])):
+    # front-matter -- not in a table, not in a string. Any line naming the
+    # key counts, however it is spelled around it (#271's fifth review: a
+    # quoted key is the same TOML key and starts no line with the name), and
+    # the one line's digest is the top-level value, so an escaped spelling of
+    # the key cannot carry a product the line does not.
+    spelled = [line for line in source.split("\n") if "product_sha256" in line]
+    if ("product_sha256" in front or spelled) and (
+        len(spelled) != 1
+        or not PRODUCT_LINE.fullmatch(spelled[0])
+        or front.get("product_sha256") != spelled[0].split('"')[1]
+    ):
         fail(
             "results.product-spelling",
             f"`product_sha256` is spelled {len(spelled)} time(s) in the front-matter"

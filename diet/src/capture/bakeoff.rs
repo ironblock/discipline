@@ -1674,16 +1674,43 @@ fn has_text(text: &str) -> bool {
 /// listed, and an `--into` with a `..` part. An empty parent is `.`; a parent
 /// that does not exist yet has no siblings.
 fn sibling_products(into: &Path) -> Result<Vec<String>, RunError> {
+    let here = std::env::current_dir().map_err(|err| RunError::Write {
+        path: into.display().to_string(),
+        reason: format!("the working directory cannot be read, so the siblings cannot be: {err}"),
+    })?;
+    siblings_from(&here, into)
+}
+
+/// [`sibling_products`] with the working directory given, so a relative
+/// `--into` is tested without moving the process's.
+fn siblings_from(cwd: &Path, into: &Path) -> Result<Vec<String>, RunError> {
     use std::path::Component;
+    if into.as_os_str().is_empty() {
+        return Err(RunError::Undeclared(
+            "`--into` is empty; name the directory to write".to_owned(),
+        ));
+    }
     if into.components().any(|part| part == Component::ParentDir) {
         return Err(RunError::Undeclared(format!(
             "`--into {}` has a `..` part; name the directory without one",
             into.display()
         )));
     }
-    let parent = match into.parent() {
-        Some(parent) if !parent.as_os_str().is_empty() => parent,
-        _ => Path::new("."),
+    // ABSOLUTE FIRST (#271's fifth review): `--into .` or `./` from inside
+    // the target named the target itself as the parent, so its own contents
+    // were read as its siblings and the real ones never were. Joined to the
+    // working directory, with `.` parts dropped, the parent is the real one
+    // and the name is the target's own.
+    let target: PathBuf = cwd
+        .join(into)
+        .components()
+        .filter(|part| *part != Component::CurDir)
+        .collect();
+    let (Some(parent), Some(name)) = (target.parent(), target.file_name()) else {
+        return Err(RunError::Undeclared(format!(
+            "`--into {}` names no directory beside others",
+            into.display()
+        )));
     };
     if !parent.exists() {
         return Ok(Vec::new());
@@ -1695,8 +1722,18 @@ fn sibling_products(into: &Path) -> Result<Vec<String>, RunError> {
     let mut products = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
+        // A symlink that resolves to nothing may name the directory being
+        // written, which would then be read twice, as itself and as the link
+        // (the fifth review's M1).
+        if entry.file_type().is_ok_and(|kind| kind.is_symlink()) && !path.exists() {
+            return Err(RunError::Undeclared(format!(
+                "`{}` beside the directory being written is a symlink to nothing; once the \
+                 directory is written it may be read twice",
+                entry.file_name().to_string_lossy()
+            )));
+        }
         if !path.is_dir()
-            || path.file_name() == into.file_name()
+            || path.file_name() == Some(name)
             || path.file_name().is_some_and(|name| name == "_template")
         {
             continue;
@@ -1704,18 +1741,22 @@ fn sibling_products(into: &Path) -> Result<Vec<String>, RunError> {
         let Ok(readme) = std::fs::read_to_string(path.join("README.md")) else {
             continue;
         };
+        // A carriage return that ends no line is a line break to Python's
+        // reader and none to `lines()`, so the two would read different
+        // front-matter (the fifth review's B2).
+        if readme.replace("\r\n", "\n").contains('\r') {
+            return Err(unreadable_sibling(&path));
+        }
         let mut lines = readme.lines();
         if lines.next() != Some("+++") {
             continue;
         }
         let named: Vec<&str> = lines
             .take_while(|line| *line != "+++")
-            // The key exactly, not a prefix: `product_sha256_note` is another
-            // key (track three's read of b56f0bf).
-            .filter(|line| {
-                line.split_once('=')
-                    .is_some_and(|(key, _)| key.trim() == "product_sha256")
-            })
+            // Any line naming the key, however spelled around it -- quoted,
+            // in a table, in a string, or a longer key (the fifth review's
+            // B1): the one spelling-independent rule, and the linter's.
+            .filter(|line| line.contains("product_sha256"))
             .collect();
         match named.as_slice() {
             [] => {}
@@ -2454,7 +2495,7 @@ mod tests {
     use std::fmt::Write as _;
     use std::path::{Path, PathBuf};
 
-    use super::{Provenance, RunError, RunKind, assemble, run};
+    use super::{Provenance, RunError, RunKind, assemble, run, siblings_from};
     use crate::capture::sense::{self, Embedder, Fixture};
     use crate::digest::sha256_hex;
     use crate::formats::record::json::Value;
@@ -3009,6 +3050,56 @@ mod tests {
             &declared(),
             "has a `..` part",
         );
+        // The fifth review: a quoted key beside a canonical line in a string,
+        // a carriage return that ends no line, and a symlink to nothing.
+        sibling(
+            "2026-01-01-quoted",
+            &format!(
+                "\"product_sha256\" = \"{}\"\nnote = \"\"\"\nproduct_sha256 = \"{sha}\"\n\"\"\"",
+                "d".repeat(64)
+            ),
+        );
+        refused(
+            &root.join("2026-01-09-new"),
+            &declared(),
+            "does not spell its `product_sha256`",
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        sibling("2026-01-01-cr", &format!("kind = \"x\"\rproduct_sha256 = \"{sha}\""));
+        refused(
+            &root.join("2026-01-09-new"),
+            &declared(),
+            "does not spell its `product_sha256`",
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("the root");
+        std::os::unix::fs::symlink(root.join("2026-01-09-new"), root.join("2026-01-01-alias"))
+            .expect("a dangling link");
+        refused(&root.join("2026-01-09-new"), &declared(), "a symlink to nothing");
+        let _ = std::fs::remove_dir_all(&root);
+        // Relative spellings are read from the working directory: `.` and
+        // `./` from inside the target, and a bare name from its parent, all
+        // read the real siblings; an empty `--into` names nothing.
+        sibling("2026-01-01-one", &format!("product_sha256 = \"{sha}\""));
+        let target = root.join("2026-01-09-new");
+        std::fs::create_dir_all(&target).expect("an empty target");
+        for (cwd, into) in [(&target, "."), (&target, "./"), (&root, "2026-01-09-new")] {
+            let read = siblings_from(cwd, Path::new(into)).expect("the siblings");
+            assert_eq!(read, vec![sha.clone()], "`--into {into}` read the wrong siblings");
+        }
+        assert!(siblings_from(&root, Path::new("")).is_err(), "an empty `--into` was read");
+        // A parent that cannot be listed refuses; it never reads as no siblings.
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o000))
+                .expect("a locked parent");
+            let read = siblings_from(&root, &root.join("2026-01-10-other"));
+            std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o755))
+                .expect("unlocked");
+            let err = read.expect_err("an unlistable parent was read as no siblings");
+            assert!(err.to_string().contains("cannot be listed"), "{err}");
+        }
+        let _ = std::fs::remove_dir_all(&root);
         sibling("_template", &format!("product_sha256 = \"{sha}\""));
         let of_the_template = Provenance::from_flags(&flags(&[
             "--claim-issue",
