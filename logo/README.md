@@ -10,8 +10,11 @@
 The build fails if a filter input or `url(#id)` refers to something that does not exist, or if
 an image loads from anywhere but a `data:` URI. Browsers ignore both silently.
 
-Typeface: Barlow Black (`font/`, SIL OFL 1.1, license text alongside). The word is outlined
-into paths because GitHub renders README SVGs through `<img>`, which cannot load fonts.
+Typeface: Barlow Black (`font/`, SIL OFL 1.1, license text alongside). Both files are byte-identical
+to the npm package `@fontsource/barlow` 5.3.0's `files/barlow-latin-900-normal.woff`
+(sha256 `8783b44e955c5eae3e236050357ca3ddc7640c96156ca1dede6ce9cfe88bd99e`) and its `LICENSE`. The
+word is outlined into paths because GitHub renders README SVGs through `<img>`, which cannot load
+fonts, so the SVGs embed no font.
 
 Serve the pair with `<picture>` (the root `README.md` does): on GitHub the `prefers-color-scheme`
 source follows GitHub's theme setting, while a media query inside an `<img>` SVG follows the OS.
@@ -55,7 +58,7 @@ transform of the rasterised glyphs (that post has a closed form for a rounded re
 
 ## Playground
 
-`playground.template.html` plus `playground.py` make one page. Its script ports `build.svg` for
+`playground.template.html` plus `playground.py` make one page. Its script ports `build.py`'s `svg()` for
 `glass="refract"` and also `lens.py`'s refraction map (canvas raster, distance transform, bezel
 profile, Snell's law), so bezel width, thickness, refractive index and the surface profile are controls.
 The profiles (convex squircle, convex circle, concave, lip) are kube.io's; the article writes concave
@@ -65,7 +68,7 @@ gives the changes from a preset, to be written into `PALETTE`, `DELTA` and `VARI
 
 Against `build.py` the page's logos differ by ~0.3/255 on average in Chromium (it rasterises with
 canvas, `lens.py` with PIL, and the gain magnifies the difference). Nothing gates that: the page and
-`build.svg` are two implementations of one generator.
+`build.py`'s `svg()` are two implementations of one generator.
 
 ## What was found
 
@@ -85,7 +88,7 @@ GitHub or through the playground, as noted.
 - **Safari and filters.** A 104-primitive glass filter painted nothing in iOS Safari (only the body tint
   showed). It reproduced in WebKitGTK and was narrowed to a stair-shaped refraction map; padding a
   working filter to 104 primitives did not break it, so it is not a plain count and the mechanism is
-  unknown. `MAX_PRIMITIVES` in `build.py` is a heuristic ceiling; the filters now used are 2 to 24.
+  unknown. `MAX_PRIMITIVES` in `build.py` is a heuristic ceiling; the shipped pair's filters have 1 to 4 primitives each.
   `feImage` with a `data:` PNG renders on an iPhone through GitHub (seen for earlier builds; the
   current default was tuned on an iPhone through the playground's `<img>`, not through GitHub).
 - **Resolution.** In WebKitGTK at 3x the filter output is blocky (below device resolution), hidden in the
@@ -102,7 +105,7 @@ test pages were deleted from the tree at the end; to see them, `git show 6f3c958
 | Commits | What |
 | --- | --- |
 | `fbbe54a` `a44525a` | Does GitHub follow its own theme or the OS? Four ways to serve a logo |
-| `389ace2` | First glass logo, D-DIN Exp Bold (replaced: DIN-alikes carry awkward licences) |
+| `389ace2` | First glass logo, D-DIN Exp Bold (SIL OFL 1.1, its licence committed with it; replaced by Barlow Black in `1e35a3f`) |
 | `1e35a3f` `6cada60` | Barlow Black, pastel waves, frosted glass, inner bloom |
 | `93b03f3` | Smaller glass filter after iOS Safari painted nothing |
 | `fc5d801` | Refraction and rim light baked into `feImage` maps, after kube.io |
