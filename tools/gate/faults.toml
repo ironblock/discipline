@@ -270,6 +270,16 @@ legacy_signature = "sed forms only GNU accepts"
 migrated = false
 
 [[fault]]
+id = "test.bakeoff_writes_a_second_product"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "a second directory of one product"
+failure_class = "results.product-shared"
+legacy_signature = "capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
 id = "test.bakeoff_infers_an_absence"
 kind = "seeded-gate"
 check = "test"
@@ -3106,6 +3116,24 @@ check = "results"
 label = "a two-directory supersession cycle"
 failure_class = "results.supersession-cycle"
 legacy_signature = ".supersedes. closes a cycle: [^ ]+ -> [^ ]+ -> [^ ]+; .*\\[results\\.supersession-cycle\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_supersedes_the_template"
+kind = "seeded-gate"
+check = "results"
+label = "a supersession of the template"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".supersedes. is [0-9a-f]{64}, which 0 directory\\(ies\\) beside this one declare.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_product_spelled_twice_over"
+kind = "seeded-gate"
+check = "results"
+label = "a product spelled a second way"
+failure_class = "results.product-spelling"
+legacy_signature = ".product_sha256. is spelled 1 time\\(s\\) in the front-matter, as .product_sha256 = \"[0-9a-f]{64}\" # the report.*\\[results\\.product-spelling\\]"
 migrated = false
 
 [[fault]]

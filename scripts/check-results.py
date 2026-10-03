@@ -167,6 +167,7 @@ def is_utc(value: object) -> bool:
 
 
 DEFAULT_RULE_FILE = "decision-rule.toml"
+PRODUCT_LINE = re.compile(r'product_sha256 = "[0-9a-f]{64}"')
 def has_text(value: object) -> bool:
     """A string a reader can read: at least one ASCII letter or digit. diet's
     assembler (`has_text` in capture/bakeoff.rs) states the same rule, so a
@@ -485,6 +486,19 @@ def check_run(directory: pathlib.Path) -> list[str]:
     except ValueError as exc:
         fail("results.front-matter-not-toml", f"README.md front-matter is not TOML: {exc}")
         return failures
+    # ONE SPELLING OF THE PRODUCT (#271's fourth review): a product is the
+    # record's identity, read by every sibling's supersession and by diet's
+    # assembler, which reads the line, not the TOML. So it is spelled once, at
+    # the top level, as `product_sha256 = "<64 hex>"`, and nowhere else in the
+    # front-matter -- not in a table, not in a string.
+    spelled = [line for line in source.split("\n") if line.lstrip().startswith("product_sha256")]
+    if "product_sha256" in front and (len(spelled) != 1 or not PRODUCT_LINE.fullmatch(spelled[0])):
+        fail(
+            "results.product-spelling",
+            f"`product_sha256` is spelled {len(spelled)} time(s) in the front-matter"
+            f"{', as ' + repr(spelled[0]) if len(spelled) == 1 else ''}; a product is one line, "
+            f'`product_sha256 = "<64 hex>"`, at the top level',
+        )
 
     for key, expected in REQUIRED_KEYS.items():
         if key not in front:

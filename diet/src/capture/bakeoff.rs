@@ -1661,18 +1661,37 @@ fn has_text(text: &str) -> bool {
     text.chars().any(|c| c.is_ascii_alphanumeric())
 }
 
-/// The `product_sha256` each directory beside `into` declares in its
-/// README's front-matter, `into` itself and the template excepted -- what a
-/// `supersedes` digest resolves against, read the way `check-results.py`'s
-/// `sibling_products` reads it. A sibling whose front-matter carries none
-/// declares nothing.
-fn sibling_products(into: &Path) -> Vec<String> {
-    let Some(parent) = into.parent() else {
-        return Vec::new();
+/// The `product_sha256` each directory beside `into` declares, `into`
+/// itself and the template excepted -- what a `supersedes` digest resolves
+/// against and what a second directory of one product collides with.
+///
+/// READ AS THE LINTER READS IT, OR REFUSED (#271's fourth review): a sibling
+/// is read only from its one canonical line, `product_sha256 = "<64 hex>"`
+/// at the top of its front-matter, which `check-results.py` requires of every
+/// directory; a sibling carrying the key spelled any other way, or more than
+/// once, is one this cannot read as the linter does, and the assembly is
+/// refused rather than guessed. So is a parent that exists and cannot be
+/// listed, and an `--into` with a `..` part. An empty parent is `.`; a parent
+/// that does not exist yet has no siblings.
+fn sibling_products(into: &Path) -> Result<Vec<String>, RunError> {
+    use std::path::Component;
+    if into.components().any(|part| part == Component::ParentDir) {
+        return Err(RunError::Undeclared(format!(
+            "`--into {}` has a `..` part; name the directory without one",
+            into.display()
+        )));
+    }
+    let parent = match into.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
     };
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return Vec::new();
-    };
+    if !parent.exists() {
+        return Ok(Vec::new());
+    }
+    let entries = std::fs::read_dir(parent).map_err(|err| RunError::Write {
+        path: parent.display().to_string(),
+        reason: format!("its directories cannot be listed, so the siblings cannot be read: {err}"),
+    })?;
     let mut products = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
@@ -1689,16 +1708,37 @@ fn sibling_products(into: &Path) -> Vec<String> {
         if lines.next() != Some("+++") {
             continue;
         }
-        for line in lines.take_while(|line| *line != "+++") {
-            if let Some(sha) = line
-                .strip_prefix("product_sha256 = \"")
-                .and_then(|rest| rest.strip_suffix('"'))
-            {
+        let named: Vec<&str> = lines
+            .take_while(|line| *line != "+++")
+            .filter(|line| line.trim_start().starts_with("product_sha256"))
+            .collect();
+        match named.as_slice() {
+            [] => {}
+            [line] => {
+                let sha = line
+                    .strip_prefix("product_sha256 = \"")
+                    .and_then(|rest| rest.strip_suffix('"'))
+                    .filter(|sha| is_sha256(sha));
+                let Some(sha) = sha else {
+                    return Err(unreadable_sibling(&path));
+                };
                 products.push(sha.to_owned());
             }
+            _ => return Err(unreadable_sibling(&path)),
         }
     }
-    products
+    Ok(products)
+}
+
+/// A sibling whose product this cannot read as the linter does.
+fn unreadable_sibling(path: &Path) -> RunError {
+    RunError::Undeclared(format!(
+        "`{}` beside the directory being written does not spell its `product_sha256` as one \
+         line, `product_sha256 = \"<64 hex>\"`, which `check-results.py` requires; its product \
+         cannot be read as the gates read it",
+        path.file_name()
+            .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+    ))
 }
 
 /// A relative path spelled one way: no empty, `.` or `..` part, so no
@@ -1884,7 +1924,7 @@ impl Provenance {
         // ONE PRODUCT, ONE DIRECTORY (#271, ruled): a record assembled beside
         // a directory already holding its product would make two, and every
         // supersession of it ambiguous.
-        let siblings = sibling_products(into);
+        let siblings = sibling_products(into)?;
         if siblings.iter().any(|sha| sha == product_sha256) {
             return Err(RunError::Undeclared(format!(
                 "this run's product, {product_sha256}, is already a directory's beside the one \
@@ -2907,6 +2947,79 @@ mod tests {
         );
         let _ = std::fs::remove_dir_all(&refused_root);
         vec![given_root, typed_root]
+    }
+
+    /// THE SIBLINGS ARE READ AS THE LINTER READS THEM, OR THE ASSEMBLY IS
+    /// REFUSED (#271's fourth review): a sibling whose product is spelled
+    /// other than as one canonical line -- a trailing comment, a second line
+    /// in a table -- cannot be read as `check-results.py` reads it; an
+    /// `--into` with a `..` part names a parent this cannot trust; and the
+    /// template's placeholder product resolves no supersession.
+    #[test]
+    fn the_assembler_reads_siblings_as_the_linter_does() {
+        let base = std::env::temp_dir().join(format!("bakeoff-siblings-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let path = write_run(&base.join("input"));
+        let root = base.join("results");
+        let sha = "c".repeat(64);
+        let sibling = |name: &str, front: &str| {
+            let dir = root.join(name);
+            std::fs::create_dir_all(&dir).expect("a sibling");
+            std::fs::write(
+                dir.join("README.md"),
+                format!("+++\n{front}\n+++\n# a sibling\n"),
+            )
+            .expect("its README");
+        };
+        let refused = |into: &Path, provenance: &Provenance, says: &str| {
+            let err = assemble(&path, into, provenance).expect_err(says);
+            assert!(err.to_string().contains(says), "{err}");
+            assert!(!into.exists(), "a refused assembly wrote its directory");
+        };
+        sibling(
+            "2026-01-01-commented",
+            &format!("product_sha256 = \"{sha}\" # the report"),
+        );
+        refused(
+            &root.join("2026-01-09-new"),
+            &declared(),
+            "does not spell its `product_sha256`",
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        sibling(
+            "2026-01-01-tabled",
+            &format!(
+                "product_sha256 = \"{sha}\"\n[note]\nproduct_sha256 = \"{}\"",
+                "d".repeat(64)
+            ),
+        );
+        refused(
+            &root.join("2026-01-09-new"),
+            &declared(),
+            "does not spell its `product_sha256`",
+        );
+        let _ = std::fs::remove_dir_all(&root);
+        refused(
+            &root.join("x").join("..").join("2026-01-09-new"),
+            &declared(),
+            "has a `..` part",
+        );
+        sibling("_template", &format!("product_sha256 = \"{sha}\""));
+        let of_the_template = Provenance::from_flags(&flags(&[
+            "--claim-issue",
+            "24",
+            "--supersedes",
+            &sha,
+            "--absent",
+            "rule_ratified=none applied",
+        ]))
+        .expect("in shape");
+        refused(
+            &root.join("2026-01-09-new"),
+            &of_the_template,
+            "names exactly one product",
+        );
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

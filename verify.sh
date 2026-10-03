@@ -1536,6 +1536,21 @@ EOF
 # scores are still computed, and they are the scores of whatever bytes happen
 # to be on disk rather than of the bytes the record consumed -- which is a
 # recompute that recomputes something else.
+# The assembler writing a second directory of one product (#271, ruled):
+# its refusal disabled, so the same record assembles beside itself.
+inject_bakeoff_writes_a_second_product() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = "if siblings.iter().any(|sha| sha == product_sha256) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "if false && siblings.iter().any(|sha| sha == product_sha256) {", 1), encoding="utf-8")
+EOF
+}
+
 inject_bakeoff_digest_unchecked() {
   python3 - <<'EOF'
 import pathlib
@@ -3597,6 +3612,38 @@ for name, old, new in edits:
     if source.count(old) != 1:
         raise SystemExit(f"{name}: the anchor appears {source.count(old)} times")
     path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A supersession of the template's placeholder product (#271's fourth review,
+# its M1): the template is no product, so the digest resolves to nothing.
+inject_results_supersedes_the_template() {
+  python3 - <<'EOF'
+import pathlib, re
+
+template = pathlib.Path("results/_template/README.md").read_text(encoding="utf-8")
+sha = re.search(r'^product_sha256 = "([0-9a-f]{64})"$', template, re.M).group(1)
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, f'supersedes = "{sha}"', 1), encoding="utf-8")
+EOF
+}
+
+# A product spelled other than as its one canonical line (#271's fourth
+# review): a trailing comment is valid TOML and a second reading of the key.
+inject_results_product_spelled_twice_over() {
+  python3 - <<'EOF'
+import pathlib, re
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+line = re.search(r'^product_sha256 = "[0-9a-f]{64}"$', source, re.M)
+if line is None:
+    raise SystemExit("the product line moved")
+path.write_text(source.replace(line.group(0), line.group(0) + " # the report", 1), encoding="utf-8")
 EOF
 }
 
@@ -7819,6 +7866,8 @@ selftest() {
     'sed forms only GNU accepts'
   seeded_case "an absence the assembler inferred"     test     inject_bakeoff_infers_an_absence \
     'capture::bakeoff::tests::a_missing_declaration_is_refused_before_anything_is_written \.\.\. FAILED' 'lib/capture::bakeoff'
+  seeded_case "a second directory of one product"    test     inject_bakeoff_writes_a_second_product \
+    'capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
     'capture::bakeoff::tests::a_cache_the_record_did_not_consume_is_refused \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
@@ -7990,6 +8039,10 @@ selftest() {
     '.product_sha256. [0-9a-f]{64} is declared here and by .*\[results\.product-shared\]'
   seeded_case "a two-directory supersession cycle"  results inject_results_supersession_cycle \
     '.supersedes. closes a cycle: [^ ]+ -> [^ ]+ -> [^ ]+; .*\[results\.supersession-cycle\]'
+  seeded_case "a supersession of the template"       results inject_results_supersedes_the_template \
+    '.supersedes. is [0-9a-f]{64}, which 0 directory\(ies\) beside this one declare.*\[results\.claim-field-malformed\]'
+  seeded_case "a product spelled a second way"       results inject_results_product_spelled_twice_over \
+    '.product_sha256. is spelled 1 time\(s\) in the front-matter, as .product_sha256 = "[0-9a-f]{64}" # the report.*\[results\.product-spelling\]'
   seeded_case "a supersession that names no product" results inject_results_supersedes_dangling \
     '.supersedes. is a{64}, which 0 directory\(ies\) beside this one declare.*\[results\.claim-field-malformed\]'
   seeded_case "an issue number with a leading zero"   results  inject_results_claim_issue_not_digits \
