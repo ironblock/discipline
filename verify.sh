@@ -3044,6 +3044,16 @@ inject_exercise_recording_carried_disagrees() {
   edit_in_place 's/^"compaction": 1$/"compaction": 2/' exercise/src/drive/recorded/voxel-stress.json
 }
 
+# A snapshot no admission names, left in scripts/ (#257): a copy of the table
+# first-drive was admitted under, filed under an id nothing cites -- a rule
+# nothing is admitted under, which a reader cannot tell from one in force.
+inject_exercise_snapshot_orphaned() {
+  local snapshot
+  snapshot="$(grep -o 'scripts/hygiene-admitted-[0-9a-f]\{12\}-patterns\.tsv' exercise/src/drive/recorded/first-drive.admission.json | head -n 1)"
+  [ -n "$snapshot" ] && [ -f "$snapshot" ] || { echo "inject: first-drive's admission names no patterns snapshot" >&2; return 1; }
+  cp "$snapshot" scripts/hygiene-admitted-000000000000-patterns.tsv
+}
+
 # #32 I2's emitter mutated (track five's faults, carried here by courier): a
 # ledger row the renderer must refuse, naming the directory. The fixture loop
 # never reaches the renderer, and a record diet accepted cannot lack a word,
@@ -7895,6 +7905,8 @@ selftest() {
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a capture's carried field disagreeing with its events" exercise inject_exercise_recording_carried_disagrees \
     'voxel-stress: its carried field disagrees with its events'
+  seeded_case "a snapshot no admission names, left in place" exercise inject_exercise_snapshot_orphaned \
+    'admission: scripts/hygiene-admitted-000000000000-patterns\.tsv: a snapshot no admission names'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \

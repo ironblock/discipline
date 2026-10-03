@@ -41,7 +41,9 @@ the repository's `scripts/` as `hygiene-admitted-<id>-patterns.tsv` and its sibl
 the snapshot's digests, the recording's own digest, and its scrub. A recording
 edited since, or a snapshot edited, fails the build; a change to the live
 table does not, since each recording stays under its snapshot until it is
-admitted again, deliberately. A published recording with no admission does not
+admitted again, deliberately. A snapshot no admission names any more is
+removed by the next `admit`, which says so, and the build refuses a tree that
+still holds one (#257). A published recording with no admission does not
 build. The repository's `check_site` (`verify.sh`) scans the built site: the
 shell under the Pages table, each recording under its admitted snapshot, then
 each against its admission. `scripts/replay-smoke.mjs` opens the built

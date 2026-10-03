@@ -8088,6 +8088,15 @@ legacy_signature = "voxel-stress: its carried field disagrees with its events"
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_snapshot_orphaned"
+kind = "seeded-gate"
+check = "exercise"
+label = "a snapshot no admission names, left in place"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "admission: scripts/hygiene-admitted-000000000000-patterns\\.tsv: a snapshot no admission names"
+migrated = false
+
+[[fault]]
 id = "ci.ci_pages_flow_collection_hides_a_group"
 kind = "seeded-gate"
 check = "ci"
