@@ -69,6 +69,10 @@ FUNCTION = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{\n(.*?)^\}\n", re.M | re
 # ...and the one-line form, `check_parity() { python3 scripts/...; }`, which
 # ten of the checks are spelled in.
 ONE_LINE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\(\) \{ (.*) \}\n", re.M)
+# An alias defined: `alias name=...` (also `\alias`, `builtin alias`, `eval
+# alias ...`), or BASH_ALIASES assigned. A definition hidden in a split or
+# computed string (`eval "al""ias ..."`) is not seen (#323).
+ALIAS_DEFINITION = re.compile(r"(?<![\w-])alias\s+(?:-p\s+)?[^\s=;|&]+=|BASH_ALIASES")
 SCRIPT = re.compile(r"scripts/[A-Za-z0-9_./-]+")
 CALL = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 
@@ -173,10 +177,10 @@ def top_level_code(text: str) -> str:
     left open -- or in the header usage() prints as --help. The top level is
     compared whole when bash -n cannot parse it, when a line starts with `}`
     (a closer the function pattern left behind), when a matched function does
-    not parse alone as a complete unit (cut short), or when the text can turn
-    alias expansion on. Whole re-proves; it never skips. What this cannot see:
-    a function match that runs long, past its real closer, swallowing top-
-    level code into the function (#317).
+    not parse alone as a complete unit (cut short), or when the text defines
+    an alias (#323). Whole re-proves; it never skips. What this cannot see: a
+    function match that runs long, past its real closer, swallowing top- level
+    code into the function (#317).
     """
     # A function match that ran long past its real closer has swallowed the
     # top-level code after it, which is then in no unit's text the plan reads
@@ -195,13 +199,13 @@ def top_level_code(text: str) -> str:
     # review broke the claim that the unit check subsumes it.
     if any(line.startswith("}") for line in lines) or not functions_parse(text):
         return outside
-    # bash expands aliases only where `expand_aliases` is set or in POSIX
-    # mode, neither of which bash -n runs: an alias can open a quote or a
-    # heredoc unseen (#310: N7b, N10; #314's review: `set -o posix`,
-    # POSIXLY_CORRECT, an option name split by quotes).
-    # Case-sensitive: verify.sh's comments say POSIX, and no shell option or
-    # variable is spelled so.
-    if re.search(r"_aliases|expand_al|\bposix\b|POSIXLY_CORRECT|BASH_ALIASES", text):
+    # An alias can open a quote or a heredoc bash -n never sees, since bash -n
+    # expands none (#310: N7b, N10). It can only expand once DEFINED, so the
+    # check is on the definition -- by the `alias` builtin or BASH_ALIASES,
+    # anywhere outside a comment line -- not on the many spellings that turn
+    # expansion on (#323: a split or computed option name, a `#!/bin/sh`
+    # shebang's POSIX mode).
+    if any(ALIAS_DEFINITION.search(line) for line in text.split("\n") if not line.lstrip().startswith("#")):
         return outside
     # A top level bash -n cannot parse whole compares whole (#308's fifth
     # review): its first error hides every open quote after it from the check
@@ -880,6 +884,11 @@ def _top_level_comments():
         ("g() {\n  cat\n} <<'EOF'\n{\n  \"a\": 1\n}\n# c\n{\n  \"b\": 2\n}\nEOF\ng\n", ("# c", "# d")),
         ("g() {\n  cat\n} <<'EOF'\n}\n# c\nEOF\ng\n", ("# c", "# d")),
         ("set -o posix\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        # #323: expansion turned on by a spelling no list holds; the alias's
+        # definition is what is seen.
+        ("shopt -s \"expand_\"\"aliases\"\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("o=expand_; shopt -s ${o}aliases\nalias q=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
+        ("POSIXLY_CORRECT=1\nBASH_ALIASES[q]=\"echo '\"\nq\n# c\n'\n: \\'\n", ("# c", "# d")),
         # #317: a function match that runs long past a closer written
         # otherwise -- a trailing comment, `};`, indented, a heredoc on it --
         # swallows the top-level code after it.
@@ -914,6 +923,11 @@ def _top_level_comments():
     gap = "#!/usr/bin/env bash\n\n# usage, after an empty line 2\n\nusage() {\n  sed -n '2,/^$/s/^# \\{0,1\\}//p' \"$0\"\n}\n"
     if top_level_code(gap) == top_level_code(gap.replace("after an empty", "after a blank")):
         return "an edit to a header after an empty line 2 read as unchanged"
+    # A comment that shows an alias's definition defines nothing (#323): it
+    # does not switch comparing comments off.
+    shown = base + "# alias q=x is how one would define it\n"
+    if top_level_code(shown) != top_level_code(shown.replace("# one", "# one, re-worded")):
+        return "a comment showing an alias definition made comments compare"
     if top_level_code(base) == top_level_code(base.replace("/usr/bin/env bash", "/bin/sh")):
         return "a changed shebang was not seen"
     if top_level_code(base + "  # indented\n") != top_level_code(base + "  # re-worded\n"):
