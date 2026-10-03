@@ -171,20 +171,27 @@ def top_level_code(text: str) -> str:
     or inside a quoted value, which BASH DECIDES -- `bash -n` on the top level
     up to each run of dropped lines must report no quote left open, or the top
     level is compared whole. And bash -n must parse the whole top level, or it
-    is compared whole: an earlier error would hide an open quote, and a closer
-    the function pattern left behind is one. Whole re-proves; it never skips.
-    What this cannot see (#310): a function the pattern cuts short whose
-    leaked tail still parses (Q8's heredoc form, a quoted-string form);
+    is compared whole: an earlier error would hide an open quote. A line
+    starting with `}` compares whole too: it is a closer the function pattern
+    left behind, which a leaked tail can balance. Whole re-proves; it never
+    skips. What this cannot see (#310): a function the pattern cuts short
+    whose leaked tail still parses (Q8's heredoc form, a quoted-string form);
     aliases, which bash -n does not expand; and `usage()` prints verify.sh's
     header comment, so an edit to it changes `--help` and is inherited, which
     no fault depends on.
     """
     outside = outside_functions(text)
     lines = outside.split("\n")
+    # A closer the function pattern left behind -- `}`, `} # g`, `};` -- is
+    # the mark of a body cut short whose tail would land here. It is not
+    # always a syntax error: a leaked heredoc tail holding a `{` makes the
+    # real `}` close a brace group, and the whole parses (#308's sixth
+    # review). So it compares whole by itself.
+    if any(line.startswith("}") for line in lines):
+        return outside
     # A top level bash -n cannot parse whole compares whole (#308's fifth
     # review): its first error hides every open quote after it from the check
-    # below. That includes a closer the function pattern left behind -- `}`,
-    # `} # g`, `};` -- the mark of a body cut short whose tail would land here.
+    # below.
     if not bash_reads_as_closed(outside, whole=True):
         return outside
     kept: list[str] = []
@@ -773,6 +780,10 @@ def _top_level_comments():
         ('X=a\\\n\necho "[$X]"\n', ("\\\n\n", "\\\n")),
         ("cat <\\\n<EOF\n# c\nEOF\n", ("# c", "# d")),
         ("g() {\n  cat <<EOF\n}\n# c\nEOF\n} # g\ng\n", ("# c", "# d")),
+        # The sixth review's B1: a leaked tail whose `{` the real closer
+        # balances, so the whole parses.
+        ("g() {\n  cat <<'EOF'\n}\n# c\n{\nEOF\n}\ng\n", ("# c", "# d")),
+        ("g() {\n  cat <<'EOF'\n}\n# c\n{\nEOF\n} # g\ng\n", ("# c", "# d")),
         ('Y="a\\"\n# b"\n', ("# b", "# c")),
         ("echo it\\'s\nZ='a\n# b'\n", ("# b", "# c")),
         ("Z=${#X}' a\n# b'\n", ("# b", "# c")),
