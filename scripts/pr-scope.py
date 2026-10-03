@@ -88,13 +88,17 @@ GATE_TREES = (
 # What a file at the root may be and stay a chore: a Markdown document other
 # than CONTRIBUTING.md, which is protocol, or a licence. Any other root entry
 # -- `.gitattributes`, a new build file -- is material until ruled otherwise.
-ROOT_CHORE = re.compile(r"(?!CONTRIBUTING\.md$)[^/]+\.md|LICENSE[^/]*")
+ROOT_CHORE = re.compile(r"(?!CONTRIBUTING\.md$)[^/]+\.md|LICENSE[^/]*", re.IGNORECASE)
 
 # What a check's body says it reads besides `scripts/...`: `cargo` reads the
 # Rust workspace, and `cd DIR` the tree it changes into.
 CARGO = re.compile(r"\bcargo\b")
 RUST_WORKSPACE = {"diet/", "Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "rustfmt.toml"}
 CHANGES_INTO = re.compile(r"\bcd ([A-Za-z0-9_][A-Za-z0-9_./-]*)")
+# ...and a path a check's body names in a tree outside `scripts/`, which the
+# map's `scripts/...` reader does not see: `python3 substrates/x.py`,
+# `tests/fixtures/results-bad`.
+NAMED_PATH = re.compile(r"(?<![\w$./-])((?:substrates|tests|results|pages|exercise|diet|tools)/[A-Za-z0-9_./-]*)")
 
 # Checks that read everything: the tree scan reads every file, the history
 # scan every commit, so a diff of anything touches both.
@@ -125,19 +129,40 @@ def changed(base: str, head: str) -> list[str]:
     return [p.decode("utf-8", errors="surrogateescape") for p in done.stdout.split(b"\0") if p]
 
 
+def under(path: str, entries: tuple[str, ...]) -> str | None:
+    """The entry `path` falls under, compared CASEFOLDED (#280's second
+    review): on a case-insensitive checkout `Results/x` is `results/x` and
+    `Contributing.md` overwrites `CONTRIBUTING.md`, so a case variant is the
+    path it collides with."""
+    folded = path.casefold()
+    return next(
+        (e for e in entries if folded == e.casefold() or (e.endswith("/") and folded.startswith(e.casefold()))),
+        None,
+    )
+
+
 def in_protocol(path: str) -> str | None:
     """The protocol entry `path` falls under, if any."""
-    return next((entry for entry in PROTOCOL if path == entry or (entry.endswith("/") and path.startswith(entry))), None)
+    return under(path, PROTOCOL)
 
 
 def in_gate_tree(path: str) -> str | None:
     """The gate tree or root build file `path` falls under, if any."""
-    return next((entry for entry in GATE_TREES if path == entry or (entry.endswith("/") and path.startswith(entry))), None)
+    return under(path, GATE_TREES)
 
 
 def unknown_root(path: str) -> bool:
-    """A root entry that is neither a gate file nor what a chore may touch."""
-    return "/" not in path and in_gate_tree(path) is None and not ROOT_CHORE.fullmatch(path)
+    """A root entry that is neither a gate file nor what a chore may touch:
+    a root file other than a Markdown document or a licence, or anything
+    under a root DOT-directory -- `.cargo/config.toml` is read by every
+    `cargo` the gate runs, `.config/` by tools (#280's second review). A new
+    top-level directory otherwise is an asset directory, as ruled."""
+    first = path.split("/", 1)[0]
+    if in_gate_tree(path) is not None:
+        return False
+    if "/" in path:
+        return first.startswith(".")
+    return not ROOT_CHORE.fullmatch(path)
 
 
 def check_inputs(scope, text: str) -> dict[str, set[str]]:
@@ -155,6 +180,9 @@ def check_inputs(scope, text: str) -> dict[str, set[str]]:
             reads |= RUST_WORKSPACE
         for match in CHANGES_INTO.finditer(body):
             reads.add(match.group(1).rstrip("/") + "/")
+        for match in NAMED_PATH.finditer(body):
+            named = match.group(1).rstrip("/.")
+            reads.add(named.rsplit("/", 1)[0] + "/" if named.endswith(".py") else named + "/")
         inputs[check] = reads
     return inputs
 
@@ -162,7 +190,7 @@ def check_inputs(scope, text: str) -> dict[str, set[str]]:
 def classify(files: list[str], census: pathlib.Path | None = None) -> tuple[str, str, list[str]]:
     """(verdict, reason, checks) for a diff of `files`."""
     scope = scope_selftest()
-    text = VERIFY.read_text(encoding="utf-8")
+    text = VERIFY.read_text(encoding="utf-8") if VERIFY.is_file() else ""
     changed_set = set(files)
     reason = ""
     protocol = next(((f, entry) for f in files if (entry := in_protocol(f))), None)
@@ -204,6 +232,17 @@ CASES = (
     (("diet/src/formats/log.rs",), "material"),
     (("scripts/hygiene.sh",), "material"),
     (("scripts/gatelib.py",), "material"),
+    # Through classify, by paths the map does not reach (#280's second
+    # review: the gate-tree and root branches were held only beside it).
+    (("exercise/src/app.ts",), "material"),
+    (("tests/fixtures/results-bad/x.reason",), "material"),
+    (("clippy.toml",), "material"),
+    ((".cargo/config.toml",), "material"),
+    ((".config/nextest.toml",), "material"),
+    (("Contributing.md",), "material"),
+    (("Results/x/README.md",), "material"),
+    (("Diet/src/lib.rs",), "material"),
+    (("docs/notes.md", "logo/a.svg", "NOTES.MD"), "chore"),
 )
 
 
@@ -297,6 +336,9 @@ def main(argv: list[str]) -> int:
         return EXIT_BROKEN
     if not files:
         print(f"pr-scope: {args.base}...{args.head} changes nothing; there is no diff to classify", file=sys.stderr)
+        return EXIT_BROKEN
+    if not VERIFY.is_file():
+        print("pr-scope: verify.sh is not in this tree; there is no gate to classify against", file=sys.stderr)
         return EXIT_BROKEN
     verdict, reason, checks = classify(files, args.census)
     print(verdict)
