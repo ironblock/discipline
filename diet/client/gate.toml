@@ -26,7 +26,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 97
+faults = 98
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -1707,4 +1707,17 @@ becomes = '''
             let _ = &mut stream;'''
 catches = [
     "client::stream::tests::a_stub_with_props_answers_them_before_and_after_its_acts",
+]
+
+[[fault]]
+id = "client.canned-ignores-its-finish-reason"
+failure_class = "client.canned-ignores-its-finish-reason"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                Step::FinishReason(reason) => finish_reason = reason,'''
+becomes = '''
+                Step::FinishReason(_) => {}'''
+catches = [
+    "client::stream::tests::a_canned_stream_finishes_with_the_reason_it_is_given",
 ]

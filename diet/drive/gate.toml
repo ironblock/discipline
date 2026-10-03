@@ -26,7 +26,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 202
+faults = 206
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3252,4 +3252,62 @@ becomes = '''
         if true || self.0.is_empty() {'''
 catches = [
     "drive::serve::tests::a_failure_after_the_writers_names_what_they_emptied",
+]
+
+[[fault]]
+id = "drive.session-settles-a-capped-turn-final"
+failure_class = "drive.session-settles-a-capped-turn-final"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    if finish_reason.as_deref() == Some(CAPPED) {'''
+becomes = '''
+    if false && finish_reason.as_deref() == Some(CAPPED) {'''
+catches = [
+    "drive::session::tests::a_capped_call_is_written_capped_settles_failed_and_stays_off_the_trunk",
+]
+
+[[fault]]
+id = "drive.session-writes-a-capped-response-uncapped"
+failure_class = "drive.session-writes-a-capped-response-uncapped"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            usage: None,
+            capped: Some(true),'''
+becomes = '''
+            usage: None,
+            capped: None,'''
+catches = [
+    "drive::session::tests::a_capped_call_is_written_capped_settles_failed_and_stays_off_the_trunk",
+]
+
+[[fault]]
+id = "drive.projection-answers-a-capped-call"
+failure_class = "drive.projection-answers-a-capped-call"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+                capped: Some(true),
+                ..
+            } => self.name('''
+becomes = '''
+                capped: Some(true),
+                ..
+            } if false => self.name('''
+catches = [
+    "drive::projection::tests::a_capped_call_is_named_not_answered_and_the_next_head_still_rebuilds",
+]
+
+[[fault]]
+id = "drive.serve-bin-usage-hides-serve"
+failure_class = "drive.serve-bin-usage-hides-serve"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");'''
+becomes = '''
+'''
+catches = [
+    "diet_drive_usage_names_the_serve_form",
 ]
