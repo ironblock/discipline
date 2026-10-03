@@ -31,9 +31,17 @@ jobs:
           verdict="$(python3 scripts/pr-scope.py --base "origin/${BASE}" --head HEAD)"
           # Every line prefixed, so a path name carrying a newline cannot
           # start a line the runner reads as a workflow command (#280's
-          # second review); the notice is one line.
+          # second review). pr-scope.py writes a path's control characters
+          # as `\xNN`, since a lone CR also ends a line for the runner, and
+          # the notice's data is escaped as workflow commands require: `%`,
+          # CR and LF (#280's fifth review).
           printf '%s\n' "$verdict" | sed 's/^/pr-scope: /'
-          printf '::notice title=pr-scope::%s\n' "$(printf '%s' "$verdict" | paste -sd ';' -)"
+          notice="$(printf '%s' "$verdict" | paste -sd ';' -)"
+          pct='%' cr=$'\r' lf=$'\n' pct_e='%25' cr_e='%0D' lf_e='%0A'
+          notice="${notice//"$pct"/$pct_e}"
+          notice="${notice//"$cr"/$cr_e}"
+          notice="${notice//"$lf"/$lf_e}"
+          printf '::notice title=pr-scope::%s\n' "$notice"
           {
             echo '### pr-scope'
             echo
