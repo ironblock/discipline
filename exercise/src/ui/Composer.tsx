@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import type { FormEvent, KeyboardEvent } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { FormEvent, KeyboardEvent, MouseEvent } from 'react';
 
 import type { SessionState } from '../session/fold.ts';
 import type { Ack, Command, Link } from '../drive/transport.ts';
@@ -30,12 +30,23 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
   ended: 'the session has ended',
 };
 
+/** How long the question "end the session?" shows before a press answers it. */
+const CONFIRM_AFTER_MS = 500;
+
 export function Composer({ state, link = 'live', phase, phases, dispatch, hint }: ComposerProps) {
   const [draft, setDraft] = useState('');
   const [refusal, setRefusal] = useState<string | undefined>();
   const next = phases[phases.indexOf(phase) + 1] ?? phases.find((p) => p !== phase) ?? phase;
   const [to, setTo] = useState(next);
+  // Ending cannot be taken back: the first press asks, a second one sends (#289) -- a second the person chose after
+  // seeing the question, not the other half of a double click or a held key.
+  const [ending, setEnding] = useState(false);
+  const armedAt = useRef(0);
   const idle = state === 'awaiting' && link === 'live';
+  // Not idle, it cannot be taken; idle again, it asks again. (A disabled button keeps its focus and is never blurred.)
+  useEffect(() => {
+    if (!idle) setEnding(false);
+  }, [idle]);
   const running = state === 'turn' || state === 'capture' || state === 'ratify';
 
   const answer = (ack: Ack) => {
@@ -44,6 +55,16 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
     setRefusal(refused.known ? refused.label : `not taken: ${refused.label}`);
   };
   const run = (command: Command) => dispatch && void dispatch(command).then(answer);
+  const end = (e: MouseEvent<HTMLButtonElement>) => {
+    if (!ending) {
+      armedAt.current = performance.now();
+      return setEnding(true);
+    }
+    // The second click of a double click, or a press before the question could be read, is not an answer.
+    if (e.detail > 1 || performance.now() - armedAt.current < CONFIRM_AFTER_MS) return;
+    setEnding(false);
+    run({ kind: 'end' });
+  };
 
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -83,6 +104,19 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
               : (refusal ?? STATE_LINE[state])}
         </span>
         <span className="ex-composer__spacer" />
+        {/* As `diet` takes it: only while awaiting. Leaving the button, or the composer leaving idle, disarms it. */}
+        <button
+          type="button"
+          className="ex-composer__end"
+          data-armed={ending || undefined}
+          disabled={!idle || !dispatch}
+          onClick={end}
+          // A held Enter repeats; a repeat is not a second answer.
+          onKeyDown={(e) => e.repeat && e.preventDefault()}
+          onBlur={() => setEnding(false)}
+        >
+          {ending ? 'end the session?' : 'end'}
+        </button>
         <span className="ex-composer__phase">
           <span className="ex-composer__label">phase</span> {phase || 'not said'}
         </span>

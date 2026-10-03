@@ -26,7 +26,9 @@ const MODIFIERS: ReadonlySet<string> = new Set(['Shift', 'Control', 'Alt', 'Meta
  *              -- a scroll by hand, not the page following its bottom; the
  *              settled block coming into view (a change, after the gap
  *              opened: already in view when it settled is not a sign)
- *   composing  a keystroke in the composer; a click on its refill controls
+ *   composing  a keystroke in the composer, or any input there without one --
+ *              a paste, a drop, dictation, an automation's `fill` (#289);
+ *              a click on its refill controls
  *   refused    Enter on a draft while work is in flight -- the composer holds
  *              the send for that reason, and a held send emits nothing
  *   away       the page hidden
@@ -85,15 +87,23 @@ export function useIdleGap(session: Session): IdleGapCarrier {
       present();
       if (e.target instanceof HTMLElement && e.target.closest('.ex-composer__seam')) meter.current?.composing(performance.now());
     };
+    // Text that arrives with no keystroke -- pasted from a menu, dropped, dictated -- is composing too (#289).
+    const onInput = (e: Event) => {
+      if (!(e.target instanceof HTMLElement) || !e.target.closest('.ex-composer__input')) return;
+      present();
+      meter.current?.composing(performance.now());
+    };
     const onVisibility = () => meter.current?.visibility(document.visibilityState === 'hidden', performance.now());
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('pointerdown', onClick, true);
+    window.addEventListener('input', onInput, true);
     window.addEventListener('wheel', present, { capture: true, passive: true });
     window.addEventListener('touchmove', present, { capture: true, passive: true });
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('pointerdown', onClick, true);
+      window.removeEventListener('input', onInput, true);
       window.removeEventListener('wheel', present, { capture: true });
       window.removeEventListener('touchmove', present, { capture: true });
       document.removeEventListener('visibilitychange', onVisibility);

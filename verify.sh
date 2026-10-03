@@ -428,6 +428,7 @@ check_exercise() {
       pnpm exec playwright install chromium &&
       pnpm test &&
       python3 scripts/test_render_ledger.py &&
+      python3 scripts/test_admission.py &&
       pnpm build:replay &&
       (cd .. && check_site _site) &&
       node scripts/replay-smoke.mjs ../_site
@@ -3084,6 +3085,47 @@ inject_exercise_pnpm_unobtainable() {
 # and compares with the field, not with the header's prose.
 inject_exercise_recording_carried_disagrees() {
   edit_in_place 's/^"compaction": 1$/"compaction": 2/' exercise/src/drive/recorded/voxel-stress.json
+}
+
+# A snapshot no admission names, left in scripts/ (#257): a copy of the table
+# first-drive was admitted under, filed under an id nothing cites -- a rule
+# nothing is admitted under, which a reader cannot tell from one in force.
+inject_exercise_snapshot_orphaned() {
+  local snapshot
+  snapshot="$(grep -o 'scripts/hygiene-admitted-[0-9a-f]\{12\}-patterns\.tsv' exercise/src/drive/recorded/first-drive.admission.json | head -n 1)"
+  [ -n "$snapshot" ] && [ -f "$snapshot" ] || { echo "inject: first-drive's admission names no patterns snapshot" >&2; return 1; }
+  cp "$snapshot" scripts/hygiene-admitted-000000000000-patterns.tsv
+}
+
+# `admit` no longer removing what no admission names (#257): the call after a
+# written admission dropped, so an orphan outlives the admission that should
+# have cleared it. `verify` would still refuse the tree; admission.py's own
+# test is what says `admit` broke its promise.
+inject_exercise_admit_keeps_orphans() {
+  edit_in_place '/^    prune()$/d' exercise/scripts/admission.py
+}
+
+# An authored example replayed without its label (#272): the condition turned
+# around, so the kitchen sink plays with nothing over it to say it is not a
+# session (and a recording gets the label instead). Typecheck and lint pass it;
+# the story that replays the example reads the label before and after it plays.
+inject_exercise_example_replayed_without_label() {
+  edit_in_place 's/{example ? <PinnedExampleLabel \/> : null}/{!example ? <PinnedExampleLabel \/> : null}/' exercise/src/replay/Replay.tsx
+}
+
+# The label there, but not held: it scrolls away with the top of the page, so
+# most of the replay reads as a session. Only the browser smoke, scrolled to
+# the end of the built page, can see it.
+inject_exercise_example_label_scrolls_away() {
+  edit_in_place '/^  position: sticky;$/d' exercise/src/replay/replay.css
+}
+
+# An example bundled into the page's own code: its registry imported from the
+# page's entry, which carries the whole authored script in with it. Typecheck,
+# lint, tests and the scans pass it; the smoke finds the example's text in
+# replay/assets/, where only the page's code belongs.
+inject_exercise_example_bundled_into_page() {
+  edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
 }
 
 # The meter reading a progress frame's old, nested shape again (#288): what
@@ -6784,26 +6826,6 @@ EOF
 inject_exercise_story_assertion() {
   edit_in_place "s/row('side-calls-per-ask')).toBe('2.0')/row('side-calls-per-ask')).toBe('2.1')/" exercise/src/stories/KitchenSink.stories.tsx
 }
-# An authored example replayed without its label (#272): the condition turned
-# around, so the kitchen sink plays with nothing over it to say it is not a
-# session (and a recording gets the label instead). Typecheck and lint pass it;
-# the story that replays the example reads the label before and after it plays.
-inject_exercise_example_replayed_without_label() {
-  edit_in_place 's/{example ? <PinnedExampleLabel \/> : null}/{!example ? <PinnedExampleLabel \/> : null}/' exercise/src/replay/Replay.tsx
-}
-# The label there, but not held: it scrolls away with the top of the page, so
-# most of the replay reads as a session. Only the browser smoke, scrolled to
-# the end of the built page, can see it.
-inject_exercise_example_label_scrolls_away() {
-  edit_in_place '/^  position: sticky;$/d' exercise/src/replay/replay.css
-}
-# An example bundled into the page's own code: its registry imported from the
-# page's entry, which carries the whole authored script in with it. Typecheck,
-# lint, tests and the scans pass it; the smoke finds the example's text in
-# replay/assets/, where only the page's code belongs.
-inject_exercise_example_bundled_into_page() {
-  edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
-}
 
 # Every pattern in a table, shown catching its own class. A pattern that has
 # never caught anything is a guess.
@@ -8267,6 +8289,16 @@ selftest() {
     'notarget No matching version found for pnpm@0\.0\.0-unpublished'
   seeded_case "a capture's carried field disagreeing with its events" exercise inject_exercise_recording_carried_disagrees \
     'voxel-stress: its carried field disagrees with its events'
+  seeded_case "a snapshot no admission names, left in place" exercise inject_exercise_snapshot_orphaned \
+    'admission: scripts/hygiene-admitted-000000000000-patterns\.tsv: a snapshot no admission names'
+  seeded_case "admit no longer removing what no admission names" exercise inject_exercise_admit_keeps_orphans \
+    'FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so'
+  seeded_case "an authored example replayed without its label" exercise inject_exercise_example_replayed_without_label \
+    'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
+  seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \
+    "replay-smoke: kitchen-sink's label is on the page but out of view"
+  seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
+    "replay-smoke: kitchen-sink is bundled into the page's code"
   seeded_case "the meter reading a progress frame's old shape" exercise inject_exercise_progress_read_nested \
     "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
@@ -8673,12 +8705,6 @@ selftest() {
     'record/fixtures/invalid/canned-with-no-acts-digest\.jsonl' 'test:conformance/formats::record'
   seeded_case "a story's assertion broken in place"   exercise inject_exercise_story_assertion \
     "expected '2\\.0' to be '2\\.1'"
-  seeded_case "an authored example replayed without its label" exercise inject_exercise_example_replayed_without_label \
-    'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
-  seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \
-    "replay-smoke: kitchen-sink's label is on the page but out of view"
-  seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
-    "replay-smoke: kitchen-sink is bundled into the page's code"
 
   echo
   echo "--- results fixtures, checked directly ---"

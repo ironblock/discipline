@@ -111,3 +111,40 @@ export const ServedReading: Story = {
     await expect(reading.some((line) => line.startsWith('+51 of 567 tok in '))).toBe(true);
   },
 };
+
+/** Ended from the page (#289): the end control asks once, then sends `end`; the session says it has ended. */
+export const Ended: Story = {
+  name: 'end, from the page: asked once, then the session has ended',
+  args: { speed: 40 },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const end = canvasElement.querySelector('.ex-composer__end') as HTMLButtonElement;
+    await userEvent.click(end);
+    await expect(end.textContent).toBe('end the session?');
+    await expect(says(canvasElement)).toBe('your turn');
+    // Answered once the question has been there to read.
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await userEvent.click(end);
+    await waitFor(async () => expect(says(canvasElement)).toBe('the session has ended'));
+    await expect((canvasElement.querySelector('.ex-composer__end') as HTMLButtonElement).disabled).toBe(true);
+  },
+};
+
+/** Not ended by accident (#289): a double click, or Enter pressed twice at once, only asks. */
+export const NotEndedByAccident: Story = {
+  name: 'end, not by a double click or a double Enter: it only asks',
+  args: { speed: 40 },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const end = canvasElement.querySelector('.ex-composer__end') as HTMLButtonElement;
+    await userEvent.dblClick(end);
+    await expect(end.textContent).toBe('end the session?');
+    end.blur();
+    await waitFor(async () => expect(end.textContent).toBe('end'));
+    end.focus();
+    await userEvent.keyboard('{Enter}{Enter}');
+    await waitFor(async () => expect(end.textContent).toBe('end the session?'));
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    await expect(says(canvasElement)).toBe('your turn');
+  },
+};

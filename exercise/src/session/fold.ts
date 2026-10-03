@@ -47,6 +47,11 @@ export interface UserNode extends Provenance {
   readonly prefill?: { readonly fresh: number; readonly cached: number };
   /** Session time it finished: when it was asked. */
   readonly endedAt: number;
+  /**
+   * Its turn was cancelled: `diet` sends the model only finished turns (#29, Q12, keeping D13 for `cancelled`), so
+   * from here on this is not in what the model reads (#289). The fact is the log's `turn.settled` with `cancelled`.
+   */
+  readonly outOfContext?: true;
 }
 
 export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled' | 'failed';
@@ -100,6 +105,11 @@ export interface AssistantNode extends Provenance, Generation {
   /** Its request's `seq`: what its answer, its tool calls and its side calls name. */
   readonly id: string;
   readonly turn: number;
+  /**
+   * Its turn was cancelled: `diet` sends the model only finished turns (#29, Q12, keeping D13 for `cancelled`), so
+   * from here on this is not in what the model reads (#289). The fact is the log's `turn.settled` with `cancelled`.
+   */
+  readonly outOfContext?: true;
 }
 
 export interface ToolNode extends Provenance {
@@ -382,6 +392,7 @@ export function fold(lines: readonly LogLine[]): Session {
 
   const unknown = new Map<string, number>();
   const settles = new Map<number, LineOf<'turn.settled'>>();
+  const cancelledTurns = new Set<number>();
   const gaps: Folded<GapNode>[] = [];
   let lastSettled: number | undefined;
   let phase = start.phase ?? '';
@@ -466,6 +477,7 @@ export function fold(lines: readonly LogLine[]): Session {
       }
       case 'turn.settled':
         settles.set(e.seq, e);
+        if (e.reason === 'cancelled') cancelledTurns.add(e.turn);
         lastSettled = e.seq;
         if (openTurn === e.turn) openTurn = undefined;
         // A turn that ended on its own, or was cancelled (the message says so), needs no mark.
@@ -548,6 +560,7 @@ export function fold(lines: readonly LogLine[]): Session {
             text: ask.text,
             endedAt: ask.t,
             ...(timings ? { prefill: { fresh: timings.prompt_n, cached: timings.cache_n } } : {}),
+            ...(cancelledTurns.has(slot.turn) ? { outOfContext: true as const } : {}),
             ...provenance(ask, first?.response),
           });
         }
@@ -558,6 +571,7 @@ export function fold(lines: readonly LogLine[]): Session {
             id: id(g.request.seq),
             turn: g.request.turn,
             ...generation(g, trunkSlot),
+            ...(g.request.turn !== undefined && cancelledTurns.has(g.request.turn) ? { outOfContext: true as const } : {}),
             ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.cancelled, g.failed),
           };
           return brand(node);

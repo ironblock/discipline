@@ -125,3 +125,9 @@
 
 .ex-composer[data-link='reconnecting'] .ex-composer__state { color: var(--warn); }
 .ex-composer[data-link='lost'] .ex-composer__state { color: var(--bad); }
+
+/* Armed: the next press ends the session, which cannot be taken back (#289). */
+.ex-composer__end[data-armed]:not(:disabled) {
+  border-color: var(--bad);
+  color: var(--bad);
+}

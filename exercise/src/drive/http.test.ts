@@ -193,6 +193,13 @@ describe('HttpTransport: commands', () => {
     await transport.dispatch({ kind: 'seam', to: 'build' });
     expect(posted).toEqual([{ kind: 'declare-seam' }]);
   });
+
+  it('posts an end as serve.rs takes it (#289)', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });
+    await expect(transport.dispatch({ kind: 'end' })).resolves.toEqual({ ok: true });
+    expect(posted).toEqual([{ kind: 'end' }]);
+  });
 });
 
 describe('HttpTransport: closed and reopened', () => {

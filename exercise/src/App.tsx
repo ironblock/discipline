@@ -49,7 +49,8 @@ export function App({
   // refused because work was in flight blocks the person from there.
   const gap = useIdleGap(session);
   const dispatch = async (command: Command) => {
-    const idleGap = gap.carry(command.kind === 'ask' ? 'ask' : command.kind === 'seam' ? 'seam' : 'cancel');
+    // A command's kind is the word for what it ends the gap with (the format's `GapEnd`): ask, seam, cancel, end.
+    const idleGap = gap.carry(command.kind);
     const ack = await transport.dispatch(command, idleGap ? { idle_gap: idleGap } : undefined);
     if (ack.ok) gap.admitted();
     else if (ack.refused === 'in-flight' || ack.refused === 'busy') gap.refused();

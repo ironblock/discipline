@@ -8264,6 +8264,51 @@ legacy_signature = "voxel-stress: its carried field disagrees with its events"
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_snapshot_orphaned"
+kind = "seeded-gate"
+check = "exercise"
+label = "a snapshot no admission names, left in place"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "admission: scripts/hygiene-admitted-000000000000-patterns\\.tsv: a snapshot no admission names"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_admit_keeps_orphans"
+kind = "seeded-gate"
+check = "exercise"
+label = "admit no longer removing what no admission names"
+failure_class = "exercise.snapshot-orphaned"
+legacy_signature = "FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_replayed_without_label"
+kind = "seeded-gate"
+check = "exercise"
+label = "an authored example replayed without its label"
+failure_class = "exercise.example-unlabelled"
+legacy_signature = "FAIL.*Replay\\.stories\\.tsx > an authored example, under its label for the whole replay"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_label_scrolls_away"
+kind = "seeded-gate"
+check = "exercise"
+label = "an example's label scrolling away"
+failure_class = "exercise.example-unlabelled"
+legacy_signature = "replay-smoke: kitchen-sink's label is on the page but out of view"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_example_bundled_into_page"
+kind = "seeded-gate"
+check = "exercise"
+label = "an example bundled into the page's code"
+failure_class = "exercise.payload-bundled"
+legacy_signature = "replay-smoke: kitchen-sink is bundled into the page's code"
+migrated = false
+
+[[fault]]
 id = "exercise.exercise_progress_read_nested"
 kind = "seeded-gate"
 check = "exercise"
@@ -8369,32 +8414,5 @@ check = "ci"
 label = "the condition with text outside its braces"
 failure_class = "wiring.pages-condition"
 legacy_signature = "pages.yml: the deploy's condition has text outside its"
-migrated = false
-
-[[fault]]
-id = "exercise.exercise_example_replayed_without_label"
-kind = "seeded-gate"
-check = "exercise"
-label = "an authored example replayed without its label"
-failure_class = "exercise.example-unlabelled"
-legacy_signature = "FAIL.*Replay\\.stories\\.tsx > an authored example, under its label for the whole replay"
-migrated = false
-
-[[fault]]
-id = "exercise.exercise_example_label_scrolls_away"
-kind = "seeded-gate"
-check = "exercise"
-label = "an example's label scrolling away"
-failure_class = "exercise.example-unlabelled"
-legacy_signature = "replay-smoke: kitchen-sink's label is on the page but out of view"
-migrated = false
-
-[[fault]]
-id = "exercise.exercise_example_bundled_into_page"
-kind = "seeded-gate"
-check = "exercise"
-label = "an example bundled into the page's code"
-failure_class = "exercise.payload-bundled"
-legacy_signature = "replay-smoke: kitchen-sink is bundled into the page's code"
 migrated = false
 
