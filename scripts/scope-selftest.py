@@ -160,26 +160,32 @@ def top_level_code(text: str) -> str:
     #293's run, for 27 comment lines and 2 blank ones. A comment block is not
     machinery.
 
-    ONLY WHOLE LINES ARE DROPPED: a line that is blank, or whose first
-    non-blank character is `#`. Every other line is kept byte for byte, so a
+    ONLY WHOLE LINES ARE DROPPED: a line that is blank, or whose first non-
+    blank character is `#`. Every other line is kept byte for byte, so a
     trailing comment on a code line is code here -- the shapes #308's reviews
-    found (a `#` after code hiding a continuation or a heredoc) are never
-    read at all. A whole line is not dropped where bash would read it as
-    text: after a line ending in an odd run of backslashes (a continuation);
-    when a kept line opens a heredoc (any `<<` on it compares the top level
-    whole, since bash 3.2's `-n` never reports one left open); or inside a
-    quoted value, which BASH DECIDES -- `bash -n` on the top level up to each
-    run of dropped lines must report no quote left open, or the top level is
-    compared whole. A lone `}`, the mark of a function the pattern cut short
-    whose tail would land here, compares whole too. Whole re-proves; it never
-    skips. What this cannot see: a heredoc inside a function whose body holds
-    a `name() {` line at column 0 can still hide from the function pattern;
-    and `usage()` prints verify.sh's header comment, so an edit to it changes
-    `--help` and is inherited, which no fault depends on.
+    found (a `#` after code hiding a continuation or a heredoc) are never read
+    at all. A whole line is not dropped where bash would read it as text:
+    after a line ending in an odd run of backslashes (a continuation); when a
+    kept line opens a heredoc (any `<<`, also across a continuation, compares
+    the top level whole, since bash 3.2's `-n` never reports one left open);
+    or inside a quoted value, which BASH DECIDES -- `bash -n` on the top level
+    up to each run of dropped lines must report no quote left open, or the top
+    level is compared whole. And bash -n must parse the whole top level, or it
+    is compared whole: an earlier error would hide an open quote, and a closer
+    the function pattern left behind is one. Whole re-proves; it never skips.
+    What this cannot see (#310): a function the pattern cuts short whose
+    leaked tail still parses (Q8's heredoc form, a quoted-string form);
+    aliases, which bash -n does not expand; and `usage()` prints verify.sh's
+    header comment, so an edit to it changes `--help` and is inherited, which
+    no fault depends on.
     """
     outside = outside_functions(text)
     lines = outside.split("\n")
-    if "}" in lines:
+    # A top level bash -n cannot parse whole compares whole (#308's fifth
+    # review): its first error hides every open quote after it from the check
+    # below. That includes a closer the function pattern left behind -- `}`,
+    # `} # g`, `};` -- the mark of a body cut short whose tail would land here.
+    if not bash_reads_as_closed(outside, whole=True):
         return outside
     kept: list[str] = []
     dropped: list[int] = []
@@ -192,7 +198,9 @@ def top_level_code(text: str) -> str:
             dropped.append(number)
             continue
         kept.append(line)
-        if "<<" in line:
+        # On the kept text joined as bash joins it, so a `<` that continues
+        # into a `<` on the next line is still a heredoc (the fifth review).
+        if "<<" in line or (carried and kept[-2:-1] and "<<" in kept[-2].rstrip("\\") + line):
             return outside
         carried = (len(line) - len(line.rstrip("\\"))) % 2 == 1
     starts = [n for n in dropped if n - 1 not in dropped]
@@ -201,7 +209,7 @@ def top_level_code(text: str) -> str:
     return "\n".join(kept)
 
 
-def bash_reads_as_closed(text: str) -> bool:
+def bash_reads_as_closed(text: str, whole: bool = False) -> bool:
     """Whether bash, parsing `text` alone, finds no quote still open at its
     end: the line after it then starts where a comment can. Not a heredoc:
     bash 3.2's `-n` says nothing of one left open, so a kept line's `<<`
@@ -212,6 +220,8 @@ def bash_reads_as_closed(text: str) -> bool:
         ["bash", "-n"], input=text + "\n", capture_output=True, text=True,
         env={**os.environ, "LC_ALL": "C"},
     )
+    if whole:
+        return parsed.returncode == 0
     return "matching" not in parsed.stderr
 
 
@@ -755,6 +765,14 @@ def _top_level_comments():
         # a double quote left open as well as a single one.
         ('C="$(echo "it\'s")"\nD=\'a\n# c\'\nE=1\n# tail\n', ("# c", "# d")),
         ('C="$(echo "it\'s")"\nD="it\'s\n# c"\n', ("# c", "# d")),
+        # #308's fifth review: an earlier line bash -n cannot parse (an
+        # extglob a `shopt` enables at run time) before a plain open quote;
+        # a blank line a continuation joins; a heredoc operator split by one;
+        # a function closer that is not a lone `}`.
+        ("shopt -s extglob\ncase x in +(x)) :;; esac\nD='a\n# c'\necho \"[$D]\"\n", ("# c", "# d")),
+        ('X=a\\\n\necho "[$X]"\n', ("\\\n\n", "\\\n")),
+        ("cat <\\\n<EOF\n# c\nEOF\n", ("# c", "# d")),
+        ("g() {\n  cat <<EOF\n}\n# c\nEOF\n} # g\ng\n", ("# c", "# d")),
         ('Y="a\\"\n# b"\n', ("# b", "# c")),
         ("echo it\\'s\nZ='a\n# b'\n", ("# b", "# c")),
         ("Z=${#X}' a\n# b'\n", ("# b", "# c")),
@@ -765,6 +783,11 @@ def _top_level_comments():
     ):
         if top_level_code(base + read) == top_level_code(base + read.replace(*edit)):
             return f"text bash reads was dropped: {read!r}"
+    # And the fix stays on for the tree it was written for: today's verify.sh
+    # does not fall back to comparing its top level whole (#310).
+    today = (ROOT / "verify.sh").read_text(encoding="utf-8")
+    if top_level_code(today) == outside_functions(today):
+        return "this verify.sh's top level is compared whole, so #305's fix is off"
     if top_level_code(base) == top_level_code(base.replace("/usr/bin/env bash", "/bin/sh")):
         return "a changed shebang was not seen"
     if top_level_code(base + "  # indented\n") != top_level_code(base + "  # re-worded\n"):
