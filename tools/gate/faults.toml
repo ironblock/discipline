@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 143
+mechanics_assertions = 152
 unseedable_guards = 2
 migrated = 0
 
@@ -8649,4 +8649,85 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.projection-drops-a-capped-calls-prefill"
 failure_class = "drive.projection-drops-a-capped-calls-prefill"
+migrated = false
+[[fault]]
+id = "hygiene.hygiene_datauri_read_as_prose"
+kind = "seeded-gate"
+check = "hygiene"
+label = "a data-URI payload read as prose"
+failure_class = "hygiene.forbidden-pattern"
+legacy_signature = "hygiene: internal-ticket-id: tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri\\.svg:6:"
+migrated = false
+
+[[fault]]
+id = "mech.a-ticket-id-shape-in-a-data-uri-payload-is-not-a-ticket-id"
+kind = "mechanics"
+check = "-"
+label = "a ticket-id shape in a data-URI payload is not a ticket id"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.and-the-same-bytes-outside-a-data-uri-read-red"
+kind = "mechanics"
+check = "-"
+label = "and the same bytes outside a data URI read red"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.a-readable-run-after-a-made-up-image-prefix-reads-red"
+kind = "mechanics"
+check = "-"
+label = "a readable run after a made-up image prefix reads red"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.a-hit-beside-an-image-is-named-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a hit beside an image is named against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-scan-of-a-tree-with-an-image-leaves-no-prose-view-behind"
+kind = "mechanics"
+check = "-"
+label = "a scan of a tree with an image leaves no prose view behind"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-readable-run-behind-every-image-label-every-check-s-near-miss-and-every-refused-delimiter-reads-red-once-each"
+kind = "mechanics"
+check = "-"
+label = "a readable run behind every image label, every check's near miss and every refused delimiter reads red once each"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.thirteen-hits-beside-images-two-files-sharing-a-name-are-each-named-once-against-their-own-file"
+kind = "mechanics"
+check = "-"
+label = "thirteen hits beside images, two files sharing a name, are each named once against their own file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-hit-in-a-decoded-view-beside-an-image-is-named-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a hit in a decoded view beside an image is named against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.a-credential-shape-inside-an-image-payload-reads-red-against-its-file"
+kind = "mechanics"
+check = "-"
+label = "a credential shape inside an image payload reads red, against its file"
+failure_class = "hygiene.forbidden-pattern"
+expected_exit = "0"
 migrated = false
