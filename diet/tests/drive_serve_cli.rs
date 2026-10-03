@@ -1124,6 +1124,38 @@ fn a_drive_server_whose_writers_fail_names_what_they_had_emptied() {
     );
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn a_drive_server_whose_log_cannot_be_emptied_names_the_record_it_had_emptied() {
+    // Linux refuses `ftruncate` on anything but a regular file, so a log at
+    // `/dev/null` opens and then cannot be emptied -- after the record was
+    // (#264, ruled (i); round 4). macOS empties `/dev/null`, so this path is
+    // reached only here.
+    let record = file_holding("record", "an earlier session's record\n");
+    let path = record.0.to_string_lossy().into_owned();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &dev_loop(),
+            "--record",
+            &path,
+            "--log",
+            "/dev/null",
+        ],
+    );
+    assert_eq!(code, Some(3), "{said}");
+    assert!(
+        said.contains("the log cannot be emptied")
+            && said.contains(&format!(
+                "already emptied before this failure: the previous record at {path}"
+            )),
+        "{said}"
+    );
+}
+
 #[test]
 fn a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_they_were() {
     // Emptied only once the address is bound (#264's review, round 2).

@@ -374,7 +374,8 @@ fn outputs(
 /// bound and before the server does: no command can append a line before
 /// the log's sink is in place (#264's review). Any refusal before this --
 /// the engine check, the bind -- leaves an existing log, record and sidecar
-/// as they were, and creates an absent one empty. A failure from here on
+/// as they were; the bind's refusal, coming after the outputs are opened,
+/// creates an absent one empty. A failure from here on
 /// names what it had already emptied (#264, ruled (i)): the writers empty
 /// the record, then its sidecar, then the log, and the server starts last.
 /// One render for the stream and the log, so they are one text.
