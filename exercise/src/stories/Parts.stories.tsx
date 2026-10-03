@@ -28,7 +28,7 @@ import { UNCLOSED_FENCE, WHAT_MODELS_WRITE } from './markdown.ts';
 import type { Cursor } from '../drive/canned.ts';
 import { MOMENTS, branchAt, sessionAt, trunkNodeAt, variantAt } from './moments.ts';
 import { fold } from '../session/fold.ts';
-import type { Session } from '../session/fold.ts';
+import type { Session, SessionState } from '../session/fold.ts';
 import type { LogLine } from '../drive/log.ts';
 import { useIdleGap } from '../session/useIdleGap.ts';
 
@@ -1088,5 +1088,47 @@ export const CancelledOutOfContext: Story = {
   play: async ({ canvasElement }) => {
     const marks = [...canvasElement.querySelectorAll('.ex-context-out')].map((m) => m.textContent);
     await expect(marks).toEqual(["not in the model's context", "not in the model's context"]);
+  },
+};
+
+/**
+ * The end control, armed and then not idle (#289): a busy session or a dropped link disables it. Armed by a
+ * click that never focused it -- Safari does not focus a button on click -- it is never blurred either, so only
+ * leaving idle can disarm it; idle again, it asks again.
+ */
+function EndHarness() {
+  const [state, setState] = useState<SessionState>('awaiting');
+  const [sent, setSent] = useState<string[]>([]);
+  return (
+    <div>
+      <Composer state={state} phase="spec" phases={PHASES} dispatch={async (c) => (setSent((s) => [...s, c.kind]), { ok: true })} />
+      <button type="button" data-probe="busy" onClick={() => setState('turn')}>
+        busy
+      </button>
+      <button type="button" data-probe="idle" onClick={() => setState('awaiting')}>
+        idle
+      </button>
+      <output data-probe="sent">{sent.join(',')}</output>
+    </div>
+  );
+}
+
+export const EndDisarmedWhenNotIdle: Story = {
+  name: 'Composer · end, armed, is disarmed when the session stops being idle',
+  render: () => <EndHarness />,
+  play: async ({ canvasElement }) => {
+    const end = canvasElement.querySelector('.ex-composer__end') as HTMLButtonElement;
+    // Armed as Safari arms it: a click that leaves the focus where it was.
+    end.click();
+    await waitFor(async () => expect(end.textContent).toBe('end the session?'));
+    await expect(document.activeElement).not.toBe(end);
+    (canvasElement.querySelector('[data-probe="busy"]') as HTMLButtonElement).click();
+    await waitFor(async () => expect(end.disabled).toBe(true));
+    (canvasElement.querySelector('[data-probe="idle"]') as HTMLButtonElement).click();
+    await waitFor(async () => expect(end.disabled).toBe(false));
+    await expect(end.textContent).toBe('end');
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    await userEvent.click(end);
+    await expect(canvasElement.querySelector('[data-probe="sent"]')?.textContent).toBe('');
   },
 };

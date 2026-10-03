@@ -54,7 +54,6 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
   );
 }
 
-/** A person's ask. Its header says what it will cost to read: the new tokens it put in front of the model. */
 /**
  * A cancelled turn's mark, on its ask and on what answered it (#289): the words are the surface's, the fact the
  * log's -- `diet` sends the model only finished turns, so a cancelled one is gone from what it reads next.
@@ -64,6 +63,7 @@ const OUT_OF_CONTEXT = {
   title: "this turn was cancelled, and the drive sends the model only finished turns: it will not read this ask or its answer",
 };
 
+/** A person's ask. Its header says what it will cost to read: the new tokens it put in front of the model. */
 export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
   return (
     <Block
