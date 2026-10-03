@@ -8488,6 +8488,15 @@ legacy_signature = "TypeError: Cannot read properties of undefined \\(reading 'p
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_stopped_read_drawn_whole"
+kind = "seeded-gate"
+check = "exercise"
+label = "a turn stopped mid-prefill drawn as read in full"
+failure_class = "exercise.progress-shape"
+legacy_signature = "FAIL.*served\\.test\\.ts.*says where a stop cut a read short"
+migrated = false
+
+[[fault]]
 id = "ci.ci_pages_flow_collection_hides_a_group"
 kind = "seeded-gate"
 check = "ci"
