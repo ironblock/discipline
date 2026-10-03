@@ -213,6 +213,11 @@ def top_level_code(text: str) -> str:
             elif char == "#" and ((i == 0 and not joined) or line[i - 1] in " \t;|&()<>"):
                 break
             i += 1
+        # Whatever the scan made of a `#` on it, a line ending in an odd run
+        # of backslashes may continue into the next: bash reads `)#b\` mid-word
+        # and joins the line after it (#308's third review). Only ever keeps.
+        if (len(line) - len(line.rstrip("\\"))) % 2:
+            carried = True
     starts = [n for n in runs if n - 1 not in runs]
     if any(not bash_reads_as_closed("\n".join(lines[:n])) for n in starts):
         return outside
@@ -756,6 +761,10 @@ def _top_level_comments():
         # scanner cannot follow (nested in `"$(...)"`), which bash confirms.
         ("X=a\\\n#'b\n# c\n'\n", ("# c", "# d")),
         ("X=a\\\n#b\\\n# c\n", ("# c", "# d")),
+        # The third review's J1 and J2: a `#` the scan took for a comment,
+        # then a trailing backslash bash joins the next line by.
+        ("Y=$(echo a)#b\\\n# c\n", ("# c", "# d")),
+        ("Y=${x:-a #b}\\\n# c\n", ("# c", "# d")),
         ('Y="a\\"\n# b"\n', ("# b", "# c")),
         ("echo it\\'s\nZ='a\n# b'\n", ("# b", "# c")),
         ("Z=${#X}' a\n# b'\n", ("# b", "# c")),
