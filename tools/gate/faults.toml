@@ -3153,6 +3153,69 @@ legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.refere
 migrated = false
 
 [[fault]]
+id = "results.results_h2_open_at_line_end"
+kind = "seeded-gate"
+check = "results"
+label = "an h2 opened at a line's end"
+failure_class = "results.heading-unread"
+legacy_signature = "'<h2', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_second_title"
+kind = "seeded-gate"
+check = "results"
+label = "a second title"
+failure_class = "results.heading-unread"
+legacy_signature = "'# Results', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_unlisted_section"
+kind = "seeded-gate"
+check = "results"
+label = "a section outside the five"
+failure_class = "results.heading-unread"
+legacy_signature = "'## Notes', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_only_when_decoded"
+kind = "seeded-gate"
+check = "results"
+label = "a heading only when decoded"
+failure_class = "results.figure-typed"
+legacy_signature = "the Results section declares a figure .\\[uncited: see the product, 0\\.241\\]..*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_behind_a_tab"
+kind = "seeded-gate"
+check = "results"
+label = "a heading behind a tab"
+failure_class = "results.heading-unread"
+legacy_signature = ">.t## Results., is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_braces_split_by_markup"
+kind = "seeded-gate"
+check = "results"
+label = "braces split by markup"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_figure_after_hash"
+kind = "seeded-gate"
+check = "results"
+label = "a figure after a hash"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '0\\.142'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
 id = "results.results_figure_in_conclusion_fence"
 kind = "seeded-gate"
 check = "results"

@@ -3684,6 +3684,111 @@ path.write_text(source.replace(old, "the product's own, \\{\\{product.decode_rat
 EOF
 }
 
+# An `<h2` at a line's end, closed on the next (#265's fourth review): an HTML heading.
+inject_results_h2_open_at_line_end() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '<h2\n>Results</h2>\n\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A second `# ` line (#265's fourth review): only the first is the title.
+inject_results_second_title() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Observation\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '# Results\n\nThe rate was [uncited: a sample, 0.241].\n\n## Observation\n', 1), encoding="utf-8")
+EOF
+}
+
+# A `## ` section outside the five (#265's fourth review): the whitelist.
+inject_results_unlisted_section() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '## Notes\n\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# An escaped `## Observation` in Results (#265's fifth review): a heading only to decoded text, so sections are read from the raw lines.
+inject_results_heading_only_when_decoded() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Conclusion\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '\\## Observation\n\nThe decode rate was [uncited: see the product, 0.241].\n\n## Conclusion\n', 1), encoding="utf-8")
+EOF
+}
+
+# A heading after `>` and a tab (#265's fifth review): a container's separator.
+inject_results_heading_behind_a_tab() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '>\t## Results\n>\n> The rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# Braces split by an HTML comment (#265's fifth review): a reader sees `{{`.
+inject_results_braces_split_by_markup() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {<!-- -->{product.decode_rate}<!-- -->}.", 1), encoding="utf-8")
+EOF
+}
+
+# A figure after `#` (#265's fifth review): only a bare integer is an issue number.
+inject_results_figure_after_hash() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, #0.142 of it.", 1), encoding="utf-8")
+EOF
+}
+
 inject_results_figure_typed_in_test() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
   python3 - <<'EOF'
@@ -8057,6 +8162,20 @@ selftest() {
     "'> ## Results', is a heading a renderer shows.*\[results\.heading-unread\]"
   seeded_case "braces escaped past the check" results inject_results_braces_escaped \
     "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "an h2 opened at a line's end" results inject_results_h2_open_at_line_end \
+    "'<h2', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a second title" results inject_results_second_title \
+    "'# Results', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a section outside the five" results inject_results_unlisted_section \
+    "'## Notes', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a heading only when decoded" results inject_results_heading_only_when_decoded \
+    "the Results section declares a figure .\[uncited: see the product, 0\.241\]..*\[results\.figure-typed\]"
+  seeded_case "a heading behind a tab" results inject_results_heading_behind_a_tab \
+    ">.t## Results., is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "braces split by markup" results inject_results_braces_split_by_markup \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "a figure after a hash" results inject_results_figure_after_hash \
+    "the Conclusion section types the figure\(s\) '0\.142'.*\[results\.figure-typed\]"
   seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \
     "the Test section types the figure\\(s\\) '3'.*\\[results\\.figure-typed\\]"
   seeded_case "an uncited figure in Conclusion"       results  inject_results_figure_uncited_in_conclusion \

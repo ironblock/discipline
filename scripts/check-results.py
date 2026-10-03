@@ -171,9 +171,23 @@ REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 # A dot before the digits exempts them only after a word or a number -- the
 # `2` of `v1.2` -- never a leading-dot decimal: `.241` and `p < .05` are
 # figures (#265's third review).
+#
+# A `#` before the digits exempts them only when they are a bare integer,
+# an issue's number (`#63`); `#0.241` and `#14.2%` are figures (#265's fifth
+# review). See `typed_figures`.
 TYPED_FIGURE = re.compile(
-    r"(?<![A-Za-z0-9#])(?<![A-Za-z0-9]\.)(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![A-Za-z0-9])"
+    r"(?<![A-Za-z0-9])(?<![A-Za-z0-9]\.)(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![A-Za-z0-9])"
 )
+
+
+def typed_figures(text: str) -> list[str]:
+    """The typed figures in `text`, an issue number (`#` then a bare
+    integer) excepted."""
+    return [
+        m.group(0)
+        for m in TYPED_FIGURE.finditer(text)
+        if not (m.start() > 0 and text[m.start() - 1] == "#" and m.group(0).isdigit())
+    ]
 # HEADINGS ARE A WHITELIST (#265's third and fourth reviews). Two reviews
 # found headings a renderer shows that this linter did not read -- indented,
 # setext, `<h2>`, in a blockquote, in a list item, `## Results ##` -- each
@@ -183,7 +197,9 @@ TYPED_FIGURE = re.compile(
 # (the title). Any other line that renders as a heading -- after stripping the
 # blockquote and list prefixes a heading can sit behind -- is refused.
 SECTION_LINE = re.compile(r"## (" + "|".join(SECTIONS) + r")")
-CONTAINER_PREFIX = re.compile(r"^(?: {0,3}>[ ]?| {0,3}(?:[-*+]|\d{1,9}[.)])(?: |$)| {1,3})")
+# A tab after `>` or a list marker is a container's separator too (#265's
+# fifth review: `>` TAB `## Results` rendered as a heading).
+CONTAINER_PREFIX = re.compile(r"^(?: {0,3}>[ \t]?| {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)| {1,3})")
 ATX = re.compile(r"#{1,6}(?:[ \t]|$)")
 SETEXT_UNDERLINE = re.compile(r"(?:=+|-+)[ \t]*$")
 HTML_HEADING = re.compile(r"<h[1-6](?:[\s>/]|$)", re.IGNORECASE)
@@ -1044,7 +1060,14 @@ def lint_figures(
                 f"`## <section>` at column 0, one of {', '.join(SECTIONS)}, and its title the "
                 f"first `# ` line before them (#63)",
             )
-    for section, text in sections_of(visible(body)).items():
+    # SECTIONS FROM THE RAW LINES (#265's fifth review): where a section
+    # starts is read from the lines the whitelist and the renderer read, never
+    # from decoded text -- an escaped or comment-hidden `## Observation` in
+    # Results is no heading to a reader, so it must not move what follows into
+    # a laxer section. `visible()` is applied to each section's text, for the
+    # figure lint only.
+    for section, raw_text in sections_of(body).items():
+        text = visible(raw_text)
         uncited = UNCITED.findall(text)
         if uncited and section in FIGURES_NEVER_TYPED:
             clean = False
@@ -1054,7 +1077,7 @@ def lint_figures(
                 f"no typed figure, cited or not -- reference the field instead (#63)",
             )
         bare = REFERENCE.sub(" ", UNCITED.sub(" ", text))
-        typed = TYPED_FIGURE.findall(bare)
+        typed = typed_figures(bare)
         if typed:
             clean = False
             where = "may carry one only inside `[uncited: <reason>]`" if section not in FIGURES_NEVER_TYPED else "carries none"
@@ -1093,7 +1116,13 @@ def lint_figures(
     # EVERY `{{` IS A REFERENCE OR AN ERROR (#265's third review): a brace
     # pair this grammar did not match -- `{{product.x}` -- was neither
     # resolved nor refused, and rendered as written.
-    left = visible("".join(rendered) if clean else REFERENCE.sub(" ", body))
+    # Braces as a reader sees them: escapes, entities and format characters
+    # dropped (visible), and comments, tags and emphasis markers removed, which
+    # GitHub never shows -- `{<!-- -->{x}<!-- -->}` and `{*{*x*}*}` read `{{x}}`
+    # (#265's fifth review).
+    left = re.sub(
+        r"<!--.*?-->|<[^>\n]*>|[*_`]", "", visible("".join(rendered) if clean else REFERENCE.sub(" ", body)), flags=re.DOTALL
+    )
     for stray in re.finditer(r"\{\{|\}\}", left):
         clean = False
         fail(
