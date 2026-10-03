@@ -1493,6 +1493,29 @@ mod tests {
     }
 
     #[test]
+    fn after_ended_the_written_log_is_sealed_byte_for_byte() {
+        // #291, ruled: after `ended` every command is refused and writes
+        // nothing -- the log file is the same bytes before and after.
+        let session = Session::open(Canned::new([deltas(&["one"])]), template());
+        let written = Shared::default();
+        write_through(
+            &session,
+            crate::drive::session::render,
+            written.clone(),
+            |why| panic!("{why}"),
+        );
+        session.ask("go", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        assert_eq!(session.end(None), Ok(()));
+        let sealed = written.text();
+        assert!(session.ask("too late", None).is_err());
+        assert!(session.cancel(1, None).is_err());
+        assert!(session.declare_seam(None).is_err());
+        assert!(session.end(None).is_err());
+        assert_eq!(written.text(), sealed);
+    }
+
+    #[test]
     fn an_events_stream_closes_itself_once_it_has_delivered_ended() {
         // #291: a page following the log sees `ended`, then the stream ends,
         // while the server itself keeps running -- the close is the stream's
