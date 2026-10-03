@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { fold } from '../session/fold.ts';
 import { edgeOf, flowText, readingOf, writingOf } from '../ui/flow.ts';
 import type { LogLine } from './log.ts';
+import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from './served/stopped-in-prefill.ts';
 
 /**
  * A session `diet-drive serve` served, as its `--log` wrote it: lines 1-1440
@@ -57,28 +58,29 @@ describe('a served session, as the page reads it (#288)', () => {
     expect(stopped?.kind === 'assistant' && flowText(readingOf(stopped, 0)!)).toMatch(/^\+567 tok in /);
     expect(stopped?.kind === 'assistant' && edgeOf(stopped)).toEqual({ read: 1 });
     expect(stopped?.kind === 'assistant' && writingOf(stopped, 0)).toEqual({ phase: 'tg', ms: 292041 - (firstDelta?.t ?? 0), running: false, stopped: 'writing' });
-    expect(stopped?.kind === 'assistant' && flowText(writingOf(stopped, 0)!)).toBe('stopped after 3.5 s of writing');
+    expect(stopped?.kind === 'assistant' && flowText(writingOf(stopped, 0)!)).toBe('wrote for 3.5 s');
   });
 
-  it('says where a stop cut a read short -- the log here WRITTEN BY THIS TEST past seq 1185, as no turn in the rehearsal stopped in prefill (#294)', () => {
-    // The rehearsal to turn 4's third progress line (51 of 567 new tokens read), then a stop the drive would log
-    // there: stop.asked, cancelled with nothing written, the turn settled. Constructed, not recorded (ruled on #294).
-    const at = 288100;
-    const cut: LogLine[] = [
-      ...upTo(1185),
-      { seq: 1186, t: at, kind: 'stop.asked', turn: 4 },
-      { seq: 1187, t: at + 1, kind: 'cancelled', request: 1182, partial: '' },
-      { seq: 1188, t: at + 1, kind: 'turn.settled', turn: 4, reason: 'cancelled' },
-      { seq: 1189, t: at + 1, kind: 'settlement', from: 'turn', to: 'awaiting' },
-    ] as LogLine[];
+  it('says where a stop cut a read short -- the log CONSTRUCTED past seq 1185 (served/stopped-in-prefill.ts), as no turn in the rehearsal stopped in prefill (#294)', () => {
+    // The rehearsal to turn 4's third progress line (51 of 567 new tokens read), then the constructed stop.
+    const cut: LogLine[] = [...upTo(STOPPED_IN_PREFILL_AFTER), ...STOPPED_IN_PREFILL];
     const stopped = assistants(cut)[3];
     expect(stopped?.kind === 'assistant' && stopped.progress).toBe('cancelled');
     const read = stopped?.kind === 'assistant' ? readingOf(stopped, 999_999) : undefined;
-    // Timed to the stop, not to now: 51 of 567, from the request at 287889 to the cancel at 288101.
-    expect(read).toEqual({ phase: 'pp', n: 51, of: 567, ms: 288101 - 287889, running: false, stopped: 'reading' });
-    expect(flowText(read!)).toMatch(/^\+51 of 567 tok in 212 ms \(.+ t\/s pp\) · stopped$/);
+    // Counted and timed at the last frame, not at the stop or now: 51 of 567, from the request at 287889 to 288037.
+    expect(read).toEqual({ phase: 'pp', n: 51, of: 567, ms: 288037 - 287889, running: false, stopped: 'reading' });
+    expect(flowText(read!)).toMatch(/^\+51 of 567 tok in 148 ms \(.+ t\/s pp\) · cut short$/);
     expect(stopped?.kind === 'assistant' && edgeOf(stopped)?.read).toBeCloseTo(51 / 567, 6);
-    expect(stopped?.kind === 'assistant' && flowText(writingOf(stopped, 999_999)!)).toBe('stopped before writing');
+    expect(stopped?.kind === 'assistant' && flowText(writingOf(stopped, 999_999)!)).toBe('wrote nothing');
+  });
+
+  it('takes a read as whole once the turn wrote, even if its last frame fell short (no final frame is promised)', () => {
+    // Turn 4's frames end at 2334 of 2334; here the last one is moved back to 2330 before the deltas that follow.
+    const short = log.map((l) => (l.kind === 'progress' && l.seq === 1187 ? { ...l, processed: 2330 } : l));
+    const answer = assistants(short)[3];
+    expect(answer?.kind === 'assistant' && readingOf(answer, 0)).toMatchObject({ n: 567 });
+    expect(answer?.kind === 'assistant' && readingOf(answer, 0)?.stopped).toBeUndefined();
+    expect(answer?.kind === 'assistant' && edgeOf(answer)).toEqual({ read: 1 });
   });
 
   it('reads a cold prefill from nothing', () => {
