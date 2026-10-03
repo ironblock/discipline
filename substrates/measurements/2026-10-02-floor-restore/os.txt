@@ -1,0 +1,7 @@
+rpm-ostree status --json, per deployment: booted, version, base-checksum (first 16 hex), image timestamp (unix)
+True 44.20260929 361661fde059f7ea 1790766436
+False 44.20260928.1 e3307b110e1c6566 1790680246
+booted deployment's own checksum: 2fd9934e890d6173846ba5a4c7baa43341ca28831b944999056942bd24fb0eda
+uname -r: 7.2.7-ogc1.1.fc44.x86_64
+nvidia-smi driver_version: 615.71.09
+driver library mapped by the server process (/proc/<pid>/maps): libcuda.so.615.71.09
