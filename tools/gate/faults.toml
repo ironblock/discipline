@@ -8576,3 +8576,42 @@ failure_class = "wiring.pages-condition"
 legacy_signature = "pages.yml: the deploy's condition has text outside its"
 migrated = false
 
+[[fault]]
+id = "drive.session-settles-a-capped-turn-final"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-settles-a-capped-turn-final"
+failure_class = "drive.session-settles-a-capped-turn-final"
+migrated = false
+
+[[fault]]
+id = "drive.session-writes-a-capped-response-uncapped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-writes-a-capped-response-uncapped"
+failure_class = "drive.session-writes-a-capped-response-uncapped"
+migrated = false
+
+[[fault]]
+id = "drive.projection-answers-a-capped-call"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-answers-a-capped-call"
+failure_class = "drive.projection-answers-a-capped-call"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-usage-hides-serve"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-usage-hides-serve"
+failure_class = "drive.serve-bin-usage-hides-serve"
+migrated = false
+
+[[fault]]
+id = "client.canned-ignores-its-finish-reason"
+kind = "lane-fault"
+check = "lanes"
+label = "client.canned-ignores-its-finish-reason"
+failure_class = "client.canned-ignores-its-finish-reason"
+migrated = false
