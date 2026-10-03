@@ -344,9 +344,13 @@ check_regimen() {
 # it would run and run none (#262): scripts/check-ci-coverage.py asks THIS
 # function, under VERIFY_CHECK_SHARD, so the wiring from the job's env to the
 # script is on the path it proves complete, not beside it.
+# VERIFY_RECOMPUTE_SCOPE is `--scope` on this check (#318): the directories a
+# seeded case mutated, comma-separated, so the case re-derives those and not
+# every directory's minutes-long recompute.sh. The package job never sets it.
+VERIFY_RECOMPUTE_SCOPE=""
 check_recompute() {
   python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} \
-    ${VERIFY_LIST_MEMBERS:+--names}
+    ${VERIFY_RECOMPUTE_SCOPE:+--only "$VERIFY_RECOMPUTE_SCOPE"} ${VERIFY_LIST_MEMBERS:+--names}
 }
 
 # A rung's admission word, derived from its admission directory rather than trusted as written (#183): the
@@ -1007,13 +1011,13 @@ seeded_case() {
       return
     fi
     scoped=(--scope "$scope")
-  elif { [ "$check" = "injections" ] || [ "$check" = "bsd" ]; } && [ -n "$scope" ]; then
+  elif { [ "$check" = "injections" ] || [ "$check" = "bsd" ] || [ "$check" = "recompute" ]; } && [ -n "$scope" ]; then
     scoped=(--scope "$scope")
   elif [ -n "$scope" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
-    SELFTEST_BROKEN+=("${label}: only the test, injections and bsd checks take a scope")
-    not_red "$ident" "$check" "only the test, injections and bsd checks take a scope"
+    SELFTEST_BROKEN+=("${label}: only the test, injections, bsd and recompute checks take a scope")
+    not_red "$ident" "$check" "only the test, injections, bsd and recompute checks take a scope"
     return
   fi
   # One log per case, kept for the run, because the box itself is overwritten
@@ -7367,6 +7371,14 @@ prove_mechanics() {
   expect_exit "nor with a shim that edits through GNU's -i" 2 \
     bash "${bsd}/gnu-shaped/scripts/check-bsd-sed.sh" "${bsd}/gnu-shaped"
 
+  # A recompute case narrowed to the directories it mutated (#318) names
+  # directories that are there, or the narrowing is a misuse: a scope that
+  # matched nothing would re-derive nothing and pass.
+  expect_exit "a recompute scope naming no directory is a misuse" 2 \
+    python3 "${ROOT}/scripts/check-recompute.py" --root "${ROOT}/results" --only no-such-directory
+  expect_exit "a recompute scope that is not a list of names is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --only recompute --scope '../results'
+
   # ...but an ordinary binary must not trip the loose heuristics. Over-strict
   # is a failure too: a gate that cries wolf on every binary gets switched off.
   #
@@ -8683,7 +8695,8 @@ selftest() {
   seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \
     'formats::regimen::tests::the_float_rule_and_the_records_decimal_rule_agree \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
-    'the report does not re-derive'
+    'the report does not re-derive' \
+    '_template'
   seeded_case "a held word the results derive as admitted" admission inject_admission_held_while_derived \
     'holds a word the results derive as'
   seeded_case "a cited result edited after the record" admission inject_admission_record_not_recomputed \
@@ -8709,13 +8722,17 @@ selftest() {
   seeded_case "an admission record the glob cannot see" admission inject_admission_record_moved \
     'admission.record-not-found'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
-    'front-matter .kind. is None'
+    'front-matter .kind. is None' \
+    '2026-01-30-seeded-undeclared'
   seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
-    'does not compare the report to the artefacts'
+    'does not compare the report to the artefacts' \
+    '_template'
   seeded_case "a probe blinded by a trailing comment"  recompute inject_recompute_probe_blinded_by_a_comment \
-    'does not compare the report to the artefacts'
+    'does not compare the report to the artefacts' \
+    '_template'
   seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
-    'tampering, not recomputation'
+    'tampering, not recomputation' \
+    '_template'
   seeded_case "a claim consuming evidence outside"     results   inject_results_consumes_outside \
     'outside the run directory'
   seeded_case "a claim consuming its own record"       results   inject_results_consumes_the_record \
@@ -8723,9 +8740,11 @@ selftest() {
   seeded_case "a claim consuming a file not there"     results   inject_results_consumes_a_missing_file \
     'which is not a file here'
   seeded_case "reproducible, with nothing to run"      recompute inject_recompute_script_missing \
-    'carries no recompute.sh'
+    'carries no recompute.sh' \
+    '_template'
   seeded_case "the template carrying the opt-out"      recompute inject_recompute_template_opts_out \
-    'the template declares .historical-observation.'
+    'the template declares .historical-observation.' \
+    '_template'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "a claim field neither given nor absent" results inject_results_claim_field_undeclared \
@@ -8855,11 +8874,14 @@ selftest() {
   seeded_case "a shared body written out under another name" test inject_number_terminal_body_regrown \
     'has a shared terminal.s body written out again' 'test:conformance/the_integer_terminal'
   seeded_case "historical, and carrying a recompute"   recompute inject_recompute_historical_with_a_script \
-    'declares .historical-observation. and carries a recompute\.sh'
+    'declares .historical-observation. and carries a recompute\.sh' \
+    '2026-01-30-seeded-historical'
   seeded_case "historical with no reason stated"       recompute inject_recompute_historical_without_a_reason \
-    'states no .historical_reason.'
+    'states no .historical_reason.' \
+    '2026-01-30-seeded-unreasoned'
   seeded_case "historical with a reason that says nothing" recompute inject_recompute_historical_reason_blank \
-    'states no .historical_reason.'
+    'states no .historical_reason.' \
+    '2026-01-31-seeded-blank-reason'
   seeded_case "only the template recomputes"           recompute inject_recompute_only_the_template_recomputes \
     'results are present and none recomputed'
   seeded_case "a check no workflow runs"              ci       inject_ci \
@@ -10378,7 +10400,7 @@ fi
 # be a misuse rather than silently no scope at all.
 if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
   if [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ]; then
-    echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
+    echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections, --only bsd or --only recompute" >&2
     exit "$EXIT_MISUSE"
   fi
   case "${selected[0]}" in
@@ -10400,8 +10422,21 @@ if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
         exit "$EXIT_MISUSE"
       }
       ;;
+    recompute)
+      # Directory names under results/, comma-separated (#318). The script
+      # refuses a name that is not there; this refuses a spelling that is
+      # not a list of names at all.
+      case "$VERIFY_SCOPE" in
+        ''|,*|*,|*,,*|*[!A-Za-z0-9._,-]*|.*|*,.*) ;;
+        *) VERIFY_RECOMPUTE_SCOPE="$VERIFY_SCOPE" ;;
+      esac
+      [ -n "$VERIFY_RECOMPUTE_SCOPE" ] || {
+        echo "verify: --scope '$VERIFY_SCOPE': the recompute check takes results directory names, comma-separated" >&2
+        exit "$EXIT_MISUSE"
+      }
+      ;;
     *)
-      echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
+      echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections, --only bsd or --only recompute" >&2
       exit "$EXIT_MISUSE"
       ;;
   esac
