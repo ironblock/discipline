@@ -1196,6 +1196,15 @@ fn a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_the
 }
 
 #[test]
+fn diet_drive_usage_names_the_serve_form() {
+    // The top-level usage listed only the scripted drive (#290).
+    let out = Command::new(DRIVE).output().expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(2), "{said}");
+    assert!(said.contains("diet-drive serve --endpoint"), "{said}");
+}
+
+#[test]
 fn a_drive_server_refuses_a_record_without_a_regimen() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let path = std::env::temp_dir()

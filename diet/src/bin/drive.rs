@@ -700,7 +700,10 @@ fn is_an_origin(value: &str) -> bool {
 
 fn usage() -> String {
     let mut out =
-        String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n\n");
+        String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n");
+    // The interactive server, which the first form's usage once hid (#290).
+    out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");
+    out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n\n");
     out.push_str("Runs the pinned three-turn script through <regimen> in <worktree>\n");
     out.push_str("and writes the record to <output.jsonl>. With no endpoint the canned\n");
     out.push_str("server answers on loopback -- no model, no network out.\n\n");
