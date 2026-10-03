@@ -8479,6 +8479,15 @@ legacy_signature = "replay-smoke: kitchen-sink is bundled into the page's code"
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_capped_from_settle_alone"
+kind = "seeded-gate"
+check = "exercise"
+label = "a capped turn read from the settle word alone"
+failure_class = "exercise.capped-settle"
+legacy_signature = "FAIL.*capped\\.test\\.ts.*is not read from the settle word alone"
+migrated = false
+
+[[fault]]
 id = "exercise.exercise_progress_read_nested"
 kind = "seeded-gate"
 check = "exercise"
