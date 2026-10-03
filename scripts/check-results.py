@@ -174,19 +174,22 @@ REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 #
 # A `#` before the digits exempts them only when they are a bare integer,
 # an issue's number (`#63`); `#0.241` and `#14.2%` are figures (#265's fifth
-# review). See `typed_figures`.
+# review). And only outside Results and Conclusion, which admit no typed
+# figure at all: `#142 of every #1000 steps` there is refused (ruled (b) on
+# #265, 5973883143). See `typed_figures`.
 TYPED_FIGURE = re.compile(
     r"(?<![A-Za-z0-9])(?<![A-Za-z0-9]\.)(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![A-Za-z0-9])"
 )
 
 
-def typed_figures(text: str) -> list[str]:
+def typed_figures(text: str, section: str | None = None) -> list[str]:
     """The typed figures in `text`, an issue number (`#` then a bare
-    integer) excepted."""
+    integer) excepted outside Results and Conclusion."""
+    exempt = section not in FIGURES_NEVER_TYPED
     return [
         m.group(0)
         for m in TYPED_FIGURE.finditer(text)
-        if not (m.start() > 0 and text[m.start() - 1] == "#" and m.group(0).isdigit())
+        if not (exempt and m.start() > 0 and text[m.start() - 1] == "#" and m.group(0).isdigit())
     ]
 # HEADINGS ARE A WHITELIST (#265's third and fourth reviews). Two reviews
 # found headings a renderer shows that this linter did not read -- indented,
@@ -1146,7 +1149,7 @@ def lint_figures(
                 f"no typed figure, cited or not -- reference the field instead (#63)",
             )
         bare = UNCITED.sub(" ", text)
-        typed = typed_figures(bare)
+        typed = typed_figures(bare, section)
         if typed:
             clean = False
             where = "may carry one only inside `[uncited: <reason>]`" if section not in FIGURES_NEVER_TYPED else "carries none"

@@ -4039,6 +4039,22 @@ path.write_text(source.replace(old, '<div>\n```\n</div>\n\n## Results\n\n<!--\n#
 EOF
 }
 
+# Integers after a hash in Conclusion (ruled (b) on #265): an issue number's
+# spelling exempts nothing in Results or Conclusion.
+inject_results_hash_integers_in_conclusion() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, #142 of every #1000 steps.", 1), encoding="utf-8")
+EOF
+}
+
 # Braces split by an HTML comment (#265's fifth review): a reader sees `{{`.
 inject_results_braces_split_by_markup() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
@@ -8928,6 +8944,8 @@ selftest() {
     "'## Results', is a section heading this linter reads as hidden in a comment or a fence.*\[results\.heading-unread\]"
   seeded_case "a figure after a hash" results inject_results_figure_after_hash \
     "the Conclusion section types the figure\(s\) '0\.142'.*\[results\.figure-typed\]"
+  seeded_case "integers after a hash in Conclusion" results inject_results_hash_integers_in_conclusion \
+    "the Conclusion section types the figure\(s\) '142', '1000'.*\[results\.figure-typed\]"
   seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \
     "the Test section types the figure\\(s\\) '3'.*\\[results\\.figure-typed\\]"
   seeded_case "an uncited figure in Conclusion"       results  inject_results_figure_uncited_in_conclusion \

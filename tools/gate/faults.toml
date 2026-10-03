@@ -3306,6 +3306,15 @@ legacy_signature = "the Conclusion section types the figure\\(s\\) '0\\.142'.*\\
 migrated = false
 
 [[fault]]
+id = "results.results_hash_integers_in_conclusion"
+kind = "seeded-gate"
+check = "results"
+label = "integers after a hash in Conclusion"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '142', '1000'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
 id = "results.results_figure_in_conclusion_fence"
 kind = "seeded-gate"
 check = "results"
