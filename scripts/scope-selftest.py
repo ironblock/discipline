@@ -159,27 +159,39 @@ def top_level_code(text: str) -> str:
     #293's run, for 27 comment lines and 2 blank ones. A comment is not
     machinery.
 
-    A line is dropped only where bash would read it as a comment or nothing:
-    outside any quote and not continuing the line before (#308's review: a `#`
-    or blank line inside a quoted value, or after a trailing backslash, is
-    text bash reads). The quotes are followed across lines; a quote this
-    misreads as open keeps every line after it, which errs toward re-proving.
-    Where the reading could be wrong the other way it compares the top level
-    whole, as before: a heredoc, or a lone `}`, the mark of a function the
-    pattern cut short, whose tail would otherwise land here. Whole re-proves;
-    it never skips.
+    A line is a candidate to drop when it is blank, or begins with `#`, where
+    this scanner reads no open quote and no continuation from the line before
+    (#308's reviews: a `#` or blank line inside a quoted value, or after a
+    trailing backslash, is text bash reads). The scanner only chooses the
+    candidates; it is not bash, and misreads `$'...'` escapes and quotes
+    nested in `"$(...)"`. BASH DECIDES the quotes: `bash -n` on the top level
+    up to each run of candidates must report no quote left open, or the top
+    level is compared whole; and any heredoc in the top level's code compares
+    it whole, since bash 3.2's `-n` does not report one left open. The
+    scanner's own care (escapes, where a `#` starts a comment) only keeps the
+    fix from switching off; the continuation it tracks is the one thing bash
+    -n does not report, so that is held by the fixture. A lone `}`, the mark
+    of a function the pattern cut short whose tail would land here, compares
+    whole too. Whole re-proves; it never skips. What this cannot see: a
+    heredoc inside a function whose body holds a `name() {` line at column 0
+    can still hide from the function pattern.
     """
     outside = outside_functions(text)
     lines = outside.split("\n")
     if "}" in lines:
         return outside
     kept: list[str] = []
+    runs: list[int] = []
     quote = ""
     carried = False
-    for line in lines:
-        if not quote and not carried:
-            bare = line.strip()
+    for number, line in enumerate(lines):
+        joined = carried
+        if not quote and not joined:
+            # Only a space or a tab is blank to bash: a line of `\r` or of a
+            # non-breaking space is a command (the second review's Note 1).
+            bare = line.strip(" \t")
             if not bare or (bare.startswith("#") and not line.startswith("#!")):
+                runs.append(number)
                 continue
         kept.append(line)
         carried = False
@@ -194,14 +206,26 @@ def top_level_code(text: str) -> str:
                 i += 1
             elif quote == '"':
                 quote = "" if char == '"' else quote
-            elif char in "'\"":
-                quote = char
-            elif char == "#" and (i == 0 or line[i - 1] in " \t;|&("):
-                break
             elif line.startswith("<<", i):
                 return outside
+            elif char in "'\"":
+                quote = char
+            elif char == "#" and ((i == 0 and not joined) or line[i - 1] in " \t;|&()<>"):
+                break
             i += 1
+    starts = [n for n in runs if n - 1 not in runs]
+    if any(not bash_reads_as_closed("\n".join(lines[:n])) for n in starts):
+        return outside
     return "\n".join(kept)
+
+
+def bash_reads_as_closed(text: str) -> bool:
+    """Whether bash, parsing `text` alone, finds no quote still open at its
+    end: the line after it then starts where a comment can. Not a heredoc:
+    bash 3.2's `-n` says nothing of one left open, so the scanner's `<<`
+    compares whole instead."""
+    parsed = subprocess.run(["bash", "-n"], input=text + "\n", capture_output=True, text=True)
+    return "matching" not in parsed.stderr
 
 
 def without_cases(body: str) -> str:
@@ -727,6 +751,18 @@ def _top_level_comments():
         ('MSG="a\n# b"\n', ("# b", "# c")),                     # an open double quote
         ("MSG='a\n\nb'\n", ("\n\n", "\n")),                     # a blank in an open single quote
         ("g() {\n  cat <<EOF\n}\n# read\nEOF\n}\n", ("# read", "# changed")),  # a function cut short
+        # The second review: a joined line starting `#`, escapes the scanner
+        # must skip, a `#` that ends no word, a `$'` string, and a quote the
+        # scanner cannot follow (nested in `"$(...)"`), which bash confirms.
+        ("X=a\\\n#'b\n# c\n'\n", ("# c", "# d")),
+        ("X=a\\\n#b\\\n# c\n", ("# c", "# d")),
+        ('Y="a\\"\n# b"\n', ("# b", "# c")),
+        ("echo it\\'s\nZ='a\n# b'\n", ("# b", "# c")),
+        ("Z=${#X}' a\n# b'\n", ("# b", "# c")),
+        ("A=$'it\\'s'\nB='a\n# b'\n", ("# b", "# c")),
+        ('C="$(echo "it\'s")"\nD=\'a\n# b\'\n', ("# b", "# c")),
+        ("(echo a)#it's\nE='a\n# b'\n", ("# b", "# c")),
+        ("F=1\n\r\n", ("\r\n", "\n")),
     ):
         if top_level_code(base + read) == top_level_code(base + read.replace(*edit)):
             return f"text bash reads was dropped: {read!r}"
