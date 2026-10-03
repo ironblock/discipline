@@ -1,7 +1,7 @@
 #!/bin/bash
 set -u
 W=$HOME/diet-inference-runs/w334b; L=$W/mac.log; mkdir -p $W/out; : > $L
-BH=$(cat $HOME/diet-inference-runs/ada-142/.boxhost)
+BH=$(cat <boxhost-file>)
 SSH="ssh -i $HOME/.ssh/id_rsa -o IdentitiesOnly=yes -o BatchMode=yes <user>@$BH"
 DI=$HOME/git/me/diet-inference
 BASELINE=$HOME/diet-inference-runs/restore-1002/substrate-2026-10-02-postupdate.json

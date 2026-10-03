@@ -1,0 +1,18 @@
+# Receipt for the model-card KLD figures cited in README findings 3 and 4.
+# Source: the model card of turboderp/Qwen3.8-27B-exl3 at revision d23340a1fdb479f3c2878136dcede06cf57ea31a (main, read 2026-10-03).
+#   README.md at that revision: sha256 617ea914cb54e3b5e28189061fad70ebcb44e8d7d416564e731cdded0463c0e4
+#   The figures appear only in the card's chart image, which the README embeds at line 40:
+#     https://cdn-uploads.huggingface.co/production/uploads/6383dc174c48969dcf1b4fce/tzoh6Fsq0xycqEM7U65mQ.png
+#     image sha256 f875ef638baf9135526fdd9429fe1f11351cdf3cf2870ce5967a7e32716aef13 (2240x1600 PNG, 277,472 bytes)
+#   Not found as values in the repository's data files (kld_table.json, measurement.json, noise_attrib.json, qbench_prompts_gen.json at main):
+#   the only near match is a per-tensor statistic in kld_table.json ("S": 0.008238...), unrelated to the chart.
+# Chart title: "Qwen 3.8 27B"; subtitle: "self-generated in-domain trace, 19,016 input + 45,930 output tokens";
+# y axis: "mean KL divergence, D_KL(p_FP || p_quant)"; x axis: "quantized weight size |W_q| / GiB (excl. embeddings, incl. output head)".
+# Point labels, transcribed as printed on the chart (series, label, value):
+EXL3     3.00 bpw     0.0332
+EXL3     4.00 bpw     0.0082
+EXL3     5.00 bpw     0.0023
+EXL3     6.00 bpw     0.0009
+EXL3-SC  3.00 bpw H4  0.0257
+EXL3-SC  4.00 bpw H5  0.0062
+# Not on the chart: EXL3 2.50 bpw; GSQ-RCO quants.

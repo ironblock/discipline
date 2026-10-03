@@ -1,5 +1,13 @@
 # Addendum to the Qwen3.8 27B quality ladder (#334): size-matched EXL3 rungs on `linux-pc`
 
+**Revision 2.** This revision fixes PR #348's review:
+- a receipt for the model-card figures (`rcpt/model-card-kld.txt`);
+- the card-scale ratio corrected;
+- the SC size accounting stated;
+- a private path redacted in `scripts/mac.sh`.
+
+No measured number changed.
+
 **Characterization, not admission.** This was measured 2026-10-03 on `linux-pc` (RTX 3090 24 GB) by the inference seat, using the harness, Q8_0 reference logits and scorer of the main #334 measurement (`substrates/measurements/2026-10-03-qwen38-27b-quality-ladder/`, PR #344). Registry ids only.
 
 **Why.** The main ladder's EXL3 rows (4.00 and 5.00 bpw) are 39–64% larger than GSQ-RCO IQ3_S, so they could not separate the quantizer from the bit budget.
@@ -44,10 +52,10 @@ KLD against the same Q8_0 reference, over 24,564 scored positions per corpus. Si
    - `SC_3.00bpw_H4` is a little worse than IQ3_S on code (0.059) and better on prose (0.074).
 3. **Self-calibration doesn't carry over to independent text here.**
    - At the same 3.00 bpw, the self-calibrated `SC_3.00bpw_H4` is no better than plain `3.00bpw` on prose (0.0738 against 0.0731) and worse on code (0.0591 against 0.0522). It is 3% smaller.
-   - The model card ranks it the other way, at 0.0257 against 0.0332. The card measures on a self-generated trace of the same kind as the SC calibration data.
+   - The model card ranks it the other way, at 0.0257 against 0.0332 (`rcpt/model-card-kld.txt`, transcribed from the card's chart at revision `d23340a1`). The card measures on a self-generated trace of the same kind as the SC calibration data.
    - Our corpora don't overlap that calibration data (`rcpt/calcheck-sc.txt`).
 4. **The card's scale and ours differ.**
-   - On our corpora, against Q8_0, the rows are 1.6–2.9× the card's figures against FP: 0.052–0.073 against 0.0332 for `3.00bpw`, and 0.017–0.022 against 0.0082 for `4.00bpw`.
+   - On our corpora, against Q8_0, the rows are 1.6–2.7× the card's figures against FP: 0.052 and 0.073 against 0.0332 for `3.00bpw`, and 0.017 and 0.022 against 0.0082 for `4.00bpw`. For `SC_3.00bpw_H4` the ratio is 2.3–2.9×: 0.059 and 0.074 against 0.0257. The card figures are from `rcpt/model-card-kld.txt`.
    - Card figures should therefore not be compared directly with these.
 
 ## How it was measured
@@ -60,7 +68,7 @@ KLD against the same Q8_0 reference, over 24,564 scored positions per corpus. Si
 
 **Engine** (`identity.txt`): ExLlamaV3 1.5.1 with torch 2.13.0+cu132. The scorer runs without a KV cache.
 
-**Weights:** `rcpt/weights.txt` gives the publisher sha256, HF revision and size for every file. Each rung's `quantization_config.json` sha256 prefix is in `identity.txt`. The SC branch also ships its 4 MB `cal_trace.safetensors`, which is not counted in its size.
+**Weights:** `rcpt/weights.txt` gives the publisher sha256, HF revision and size for every file. Each rung's `quantization_config.json` sha256 prefix is in `identity.txt`. The SC branch also ships its 4,096,088-byte `cal_trace.safetensors`, which is not counted in its size: the model shards total 13,448,350,131 bytes. `identity.txt`'s total for that branch (13,452,446,219) sums every `*.safetensors` file, including the trace. Both round to 13.45 GB.
 
 **Calibration overlap** (`rcpt/calcheck_sc.py`, `rcpt/calcheck-sc.txt`):
 - The self-calibration trace (`cal_trace.json` on the repo's main branch, sha256 `7a3436f0…`, 217 rows of token ids) was decoded with the model's tokenizer, giving 2,122,166 characters.
