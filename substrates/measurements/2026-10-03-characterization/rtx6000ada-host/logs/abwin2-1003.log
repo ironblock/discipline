@@ -1,0 +1,109 @@
+2026-10-03T07:24:11Z slots before stop: [False, False, False, False]
+2026-10-03T07:24:12Z DOWNTIME START vram=2 MiB
+2026-10-03T07:24:19Z llama1 up after ~8s vram=46572 MiB
+[llama1] solo 0 a=0.42 'of Midway in June 1942, the Ise class was repurposed as hybrid aircraft carriers. This conversion involved removing the aft main gun turrets and repla'
+[llama1] solo 1 a=0.45 'The initial North Korean offensive, which began on August 31, was characterized by a series of coordinated assaults designed to breach the UN defensiv'
+[llama1] solo 2 a=0.42 "The departure of DJ Product © 1969 marked a significant shift in the band's sonic identity, signaling a move away from the heavy hip-hop influences th"
+[llama1] solo 3 a=0.4 'signation of the battleship as the primary capital ship, a consensus that was largely driven by the rapid evolution of naval artillery and the increas'
+[llama1] conc 0 a=0.35 'of Midway in June 1942, the Ise class was repurposed as hybrid aircraft carriers. This conversion involved removing the aft main guns and replacing th'
+[llama1] conc 1 a=0.44 'The initial North Korean offensive, which began on August 31, was characterized by a series of coordinated assaults designed to breach the UN defensiv'
+[llama1] conc 2 a=0.48 "The departure of DJ Product © 1969 marked a significant shift in the band's sonic identity, as the electronic elements that had previously defined the"
+[llama1] conc 3 a=0.49 'signation of the modern battleship, a vessel that combined the heavy armor and firepower of the ironclad with the speed and maneuverability of the cru'
+{"tag": "llama1", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 10.4, "per_req": [100.48], "agg_wall": 24.7, "pn": [10082], "pp": [1457], "a": 0.543, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.8, "per_req": [96.7], "agg_wall": 92.6, "pn": [4], "pp": [40], "a": 0.502, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.6, "per_req": [103.31], "agg_wall": 98.6, "pn": [4], "pp": [39], "a": 0.573, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 2, "rep": 0, "wall_s": 11.6, "per_req": [23.19, 77.61], "agg_wall": 44.1, "pn": [4, 10418], "pp": [25, 1268], "a": 0.579, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 2, "rep": 1, "wall_s": 3.9, "per_req": [84.25, 76.7], "agg_wall": 132.7, "pn": [4, 4], "pp": [23, 39], "a": 0.597, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 2, "rep": 2, "wall_s": 3.8, "per_req": [81.42, 77.49], "agg_wall": 134.5, "pn": [4, 4], "pp": [23, 39], "a": 0.594, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 23.7, "per_req": [11.6, 11.55, 21.32, 48.33], "agg_wall": 43.2, "pn": [4, 4, 10081, 9851], "pp": [15, 20, 931, 560], "a": 0.569, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 7.0, "per_req": [48.1, 47.29, 45.42, 45.21], "agg_wall": 146.4, "pn": [4, 4, 4, 4], "pp": [12, 21, 34, 15], "a": 0.57, "errors": []}
+{"tag": "llama1", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.9, "per_req": [49.96, 47.32, 46.9, 45.66], "agg_wall": 147.6, "pn": [4, 4, 4, 4], "pp": [21, 15, 12, 33], "a": 0.569, "errors": []}
+{"tag": "llama1", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 91.4, "per_req": [81.34], "agg_wall": 2.8, "pn": [101622], "pp": [1169], "a": 0.645, "errors": []}
+{"tag": "llama1", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 3.6, "per_req": [80.91], "agg_wall": 71.4, "pn": [4], "pp": [17], "a": 0.622, "errors": []}
+{"tag": "llama1", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 3.6, "per_req": [82.08], "agg_wall": 72.0, "pn": [4], "pp": [16], "a": 0.633, "errors": []}
+{"tag": "llama1", "depth": 200000, "conc": 1, "rep": 0, "wall_s": 115.1, "per_req": [53.68], "agg_wall": 2.2, "pn": [99374], "pp": [904], "a": 0.505, "errors": []}
+{"tag": "llama1", "depth": 200000, "conc": 1, "rep": 1, "wall_s": 4.9, "per_req": [61.44], "agg_wall": 51.9, "pn": [4], "pp": [10], "a": 0.629, "errors": []}
+{"tag": "llama1", "depth": 200000, "conc": 1, "rep": 2, "wall_s": 5.3, "per_req": [57.61], "agg_wall": 48.7, "pn": [4], "pp": [9], "a": 0.567, "errors": []}
+2026-10-03T07:29:52Z llama1 bench done
+2026-10-03T07:29:55Z llama1 stopped vram=2 MiB
+2026-10-03T07:30:25Z tabby1 up after ~32s vram=43762 MiB
+[tabby1] solo 0 a=0.45 'e of Midway in June 1942, the IJN sought to convert the remaining battleships into hybrid aircraft carriers to bolster its depleted air power. Ise and'
+[tabby1] solo 1 a=0.39 'The UN forces, primarily composed of the US Army and the Republic of Korea Army, were initially pushed back rapidly by the North Korean advance, which'
+[tabby1] solo 2 a=0.39 'o explanation was given for his departure. In early 2014, the band announced that they had signed with Cleopatra Records, a label known for its divers'
+[tabby1] solo 3 a=0.45 'The proliferation of ironclad battleship designs came to an end in the 1890s as navies reached a consensus on the design of the modern battleship, cha'
+[tabby1] conc 0 a=0.45 'e of Midway in June 1942, the IJN sought to convert the remaining battleships into hybrid aircraft carriers to bolster its depleted air power. Ise and'
+[tabby1] conc 1 a=0.45 'The UN forces, primarily composed of the US Army and the Republic of Korea Army, were initially pushed back rapidly by the North Korean advance, which'
+[tabby1] conc 2 a=0.41 'o explanation was given for his departure. In early 2014, the band announced that they had signed with Cleopatra Records, a label known for its divers'
+[tabby1] conc 3 a=0.45 'The proliferation of ironclad battleship designs came to an end in the 1890s as navies reached a consensus on the dominant form of the capital ship, d'
+{"tag": "tabby1", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 5.5, "per_req": [119.07], "agg_wall": 46.4, "pn": [10082], "pp": [3010], "a": 0.479, "errors": []}
+{"tag": "tabby1", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.1, "per_req": [131.28], "agg_wall": 122.1, "pn": [98], "pp": [891], "a": 0.546, "errors": []}
+{"tag": "tabby1", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.1, "per_req": [129.29], "agg_wall": 120.3, "pn": [98], "pp": [891], "a": 0.537, "errors": []}
+{"tag": "tabby1", "depth": 10000, "conc": 2, "rep": 0, "wall_s": 7.3, "per_req": [39.45, 75.96], "agg_wall": 70.5, "pn": [98, 10418], "pp": [138, 2801], "a": 0.46, "errors": []}
+{"tag": "tabby1", "depth": 10000, "conc": 2, "rep": 1, "wall_s": 3.8, "per_req": [79.75, 74.2], "agg_wall": 136.3, "pn": [178, 98], "pp": [1369, 408], "a": 0.472, "errors": []}
+{"tag": "tabby1", "depth": 10000, "conc": 2, "rep": 2, "wall_s": 3.7, "per_req": [78.29, 75.96], "agg_wall": 139.4, "pn": [178, 98], "pp": [1483, 426], "a": 0.483, "errors": []}
+{"tag": "tabby1", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 13.9, "per_req": [19.36, 18.99, 41.22, 42.31], "agg_wall": 73.8, "pn": [98, 178, 10081, 9851], "pp": [817, 712, 1385, 1620], "a": 0.474, "errors": []}
+{"tag": "tabby1", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.7, "per_req": [43.84, 44.6, 42.38, 41.22], "agg_wall": 153.9, "pn": [97, 123, 178, 98], "pp": [882, 1025, 509, 426], "a": 0.497, "errors": []}
+{"tag": "tabby1", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.4, "per_req": [46.21, 44.91, 43.69, 44.52], "agg_wall": 160.1, "pn": [178, 123, 98, 97], "pp": [509, 1025, 426, 882], "a": 0.533, "errors": []}
+{"tag": "tabby1", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 33.7, "per_req": [119.63], "agg_wall": 7.6, "pn": [91680], "pp": [2928], "a": 0.479, "errors": []}
+{"tag": "tabby1", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 2.2, "per_req": [132.64], "agg_wall": 116.3, "pn": [32], "pp": [457], "a": 0.565, "errors": []}
+{"tag": "tabby1", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 2.4, "per_req": [121.9], "agg_wall": 108.2, "pn": [32], "pp": [457], "a": 0.495, "errors": []}
+{"tag": "tabby1", "depth": 200000, "conc": 1, "rep": 0, "wall_s": 36.9, "per_req": [129.29], "agg_wall": 6.9, "pn": [98890], "pp": [2871], "a": 0.556, "errors": []}
+{"tag": "tabby1", "depth": 200000, "conc": 1, "rep": 1, "wall_s": 2.9, "per_req": [108.94], "agg_wall": 89.0, "pn": [74], "pp": [740], "a": 0.409, "errors": []}
+{"tag": "tabby1", "depth": 200000, "conc": 1, "rep": 2, "wall_s": 2.6, "per_req": [124.88], "agg_wall": 99.5, "pn": [74], "pp": [740], "a": 0.52, "errors": []}
+2026-10-03T07:32:58Z tabby1 bench done
+2026-10-03T07:33:02Z tabby1 stopped vram=2 MiB
+2026-10-03T07:33:11Z llama2 up after ~10s vram=46572 MiB
+[llama2] solo 0 a=0.44 'of Midway in June 1942, the IJN found itself lacking sufficient carrier capacity to support its operations. To compensate for this deficit, the Imperi'
+[llama2] solo 1 a=0.42 'The initial North Korean offensive, which began on August 31, was characterized by a series of coordinated assaults designed to breach the UN defensiv'
+[llama2] solo 2 a=0.49 "The departure of DJ Product © 1969 marked a significant shift in the band's sonic identity, signaling a move away from the heavy hip-hop influences th"
+[llama2] solo 3 a=0.49 'signation of the battleship as the primary capital ship, and the armored cruiser as its secondary counterpart. This convergence was driven by the real'
+[llama2] conc 0 a=0.41 'of Midway in June 1942, the IJN found itself lacking sufficient carrier capacity to support its operations. To compensate for this deficit, the Imperi'
+[llama2] conc 1 a=0.42 'The initial North Korean offensive, launched on August 31, was designed to break the UN defensive line and collapse the Pusan Perimeter. The 2nd Infan'
+[llama2] conc 2 a=0.56 "The departure of DJ Product © 1969 marked a significant shift in the band's sonic identity, as his turntables and sampling had been a defining element"
+[llama2] conc 3 a=0.48 'signation of the battleship as the primary capital ship, a consensus that was largely driven by the rapid evolution of naval artillery and the increas'
+{"tag": "llama2", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 10.4, "per_req": [108.63], "agg_wall": 24.5, "pn": [10082], "pp": [1405], "a": 0.616, "errors": []}
+{"tag": "llama2", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.6, "per_req": [103.24], "agg_wall": 98.7, "pn": [4], "pp": [41], "a": 0.551, "errors": []}
+{"tag": "llama2", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.5, "per_req": [106.39], "agg_wall": 101.5, "pn": [4], "pp": [41], "a": 0.577, "errors": []}
+{"tag": "llama2", "depth": 10000, "conc": 2, "rep": 0, "wall_s": 12.2, "per_req": [22.64, 77.96], "agg_wall": 41.8, "pn": [4, 10418], "pp": [26, 1202], "a": 0.578, "errors": []}
+{"tag": "llama2", "depth": 10000, "conc": 2, "rep": 1, "wall_s": 3.9, "per_req": [81.51, 75.29], "agg_wall": 130.6, "pn": [4, 4], "pp": [39, 23], "a": 0.584, "errors": []}
+{"tag": "llama2", "depth": 10000, "conc": 2, "rep": 2, "wall_s": 4.0, "per_req": [76.23, 74.63], "agg_wall": 129.5, "pn": [4, 4], "pp": [23, 38], "a": 0.56, "errors": []}
+{"tag": "llama2", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 24.4, "per_req": [11.16, 11.02, 21.29, 48.55], "agg_wall": 42.0, "pn": [4, 4, 10081, 9851], "pp": [20, 15, 867, 529], "a": 0.581, "errors": []}
+{"tag": "llama2", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.8, "per_req": [50.54, 47.48, 46.72, 46.71], "agg_wall": 150.5, "pn": [4, 4, 4, 4], "pp": [34, 21, 12, 15], "a": 0.597, "errors": []}
+{"tag": "llama2", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.7, "per_req": [50.32, 49.08, 47.92, 47.41], "agg_wall": 152.0, "pn": [4, 4, 4, 4], "pp": [34, 12, 15, 21], "a": 0.585, "errors": []}
+{"tag": "llama2", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 85.1, "per_req": [78.65], "agg_wall": 3.0, "pn": [92098], "pp": [1143], "a": 0.607, "errors": []}
+{"tag": "llama2", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 4.1, "per_req": [69.84], "agg_wall": 62.6, "pn": [4], "pp": [16], "a": 0.502, "errors": []}
+{"tag": "llama2", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 3.6, "per_req": [80.85], "agg_wall": 71.0, "pn": [4], "pp": [16], "a": 0.616, "errors": []}
+{"tag": "llama2", "depth": 200000, "conc": 1, "rep": 0, "wall_s": 114.5, "per_req": [65.05], "agg_wall": 2.2, "pn": [99374], "pp": [902], "a": 0.675, "errors": []}
+{"tag": "llama2", "depth": 200000, "conc": 1, "rep": 1, "wall_s": 4.9, "per_req": [62.3], "agg_wall": 52.6, "pn": [4], "pp": [10], "a": 0.629, "errors": []}
+{"tag": "llama2", "depth": 200000, "conc": 1, "rep": 2, "wall_s": 5.2, "per_req": [58.2], "agg_wall": 49.6, "pn": [4], "pp": [10], "a": 0.579, "errors": []}
+2026-10-03T07:38:40Z llama2 bench done
+2026-10-03T07:38:42Z llama2 stopped vram=2 MiB
+2026-10-03T07:39:04Z tabby2 up after ~24s vram=43762 MiB
+[tabby2] solo 0 a=0.45 'e of Midway in June 1942, the IJN sought to convert the remaining battleships into hybrid aircraft carriers to bolster its depleted air power. Ise and'
+[tabby2] solo 1 a=0.39 'The UN forces, primarily composed of the US Army and the Republic of Korea Army, were initially pushed back rapidly by the North Korean advance, which'
+[tabby2] solo 2 a=0.39 'o explanation was given for his departure. In early 2014, the band announced that they had signed with Cleopatra Records, a label known for its divers'
+[tabby2] solo 3 a=0.45 'The proliferation of ironclad battleship designs came to an end in the 1890s as navies reached a consensus on the design of the modern battleship, cha'
+[tabby2] conc 0 a=0.45 'e of Midway in June 1942, the IJN sought to convert the remaining battleships into hybrid aircraft carriers to bolster its depleted air power. Ise and'
+[tabby2] conc 1 a=0.45 'The UN forces, primarily composed of the US Army and the Republic of Korea Army, were initially pushed back rapidly by the North Korean advance, which'
+[tabby2] conc 2 a=0.41 'o explanation was given for his departure. In early 2014, the band announced that they had signed with Cleopatra Records, a label known for its divers'
+[tabby2] conc 3 a=0.45 'The proliferation of ironclad battleship designs came to an end in the 1890s as navies reached a consensus on the dominant form of the capital ship, d'
+{"tag": "tabby2", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 5.6, "per_req": [118.52], "agg_wall": 46.1, "pn": [10082], "pp": [2992], "a": 0.479, "errors": []}
+{"tag": "tabby2", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.1, "per_req": [130.61], "agg_wall": 121.5, "pn": [98], "pp": [891], "a": 0.546, "errors": []}
+{"tag": "tabby2", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.1, "per_req": [129.95], "agg_wall": 120.7, "pn": [98], "pp": [891], "a": 0.537, "errors": []}
+{"tag": "tabby2", "depth": 10000, "conc": 2, "rep": 0, "wall_s": 7.4, "per_req": [36.52, 79.01], "agg_wall": 69.3, "pn": [98, 10418], "pp": [891, 2631], "a": 0.499, "errors": []}
+{"tag": "tabby2", "depth": 10000, "conc": 2, "rep": 1, "wall_s": 3.6, "per_req": [79.01, 78.53], "agg_wall": 143.0, "pn": [98, 178], "pp": [754, 712], "a": 0.507, "errors": []}
+{"tag": "tabby2", "depth": 10000, "conc": 2, "rep": 2, "wall_s": 3.4, "per_req": [87.67, 81.53], "agg_wall": 148.9, "pn": [98, 178], "pp": [426, 1483], "a": 0.551, "errors": []}
+{"tag": "tabby2", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 13.9, "per_req": [19.78, 41.36, 42.52, 18.88], "agg_wall": 73.8, "pn": [178, 10081, 9851, 98], "pp": [1369, 1389, 1634, 408], "a": 0.474, "errors": []}
+{"tag": "tabby2", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.7, "per_req": [43.91, 42.11, 40.31, 40.31], "agg_wall": 154.0, "pn": [123, 97, 98, 178], "pp": [1025, 882, 426, 1483], "a": 0.491, "errors": []}
+{"tag": "tabby2", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.6, "per_req": [44.21, 44.29, 41.16, 41.9], "agg_wall": 155.6, "pn": [178, 123, 98, 97], "pp": [1483, 1025, 426, 882], "a": 0.509, "errors": []}
+{"tag": "tabby2", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 33.0, "per_req": [161.01], "agg_wall": 7.8, "pn": [91680], "pp": [2941], "a": 0.775, "errors": []}
+{"tag": "tabby2", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 2.3, "per_req": [129.29], "agg_wall": 113.6, "pn": [32], "pp": [457], "a": 0.546, "errors": []}
+{"tag": "tabby2", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 2.3, "per_req": [126.11], "agg_wall": 111.2, "pn": [32], "pp": [457], "a": 0.52, "errors": []}
+{"tag": "tabby2", "depth": 200000, "conc": 1, "rep": 0, "wall_s": 36.8, "per_req": [126.73], "agg_wall": 6.9, "pn": [98890], "pp": [2876], "a": 0.537, "errors": []}
+{"tag": "tabby2", "depth": 200000, "conc": 1, "rep": 1, "wall_s": 2.7, "per_req": [117.97], "agg_wall": 94.2, "pn": [74], "pp": [740], "a": 0.472, "errors": []}
+{"tag": "tabby2", "depth": 200000, "conc": 1, "rep": 2, "wall_s": 2.8, "per_req": [113.78], "agg_wall": 91.4, "pn": [74], "pp": [740], "a": 0.442, "errors": []}
+2026-10-03T07:41:37Z tabby2 bench done
+2026-10-03T07:41:41Z tabby2 stopped vram=2 MiB
+2026-10-03T07:41:41Z arms done
+2026-10-03T07:41:41Z restore: begin
+2026-10-03T07:41:49Z RESTORED b7-e7051ef pid=662878 exe=41e6591d710fd4b5

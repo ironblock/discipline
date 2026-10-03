@@ -1,0 +1,24 @@
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-3.05bpw
+ -- CPU-offloaded experts (worker): model.language_model.layers.0.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.1.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.2.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.3.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.4.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.5.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.6.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.7.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.8.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.9.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.10.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.11.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.12.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.13.mlp
+
+ -- CPU MoE worker started: 14 layers, avx2, 16 threads
+ -- Warming up...
+
+ -- Loading tokenizer...
+[exl3-fn-mcl14] loaded in 94s; VRAM 38.2 GiB alloc / 40.9 GiB used
+[exl3-fn-mcl14] code: prompt_n=53 predicted_n=320 predicted_per_second=41.20 time=7.8s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-fn-mcl14] code2: prompt_n=53 predicted_n=320 predicted_per_second=36.85 time=8.7s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-fn-mcl14] prose: prompt_n=54 predicted_n=320 predicted_per_second=36.91 time=8.7s cached_tokens=0 | text: '<think>\nThe user wants a 400-word essay about the Mac Pro 20'

@@ -1,0 +1,30 @@
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-3.05bpw
+ -- CPU-offloaded experts (worker): model.language_model.layers.0.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.1.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.2.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.3.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.4.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.5.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.6.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.7.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.8.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.9.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.10.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.11.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.12.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.13.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.14.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.15.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.16.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.17.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.18.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.19.mlp
+
+ -- CPU MoE worker started: 20 layers, avx2, 16 threads
+ -- Warming up...
+
+ -- Loading tokenizer...
+[exl3-fn-mcl20] loaded in 159s; VRAM 32.9 GiB alloc / 35.9 GiB used
+[exl3-fn-mcl20] code: prompt_n=53 predicted_n=320 predicted_per_second=29.71 time=10.8s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-fn-mcl20] code2: prompt_n=53 predicted_n=320 predicted_per_second=33.96 time=9.4s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-fn-mcl20] prose: prompt_n=54 predicted_n=320 predicted_per_second=31.73 time=10.1s cached_tokens=0 | text: '<think>\nThe user wants a 400-word essay about the Mac Pro 20'

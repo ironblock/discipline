@@ -1,0 +1,13 @@
+##### ref code 23:32:03
+0.00.019.042 E ggml_cuda_init: failed to initialize CUDA: no CUDA-capable device is detected
+3.54.859.865 I perplexity: 96.99 seconds per pass - ETA 19.38 minutes
+[1]1.7328,[2]1.8072,[3]1.6717,[4]1.5256,[5]1.4298,[6]1.4018,[7]1.4027,[8]1.3842,[9]1.3705,[10]1.3652,[11]1.3555,[12]1.3470,
+21.37.908.192 I Final estimate: PPL = 1.3470 +/- 0.01061
+rc=0 23:53:43
+##### ref prose 23:53:43
+0.00.013.375 E ggml_cuda_init: failed to initialize CUDA: no CUDA-capable device is detected
+1.41.485.498 I perplexity: 96.18 seconds per pass - ETA 19.23 minutes
+[1]1.2400,[2]1.9612,[3]1.9014,[4]2.0703,[5]2.4180,[6]2.7147,[7]2.9488,[8]3.1550,[9]3.2905,[10]3.2093,[11]3.0841,[12]2.9522,
+19.10.547.641 I Final estimate: PPL = 2.9522 +/- 0.03683
+rc=0 00:12:54
+REF-DONE

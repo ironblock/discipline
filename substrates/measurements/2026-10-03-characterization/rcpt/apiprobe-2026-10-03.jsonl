@@ -1,0 +1,4 @@
+{"check": "effort_high", "http": 400, "body": "{\"detail\":\"TemplateError: Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.\"}"}
+{"check": "effort_xhigh", "http": 200, "content": "\n\n391", "content_starts_with_blank_line": true, "reasoning_chars": 131, "has_timings": true, "timings_keys": ["cache_n", "draft_n", "draft_n_accepted", "predicted_ms", "predicted_n", "predicted_per_second", "predicted_per_token_ms", "prompt_ms", "prompt_n", "prompt_per_second", "prompt_per_token_ms"]}
+{"check": "slots", "http": 404, "body": "{\"detail\":\"Not Found\"}"}
+{"check": "default", "http": 200, "content": "\n\n391", "content_starts_with_blank_line": true, "reasoning_chars": 131, "has_timings": true, "timings_keys": ["cache_n", "draft_n", "draft_n_accepted", "predicted_ms", "predicted_n", "predicted_per_second", "predicted_per_token_ms", "prompt_ms", "prompt_n", "prompt_per_second", "prompt_per_token_ms"]}

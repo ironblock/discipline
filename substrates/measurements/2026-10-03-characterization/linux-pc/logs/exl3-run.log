@@ -1,0 +1,102 @@
+##### 12:12:35 exl3-4.00
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-4.00bpw
+In file included from $HOME/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/include/python3.12/Python.h:12,
+                 from /tmp/tmpol797nb6/cuda_utils.c:9:
+$HOME/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/include/python3.12/pyconfig.h:1877:9: warning: ‘_POSIX_C_SOURCE’ redefined
+ 1877 | #define _POSIX_C_SOURCE 200809L
+      |         ^~~~~~~~~~~~~~~
+In file included from /usr/include/bits/libc-header-start.h:33,
+                 from /usr/include/stdlib.h:26,
+                 from $HOME/venvs/exl3/lib/python3.12/site-packages/triton/backends/nvidia/include/cuda.h:56,
+                 from /tmp/tmpol797nb6/cuda_utils.c:1:
+/usr/include/features.h:319:10: note: this is the location of the previous definition
+  319 | # define _POSIX_C_SOURCE        202405L
+      |          ^~~~~~~~~~~~~~~
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+[exl3-4.00] loaded in 68s; VRAM 15.1 GiB alloc / 17.9 GiB used
+[exl3-4.00] code: prompt_n=53 predicted_n=320 predicted_per_second=37.64 time=8.5s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-4.00] code2: prompt_n=53 predicted_n=320 predicted_per_second=43.02 time=7.4s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-4.00] prose: prompt_n=54 predicted_n=320 predicted_per_second=43.01 time=7.4s cached_tokens=0 | text: '<think>\nThe user wants a 400-word essay about the Mac Pro 20'
+  rc=0 vram=21 MiB
+##### 12:14:14 exl3-4.00-dfl
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw
+
+Traceback (most recent call last):
+  File "$HOME/setup/exl3bench.py", line 28, in <module>
+    main()
+  File "$HOME/setup/exl3bench.py", line 12, in main
+    model, config, cache, tokenizer, draft_model, draft_config, draft_cache = model_init.init(args)
+                                                                              ^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model_init.py", line 348, in init
+    draft_model.load(
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model.py", line 656, in load
+    for _ in f: pass
+             ^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model.py", line 581, in load_gen
+    yield from self._load_autosplit(
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model_ls.py", line 181, in _load_autosplit
+    module.load(load_device, max_chunk_size = max_chunk_size)
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/modules/arch_specific/dflash2.py", line 284, in load
+    self.pred_codebook = self.config.stc.get_tensor(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/loader/safetensors.py", line 704, in get_tensor
+    raise ValueError(f"Required tensor {key} not found in any *.safetensors file in {self.directory}")
+ValueError: Required tensor candidate_selector.predecessor_codebook not found in any *.safetensors file in $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw
+  rc=1 vram=21 MiB
+##### 12:14:22 exl3-5.00
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-5.00bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+[exl3-5.00] loaded in 32s; VRAM 18.0 GiB alloc / 20.7 GiB used
+[exl3-5.00] code: prompt_n=53 predicted_n=320 predicted_per_second=35.36 time=9.0s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-5.00] code2: prompt_n=53 predicted_n=320 predicted_per_second=35.43 time=9.0s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-5.00] prose: prompt_n=54 predicted_n=320 predicted_per_second=35.42 time=9.0s cached_tokens=0 | text: '<think>\nThe user wants a 400-word essay about the Mac Pro 20'
+  rc=0 vram=21 MiB
+##### 12:15:28 exl3-5.00-dfl
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw
+
+Traceback (most recent call last):
+  File "$HOME/setup/exl3bench.py", line 28, in <module>
+    main()
+  File "$HOME/setup/exl3bench.py", line 12, in main
+    model, config, cache, tokenizer, draft_model, draft_config, draft_cache = model_init.init(args)
+                                                                              ^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model_init.py", line 348, in init
+    draft_model.load(
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model.py", line 656, in load
+    for _ in f: pass
+             ^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model.py", line 581, in load_gen
+    yield from self._load_autosplit(
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model_ls.py", line 181, in _load_autosplit
+    module.load(load_device, max_chunk_size = max_chunk_size)
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/modules/arch_specific/dflash2.py", line 284, in load
+    self.pred_codebook = self.config.stc.get_tensor(
+                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/loader/safetensors.py", line 704, in get_tensor
+    raise ValueError(f"Required tensor {key} not found in any *.safetensors file in {self.directory}")
+ValueError: Required tensor candidate_selector.predecessor_codebook not found in any *.safetensors file in $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw
+  rc=1 vram=21 MiB
+##### 12:15:36 exl3-6.00-c8k
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-6.00bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+[exl3-6.00-c8k] loaded in 34s; VRAM 19.3 GiB alloc / 22.0 GiB used
+[exl3-6.00-c8k] code: prompt_n=53 predicted_n=320 predicted_per_second=33.15 time=9.7s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-6.00-c8k] code2: prompt_n=53 predicted_n=320 predicted_per_second=33.21 time=9.6s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-6.00-c8k] prose: prompt_n=54 predicted_n=320 predicted_per_second=33.17 time=9.6s cached_tokens=0 | text: '<think>\nThe user wants a 400-word essay about the Mac Pro 20'
+  rc=0 vram=21 MiB
+##### 12:16:47 DONE

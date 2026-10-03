@@ -1,0 +1,61 @@
+# sha256  hf-revision  host  directory  file   (from each host's Hugging Face download metadata)
+# a 64-hex digest is the LFS sha256 of the file; a 40-hex digest (small, non-LFS files) is the git blob sha1
+e278f218318565562af07fc333045e411ffa0d83523f8224fc8c2d24d5a68223  265b5240592907d2d55ff0dc4d5f66569692604d  linux-pc  Qwen3.8-27B-DFlash2-EXL3-4.00bpw  model.safetensors
+67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c  50307d4c4cde6860d4eee73e2547cd786fe8e8a4  linux-pc  Qwen3.8-27B-DFlash2-hf  model.safetensors
+509ee9d8424c08995f59231178b870c02109db6f  113cf7ab958054860e43fb7f3063b1af19171095  linux-pc  Qwen3.8-27B-exl3-4.00bpw  model.safetensors.index.json
+b1e7fcc53a2bb211460ebb65e329cdb7a5af8bd819dcbcd89e06f0ccc041e590  113cf7ab958054860e43fb7f3063b1af19171095  linux-pc  Qwen3.8-27B-exl3-4.00bpw  model-00001-of-00002.safetensors
+c6d72f51b0cd99510239b264fef37bc26c950e6843f35421ce4830d4f87f8c05  113cf7ab958054860e43fb7f3063b1af19171095  linux-pc  Qwen3.8-27B-exl3-4.00bpw  model-00002-of-00002.safetensors
+c7bca071e260ebee33ecf00c3a885152560b3cc4  a35e75a73baee51da709329d19294245cbeeb5d8  linux-pc  Qwen3.8-27B-exl3-5.00bpw  model.safetensors.index.json
+56f35ca89b0cf01e0a7431e74042d27b6eace941a3c361d8af3e3e3558bc4254  a35e75a73baee51da709329d19294245cbeeb5d8  linux-pc  Qwen3.8-27B-exl3-5.00bpw  model-00003-of-00003.safetensors
+16326edb907e474bb727b6078f7a67182ea319f2c5df5029b8155556dd483107  a35e75a73baee51da709329d19294245cbeeb5d8  linux-pc  Qwen3.8-27B-exl3-5.00bpw  model-00001-of-00003.safetensors
+488c30f1d773e0248d09e1b31401f48f341d3e7a2c1d46852d55d2a9770450f8  a35e75a73baee51da709329d19294245cbeeb5d8  linux-pc  Qwen3.8-27B-exl3-5.00bpw  model-00002-of-00003.safetensors
+8e927ece47647beb3be24e69da8f9d8b21bb0ac7  d32ba0bbd17de6bed8d5bbfb8c19f16f228f67ff  linux-pc  Qwen3.8-27B-exl3-6.00bpw  model.safetensors.index.json
+a50c0a24ae0fb02e21d13003a274eddcbef82b9a5c4c0d6772d32a7cc77e30d1  d32ba0bbd17de6bed8d5bbfb8c19f16f228f67ff  linux-pc  Qwen3.8-27B-exl3-6.00bpw  model-00003-of-00003.safetensors
+e0921a677eaebdced9a70fc76eac7b6df383f1a86634bd89ebd889937fbfe5b7  d32ba0bbd17de6bed8d5bbfb8c19f16f228f67ff  linux-pc  Qwen3.8-27B-exl3-6.00bpw  model-00001-of-00003.safetensors
+0747736cc0fc63d4d2a1f8419e027072cc5ffcaab0cec952da36189ac8de71ce  d32ba0bbd17de6bed8d5bbfb8c19f16f228f67ff  linux-pc  Qwen3.8-27B-exl3-6.00bpw  model-00002-of-00003.safetensors
+350684ef7a94026f7e69b533d1554387c0be505abe0674721726fe207fcf964e  d562806dbafae37109975e970aae91b43e73b440  linux-pc  Qwen3.8-27B-GSQ-RCO  imatrix-qwen3.8-27b.gguf
+13cb7bebccbd04afc8f4090cb949ecf8937cdf7377c5799b1a0c594e7c0d3e16  d562806dbafae37109975e970aae91b43e73b440  linux-pc  Qwen3.8-27B-GSQ-RCO  mmproj-Qwen3.8-27B-BF16.gguf
+f3369f8d36968ab7dd12f5ff11452680aef9371aa19c9922d22ccd5e58c2d9c8  d562806dbafae37109975e970aae91b43e73b440  linux-pc  Qwen3.8-27B-GSQ-RCO  Qwen3.8-27B-GSQ-RCO-IQ2_XS-mtp.gguf
+63f29a2189a6b4cc31f81e093d3856ad293a5583114439f41ae1ed7af4093262  d562806dbafae37109975e970aae91b43e73b440  linux-pc  Qwen3.8-27B-GSQ-RCO  Qwen3.8-27B-GSQ-RCO-IQ3_XXS-mtp.gguf
+58fd826723939933dc86f45b7fe04545cbc2de1c70f6fe2cdd3858c87a98c12f  d562806dbafae37109975e970aae91b43e73b440  linux-pc  Qwen3.8-27B-GSQ-RCO  Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf
+e6406238a5cc0043775cd1963b6f9e5b8707400276e38d9fde742304906b1330  d562806dbafae37109975e970aae91b43e73b440  linux-pc  Qwen3.8-27B-GSQ-RCO  Qwen3.8-27B-GSQ-RCO-IQ2_S-mtp.gguf
+509ee9d8424c08995f59231178b870c02109db6f  113cf7ab958054860e43fb7f3063b1af19171095  rtx6000ada-host  Qwen3.8-27B-exl3-4.00bpw  model.safetensors.index.json
+c6d72f51b0cd99510239b264fef37bc26c950e6843f35421ce4830d4f87f8c05  113cf7ab958054860e43fb7f3063b1af19171095  rtx6000ada-host  Qwen3.8-27B-exl3-4.00bpw  model-00002-of-00002.safetensors
+b1e7fcc53a2bb211460ebb65e329cdb7a5af8bd819dcbcd89e06f0ccc041e590  113cf7ab958054860e43fb7f3063b1af19171095  rtx6000ada-host  Qwen3.8-27B-exl3-4.00bpw  model-00001-of-00002.safetensors
+67fc76d68dc5a9415511a4f394ef744d67510cd20e93b37cc2cc7d28e4bab65c  50307d4c4cde6860d4eee73e2547cd786fe8e8a4  rtx6000ada-host  Qwen3.8-27B-DFlash2-hf  model.safetensors
+32006bf33c1e079414be3d3b4099c9425112ca9666b045a3e48924237d1a372e  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  ngram_embedding.safetensors
+3792d95808ec804535280578d200f9424ddf26613361330da2f19a11813d751e  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  model-00006-of-00007.safetensors
+053f5337aabd57297d0fb65203e2f269cdb1c45b848e7169deb79fadf170ca4f  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  model-00003-of-00007.safetensors
+eb3ee11406c138b09e5208bd26dec57d9d438bb20d30f7c847acd2aea2e2f428  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  model-00004-of-00007.safetensors
+248b0490f3a178e051ee8d2608ef151a302940ad36e91685ca47a0d10532d966  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  model-00001-of-00007.safetensors
+b51039a706e5a76fed2a1eb9a6eec91b9e982a24863886097d552e6fbb531680  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  model-00002-of-00007.safetensors
+318339ceddd7a54e422ba48a581823bcd87a455b8fa69baf4a883825106bc8dd  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  model.safetensors.index.json
+9b29ae89413854802076ad392809abe4d91a1e61a6bc08193dad8271a7510953  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  mtp_hyper_connection_mixer_patch.safetensors
+ce89387b7c29aab893dfeffa017830c9372458ee64e6e89a3edcb8ab8c11030f  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  model-00007-of-00007.safetensors
+d188dced0538cd85a5780d5778ec94028507274541547ab4e0552721e6a703a3  69e33439ae950f17bcbe95c98f117d80f759ab6d  rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  model-00005-of-00007.safetensors
+3f227079003add2511437e5b1e94812e363385225bf6a9b47b0054a72bc8b01e  4ca720788d1e01f1bff70c033e0d0028fd02e502  rtx6000ada-host  Qwen3.8-27B  Qwen3.8-27B-UD-Q4_K_XL.gguf
+1a25c56858e1ebe93f2718ac1d49d1151f9323325c1bbfd6209370f4db131ebd  2d9571f8ce46e151f61c6499c99dee6079e1d610  rtx6000ada-host  Qwen3.8-27B  Qwen3.8-27B-DFlash2-Q4_K_M.gguf
+9db03a687670608286e99b563fcc86d0ee76c8dd863f64b2afc0b54eb0eb975d  896756c9558ea9d5bd621c5e9a2d618f78b364f5  rtx6000ada-host  Qwen3.8-Flash-Next/MTP  mtp-Qwen3.8-Flash-Next-Q8_0.gguf
+b15000cd9618129885c098c3fd0859a8897be984d9f0f883a183c07827710895  ceef7fe48bd3da5202c715ff0dd3c34a33deb5c5  rtx6000ada-host  Qwen3.8-Flash-Next/MTP  Qwen3.8-Flash-Next-MTP-ik_llama-IQ4_KT.gguf
+9db03a687670608286e99b563fcc86d0ee76c8dd863f64b2afc0b54eb0eb975d  896756c9558ea9d5bd621c5e9a2d618f78b364f5  rtx6000ada-host  Qwen3.8-Flash-Next/MTP  mtp-Qwen3.8-Flash-Next-hc-Q8_0.gguf
+4448186216b3af4cc558bbce2c3213f01608f8f8b2e5267a9767971dd3ec8082  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00001-of-00004.gguf
+753bda48b98ba4f1636134a90a967de1b2d3908a236c026e464777342e53510a  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00004-of-00004.gguf
+3f342f1c1580473f1ee94ddd5b28206e8c07a70fa1a366f59d1d6c922919a6c9  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00002-of-00004.gguf
+56758f40269cad5cd9b0d3d6fbae0f40f6d5be6de49e4ab392dbe83157d9cbd3  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  UD-Q4_K_XL/Qwen3.8-Flash-Next-UD-Q4_K_XL-00003-of-00004.gguf
+2dabcbb53ca537a7947bc7d20414fd464eeaf4d66d43021b5b2556cc87544ad2  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  Q8_0/Qwen3.8-Flash-Next-Q8_0-00001-of-00006.gguf
+494ca4ed3dbf97bc28da88af3890b8877b9032f909812d00c0526a9ca5e91d2e  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  Q8_0/Qwen3.8-Flash-Next-Q8_0-00002-of-00006.gguf
+538a93bca918064983409a41187ad4c68640f9aced6f29564da8f551bf86d7a5  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  Q8_0/Qwen3.8-Flash-Next-Q8_0-00006-of-00006.gguf
+34efd79a80a1ce540a517a5d56171924b66ce1c38b04c904f17ad6d8ef17cf20  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  Q8_0/Qwen3.8-Flash-Next-Q8_0-00003-of-00006.gguf
+232a8f14cc0fa4262e7efe8593774b136fe40909e39c7a020342ddaa27259a97  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  Q8_0/Qwen3.8-Flash-Next-Q8_0-00005-of-00006.gguf
+bfa634025fabbd2658bf7694bc80b90e571699c768723f844c934c7ef06c691a  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  Q8_0/Qwen3.8-Flash-Next-Q8_0-00004-of-00006.gguf
+b646ef60eaae2a9ed849e75f15f399629ca22633555e99e809959e95f22a1575  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  MTP/mtp-Qwen3.8-Flash-Next-Q4_K_M.gguf
+f521868a9e143718bef513772f6e04d9642551e362cf2439636d2abdbd149dfc  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  MTP/mtp-Qwen3.8-Flash-Next-shared-Q4_K_M.gguf
+5ff54097406a905cf3a724c709124ceb0e3e10235ee862298969e91c96fa96e6  38bb39ee97821de2c9009abb7e93950eec396e66  rtx6000ada-host  Qwen3.8-Flash-Next  MTP/mtp-Qwen3.8-Flash-Next-shared-Q8_0.gguf
+316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113  2c4721899b4382bd07dfb61ae4fbad90c09caf7d  rtx6000ada-host  Qwen3.8-Flash-Next-GSQ-RCO  Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00002-of-00002.gguf
+69820c02ec7d0b45ef2ebb19d6620299db749fe2aded7f39f93c6b88b199b720  2c4721899b4382bd07dfb61ae4fbad90c09caf7d  rtx6000ada-host  Qwen3.8-Flash-Next-GSQ-RCO  Q2_0/Qwen3.8-Flash-Next-GSQ-RCO-Q2_0-00001-of-00002.gguf
+e11083ba855e7666b48ea3f2db6a9c3a20c18751a012cc24f948de91b7087fad  5348543e0147355ac9cbcb031184a3546350988e  rtx6000ada-host  Qwen3.8-Flash-Next-GSQ-RCO-Coder  IQ1_M/Qwen3.8-Flash-Next-GSQ-RCO-IQ1_M-00001-of-00002.gguf
+# EXL3 2.05bpw_h4_ng4 (rtx6000ada-host): every file hashed on the host, see rtx6000ada-host/exl3-205bpw-sha256.txt
+# Coder (ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF) shard 2: no download metadata on the host (it is a hard link to the Q2_0's shard 2);
+# publisher digest read from the Hugging Face API tree of main on 2026-10-03, and host-hashed in rcpt/trunk-sha256.txt
+316b46f3a2dbd68c900f43136ab9449f9dcc3725dfd8c794847c204bc161e113  main(api)  rtx6000ada-host  Qwen3.8-Flash-Next-GSQ-RCO-Coder  IQ1_M/Qwen3.8-Flash-Next-GSQ-RCO-IQ1_M-00002-of-00002.gguf
+# BF16-PLE variants (kld/*_bf16 rows): built locally, not published; shard 1 is the publisher's file, shard 2 is the rebuilt BF16 table, host-hashed in rcpt/trunk-sha256.txt

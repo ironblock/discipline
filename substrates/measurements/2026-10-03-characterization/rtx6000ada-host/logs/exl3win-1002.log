@@ -1,0 +1,53 @@
+2026-10-03T00:40:27Z slots before stop: [False, False, False, False]
+2026-10-03T00:40:33Z DOWNTIME START vram=2 MiB
+2026-10-03T00:40:33Z kld 2.05
+2026-10-03T00:42:53Z kld 2.05 rc=0 [exl3-205] loaded in 79s; VRAM used 37.7 GiB|RESULT exl3-205 base-code.kld: PPL(Q) 1.367824 PPL(base) 1.346347 Mean KLD 0.086476 ± 0.002466 99.9% KLD 4.743039 Median KLD 0.000330 Same top 95.616 ± 0.131 % n=24564|RESULT exl3-205 base-prose.kld: PPL(Q) 3.201715 PPL(base) 2.950894 Mean KLD 0.230785 ± 0.003293 99.9% KLD 5.243791 Median KLD 0.052463 Same top 84.876 ± 0.229 % n=24564|
+2026-10-03T00:42:53Z kld 3.05 (-mcl 10)
+2026-10-03T00:44:46Z kld 3.05 rc=0  -- CPU-offloaded experts (worker): model.language_model.layers.0.mlp| -- CPU-offloaded experts (worker): model.language_model.layers.1.mlp| -- CPU-offloaded experts (worker): model.language_model.layers.2.mlp| -- CPU-offloaded experts (worker): model.language_model.layers.3.mlp| -- CPU-offloaded experts (worker): model.language_model.layers.4.mlp| -- CPU-offloaded experts (worker): model.language_model.layers.5.mlp| -- CPU-offloaded experts (worker): model.language_model.layers.6.mlp| -- CPU-offloaded experts (worker): model.language_model.layers.7.mlp| -- CPU-offloaded experts (worker): model.language_model.layers.8.mlp| -- CPU-offloaded experts (worker): model.language_model.layers.9.mlp|[exl3-305] loaded in 51s; VRAM used 43.5 GiB|RESULT exl3-305 base-code.kld: PPL(Q) 1.349132 PPL(base) 1.346347 Mean KLD 0.033283 ± 0.001044 99.9% KLD 2.090547 Median KLD 0.000120 Same top 97.215 ± 0.105 % n=24564|RESULT exl3-305 base-prose.kld: PPL(Q) 3.014490 PPL(base) 2.950894 Mean KLD 0.089471 ± 0.001527 99.9% KLD 2.894039 Median KLD 0.016406 Same top 90.523 ± 0.187 % n=24564|
+2026-10-03T00:44:46Z speed 2.05 mtp
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "exl3-205-mtp", "event": "loaded", "load_s": 42, "vram_used_gib": 44.4}
+{"tag": "exl3-205-mtp", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "exl3-205-mtp", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 7.4, "per_req": [69.99], "agg_wall": 34.5, "pn": [10082], "cached": [0], "pp": [2674], "a": 0.472, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.0, "per_req": [132.32], "agg_wall": 125.1, "pn": [10082], "cached": [9984], "pp": [927], "a": 0.529, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.0, "per_req": [132.52], "agg_wall": 125.3, "pn": [10082], "cached": [9984], "pp": [930], "a": 0.529, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 10000, "conc": 2, "rep": 0, "wall_s": 7.1, "per_req": [45.24, 79.12], "agg_wall": 72.5, "pn": [10082, 10418], "cached": [9984, 0], "pp": [74, 2805], "a": 0.507, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 10000, "conc": 2, "rep": 1, "wall_s": 3.3, "per_req": [85.19, 84.09], "agg_wall": 156.2, "pn": [10082, 10418], "cached": [9984, 10240], "pp": [445, 1556], "a": 0.529, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 10000, "conc": 2, "rep": 2, "wall_s": 3.4, "per_req": [82.5, 81.44], "agg_wall": 151.6, "pn": [10418, 10082], "cached": [10240, 9984], "pp": [1550, 444], "a": 0.503, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 12.9, "per_req": [26.45, 25.61, 43.95, 43.65], "agg_wall": 79.4, "pn": [10418, 10082, 9851, 10081], "cached": [10240, 9984, 0, 0], "pp": [68, 36, 1761, 1482], "a": 0.499, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.3, "per_req": [46.29, 45.41, 44.9, 44.31], "agg_wall": 163.5, "pn": [9851, 10082, 10418, 10081], "cached": [9728, 9984, 10240, 9984], "pp": [965, 216, 512, 408], "a": 0.516, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.2, "per_req": [48.78, 46.09, 45.31, 45.15], "agg_wall": 166.4, "pn": [10418, 9851, 10082, 10081], "cached": [10240, 9728, 9984, 9984], "pp": [510, 994, 215, 415], "a": 0.535, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 31.0, "per_req": [162.2], "agg_wall": 8.3, "pn": [101664], "cached": [9984], "pp": [3120], "a": 0.761, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 1.6, "per_req": [165.09], "agg_wall": 157.1, "pn": [101664], "cached": [101632], "pp": [467], "a": 0.775, "errors": []}
+{"tag": "exl3-205-mtp", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 2.1, "per_req": [127.49], "agg_wall": 122.7, "pn": [101664], "cached": [101632], "pp": [467], "a": 0.52, "errors": []}
+2026-10-03T00:46:59Z speed 2.05 mtp rc=0
+2026-10-03T00:46:59Z speed 2.05 nospec
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "exl3-205-nospec", "event": "loaded", "load_s": 22, "vram_used_gib": 41.7}
+{"tag": "exl3-205-nospec", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "exl3-205-nospec", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 6.2, "per_req": [89.13], "agg_wall": 41.4, "pn": [10082], "cached": [0], "pp": [3036], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.9, "per_req": [90.5], "agg_wall": 87.3, "pn": [10082], "cached": [9984], "pp": [960], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.9, "per_req": [90.49], "agg_wall": 87.3, "pn": [10082], "cached": [9984], "pp": [952], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 10000, "conc": 2, "rep": 0, "wall_s": 8.2, "per_req": [37.32, 57.77], "agg_wall": 62.6, "pn": [10082, 10418], "cached": [9984, 0], "pp": [75, 2850], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 10000, "conc": 2, "rep": 1, "wall_s": 4.7, "per_req": [57.71, 57.71], "agg_wall": 110.0, "pn": [10082, 10418], "cached": [9984, 10240], "pp": [460, 1599], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 10000, "conc": 2, "rep": 2, "wall_s": 4.7, "per_req": [57.58, 57.58], "agg_wall": 109.7, "pn": [10082, 10418], "cached": [9984, 10240], "pp": [460, 1602], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 12.7, "per_req": [25.59, 25.59, 43.98, 43.98], "agg_wall": 80.4, "pn": [10082, 10418, 10081, 9851], "cached": [9984, 10240, 0, 0], "pp": [36, 69, 1503, 1783], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.4, "per_req": [43.65, 43.65, 43.65, 43.65], "agg_wall": 161.2, "pn": [10082, 10418, 10081, 9851], "cached": [9984, 10240, 9984, 9728], "pp": [212, 499, 405, 961], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.3, "per_req": [43.67, 43.67, 43.67, 43.67], "agg_wall": 161.5, "pn": [10082, 10418, 10081, 9851], "cached": [9984, 10240, 9984, 9728], "pp": [216, 509, 409, 961], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 31.5, "per_req": [87.87], "agg_wall": 8.1, "pn": [101664], "cached": [9984], "pp": [3209], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 3.0, "per_req": [88.1], "agg_wall": 86.0, "pn": [101664], "cached": [101632], "pp": [485], "a": null, "errors": []}
+{"tag": "exl3-205-nospec", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 3.0, "per_req": [88.01], "agg_wall": 85.9, "pn": [101664], "cached": [101632], "pp": [488], "a": null, "errors": []}
+2026-10-03T00:48:58Z speed 2.05 nospec rc=0
+2026-10-03T00:48:58Z arms done
+2026-10-03T00:48:58Z restore: begin
+2026-10-03T00:49:17Z RESTORED b8-e486f80 pid=645460
