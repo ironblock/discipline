@@ -58,6 +58,12 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(answer?.kind === 'assistant' && answer.text).toBe('Hel');
   });
 
+  it('marks a cancelled turn’s ask and answer as out of the model’s context, and an answered one’s not (#289)', () => {
+    const marks = (file: string) => (fold(logOf(file)).eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, 'outOfContext' in n && n.outOfContext === true]);
+    expect(marks('a-cancelled-turn.jsonl')).toEqual([['user', true], ['assistant', true]]);
+    expect(marks('an-answered-turn.jsonl')).toEqual([['user', false], ['assistant', false]]);
+  });
+
   it('folds a reasoning delta as reasoning, not answer', () => {
     const log = logOf('a-reasoning-delta.jsonl');
     const answer = fold(log).eras[0]?.nodes.find((n) => n.kind === 'assistant');

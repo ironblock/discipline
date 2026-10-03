@@ -35,6 +35,8 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
   const [refusal, setRefusal] = useState<string | undefined>();
   const next = phases[phases.indexOf(phase) + 1] ?? phases.find((p) => p !== phase) ?? phase;
   const [to, setTo] = useState(next);
+  // Ending cannot be taken back: the first press asks, the second sends (#289).
+  const [ending, setEnding] = useState(false);
   const idle = state === 'awaiting' && link === 'live';
   const running = state === 'turn' || state === 'capture' || state === 'ratify';
 
@@ -44,6 +46,11 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
     setRefusal(refused.known ? refused.label : `not taken: ${refused.label}`);
   };
   const run = (command: Command) => dispatch && void dispatch(command).then(answer);
+  const end = () => {
+    if (!ending) return setEnding(true);
+    setEnding(false);
+    run({ kind: 'end' });
+  };
 
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
@@ -83,6 +90,17 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
               : (refusal ?? STATE_LINE[state])}
         </span>
         <span className="ex-composer__spacer" />
+        {/* As `diet` takes it: only while awaiting. Any other command, or leaving the button, disarms it. */}
+        <button
+          type="button"
+          className="ex-composer__end"
+          data-armed={ending || undefined}
+          disabled={!idle || !dispatch}
+          onClick={end}
+          onBlur={() => setEnding(false)}
+        >
+          {ending ? 'end the session?' : 'end'}
+        </button>
         <span className="ex-composer__phase">
           <span className="ex-composer__label">phase</span> {phase || 'not said'}
         </span>

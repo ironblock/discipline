@@ -48,3 +48,19 @@ export const Driven: Story = {
     await expect(canvasElement.querySelector('.ex-trunk [data-tone="assistant"]')).not.toBeNull();
   },
 };
+
+/** Ended from the page (#289): the end control asks once, then sends `end`; the session says it has ended. */
+export const Ended: Story = {
+  name: 'end, from the page: asked once, then the session has ended',
+  args: { speed: 40 },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const end = canvasElement.querySelector('.ex-composer__end') as HTMLButtonElement;
+    await userEvent.click(end);
+    await expect(end.textContent).toBe('end the session?');
+    await expect(says(canvasElement)).toBe('your turn');
+    await userEvent.click(end);
+    await waitFor(async () => expect(says(canvasElement)).toBe('the session has ended'));
+    await expect((canvasElement.querySelector('.ex-composer__end') as HTMLButtonElement).disabled).toBe(true);
+  },
+};
