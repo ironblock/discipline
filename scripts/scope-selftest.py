@@ -157,18 +157,51 @@ def top_level_code(text: str) -> str:
     The comment above each injection lives between functions, so adding or
     re-wording one changed `<top-level>` and re-proved every fault: 803 on
     #293's run, for 27 comment lines and 2 blank ones. A comment is not
-    machinery. A line inside a heredoc may begin with `#` and still be read,
-    so a top level whose code opens one (a `<<` in a comment does not) is
-    compared whole, as before.
+    machinery.
+
+    A line is dropped only where bash would read it as a comment or nothing:
+    outside any quote and not continuing the line before (#308's review: a `#`
+    or blank line inside a quoted value, or after a trailing backslash, is
+    text bash reads). The quotes are followed across lines; a quote this
+    misreads as open keeps every line after it, which errs toward re-proving.
+    Where the reading could be wrong the other way it compares the top level
+    whole, as before: a heredoc, or a lone `}`, the mark of a function the
+    pattern cut short, whose tail would otherwise land here. Whole re-proves;
+    it never skips.
     """
     outside = outside_functions(text)
-    code = [
-        line for line in outside.split("\n")
-        if line.strip() and (line.startswith("#!") or not line.lstrip().startswith("#"))
-    ]
-    if any("<<" in line for line in code):
+    lines = outside.split("\n")
+    if "}" in lines:
         return outside
-    return "\n".join(code)
+    kept: list[str] = []
+    quote = ""
+    carried = False
+    for line in lines:
+        if not quote and not carried:
+            bare = line.strip()
+            if not bare or (bare.startswith("#") and not line.startswith("#!")):
+                continue
+        kept.append(line)
+        carried = False
+        i = 0
+        while i < len(line):
+            char = line[i]
+            if quote == "'":
+                quote = "" if char == "'" else quote
+            elif char == "\\":
+                if i == len(line) - 1 and not quote:
+                    carried = True
+                i += 1
+            elif quote == '"':
+                quote = "" if char == '"' else quote
+            elif char in "'\"":
+                quote = char
+            elif char == "#" and (i == 0 or line[i - 1] in " \t;|&("):
+                break
+            elif line.startswith("<<", i):
+                return outside
+            i += 1
+    return "\n".join(kept)
 
 
 def without_cases(body: str) -> str:
@@ -687,6 +720,20 @@ def _top_level_comments():
     heredoc = base + "cat <<'EOF'\n# read\nEOF\n"
     if top_level_code(heredoc) == top_level_code(heredoc.replace("# read", "# changed")):
         return "a `#` line in a top-level heredoc was skipped"
+    # #308's review: text bash reads that starts with `#` or is blank, and the
+    # two exceptions to "a comment is not machinery".
+    for read, edit in (
+        ("X=a\\\n#b\n", ("#b", "#c")),                       # a continuation
+        ('MSG="a\n# b"\n', ("# b", "# c")),                     # an open double quote
+        ("MSG='a\n\nb'\n", ("\n\n", "\n")),                     # a blank in an open single quote
+        ("g() {\n  cat <<EOF\n}\n# read\nEOF\n}\n", ("# read", "# changed")),  # a function cut short
+    ):
+        if top_level_code(base + read) == top_level_code(base + read.replace(*edit)):
+            return f"text bash reads was dropped: {read!r}"
+    if top_level_code(base) == top_level_code(base.replace("/usr/bin/env bash", "/bin/sh")):
+        return "a changed shebang was not seen"
+    if top_level_code(base + "  # indented\n") != top_level_code(base + "  # re-worded\n"):
+        return "an indented comment between functions read as a top-level change"
     return None
 
 
