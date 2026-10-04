@@ -33,11 +33,12 @@ on:
   push:
     branches: [main, develop]
   pull_request:
-  # THE NIGHTLY (#112). A pull request re-proves only the faults its diff can
-  # reach, and inherits the rest from the base branch's last full run; an indirect
-  # dependency -- a helper, the runner image, the toolchain's own drift -- is
-  # what this catches, within a day. It runs the full set on the default
-  # branch, like a push to it, and a fault it finds not red opens an issue.
+  # THE NIGHTLY (#112). Since #369 it is where the integration branch's
+  # faults are proven: a pull request into it and a push to it run no
+  # selftest. An indirect dependency -- a helper, the runner image, the
+  # toolchain's own drift -- is what it catches, within a day. It runs the
+  # full set on the default branch, and a fault it finds not red opens an
+  # issue.
   schedule:
     - cron: "17 6 * * *"
 
@@ -46,16 +47,16 @@ permissions:
 
 # SUPERSEDING, EXCEPT ON THE WAY INTO THE RELEASE BRANCH (#326). A pull
 # request's newer push supersedes its older run. A push to the integration
-# branch supersedes the one in flight too: merges never queue behind a full
-# run (on 2026-10-03 one waited 60 minutes, run 37097117869), and the census
-# pull requests are scoped against is the last run that COMPLETED, which a
-# cancelled run is not. A release pull request and a push to the release
+# branch supersedes the one in flight too: merges never queue behind a run
+# (on 2026-10-03 one waited 60 minutes behind a full one, run 37097117869);
+# since #369 those runs carry no selftest. A release pull request and a push to the release
 # branch are never cancelled: the release branch is green by construction,
 # and every run on the way into it finishes.
 #
 # 'main' below is .github/branches.tsv's `release_branch`. A concurrency
-# expression reads no file, so it is spelled here, once, and
-# check-ci-coverage.py checks this expression against that row (#326, Q1).
+# expression reads no file, so it is spelled here, and once more in the
+# `selftest` job's `if:`, and check-ci-coverage.py checks each against that
+# row (#326, Q1; #369).
 # A pull request into the release branch BEFORE the rename, while it is still
 # the default branch, is an ordinary pull request and supersedes; so is one
 # into any other branch, a stacked pull request's base.
@@ -75,6 +76,11 @@ jobs:
 
   repo:
     uses: ./.github/workflows/pkg-repo.yml
+    # `issues: read` for the drift issues a pull request is refused on, a
+    # step of the repo job since the selftest no longer runs on one (#369).
+    permissions:
+      contents: read
+      issues: read
 
   bsd:
     uses: ./.github/workflows/pkg-bsd.yml
@@ -85,8 +91,19 @@ jobs:
   recompute:
     uses: ./.github/workflows/pkg-recompute.yml
 
+  # ON THE NIGHTLY AND THE RELEASE PATH ONLY (#369), until the gate redesign:
+  # the events .github/gate-budget.tsv's `selftest_events` names. A pull request
+  # into the integration branch and a push to it skip this job; their package
+  # checks are unchanged, the nightly's drift opener files what it finds, and
+  # the release path re-proves every fault before a release. The expression
+  # spells the release branch because a job's `if:` reads no file;
+  # scripts/check-ci-coverage.py holds it to that row and .github/branches.tsv,
+  # and check-job-results.py accepts it skipped only where the row says so.
+  # The `if:` follows `uses:`: a call is a job whose first line is its `uses:`
+  # (check-ci-coverage.py's CALLS).
   selftest:
     uses: ./.github/workflows/gate-selftest.yml
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && github.ref_name == 'main') }}
     # `actions: read` for the scope plan's base-branch censuses, `issues: read` for
     # the drift issues a pull request is refused on (#112).
     permissions:
@@ -107,8 +124,8 @@ jobs:
     permissions:
       contents: read
       actions: read
-      # To open a drift issue on a push or the nightly (#112). Pull-request
-      # runs never reach the step that uses it.
+      # To open a drift issue on the nightly or a push to the release branch
+      # (#112, #369). Pull-request runs never reach the step that uses it.
       issues: write
     steps:
       - uses: actions/checkout@v5
@@ -133,10 +150,16 @@ jobs:
       # trusted because it looks right in YAML.
       # `always()`: the opener above only fails when a shard already has, and
       # its failure must not hide this step's message about which job it was.
+      # The event, so a `selftest` skipped by its own `if:` is accepted where
+      # gate-budget.tsv's `selftest_events` declares it off, and nowhere else
+      # (#369).
       - name: Every job must have succeeded
         if: always()
         env:
           NEEDS: ${{ toJSON(needs) }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF_NAME: ${{ github.ref_name }}
         run: python3 scripts/check-job-results.py
 
       # Only reached when the step above passed, because `run` steps stop at
@@ -149,12 +172,18 @@ jobs:
       # because this job is the one check-ci-coverage.py already proves is
       # depended upon. A new job there would be a job nothing checks is
       # reachable, and a skipped one would leave the called workflow green.
+      #
+      # Not on a run whose `selftest` was skipped (#369): there is no shard to
+      # add up. Where a skip is not declared, the step above has already
+      # failed the run for it, so the census is never what lets one through.
       - uses: actions/download-artifact@v4
+        if: needs.selftest.result != 'skipped'
         with:
           pattern: selftest-census-*
           path: ${{ runner.temp }}/census
 
       - name: Every fault was run by exactly one shard
+        if: needs.selftest.result != 'skipped'
         run: python3 scripts/check-selftest-census.py "${{ runner.temp }}/census"
 
       # The same question of the sharded packages (#262, ruled on #268): did
