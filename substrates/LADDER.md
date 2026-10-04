@@ -93,6 +93,18 @@ What each engine is in the ladder, and what was measured about it. Characterizat
 - On the 27B, at matched size, GSQ-RCO IQ3_S beats EXL3. EXL3 2.50 bpw is 1.5% larger than IQ3_S with 1.8× its code KLD; EXL3 3.00 bpw roughly ties it for 11–14% more bytes (`measurements/2026-10-03-qwen38-27b-quality-ladder-size-matched/`).
 - Prose costs more than code at every rung of both ladders: 1.3–1.6× on the 27B, 2.4–2.7× on Flash-Next.
 
+**The middle rung's speed at depth** (`linux-pc`, the candidate's registered line; the profile window of 2026-09-29, [5883986293](https://github.com/ironblock/discipline/issues/143#issuecomment-5883986293); greedy, 256 tokens, single samples):
+
+| depth (prompt tokens) | prefill tok/s | decode, MTP n=2 | decode, spec off |
+|---|---|---|---|
+| 2,236 | 978 | 68.1 | 45.3 |
+| ~98k | 858 | 43.1 | 27.7 |
+| ~125k | 474 | 34.6 | 18.3 |
+| 226,750 (full) | 586 | 35.5 | — |
+| 2 streams × ~112.6k | — | 29.9 aggregate | — |
+
+Draft acceptance rises to 0.92–0.97 at 126k and beyond on this prompt, so the deep MTP rows flatter typical use, and spec-off is the clean reading at depth. MTP n=3 adds nothing over n=2 for 300 MiB more. No matched depth reading of the 3.6 floor exists. DFlash2 against MTP, on this line and on EXL3, is #335.
+
 **Hazards the record carries** ([5922544337](https://github.com/ironblock/discipline/issues/143#issuecomment-5922544337), in the registry entries):
 - llama.cpp with `-fit` and no `--spec-draft-ngl 99` silently places the MTP draft on the host.
 - q8_0 KV without the `q8-sparse-fa` patch disables the sparse-attention decode path.
