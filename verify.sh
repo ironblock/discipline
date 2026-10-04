@@ -5160,6 +5160,66 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# Only the line's first AND-OR list read: `ls; sudo id` runs its second segment unseen (#298 point 12).
+inject_shell_gate_later_segment_escapes() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/drive/shell_gate.rs")
+source = path.read_text(encoding="utf-8")
+old = '    for and_or in &list.items {'
+new = "    for and_or in list.items.iter().take(1) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A literal wrapper not read through: `env sudo id` is judged as `env` and its inner `sudo` goes unseen (#298 point 12).
+inject_shell_gate_wrapper_hides() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/drive/shell_gate.rs")
+source = path.read_text(encoding="utf-8")
+old = '                    self.read_words(inner, simple, depth, prefixed || assigned)'
+new = "                    { let _ = (inner, prefixed, assigned); vec![ordinary(program, rest)] }"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Dynamic syntax read as free: `eval`, `$( )`, a subshell run with no prompt (#298 point 12).
+inject_shell_gate_dynamic_read_as_allowed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/drive/shell_gate.rs")
+source = path.read_text(encoding="utf-8")
+old = '    prompt(None, Why::Dynamic(why.into()))'
+new = "    let _ = why.into();\n    Segment { shape: None, verdict: Verdict::Free }"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A standing approval matched on the subcommand alone: approving `cat` for the session covers `ls` (#298 point 12).
+inject_shell_gate_session_covers_another_program() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/drive/shell_gate.rs")
+source = path.read_text(encoding="utf-8")
+old = 'segment.shape.as_ref() == Some(shape)'
+new = "segment.shape.as_ref().map(|s| &s.subcommand) == Some(&shape.subcommand)"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # The tree copy leaving the last path out (#380): every box the gate builds is
 # then not the tree it claims to be, and an injection applied there proves
 # nothing about the tree. Caught by check-injections.py reading its box back.
@@ -10298,6 +10358,14 @@ selftest() {
     'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
     'formats::regimen::tests::an_array_holds_scalars_read_by_the_same_reader \.\.\. FAILED' 'lib/formats::regimen::tests'
+  seeded_case "a later segment escapes the denylist" test inject_shell_gate_later_segment_escapes \
+    'drive::shell_gate::tests::a_denylisted_program_in_any_segment_is_refused \.\.\. FAILED' 'lib/drive::shell_gate::tests'
+  seeded_case "a wrapper hides a denylisted program" test inject_shell_gate_wrapper_hides \
+    'drive::shell_gate::tests::a_wrapper_does_not_hide_a_denylisted_program \.\.\. FAILED' 'lib/drive::shell_gate::tests'
+  seeded_case "dynamic syntax read as allowed" test inject_shell_gate_dynamic_read_as_allowed \
+    'drive::shell_gate::tests::dynamic_syntax_prompts_and_is_never_read_as_allowed \.\.\. FAILED' 'lib/drive::shell_gate::tests'
+  seeded_case "a session approval covers another program" test inject_shell_gate_session_covers_another_program \
+    'drive::shell_gate::tests::a_session_approval_covers_its_shape_and_no_other \.\.\. FAILED' 'lib/drive::shell_gate::tests'
   seeded_case "a tree copy that drops a file"        injections inject_injections_copy_drops_a_file \
     'the box is missing 1 tracked path' inject_ci_trunk_typo
   seeded_case "a merged field an injection cannot see" injections inject_injections_struct_grew \

@@ -1,0 +1,32 @@
+{"argv":["sudo","id"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","ls; sudo id"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["bash","-c","timeout 5 env sudo id"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","git status && git diff"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["git","-C","sub","log","--oneline"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["git","push","--force"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["git","reset","--hard","HEAD~1"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["git","reset","HEAD~1"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","npm install && npm run build"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","echo $(sudo id)"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","eval ls"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","if true; then ls; fi"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","(cd x && make)"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","cat <<EOF\nx\nEOF\n"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","xargs env sudo id"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","find . -exec rm {} ;"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["npx","-y","docker","ps"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["npm","exec","--","kubectl"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["python3","-m","pytest","-q"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["cargo","+nightly","test"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","unterminated 'quote"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","git log > out.txt"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","git -c core.pager=less log"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sudo","id"],"denylist":["dd"]}
+{"argv":["sh","-c","lsé; cat café.txt"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","LD_PRELOAD=x.so cat a; FOO=1 cat b"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["git","lg"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["python3.12","-m","pytest"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+not json
+{"argv":["ls"]}
+{"argv":[],"denylist":[]}
+{"argv":["ls"],"denylist":["two words"]}

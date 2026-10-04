@@ -3,6 +3,8 @@
 //! `check_record` and `check_regimen` are the wasm-facing form of
 //! `diet check-record` and `diet check-regimen` -- pure pass-throughs to
 //! [`diet::formats::record::project`] and [`diet::formats::regimen::project`].
+//! `judge_argv` is the same for the shell gate's
+//! [`diet::drive::shell_gate::project`] (#389).
 //! This crate adds no logic of its own on purpose: the conformance test in
 //! `tests/wasm_conformance.rs` claims "the same function, compiled for two
 //! targets, reaches the same verdict," and that claim is only true if this
@@ -59,6 +61,16 @@ pub fn check_record(source: &str) -> String {
 #[must_use]
 pub fn check_regimen(source: &str) -> String {
     envelope(diet::formats::regimen::project(source))
+}
+
+/// The browser-callable shell gate (#389, 5982832752): a logged call's
+/// `argv` and the denylist it ran under, as one JSON object, to its segments
+/// and verdicts -- [`diet::drive::shell_gate::project`], so the surface's
+/// replay and the drive have one reader.
+#[wasm_bindgen]
+#[must_use]
+pub fn judge_argv(request: &str) -> String {
+    envelope(diet::drive::shell_gate::project(request))
 }
 
 /// Exists only to prove the conformance job's row-4 control against a real
