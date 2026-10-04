@@ -22,12 +22,22 @@
 # in the run, `expect_exit` was 101 for every fault whether or not the
 # fault had a catcher of its own -- an orchestrator reading the exit code
 # would score a fault green with its only catcher deleted.
+#
+# `catches` names what fails on LINUX, where CI applies every fault and
+# requires every named catcher's failure line (#239). On a Mac the census
+# (`the_seeded_escapes_...`) is a second catcher for the Seatbelt profile
+# faults; it cannot fail on Linux, so it is not named here, and the Mac's reds
+# are cited on the pull request as commands and exit codes (#299).
+#
+# Owner: track three (#29 Q8, comment 5963406133; placed here by #299's
+# ruling 13, because `.github/check-owners.tsv` maps checks to packages and
+# has no lane rows).
 
 [package]
 name = "diet-isolation"
 check = "test"
 command = "cargo test -p discipline-diet -- isolation --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 21
+faults = 55
 
 [[fault]]
 id = "isolation.vm-falls-back-to-the-sandbox"
@@ -40,27 +50,26 @@ anchor = '''
             on: platform,
         }),'''
 becomes = '''
-        Isolation::Vm => Bubblewrap::found().map(Confinement::Sandbox),'''
+        Isolation::Vm => {
+            Bubblewrap::found().map(|runner| Confinement::Sandbox(Backend::Bubblewrap(runner)))
+        }'''
 catches = [
     "isolation::tests::a_declared_vm_refuses_to_start_rather_than_falling_back_to_the_sandbox",
 ]
 
 [[fault]]
-id = "isolation.macos-uses-the-linux-sandbox"
-failure_class = "isolation.macos-uses-the-linux-sandbox"
+id = "isolation.macos-without-seatbelt-runs-unconfined"
+failure_class = "isolation.macos-without-seatbelt-runs-unconfined"
 target = "diet/src/isolation/mod.rs"
 expect_exit = 101
 anchor = '''
-            Platform::MacOs | Platform::Other => Err(Unavailable::NotImplemented {
-                mechanism: Isolation::Sandbox,
-                on: platform,
-            }),'''
+                let runner = Seatbelt::found_in(path)?;'''
 becomes = '''
-            Platform::MacOs | Platform::Other => {
-                Bubblewrap::found().map(Confinement::Sandbox)
-            }'''
+                let Ok(runner) = Seatbelt::found_in(path) else {
+                    return Ok(Confinement::Unconfined);
+                };'''
 catches = [
-    "isolation::tests::the_macos_half_is_not_built_and_says_so_from_here",
+    "isolation::tests::a_mac_without_seatbelt_refuses_to_start_rather_than_running_unconfined",
 ]
 
 [[fault]]
@@ -76,6 +85,8 @@ becomes = '''
 catches = [
     "isolation::tests::a_regimen_that_says_nothing_about_isolation_gets_the_sandbox",
     "isolation::tests::the_network_is_shared_only_where_the_regimen_declares_it",
+    "isolation::tests::a_loopback_declaration_is_read_only_under_no_network",
+    "isolation::tests::network_loopback_refuses_to_start_on_linux",
 ]
 
 [[fault]]
@@ -170,6 +181,7 @@ catches = [
     "isolation::tests::an_ambiguous_denial_is_named_as_one",
     "isolation::tests::every_denial_line_is_kept_and_none_is_invented",
     "isolation::tests::the_seeded_escapes_are_denied_where_the_mechanism_is_present",
+    "isolation::tests::an_operation_not_permitted_is_listed_and_never_explained",
 ]
 
 [[fault]]
@@ -179,12 +191,13 @@ target = "diet/src/isolation/mod.rs"
 expect_exit = 101
 anchor = '''
             Self::ReadOnly | Self::Network | Self::PermissionDenied => true,
-            Self::AbsentOrOutside => false,'''
+            Self::AbsentOrOutside | Self::NotPermitted => false,'''
 becomes = '''
             Self::ReadOnly
             | Self::Network
             | Self::PermissionDenied
-            | Self::AbsentOrOutside => true,'''
+            | Self::AbsentOrOutside => true,
+            Self::NotPermitted => false,'''
 catches = [
     "isolation::tests::an_ambiguous_denial_is_named_as_one",
 ]
@@ -233,6 +246,7 @@ becomes = '''
             network: Network::Host,'''
 catches = [
     "isolation::tests::the_record_is_read_from_the_run_and_not_written_down_as_a_constant",
+    "isolation::tests::the_record_carries_the_policy_it_ran_under",
 ]
 
 [[fault]]
@@ -289,6 +303,7 @@ becomes = '''
         if !self.denials().is_empty() {'''
 catches = [
     "isolation::tests::an_ambiguous_denial_is_named_as_one",
+    "isolation::tests::an_operation_not_permitted_is_listed_and_never_explained",
 ]
 
 [[fault]]
@@ -355,7 +370,7 @@ failure_class = "isolation.a-relative-path-is-accepted"
 target = "diet/src/isolation/policy.rs"
 expect_exit = 101
 anchor = '''
-                if !path.starts_with('/') {
+                if !is_rooted(path) {
                     return Err(PolicyError::NotAbsolute(path.clone()));
                 }'''
 becomes = '''
@@ -391,4 +406,529 @@ becomes = '''
 catches = [
     "isolation::tests::a_busy_runner_is_retried_within_a_bound_and_nothing_else_is",
     "isolation::tests::a_runner_still_open_for_writing_runs_once_it_is_closed",
+]
+
+[[fault]]
+id = "isolation.seatbelt-writes-outside-the-tree"
+failure_class = "isolation.seatbelt-writes-outside-the-tree"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+const WRITES_HEAD: &str = r#"(allow file-write*
+  (subpath (param "WORKTREE"))"#;'''
+becomes = '''
+const WRITES_HEAD: &str = r#"(allow file-write*
+  (subpath (param "WORKTREE")) (subpath "/private/tmp")"#;'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_writes_only_to_the_tree_and_dev_null",
+]
+
+[[fault]]
+id = "isolation.seatbelt-network-under-none"
+failure_class = "isolation.seatbelt-network-under-none"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+        if policy.network == Network::Host {
+            out.push_str(HOST_NETWORK);
+        } else {'''
+becomes = '''
+        out.push_str(HOST_NETWORK);
+        if policy.network != Network::Host {'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_opens_the_network_only_as_declared",
+]
+
+[[fault]]
+id = "isolation.seatbelt-undeclared-loopback-port"
+failure_class = "isolation.seatbelt-undeclared-loopback-port"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+                let _ = writeln!(out, "(allow network-outbound (remote ip {port}))");'''
+becomes = '''
+                let _ = writeln!(out, "(allow network-outbound (remote ip \"localhost:*\")) ; {port}");'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_opens_the_network_only_as_declared",
+]
+
+[[fault]]
+id = "isolation.seatbelt-worktree-not-canonical"
+failure_class = "isolation.seatbelt-worktree-not-canonical"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+        let tree = canonical(worktree);'''
+becomes = '''
+        let tree = worktree.to_string_lossy().into_owned();'''
+catches = [
+    "isolation::tests::the_worktree_enters_seatbelt_canonical",
+]
+
+[[fault]]
+id = "isolation.seatbelt-profile-not-validated"
+failure_class = "isolation.seatbelt-profile-not-validated"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+                let runner = runner.validated(policy)?;
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::a_profile_seatbelt_refuses_at_open_is_unavailable_not_a_run",
+]
+
+[[fault]]
+id = "isolation.seatbelt-policy-not-the-profile"
+failure_class = "isolation.seatbelt-policy-not-the-profile"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+            .map(|profile| sha256_hex(profile.as_bytes()))'''
+becomes = '''
+            .map(|_| sha256_hex(confined.join("\0").as_bytes()))'''
+catches = [
+    "isolation::tests::the_policy_is_the_digest_of_exactly_the_profile_or_the_runner_argv",
+]
+
+[[fault]]
+id = "isolation.bwrap-policy-covers-the-command"
+failure_class = "isolation.bwrap-policy-covers-the-command"
+target = "diet/src/isolation/bwrap.rs"
+expect_exit = 101
+anchor = '''
+        let end = confined.iter().position(|arg| arg == "--")?;'''
+becomes = '''
+        let end = confined.len();'''
+catches = [
+    "isolation::tests::the_policy_is_the_digest_of_exactly_the_profile_or_the_runner_argv",
+]
+
+[[fault]]
+id = "isolation.linux-loopback-runs-anyway"
+failure_class = "isolation.linux-loopback-runs-anyway"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+                if !policy.loopback.is_empty() {
+                    return Err(Unavailable::LoopbackNotImplemented { on: platform });
+                }
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::network_loopback_refuses_to_start_on_linux",
+]
+
+[[fault]]
+id = "isolation.loopback-under-host-is-accepted"
+failure_class = "isolation.loopback-under-host-is-accepted"
+target = "diet/src/isolation/policy.rs"
+expect_exit = 101
+anchor = '''
+            if !loopback.is_empty() && policy.network != Network::None {
+                return Err(PolicyError::LoopbackWithoutNone {
+                    network: policy.network,
+                });
+            }
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::a_loopback_declaration_is_read_only_under_no_network",
+]
+
+[[fault]]
+id = "isolation.not-permitted-is-unambiguous"
+failure_class = "isolation.not-permitted-is-unambiguous"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+            Self::ReadOnly | Self::Network | Self::PermissionDenied => true,
+            Self::AbsentOrOutside | Self::NotPermitted => false,'''
+becomes = '''
+            Self::ReadOnly | Self::Network | Self::PermissionDenied | Self::NotPermitted => true,
+            Self::AbsentOrOutside => false,'''
+catches = [
+    "isolation::tests::an_operation_not_permitted_is_listed_and_never_explained",
+]
+
+[[fault]]
+id = "isolation.seatbelt-binds-an-undeclared-port"
+failure_class = "isolation.seatbelt-binds-an-undeclared-port"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+                let _ = writeln!(out, "(allow network-bind (local ip {port}))");'''
+becomes = '''
+                let _ = writeln!(out, "(allow network-bind (local ip \"localhost:*\")) ; {port}");'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_opens_the_network_only_as_declared",
+]
+
+[[fault]]
+id = "isolation.seatbelt-inbound-on-an-undeclared-port"
+failure_class = "isolation.seatbelt-inbound-on-an-undeclared-port"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+                let _ = writeln!(out, "(allow network-inbound (local ip {port}))");'''
+becomes = '''
+                let _ = writeln!(out, "(allow network-inbound (local ip \"localhost:*\")) ; {port}");'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_opens_the_network_only_as_declared",
+]
+
+# What the profile proves about a declared port (#299, ruling 5977176035): a
+# connect to ANOTHER host on it is refused. It does not prove the port is
+# loopback-only -- Seatbelt's `localhost` is every address of this host, which
+# the equipment row discloses as `loopback_scope = "host"`. The companion
+# proof, a bind on an undeclared port is refused, is
+# `isolation.seatbelt-binds-an-undeclared-port`.
+[[fault]]
+id = "isolation.seatbelt-declared-port-reaches-other-hosts"
+failure_class = "isolation.seatbelt-declared-port-reaches-other-hosts"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+const LOOPBACK: &str = "localhost";'''
+becomes = '''
+const LOOPBACK: &str = "*";'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_opens_the_network_only_as_declared",
+]
+
+[[fault]]
+id = "isolation.seatbelt-host-admits-unix-sockets"
+failure_class = "isolation.seatbelt-host-admits-unix-sockets"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+const HOST_NETWORK: &str = r#"(allow network-outbound (remote ip "*:*"))
+(allow network-bind (local ip "*:*"))
+(allow network-inbound (local ip "*:*"))
+(allow network-outbound (literal "/private/var/run/mDNSResponder"))
+"#;'''
+becomes = '''
+const HOST_NETWORK: &str = "(allow network*)\n";'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_opens_the_network_only_as_declared",
+]
+
+[[fault]]
+id = "isolation.seatbelt-tty-writable"
+failure_class = "isolation.seatbelt-tty-writable"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+  (literal "/dev/null"))
+(allow file-ioctl (literal "/dev/null"))'''
+becomes = '''
+  (literal "/dev/null") (literal "/dev/tty"))
+(allow file-ioctl (literal "/dev/null") (literal "/dev/tty"))'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_writes_only_to_the_tree_and_dev_null",
+]
+
+[[fault]]
+id = "isolation.seatbelt-session-end-kills-nothing"
+failure_class = "isolation.seatbelt-session-end-kills-nothing"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+        for group in groups {
+            // A group whose members are all gone answers "no such process",
+            // which is the outcome wanted; nothing to report.
+            let _ = kill().args(["-KILL", "--", &format!("-{group}")]).output();
+        }'''
+becomes = '''
+        let _ = groups;'''
+catches = [
+    "isolation::tests::ending_the_session_kills_what_its_commands_left_running",
+    "isolation::tests::a_session_that_drops_its_confinement_kills_what_its_commands_left_running",
+]
+
+[[fault]]
+id = "isolation.seatbelt-secret-reads"
+failure_class = "isolation.seatbelt-secret-reads"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+        let mut out = String::from("(deny file-read* file-write*");'''
+becomes = '''
+        let mut out = String::from("(deny file-write*");'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_denies_secrets_after_every_allow",
+]
+
+[[fault]]
+id = "isolation.seatbelt-writable-overrides-secret"
+failure_class = "isolation.seatbelt-writable-overrides-secret"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+        format!("{out}{denies}")'''
+becomes = '''
+        format!("{HEAD}{denies}{}", &out[HEAD.len()..])'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_denies_secrets_after_every_allow",
+]
+
+[[fault]]
+id = "isolation.seatbelt-env-files-readable"
+failure_class = "isolation.seatbelt-env-files-readable"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+        out.push_str(ENV_FILES);
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::the_seatbelt_profile_is_exactly_what_the_policy_declares",
+    "isolation::tests::the_seatbelt_profile_denies_secrets_after_every_allow",
+]
+
+[[fault]]
+id = "isolation.seatbelt-writes-an-undeclared-dir"
+failure_class = "isolation.seatbelt-writes-an-undeclared-dir"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+            out.push(format!(
+                "WRITABLE_{index}={}",
+                canonical(&home_expanded(dir))
+            ));'''
+becomes = '''
+            let dir = home_expanded(dir);
+            out.push(format!(
+                "WRITABLE_{index}={}",
+                canonical(dir.parent().unwrap_or(&dir))
+            ));'''
+catches = [
+    "isolation::tests::a_writable_dir_enters_canonical_and_binds_writable_under_bwrap",
+]
+
+[[fault]]
+id = "isolation.environment-not-cleared"
+failure_class = "isolation.environment-not-cleared"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+            command.env_clear();
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::the_command_receives_only_the_environment_the_policy_names",
+]
+
+[[fault]]
+id = "isolation.linux-reads-all-runs-anyway"
+failure_class = "isolation.linux-reads-all-runs-anyway"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+                if policy.reads == Reads::All {
+                    return Err(Unavailable::ReadsAllNotImplemented { on: platform });
+                }
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::sandbox_reads_all_refuses_to_start_on_linux",
+]
+
+[[fault]]
+id = "isolation.tilde-expanded-from-the-wrong-place"
+failure_class = "isolation.tilde-expanded-from-the-wrong-place"
+target = "diet/src/isolation/policy.rs"
+expect_exit = 101
+anchor = '''
+    let home = std::env::var_os("HOME").filter(|home| !home.is_empty());'''
+becomes = '''
+    let home = std::env::var_os("PWD").filter(|home| !home.is_empty());'''
+catches = [
+    "isolation::tests::a_tilde_path_is_the_drives_home_and_nothing_else_relative_is_accepted",
+    "isolation::tests::t1s_ratified_regimen_lines_read_as_the_intended_policy",
+]
+
+[[fault]]
+id = "isolation.secret-under-writable-accepted"
+failure_class = "isolation.secret-under-writable-accepted"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+            if let Some((writable, secret)) = declared::secret_under_writable(policy) {
+                return Err(Unavailable::SecretUnderWritable { writable, secret });
+            }
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::a_writable_dir_or_tree_holding_a_secret_refuses_to_start",
+]
+
+[[fault]]
+id = "isolation.secret-in-tree-accepted"
+failure_class = "isolation.secret-in-tree-accepted"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+        if let Self::Sandbox(_) = self
+            && let Some(secret) = declared::secret_under_tree(policy, worktree)
+        {'''
+becomes = '''
+        if let Self::Sandbox(_) = self
+            && let Some(secret) = declared::secret_under_tree(policy, worktree)
+            && false
+        {'''
+catches = [
+    "isolation::tests::a_writable_dir_or_tree_holding_a_secret_refuses_to_start",
+]
+
+[[fault]]
+id = "isolation.env-file-declared-accepted"
+failure_class = "isolation.env-file-declared-accepted"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+            if let Some(found) = declared::env_file_declared(policy) {
+                return Err(Unavailable::EnvFileDeclared { found });
+            }
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::a_declared_path_holding_a_dot_env_file_refuses_to_start",
+]
+
+[[fault]]
+id = "isolation.linux-secret-unmasked"
+failure_class = "isolation.linux-secret-unmasked"
+target = "diet/src/isolation/bwrap.rs"
+expect_exit = 101
+anchor = '''
+        for mask in masks(policy, &declared) {
+            push(&mask.iter().map(String::as_str).collect::<Vec<_>>());
+        }'''
+becomes = '''
+        let _ = masks(policy, &declared);'''
+catches = [
+    "isolation::tests::bwrap_masks_each_secret_inside_a_declared_path",
+]
+
+[[fault]]
+id = "isolation.env-scan-case-sensitive"
+failure_class = "isolation.env-scan-case-sensitive"
+target = "diet/src/isolation/declared.rs"
+expect_exit = 101
+anchor = '''
+    let lowered = name.to_ascii_lowercase();'''
+becomes = '''
+    let lowered = name.to_owned();'''
+catches = [
+    "isolation::tests::the_dot_env_scan_ignores_case_as_the_profile_does",
+]
+
+[[fault]]
+id = "isolation.declared-inside-secret-accepted"
+failure_class = "isolation.declared-inside-secret-accepted"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+            if let Some((path, secret)) = declared::declared_inside_secret(policy) {
+                return Err(Unavailable::DeclaredInsideSecret { path, secret });
+            }
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::a_declared_path_inside_a_secret_refuses_to_start",
+]
+
+[[fault]]
+id = "isolation.seatbelt-ended-groups-kept"
+failure_class = "isolation.seatbelt-ended-groups-kept"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+            runner.forget_ended_groups();
+'''
+becomes = '''
+'''
+catches = [
+    "isolation::tests::a_session_forgets_a_process_group_once_it_has_no_member",
+]
+
+[[fault]]
+id = "isolation.secret-resolved-without-its-ancestor"
+failure_class = "isolation.secret-resolved-without-its-ancestor"
+target = "diet/src/isolation/policy.rs"
+expect_exit = 101
+anchor = '''
+    let mut rest = Vec::new();
+    let mut at = path;
+    loop {'''
+becomes = '''
+    if let Ok(real) = std::fs::canonicalize(path) {
+        return real;
+    }
+    let rest: Vec<std::ffi::OsString> = Vec::new();
+    let at = path;
+    #[allow(clippy::never_loop)]
+    loop {
+        let _ = (&rest, at);
+        return path.to_path_buf();'''
+catches = [
+    "isolation::tests::a_secret_that_does_not_exist_yet_resolves_through_its_existing_ancestor",
+]
+
+[[fault]]
+id = "isolation.drive-keeps-its-environment"
+failure_class = "isolation.drive-keeps-its-environment"
+target = "diet/src/isolation/mod.rs"
+expect_exit = 101
+anchor = '''
+    command.envs(passed(names, parent));'''
+becomes = '''
+    command.envs(parent);'''
+catches = [
+    "isolation::tests::the_re_executed_drive_holds_only_the_listed_environment",
+]
+
+[[fault]]
+id = "isolation.key-file-not-a-secret"
+failure_class = "isolation.key-file-not-a-secret"
+target = "diet/src/isolation/declared.rs"
+expect_exit = 101
+anchor = '''
+        policy.secrets.push(file);'''
+becomes = '''
+        let _ = file;'''
+catches = [
+    "isolation::tests::the_drives_key_file_joins_the_secrets_and_no_command_reads_it",
+]
+
+[[fault]]
+id = "isolation.kill-looked-up-on-path"
+failure_class = "isolation.kill-looked-up-on-path"
+target = "diet/src/isolation/seatbelt.rs"
+expect_exit = 101
+anchor = '''
+const KILL: &str = "/bin/kill";'''
+becomes = '''
+const KILL: &str = "kill";'''
+catches = [
+    "isolation::tests::no_helper_the_drive_runs_unconfined_is_looked_up_on_path",
 ]

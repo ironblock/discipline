@@ -271,7 +271,9 @@ fn serve(args: &[String]) -> ExitCode {
     };
     let mut transport = HttpStream::new(endpoint);
     if let Some(key_file) = key_file {
-        match bearer_from(&key_file) {
+        match key_file_in_declared_path(regimen_file.as_deref(), &key_file)
+            .map_or_else(|| bearer_from(&key_file), Err)
+        {
             Ok(bearer) => transport = transport.with_bearer(bearer),
             Err(why) => return fail(EXIT_INPUT, &why),
         }
@@ -761,6 +763,69 @@ fn is_an_origin(value: &str) -> bool {
         .is_some_and(|(_, authority)| !authority.is_empty() && !authority.contains('/'))
 }
 
+/// Why `key_file` may not be read: it lies in a path the regimen declares
+/// readable or writable, which a command can read (#299, ruling 5983673467,
+/// H(1)).
+///
+/// The key file joins the session's secret set (#299 review of 0706745, O),
+/// and a regimen whose isolation does not read is refused rather than
+/// skipped.
+fn key_file_in_declared_path(regimen: Option<&str>, key_file: &str) -> Option<String> {
+    let regimen = regimen?;
+    let Some(mut policy) = isolation_policy_of(regimen) else {
+        return Some(format!(
+            "{regimen}'s isolation lines do not read as a policy, so where --key-file may \
+             lie cannot be checked; refusing to start"
+        ));
+    };
+    let path =
+        isolation::declared::add_credential(&mut policy, std::path::Path::new(key_file)).err()?;
+    Some(format!(
+        "--key-file {key_file} lies in `{}`, which the regimen declares readable or writable: \
+         a command could read the key",
+        path.display()
+    ))
+}
+
+/// Re-execute this program under only the regimen's environment
+/// (`PATH`, `HOME`, `LANG`, `TERM`, `TMPDIR` and its `env_passthrough`),
+/// marked so it does not do it twice. Returns only if the exec failed.
+fn scrubbed() -> ExitCode {
+    use std::os::unix::process::CommandExt as _;
+    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
+    let regimen = if args.first().is_some_and(|first| first == SERVE) {
+        args.iter()
+            .position(|arg| arg == "--regimen")
+            .and_then(|at| args.get(at + 1))
+    } else {
+        args.first()
+    };
+    let names = regimen
+        .and_then(|path| isolation_policy_of(&path.to_string_lossy()))
+        .unwrap_or_else(IsolationPolicy::merged_usr)
+        .environment;
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(why) => {
+            return fail(
+                EXIT_HALT,
+                &format!("cannot find this program to re-execute: {why}"),
+            );
+        }
+    };
+    let why = isolation::scrubbed_drive(&exe, &args, &names, std::env::vars_os()).exec();
+    fail(
+        EXIT_HALT,
+        &format!("could not re-execute with a scrubbed environment: {why}"),
+    )
+}
+
+/// The isolation policy the regimen at `path` declares, if it reads as one.
+fn isolation_policy_of(path: &str) -> Option<IsolationPolicy> {
+    let text = std::fs::read_to_string(path).ok()?;
+    IsolationPolicy::from_regimen(&regimen::parse(&text).ok()?).ok()
+}
+
 fn usage() -> String {
     let mut out =
         String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n");
@@ -786,6 +851,14 @@ fn usage() -> String {
 }
 
 fn main() -> ExitCode {
+    // FIRST, before any thread: a sandboxed command can read this process's
+    // environment and argv (`KERN_PROCARGS2`), so the drive re-executes
+    // itself holding only what a command is given anyway (#299, ruling
+    // 5983673467, H(1)). The endpoint's key is never in either; serve reads
+    // it from `--key-file` after this.
+    if std::env::var_os(isolation::SCRUBBED).is_none() {
+        return scrubbed();
+    }
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some(SERVE) {
         if asks_for_help(&args[1..]) {
