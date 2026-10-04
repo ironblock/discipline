@@ -27,7 +27,9 @@ Determining the range:
   pull_request  the event payload's base.sha..head.sha, plus title and body
   push          the event payload's before..after; on a new branch, where
                 `before` is all zeros, the merge base with the default branch
-  otherwise     origin/<default>..HEAD -- the history you have not published
+  otherwise     origin/<default>..HEAD -- the history you have not published;
+                on a schedule event (the nightly), whose own ref IS the
+                default branch, origin/<that ref> when no origin/HEAD is set
 
 `--range A..B` overrides all three. It is how a CI red is reproduced on the
 machine that caused it: the inferred range is empty on a checkout that matches
@@ -106,13 +108,19 @@ def event() -> dict:
 
 
 def default_branch() -> str:
-    for candidate in ("origin/HEAD", "origin/main", "origin/master"):
-        ref = git("rev-parse", "--verify", "--quiet", candidate, check=False)
-        if ref:
+    # A NIGHTLY runs on the default branch, so its own ref is that branch:
+    # `origin/<ref>` is the base, and the range is what is not yet published,
+    # which on a nightly is nothing. An Actions checkout sets no origin/HEAD,
+    # and since the default branch was renamed (#326) neither fallback below
+    # exists there, so the first develop nightly could name no base at all.
+    own = os.environ.get("GITHUB_REF_NAME", "")
+    nightly = [f"origin/{own}"] if os.environ.get("GITHUB_EVENT_NAME") == "schedule" and own else []
+    candidates = ("origin/HEAD", *nightly, "origin/main", "origin/master")
+    for candidate in candidates:
+        if git("rev-parse", "--verify", "--quiet", candidate, check=False):
             return candidate
     raise Undeterminable(
-        "no origin/HEAD, origin/main or origin/master to compare against; "
-        "pass --range explicitly"
+        f"no {', '.join(candidates)} to compare against; pass --range explicitly"
     )
 
 
