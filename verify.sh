@@ -4097,6 +4097,34 @@ path.write_text(source.replace(old, '    return None\n', 1), encoding="utf-8")
 EOF
 }
 
+# #335: llama.cpp's elapsed-time log prefix is exempt from private-ipv4, and
+# only the prefix. A real 10.x address later on such a line still fires. The
+# address and the prefix are built from parts so this file does not trip the
+# gate it tests.
+inject_hygiene_llamacpp_prefix_address_elsewhere() {
+  python3 - <<'PYEOF2'
+import pathlib
+prefix = ".".join(["10", "15", "926", "183"])
+addr = ".".join(["10", "1", "2", "3"])
+d = pathlib.Path("seeded-faults"); d.mkdir(exist_ok=True)
+(d / "llamacpp-prefix-address-elsewhere.log").write_text(
+    f"{prefix} I slot print_timing: id  0 | peer {addr}\n", encoding="utf-8")
+PYEOF2
+  git add --all
+}
+# #335: a valid 10.x address of the prefix's own 2-3-3 shape at the start of a
+# line, without the level letter and source after it, still fires.
+inject_hygiene_llamacpp_prefix_without_suffix() {
+  python3 - <<'PYEOF2'
+import pathlib
+addr = ".".join(["10", "15", "200", "183"])
+d = pathlib.Path("seeded-faults"); d.mkdir(exist_ok=True)
+(d / "llamacpp-prefix-without-suffix.log").write_text(
+    f"{addr} listening on port 8080\n", encoding="utf-8")
+PYEOF2
+  git add --all
+}
+
 inject_pages() {
   printf '<script src="https://cdn.example.com/x.js"></script>\n' >> pages/index.html
 }
@@ -10714,6 +10742,10 @@ selftest() {
     'pr-scope: \.github/PULL_REQUEST_TEMPLATE\.md falls under None, not the protocol entry'
   seeded_case "a data-URI payload read as prose"      hygiene  inject_hygiene_datauri_read_as_prose \
     'hygiene: internal-ticket-id: tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri\.svg:6:'
+  seeded_case "a 10.x address after llama.cpp's log prefix" hygiene inject_hygiene_llamacpp_prefix_address_elsewhere \
+    'hygiene: private-ipv4: seeded-faults/llamacpp-prefix-address-elsewhere\.log:1:'
+  seeded_case "a 10.x address of the prefix's shape, no suffix" hygiene inject_hygiene_llamacpp_prefix_without_suffix \
+    'hygiene: private-ipv4: seeded-faults/llamacpp-prefix-without-suffix\.log:1:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
   seeded_case "a ledger row citing a missing directory" results inject_results_ledger_row_cites_missing_directory \
