@@ -31,7 +31,9 @@
 //! v3 (#297, from the #117 courier) adds the `tool_call` kind, one line per
 //! call the model made, written at its outcome, whose keys must fit that
 //! outcome ([`outcome_keys`]) and its name (only `bash` carries the [`EXEC`]
-//! keys, `policy` among them, and only `bash` must carry its streams), whose
+//! keys, `policy` among them, and only `bash` must carry its streams; a
+//! `policy` only under an `isolation` that names a profile, `sandbox` or
+//! `vm`), whose
 //! streams' byte counts are `0` exactly when their text is empty and are not
 //! otherwise compared with it (output that is not UTF-8 is written as lossy
 //! text), whose `isolation` and
@@ -40,7 +42,9 @@
 //! written at most once per call; a `delta`'s `id` and `name` only on a
 //! call's first fragment, and a line for every streamed call, are the
 //! writer's obligations, not read here; a `session.start`'s substrate claim, its four
-//! keys together or not at all ([`all_or_none`]); a `delta`'s third piece,
+//! keys together or not at all ([`all_or_none`]); a `session.start`'s
+//! `provenance`, `placed` or `constructed`, absent when a session wrote the
+//! log as it ran; a `delta`'s third piece,
 //! `tool_call`, a fragment of a streamed call; `turn.settled`'s reason
 //! `capped`, which requires the turn's trunk `response` to carry `capped:
 //! true`; and a `cancelled`'s `reasoning`. A log that declares 0, 1 or 2 and
@@ -1757,7 +1761,9 @@ fn argv_if_it_parsed(
 /// carry its streams. A call whose `isolation` is `unrecorded` carries no
 /// `confined`, whatever its outcome requires (5974732908). `confined` is
 /// keyed to `isolation` alone: `network` alone `unrecorded` leaves
-/// `confined` as its outcome says (ruled at 5975827372).
+/// `confined` as its outcome says (ruled at 5975827372). A `bash` call
+/// carries `policy` only when `profiled`, its `isolation` `sandbox` or `vm`,
+/// and a `command_failed` one must then (ruled at #299, 5976386318 point 6).
 fn fits_its_outcome(
     object: &BTreeMap<String, Value>,
     name: &str,

@@ -1,4 +1,4 @@
-{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model (CONSTRUCTED: a bash call that failed under isolation none and still names a policy, though no profile confined it, ruled at #299 5976386318 point 6)","opened":1790000000000,"provenance":"constructed","seq":0,"t":0,"version":3}
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model (CONSTRUCTED: a bash call that failed under isolation none and still names a policy, though no profile confined it, ruled at #299 5976386318 point 6)","opened":1790000000000,"seq":0,"t":0,"version":3}
 {"kind":"ask","seq":1,"t":5,"text":"list the files","turn":1}
 {"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
 {"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}

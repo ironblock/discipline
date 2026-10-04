@@ -6669,6 +6669,16 @@ legacy_signature = "log/fixtures/invalid/a-provenance-outside-its-vocabulary\\.j
 migrated = false
 
 [[fault]]
+id = "test.log_provenance_read_in_a_v2_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a provenance read in a log that declares v2"
+failure_class = "log.provenance-read-in-a-v2-log"
+legacy_signature = "log/fixtures/invalid/a-v2-log-carrying-a-provenance\\.jsonl"
+migrated = false
+
+[[fault]]
 id = "test.log_tool_call_citing_anything_read"
 kind = "seeded-gate"
 check = "test"
