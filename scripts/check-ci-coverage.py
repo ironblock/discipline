@@ -1145,7 +1145,8 @@ def main() -> int:
     census = pathlib.Path(tempfile.mkdtemp(prefix="check-ci-coverage.census."))
     try:
         ran = True
-        for check, count in sorted(SHARDS.items()):
+        # SPIKE (#320, never merged): skip the runs, to time what the rules cost without them.
+        for check, count in ([] if os.environ.get("SPIKE_320_SKIP_RUNS") else sorted(SHARDS.items())):
             if check not in SHARDABLE:
                 continue
             for part in range(1, count + 1):
@@ -1166,7 +1167,7 @@ def main() -> int:
                         f"`{check}`: a dry run of shard {part}/{count} exited {done.returncode}, not 0: "
                         f"{(done.stdout + done.stderr).strip()[-200:]}"
                     )
-        if ran:
+        if ran and not os.environ.get("SPIKE_320_SKIP_RUNS"):
             done = subprocess.run(
                 [sys.executable, str(ROOT / "scripts" / "check-shard-census.py"), str(census), "--dry"],
                 capture_output=True, text=True,
@@ -1183,7 +1184,7 @@ def main() -> int:
     #    too, split in two, over inputs that cost seconds: recompute over the
     #    malformed-directory fixtures, the applier over one injection. Every
     #    member listed must come back as a row with its outcome.
-    for check, command in REAL_CENSUS:
+    for check, command in ([] if os.environ.get("SPIKE_320_SKIP_RUNS") else REAL_CENSUS):
         listing = subprocess.run([*command, "--names"], cwd=ROOT, capture_output=True, text=True)
         lines = listing.stdout.split("\n")
         whole = [l for l in lines[lines.index(gatelib.LISTING) + 1:] if l.strip()] if gatelib.LISTING in lines else []
