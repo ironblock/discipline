@@ -26,7 +26,10 @@ reporting success -- so an undeclared directory is a failure, and finding no
 recomputable directory at all is exit 2 rather than a pass.
 
 Stdlib only. Exit 0 if every recomputable directory re-derives, 1 if one does
-not or a directory is undeclared, 2 if there is nothing to recompute.
+not or a directory is undeclared, 2 if there is nothing to recompute. Under
+`--only` (#318, the selftest's narrowing to the directories a seeded fault
+mutated) a scope naming only the template has no results directory to count,
+and says so with exit 0; a name that is not there is exit 2.
 """
 
 from __future__ import annotations
@@ -217,6 +220,15 @@ def main(argv: list[str]) -> int:
         "(#262); every directory lands in exactly one shard",
     )
     parser.add_argument(
+        "--only",
+        metavar="NAME[,NAME]",
+        help="re-derive only these directories under --root (#318): a seeded "
+        "fault's case narrowed to the directory it mutated. A name that is not "
+        "there is a misuse (exit 2). A scope of only the template re-derives no "
+        "results directory and says so; that is the selftest's narrowing, and "
+        "CI never passes one",
+    )
+    parser.add_argument(
         "--names",
         action="store_true",
         help="print the directories this invocation would re-derive, and re-derive none",
@@ -227,6 +239,13 @@ def main(argv: list[str]) -> int:
         shard = gatelib.shard_arg(args.shard)
         if shard is None:
             print(f"check-recompute: --shard {args.shard!r} is not K/N with 1 <= K <= N", file=sys.stderr)
+            return 2
+    only = None
+    if args.only is not None:
+        only = [n for n in args.only.split(",")]
+        if shard is not None or not only or any(not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]*", n) for n in only):
+            print(f"check-recompute: --only {args.only!r} is not a comma-separated list of directory "
+                  f"names, or is given with --shard", file=sys.stderr)
             return 2
 
     root = pathlib.Path(args.root)
@@ -249,6 +268,13 @@ def main(argv: list[str]) -> int:
     directories = sorted(p for p in root.iterdir() if p.is_dir())
     if shard is not None:
         directories = [p for p in directories if gatelib.in_shard(p.name, *shard)]
+    if only is not None:
+        missing = sorted(set(only) - {p.name for p in directories})
+        if missing:
+            print(f"check-recompute: --only names {', '.join(missing)}, which {root} does not hold; "
+                  f"a scope that narrows to nothing is not a pass", file=sys.stderr)
+            return 2
+        directories = [p for p in directories if p.name in only]
     if args.names:
         print("\n".join([gatelib.LISTING, *(p.name for p in directories)]))
         return 0
@@ -405,6 +431,7 @@ def main(argv: list[str]) -> int:
         f"check-recompute: template: {templates} · results: {recomputed} recomputed, "
         f"{historical} declared historical, {undeclared} undeclared"
         f"{f' (shard {shard[0]} of {shard[1]})' if shard else ''}"
+        f"{f' (only {args.only})' if only else ''}"
     )
     if failures:
         print(census, file=sys.stderr)
@@ -431,7 +458,8 @@ def main(argv: list[str]) -> int:
         # the one that runs.
         print(
             f"{census}\ncheck-recompute: no results directory hashes into shard {shard[0]} of {shard[1]}"
-            if shard else f"{census}\ncheck-recompute: no results directory yet; declared empty"
+            if shard else f"{census}\ncheck-recompute: --only names no results directory"
+            if only else f"{census}\ncheck-recompute: no results directory yet; declared empty"
         )
         return 0
     if recomputed == 0:

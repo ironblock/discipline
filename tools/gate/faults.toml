@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 153
+mechanics_assertions = 155
 unseedable_guards = 2
 migrated = 0
 
@@ -1798,6 +1798,22 @@ kind = "mechanics"
 check = "-"
 label = "nor with a shim that edits through GNU's -i"
 failure_class = "bsd.shim-not-in-force"
+expected_exit = "2"
+migrated = false
+[[fault]]
+id = "mech.a-recompute-scope-naming-no-directory-is-a-misuse"
+kind = "mechanics"
+check = "-"
+label = "a recompute scope naming no directory is a misuse"
+failure_class = "recompute.scope-names-nothing"
+expected_exit = "2"
+migrated = false
+[[fault]]
+id = "mech.a-recompute-scope-that-is-not-a-list-of-names-is-a-misuse"
+kind = "mechanics"
+check = "-"
+label = "a recompute scope that is not a list of names is a misuse"
+failure_class = "recompute.scope-misspelled"
 expected_exit = "2"
 migrated = false
 [[fault]]

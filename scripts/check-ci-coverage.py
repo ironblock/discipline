@@ -107,9 +107,9 @@ NARROWING_FLAGS = (
     # fault it does not re-prove is DECLARED in the census at the commit it
     # was last seen red, which is the thing a narrowing flag here hides.
     ("--scope", re.compile(r"--scope(?![-\w])"),
-     "narrows the test check to part of the suite, or the injections check to "
-     "one injection; the selftest scopes its own "
-     "sandboxes and CI must not"),
+     "narrows the test check to part of the suite, the injections check to "
+     "one injection, or the recompute check to some directories; the selftest "
+     "scopes its own sandboxes and CI must not"),
     ("--range", re.compile(r"--range\b"),
      "narrows the history check to a slice somebody chose; the range CI must "
      "scan is the one its event names, and a chosen one is a gate reading past "
