@@ -309,6 +309,17 @@ vocabulary! {
     }
 }
 
+vocabulary! {
+    /// Who wrote a log that a session did not write as it ran (v3, ruled on
+    /// #297 at 5976392264). Absent, a session wrote it as it ran.
+    Provenance {
+        /// A recording placed into the log, replayed rather than served.
+        Placed => "placed",
+        /// Written by hand, as a fixture is: no session ran it.
+        Constructed => "constructed",
+    }
+}
+
 /// One message of the head the trunk starts from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HeadMessage {
@@ -389,6 +400,8 @@ pub enum Event {
         /// What the session claims serves it (v3, #292), when it was started
         /// against a regimen.
         claim: Option<SubstrateClaim>,
+        /// Who wrote the log, when a session did not write it as it ran (v3).
+        provenance: Option<Provenance>,
     },
     /// An ask was admitted.
     Ask {
@@ -1477,6 +1490,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 } else {
                     None
                 },
+                provenance: fields.optional_tag("provenance", Provenance::from_tag)?,
             }
         }
         Kind::Ask => Event::Ask {
@@ -1594,8 +1608,9 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             let network = fields.optional_tag("network", Network::from_tag)?;
             let reason = fields.optional_tag("reason", ToolRefusal::from_tag)?;
             let unrecorded = isolation == Some(Isolation::Unrecorded);
+            let profiled = matches!(isolation, Some(Isolation::Sandbox | Isolation::Vm));
             let name = fields.string("name")?;
-            fits_its_outcome(object, &name, outcome, unrecorded)?;
+            fits_its_outcome(object, &name, outcome, unrecorded, profiled)?;
             if name == "bash" {
                 argv_if_it_parsed(object, reason)?;
             }
@@ -1641,7 +1656,9 @@ pub const EXEC: &[&str] = &["argv", "confined", "isolation", "network", "policy"
 /// says why and ran nothing; what was cancelled never finished. `exit` is
 /// never required: a signal leaves none. The [`EXEC`] keys required here
 /// (`policy` among them, under `command_failed`) are required of a `bash`
-/// call only, and forbidden on any other (ruled at 5975957135); the
+/// call only, and forbidden on any other (ruled at 5975957135); `policy` is
+/// required, and allowed, only under an `isolation` that names a profile,
+/// `sandbox` or `vm` (ruled at #299, 5976386318 point 6); the
 /// [`STREAMS`] required here are required of a `bash` call only, and on any
 /// other neither required nor refused (ruled at 5975651100): a
 /// cancelled `bash` call always says its `isolation` and `network`, and its
@@ -1746,6 +1763,7 @@ fn fits_its_outcome(
     name: &str,
     outcome: ToolOutcome,
     unrecorded: bool,
+    profiled: bool,
 ) -> Result<(), String> {
     let bash = name == "bash";
     for (text_key, bytes_key) in STREAMS {
@@ -1775,6 +1793,12 @@ fn fits_its_outcome(
         if unrecorded && *needed == "confined" {
             continue;
         }
+        // `policy` names the profile that confined a command, so a call no
+        // profile confined -- `isolation` `none` or `unrecorded` -- has none
+        // to name (ruled at #299, 5976386318 point 6).
+        if !profiled && *needed == "policy" {
+            continue;
+        }
         if !bash && EXEC.contains(needed) {
             continue;
         }
@@ -1799,6 +1823,13 @@ fn fits_its_outcome(
                 outcome.tag()
             ));
         }
+    }
+    if bash && !profiled && object.contains_key("policy") {
+        return Err(format!(
+            "a `bash` call whose outcome is `{}` carries `policy` under no profile: only \
+             `isolation` `sandbox` or `vm` confines a command under one",
+            outcome.tag()
+        ));
     }
     for exec in EXEC {
         if !bash && object.contains_key(*exec) {
@@ -1861,6 +1892,8 @@ pub enum Tags {
     ToolRefusal,
     /// [`EngineIdentity`] (v3).
     EngineIdentity,
+    /// [`Provenance`] (v3).
+    Provenance,
 }
 
 impl Tags {
@@ -1879,6 +1912,7 @@ impl Tags {
         Self::Network,
         Self::ToolRefusal,
         Self::EngineIdentity,
+        Self::Provenance,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -1898,6 +1932,7 @@ impl Tags {
             Self::Network => "Network",
             Self::ToolRefusal => "ToolRefusal",
             Self::EngineIdentity => "EngineIdentity",
+            Self::Provenance => "Provenance",
         }
     }
 
@@ -1921,6 +1956,7 @@ impl Tags {
             Self::Network => of(Network::ALL, Network::tag),
             Self::ToolRefusal => of(ToolRefusal::ALL, ToolRefusal::tag),
             Self::EngineIdentity => of(EngineIdentity::ALL, EngineIdentity::tag),
+            Self::Provenance => of(Provenance::ALL, Provenance::tag),
         }
     }
 }
@@ -2145,6 +2181,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v3("registry_sha256", Holds::Digest),
                 may_v3("engine_build", Text),
                 may_v3("engine_identity", Tag(Tags::EngineIdentity)),
+                may_v3("provenance", Tag(Tags::Provenance)),
             ];
             F
         }
@@ -2510,6 +2547,7 @@ fn to_value(line: &Line) -> Value {
             head,
             serving,
             claim,
+            provenance,
         } => {
             put("version", Value::Integer(*version));
             put("opened", count(*opened));
@@ -2539,6 +2577,9 @@ fn to_value(line: &Line) -> Value {
                 put("registry_sha256", text(&claim.registry_sha256));
                 put("engine_build", text(&claim.engine_build));
                 put("engine_identity", text(claim.engine_identity.tag()));
+            }
+            if let Some(provenance) = provenance {
+                put("provenance", text(provenance.tag()));
             }
             Kind::SessionStart
         }
@@ -3075,6 +3116,7 @@ mod tests {
                 model: "a-model".to_owned(),
                 serving: None,
                 claim: None,
+                provenance: None,
                 head: vec![HeadMessage {
                     role: Role::System,
                     content: "you are the trunk".to_owned(),
@@ -3615,7 +3657,9 @@ mod tests {
     /// tag counts as read when the refusal is the outcome's keys rule, which
     /// runs only once the tag has parsed as a [`ToolOutcome`] (v3). Likewise
     /// `unrecorded` in `isolation` beside a `confined` is refused by the
-    /// confinement rule, which runs only once the tag has parsed, and a
+    /// confinement rule, which runs only once the tag has parsed; so is a
+    /// `policy` beside an `isolation` that names no profile, or none beside
+    /// one that does (ruled at #299, 5976386318 point 6); and a
     /// `bash` refusal's `reason` decides its `argv`
     /// ([`argv_if_it_parsed`]), which runs only once the reason has parsed.
     fn the_reader_reads_it_as(object: &BTreeMap<String, Value>, key: &str, tags: Tags) {
@@ -3629,7 +3673,9 @@ mod tests {
                     (tags == Tags::ToolOutcome && why.contains("whose outcome is"))
                         || (tags == Tags::Isolation
                             && (why.contains("`isolation` is `unrecorded` carries `confined`")
-                                || why.contains("carries no `confined`")))
+                                || why.contains("carries no `confined`")
+                                || why.contains("carries `policy` under no profile")
+                                || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
                 },
                 |_| true,
@@ -4041,6 +4087,11 @@ mod tests {
             "{}\"exit\":1,{policy}{STREAMS_HELD}",
             exec("sandbox", "none")
         );
+        let failed_vm = format!("{}\"exit\":1,{policy}{STREAMS_HELD}", exec("vm", "none"));
+        let failed_unprofiled = format!("{}\"exit\":1,{STREAMS_HELD}", exec("none", "none"));
+        let failed_unrecorded = format!(
+            r#""argv":["true"],"exit":1,"isolation":"unrecorded","network":"unrecorded",{STREAMS_HELD}"#
+        );
         let cancelled_bash = exec("sandbox", "none");
         let cancelled_unrecorded =
             r#""argv":["true"],"isolation":"unrecorded","network":"unrecorded","#.to_owned();
@@ -4098,6 +4149,27 @@ mod tests {
                 streams_and(&["argv", "confined", "isolation", "network", "policy"]),
                 vec!["reason"],
                 vec!["exit"],
+            ),
+            (
+                "bash command_failed under vm",
+                line_of("bash", "command_failed", &failed_vm),
+                streams_and(&["argv", "confined", "isolation", "network", "policy"]),
+                vec!["reason"],
+                vec![],
+            ),
+            (
+                "bash command_failed under no profile",
+                line_of("bash", "command_failed", &failed_unprofiled),
+                streams_and(&["argv", "confined", "isolation", "network"]),
+                vec!["reason", "policy"],
+                vec![],
+            ),
+            (
+                "bash command_failed, unrecorded",
+                line_of("bash", "command_failed", &failed_unrecorded),
+                streams_and(&["argv", "isolation", "network"]),
+                vec!["reason", "policy", "confined"],
+                vec![],
             ),
             (
                 "bash refused not_allowed",

@@ -8,12 +8,12 @@
         }
       ],
       "kind": "session.start",
-      "model": "a-model (CONSTRUCTED: a placed replay's shape -- no substrate claim, since no serve start made one, and a bash call that ran whose recording says its argv but not its confinement, so isolation and network are unrecorded and confined is absent)",
+      "model": "a-model (CONSTRUCTED: a bash call that failed under isolation none, so no profile confined it and it carries no policy, ruled at #299 5976386318 point 6; the command and its exit are invented)",
       "opened": 1790000000000,
-      "provenance": "constructed",
       "seq": 0,
       "t": 0,
-      "version": 3
+      "version": 3,
+      "provenance": "constructed"
     },
     {
       "kind": "ask",
@@ -42,7 +42,7 @@
       "seq": 4,
       "t": 20,
       "tool_call": {
-        "arguments": "{\"command\":\"ls\"}",
+        "arguments": "{\"command\": \"test -e /work/missing\"}",
         "id": "call-0",
         "index": 0,
         "name": "bash"
@@ -57,41 +57,32 @@
       "to_request": 3
     },
     {
-      "arguments": "{\"command\":\"ls\"}",
+      "arguments": "{\"command\": \"test -e /work/missing\"}",
       "argv": [
         "sh",
         "-c",
-        "ls"
+        "test -e /work/missing"
       ],
-      "exit": 0,
+      "confined": [
+        "sh",
+        "-c",
+        "test -e /work/missing"
+      ],
+      "exit": 1,
       "id": "call-0",
-      "isolation": "unrecorded",
+      "isolation": "none",
       "kind": "tool_call",
       "name": "bash",
-      "network": "unrecorded",
-      "outcome": "ran",
+      "network": "none",
+      "outcome": "command_failed",
       "request": 3,
       "seq": 6,
       "stderr": "",
       "stderr_bytes": 0,
-      "stdout": "a\n",
-      "stdout_bytes": 2,
+      "stdout": "",
+      "stdout_bytes": 0,
       "t": 30,
       "turn": 1
-    },
-    {
-      "kind": "turn.settled",
-      "reason": "final",
-      "seq": 7,
-      "t": 35,
-      "turn": 1
-    },
-    {
-      "from": "turn",
-      "kind": "settlement",
-      "seq": 8,
-      "t": 40,
-      "to": "awaiting"
     }
   ],
   "torn": 0

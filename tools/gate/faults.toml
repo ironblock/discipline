@@ -6639,6 +6639,36 @@ legacy_signature = "log/fixtures/invalid/a-capped-settle-whose-response-is-not-c
 migrated = false
 
 [[fault]]
+id = "test.log_policy_unrequired_under_a_profile"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a failed bash call under a profile read without its policy"
+failure_class = "log.policy-unrequired-under-a-profile"
+legacy_signature = "log/fixtures/invalid/a-failed-call-without-its-policy\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_policy_read_under_no_profile"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a policy read on a bash call no profile confined"
+failure_class = "log.policy-read-under-no-profile"
+legacy_signature = "log/fixtures/invalid/a-policy-under-no-profile\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_provenance_outside_its_vocabulary_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a provenance outside its vocabulary read"
+failure_class = "log.provenance-outside-its-vocabulary"
+legacy_signature = "log/fixtures/invalid/a-provenance-outside-its-vocabulary\\.jsonl"
+migrated = false
+
+[[fault]]
 id = "test.log_tool_call_citing_anything_read"
 kind = "seeded-gate"
 check = "test"

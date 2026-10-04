@@ -10,6 +10,7 @@
       "kind": "session.start",
       "model": "qwen3.8-flash-next (CONSTRUCTED: the deltas, response, progress and timings are I0's turn 1, substrates/measurements/2026-10-02-i0-tool-call-captures/turn1.http, and the tool_call's stdout is that run's tool-output.txt; the tool_call's argv, confinement and run are constructed)",
       "opened": 1790944103000,
+      "provenance": "constructed",
       "seq": 0,
       "t": 0,
       "version": 3

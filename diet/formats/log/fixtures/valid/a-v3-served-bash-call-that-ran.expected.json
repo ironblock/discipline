@@ -12,6 +12,7 @@
       "kind": "session.start",
       "model": "a-model (CONSTRUCTED: the session.start claim is a-v3-session-start-with-its-claim's, from the registry; no serve start wrote it, and the call's argv, confinement and run are constructed)",
       "opened": 1790000000000,
+      "provenance": "constructed",
       "registry_sha256": "c4bd454be848f49f7851eb093dd2c2c9046fe944df7681d8a3625e21a1757da3",
       "seq": 0,
       "substrate": "accel24-beellama-qwen27b-q4kxl",

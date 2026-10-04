@@ -1,4 +1,4 @@
-{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model (CONSTRUCTED: a read call as an OpenCode recording carries one -- arguments only, no argv, confinement, isolation or network, since no command ran; the file text is invented)","opened":1790000000000,"provenance":"constructed","seq":0,"t":0,"version":3}
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model (CONSTRUCTED: a session.start whose provenance is a word outside its vocabulary, placed or constructed, ruled at #297 5976392264)","opened":1790000000000,"provenance":"replayed","seq":0,"t":0,"version":3}
 {"kind":"ask","seq":1,"t":5,"text":"what does the readme say","turn":1}
 {"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
 {"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}

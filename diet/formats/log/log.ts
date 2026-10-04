@@ -113,6 +113,11 @@ export type EngineIdentity =
   | "literal_matched"
 ;
 
+export type Provenance =
+  | "placed"
+  | "constructed"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -155,6 +160,7 @@ export type SessionStartLine = {
   model: string;
   head: HeadMessage[];
   serving?: Serving;
+  provenance?: Provenance;
 } & ({ substrate: string; registry_sha256: string; engine_build: string; engine_identity: EngineIdentity } | { substrate?: never; registry_sha256?: never; engine_build?: never; engine_identity?: never });
 
 export type AskLine = {

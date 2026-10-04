@@ -10,6 +10,7 @@
       "kind": "session.start",
       "model": "a-model (CONSTRUCTED: a placed replay's shape -- no substrate claim -- and a bash call that ran whose recording says its network but not its sandbox, so isolation alone is unrecorded and confined is absent, ruled at 5975651100)",
       "opened": 1790000000000,
+      "provenance": "constructed",
       "seq": 0,
       "t": 0,
       "version": 3

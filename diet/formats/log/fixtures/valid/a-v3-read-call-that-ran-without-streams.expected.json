@@ -10,6 +10,7 @@
       "kind": "session.start",
       "model": "a-model (CONSTRUCTED: a read call that ran, carrying arguments only -- no argv, confinement, isolation or network, since no command ran, and no streams, since a non-bash call carries its result in the field its definition names, ruled at 5975651100)",
       "opened": 1790000000000,
+      "provenance": "constructed",
       "seq": 0,
       "t": 0,
       "version": 3

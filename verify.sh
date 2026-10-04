@@ -2252,6 +2252,48 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+inject_log_policy_unrequired_under_a_profile() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if !profiled && *needed == "policy" {'
+new = '        if *needed == "policy" {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_policy_read_under_no_profile() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if bash && !profiled && object.contains_key("policy") {'
+new = '    if false && bash && !profiled && object.contains_key("policy") {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_provenance_outside_its_vocabulary_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = 'fields.optional_tag("provenance", Provenance::from_tag)?'
+new = 'fields.optional_tag("provenance", |_| Some(Provenance::Constructed))?'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_log_tool_call_citing_anything_read() {
   python3 - <<'EOF'
 import pathlib
@@ -8987,6 +9029,12 @@ selftest() {
     'log/fixtures/invalid/a-session-start-with-part-of-its-claim\.jsonl' 'test:conformance/formats::log'
   seeded_case "a capped settle whose response is not capped read" test inject_log_capped_settle_unchecked \
     'log/fixtures/invalid/a-capped-settle-whose-response-is-not-capped\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a failed bash call under a profile read without its policy" test inject_log_policy_unrequired_under_a_profile \
+    'log/fixtures/invalid/a-failed-call-without-its-policy\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a policy read on a bash call no profile confined" test inject_log_policy_read_under_no_profile \
+    'log/fixtures/invalid/a-policy-under-no-profile\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a provenance outside its vocabulary read" test inject_log_provenance_outside_its_vocabulary_read \
+    'log/fixtures/invalid/a-provenance-outside-its-vocabulary\.jsonl' 'test:conformance/formats::log'
   seeded_case "a tool_call citing anything read as a request" test inject_log_tool_call_citing_anything_read \
     'log/fixtures/invalid/a-tool-call-naming-no-request\.jsonl' 'test:conformance/formats::log'
   seeded_case "a stream's text and its byte count not paired" test inject_log_stream_without_its_bytes_unpaired \

@@ -10,6 +10,7 @@
       "kind": "session.start",
       "model": "a-model (CONSTRUCTED: a placed replay's shape -- no substrate claim, since no serve start made one, and a bash call the recording shows cancelled, whose argv it says and whose confinement it does not, so isolation and network are unrecorded and confined is absent)",
       "opened": 1790000000000,
+      "provenance": "constructed",
       "seq": 0,
       "t": 0,
       "version": 3

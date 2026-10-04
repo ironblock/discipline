@@ -10,6 +10,7 @@
       "kind": "session.start",
       "model": "a-model (CONSTRUCTED: a read call that failed carries arguments and its exit, and no policy, since only bash ran under a profile; the error text is invented)",
       "opened": 1790000000000,
+      "provenance": "constructed",
       "seq": 0,
       "t": 0,
       "version": 3

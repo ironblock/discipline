@@ -10,6 +10,7 @@
       "kind": "session.start",
       "model": "a-model (CONSTRUCTED: a read call as an OpenCode recording carries one -- arguments only, no argv, confinement, isolation or network, since no command ran; the file text is invented)",
       "opened": 1790000000000,
+      "provenance": "constructed",
       "seq": 0,
       "t": 0,
       "version": 3

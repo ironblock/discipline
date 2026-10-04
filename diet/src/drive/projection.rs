@@ -684,6 +684,7 @@ mod tests {
             }],
             serving: None,
             claim: None,
+            provenance: None,
         }
     }
 

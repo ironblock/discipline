@@ -929,6 +929,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // v3's substrate claim, written once the session carries one
             // (#292's v3 half, track three's own PR).
             claim: None,
+            // A session writing as it runs carries no provenance word.
+            provenance: None,
         },
         Event::Asked { turn, text } => log::Event::Ask {
             turn: *turn,
@@ -2562,6 +2564,7 @@ pub(in crate::drive) mod tests {
                     content: HEAD.to_owned(),
                 }],
                 claim: None,
+                provenance: None,
             },
             log::Event::Ask {
                 turn: 1,
