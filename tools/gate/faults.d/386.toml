@@ -1,0 +1,28 @@
+# #386's mechanics: check-history's base on a force-push and with no event.
+
+[[fault]]
+id = "mech.history-a-force-push-with-no-origin-head-reads-the-default-branch-from-its-payload"
+kind = "mechanics"
+check = "-"
+label = "history: a force-push with no origin/HEAD reads the default branch from its payload"
+failure_class = "history.payload-base"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-and-with-no-default-branch-in-the-payload-that-base-is-still-undeterminable"
+kind = "mechanics"
+check = "-"
+label = "history: and with no default branch in the payload, that base is still undeterminable"
+failure_class = "history.base-undeterminable"
+expected_exit = "0"
+migrated = false
+
+[[fault]]
+id = "mech.history-with-no-event-the-branch-table-names-the-base"
+kind = "mechanics"
+check = "-"
+label = "history: with no event, the branch table names the base"
+failure_class = "history.table-base"
+expected_exit = "0"
+migrated = false

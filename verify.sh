@@ -9354,6 +9354,32 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
   expect_exit "history: and with no schedule event, that base is still undeterminable" 2 \
     env -u GITHUB_EVENT_PATH GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF_NAME=trunk \
       python3 "${nightly}/repo/scripts/check-history.py"
+  # A FORCE-PUSH WITH NO origin/HEAD (#386): its `before` is unreachable, so
+  # the base is the merge base with the default branch, which the push
+  # payload names. Without that name, and with no table, it is still
+  # undeterminable; with no event at all, branches.tsv's integration branch
+  # is the base, read last. Same neutral branch name as above.
+  # A commit past origin/trunk, so the force-push has one to scan: with
+  # none, its range is empty, which a push refuses whatever the base was.
+  ( cd "${nightly}/repo" && printf 'c\n' > c.txt && git add --all && seed_commit --message 'pushed' )
+  local nightly_head; nightly_head="$(git -C "${nightly}/repo" rev-parse HEAD)"
+  printf '{"before":"%s","after":"%s","repository":{"default_branch":"trunk"}}' \
+    "$(printf 'f%.0s' $(seq 40))" "$nightly_head" > "${nightly}/force-push.json"
+  printf '{"before":"%s","after":"%s"}' \
+    "$(printf 'f%.0s' $(seq 40))" "$nightly_head" > "${nightly}/force-push-unnamed.json"
+  expect_exit "history: a force-push with no origin/HEAD reads the default branch from its payload" 0 \
+    env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_EVENT_PATH="${nightly}/force-push.json" \
+      python3 "${nightly}/repo/scripts/check-history.py"
+  # By its message, not its exit: an empty range exits 2 too.
+  expect_exit "history: and with no default branch in the payload, that base is still undeterminable" 0 \
+    "$BASH" -c 'rc=0; out="$(env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push GITHUB_EVENT_PATH="$1" python3 "$2" 2>&1)" || rc=$?
+      [ "$rc" -eq 2 ] && grep -qF "an undeterminable base is a failure" <<<"$out"' \
+    _ "${nightly}/force-push-unnamed.json" "${nightly}/repo/scripts/check-history.py"
+  mkdir -p "${nightly}/repo/.github" && printf 'integration_branch\ttrunk\n' > "${nightly}/repo/.github/branches.tsv"
+  expect_exit "history: with no event, the branch table names the base" 0 \
+    env -u GITHUB_EVENT_PATH -u GITHUB_EVENT_NAME -u GITHUB_ACTIONS \
+      python3 "${nightly}/repo/scripts/check-history.py"
+  rm -f "${nightly}/repo/.github/branches.tsv"
 
   # A SECRET IN A PATH GIT WILL NOT DIFF. Without `--text`, `git show` prints
   # `Binary files a/x and b/x differ` for a path its NUL heuristic calls
