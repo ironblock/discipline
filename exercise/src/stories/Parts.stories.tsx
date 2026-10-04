@@ -881,6 +881,26 @@ export const UnknownEvents: Story = {
   },
 };
 
+/** The logo (#351): the file for the surface's own mode, in every look, and only that one -- loaded, not a broken image. */
+export const HeaderLogo: Story = {
+  name: 'Header · the logo, by the surface’s mode',
+  render: () => <SessionHeader session={sessionAt(MOMENTS.opened)} surface={{ curtain: true, gaps: false }} />,
+  play: async ({ canvasElement }) => {
+    const root = canvasElement.querySelector('.ex-root') as HTMLElement;
+    const logos = [...canvasElement.querySelectorAll<HTMLImageElement>('.ex-header__logo-img')];
+    await waitFor(async () => expect(logos.every((img) => img.complete && img.naturalWidth > 0)).toBe(true));
+    const shown: string[] = [];
+    for (const theme of ['bloom', 'paper', 'emboss'])
+      for (const mode of ['dark', 'light']) {
+        root.setAttribute('data-theme', theme);
+        root.setAttribute('data-mode', mode);
+        const visible = logos.filter((img) => getComputedStyle(img).display !== 'none');
+        shown.push(`${theme} ${mode}: ${visible.map((img) => `${img.dataset['for']} ${img.alt}`).join(', ')}`);
+      }
+    await expect(shown).toEqual(['bloom', 'paper', 'emboss'].flatMap((theme) => [`${theme} dark: dark Discipline`, `${theme} light: light Discipline`]));
+  },
+};
+
 export const UnknownRefusal: Story = {
   name: 'Unknown · a refusal',
   render: () => <Composer state="awaiting" phase="spec" phases={PHASES} dispatch={async () => ({ ok: false, refused: 'quota' })} />,

@@ -12,6 +12,27 @@
   color: var(--ink-muted);
 }
 
+/*
+ * The logo, at the height of the line it sits on. Its two files are the two
+ * modes; the surface's mode is a setting, not the system's, so the choice is
+ * made here, by `data-mode`, not by a media query.
+ */
+.ex-header__logo {
+  display: inline-flex;
+  align-items: center;
+}
+
+.ex-header__logo-img {
+  display: block;
+  height: 1.5rem;
+  width: auto;
+}
+
+.ex-root[data-mode='dark'] .ex-header__logo-img[data-for='light'],
+.ex-root[data-mode='light'] .ex-header__logo-img[data-for='dark'] {
+  display: none;
+}
+
 .ex-header__k {
   color: var(--ink-faint);
 }

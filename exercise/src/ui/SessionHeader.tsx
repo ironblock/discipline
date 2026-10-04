@@ -1,3 +1,5 @@
+import logoDark from '../../../logo/logo-dark.svg?url';
+import logoLight from '../../../logo/logo-light.svg?url';
 import type { Link } from '../drive/transport.ts';
 import type { Session } from '../session/fold.ts';
 import { Settings } from './Prefs.tsx';
@@ -26,6 +28,11 @@ export function SessionHeader({ session, link = 'live', linkWhy, surface, room =
   const drawn = !surface.curtain || room === 'none' ? 'closed' : surface.condensed === true || room === 'bars' ? 'condensed' : 'open';
   return (
     <header className="ex-header">
+      {/* The repository's logo (logo/), as it ships: one file per mode, the one the surface's own mode asks for shown. */}
+      <span className="ex-header__logo">
+        <img className="ex-header__logo-img" data-for="dark" src={logoDark} alt="Discipline" />
+        <img className="ex-header__logo-img" data-for="light" src={logoLight} alt="Discipline" />
+      </span>
       {/* What the log has not said is left out: `diet`'s v0 names no arm and no phase. */}
       {session.arm ? (
         <span className="ex-header__item">
