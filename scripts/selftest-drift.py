@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""A fault found not red on `main` opens an issue against its check, and a
+"""A fault found not red on a full run opens an issue against its check, and a
 pull request touching that check is refused until it is closed (#112).
 
-    selftest-drift.py open DIR     on `main` and the nightly: every census under
+    selftest-drift.py open DIR     on a full run (a push or the nightly, #326): every census under
                                    DIR is read for `not_red` rows, and each
                                    check with one gets ONE open issue, labelled
                                    `check:<CHECK>`, listing its faults
@@ -22,10 +22,10 @@ does not repeat itself.
 
 A pull request that FIXES the drift re-proves the check and is refused like any
 other. The procedure is the refusal's: close the issue, re-run the pull
-request, and let the next `main` run reopen it if the fix did not hold.
+request, and let the next full run reopen it if the fix did not hold.
 
 Why the block exists when a re-proven fault would fail anyway: the fault a PR
-touches may be inherited from a `main` run older than the drift, and the issue
+touches may be inherited from a full run older than the drift, and the issue
 names the cause where the selftest would only name the symptom.
 
 Exit 0 when done or nothing is open; 1 when `block` refuses; 2 when `gh`
@@ -72,14 +72,14 @@ class Gh:
 
     def ensure_label(self, label: str) -> None:
         self.run("label", "create", label, "--force", "--color", LABEL_COLOR,
-                 "--description", "a seeded fault for this check was not seen red on main (#112)")
+                 "--description", "a seeded fault for this check was not seen red on a full run (#112)")
 
     def create_issue(self, title: str, label: str, body: str) -> str:
         return self.run("issue", "create", "--title", title, "--label", label, "--body", body).strip()
 
 
 def title(check: str) -> str:
-    return f"selftest: the {check} check has faults not red on main"
+    return f"selftest: the {check} check has faults not red on a full run"
 
 
 LISTED = 50
@@ -124,17 +124,17 @@ def open_issues_for(rows, commit, gh: Gh, run_url: str) -> list[str]:
             issue = existing[0]
             new = [(i, w) for i, w in faults if f"`{i}`" not in (issue.get("body") or "")]
             if new:
-                gh.comment(issue["number"], f"Also not red on `main`{where}:\n\n{listing(new)}\nRun: {run_url or 'unknown'}\n")
+                gh.comment(issue["number"], f"Also not red on a full run{where}:\n\n{listing(new)}\nRun: {run_url or 'unknown'}\n")
                 said.append(f"{check}: #{issue['number']} already open; {len(new)} more fault(s) added")
             else:
                 said.append(f"{check}: #{issue['number']} already open and names every fault")
             continue
         body = (
-            f"The full selftest on `main`{where} did not see these `{check}` faults red:\n\n"
+            f"The full selftest{where} did not see these `{check}` faults red:\n\n"
             f"{listing(faults)}\n"
             f"Until this issue is closed, a pull request whose selftest re-proves any `{check}` "
             f"fault is refused (#112). A pull request that fixes this is refused too: close the "
-            f"issue, re-run it, and the next `main` run reopens it if the fix did not hold.\n\n"
+            f"issue, re-run it, and the next full run reopens it if the fix did not hold.\n\n"
             f"Run: {run_url or 'unknown'}\n"
         )
         said.append(f"{check}: opened {gh.create_issue(title(check), label, body)} for {len(faults)} fault(s)")
@@ -200,7 +200,7 @@ def _census(box: pathlib.Path, text: str) -> pathlib.Path:
     return box
 
 
-@fixture("faults not red on main open one issue per check, labelled with it")
+@fixture("faults not red on a full run open one issue per check, labelled with it")
 def _opens():
     import tempfile
     with tempfile.TemporaryDirectory() as box:
@@ -286,7 +286,7 @@ def _unrelated():
     return f"refused on {found}" if found else None
 
 
-@fixture("the issue opened on main is the issue that blocks the next PR")
+@fixture("the issue a full run opened is the issue that blocks the next PR")
 def _round_trip():
     gh = FakeGh()
     open_issues_for([("results.y", "results", "the fixture did not fail")], "abc", gh, "run")
@@ -335,8 +335,8 @@ def main(argv: list[str]) -> int:
         print(f"selftest-drift: {err}", file=sys.stderr)
         return EXIT_BROKEN
     if found:
-        print("selftest-drift: this pull request re-proves a check with an open drift issue on main. "
-              "If this pull request is the fix, close the issue and re-run it; the next main run "
+        print("selftest-drift: this pull request re-proves a check with an open drift issue from a full run. "
+              "If this pull request is the fix, close the issue and re-run it; the next full run "
               "reopens it if the fix did not hold. Open:", file=sys.stderr)
         for line in found:
             print(f"  {line}", file=sys.stderr)

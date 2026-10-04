@@ -13,10 +13,12 @@ name: gate-selftest
 # is the only thing that can tell you it did.
 #
 # HOW MANY SHARDS IS NOT WRITTEN HERE (#87). It is derived by
-# scripts/scope-selftest.py --matrix: the full run on `main` and the nightly
-# get .github/gate-budget.tsv's `max_shards`, and a pull request re-proving a
-# fraction of the faults gets that fraction of it, never fewer than one
-# (#112). The harvested plan that balanced shards by measured cost retired
+# scripts/scope-selftest.py --matrix, by the run's KIND (#326): a release
+# pull request, a push to the release branch and the nightly get
+# .github/gate-budget.tsv's `max_shards`; a push to the integration branch,
+# which the next push supersedes, gets `develop_shards`; and a pull request
+# re-proving a fraction of the faults gets that fraction of `max_shards`,
+# never fewer than one (#112). The harvested plan that balanced shards by measured cost retired
 # with that ruling; the budget is a number every run prints, not a gate.
 #
 # N is `strategy.job-total`, the size of the matrix the plan produced, so the
@@ -27,11 +29,11 @@ on:
 
 permissions:
   contents: read
-  # To read the latest `main` run's census artifacts, which a pull request's
-  # scope plan is derived from (#112).
+  # To read the base branch's latest full run's census artifacts, which a
+  # pull request's scope plan is derived from (#112).
   actions: read
   # To ask whether a check this pull request re-proves has an open drift issue
-  # on `main` (#112).
+  # from a full run (#112).
   issues: read
 
 jobs:
@@ -44,59 +46,84 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       shards: ${{ steps.count.outputs.shards }}
+      kind: ${{ steps.kind.outputs.kind }}
     steps:
       - uses: actions/checkout@v5
 
+      # WHAT KIND OF RUN THIS IS (#326), read from the event and the branch
+      # table, never from a branch spelled here: `scoped` (a pull request into
+      # anything but the release branch), `superseding` (a push to the
+      # integration branch, the repository's default) or `full` (a release
+      # pull request, a push to the release branch, the nightly). Bound to a
+      # variable first, for the reason the count step below gives.
+      - name: What kind of run this is
+        id: kind
+        run: |
+          kind="$(python3 scripts/scope-selftest.py --kind \
+            --event "${{ github.event_name }}" --ref "${{ github.ref_name }}" \
+            --base-ref "${{ github.base_ref }}" \
+            --default-branch "${{ github.event.repository.default_branch }}")"
+          echo "kind=${kind}" >> "$GITHUB_OUTPUT"
+
       # A PULL REQUEST RE-PROVES ONLY WHAT ITS DIFF CAN REACH (#112). The
-      # latest successful `main` run's censuses say which faults ran red there,
-      # at which commit, and which files each fault's injection touched;
-      # scripts/scope-selftest.py turns that and this diff into a plan of
-      # faults to INHERIT, each declared in this run's census at the commit it
-      # was last seen red -- never counted as passed. No `main` census, or
-      # none this branch can reach, is a plan that inherits nothing, and every
-      # fault runs. A push to `main` is never scoped: it is the full run the
-      # next pull request's plan is read from.
+      # base branch's latest successful full run -- a push or the nightly, the
+      # newer; a superseded push run was cancelled and has no census (#326) --
+      # says which faults ran red there, at which commit, and which files each
+      # fault's injection touched; scripts/scope-selftest.py turns that and
+      # this diff into a plan of faults to INHERIT, each declared in this
+      # run's census at the commit it was last seen red -- never counted as
+      # passed. No census, or none this branch can reach, is a plan that
+      # inherits nothing, and every fault runs. A push is never scoped, and
+      # neither is a release pull request: both are full runs.
       - name: Fetch the history the scope is measured against
-        if: github.event_name == 'pull_request'
+        if: steps.kind.outputs.kind == 'scoped'
         run: git fetch --no-tags --quiet origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" --unshallow || git fetch --no-tags --quiet origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
-      - name: Read the latest main run's censuses
-        if: github.event_name == 'pull_request'
+      - name: Read the base branch's latest full run's censuses
+        if: steps.kind.outputs.kind == 'scoped'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p "${{ runner.temp }}/main-census"
+          mkdir -p "${{ runner.temp }}/base-census"
           run_id="$(gh run list --repo "${{ github.repository }}" --workflow verify.yml \
-            --branch "${{ github.base_ref }}" --event push --status success --limit 1 \
-            --json databaseId --jq '.[0].databaseId // empty')"
+            --branch "${{ github.base_ref }}" --status success --limit 50 \
+            --json databaseId,event \
+            --jq '[.[] | select(.event == "push" or .event == "schedule")][0].databaseId // empty')"
           if [ -n "$run_id" ]; then
+            echo "the census is verify run ${run_id}, the newest successful push or nightly on ${{ github.base_ref }}"
             gh run download "$run_id" --repo "${{ github.repository }}" \
-              --pattern 'selftest-census-*' --dir "${{ runner.temp }}/main-census" \
-              || echo "::warning::main run ${run_id} has no census to read; every fault runs"
+              --pattern 'selftest-census-*' --dir "${{ runner.temp }}/base-census" \
+              || echo "::warning::run ${run_id} on ${{ github.base_ref }} has no census to read; every fault runs"
           else
-            echo "::warning::no successful main run to read; every fault runs"
+            echo "::warning::no successful full run on ${{ github.base_ref }} to read; every fault runs"
           fi
       - name: Derive this pull request's scope plan
-        if: github.event_name == 'pull_request'
+        if: steps.kind.outputs.kind == 'scoped'
         run: >-
           python3 scripts/scope-selftest.py
           --base "origin/${{ github.base_ref }}"
-          --census "${{ runner.temp }}/main-census"
+          --census "${{ runner.temp }}/base-census"
           --out "${{ runner.temp }}/scope-plan.tsv"
           --checks-out "${{ runner.temp }}/checks.txt"
 
-      # A FAULT FOUND NOT RED ON `main` BLOCKS THE NEXT PULL REQUEST THAT
-      # TOUCHES ITS CHECK (#112, ruled 2026-09-27). The `main` run and the
-      # nightly open an issue labelled `check:<name>` for each such fault;
-      # this refuses while one is open for any check whose faults this pull
-      # request re-proves, and names it. Before any shard starts, so the
-      # refusal is the first thing the run says.
+      # A FAULT FOUND NOT RED ON A FULL RUN BLOCKS THE NEXT PULL REQUEST THAT
+      # TOUCHES ITS CHECK (#112, ruled 2026-09-27). Every full run that is not
+      # a pull request's -- a push to either branch, the nightly -- opens an
+      # issue labelled `check:<name>` for each such fault; this refuses while
+      # one is open for any check whose faults this pull request re-proves,
+      # and names it. Before any shard starts, so the refusal is the first
+      # thing the run says. A release pull request re-proves every check, so
+      # it is refused while ANY drift issue is open (#326, Q4): the release
+      # branch is green by construction.
+      - name: Every check, for a release pull request
+        if: steps.kind.outputs.kind == 'full' && github.event_name == 'pull_request'
+        run: python3 scripts/scope-selftest.py --list-checks > "${{ runner.temp }}/checks.txt"
       - name: No open drift issue against a check this pull request re-proves
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/selftest-drift.py block "${{ runner.temp }}/checks.txt"
       - name: Keep the scope plan
-        if: github.event_name == 'pull_request'
+        if: steps.kind.outputs.kind == 'scoped'
         uses: actions/upload-artifact@v4
         with:
           name: selftest-scope-plan
@@ -105,7 +132,8 @@ jobs:
           retention-days: 7
 
       # After the scope, because the count is the scope's: the full list on a
-      # push or the nightly, what the plan does not inherit on a pull request.
+      # full or superseding run, what the plan does not inherit on a scoped
+      # one, divided by the ceiling the kind names.
       #
       # The substitution is BOUND TO A VARIABLE FIRST, not written straight
       # into the `echo`. `echo "shards=$(...)" >> $GITHUB_OUTPUT` is echo's
@@ -117,8 +145,8 @@ jobs:
       - name: How many shards this run needs
         id: count
         run: |
-          shards="$(python3 scripts/scope-selftest.py --matrix \
-            ${{ github.event_name == 'pull_request' && format('--plan {0}/scope-plan.tsv', runner.temp) || '' }})"
+          shards="$(python3 scripts/scope-selftest.py --matrix --kind "${{ steps.kind.outputs.kind }}" \
+            ${{ steps.kind.outputs.kind == 'scoped' && format('--plan {0}/scope-plan.tsv', runner.temp) || '' }})"
           echo "shards=${shards}" >> "$GITHUB_OUTPUT"
           echo "this run derives ${shards}"
 
@@ -215,7 +243,7 @@ jobs:
           cache-dependency-path: exercise/pnpm-lock.yaml
 
       - name: The scope plan this pull request's plan job derived
-        if: github.event_name == 'pull_request'
+        if: needs.plan.outputs.kind == 'scoped'
         uses: actions/download-artifact@v4
         with:
           name: selftest-scope-plan
@@ -228,7 +256,7 @@ jobs:
           ./verify.sh --selftest
           --shard ${{ matrix.shard }}/${{ strategy.job-total }}
           --census "${{ runner.temp }}/census.tsv"
-          ${{ github.event_name == 'pull_request' && format('--scope-plan {0}/scope-plan.tsv', runner.temp) || '' }}
+          ${{ needs.plan.outputs.kind == 'scoped' && format('--scope-plan {0}/scope-plan.tsv', runner.temp) || '' }}
 
       # Uploaded only on success, deliberately. A shard that failed has
       # already failed the build; its census would say nothing the failure
@@ -242,7 +270,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # ...and on `main` and the nightly, a shard that FAILED keeps its census
+      # ...and on a push or the nightly, a shard that FAILED keeps its census
       # under another name, because its `not_red` rows are what
       # scripts/selftest-drift.py opens issues from (#112). Not under
       # `selftest-census-*`: the gate's census check reads that pattern, and a

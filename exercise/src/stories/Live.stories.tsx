@@ -1,9 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor } from 'storybook/test';
 
+import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import { App } from '../App.tsx';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
+import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
  * The canned transport, driven for real: type an ask, watch it stream, let
@@ -97,6 +99,9 @@ export const Served: Story = {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]').length).toBe(4));
     await expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="user"]').length).toBe(4);
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    // Turn 4 was stopped while writing, its prompt read whole: its footer says how far it wrote, beside the `cancelled` badge (#294).
+    const feet = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"] .ex-block__foot')].map((f) => f.textContent ?? '');
+    await expect(feet.some((line) => line.includes('wrote for 3.5 s'))).toBe(true);
   },
 };
 
@@ -109,6 +114,25 @@ export const ServedReading: Story = {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]').length).toBe(4));
     const reading = [...canvasElement.querySelectorAll('.ex-trunk .ex-block__head .ex-block__flow')].map((f) => f.textContent ?? '');
     await expect(reading.some((line) => line.startsWith('+51 of 567 tok in '))).toBe(true);
+  },
+};
+
+/**
+ * `?drive`, a turn stopped mid-prefill (#294). No turn in the rehearsal stopped in prefill, so the log past turn 4's
+ * third progress line is CONSTRUCTED (`served/stopped-in-prefill.ts`, ruled on #294): the block says how far the
+ * read got and that it was cut short, and that nothing was written.
+ */
+export const ServedStoppedReading: Story = {
+  name: '?drive: a turn stopped mid-prefill, drawn as read that far (a constructed stop)',
+  args: {
+    drive: true,
+    web: serving(rehearsalTo(STOPPED_IN_PREFILL_AFTER) + STOPPED_IN_PREFILL.map((line) => JSON.stringify(line)).join('\n') + '\n'),
+  },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const last = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="assistant"]')].at(-1) as HTMLElement;
+    await expect(last.querySelector('.ex-block__head .ex-block__flow')?.textContent).toMatch(/^\+51 of 567 tok in 148 ms \(.+ t\/s pp\) · cut short$/);
+    await expect(last.querySelector('.ex-block__foot')?.textContent).toContain('wrote nothing');
   },
 };
 
@@ -146,5 +170,37 @@ export const NotEndedByAccident: Story = {
     await waitFor(async () => expect(end.textContent).toBe('end the session?'));
     await new Promise((resolve) => setTimeout(resolve, 300));
     await expect(says(canvasElement)).toBe('your turn');
+  },
+};
+
+/**
+ * `?drive`, a turn that hit its output cap (#290): `capped` on the response, the turn settled `failed` -- track three's
+ * fixture. The answer says it hit max tokens, the turn's end says so in place of a failed request, and neither the
+ * ask nor what it wrote is in the model's context (ruled 5969941559).
+ */
+export const ServedCapped: Story = {
+  name: '?drive: a turn that hit max tokens, so no answer',
+  args: { drive: true, web: serving(capped) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-turnend')).not.toBeNull());
+    const answer = canvasElement.querySelector('.ex-trunk [data-tone="assistant"]') as HTMLElement;
+    await expect(answer.querySelector('.ex-stop[data-level="warn"]')?.textContent).toBe('hit max tokens');
+    await expect(answer.querySelector('.ex-context-out')).not.toBeNull();
+    await expect(canvasElement.querySelector('.ex-trunk [data-tone="user"] .ex-context-out')).not.toBeNull();
+    const end = canvasElement.querySelector('.ex-turnend') as HTMLElement;
+    await expect(end.dataset['level']).toBe('warn');
+    await expect(end.textContent).toContain('hit max tokens, so no answer');
+    await expect(end.textContent).not.toContain('a request failed');
+  },
+};
+
+/** The same turn with the finish spelled `max_tokens`, diet's other capped spelling: the badge reads `capped`, not the word. */
+export const ServedCappedMaxTokens: Story = {
+  name: '?drive: a turn capped under another finish spelling, still hit max tokens',
+  args: { drive: true, web: serving(capped.replace('"finish_reason":"length"', '"finish_reason":"max_tokens"')) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-turnend')).not.toBeNull());
+    const answer = canvasElement.querySelector('.ex-trunk [data-tone="assistant"]') as HTMLElement;
+    await expect(answer.querySelector('.ex-stop[data-level="warn"]')?.textContent).toBe('hit max tokens');
   },
 };

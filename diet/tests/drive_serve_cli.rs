@@ -259,9 +259,24 @@ fn a_served_drive_streams_a_real_servers_answer_over_sse() {
         + "\n";
     log::parse(&document).expect("what the binary streams is a log the format reads");
 
-    let log::Event::SessionStart { opened, head, .. } = &lines[0].event else {
+    let log::Event::SessionStart {
+        opened,
+        head,
+        serving,
+        ..
+    } = &lines[0].event
+    else {
         panic!("the stream does not begin with the session: {stream}");
     };
+    // What serves it, declared (#292): llama-server's dialect, concurrency
+    // undeclared rather than assumed one.
+    assert_eq!(
+        serving
+            .as_ref()
+            .map(|serving| (serving.dialect.as_str(), serving.concurrency)),
+        Some(("llama.cpp", None)),
+        "{stream}"
+    );
     assert_eq!(
         *opened, served.opened,
         "the announced `opened` is the log's"
@@ -742,6 +757,62 @@ fn a_drive_server_killed_mid_session_leaves_a_log_whole_through_what_it_showed()
         ),
         "{said}"
     );
+}
+
+#[test]
+fn a_drive_server_exits_0_after_ended_and_ended_is_its_logs_last_line() {
+    // #291: no interrupt needed, and nothing logged after `ended`.
+    let stub = Stub::serving(vec![Act::Raw(ANSWERED.to_vec())]).expect("loopback");
+    let log_file = file_holding("log", "");
+    let path = log_file.0.to_string_lossy().into_owned();
+    let mut served = start(&stub.url(), &["--log", &path]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _ = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains(r#""reason":"final""#) && read.contains(r#""to":"awaiting""#),
+    );
+    // A page streaming the log when the session ends sees `ended`, then the
+    // stream closes.
+    let watcher = {
+        let address = address.clone();
+        std::thread::spawn(move || {
+            exchange(
+                &address,
+                &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+                |_| false,
+            )
+        })
+    };
+    std::thread::sleep(Duration::from_millis(200));
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let exited = loop {
+        if let Some(exited) = served.child.try_wait().expect("the child is waited on") {
+            break Some(exited);
+        }
+        if Instant::now() >= deadline {
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(
+        exited.and_then(|exited| exited.code()),
+        Some(0),
+        "serve did not exit on its own"
+    );
+    let written = std::fs::read_to_string(&log_file.0).expect("the log");
+    let last = written.lines().last().expect("a line");
+    assert!(
+        last.contains(r#""kind":"settlement""#) && last.contains(r#""to":"ended""#),
+        "{written}"
+    );
+    let streamed = watcher.join().expect("the watcher");
+    assert!(streamed.contains(r#""to":"ended""#), "{streamed}");
 }
 
 #[test]

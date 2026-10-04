@@ -1,0 +1,20 @@
+# The floor regimen: the first driven session (#177) against the maintainer's
+# admitted floor, as #287 ruled. `diet/drive/BEGIN.md` is how to run it.
+#
+# The endpoint is NOT here: it goes on `serve`'s command line. The output cap
+# is not here either -- nothing reads one from a regimen; it is `serve`'s
+# `--max-output-tokens`, 8192 by default (#290, measured: 5969377550).
+arm = "first-driven-session"
+dogma_version = 0
+
+substrate = "accel24-beellama-qwen27b-q4kxl"
+# What the server does with reasoning, as served: "on", "off" or "suppressed".
+substrate_reasoning = "on"
+# The registry's hardware_fingerprint for equipment `linux-pc`, which must agree.
+substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"
+
+# Declared, not sent: the server's own launch settings decide sampling, so
+# write what the server actually runs.
+[sampler]
+temperature = 0.6
+top_p = 0.95

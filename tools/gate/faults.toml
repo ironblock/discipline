@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 154
+mechanics_assertions = 155
 unseedable_guards = 2
 migrated = 0
 
@@ -4265,7 +4265,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "the site published though a later run passed"
 failure_class = "wiring.pages-older-sha"
-legacy_signature = "pages.yml: publishes without checking that no later verify run on main has passed"
+legacy_signature = "pages.yml: publishes without checking that no later verify run on its branch has passed"
 migrated = false
 
 [[fault]]
@@ -8489,7 +8489,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "the trigger on any branch"
 failure_class = "wiring.pages-trigger"
-legacy_signature = "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+legacy_signature = "pages.yml: the workflow_run trigger is not exactly verify's runs completed on the declared branches"
 migrated = false
 
 [[fault]]
@@ -9045,4 +9045,255 @@ check = "-"
 label = "a credential shape inside an image payload reads red, against its file"
 failure_class = "hygiene.forbidden-pattern"
 expected_exit = "0"
+migrated = false
+[[fault]]
+id = "test.bakeoff_writes_a_second_product"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "a second directory of one product"
+failure_class = "results.product-shared"
+legacy_signature = "capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.bakeoff_infers_an_absence"
+kind = "seeded-gate"
+check = "test"
+target = "lib/capture::bakeoff"
+label = "an absence the assembler inferred"
+failure_class = "results.claim-field-undeclared"
+legacy_signature = "capture::bakeoff::tests::a_missing_declaration_is_refused_before_anything_is_written \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "metadata.metadata_protocol_unread"
+kind = "seeded-gate"
+check = "metadata"
+label = "the protocol list left unread"
+failure_class = "metadata.protocol-unread"
+legacy_signature = "pr-scope: \\.github/PULL_REQUEST_TEMPLATE\\.md falls under None, not the protocol entry"
+migrated = false
+
+[[fault]]
+id = "mech.post-hoc-is-derived-from-the-two-times-both-ways"
+kind = "mechanics"
+check = "results"
+label = "post-hoc is derived from the two times, both ways"
+failure_class = "results.clean"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "results.results_claim_field_undeclared"
+kind = "seeded-gate"
+check = "results"
+label = "a claim field neither given nor absent"
+failure_class = "results.claim-field-undeclared"
+legacy_signature = "neither gives .claim_issue. nor declares it in .absent.*\\[results\\.claim-field-undeclared\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_product_shared"
+kind = "seeded-gate"
+check = "results"
+label = "one record in two directories"
+failure_class = "results.product-shared"
+legacy_signature = ".product_sha256. [0-9a-f]{64} is declared here and by .*\\[results\\.product-shared\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_supersession_cycle"
+kind = "seeded-gate"
+check = "results"
+label = "a two-directory supersession cycle"
+failure_class = "results.supersession-cycle"
+legacy_signature = ".supersedes. closes a cycle: [^ ]+ -> [^ ]+ -> [^ ]+; .*\\[results\\.supersession-cycle\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_supersedes_the_template"
+kind = "seeded-gate"
+check = "results"
+label = "a supersession of the template"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".supersedes. is [0-9a-f]{64}, which 0 directory\\(ies\\) beside this one declare.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_product_spelled_twice_over"
+kind = "seeded-gate"
+check = "results"
+label = "a product spelled a second way"
+failure_class = "results.product-spelling"
+legacy_signature = ".product_sha256. is spelled 1 time\\(s\\) in the front-matter, as .product_sha256 = \"[0-9a-f]{64}\" # the report.*\\[results\\.product-spelling\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_supersedes_dangling"
+kind = "seeded-gate"
+check = "results"
+label = "a supersession that names no product"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".supersedes. is a{64}, which 0 directory\\(ies\\) beside this one declare.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_issue_not_digits"
+kind = "seeded-gate"
+check = "results"
+label = "an issue number with a leading zero"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".claim_issue. is .0114.; an issue number is a string of digits.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_field_both"
+kind = "seeded-gate"
+check = "results"
+label = "a claim field given and absent"
+failure_class = "results.claim-field-both"
+legacy_signature = ".claim_issue. is both given and declared absent.*\\[results\\.claim-field-both\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_window_start_unsourced"
+kind = "seeded-gate"
+check = "results"
+label = "a window start with no source"
+failure_class = "results.window-start-unsourced"
+legacy_signature = ".window_start. gives no .window_start_from.*\\[results\\.window-start-unsourced\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_rule_ratified_at_malformed"
+kind = "seeded-gate"
+check = "results"
+label = "a ratification time not in UTC"
+failure_class = "results.claim-field-malformed"
+legacy_signature = ".rule_ratified\\.at. is .2026-09-25 03:29., not an ISO-8601 UTC time.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_rule_ratified_of_missing"
+kind = "seeded-gate"
+check = "results"
+label = "a ratification of a file not here"
+failure_class = "results.claim-field-malformed"
+legacy_signature = "is of .nowhere\\.toml., which is not a file here.*\\[results\\.claim-field-malformed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_claim_provenance_nested"
+kind = "seeded-gate"
+check = "results"
+label = "a provenance key in the wrong table"
+failure_class = "results.claim-field-nested"
+legacy_signature = ".derivation\\.rule_ratified_note.: .rule_ratified_note. belongs at the top level.*\\[results\\.claim-field-nested\\]"
+migrated = false
+
+[[fault]]
+id = "ci.ci_pages_deploys_any_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "the site published from any branch"
+failure_class = "wiring.pages-branch"
+legacy_signature = "pages.yml: deploys a run on a branch that is not the default branch"
+migrated = false
+[[fault]]
+id = "ci.ci_release_run_cancelled"
+kind = "seeded-gate"
+check = "ci"
+label = "a release push made cancellable"
+failure_class = "wiring.release-run-cancelled"
+legacy_signature = "is not the one workflow-level expression"
+migrated = false
+[[fault]]
+id = "ci.ci_release_misspelled"
+kind = "seeded-gate"
+check = "ci"
+label = "the release branch misspelled in the cancel expression"
+failure_class = "wiring.release-disagreed"
+legacy_signature = "spells the release branch as mian"
+migrated = false
+[[fault]]
+id = "ci.ci_trigger_drops_a_branch"
+kind = "seeded-gate"
+check = "ci"
+label = "a trigger dropping the integration branch"
+failure_class = "wiring.trigger-disagreed"
+legacy_signature = "repo-metadata.yml: its .push:. trigger names main, and"
+migrated = false
+[[fault]]
+id = "ci.ci_branch_literal_in_script"
+kind = "seeded-gate"
+check = "ci"
+label = "a branch spelled in a script"
+failure_class = "wiring.branch-literal"
+legacy_signature = "scope-selftest.py:[0-9]+: .*names a branch literally"
+migrated = false
+[[fault]]
+id = "exercise.exercise_capped_from_settle_alone"
+kind = "seeded-gate"
+check = "exercise"
+label = "a capped turn read from the settle word alone"
+failure_class = "exercise.capped-settle"
+legacy_signature = "FAIL.*capped\\.test\\.ts.*is not read from the settle word alone"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_stopped_read_drawn_whole"
+kind = "seeded-gate"
+check = "exercise"
+label = "a turn stopped mid-prefill drawn as read in full"
+failure_class = "exercise.progress-shape"
+legacy_signature = "FAIL.*served\\.test\\.ts.*says where a stop cut a read short"
+migrated = false
+
+[[fault]]
+id = "drive.session-logs-a-refusal-after-the-end"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-logs-a-refusal-after-the-end"
+failure_class = "drive.session-logs-a-refusal-after-the-end"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-serves-on-after-ended"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-serves-on-after-ended"
+failure_class = "drive.serve-bin-serves-on-after-ended"
+migrated = false
+
+[[fault]]
+id = "drive.serve-events-outlive-ended"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-events-outlive-ended"
+failure_class = "drive.serve-events-outlive-ended"
+migrated = false
+
+[[fault]]
+id = "drive.session-drops-its-serving"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.session-drops-its-serving"
+failure_class = "drive.session-drops-its-serving"
+migrated = false
+
+[[fault]]
+id = "drive.serve-bin-assumes-one-stream"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-bin-assumes-one-stream"
+failure_class = "drive.serve-bin-assumes-one-stream"
+migrated = false
+
+[[fault]]
+id = "drive.floor-regimen-names-other-hardware"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.floor-regimen-names-other-hardware"
+failure_class = "drive.floor-regimen-names-other-hardware"
 migrated = false

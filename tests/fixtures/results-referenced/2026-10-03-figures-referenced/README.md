@@ -9,6 +9,7 @@ controls_run = []
 known_defects = []
 turns = 2
 prefill_tokens_total = 2048
+absent = { claim_issue = "a constructed fixture, no claim", supersedes = "a constructed fixture, nothing superseded", rule_ratified = "a constructed fixture, no decision rule", window_start = "a constructed fixture, no window" }
 
 [regime]
 arm = "baseline"

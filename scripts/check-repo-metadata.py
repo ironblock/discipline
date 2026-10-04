@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Lint the repository metadata that `sync-repo-metadata.sh` applies.
 
-The sync workflow runs only on `main`, so without this check a malformed
-`labels.json` would not be noticed until after it had merged. This is the
+The sync workflow runs only on the default branch, so without this check a
+malformed `labels.json` would not be noticed until after it had merged. This is the
 gate that makes the sync trustworthy:
 
   * `.github/labels.json` and `.github/milestones.json` parse, carry the

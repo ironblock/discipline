@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-import type { AssistantNode, Folded, SettledNode, SystemNode, ToolNode, UserNode } from '../session/fold.ts';
+import type { AssistantNode, Folded, OffTrunk, SettledNode, SystemNode, ToolNode, UserNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { tokens, took } from './format.ts';
 import { Copy } from './Copy.tsx';
@@ -55,13 +55,14 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
 }
 
 /**
- * A cancelled turn's mark, on its ask and on what answered it (#289): the words are the surface's, the fact the
- * log's -- `diet` sends the model only finished turns, so a cancelled one is gone from what it reads next.
+ * The mark of a turn that ended without an answer -- cancelled, failed (a capped one among them), timed out -- on its
+ * ask and on what answered it (#289): the words are the surface's, the fact the log's -- `diet` sends the model only
+ * finished turns, so such a turn is gone from what it reads next.
  */
-const OUT_OF_CONTEXT = {
+const outOfContext = (why: OffTrunk) => ({
   value: <span className="ex-context-out">not in the model's context</span>,
-  title: "this turn was cancelled, and the drive sends the model only finished turns: it will not read this ask or its answer",
-};
+  title: `this turn ${why === 'cancelled' ? 'was cancelled' : 'ended without an answer'}, and the drive sends the model only finished turns: it will not read this ask or its answer`,
+});
 
 /** A person's ask. Its header says what it will cost to read: the new tokens it put in front of the model. */
 export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
@@ -78,7 +79,7 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
             ),
           }
         : {})}
-      stats={[node.outOfContext && OUT_OF_CONTEXT]}
+      stats={[node.outOfContext && outOfContext(node.outOfContext)]}
       provenance={node}
       id={node.id}
       actions={<Copy text={node.text} />}
@@ -111,7 +112,8 @@ export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<A
   const streamingInto = node.progress === 'streaming' ? (node.text === '' ? 'reasoning' : 'answer') : undefined;
   // It wrote no text: a step, not a message.
   const bare = node.progress === 'done' && node.text === '' && node.reasoning === '';
-  const stopped = stopOf(node.stop ?? 'stop');
+  // The log's `capped` is the record that it hit the cap, whatever the server spelled its finish (#290).
+  const stopped = stopOf(node.capped ? 'length' : (node.stop ?? 'stop'));
   const reading = readingOf(node, now);
   const apart = calls.length > 0 ? writtenApart(node) : undefined;
   // What it wrote, in its footer: all of it, or its text's share, or -- ending in calls it wrote as one with them -- nothing here.
@@ -147,7 +149,7 @@ export function AssistantMessage({ node, calls = [] }: { readonly node: Folded<A
             ),
             title: 'why generation stopped',
           },
-        node.outOfContext && OUT_OF_CONTEXT,
+        node.outOfContext && outOfContext(node.outOfContext),
       ]}
       provenance={node}
       id={node.id}
@@ -215,7 +217,8 @@ function AssistantBody({
  * a reason from a newer drive -- drawn across the trunk where the turn stopped.
  */
 export function TurnEnd({ node }: { readonly node: Folded<SettledNode> }) {
-  const settled = settleOf(node.reason);
+  // `failed` with `capped` is a capped turn (#290, ruled 5969297103), drawn under the settle word #297 proposes for it.
+  const settled = settleOf(node.capped ? 'capped' : node.reason);
   return (
     <div
       className="ex-turnend"

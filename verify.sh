@@ -239,7 +239,7 @@ build_diet() {
 # check's: the renderer's verdict reaches it (`RENDER_LEDGER` names the
 # renderer, so the mechanics assertion can stand one in). The page links the
 # commit it was rendered from; a tree with no commit (the selftest's box)
-# links main.
+# links HEAD, the default branch (#326).
 check_results() {
   build_diet || return
   local ledger rc=0
@@ -247,7 +247,7 @@ check_results() {
   python3 scripts/check-results.py --root results --ledger "$ledger" || rc=$?
   if [ "$rc" -eq 0 ]; then
     python3 "${RENDER_LEDGER:-exercise/scripts/render-ledger.py}" "$ledger" _site/ledger --results results \
-      --commit "$(git rev-parse --verify --quiet HEAD || echo main)" || rc=$?
+      --commit "$(git rev-parse --verify --quiet HEAD || echo HEAD)" || rc=$?
   fi
   # And the page as published, under the Pages table (#32 I3): it is checked
   # here, where the gate can fail, and not first at deploy time.
@@ -382,7 +382,9 @@ check_admission() {
 # from `apply-lane-faults.py --list`, below, rather than declared by hand.
 check_lanes() { python3 scripts/apply-lane-faults.py --verify; }
 
-check_metadata() { python3 scripts/check-repo-metadata.py; }
+# ...and the chore lane's classifier against its own cases (#276): a protocol
+# entry it stopped reading would let a template edit land as a chore.
+check_metadata() { python3 scripts/check-repo-metadata.py && python3 scripts/pr-scope.py --check; }
 
 # ...and the scanner itself stays honest on the shell a stock Mac runs (#236):
 # CI cannot run bash 3.2, so this reads hygiene.sh for what keeps it so.
@@ -680,7 +682,7 @@ usage() {
 SELFTEST_SCRATCH=()
 SELFTEST_BROKEN=()
 # Each fault this run did not see red, as `ID<TAB>CHECK<TAB>WHY`, written to
-# the census. On `main` and the nightly, a shard that fails keeps its census,
+# the census. On a push and the nightly, a shard that fails keeps its census,
 # and scripts/selftest-drift.py opens an issue labelled `check:<CHECK>` for
 # each row (#112). SELFTEST_BROKEN is the run's verdict; this is the per-fault
 # record the verdict is about, for the rows that have a fault to name.
@@ -727,7 +729,7 @@ SELFTEST_RAN=()
 # by --scope-plan (scripts/scope-selftest.py writes it); a fault it does not
 # name runs, so no plan -- and any plan that forgets a fault -- means the old
 # behaviour, every fault re-proven. An inherited fault is never counted as
-# passed: the census declares it, with the `main` commit it was last seen red
+# passed: the census declares it, with the commit it was last seen red
 # at, and nothing here runs it.
 SELFTEST_SCOPE_PLAN=""
 SELFTEST_RAN_IDS=()
@@ -1065,7 +1067,7 @@ seeded_case() {
   # WHAT THIS FAULT TOUCHED, for #112's scoping: the files between the two
   # trees `sandbox_state` just wrote (its first line), read off the sandbox
   # rather than parsed out of the injection's body. The census carries them,
-  # and the `main` run's census is what a PR's scope is decided from.
+  # and the base branch's full run's census is what a PR's scope is decided from.
   local touched
   while IFS= read -r touched; do
     [ -n "$touched" ] && SELFTEST_TOUCHED+=("${ident}"$'\t'"${touched}")
@@ -1556,6 +1558,37 @@ if "edit_in_place" not in was:
     raise SystemExit("that injection no longer uses the portable helper")
 now = was.replace("edit_in_place", "sed" + " -" + "i", 1)
 path.write_text(source.replace(was, now, 1), encoding="utf-8")
+EOF
+}
+
+# The assembler inferring an absence the caller never declared (#32, ruled on
+# #271): an undeclared field written as absent, with no one having said why.
+inject_bakeoff_infers_an_absence() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = "(None, None) => Err(RunError::Undeclared(format!("
+new = "(None, None) => Ok(Declared::Absent(format!("
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The assembler writing a second directory of one product (#271, ruled):
+# its refusal disabled, so the same record assembles beside itself.
+inject_bakeoff_writes_a_second_product() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/capture/bakeoff.rs")
+source = path.read_text(encoding="utf-8")
+old = "if siblings.iter().any(|sha| sha == product_sha256) {"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "if false && siblings.iter().any(|sha| sha == product_sha256) {", 1), encoding="utf-8")
 EOF
 }
 
@@ -3149,6 +3182,14 @@ inject_exercise_example_bundled_into_page() {
   edit_in_place "s|import { examplePath, load } from './drive/recorded.ts';|&import './drive/examples.ts';|" exercise/src/replay.tsx
 }
 
+# A capped turn read from the settle word alone (#290): every failed turn
+# drawn as hitting max tokens, whether or not its response carried `capped`.
+# Typecheck and lint pass it; the fold of a request that failed says it was
+# not capped (capped.test.ts).
+inject_exercise_capped_from_settle_alone() {
+  edit_in_place "s|slot.line.reason === 'failed' \&\& cappedTurns.has(slot.line.turn)|slot.line.reason === 'failed'|" exercise/src/session/fold.ts
+}
+
 # The meter reading a progress frame's old, nested shape again (#288): what
 # the page did when it went blank on the rehearsal drive's first live frame.
 # The types are the format's now, so the read goes through a cast, as an
@@ -3156,6 +3197,14 @@ inject_exercise_example_bundled_into_page() {
 # fold of a progress line -- served, or synthesized for a replay -- sees it.
 inject_exercise_progress_read_nested() {
   edit_in_place 's|    processed: top.processed,|    processed: (top as unknown as { prompt: { processed: number } }).prompt.processed,|' exercise/src/session/fold.ts
+}
+
+# A turn stopped mid-prefill drawn as read in full (#294): the read taken as
+# the whole new part, whatever the last frame said. Typecheck and lint pass
+# it; the fold of a stop cut short -- constructed in served/stopped-in-prefill.ts, as no
+# recorded turn stopped in prefill -- says how far it got.
+inject_exercise_stopped_read_drawn_whole() {
+  edit_in_place 's|^  const read = wrote ? fresh : Math.min(fresh, Math.max(0, m.processed - m.cache));$|  const read = fresh;|' exercise/src/ui/flow.ts
 }
 
 # #32 I2's emitter mutated (track five's faults, carried here by courier): a
@@ -3200,6 +3249,22 @@ EOF
 inject_hygiene() {
   bash scripts/seed-hygiene-fault.sh seeded-faults > /dev/null
   git add --all
+}
+
+# The protocol list left unread (#276): `in_protocol` answers nothing, so no
+# protocol entry is read, and a `substrates/` edit -- in no gate tree, and
+# reached by no seeded fault -- reads as a chore.
+inject_metadata_protocol_unread() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('scripts/pr-scope.py')
+source = path.read_text(encoding="utf-8")
+old = '    """The protocol entry `path` falls under, if any."""\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, old + '    return None\n', 1), encoding="utf-8")
+EOF
 }
 
 # A data-URI payload read as prose again (#278): the views are never built,
@@ -4187,6 +4252,181 @@ path.write_text(source.replace(old, '', 1), encoding="utf-8")
 EOF
 }
 
+# THE CLAIM'S PROVENANCE FIELDS (#32): each broken once, in one directory.
+# A field neither given nor declared absent.
+inject_results_claim_field_undeclared() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'claim_issue = "114"\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '', 1), encoding="utf-8")
+EOF
+}
+
+# One record in two directories (#271, ruled): two rows with one product,
+# which makes every supersession of it ambiguous.
+inject_results_product_shared() {
+  cp -R results/2026-09-27-false-nomination-edit-rate results/2026-09-27-false-nomination-edit-rate-again
+}
+
+# A two-directory supersession cycle (#271, ruled): the edit-rate claim
+# supersedes the framing claim, and the framing claim the edit-rate one.
+inject_results_supersession_cycle() {
+  python3 - <<'EOF'
+import pathlib
+
+edits = [
+    ("results/2026-09-27-false-nomination-edit-rate/README.md",
+     'absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }',
+     'supersedes = "ac427f76ee8fd3ae3f596158d7264d2c853ae937f3215f93ad6d00edc94be122"'),
+    ("results/2026-09-20-false-nomination-framing/README.md",
+     'absent = { supersedes = "nothing replaced: the first draw; (b)-v2 sits beside it" }',
+     'supersedes = "9f9afe1b72ca8860742cb037b4a154a9d53ec6c8f7f46d7bc2c4115da0c334b8"'),
+]
+for name, old, new in edits:
+    path = pathlib.Path(name)
+    source = path.read_text(encoding="utf-8")
+    if source.count(old) != 1:
+        raise SystemExit(f"{name}: the anchor appears {source.count(old)} times")
+    path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# A supersession of the template's placeholder product (#271's fourth review,
+# its M1): the template is no product, so the digest resolves to nothing.
+inject_results_supersedes_the_template() {
+  python3 - <<'EOF'
+import pathlib, re
+
+template = pathlib.Path("results/_template/README.md").read_text(encoding="utf-8")
+sha = re.search(r'^product_sha256 = "([0-9a-f]{64})"$', template, re.M).group(1)
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, f'supersedes = "{sha}"', 1), encoding="utf-8")
+EOF
+}
+
+# A product spelled other than as its one canonical line (#271's fourth
+# review): a trailing comment is valid TOML and a second reading of the key.
+inject_results_product_spelled_twice_over() {
+  python3 - <<'EOF'
+import pathlib, re
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+line = re.search(r'^product_sha256 = "[0-9a-f]{64}"$', source, re.M)
+if line is None:
+    raise SystemExit("the product line moved")
+path.write_text(source.replace(line.group(0), line.group(0) + " # the report", 1), encoding="utf-8")
+EOF
+}
+
+# A supersession that names no product (#271, ruling (a)): a digest of the
+# right shape that no directory beside this one declares.
+inject_results_supersedes_dangling() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'absent = { supersedes = "nothing replaced: stage 1 is a file inside this directory, cited as post-hoc, not a directory" }'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'supersedes = "' + "a" * 64 + '"', 1), encoding="utf-8")
+EOF
+}
+
+# An issue number with a leading zero: a second spelling of one id.
+inject_results_claim_issue_not_digits() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'claim_issue = "114"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'claim_issue = "0114"', 1), encoding="utf-8")
+EOF
+}
+
+# A field given and declared absent at once.
+inject_results_claim_field_both() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'absent = { supersedes ='
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'absent = { claim_issue = "declared absent as well", supersedes =', 1), encoding="utf-8")
+EOF
+}
+
+# A window start with no source: an invented number.
+inject_results_window_start_unsourced() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'window_start_from = "window/run.start"\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '', 1), encoding="utf-8")
+EOF
+}
+
+# A ratification time that is not ISO-8601 UTC.
+inject_results_rule_ratified_at_malformed() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'at = "2026-09-25T03:29:00Z"'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'at = "2026-09-25 03:29"', 1), encoding="utf-8")
+EOF
+}
+
+# A ratification digest of a file that is not here.
+inject_results_rule_ratified_of_missing() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = 'digest = "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2" }'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'digest = "cee9e51342592d9ec4eca966706e2a6207294e211d67fbf08ffcf0e9bc1658d2", of = "nowhere.toml" }', 1), encoding="utf-8")
+EOF
+}
+
+# A provenance key in a table where nothing reads it.
+inject_results_claim_provenance_nested() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path('results/2026-09-27-false-nomination-edit-rate/README.md')
+source = path.read_text(encoding="utf-8")
+old = '[derivation]\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '[derivation]\nrule_ratified_note = "a caveat in the wrong table"\n', 1), encoding="utf-8")
+EOF
+}
+
 # A consumed digest that no longer matches its file. The claim then cites
 # evidence it never read, which reads exactly like evidence it did.
 inject_results_consumed_digest_stale() {
@@ -4750,7 +4990,7 @@ inject_ci_pages_upload_always() {
 
 # The trigger's branch filter gone: a passing push run on any branch publishes.
 inject_ci_pages_trigger_any_branch() {
-  edit_in_place '/^    branches: \[main\]$/d' .github/workflows/pages.yml
+  edit_in_place '/^    branches: \[main, develop\]$/d' .github/workflows/pages.yml
 }
 
 # The site checked against main's tip rather than the sha that built it.
@@ -5067,7 +5307,7 @@ EOF
 
 # Publishes on a trigger of its own, beside the gate.
 inject_ci_pages_publishes_on_its_own_trigger() {
-  edit_in_place '/^    branches: \[main\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
+  edit_in_place '/^    branches: \[main, develop\]$/{n;s/^$/  workflow_dispatch:/;}' .github/workflows/pages.yml
 }
 
 # The ledger the deploy publishes, uploaded by nothing.
@@ -5158,7 +5398,7 @@ import pathlib
 
 path = pathlib.Path(".github/workflows/verify.yml")
 source = path.read_text(encoding="utf-8")
-old = "  push:\n    branches: [main]\n"
+old = "  push:\n    branches: [main, develop]\n"
 if source.count(old) != 1:
     raise SystemExit("verify.yml: no single `push:` trigger to remove")
 path.write_text(source.replace(old, "", 1), encoding="utf-8")
@@ -5166,13 +5406,13 @@ EOF
 }
 
 # Both corroborating namers stripped of their branch filter. Nothing is
-# broken today: verify.yml still says `branches: [main]`, the gate still runs
+# broken today: verify.yml still names both branches, the gate still runs
 # on the trunk, and every check passes. What is gone is the second opinion. The
 # rule that grades the NAME has only corroboration to grade it with, so with
 # one namer left it quietly stops grading anything while still reporting a
 # pass -- which is the shape of both defects this whole file was extended for.
 inject_ci_trunk_uncorroborated() {
-  edit_in_place '/^    branches: \[main\]$/d' \
+  edit_in_place '/^    branches: \[main, develop\]$/d' \
     .github/workflows/pages.yml .github/workflows/repo-metadata.yml
 }
 
@@ -5183,7 +5423,86 @@ inject_ci_trunk_uncorroborated() {
 # knows what the trunk is called; the other workflows that name it do, and
 # they are what catches this.
 inject_ci_trunk_typo() {
-  edit_in_place 's|^    branches: \[main\]$|    branches: [mian]|' .github/workflows/verify.yml
+  edit_in_place 's|^    branches: \[main, develop\]$|    branches: [mian, develop]|' .github/workflows/verify.yml
+}
+
+# #326's faults: the branch table and everything that must agree with it.
+
+# The site published from whichever branch's run passed, not only the
+# default branch's: after the rename, a release push would deploy over the
+# working surface.
+inject_ci_pages_deploys_any_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/pages.yml")
+source = path.read_text(encoding="utf-8")
+old = " && github.event.workflow_run.head_branch == github.event.repository.default_branch"
+if source.count(old) != 1:
+    raise SystemExit("pages.yml: no single default-branch guard to remove")
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# A push to the release branch made cancellable: the next release push would
+# cancel the run that makes the release branch green by construction.
+inject_ci_release_run_cancelled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+old = "(github.event_name == 'push' && github.ref_name != 'main')"
+if source.count(old) != 1:
+    raise SystemExit("verify.yml: no single push clause to widen")
+path.write_text(source.replace(old, "(github.event_name == 'push')", 1), encoding="utf-8")
+EOF
+}
+
+# The release branch's one spelling outside the table, misspelled: every
+# release push would be cancellable and every release pull request superseded.
+inject_ci_release_misspelled() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+lines = path.read_text(encoding="utf-8").split("\n")
+hits = [i for i, line in enumerate(lines) if line.startswith("  cancel-in-progress: ")]
+if len(hits) != 1 or lines[hits[0]].count("'main'") != 2:
+    raise SystemExit("verify.yml: no single cancel expression spelling the release branch twice")
+lines[hits[0]] = lines[hits[0]].replace("'main'", "'mian'")
+path.write_text("\n".join(lines), encoding="utf-8")
+EOF
+}
+
+# A trigger that drops the integration branch: before the rename it changes
+# nothing, after it the labels sync from no push at all.
+inject_ci_trigger_drops_a_branch() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/repo-metadata.yml")
+source = path.read_text(encoding="utf-8")
+old = "    branches: [main, develop]\n"
+if source.count(old) != 1:
+    raise SystemExit("repo-metadata.yml: no single two-branch trigger to narrow")
+path.write_text(source.replace(old, "    branches: [main]\n", 1), encoding="utf-8")
+EOF
+}
+
+# The release branch spelled in a script instead of read from the table: a
+# rename of the table would leave this script deciding by the old name.
+inject_ci_branch_literal_in_script() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/scope-selftest.py")
+source = path.read_text(encoding="utf-8")
+old = 'declared("release_branch", BRANCHES))'
+if source.count(old) != 1:
+    raise SystemExit("scope-selftest.py: no single read of the release branch to replace")
+path.write_text(source.replace(old, '"main")', 1), encoding="utf-8")
+EOF
 }
 
 # A gating workflow that narrows the test check to part of the suite. The job
@@ -8219,7 +8538,7 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
     # ignored, so each `git add --all` commits only what its case names.
     printf '__pycache__/\n' > .gitignore
     printf 'a\n' > a.txt && git add --all && seed_commit --message 'base'
-    git update-ref refs/remotes/origin/main HEAD
+    git update-ref refs/remotes/origin/HEAD HEAD
     printf 'b\n' > b.txt && git add --all && seed_commit --message 'second'
   )
   local fake_base fake_head
@@ -8755,6 +9074,10 @@ selftest() {
     'record/fixtures/invalid/request-unhashed-in-a-live-record\.jsonl' 'test:conformance/formats::record'
   seeded_case "an injection only GNU sed accepts"     injections inject_injection_needs_gnu_sed \
     'sed forms only GNU accepts'
+  seeded_case "an absence the assembler inferred"     test     inject_bakeoff_infers_an_absence \
+    'capture::bakeoff::tests::a_missing_declaration_is_refused_before_anything_is_written \.\.\. FAILED' 'lib/capture::bakeoff'
+  seeded_case "a second directory of one product"    test     inject_bakeoff_writes_a_second_product \
+    'capture::bakeoff::tests::the_assembled_directory_is_one_the_gates_accept \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the runner's digest made advisory"     test     inject_bakeoff_digest_unchecked \
     'capture::bakeoff::tests::a_cache_the_record_did_not_consume_is_refused \.\.\. FAILED' 'lib/capture::bakeoff'
   seeded_case "the assembled directory's evidence is elsewhere" test inject_bakeoff_evidence_not_attached \
@@ -8990,6 +9313,30 @@ selftest() {
     '0 file\(s\) here hash to .product_sha256.*\[results\.reference-unresolved\]'
   seeded_case "a new directory declaring no figures"  results  inject_results_figures_undeclared \
     'declares no .figures., and a directory dated after.*\[results\.figures-undeclared\]'
+  seeded_case "a claim field neither given nor absent" results inject_results_claim_field_undeclared \
+    'neither gives .claim_issue. nor declares it in .absent.*\[results\.claim-field-undeclared\]'
+  seeded_case "one record in two directories"       results inject_results_product_shared \
+    '.product_sha256. [0-9a-f]{64} is declared here and by .*\[results\.product-shared\]'
+  seeded_case "a two-directory supersession cycle"  results inject_results_supersession_cycle \
+    '.supersedes. closes a cycle: [^ ]+ -> [^ ]+ -> [^ ]+; .*\[results\.supersession-cycle\]'
+  seeded_case "a supersession of the template"       results inject_results_supersedes_the_template \
+    '.supersedes. is [0-9a-f]{64}, which 0 directory\(ies\) beside this one declare.*\[results\.claim-field-malformed\]'
+  seeded_case "a product spelled a second way"       results inject_results_product_spelled_twice_over \
+    '.product_sha256. is spelled 1 time\(s\) in the front-matter, as .product_sha256 = "[0-9a-f]{64}" # the report.*\[results\.product-spelling\]'
+  seeded_case "a supersession that names no product" results inject_results_supersedes_dangling \
+    '.supersedes. is a{64}, which 0 directory\(ies\) beside this one declare.*\[results\.claim-field-malformed\]'
+  seeded_case "an issue number with a leading zero"   results  inject_results_claim_issue_not_digits \
+    '.claim_issue. is .0114.; an issue number is a string of digits.*\[results\.claim-field-malformed\]'
+  seeded_case "a claim field given and absent"        results  inject_results_claim_field_both \
+    '.claim_issue. is both given and declared absent.*\[results\.claim-field-both\]'
+  seeded_case "a window start with no source"         results  inject_results_window_start_unsourced \
+    '.window_start. gives no .window_start_from.*\[results\.window-start-unsourced\]'
+  seeded_case "a ratification time not in UTC"        results  inject_results_rule_ratified_at_malformed \
+    '.rule_ratified\.at. is .2026-09-25 03:29., not an ISO-8601 UTC time.*\[results\.claim-field-malformed\]'
+  seeded_case "a ratification of a file not here"     results  inject_results_rule_ratified_of_missing \
+    'is of .nowhere\.toml., which is not a file here.*\[results\.claim-field-malformed\]'
+  seeded_case "a provenance key in the wrong table"   results  inject_results_claim_provenance_nested \
+    '.derivation\.rule_ratified_note.: .rule_ratified_note. belongs at the top level.*\[results\.claim-field-nested\]'
   seeded_case "an injection that changes nothing"     injections inject_inert_injection \
     'inject_that_changes_nothing  exit=' inject_that_changes_nothing
   seeded_case "the one portable spelling made GNU-only" bsd    inject_bsd_edit_in_place_gnu_only \
@@ -9030,6 +9377,8 @@ selftest() {
     'is unguarded; bash 3\.2 aborts on it'
   seeded_case "forbidden content in the tree"         hygiene  inject_hygiene \
     'hygiene: internal-ticket-id:'
+  seeded_case "the protocol list left unread"         metadata inject_metadata_protocol_unread \
+    'pr-scope: \.github/PULL_REQUEST_TEMPLATE\.md falls under None, not the protocol entry'
   seeded_case "a data-URI payload read as prose"      hygiene  inject_hygiene_datauri_read_as_prose \
     'hygiene: internal-ticket-id: tests/fixtures/hygiene-datauri/ticket-id-shape-in-a-data-uri\.svg:6:'
   seeded_case "external subresource on the site"      pages    inject_pages \
@@ -9072,10 +9421,14 @@ selftest() {
     'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
   seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \
     "replay-smoke: kitchen-sink's label is on the page but out of view"
+  seeded_case "a capped turn read from the settle word alone" exercise inject_exercise_capped_from_settle_alone \
+    'FAIL.*capped\.test\.ts.*is not read from the settle word alone'
   seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
     "replay-smoke: kitchen-sink is bundled into the page's code"
   seeded_case "the meter reading a progress frame's old shape" exercise inject_exercise_progress_read_nested \
     "TypeError: Cannot read properties of undefined \\(reading 'processed'\\)"
+  seeded_case "a turn stopped mid-prefill drawn as read in full" exercise inject_exercise_stopped_read_drawn_whole \
+    'FAIL.*served\.test\.ts.*says where a stop cut a read short'
   seeded_case "a dogma tag in no vocabulary"          test     inject_interview_tag_undeclared \
     'formats::interview::tests::no_dogma_tag_is_missing_from_the_table \.\.\. FAILED' 'lib/formats::interview'
   seeded_case "operating points sorted, not in file order" test  inject_operating_points_sorted \
@@ -9107,7 +9460,7 @@ selftest() {
   seeded_case "the site uploaded unchecked" ci inject_ci_pages_uploads_unchecked \
     "pages.yml: upload-pages-artifact is not preceded by \./verify\.sh --site _site"
   seeded_case "the site published though a later run passed" ci inject_ci_pages_publishes_an_older_sha \
-    "pages.yml: publishes without checking that no later verify run on main has passed"
+    "pages.yml: publishes without checking that no later verify run on its branch has passed"
   seeded_case "the newest-run comparison turned round" ci inject_ci_pages_newest_run_compared_backwards \
     "pages.yml: the newest-run step publishes when the newest passed run is 1006 and this run is 998"
   seeded_case "the deploy's group at the workflow level" ci inject_ci_pages_concurrency_at_workflow_level \
@@ -9139,7 +9492,7 @@ selftest() {
   seeded_case "the upload run whatever the check said" ci inject_ci_pages_upload_always \
     "pages.yml: a step from the check on carries .if:. .actions/upload-pages-artifact"
   seeded_case "the trigger on any branch" ci inject_ci_pages_trigger_any_branch \
-    "pages.yml: the workflow_run trigger is not exactly verify's runs completed on main"
+    "pages.yml: the workflow_run trigger is not exactly verify's runs completed on the declared branches"
   seeded_case "the checkout not the run's sha" ci inject_ci_pages_checkout_not_the_run \
     "pages.yml: the site is not checked against the sha that run built"
   seeded_case "the condition with text outside its braces" ci inject_ci_pages_condition_outside_its_braces \
@@ -9194,6 +9547,16 @@ selftest() {
     'runs apt-get with no .timeout-minutes.'
   seeded_case "the trunk's run cancelled by a merge"  ci       inject_ci_trunk_run_cancelled \
     'cancels a push run on the trunk'
+  seeded_case "the site published from any branch" ci inject_ci_pages_deploys_any_branch \
+    "pages.yml: deploys a run on a branch that is not the default branch"
+  seeded_case "a release push made cancellable" ci inject_ci_release_run_cancelled \
+    'is not the one workflow-level expression'
+  seeded_case "the release branch misspelled in the cancel expression" ci inject_ci_release_misspelled \
+    'spells the release branch as mian'
+  seeded_case "a trigger dropping the integration branch" ci inject_ci_trigger_drops_a_branch \
+    'repo-metadata.yml: its .push:. trigger names main, and'
+  seeded_case "a branch spelled in a script" ci inject_ci_branch_literal_in_script \
+    'scope-selftest.py:[0-9]+: .*names a branch literally'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
     'passes .--scope. to verify\.sh'
   seeded_case "CI narrowing the history check"        ci       inject_ci_ranged_history \
@@ -9646,7 +10009,7 @@ selftest() {
       # predicted (ruled on #108, 2026-09-24). Reported, never graded: the
       # budget is a printed number, not a gate (#112).
       printf 'elapsed\t%d\n' "$SECONDS"
-      # The commit these verdicts are about, so a `main` run's census can say
+      # The commit these verdicts are about, so a full run's census can say
       # at which sha each fault was last seen red (#112).
       printf 'commit\t%s\n' "$(git -C "$ROOT" rev-parse HEAD 2> /dev/null || echo unknown)"
       # Each fault this shard ran, by ordinal AND id: the id is what a later
@@ -9756,6 +10119,28 @@ prove_selftest_mechanics() {
   expect_exit "and the template passes as referenced" 0 \
     bash -c "cd '${ROOT}' && python3 scripts/check-results.py results/_template"
 
+  # A copy of the template is a claim directory, so it declares its four
+  # provenance fields (#32): absent here, since the record refusal is the one
+  # failure this case reads.
+  python3 - "${relay}/2026-01-30-no-substrate/README.md" <<'EOF'
+import pathlib, sys
+
+path = pathlib.Path(sys.argv[1])
+source = path.read_text(encoding="utf-8")
+if not source.startswith("+++\n"):
+    raise SystemExit("the template's front-matter fence moved")
+absent = 'absent = { claim_issue = "a fixture", supersedes = "a fixture", rule_ratified = "a fixture", window_start = "a fixture" }\n'
+path.write_text("+++\n" + absent + source[len("+++\n"):], encoding="utf-8")
+EOF
+  # POST-HOC IS DERIVED, BOTH WAYS (#32): a rule ratified after its window
+  # opened reads post-hoc in the ledger (the 09-20 framing run), and one
+  # ratified before does not (the 09-27 edit-rate run).
+  expect_exit "post-hoc is derived from the two times, both ways" 0 \
+    bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
+      && ledger=\$(mktemp) && trap 'rm -f \"\${ledger:?}\"' EXIT \
+      && python3 scripts/check-results.py --root results --ledger \"\$ledger\" >/dev/null \
+      && python3 -c 'import json,sys; rows={r[\"directory\"]: r[\"provenance\"][\"post_hoc\"] for r in json.load(open(sys.argv[1]))[\"directories\"]}; sys.exit(0 if rows[\"2026-09-20-false-nomination-framing\"] is True and rows[\"2026-09-27-false-nomination-edit-rate\"] is False else 1)' \"\$ledger\""
+
   expect_exit "a record diet refuses gets no verdict from the linter" 0 \
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
       && out=\$(python3 scripts/check-results.py '${relay}/2026-01-30-no-substrate' 2>&1; true) \
@@ -9786,7 +10171,7 @@ prove_selftest_mechanics() {
     cd "$pushes" && git init -q .
     git -c user.email=gate@example.invalid -c user.name=gate \
       commit -q --allow-empty -m "a trunk commit"
-    git update-ref refs/remotes/origin/main HEAD
+    git update-ref refs/remotes/origin/HEAD HEAD
     git -c user.email=gate@example.invalid -c user.name=gate \
       commit -q --allow-empty -m "one"
     git -c user.email=gate@example.invalid -c user.name=gate \

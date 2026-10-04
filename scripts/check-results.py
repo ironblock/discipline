@@ -72,6 +72,7 @@ import datetime
 import decimal
 import hashlib
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -297,6 +298,58 @@ REF_STEP = re.compile(r"\.([A-Za-z_][A-Za-z0-9_-]*)|\[(\d+)\]")
 class Written(str):
     """A JSON number as it was written, so a rendered figure is the product's
     own digits and not a float's re-spelling of them."""
+# THE CLAIM'S PROVENANCE, AS FIELDS (#32, ruled on the thread; written into
+# every directory by #245). Each of these four is either present at the top
+# level of the front-matter or named in `absent = { field = "reason" }` --
+# never both, never neither: an absence is declared, not inferred.
+CLAIM_FIELDS = ("claim_issue", "supersedes", "rule_ratified", "window_start")
+# Free text that rides beside them, top level only: where `window_start` was
+# read from (required with it), and a caveat on the ratification.
+CLAIM_PROVENANCE = ("window_start_from", "rule_ratified_note")
+DIGIT_ID = re.compile(r"[1-9][0-9]*")
+# ASCII digits only -- `\d` takes any script's digits, and post-hoc is a
+# string comparison of two of these -- and a real time, checked by parsing
+# (#271's review: "2026-13-45T25:61:61Z" and Arabic-Indic digits passed).
+UTC = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z")
+
+
+def is_utc(value: object) -> bool:
+    """An ISO-8601 UTC time as these fields spell it, and a real one."""
+    if not (isinstance(value, str) and UTC.fullmatch(value)):
+        return False
+    try:
+        datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ")
+    except ValueError:
+        return False
+    return True
+
+
+DEFAULT_RULE_FILE = "decision-rule.toml"
+PRODUCT_LINE = re.compile(r'product_sha256 = "[0-9a-f]{64}"')
+def has_text(value: object) -> bool:
+    """A string a reader can read: at least one ASCII letter or digit. diet's
+    assembler (`has_text` in capture/bakeoff.rs) states the same rule, so a
+    reason it writes is a reason this reads (#271's third review: a list of
+    invisible code points kept growing)."""
+    return isinstance(value, str) and any(ch.isascii() and ch.isalnum() for ch in value)
+
+
+def named_exactly(directory: pathlib.Path, path: str) -> bool:
+    """Whether `path` names a regular file under `directory` spelled exactly as
+    the directory lists it, part by part, and through no symlink: on a
+    case-insensitive filesystem `readme.md` would otherwise open README.md
+    (#271's second review)."""
+    here = directory
+    for part in path.split("/"):
+        try:
+            if part not in os.listdir(here):
+                return False
+        except OSError:
+            return False
+        here = here / part
+        if here.is_symlink():
+            return False
+    return here.is_file()
 
 
 class Unreadable(Exception):
@@ -603,6 +656,27 @@ def check_run(directory: pathlib.Path) -> list[str]:
     except ValueError as exc:
         fail("results.front-matter-not-toml", f"README.md front-matter is not TOML: {exc}")
         return failures
+    # ONE SPELLING OF THE PRODUCT (#271's fourth review): a product is the
+    # record's identity, read by every sibling's supersession and by diet's
+    # assembler, which reads the line, not the TOML. So it is spelled once, at
+    # the top level, as `product_sha256 = "<64 hex>"`, and nowhere else in the
+    # front-matter -- not in a table, not in a string. Any line naming the
+    # key counts, however it is spelled around it (#271's fifth review: a
+    # quoted key is the same TOML key and starts no line with the name), and
+    # the one line's digest is the top-level value, so an escaped spelling of
+    # the key cannot carry a product the line does not.
+    spelled = [line for line in source.split("\n") if "product_sha256" in line]
+    if ("product_sha256" in front or spelled) and (
+        len(spelled) != 1
+        or not PRODUCT_LINE.fullmatch(spelled[0])
+        or front.get("product_sha256") != spelled[0].split('"')[1]
+    ):
+        fail(
+            "results.product-spelling",
+            f"`product_sha256` is spelled {len(spelled)} time(s) in the front-matter"
+            f"{', as ' + repr(spelled[0]) if len(spelled) == 1 else ''}; a product is one line, "
+            f'`product_sha256 = "<64 hex>"`, at the top level',
+        )
 
     for key, expected in REQUIRED_KEYS.items():
         if key not in front:
@@ -921,11 +995,21 @@ def check_run(directory: pathlib.Path) -> list[str]:
     if FIGURES_SEEN is not None and figures in FIGURES and name != TEMPLATE_DIR:
         FIGURES_SEEN[figures] += 1
 
+    # --- the claim's provenance fields (#32) ---------------------------------
+    post_hoc = check_claim_fields(directory, front, fail) if name != TEMPLATE_DIR else None
+
     if LEDGER is not None and not failures and name != TEMPLATE_DIR:
         row = ledger_row(directory, front, claims)
         row["figures"] = figures
         if rendered is not None:
             row["report"] = rendered
+        row["provenance"] = {
+            **{key: front[key] for key in (*CLAIM_FIELDS, *CLAIM_PROVENANCE) if key in front},
+            "absent": front.get("absent", {}),
+            # Derived, never written: a rule ratified after its window opened
+            # is a post-hoc rule, whatever a note says about it.
+            "post_hoc": post_hoc,
+        }
         LEDGER.append(row)
     return failures
 
@@ -1211,6 +1295,203 @@ def lint_figures(
         )
         break
     return "".join(rendered) if clean else None
+
+
+def sibling_fronts(directory: pathlib.Path) -> dict[str, tuple[object, object]]:
+    """Each directory beside this one, the template excepted, by name: the
+    `product_sha256` and `supersedes` its front-matter declares. A sibling
+    whose front-matter cannot be read declares nothing here; its own lint
+    says why."""
+    fronts: dict[str, tuple[object, object]] = {}
+    for sibling in sorted(
+        p for p in directory.parent.iterdir() if p.is_dir() and p != directory and p.name != TEMPLATE_DIR
+    ):
+        try:
+            source, _, _, _ = split_front_matter(read_text(sibling / "README.md"))
+            front = tomllib.loads(source or "")
+        except (OSError, Unreadable, tomllib.TOMLDecodeError):
+            continue
+        fronts[sibling.name] = (front.get("product_sha256"), front.get("supersedes"))
+    return fronts
+
+
+def sibling_products(directory: pathlib.Path) -> dict[str, list[str]]:
+    """Each `product_sha256` the directories beside this one declare, and
+    which directories declare it: what a `supersedes` digest resolves
+    against (#271, Dispatch's ruling (a))."""
+    products: dict[str, list[str]] = {}
+    for name, (sha, _) in sibling_fronts(directory).items():
+        if isinstance(sha, str):
+            products.setdefault(sha, []).append(name)
+    return products
+
+
+def supersession_cycle(directory: pathlib.Path, front: dict) -> list[str] | None:
+    """The directories a supersession walk from this one passes through when
+    it returns here -- a cycle of any length (#271, ruled) -- or None. Each
+    step resolves a `supersedes` digest to the one sibling declaring it as
+    its product; a step that does not resolve to exactly one ends the walk,
+    since that is refused on its own."""
+    fronts = sibling_fronts(directory)
+    fronts[directory.name] = (front.get("product_sha256"), front.get("supersedes"))
+    owner: dict[object, list[str]] = {}
+    for name, (sha, _) in fronts.items():
+        owner.setdefault(sha, []).append(name)
+    path, here = [directory.name], directory.name
+    while True:
+        target = fronts[here][1]
+        named = owner.get(target, []) if isinstance(target, str) else []
+        if len(named) != 1:
+            return None
+        here = named[0]
+        if here == directory.name:
+            return path + [here]
+        if here in path:
+            return None
+        path.append(here)
+
+
+def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str, str], None]) -> bool | None:
+    """The four provenance fields, their absences and their free text, as
+    ruled on #32. Returns whether the rule was ratified after its window
+    opened -- None when either time is absent."""
+    absent = front.get("absent", {})
+    if not isinstance(absent, dict):
+        fail("results.claim-field-malformed", "front-matter `absent` is not a table of field = \"reason\"")
+        absent = {}
+    for key, reason in absent.items():
+        if key not in CLAIM_FIELDS:
+            fail("results.claim-field-malformed", f"`absent` names `{key}`, which is none of {', '.join(CLAIM_FIELDS)}")
+        elif not has_text(reason):
+            fail("results.claim-field-malformed", f"`absent.{key}` gives no reason; an absence is declared with why")
+    for key in CLAIM_FIELDS:
+        if key in front and key in absent:
+            fail("results.claim-field-both", f"`{key}` is both given and declared absent")
+        elif key not in front and key not in absent:
+            fail(
+                "results.claim-field-undeclared",
+                f"front-matter neither gives `{key}` nor declares it in `absent`; an absence is declared, not inferred (#32)",
+            )
+
+    # Top level only, at any depth: the same key in a table, a table's table
+    # or an array of tables is a field nobody reads, looking like one somebody
+    # does (#271's review found `[derivation.sub]` unchecked).
+    def nested(value: object, where: str) -> None:
+        if isinstance(value, dict):
+            for key, inner in value.items():
+                if key in (*CLAIM_FIELDS, *CLAIM_PROVENANCE):
+                    fail("results.claim-field-nested", f"`{where}.{key}`: `{key}` belongs at the top level of the front-matter")
+                nested(inner, f"{where}.{key}")
+        elif isinstance(value, list):
+            for index, inner in enumerate(value):
+                nested(inner, f"{where}[{index}]")
+
+    for table, value in front.items():
+        if table not in ("absent", "rule_ratified"):
+            nested(value, table) if isinstance(value, (dict, list)) else None
+
+    issue = front.get("claim_issue")
+    if issue is not None and not (isinstance(issue, str) and DIGIT_ID.fullmatch(issue)):
+        fail("results.claim-field-malformed", f"`claim_issue` is {issue!r}; an issue number is a string of digits with no leading zero")
+    supersedes = front.get("supersedes")
+    if supersedes is not None and not (isinstance(supersedes, str) and SHA256.fullmatch(supersedes)):
+        fail("results.claim-field-malformed", "`supersedes` is not the 64-hex digest of the product it replaces")
+    elif supersedes is not None and supersedes == front.get("product_sha256"):
+        # A claim never replaces itself (#271 review): one comparison.
+        fail("results.claim-field-malformed", "`supersedes` is this directory's own `product_sha256`; a claim does not supersede itself")
+    elif supersedes is not None:
+        # RESOLVED, NOT TRUSTED (#271, ruling (a)): a digest names a product
+        # exactly, so it must name exactly one beside this directory -- a
+        # dangling or an ambiguous supersession cannot pass.
+        named = sibling_products(directory).get(supersedes, [])
+        if len(named) != 1:
+            fail(
+                "results.claim-field-malformed",
+                f"`supersedes` is {supersedes}, which {len(named)} directory(ies) beside this one "
+                f"declare as their `product_sha256`{': ' + ', '.join(named) if named else ''}; a "
+                f"supersession names exactly one product",
+            )
+        # NO CYCLE (#271, ruled): a claim that its own successor supersedes
+        # orders nothing, at any length.
+        elif (cycle := supersession_cycle(directory, front)) is not None:
+            fail(
+                "results.supersession-cycle",
+                f"`supersedes` closes a cycle: {' -> '.join(cycle)}; a supersession orders "
+                f"claims, and a cycle orders none",
+            )
+    # ONE PRODUCT, ONE DIRECTORY (#271, ruled): a digest is the record's
+    # identity, and two directories declaring one make every supersession of
+    # it ambiguous.
+    own = front.get("product_sha256")
+    shared = sibling_products(directory).get(own, []) if isinstance(own, str) else []
+    if shared:
+        fail(
+            "results.product-shared",
+            f"`product_sha256` {own} is declared here and by {', '.join(shared)}; a product is "
+            f"one directory's, and a supersession of it would name more than one",
+        )
+    window = front.get("window_start")
+    if window is not None and not is_utc(window):
+        fail("results.claim-field-malformed", f"`window_start` is {window!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
+    source = front.get("window_start_from")
+    if window is not None and not has_text(source):
+        fail("results.window-start-unsourced", "`window_start` gives no `window_start_from`; a time with no source is an invented number (#32)")
+    if window is None and "window_start_from" in front:
+        fail("results.claim-field-malformed", "`window_start_from` names the source of a `window_start` this directory does not give")
+
+    ratified = front.get("rule_ratified")
+    note = front.get("rule_ratified_note")
+    if note is not None and not has_text(note):
+        fail("results.claim-field-malformed", "`rule_ratified_note` is not free text")
+    if ratified is None:
+        if note is not None:
+            fail("results.claim-field-malformed", "`rule_ratified_note` caveats a ratification this directory does not give")
+        return None
+    if not isinstance(ratified, dict):
+        fail("results.claim-field-malformed", "`rule_ratified` is not a table of comment, at, digest and an optional of")
+        return None
+    extra = sorted(set(ratified) - {"comment", "at", "digest", "of"})
+    missing = sorted({"comment", "at", "digest"} - set(ratified))
+    if extra or missing:
+        fail(
+            "results.claim-field-malformed",
+            f"`rule_ratified` carries {', '.join(extra) or 'nothing extra'} and lacks "
+            f"{', '.join(missing) or 'nothing'}; it is comment, at, digest and an optional of",
+        )
+    comment, at, digest = ratified.get("comment"), ratified.get("at"), ratified.get("digest")
+    if "comment" in ratified and not (isinstance(comment, str) and DIGIT_ID.fullmatch(comment)):
+        fail("results.claim-field-malformed", f"`rule_ratified.comment` is {comment!r}; a comment id is a string of digits")
+    if "at" in ratified and not is_utc(at):
+        fail("results.claim-field-malformed", f"`rule_ratified.at` is {at!r}, not an ISO-8601 UTC time (YYYY-MM-DDTHH:MM:SSZ)")
+    if "digest" in ratified and not (isinstance(digest, str) and SHA256.fullmatch(digest)):
+        fail("results.claim-field-malformed", "`rule_ratified.digest` is not 64 lowercase hex characters")
+    # `of` names the file the digest is of -- the rule file by default, the
+    # applier where the ratification pinned that (ruled on #32, 5945384945).
+    # Shape only: whether the digest matches the file as it was at the pinned
+    # commit is the migration's measurement, cited in its values file.
+    of = ratified.get("of", DEFAULT_RULE_FILE)
+    parts = pathlib.PurePosixPath(of).parts if isinstance(of, str) else ()
+    if not isinstance(of, str) or not of or of.startswith("/") or ".." in parts \
+            or pathlib.PurePosixPath(of).as_posix() != of or of.startswith("./"):
+        # One spelling per file (#271 review): `./decision-rule.toml` and
+        # `a//b` are refused, so two directories naming one file agree.
+        fail("results.claim-field-malformed", f"`rule_ratified.of` is {of!r}; it is a path inside this directory, spelled plainly")
+    elif of == "README.md":
+        # The README states the digest, so it can never be the file the
+        # digest is of (#271 review).
+        fail("results.claim-field-malformed", "`rule_ratified` is of `README.md`, the file that states its digest; a digest cannot be of itself")
+    elif not named_exactly(directory, of) \
+            or not (directory / of).resolve().is_relative_to(directory.resolve()):
+        # Not a symlink, and inside once resolved: a link can name a file
+        # anywhere, and the digest would be of whatever sat there (#271's
+        # review, the class `check_consumed` already refuses for evidence).
+        fail(
+            "results.claim-field-malformed",
+            f"`rule_ratified` is of `{of}`, which is not a file here; the digest is of the file `of` names",
+        )
+    if is_utc(at) and is_utc(window):
+        return at > window
+    return None
 
 
 # Each directory this run passed, as the results page draws it (--ledger), or
