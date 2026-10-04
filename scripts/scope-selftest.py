@@ -1135,9 +1135,14 @@ def _checks_of():
                         ("injections.inert_injection", "injections")):
         if checks.get(ident) != want:
             return f"{ident} labelled {checks.get(ident)!r}, not {want!r}"
-    lane = next((i for i, c in checks.items() if c == "lanes"), None)
-    if lane is None or lane.startswith("lanes."):
-        return f"no lane fault labelled `lanes` by its own id: {lane}"
+    # A generated lane fault, labelled `lanes` though its id is its lane's
+    # (`drive.…`). A hand-written `lanes` case (#360) is labelled by the id
+    # verify.sh derives, which starts `lanes.`, so it is not the one asked of.
+    lane = next((i for i, c in checks.items() if c == "lanes" and not i.startswith("lanes.")), None)
+    if lane is None:
+        return "no lane fault labelled `lanes` by its own id"
+    if checks.get("lanes.lanes_scope_drops_a_second_lane") != "lanes":
+        return "the hand-written lanes case is not labelled `lanes`"
     return None
 
 
