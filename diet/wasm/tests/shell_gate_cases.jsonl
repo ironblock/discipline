@@ -23,6 +23,9 @@
 {"argv":["sh","-c","git -c core.pager=less log"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
 {"argv":["sudo","id"],"denylist":["dd"]}
 {"argv":["sh","-c","lsé; cat café.txt"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["sh","-c","LD_PRELOAD=x.so cat a; FOO=1 cat b"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["git","lg"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
+{"argv":["python3.12","-m","pytest"],"denylist":["sudo","su","doas","dd","shred","docker","kubectl","systemctl","crontab","at","git push","git reset --hard"]}
 not json
 {"argv":["ls"]}
 {"argv":[],"denylist":[]}

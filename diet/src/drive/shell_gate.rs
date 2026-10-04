@@ -68,8 +68,35 @@ pub const DENYLIST: &[&str] = &[
 /// flow or a compound test. In the program position they prompt.
 pub const CONTROL_WORDS: &[&str] = &[
     "if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "case", "esac",
-    "in", "function", "select", "!", "[[", "]]", "((", "))", "{", "}",
+    "in", "function", "select", "coproc", "!", "[[", "]]", "((", "))", "{", "}",
 ];
+
+/// Environment names whose assignment prefix changes which program runs or
+/// what it loads (5983544366 (b)): a prefix naming one makes the segment
+/// dynamic, whatever the program. Every other prefix is stripped. A name
+/// ending `*` covers every name it begins.
+pub const LOADER_VARIABLES: &[&str] = &[
+    "PATH",
+    "LD_*",
+    "DYLD_*",
+    "GIT_*",
+    "NODE_OPTIONS",
+    "PYTHONPATH",
+    "PYTHONSTARTUP",
+    "PERL5LIB",
+    "RUBYLIB",
+    "CLASSPATH",
+];
+
+/// Whether an assignment to `name` is one [`LOADER_VARIABLES`] names.
+fn loads(name: &str) -> bool {
+    LOADER_VARIABLES
+        .iter()
+        .any(|pattern| match pattern.strip_suffix('*') {
+            Some(prefix) => name.starts_with(prefix),
+            None => name == *pattern,
+        })
+}
 
 /// Programs that run a string or a file as shell: never read as allowed.
 pub const EVALUATORS: &[&str] = &["eval", "source", ".", "exec"];
@@ -107,7 +134,7 @@ const XARGS_FLAGS: &[&str] = &[
     "-x",
     "--exit",
 ];
-const XARGS_VALUED: &[&str] = &["-n", "-L", "-P", "-I", "-d", "-s", "-E"];
+const XARGS_VALUED: &[&str] = &["-n", "-L", "-P", "-I", "-d", "-s", "-E", "-a", "--arg-file"];
 
 /// The `find` actions that run a command.
 const FIND_EXEC: &[&str] = &["-exec", "-execdir", "-ok", "-okdir"];
@@ -122,6 +149,172 @@ const GIT_FLAGS: &[&str] = &[
     "--literal-pathspecs",
 ];
 const GIT_PREFIXED: &[&str] = &["--git-dir=", "--work-tree=", "--namespace="];
+
+/// git's own commands (`git --list-cmds=main`, its internal `--` helpers
+/// aside). A subcommand outside it is an alias or an external `git-*`
+/// program this cannot expand, so it is dynamic (5983544366 (f)); expanding
+/// an alias is the integration's job.
+const GIT_COMMANDS: &[&str] = &[
+    "add",
+    "am",
+    "annotate",
+    "apply",
+    "archive",
+    "backfill",
+    "bisect",
+    "blame",
+    "branch",
+    "bugreport",
+    "bundle",
+    "cat-file",
+    "check-attr",
+    "check-ignore",
+    "check-mailmap",
+    "check-ref-format",
+    "checkout",
+    "checkout-index",
+    "cherry",
+    "cherry-pick",
+    "clean",
+    "clone",
+    "column",
+    "commit",
+    "commit-graph",
+    "commit-tree",
+    "config",
+    "count-objects",
+    "credential",
+    "credential-cache",
+    "credential-store",
+    "daemon",
+    "describe",
+    "diagnose",
+    "diff",
+    "diff-files",
+    "diff-index",
+    "diff-pairs",
+    "diff-tree",
+    "difftool",
+    "fast-export",
+    "fast-import",
+    "fetch",
+    "fetch-pack",
+    "filter-branch",
+    "fmt-merge-msg",
+    "for-each-ref",
+    "for-each-repo",
+    "format-patch",
+    "fsck",
+    "fsck-objects",
+    "gc",
+    "get-tar-commit-id",
+    "grep",
+    "hash-object",
+    "help",
+    "hook",
+    "http-backend",
+    "http-fetch",
+    "http-push",
+    "imap-send",
+    "index-pack",
+    "init",
+    "init-db",
+    "interpret-trailers",
+    "log",
+    "ls-files",
+    "ls-remote",
+    "ls-tree",
+    "mailinfo",
+    "mailsplit",
+    "maintenance",
+    "merge",
+    "merge-base",
+    "merge-file",
+    "merge-index",
+    "merge-octopus",
+    "merge-one-file",
+    "merge-ours",
+    "merge-recursive",
+    "merge-recursive-ours",
+    "merge-recursive-theirs",
+    "merge-resolve",
+    "merge-subtree",
+    "merge-tree",
+    "mergetool",
+    "mktag",
+    "mktree",
+    "multi-pack-index",
+    "mv",
+    "name-rev",
+    "notes",
+    "pack-objects",
+    "pack-redundant",
+    "pack-refs",
+    "patch-id",
+    "pickaxe",
+    "prune",
+    "prune-packed",
+    "pull",
+    "push",
+    "quiltimport",
+    "range-diff",
+    "read-tree",
+    "rebase",
+    "receive-pack",
+    "reflog",
+    "refs",
+    "remote",
+    "remote-ext",
+    "remote-fd",
+    "remote-ftp",
+    "remote-ftps",
+    "remote-http",
+    "remote-https",
+    "repack",
+    "replace",
+    "replay",
+    "request-pull",
+    "rerere",
+    "reset",
+    "restore",
+    "rev-list",
+    "rev-parse",
+    "revert",
+    "rm",
+    "send-email",
+    "send-pack",
+    "shell",
+    "shortlog",
+    "show",
+    "show-branch",
+    "show-index",
+    "show-ref",
+    "sparse-checkout",
+    "stage",
+    "stash",
+    "status",
+    "stripspace",
+    "submodule",
+    "subtree",
+    "switch",
+    "symbolic-ref",
+    "tag",
+    "unpack-file",
+    "unpack-objects",
+    "update-index",
+    "update-ref",
+    "update-server-info",
+    "upload-archive",
+    "upload-pack",
+    "var",
+    "verify-commit",
+    "verify-pack",
+    "verify-tag",
+    "version",
+    "whatchanged",
+    "worktree",
+    "write-tree",
+];
 
 /// git's free reads (point 4), `branch` aside.
 const GIT_READS: &[&str] = &["status", "log", "diff", "show"];
@@ -603,6 +796,7 @@ impl Gate<'_> {
         if let Some(refusal) = inner.into_iter().find(is_refused) {
             return vec![refusal];
         }
+        let loader = simple.assignments.iter().any(|a| loads(&a.name));
         let heredoc = simple
             .redirections
             .iter()
@@ -613,6 +807,8 @@ impl Gate<'_> {
         }
         let why = if !spliced.is_empty() {
             Some("a command substitution")
+        } else if loader {
+            Some("an environment prefix that changes what runs or what it loads")
         } else if backtick {
             Some("a backtick substitution")
         } else if heredoc {
@@ -820,6 +1016,11 @@ impl Gate<'_> {
         if let Some(entry) = self.denylist.git(subcommand, args) {
             return refused(entry);
         }
+        if !GIT_COMMANDS.contains(&subcommand) {
+            return dynamic(format!(
+                "`git {subcommand}` is not one of git's own commands: an alias or an external program"
+            ));
+        }
         let shape = Shape {
             program: "git".to_owned(),
             subcommand: Some(subcommand.to_owned()),
@@ -898,7 +1099,10 @@ fn wrapper_step(wrapper: &str, text: &str) -> Result<Step, ()> {
             Step::Skip(1)
         } else if ["-u", "--unset"].contains(&text) {
             Step::Skip(2)
-        } else if text.starts_with('-') {
+        } else if text.starts_with('-') || text.split_once('=').is_some_and(|(name, _)| loads(name))
+        {
+            // An option this does not read, or a loader variable
+            // (5983544366 (b)).
             return Err(());
         } else if text.contains('=') {
             Step::Skip(1)
@@ -1002,8 +1206,9 @@ fn shape_of(program: &str, rest: &[Word]) -> Result<Shape, String> {
                 _ => return Err(format!("`{program} -m` with a module that is not literal")),
             }
         }
+        // `python3.12` and `python3` are one shape (5983544366 (h)).
         return Ok(Shape {
-            program: program.to_owned(),
+            program: "python".to_owned(),
             subcommand,
         });
     }
@@ -1377,9 +1582,10 @@ mod tests {
         );
         assert_eq!(
             shape("python3.12 -m pytest -q").as_deref(),
-            Some("python3.12 -m pytest")
+            Some("python -m pytest")
         );
-        assert_eq!(shape("python3 script.py").as_deref(), Some("python3"));
+        assert_eq!(shape("python3 script.py").as_deref(), Some("python"));
+        assert_eq!(shape("python3 -m pytest"), shape("python3.12 -m pytest -x"));
         assert_eq!(shape("git commit -m x").as_deref(), Some("git commit"));
         assert_eq!(shape("timeout 5 cargo test").as_deref(), Some("cargo test"));
         assert_eq!(shape("npm --prefix x install"), None);
@@ -1514,5 +1720,71 @@ mod tests {
         ] {
             assert!(render(bad).is_err(), "{bad:?} was read as a request");
         }
+    }
+
+    #[test]
+    fn a_loader_prefix_is_dynamic_and_any_other_is_stripped() {
+        for line in [
+            "LD_PRELOAD=x.so cat a",
+            "DYLD_INSERT_LIBRARIES=x cat a",
+            "PATH=. ls",
+            "GIT_DIR=x git status",
+            "NODE_OPTIONS=--require=x node a.js",
+            "PYTHONPATH=. python -m pytest",
+            "env LD_PRELOAD=x.so cat a",
+            "env -i PATH=. ls",
+        ] {
+            let judged = judge(line, &[session("cat", None), session("ls", None)]);
+            assert!(
+                judged.segments.iter().all(|s| s.shape.is_none()),
+                "{line:?} kept a shape"
+            );
+            assert_ne!(
+                judged.outcome(),
+                Outcome::Run,
+                "{line:?} ran under a standing approval"
+            );
+        }
+        let judged = judge("FOO=1 LANG=C cat a", &[session("cat", None)]);
+        assert_eq!(judged.outcome(), Outcome::Run);
+    }
+
+    #[test]
+    fn an_unknown_git_subcommand_is_dynamic() {
+        for line in ["git lg", "git co main", "git my-push-alias", "git lfs pull"] {
+            let judged = judge(line, &[]);
+            assert_eq!(judged.segments[0].shape, None, "{line:?} kept a shape");
+            assert_eq!(judged.outcome(), Outcome::Prompt, "{line:?}");
+        }
+        assert_eq!(outcome("git log"), Outcome::Run);
+        assert_eq!(outcome("git commit -m x"), Outcome::Prompt);
+    }
+
+    #[test]
+    fn the_standard_denylist_is_every_entry_of_the_constant() {
+        // A bad edit to `DENYLIST` must fail here, never leave a list that
+        // refuses nothing.
+        assert_eq!(Denylist::standard().entries.len(), DENYLIST.len());
+        for entry in DENYLIST {
+            assert!(Denylist::new(&[*entry]).is_ok(), "{entry:?}");
+        }
+    }
+
+    #[test]
+    fn a_denylisted_program_is_refused_however_it_is_spelled() {
+        for line in [
+            "\"sudo\" id",
+            "'su''do' id",
+            "s\\udo id",
+            "./sudo id",
+            "/usr/bin/../bin/sudo id",
+            "xargs -a list sudo",
+            "xargs --arg-file list sudo",
+            "time -p sudo id",
+            "nice -n 5 timeout 9 sudo id",
+        ] {
+            assert_eq!(outcome(line), Outcome::Refused, "{line:?}");
+        }
+        assert_ne!(outcome("coproc sudo id"), Outcome::Run);
     }
 }
