@@ -53,7 +53,12 @@ def selftest_declared_off() -> bool:
         return False
     if events is None or not release:
         return False
-    return not gatelib.selftest_runs(events, release, event, os.environ.get("BASE_REF", ""), os.environ.get("REF_NAME", ""))
+    base_ref, ref_name = os.environ.get("BASE_REF", ""), os.environ.get("REF_NAME", "")
+    # The ref the event's rule reads must be there: a pull request with no
+    # base, or a push with no ref, cannot be told from the release path.
+    if (event == "pull_request" and not base_ref) or (event == "push" and not ref_name):
+        return False
+    return not gatelib.selftest_runs(events, release, event, base_ref, ref_name)
 
 
 def main() -> int:

@@ -13,7 +13,7 @@ red, never counted as passed.
 `--base` is what the PR is measured against (its merge base with its base
 branch).
 `--census` is a directory of census files from the latest successful full
-selftest on the base branch (a push or the nightly, #326): the ids that ran there, the commit they ran at, and the
+selftest on the base branch (the nightly, #369): the ids that ran there, the commit they ran at, and the
 files each fault's injection touched. PLAN is `inherit<TAB>ID<TAB>SHA` rows;
 a fault the plan does not name is re-proven, so every rule below fails
 toward running.

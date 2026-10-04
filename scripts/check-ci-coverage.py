@@ -158,6 +158,8 @@ LITERAL_EXCEPT = (
 SECONDS_TABLE = pathlib.Path(__file__).resolve().parent.parent / ".github" / "check-seconds.tsv"
 # The one condition the gate's selftest census steps carry (#369, rule 17).
 SKIPPED_SELFTEST = "needs.selftest.result != 'skipped'"
+# ...and the one the repo job's drift refusal carries (#369, rule 17).
+PULL_REQUEST_ONLY = "github.event_name == 'pull_request'"
 
 # Each check a declared split may name (#262). Its members are asked of
 # verify.sh itself -- `VERIFY_LIST_MEMBERS=1 VERIFY_CHECK_SHARD=K/N
@@ -1337,6 +1339,20 @@ def main() -> int:
                     f"{ROOT_WORKFLOW}: the gate's selftest census step ({marker}) runs under {conditions!r}, "
                     f"not `if: {SKIPPED_SELFTEST}` alone: skipped only where the selftest was (#369)"
                 )
+        # ...and the one selftest-time control a pull request keeps (#369, ruled
+        # (c)): the `repo` job refuses a pull request while a check it touches
+        # has an open drift issue. Its step runs `selftest-drift.py
+        # block-scope` on every pull request and under no other condition.
+        repo_wf = WORKFLOWS / "pkg-repo.yml"
+        repo_text = repo_wf.read_text(encoding="utf-8") if repo_wf.is_file() else ""
+        step = next((s for s in re.split(r"\n      - ", repo_text) if "scripts/selftest-drift.py block-scope " in s), None)
+        conditions = re.findall(r"^        if: (.*)$", step, re.MULTILINE) if step else []
+        if conditions != [PULL_REQUEST_ONLY]:
+            failures.append(
+                f"{repo_wf.name}: the step refusing a pull request on an open drift issue "
+                f"(selftest-drift.py block-scope) runs under {conditions!r}, not `if: {PULL_REQUEST_ONLY}` "
+                f"alone; it is the one selftest-time control a pull request keeps (#369)"
+            )
 
     for message in failures:
         print(message, file=sys.stderr)

@@ -124,8 +124,8 @@ jobs:
     permissions:
       contents: read
       actions: read
-      # To open a drift issue on a push or the nightly (#112). Pull-request
-      # runs never reach the step that uses it.
+      # To open a drift issue on the nightly or a push to the release branch
+      # (#112, #369). Pull-request runs never reach the step that uses it.
       issues: write
     steps:
       - uses: actions/checkout@v5

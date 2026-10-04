@@ -244,7 +244,7 @@ def selftest_expression(events: tuple[str, ...], release: str) -> str:
 
 def selftest_runs(events: tuple[str, ...], release: str, event: str, base_ref: str, ref_name: str) -> bool:
     """Whether a run with this event, base and ref runs the selftest -- the
-    same answer SELFTEST_EXPRESSION gives GitHub, in Python."""
+    same answer selftest_expression() gives GitHub, in Python."""
     if "schedule" in events and event == "schedule":
         return True
     if "release" in events:

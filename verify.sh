@@ -5098,6 +5098,21 @@ path.write_text(source.replace(old, "      - name: Every fault was run by exactl
 EOF
 }
 
+# The repo job's drift refusal switched off: a pull request touching a check
+# with an open drift issue then lands, now that it runs no selftest (#369).
+inject_ci_drift_refusal_off() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/pkg-repo.yml")
+source = path.read_text(encoding="utf-8")
+old = "        if: github.event_name == 'pull_request'\n"
+if source.count(old) != 1:
+    raise SystemExit("pkg-repo.yml: no single pull-request-only step")
+path.write_text(source.replace(old, "        if: false\n", 1), encoding="utf-8")
+EOF
+}
+
 # The release branch spelled in a script instead of read from the table: a
 # rename of the table would leave this script deciding by the old name.
 inject_ci_branch_literal_in_script() {
@@ -6006,7 +6021,7 @@ import pathlib
 
 path = pathlib.Path("scripts/selftest-drift.py")
 source = path.read_text(encoding="utf-8")
-old = "    if any(m in reason for m in MACHINERY_REASONS):\n"
+old = "    if is_machinery(files, machinery):\n"
 if source.count(old) != 1:
     raise SystemExit("selftest-drift.py: no single machinery widening to remove")
 path.write_text(source.replace(old, "    if False:\n", 1), encoding="utf-8")
@@ -8417,6 +8432,9 @@ STRICT
   expect_exit "the gate rejects a skipped selftest on a release pull request" 1 \
     env NEEDS="$skipped" EVENT_NAME=pull_request BASE_REF="$release" REF_NAME=7/merge \
       python3 "${ROOT}/scripts/check-job-results.py"
+  expect_exit "the gate rejects a skipped selftest on a pull request with no base" 1 \
+    env NEEDS="$skipped" EVENT_NAME=pull_request REF_NAME=7/merge \
+      python3 "${ROOT}/scripts/check-job-results.py"
   expect_exit "the gate rejects any other job skipped where the selftest may skip" 1 \
     env NEEDS='{"repo":{"result":"skipped"},"selftest":{"result":"skipped"}}' \
       EVENT_NAME=pull_request BASE_REF="$integration" REF_NAME=7/merge \
@@ -9159,6 +9177,8 @@ selftest() {
     "the .selftest. job's .if:. is \\[.\\$\\{\\{ \\(github"
   seeded_case "the selftest census required where the selftest skips" ci inject_ci_selftest_census_unconditional \
     "census step .check-selftest-census.py.* runs under \\[\\]"
+  seeded_case "the pull request's drift refusal switched off" ci inject_ci_drift_refusal_off \
+    "pkg-repo.yml: the step refusing a pull request on an open drift issue .* runs under \\[.false.\\]"
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
     'passes .--scope. to verify\.sh'
   seeded_case "CI narrowing the history check"        ci       inject_ci_ranged_history \

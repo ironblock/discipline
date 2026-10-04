@@ -314,7 +314,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      # ...and on a push or the nightly, a shard that FAILED keeps its census
+      # ...and on a full run that is not a pull request's -- the nightly, a
+      # push to the release branch (#369) -- a shard that FAILED keeps its census
       # under another name, because its `not_red` rows are what
       # scripts/selftest-drift.py opens issues from (#112). Not under
       # `selftest-census-*`: the gate's census check reads that pattern, and a
