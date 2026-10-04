@@ -3427,6 +3427,15 @@ legacy_signature = "the Results section types the figure\\(s\\) '1000', '142'.*\
 migrated = false
 
 [[fault]]
+id = "results.results_front_reference_other_key"
+kind = "seeded-gate"
+check = "results"
+label = "a front reference to a key other than claim_issue"
+failure_class = "results.reference-unresolved"
+legacy_signature = "\\{\\{front\\.issue\\}\\}. names .front\\.issue.; a front-matter reference is a date.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
 id = "results.results_figure_in_conclusion_fence"
 kind = "seeded-gate"
 check = "results"
