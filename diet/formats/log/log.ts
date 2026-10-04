@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 4;
-export const READS = [0, 1, 2, 3, 4] as const;
+export const VERSION = 5;
+export const READS = [0, 1, 2, 3, 4, 5] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -23,6 +23,9 @@ export type Kind =
   | "idle.gap"
   | "progress"
   | "tool_call"
+  | "fork"
+  | "fork.settled"
+  | "patch"
 ;
 
 export type State =
@@ -34,6 +37,7 @@ export type State =
 
 export type Lane =
   | "trunk"
+  | "interview"
 ;
 
 export type Command =
@@ -127,6 +131,28 @@ export type ApprovalScope =
   | "preseeded"
 ;
 
+export type Warrant =
+  | "read"
+  | "scoping"
+;
+
+export type ForkOutcome =
+  | "value"
+  | "decline"
+  | "unparseable"
+  | "truncated"
+  | "failed"
+  | "cancelled"
+;
+
+export type PatchOp =
+  | "add"
+  | "supersede"
+  | "resolve"
+  | "retire"
+  | "park"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -173,11 +199,17 @@ export interface RecordedFile {
   bytes: number;
 }
 
+export interface PatchEntry {
+  id: string;
+  text: string;
+  category?: string;
+}
+
 export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4;
+  version: 0 | 1 | 2 | 3 | 4 | 5;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -191,6 +223,7 @@ export type AskLine = {
   kind: "ask";
   turn: number;
   text: string;
+  scoping?: boolean;
 };
 
 export type SettlementLine = {
@@ -208,6 +241,7 @@ export type RequestLine = {
   turn: number;
   lane: Lane;
   head_sha256?: string;
+  fork?: number;
 };
 
 export type RefusedLine = {
@@ -322,6 +356,35 @@ export type ToolCallLine = {
   files?: RecordedFile[];
 };
 
+export type ForkLine = {
+  seq: number;
+  t: number;
+  kind: "fork";
+  lane: Lane;
+  of_turn: number;
+  at: number;
+  why: Warrant;
+  question: string;
+};
+
+export type ForkSettledLine = {
+  seq: number;
+  t: number;
+  kind: "fork.settled";
+  fork: number;
+  outcome: ForkOutcome;
+};
+
+export type PatchLine = {
+  seq: number;
+  t: number;
+  kind: "patch";
+  fork: number;
+  op: PatchOp;
+  entry: PatchEntry;
+  supersedes?: string;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -337,4 +400,7 @@ export type LogLine =
   | IdleGapLine
   | ProgressLine
   | ToolCallLine
+  | ForkLine
+  | ForkSettledLine
+  | PatchLine
 ;

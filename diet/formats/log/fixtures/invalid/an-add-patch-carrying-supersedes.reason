@@ -1,0 +1,1 @@
+a patch whose `op` is `add` carries `supersedes`: a patch names the entry it replaces exactly when its `op` is `supersede`
