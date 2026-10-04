@@ -6261,6 +6261,68 @@ path.write_text(source.replace(old, "        if: false\n", 1), encoding="utf-8")
 EOF
 }
 
+# A machinery pull request's selftest switched off (#398): the `if:` loses the
+# clause that reads the scope job's answer, so a change to the selftest's own
+# machinery lands with no fault it reaches proven, as #381 did.
+inject_ci_selftest_off_machinery_prs() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+old = " || (github.event_name == 'pull_request' && needs.scope.outputs.machinery == 'true')"
+if source.count(old) != 1:
+    raise SystemExit("verify.yml: no single machinery clause in the selftest's if:")
+path.write_text(source.replace(old, "", 1), encoding="utf-8")
+EOF
+}
+
+# The machinery clause losing its answer (#398): every pull request, machinery
+# or not, runs the selftest again -- #369's cadence undone in one clause.
+inject_ci_selftest_on_every_pr() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+old = "(github.event_name == 'pull_request' && needs.scope.outputs.machinery == 'true')"
+if source.count(old) != 1:
+    raise SystemExit("verify.yml: no single machinery clause in the selftest's if:")
+path.write_text(source.replace(old, "(github.event_name == 'pull_request')", 1), encoding="utf-8")
+EOF
+}
+
+# The selftest no longer needing the scope job (#398): its `if:` then reads an
+# output no job it needs gives, and a machinery pull request skips it.
+inject_ci_selftest_needs_no_scope() {
+  python3 - <<'EOF'
+import pathlib, re
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+new, count = re.subn(r"^(  selftest:\n    uses: .*\n    if: .*\n)    needs: \[scope\]\n", r"\1", source, count=1, flags=re.M)
+if count != 1:
+    raise SystemExit("verify.yml: no selftest job needing [scope]")
+path.write_text(new, encoding="utf-8")
+EOF
+}
+
+# The scope job answering without `--machinery` (#398): pr-scope.py then
+# prints its lane report, which no `machinery=` line is in, so the output is
+# empty and every machinery pull request reads as none.
+inject_ci_scope_not_machinery() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+old = "python3 scripts/pr-scope.py --machinery --base"
+if source.count(old) != 1:
+    raise SystemExit("verify.yml: no single pr-scope.py --machinery step")
+path.write_text(source.replace(old, "python3 scripts/pr-scope.py --base", 1), encoding="utf-8")
+EOF
+}
+
 # The release branch spelled in a script instead of read from the table: a
 # rename of the table would leave this script deciding by the old name.
 inject_ci_branch_literal_in_script() {
@@ -9633,8 +9695,21 @@ STRICT
   integration="$(awk -F'\t' '$1 == "integration_branch" { print $2 }' "${ROOT}/.github/branches.tsv")"
   release="$(awk -F'\t' '$1 == "release_branch" { print $2 }' "${ROOT}/.github/branches.tsv")"
   skipped='{"repo":{"result":"success"},"selftest":{"result":"skipped"}}'
+  # On a pull request the scope job's answer rides in `needs` (#398).
+  local untouched touched
+  untouched='{"repo":{"result":"success"},"scope":{"result":"success","outputs":{"machinery":"false"}},"selftest":{"result":"skipped"}}'
+  touched='{"repo":{"result":"success"},"scope":{"result":"success","outputs":{"machinery":"true"}},"selftest":{"result":"skipped"}}'
   expect_exit "the gate accepts a skipped selftest on a pull request into the integration branch" 0 \
+    env NEEDS="$untouched" EVENT_NAME=pull_request BASE_REF="$integration" REF_NAME=7/merge \
+      python3 "${ROOT}/scripts/check-job-results.py"
+  expect_exit "the gate rejects a skipped selftest on a pull request that touches the machinery" 1 \
+    env NEEDS="$touched" EVENT_NAME=pull_request BASE_REF="$integration" REF_NAME=7/merge \
+      python3 "${ROOT}/scripts/check-job-results.py"
+  expect_exit "the gate rejects a skipped selftest on a pull request with no machinery answer" 1 \
     env NEEDS="$skipped" EVENT_NAME=pull_request BASE_REF="$integration" REF_NAME=7/merge \
+      python3 "${ROOT}/scripts/check-job-results.py"
+  expect_exit "the gate accepts a skipped selftest on a push to the integration branch, which asks no machinery answer" 0 \
+    env NEEDS="$skipped" EVENT_NAME=push REF_NAME="$integration" \
       python3 "${ROOT}/scripts/check-job-results.py"
   expect_exit "the gate rejects a skipped selftest on the nightly" 1 \
     env NEEDS="$skipped" EVENT_NAME=schedule REF_NAME="$integration" \
@@ -9646,7 +9721,7 @@ STRICT
     env NEEDS="$skipped" EVENT_NAME=pull_request REF_NAME=7/merge \
       python3 "${ROOT}/scripts/check-job-results.py"
   expect_exit "the gate rejects any other job skipped where the selftest may skip" 1 \
-    env NEEDS='{"repo":{"result":"skipped"},"selftest":{"result":"skipped"}}' \
+    env NEEDS='{"repo":{"result":"skipped"},"scope":{"result":"success","outputs":{"machinery":"false"}},"selftest":{"result":"skipped"}}' \
       EVENT_NAME=pull_request BASE_REF="$integration" REF_NAME=7/merge \
       python3 "${ROOT}/scripts/check-job-results.py"
 
@@ -10527,6 +10602,14 @@ selftest() {
     "census step .check-selftest-census.py.* runs under \\[\\]"
   seeded_case "the pull request's drift refusal switched off" ci inject_ci_drift_refusal_off \
     "pkg-repo.yml: the step refusing a pull request on an open drift issue .* runs under \\[.false.\\]"
+  seeded_case "a machinery pull request's selftest skipped" ci inject_ci_selftest_off_machinery_prs \
+    'the .selftest. job.s .if:. is \[[^]]*ref_name == .[a-z]+.\) \}\}.\], not the one expression'
+  seeded_case "a pull request touching no machinery running the selftest" ci inject_ci_selftest_on_every_pr \
+    'the .selftest. job.s .if:. is \[[^]]*\(github.event_name == .pull_request.\) \}\}.\], not the one expression'
+  seeded_case "the selftest not needing the scope job" ci inject_ci_selftest_needs_no_scope \
+    'the .selftest. job needs \[\], not .\[scope\]. alone'
+  seeded_case "the scope job not asking pr-scope.py --machinery" ci inject_ci_scope_not_machinery \
+    'the .scope. job has no line .run: python3 scripts/pr-scope.py --machinery'
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
     'passes .--scope. to verify\.sh'
   seeded_case "CI narrowing the history check"        ci       inject_ci_ranged_history \

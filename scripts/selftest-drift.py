@@ -167,22 +167,23 @@ def blocking(checks: list[str], gh: Gh) -> list[str]:
 # and a protocol file (a workflow, CONTRIBUTING.md) outranks machinery there,
 # so a change to gate-selftest.yml, or machinery beside a doc, reads as
 # protocol (#369's review). pr-scope's own verdict is untouched; the widening
-# is the refusal's.
-def machinery_files() -> frozenset[str]:
-    """scope-selftest.py's MACHINERY_FILES, read from it, not restated."""
+# is the refusal's. The rule is pr-scope.py's `machinery()`, the one
+# definition verify.yml's `scope` job also asks (#398), never restated here.
+def machinery_rule():
+    """pr-scope.py's `machinery(files)`, read from it."""
     import importlib.util
     spec = importlib.util.spec_from_file_location(
-        "scope_selftest", pathlib.Path(__file__).resolve().parent / "scope-selftest.py")
+        "pr_scope", pathlib.Path(__file__).resolve().parent / "pr-scope.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return frozenset(module.MACHINERY_FILES)
+    return module.machinery
 
 
-def is_machinery(files: list[str], machinery: frozenset[str]) -> bool:
-    return "verify.sh" in files or bool(set(files) & machinery)
+def is_machinery(files: list[str], machinery) -> bool:
+    return machinery(files) is not None
 
 
-def scope_checks(report: str, files: list[str], every: list[str], machinery: frozenset[str]) -> list[str]:
+def scope_checks(report: str, files: list[str], every: list[str], machinery) -> list[str]:
     """The checks a pull request's drift refusal is asked about: pr-scope.py's
     `checks:` line, or `every` check when `files` touch the machinery. A
     report with no `checks:` line, or no files, is refused rather than read
@@ -332,7 +333,7 @@ def _blocks():
 def _machinery_widens():
     gh = FakeGh({"check:bsd": [{"number": 8, "title": title("bsd"), "url": "u/8"}]})
     every = ["bsd", "ci", "hygiene", "history", "results"]
-    machinery = machinery_files()
+    machinery = machinery_rule()
     report = "material\nreason: it changes verify.sh, the gate itself\nchecks: hygiene, ci, history"
     found = blocking(scope_checks(report, ["verify.sh"], every, machinery), gh)
     if len(found) != 1 or "#8" not in found[0] or "check:bsd" not in found[0]:
@@ -411,7 +412,7 @@ def main(argv: list[str]) -> int:
             if every.returncode != 0:
                 raise Broken(f"scope-selftest.py --list-checks exited {every.returncode}: {every.stderr.strip()}")
             files = [f for f in pathlib.Path(argv[2]).read_bytes().decode("utf-8").split("\0") if f]
-            checks = scope_checks(target.read_text(encoding="utf-8"), files, every.stdout.split(), machinery_files())
+            checks = scope_checks(target.read_text(encoding="utf-8"), files, every.stdout.split(), machinery_rule())
         else:
             checks = [c.strip() for c in target.read_text(encoding="utf-8").splitlines() if c.strip()]
         found = blocking(checks, gh)

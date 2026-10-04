@@ -21,6 +21,12 @@ selftest that did not run, and fails like any skipped job. The event comes
 from $EVENT_NAME, $BASE_REF and $REF_NAME; with no event given, nothing is
 accepted. No other job is ever accepted skipped.
 
+A pull request whose diff touches the selftest's machinery runs it (#398),
+where the row names `machinery`: the `scope` job's `machinery` output, read
+from `needs`, is `true`, and a skipped selftest is then refused. On a pull
+request that output must read `true` or `false`; anything else -- no `scope`
+job, no output -- is not off, so a skip is refused rather than guessed at.
+
 Exit 0 if every job succeeded, 1 otherwise.
 """
 
@@ -37,12 +43,22 @@ import gatelib  # noqa: E402
 SUCCESS = "success"
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SELFTEST_JOB = "selftest"
+SCOPE_JOB = "scope"
 
 
-def selftest_declared_off() -> bool:
+def machinery_answer(needs: dict) -> str:
+    """The `scope` job's `machinery` output, or "" when there is none."""
+    scope = needs.get(SCOPE_JOB)
+    outputs = scope.get("outputs") if isinstance(scope, dict) else None
+    answer = outputs.get("machinery", "") if isinstance(outputs, dict) else ""
+    return answer if isinstance(answer, str) else ""
+
+
+def selftest_declared_off(needs: dict) -> bool:
     """Whether this run's event is one `selftest_events` declares off, read
-    from the event the gate job passes and the two tables. Anything unreadable
-    -- no event, no row, a row nothing reads -- is not off."""
+    from the event the gate job passes, the two tables and, on a pull request,
+    the `scope` job's output in `needs`. Anything unreadable -- no event, no
+    row, a row nothing reads, no machinery answer -- is not off."""
     event = os.environ.get("EVENT_NAME", "")
     if not event:
         return False
@@ -58,7 +74,12 @@ def selftest_declared_off() -> bool:
     # base, or a push with no ref, cannot be told from the release path.
     if (event == "pull_request" and not base_ref) or (event == "push" and not ref_name):
         return False
-    return not gatelib.selftest_runs(events, release, event, base_ref, ref_name)
+    machinery = ""
+    if event == "pull_request" and "machinery" in events:
+        machinery = machinery_answer(needs)
+        if machinery not in ("true", "false"):
+            return False
+    return not gatelib.selftest_runs(events, release, event, base_ref, ref_name, machinery)
 
 
 def main() -> int:
@@ -76,7 +97,7 @@ def main() -> int:
         print("::error::the gate depends on no jobs, so it gates nothing", file=sys.stderr)
         return 1
 
-    off = selftest_declared_off()
+    off = selftest_declared_off(needs)
     bad = {
         name: (job or {}).get("result", "<no result>")
         for name, job in needs.items()
@@ -86,6 +107,10 @@ def main() -> int:
         del bad[SELFTEST_JOB]
         print(f"check-job-results: '{SELFTEST_JOB}' skipped, on an event gate-budget.tsv's "
               f"selftest_events declares off (#369)")
+    if bad.get(SELFTEST_JOB) == "skipped" and os.environ.get("EVENT_NAME") == "pull_request" \
+            and machinery_answer(needs) == "true":
+        print(f"::error::'{SELFTEST_JOB}' skipped on a pull request whose diff touches the selftest's "
+              f"machinery: the scope job said so, and such a pull request runs it (#398)", file=sys.stderr)
     for name, result in sorted(bad.items()):
         print(f"::error::job '{name}' finished '{result}', not '{SUCCESS}'", file=sys.stderr)
 

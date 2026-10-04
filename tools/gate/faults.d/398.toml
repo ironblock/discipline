@@ -1,0 +1,65 @@
+# #398: a pull request that touches the selftest's machinery runs the scoped
+# selftest; the scope job's answer, the selftest's `if:` and the gate's verdict.
+
+[[fault]]
+id = "ci.ci_selftest_off_machinery_prs"
+kind = "seeded-gate"
+check = "ci"
+label = "a machinery pull request's selftest skipped"
+failure_class = "wiring.selftest-cadence"
+legacy_signature = "the .selftest. job.s .if:. is \\[[^]]*ref_name == .[a-z]+.\\) \\}\\}.\\], not the one expression"
+migrated = false
+
+[[fault]]
+id = "ci.ci_selftest_on_every_pr"
+kind = "seeded-gate"
+check = "ci"
+label = "a pull request touching no machinery running the selftest"
+failure_class = "wiring.selftest-cadence"
+legacy_signature = "the .selftest. job.s .if:. is \\[[^]]*\\(github.event_name == .pull_request.\\) \\}\\}.\\], not the one expression"
+migrated = false
+
+[[fault]]
+id = "ci.ci_selftest_needs_no_scope"
+kind = "seeded-gate"
+check = "ci"
+label = "the selftest not needing the scope job"
+failure_class = "wiring.selftest-scope-needs"
+legacy_signature = "the .selftest. job needs \\[\\], not .\\[scope\\]. alone"
+migrated = false
+
+[[fault]]
+id = "ci.ci_scope_not_machinery"
+kind = "seeded-gate"
+check = "ci"
+label = "the scope job not asking pr-scope.py --machinery"
+failure_class = "wiring.selftest-scope-command"
+legacy_signature = "the .scope. job has no line .run: python3 scripts/pr-scope.py --machinery"
+migrated = false
+
+[[fault]]
+id = "mech.the-gate-rejects-a-skipped-selftest-on-a-pull-request-that-touches-the-machinery"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects a skipped selftest on a pull request that touches the machinery"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.the-gate-rejects-a-skipped-selftest-on-a-pull-request-with-no-machinery-answer"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects a skipped selftest on a pull request with no machinery answer"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+
+[[fault]]
+id = "mech.the-gate-accepts-a-skipped-selftest-on-a-push-to-the-integration-branch-which-asks-no-machinery-answer"
+kind = "mechanics"
+check = "-"
+label = "the gate accepts a skipped selftest on a push to the integration branch, which asks no machinery answer"
+failure_class = "wiring.selftest-declared-off"
+expected_exit = "0"
+migrated = false

@@ -204,12 +204,14 @@ def split_failures(check: str, count: int, whole: list[str], parts: list[list[st
 # WHEN THE SELFTEST RUNS (#369): the events `.github/gate-budget.tsv`'s
 # `selftest_events` row names, one word each. `schedule` is the nightly; and
 # `release` is the release path, a pull request into the release branch and a
-# push to it, the branch read from `.github/branches.tsv`. Read here by both
+# push to it, the branch read from `.github/branches.tsv`; and `machinery` is
+# a pull request whose diff touches the selftest's machinery, which verify.yml's
+# `scope` job outputs from `pr-scope.py --machinery` (#398). Read here by both
 # sides of the one claim -- check-ci-coverage.py, which holds verify.yml's
 # `selftest` job's `if:` to selftest_expression(), and check-job-results.py,
 # which accepts a skipped `selftest` only on an event this says is off -- so
 # the workflow and the verdict cannot read the row two ways.
-SELFTEST_EVENT_WORDS = ("schedule", "release")
+SELFTEST_EVENT_WORDS = ("schedule", "release", "machinery")
 
 
 def table_value(path, key: str) -> str | None:
@@ -239,12 +241,16 @@ def selftest_expression(events: tuple[str, ...], release: str) -> str:
     if "release" in events:
         clauses.append(f"(github.event_name == 'pull_request' && github.base_ref == '{release}')")
         clauses.append(f"(github.event_name == 'push' && github.ref_name == '{release}')")
+    if "machinery" in events:
+        clauses.append("(github.event_name == 'pull_request' && needs.scope.outputs.machinery == 'true')")
     return "${{ " + " || ".join(clauses) + " }}"
 
 
-def selftest_runs(events: tuple[str, ...], release: str, event: str, base_ref: str, ref_name: str) -> bool:
+def selftest_runs(events: tuple[str, ...], release: str, event: str, base_ref: str, ref_name: str,
+                  machinery: str = "") -> bool:
     """Whether a run with this event, base and ref runs the selftest -- the
-    same answer selftest_expression() gives GitHub, in Python."""
+    same answer selftest_expression() gives GitHub, in Python. `machinery` is
+    the `scope` job's output, the string `true` or `false`."""
     if "schedule" in events and event == "schedule":
         return True
     if "release" in events:
@@ -252,4 +258,6 @@ def selftest_runs(events: tuple[str, ...], release: str, event: str, base_ref: s
             return True
         if event == "push" and ref_name == release:
             return True
+    if "machinery" in events and event == "pull_request" and machinery == "true":
+        return True
     return False
