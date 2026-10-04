@@ -324,7 +324,8 @@ def populate(box: Path, root: Path, tracked: list[str]) -> None:
     # applied to, so a copy that left a tracked file out would make some
     # injection inert or wrong for a reason that is the copy's. The box is
     # read as a tree and compared with the list before anything runs in it.
-    copied = {p.relative_to(box).as_posix() for p in box.rglob("*") if p.is_file() and ".git" not in p.relative_to(box).parts}
+    # Read before `git init` below, so the box holds only what was copied.
+    copied = {p.relative_to(box).as_posix() for p in box.rglob("*") if p.is_file()}
     missing = sorted(set(tracked) - copied)
     if missing:
         print(f"check-injections: the box is missing {len(missing)} tracked path(s) the copy was given, "

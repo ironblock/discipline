@@ -965,10 +965,11 @@ sandbox() {
   # times a thousand files times two hundred cases. Measured on this tree,
   # back to back: 7.4s and 7.7s for the fork-per-file loop, 0.52s and 0.50s
   # for one batched `cp`. It cost as much as the compile it existed to feed.
+  # The copy is now one Python process (#380), measured in #380's body.
   local -a files=()
   while IFS= read -r -d '' path; do
     # -f after dereference: a broken symlink, or one pointing at a directory,
-    # would make `cp` fail mid-copy and leave a half-built sandbox.
+    # would make the copy fail mid-way and leave a half-built sandbox.
     if [ ! -f "${ROOT}/${path}" ]; then
       echo "selftest: ${path} is not a regular file (missing, or a symlink to one)" >&2
       return 1
@@ -999,7 +1000,8 @@ sandbox() {
   # Read back, not trusted (#380): the box holds exactly as many files as the
   # list it was given, counted on the tree before git touches it.
   local copied
-  copied="$(find "$dest" -type f | wc -l)"
+  # NUL-counted: a path holding a newline is one file, not two lines.
+  copied="$(find "$dest" -type f -print0 | tr -dc '\0' | wc -c)"
   if [ "${copied// /}" -ne "${#files[@]}" ]; then
     echo "selftest: the sandbox holds ${copied// /} file(s) of the ${#files[@]} it was given" >&2
     return 1

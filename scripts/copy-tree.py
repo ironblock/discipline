@@ -5,8 +5,9 @@ sandboxes need them (#380).
     copy-tree.py SRC DEST     the paths, relative to SRC, NUL-separated on stdin
 
 Each path's parent directories are made under DEST. The file is copied with
-its links followed, and its mode is kept. Its modification time is NOT
-kept: the copy is new.
+its links followed, and given its source's exact mode (where plain `cp`
+applied the umask; git records only the execute bit, so the trees are the
+same to it). Its modification time is NOT kept: the copy is new.
 
 That last part is the point. A sandbox's sources must look newer than any
 artifact a previous case left in the shared cargo target, or cargo declares
@@ -60,7 +61,8 @@ def main(argv: list[str]) -> int:
         print(__doc__.strip().split("\n\n")[1], file=sys.stderr)
         return EXIT_MISUSE
     src, dest = pathlib.Path(argv[0]), pathlib.Path(argv[1])
-    paths = [p for p in sys.stdin.buffer.read().decode("utf-8").split("\0") if p]
+    # As the filesystem spells them: a path that is not UTF-8 is still a path.
+    paths = [os.fsdecode(p) for p in sys.stdin.buffer.read().split(b"\0") if p]
     if not paths:
         print("copy-tree: no paths given; a copy of nothing is not a sandbox", file=sys.stderr)
         return EXIT_MISUSE
