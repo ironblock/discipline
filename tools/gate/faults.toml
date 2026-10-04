@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 172
+mechanics_assertions = 175
 unseedable_guards = 2
 migrated = 0
 
@@ -1849,6 +1849,14 @@ check = "-"
 label = "a lanes scope that is not a list of names is a misuse"
 failure_class = "lanes.scope-malformed"
 expected_exit = "2"
+migrated = false
+[[fault]]
+id = "mech.a-lanes-case-with-no-scope-is-wrong-at-generation"
+kind = "mechanics"
+check = "-"
+label = "a lanes case with no scope is WRONG at generation"
+failure_class = "lanes.no-scope"
+expected_exit = "0"
 migrated = false
 [[fault]]
 id = "mech.an-ordinary-binary-does-not-false-positive"

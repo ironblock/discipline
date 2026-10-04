@@ -1106,7 +1106,9 @@ run_seeded_case() {
   # lanes its catchers run in (#360); anything else says nothing, because
   # `--scope` narrows only those checks and verify.sh refuses it elsewhere. Both halves are reported here rather than left to become a
   # confusing exit 2 from inside the box, and scripts/check-fault-manifest.py
-  # refuses the same two states before a run ever starts.
+  # refuses the same two states before a run ever starts -- for the
+  # hand-written cases; a generated `lanes` case's scope is apply-lane-faults'
+  # to derive, and a missing one is caught below, at generation.
   local -a scoped=()
   # UNSCOPED ON PURPOSE in derive mode: the point is to see everything this
   # fault breaks, including whatever the declaration currently excludes. A
@@ -1348,8 +1350,10 @@ EOF
 # copy, mutating the box's own files. The absolute `$ROOT` this script
 # otherwise uses throughout would mutate the real checkout instead.
 # A catcher two lanes' filters select resolved to the first of them only
-# (#360, ruled (a)): the second lane would no longer run it, and a fault whose
-# only red is there would pass. The resolution's fixtures name the drop.
+# (#360, ruled (a)): the ruling runs such a catcher in both lanes, and this
+# would run it in one. The same test fails in either lane, so a verdict is not
+# lost today; what is lost is the ruling's rule, and the resolution's
+# fixtures name the drop.
 inject_lanes_scope_drops_a_second_lane() {
   python3 - <<'EOF'
 import pathlib
@@ -8534,6 +8538,15 @@ prove_mechanics() {
     python3 "${ROOT}/scripts/apply-lane-faults.py" --verify --lanes no-such-lane
   expect_exit "a lanes scope that is not a list of names is a misuse" 2 \
     bash "${ROOT}/verify.sh" --only lanes --scope ',seam'
+  # ...and a generated lanes case with no scope is WRONG before its box is
+  # built (#360): without that branch it would fall through and run every
+  # lane, go red, and pass. Driven through the real run_seeded_case, with no
+  # box to build -- the branch must answer before one is needed.
+  expect_exit "a lanes case with no scope is WRONG at generation" 0 \
+    "$BASH" -c "$(declare -f run_seeded_case not_red)"'
+      EXIT_MISUSE=2 SELFTEST_BOX="" SELFTEST_BROKEN=() SELFTEST_NOT_RED=()
+      out="$(run_seeded_case "lane: x.y" lanes inject_lane_fault "x \\.\\.\\. FAILED" "" x.y 2>&1)"
+      grep -qF "A CATCHER NO LANE RUNS" <<<"$out"'
 
   # ...but an ordinary binary must not trip the loose heuristics. Over-strict
   # is a failure too: a gate that cries wolf on every binary gets switched off.
@@ -10644,6 +10657,11 @@ selftest() {
     fi
   done
 
+  # The lane resolution itself (#360): a hand-written case, so it carries the
+  # cheapest lane as its scope; its check fails on the fixtures first.
+  seeded_case "a two-lane catcher resolved to one lane" lanes inject_lanes_scope_drops_a_second_lane \
+    'resolved to \[.client.\], not \[.client., .drive.\]' seam
+
   # LANE-DECLARED FAULTS, ONE `seeded_case` PER FAULT, GENERATED RATHER THAN
   # WRITTEN OUT. `apply-lane-faults.py --list` is the one reader of the lane
   # manifests and the root registry; a hand-maintained list of 123 rows here
@@ -10690,10 +10708,6 @@ selftest() {
   # foreseen either. Indirecting the call word too removes it from both
   # counts equally, which is the only count this generator should ever be
   # in: zero.
-  # The lane resolution itself (#360): a hand-written case, so it carries the
-  # cheapest lane as its scope; its check fails on the fixtures first.
-  seeded_case "a two-lane catcher resolved to one lane" lanes inject_lanes_scope_drops_a_second_lane \
-    'resolved to \[.client.\], not \[.client., .drive.\]' seam
 
   sc_call="seeded_case"
   sc_inject="inject_lane_fault"

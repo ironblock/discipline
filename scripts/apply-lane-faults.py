@@ -15,8 +15,10 @@ manifests exist; this script is what applies them continuously rather than
 once: `--verify` (this file's `lanes` check) confirms every registered lane
 is present and green, `--list` is what `verify.sh --selftest` reads to turn
 every declared fault into a seeded case -- one signature per catcher, every
-one required (#239) -- and `--apply-only LANE ID` is the
-injection that case runs.
+one required (#239), and the lanes its catchers run in (#360) -- and
+`--apply-only LANE ID` is the injection that case runs. `--verify --lanes
+A,B` runs only those lanes, which is how a lane fault's case runs its scope,
+and `--selftest` proves the resolution that derives it.
 
 THREE THINGS THIS PROVES, RULED ON #76:
 
@@ -167,25 +169,39 @@ def run_command(command: str, root: pathlib.Path) -> tuple[int, str]:
 # `cargo test` selects nothing, so a catcher only it could run resolves to no
 # lane, and the generated case is WRONG before anything runs.
 def lane_selection(command: str) -> tuple[str, list[str]] | None:
-    """(filter, skips) from a `cargo test` command; filter "" selects every
-    test. None when the command is not `cargo test`."""
+    """(filter, skips) from a lane's command, or None for any command this
+    does not read exactly: `cargo test` with only `-p NAME` and
+    `--no-fail-fast` before `--`, and after it one filter and `--skip NAME`
+    pairs. A word it does not know -- `--exact`, `--lib`, `--skip=`, a
+    filter before `--`, a flag's value -- would change what cargo runs, so
+    it is refused rather than read past (#381's review)."""
     try:
         words = shlex.split(command)
     except ValueError:
         return None
-    if words[:2] != ["cargo", "test"]:
+    if words[:2] != ["cargo", "test"] or "--" not in words:
         return None
-    after = words[words.index("--") + 1:] if "--" in words else []
+    split = words.index("--")
+    before, after = words[2:split], words[split + 1:]
+    i = 0
+    while i < len(before):
+        if before[i] == "-p" and i + 1 < len(before):
+            i += 2
+        elif before[i] == "--no-fail-fast":
+            i += 1
+        else:
+            return None
     filters, skips, i = [], [], 0
     while i < len(after):
         if after[i] == "--skip" and i + 1 < len(after):
-            skips.append(after[i + 1]); i += 2; continue
-        if not after[i].startswith("-"):
-            filters.append(after[i])
-        i += 1
-    if len(filters) > 1:
+            skips.append(after[i + 1]); i += 2
+        elif not after[i].startswith("-"):
+            filters.append(after[i]); i += 1
+        else:
+            return None
+    if len(filters) != 1:
         return None
-    return (filters[0] if filters else ""), skips
+    return filters[0], skips
 
 
 def selects(selection: tuple[str, list[str]] | None, path: str) -> bool:
@@ -216,6 +232,12 @@ def lane_fixtures() -> list[str]:
         "drive": "cargo test -p x -- drive --skip every_seeded_fault",
         "digest": "cargo test -p x -- digest:: --skip every_seeded_fault",
         "synthetic": "printf 'not cargo'; exit 1",
+        # Shapes this does not read exactly select nothing (#381's review).
+        "before": "cargo test -p x drive",
+        "exact": "cargo test -p x -- drive --exact",
+        "lib": "cargo test -p x --lib -- drive",
+        "threads": "cargo test -p x -- drive --test-threads 1",
+        "equals": "cargo test -p x -- drive --skip=client",
     }
     for catches, want in (
         (["drive::serve::tests::a"], ["drive"]),
@@ -312,6 +334,12 @@ def cmd_list(root: pathlib.Path, registry_path: pathlib.Path) -> int:
     for name, (_package, faults) in sorted(found.lanes.items()):
         for fault in faults:
             catches = fault.get("catches") or []
+            # Every column filled (#381's review): `read` with a tab IFS folds
+            # two tabs into one, so an empty class would shift the scope into
+            # the class's place and the case would read as scope-less.
+            if not fault.get("failure_class"):
+                print(f"apply-lane-faults: {fault['id']} declares no failure_class", file=sys.stderr)
+                return EXIT_BROKEN
             if not catches:
                 print(
                     # `fault["id"]` is already lane-prefixed (every gate.toml
@@ -415,15 +443,15 @@ def main(argv: list[str]) -> int:
         pathlib.Path(args.registry) if args.registry else root / DEFAULT_REGISTRY
     )
 
+    if args.lanes is not None and not args.verify:
+        print("apply-lane-faults: --lanes narrows --verify and nothing else", file=sys.stderr)
+        return EXIT_BROKEN
     if args.selftest:
         wrong = lane_fixtures()
         for line in wrong:
             print(f"apply-lane-faults: {line}", file=sys.stderr)
         print(f"apply-lane-faults: lane resolution fixtures, {len(wrong)} wrong")
         return EXIT_DIRTY if wrong else 0
-    if args.lanes is not None and not args.verify:
-        print("apply-lane-faults: --lanes narrows --verify and nothing else", file=sys.stderr)
-        return EXIT_BROKEN
     try:
         if args.verify:
             return cmd_verify(root, registry_path,
