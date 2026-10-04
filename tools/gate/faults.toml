@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 176
+mechanics_assertions = 178
 unseedable_guards = 2
 migrated = 0
 
@@ -1964,6 +1964,22 @@ failure_class = "history.clean"
 expected_exit = "0"
 migrated = false
 
+[[fault]]
+id = "mech.history-a-nightly-with-no-origin-head-compares-against-its-own-ref"
+kind = "mechanics"
+check = "-"
+label = "history: a nightly with no origin/HEAD compares against its own ref"
+failure_class = "history.nightly-base"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.history-and-with-no-schedule-event-that-base-is-still-undeterminable"
+kind = "mechanics"
+check = "-"
+label = "history: and with no schedule event, that base is still undeterminable"
+failure_class = "history.base-undeterminable"
+expected_exit = "2"
+migrated = false
 [[fault]]
 id = "mech.history-a-secret-git-renders-as-binary-is-still-found"
 kind = "mechanics"

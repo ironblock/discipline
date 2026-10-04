@@ -9259,6 +9259,26 @@ open(sys.argv[2], 'w', encoding='utf-8').write(
     env GITHUB_ACTIONS=true GITHUB_EVENT_NAME=push \
         GITHUB_EVENT_PATH="${fake}/push-new-branch.json" \
       python3 "${fake}/repo/scripts/check-history.py"
+  # A NIGHTLY WITH NO origin/HEAD (an Actions checkout sets none): its own ref
+  # is the default branch, and that is the base. The first develop nightly
+  # failed here, 37201593685, because the fallbacks name a branch the rename
+  # (#326) retired. The branch below is a neutral name, not the table's.
+  local nightly; scratch; nightly="$SCRATCH"
+  mkdir -p "${nightly}/repo"
+  cp -R "${ROOT}/scripts" "${nightly}/repo/scripts"
+  (
+    cd "${nightly}/repo"
+    git init --quiet
+    printf '__pycache__/\n' > .gitignore
+    printf 'a\n' > a.txt && git add --all && seed_commit --message 'base'
+    git update-ref refs/remotes/origin/trunk HEAD
+  )
+  expect_exit "history: a nightly with no origin/HEAD compares against its own ref" 0 \
+    env -u GITHUB_EVENT_PATH GITHUB_ACTIONS=true GITHUB_EVENT_NAME=schedule GITHUB_REF_NAME=trunk \
+      python3 "${nightly}/repo/scripts/check-history.py"
+  expect_exit "history: and with no schedule event, that base is still undeterminable" 2 \
+    env -u GITHUB_EVENT_PATH GITHUB_ACTIONS=true GITHUB_EVENT_NAME=workflow_dispatch GITHUB_REF_NAME=trunk \
+      python3 "${nightly}/repo/scripts/check-history.py"
 
   # A SECRET IN A PATH GIT WILL NOT DIFF. Without `--text`, `git show` prints
   # `Binary files a/x and b/x differ` for a path its NUL heuristic calls
