@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 214
+faults = 215
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3446,4 +3446,17 @@ becomes = '''
 substrate_hardware = "0000000000000000000000000000000000000000000000000000000000000000"'''
 catches = [
     "drive::tests::the_floor_regimen_and_head_ship_as_a_drive_can_start",
+]
+
+[[fault]]
+id = "drive.the-projected-record-is-a-constant"
+failure_class = "drive.the-projected-record-is-a-constant"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+                isolation: *isolation,'''
+becomes = '''
+                isolation: Some(log::Isolation::Sandbox),'''
+catches = [
+    "drive::projection::tests::a_tool_calls_row_carries_its_confinement_from_its_line",
 ]

@@ -2966,6 +2966,22 @@ path.write_text(source.replace(old, new), encoding="utf-8")
 EOF
 }
 
+# A refused tool call's row read with `confined` (#302): the record's outcome
+# rule, the log's own, no longer refuses a key its outcome forbids.
+inject_record_tool_call_forbidden_keys_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = "    for barred in forbidden {\n        if has(barred) {\n"
+new = "    for barred in forbidden {\n        if false && has(barred) {\n"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_record_substrate_optional() {
   python3 - <<'EOF'
 import pathlib
@@ -10209,6 +10225,8 @@ selftest() {
     'formats::interview::tests::every_byte_of_an_answer_is_accounted_for \.\.\. FAILED' 'lib/formats::interview::tests'
   seeded_case "an event kind with no fixture"         test     inject_record_unfixtured_kind \
     'formats::record::tests::every_event_kind_appears_in_the_committed_corpus \.\.\. FAILED' 'lib/formats::record::tests'
+  seeded_case "a refused tool call read with its confined" test inject_record_tool_call_forbidden_keys_read \
+    'record/fixtures/invalid/a-refused-tool-call-carrying-confined\.jsonl' 'test:conformance/formats::record'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
     'record/fixtures/invalid/regime-missing-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a comparison's word left open"        test     inject_record_comparison_word_open \

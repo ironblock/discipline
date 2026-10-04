@@ -1,0 +1,1 @@
+a `tool_call` whose outcome is `refused` carries `confined`: nothing ran under any policy (#302, the log's own outcome rule)

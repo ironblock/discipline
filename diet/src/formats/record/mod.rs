@@ -41,6 +41,8 @@ use pest_derive::Parser;
 
 use json::{Decimal, Value, ValueError};
 
+use crate::formats::log;
+
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
 #[grammar = "../formats/number.pest"]
@@ -74,7 +76,7 @@ macro_rules! vocabulary {
             }
 
             /// The variant `tag` names, if there is one.
-            fn from_tag(tag: &str) -> Option<Self> {
+            pub(crate) fn from_tag(tag: &str) -> Option<Self> {
                 Self::ALL.iter().copied().find(|variant| variant.tag() == tag)
             }
         }
@@ -1313,6 +1315,9 @@ pub enum Event {
         /// What the tool returned, when the record keeps it. May be empty: a
         /// command that printed nothing is a fact about the command.
         output: Option<String>,
+        /// How the call ran, when a projected log said (#302): its typed
+        /// outcome and, for a `bash` call, what ran it and under what.
+        exec: Option<Execution>,
     },
     /// A lane's output rejected whole because too little of it was grounded
     /// in the input the lane was told to work from.
@@ -1676,6 +1681,14 @@ pub enum SchemaError {
         /// What it held.
         found: String,
     },
+    /// A row's keys do not fit together: a `tool_call`'s against its
+    /// outcome, by the log's own rule (#302).
+    Inconsistent {
+        /// The event kind.
+        of: &'static str,
+        /// Which keys, and why.
+        why: String,
+    },
 }
 
 /// Why a sequence of well-formed rows is not a record.
@@ -2029,6 +2042,9 @@ impl fmt::Display for SchemaError {
                     f,
                     "a `{of}` row's `{field}` holds `{found}`, which is outside its vocabulary"
                 )
+            }
+            Self::Inconsistent { of, why } => {
+                write!(f, "a `{of}` row's keys do not fit: {why}")
             }
         }
     }
@@ -2395,14 +2411,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             at_turn: take_u32(&mut members, of, "at_turn")?,
             rendered_bytes: take_u64(&mut members, of, "rendered_bytes")?,
         },
-        Kind::ToolCall => Event::ToolCall {
-            id: take_string(&mut members, of, "id")?,
-            at_turn: take_u32(&mut members, of, "at_turn")?,
-            tool: take_string(&mut members, of, "tool")?,
-            args: take_optional_object(&mut members, of, "args")?,
-            exit: take_optional_integer(&mut members, of, "exit")?,
-            output: take_optional_text(&mut members, of, "output")?,
-        },
+        Kind::ToolCall => tool_call(&mut members, of)?,
         Kind::Rejected => Event::Rejected {
             id: take_string(&mut members, of, "id")?,
             lane: take_string(&mut members, of, "lane")?,
@@ -3413,6 +3422,265 @@ fn take_digests(
     Ok(digests)
 }
 
+/// How a tool call ran (#302): the log's `tool_call` keys, carried into the
+/// record by the projection under the log's own vocabularies and checked by
+/// the log's own outcome rule ([`log::outcome_keys`], [`log::EXEC`]), so a row
+/// the log would refuse is refused here too and the two cannot disagree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Execution {
+    /// What became of the call.
+    pub outcome: log::ToolOutcome,
+    /// Why it was refused.
+    pub reason: Option<log::ToolRefusal>,
+    /// The command as the drive asked for it.
+    pub argv: Option<Vec<String>>,
+    /// What actually ran, runner and all.
+    pub confined: Option<Vec<String>>,
+    /// The confinement it ran under.
+    pub isolation: Option<log::Isolation>,
+    /// The network it had.
+    pub network: Option<log::Network>,
+    /// The sha256 of the confinement policy, under a profile.
+    pub policy: Option<String>,
+    /// The command's working directory, as the runner passed it (v4).
+    pub cwd: Option<String>,
+    /// The decision it ran under, when it ran under one (v4).
+    pub approval: Option<log::Approval>,
+}
+
+/// The keys an [`Execution`] is written under, beside `outcome`.
+const EXECUTION_KEYS: &[&str] = &[
+    "reason",
+    "argv",
+    "confined",
+    "isolation",
+    "network",
+    "policy",
+    "cwd",
+    "approval",
+];
+
+/// A row's `approval`: `{scope, decided_at?, why?}` in the log's words, with
+/// `decided_at` forbidden for `preseeded` and required of every other scope
+/// (5981588394 (d)).
+fn take_approval(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<log::Approval>, ParseError> {
+    let Some(mut fields) = take_optional_object(members, of, "approval")? else {
+        return Ok(None);
+    };
+    let Some(scope) = take_optional_word(&mut fields, of, "scope", log::ApprovalScope::from_tag)?
+    else {
+        return Err(SchemaError::MissingField { of, field: "scope" }.into());
+    };
+    let decided_at = match fields.remove("decided_at") {
+        None => None,
+        Some(Value::Integer(n)) if n >= 0 => Some(n.unsigned_abs()),
+        Some(_) => {
+            return Err(SchemaError::WrongType {
+                of,
+                field: "decided_at".to_owned(),
+                want: "a count of milliseconds",
+            }
+            .into());
+        }
+    };
+    let why = take_optional_string(&mut fields, of, "why")?;
+    if let Some(field) = fields.keys().next() {
+        return Err(SchemaError::Inconsistent {
+            of,
+            why: format!("an `approval` carries `{field}`, which it does not define"),
+        }
+        .into());
+    }
+    let preseeded = scope == log::ApprovalScope::Preseeded;
+    if preseeded == decided_at.is_some() {
+        return Err(SchemaError::Inconsistent {
+            of,
+            why: format!(
+                "an `approval` whose scope is `{}` {} `decided_at`",
+                scope.tag(),
+                if preseeded { "carries" } else { "carries no" }
+            ),
+        }
+        .into());
+    }
+    Ok(Some(log::Approval {
+        scope,
+        decided_at,
+        why,
+    }))
+}
+
+fn take_strings(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<Vec<String>>, ParseError> {
+    let wrong = || SchemaError::WrongType {
+        of,
+        field: field.to_owned(),
+        want: "a list of strings",
+    };
+    match members.remove(field) {
+        None => Ok(None),
+        Some(Value::Array(items)) => items
+            .into_iter()
+            .map(|item| match item {
+                Value::String(text) => Ok(text),
+                _ => Err(wrong().into()),
+            })
+            .collect::<Result<Vec<_>, ParseError>>()
+            .map(Some),
+        Some(_) => Err(wrong().into()),
+    }
+}
+
+fn take_optional_word<T>(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+    from_tag: fn(&str) -> Option<T>,
+) -> Result<Option<T>, ParseError> {
+    match take_optional_string(members, of, field)? {
+        None => Ok(None),
+        Some(word) => match from_tag(&word) {
+            Some(value) => Ok(Some(value)),
+            None => Err(SchemaError::BadValue {
+                of,
+                field,
+                found: word,
+            }
+            .into()),
+        },
+    }
+}
+
+/// A `tool_call` row: its call, and how it ran when a projected log said.
+fn tool_call(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Event, ParseError> {
+    let id = take_string(members, of, "id")?;
+    let at_turn = take_u32(members, of, "at_turn")?;
+    let tool = take_string(members, of, "tool")?;
+    let args = take_optional_object(members, of, "args")?;
+    let exit = take_optional_integer(members, of, "exit")?;
+    let output = take_optional_text(members, of, "output")?;
+    let exec = take_execution(members, of, &tool, exit)?;
+    Ok(Event::ToolCall {
+        id,
+        at_turn,
+        tool,
+        args,
+        exit,
+        output,
+        exec,
+    })
+}
+
+/// A `tool_call` row's [`Execution`]: present exactly when `outcome` is, and
+/// held to the log's rule for that outcome and `tool`. `exit` is the row's own
+/// key, and the rule reads it too: no exit under `refused` or `cancelled`.
+fn take_execution(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    tool: &str,
+    exit: Option<i64>,
+) -> Result<Option<Execution>, ParseError> {
+    let Some(outcome) = take_optional_word(members, of, "outcome", log::ToolOutcome::from_tag)?
+    else {
+        if let Some(stray) = EXECUTION_KEYS.iter().find(|k| members.contains_key(**k)) {
+            return Err(SchemaError::Inconsistent {
+                of,
+                why: format!("carries `{stray}` without an `outcome`"),
+            }
+            .into());
+        }
+        return Ok(None);
+    };
+    let exec = Execution {
+        outcome,
+        reason: take_optional_word(members, of, "reason", log::ToolRefusal::from_tag)?,
+        argv: take_strings(members, of, "argv")?,
+        confined: take_strings(members, of, "confined")?,
+        isolation: take_optional_word(members, of, "isolation", log::Isolation::from_tag)?,
+        network: take_optional_word(members, of, "network", log::Network::from_tag)?,
+        policy: take_optional_digest(members, of, "policy")?,
+        cwd: take_optional_string(members, of, "cwd")?,
+        approval: take_approval(members, of)?,
+    };
+    execution_fits(&exec, tool, exit)
+        .map_err(|why| ParseError::from(SchemaError::Inconsistent { of, why }))?;
+    Ok(Some(exec))
+}
+
+/// The log's rule for a call's keys, read off [`log::outcome_keys`]: the
+/// required keys present and the forbidden ones absent, the exec keys only on
+/// `bash`, `confined` absent under `unrecorded`, and `policy` only under a
+/// profile (5976386318 point 6). The streams are the log's alone: the record
+/// keeps `output`, not `stdout`.
+fn execution_fits(exec: &Execution, tool: &str, exit: Option<i64>) -> Result<(), String> {
+    let present = [
+        ("reason", exec.reason.is_some()),
+        ("argv", exec.argv.is_some()),
+        ("confined", exec.confined.is_some()),
+        ("isolation", exec.isolation.is_some()),
+        ("network", exec.network.is_some()),
+        ("policy", exec.policy.is_some()),
+        ("cwd", exec.cwd.is_some()),
+        ("approval", exec.approval.is_some()),
+        ("exit", exit.is_some()),
+    ];
+    let has = |key: &str| present.iter().any(|(k, held)| *k == key && *held);
+    let bash = tool == "bash";
+    let unrecorded = exec.isolation == Some(log::Isolation::Unrecorded);
+    let profiled = matches!(
+        exec.isolation,
+        Some(log::Isolation::Sandbox | log::Isolation::Vm)
+    );
+    let tag = exec.outcome.tag();
+    let (required, forbidden) = log::outcome_keys(exec.outcome);
+    for needed in required
+        .iter()
+        .filter(|k| log::EXEC.contains(k) || **k == "reason")
+    {
+        let exec_key = log::EXEC.contains(needed);
+        if (exec_key && !bash)
+            || (unrecorded && *needed == "confined")
+            || (!profiled && *needed == "policy")
+        {
+            continue;
+        }
+        if !has(needed) {
+            return Err(format!(
+                "a `tool_call` whose outcome is `{tag}` carries no `{needed}`"
+            ));
+        }
+    }
+    for barred in forbidden {
+        if has(barred) {
+            return Err(format!(
+                "a `tool_call` whose outcome is `{tag}` carries `{barred}`"
+            ));
+        }
+    }
+    if let Some(key) = log::EXEC.iter().find(|k| !bash && has(k)) {
+        return Err(format!(
+            "a `{tool}` call carries `{key}`: only `bash` ran a command"
+        ));
+    }
+    if unrecorded && exec.confined.is_some() {
+        return Err(
+            "a `tool_call` whose `isolation` is `unrecorded` carries `confined`".to_owned(),
+        );
+    }
+    if bash && !profiled && exec.policy.is_some() {
+        return Err(format!(
+            "a `bash` call whose outcome is `{tag}` carries `policy` under no profile"
+        ));
+    }
+    Ok(())
+}
+
 fn take_string(
     members: &mut BTreeMap<String, Value>,
     of: &'static str,
@@ -4398,6 +4666,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             args,
             exit,
             output,
+            exec,
             ..
         } => {
             members.put_u32("at_turn", *at_turn);
@@ -4405,6 +4674,44 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_optional("args", args.clone().map(Value::Object));
             members.put_optional("exit", exit.map(Value::Integer));
             members.put_optional("output", output.clone().map(Value::String));
+            if let Some(exec) = exec {
+                let words = |items: &Vec<String>| {
+                    Value::Array(items.iter().cloned().map(Value::String).collect())
+                };
+                members.put_text("outcome", exec.outcome.tag());
+                members.put_optional(
+                    "reason",
+                    exec.reason.map(|r| Value::String(r.tag().to_owned())),
+                );
+                members.put_optional("argv", exec.argv.as_ref().map(words));
+                members.put_optional("confined", exec.confined.as_ref().map(words));
+                members.put_optional(
+                    "isolation",
+                    exec.isolation.map(|i| Value::String(i.tag().to_owned())),
+                );
+                members.put_optional(
+                    "network",
+                    exec.network.map(|n| Value::String(n.tag().to_owned())),
+                );
+                members.put_optional("policy", exec.policy.clone().map(Value::String));
+                members.put_optional("cwd", exec.cwd.clone().map(Value::String));
+                if let Some(approval) = &exec.approval {
+                    let mut fields = BTreeMap::from([(
+                        "scope".to_owned(),
+                        Value::String(approval.scope.tag().to_owned()),
+                    )]);
+                    if let Some(at) = approval.decided_at {
+                        fields.insert(
+                            "decided_at".to_owned(),
+                            Value::Integer(i64::try_from(at).unwrap_or(i64::MAX)),
+                        );
+                    }
+                    if let Some(why) = &approval.why {
+                        fields.insert("why".to_owned(), Value::String(why.clone()));
+                    }
+                    members.put_optional("approval", Some(Value::Object(fields)));
+                }
+            }
         }
         Event::Claim {
             hypothesis,

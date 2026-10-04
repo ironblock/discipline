@@ -1,0 +1,22 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"kind\":\"live\"}}\n{\"index\":1,\"prefill_tokens\":900,\"record\":\"turn\"}\n{\"head_sha256\":\"6b36f1a89e10d530391191fa18488cbce11eec142c28669624d30286b949327d\",\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"local\",\"text\":\"List the files, then touch the hosts file.\"}\n{\"approval\":{\"decided_at\":12,\"scope\":\"session\",\"why\":\"not_approved\"},\"args\":{\"command\":\"ls\"},\"argv\":[\"sh\",\"-c\",\"ls\"],\"at_turn\":1,\"confined\":[\"sandbox-exec\",\"-f\",\"/work/policy.sb\",\"sh\",\"-c\",\"ls\"],\"cwd\":\"/work\",\"exit\":0,\"id\":\"t1\",\"isolation\":\"sandbox\",\"network\":\"none\",\"outcome\":\"ran\",\"output\":\"a.txt\\n\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"args\":{\"command\":\"touch /etc/hosts\"},\"argv\":[\"sh\",\"-c\",\"touch /etc/hosts\"],\"at_turn\":1,\"confined\":[\"sandbox-exec\",\"-f\",\"/work/policy.sb\",\"sh\",\"-c\",\"touch /etc/hosts\"],\"cwd\":\"/work\",\"exit\":1,\"id\":\"t2\",\"isolation\":\"sandbox\",\"network\":\"none\",\"outcome\":\"command_failed\",\"output\":\"\",\"policy\":\"6906c7cd0f1fe84d3891a055adeb34e2d5475c71dcbbd91fb83d6a813e031d5f\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"args\":{\"command\":\"rm -rf /\"},\"argv\":[\"sh\",\"-c\",\"rm -rf /\"],\"at_turn\":1,\"cwd\":\"/work\",\"id\":\"t3\",\"outcome\":\"refused\",\"reason\":\"not_allowed\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"args\":{\"command\":\"sleep 99\"},\"argv\":[\"sh\",\"-c\",\"sleep 99\"],\"at_turn\":1,\"cwd\":\"/work\",\"id\":\"t4\",\"isolation\":\"sandbox\",\"network\":\"none\",\"outcome\":\"cancelled\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"args\":{\"path\":\"a.txt\"},\"at_turn\":1,\"id\":\"t5\",\"outcome\":\"ran\",\"output\":\"hello\\n\",\"record\":\"tool_call\",\"tool\":\"read\"}\n{\"approval\":{\"scope\":\"preseeded\"},\"args\":{\"command\":\"git status\"},\"argv\":[\"sh\",\"-c\",\"git status\"],\"at_turn\":1,\"confined\":[\"sandbox-exec\",\"-f\",\"/work/policy.sb\",\"sh\",\"-c\",\"git status\"],\"cwd\":\"/work\",\"exit\":0,\"id\":\"t6\",\"isolation\":\"sandbox\",\"network\":\"none\",\"outcome\":\"ran\",\"output\":\"\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"args\":{\"command\":\"sudo id\"},\"argv\":[\"sh\",\"-c\",\"sudo id\"],\"at_turn\":1,\"cwd\":\"/work\",\"id\":\"t7\",\"outcome\":\"refused\",\"reason\":\"denylist\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"id\":\"a1\",\"output_tokens\":40,\"record\":\"response\",\"text\":\"Done.\",\"to_request\":\"q1\"}\n{\"kind\":\"drive\",\"prefill_tokens_total\":900,\"product_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"record\":\"summary\",\"turns\":1}\n",
+  "kinds": [
+    "start",
+    "turn",
+    "request",
+    "response",
+    "tool_call",
+    "summary"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
+  },
+  "source": {
+    "kind": "live"
+  }
+}
