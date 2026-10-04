@@ -895,7 +895,8 @@ export const HeaderLogo: Story = {
         root.setAttribute('data-theme', theme);
         root.setAttribute('data-mode', mode);
         const visible = logos.filter((img) => getComputedStyle(img).display !== 'none');
-        shown.push(`${theme} ${mode}: ${visible.map((img) => `${img.dataset['for']} ${img.alt}`).join(', ')}`);
+        // The file it loaded, not only its label: a swapped `src` shows the other mode's logo under the right label.
+        shown.push(`${theme} ${mode}: ${visible.map((img) => `${/logo-(dark|light)/.exec(img.currentSrc)?.[1]} ${img.alt}`).join(', ')}`);
       }
     await expect(shown).toEqual(['bloom', 'paper', 'emboss'].flatMap((theme) => [`${theme} dark: dark Discipline`, `${theme} light: light Discipline`]));
   },
