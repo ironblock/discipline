@@ -1,6 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
+import { importedFiles } from './drive/files.ts';
 import { examplePath, load } from './drive/recorded.ts';
 import { isExample, isPublished } from './replay/published.ts';
 import { Replay, ReplayIndex } from './replay/Replay.tsx';
@@ -26,6 +27,9 @@ const overrides = Object.fromEntries(Object.keys(PREFS).map((name) => [name, par
 /** Where a published recording's file is: beside the page, under its base. */
 export const payloadUrl = (name: string) => new URL(`${import.meta.env.BASE_URL}data/${name}.js`, document.baseURI).href;
 
+/** Where a published recording's file is, by digest: `data/<name>/files/<sha256>.js`, beside its payload (#372). */
+export const assetUrl = (name: string, sha256: string) => new URL(`${import.meta.env.BASE_URL}data/${name}/files/${sha256}.js`, document.baseURI).href;
+
 async function recordingOf(name: string, file?: string) {
   const url = payloadUrl(name);
   const module = (await import(/* @vite-ignore */ url)) as { readonly default: unknown };
@@ -50,7 +54,7 @@ if (params.has('drive')) {
 } else {
   const example = isExample(asked);
   recordingOf(asked, example ? examplePath(asked) : undefined).then(
-    (recording) => show(<Replay name={asked} recording={recording} speed={speed} example={example} />),
+    (recording) => show(<Replay name={asked} recording={recording} speed={speed} example={example} files={importedFiles((sha256) => assetUrl(asked, sha256))} />),
     (err: unknown) => {
       root.setAttribute('data-failed', '');
       root.textContent = `could not load ${payloadUrl(asked)}: ${(err as Error).message}`;

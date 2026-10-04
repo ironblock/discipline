@@ -249,6 +249,37 @@ describe('HttpTransport: the idle gap a command ends (Q4, #146)', () => {
   });
 });
 
+describe('HttpTransport: a tool call’s file, by digest (#372)', () => {
+  const sha = 'ab'.repeat(32);
+  const serving = (status: number, body: BodyInit | null = null) => {
+    const asked: string[] = [];
+    const web: Web = {
+      EventSource: class extends FakeSource {},
+      fetch: (url) => (asked.push(url), Promise.resolve(new Response(body, { status }))),
+    };
+    return { transport: new HttpTransport('', web), asked };
+  };
+
+  it('asks serve for GET /files/<sha256> and answers its bytes, unchecked', async () => {
+    const { transport, asked } = serving(200, new Uint8Array([1, 2, 3]));
+    await expect(transport.file(sha)).resolves.toEqual({ kind: 'bytes', bytes: new Uint8Array([1, 2, 3]) });
+    expect(asked).toEqual([`/files/${sha}`]);
+  });
+
+  it('answers not found on 404, and why on anything else', async () => {
+    await expect(serving(404).transport.file(sha)).resolves.toEqual({ kind: 'not-found' });
+    await expect(serving(503).transport.file(sha)).resolves.toEqual({ kind: 'unreachable', why: 'the drive is at its connection limit, or down (503)' });
+  });
+
+  it('never asks for what is not a digest', async () => {
+    const { transport, asked } = serving(200, 'x');
+    await expect(transport.file('../../etc/passwd')).resolves.toEqual({ kind: 'not-found' });
+    // As a digest is written: lowercase, as the replay's source reads it too.
+    await expect(transport.file(sha.toUpperCase())).resolves.toEqual({ kind: 'not-found' });
+    expect(asked).toEqual([]);
+  });
+});
+
 describe('HttpTransport: a call waiting on the operator (#389, ruled 5982826097)', () => {
   const waiting = { request: 3, id: 'call_1', command: 'npm install', cwd: '~/git/experiments/t1', reason: 'not_approved', segments: [{ text: 'npm install', program: 'npm', subcommand: 'install', verdict: 'prompt', why: 'not_approved' }] };
   const watched = (transport: HttpTransport) => {

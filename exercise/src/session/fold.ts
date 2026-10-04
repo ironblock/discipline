@@ -12,7 +12,7 @@
  * node waits on, which is what the gaps overlay outlines.
  */
 
-import type { Approval, Authority, FailReason, ForkLane, ForkOutcome, IsolationWord, Lane, LineOf, LogLine, Need, NetworkWord, Open, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
+import type { Approval, Authority, FailReason, FileRef, ForkLane, ForkOutcome, IsolationWord, Lane, LineOf, LogLine, Need, NetworkWord, Open, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
 import { NEEDS_OF } from '../drive/log.ts';
 import { receiptOf } from './receipt.ts';
 import type { Receipt } from './receipt.ts';
@@ -152,6 +152,8 @@ export interface ToolNode extends Provenance {
   readonly cwd?: string;
   /** The decision it ran under: the operator's on its prompt, or the pre-seeded set (log v4's `approval`, #388). */
   readonly approval?: Approval;
+  /** The files its result is, by reference (log v4's `files`, #372): read by digest, never by path. */
+  readonly files?: readonly FileRef[];
   /** What ran, under which mechanism and network: absent where the log does not say. */
   readonly confinement?: { readonly confined?: readonly string[]; readonly isolation?: IsolationWord; readonly network?: NetworkWord };
   readonly exit?: number;
@@ -694,6 +696,7 @@ export function fold(lines: readonly LogLine[]): Session {
                   ...(line.argv ? { argv: line.argv } : {}),
                   ...(line.cwd !== undefined ? { cwd: line.cwd } : {}),
                   ...(line.approval ? { approval: line.approval } : {}),
+                  ...(line.files && line.files.length > 0 ? { files: line.files } : {}),
                   ...(confinement ? { confinement } : {}),
                   ...(line.exit !== undefined ? { exit: line.exit } : {}),
                   ...(line.stdout !== undefined ? { output: line.stdout } : {}),

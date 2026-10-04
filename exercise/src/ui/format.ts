@@ -42,7 +42,11 @@ export function rate(n: number, ms: number): string {
 }
 
 export function bytes(text: string): string {
-  const n = new TextEncoder().encode(text).length;
+  return size(new TextEncoder().encode(text).length);
+}
+
+/** A size in bytes, as `bytes` says a text's. */
+export function size(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / 1024 / 1024).toFixed(1)} MB`;

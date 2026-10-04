@@ -1,0 +1,39 @@
+/* A tool call's files (Files.tsx): the image at its own size, up to the block's width, and its reference under it. */
+.ex-files {
+  display: grid;
+  gap: 0.6rem;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ex-file {
+  display: grid;
+  gap: 0.25rem;
+  justify-items: start;
+}
+
+.ex-file__image {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--rule);
+  border-radius: 0.25rem;
+  image-rendering: auto;
+}
+
+.ex-file__ref {
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.ex-file__unshown {
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: var(--ink-faint);
+  overflow-wrap: anywhere;
+}
+
+.ex-file__unshown[data-reading='not-found'],
+.ex-file__unshown[data-reading='mismatch'] {
+  color: var(--warn);
+}

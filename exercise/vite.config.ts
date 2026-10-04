@@ -11,6 +11,7 @@ import { defineConfig } from 'vitest/config';
 
 import { EXAMPLES, PUBLISHED } from './src/replay/published.ts';
 import { wrap } from './src/replay/payload.ts';
+import { publishedAssets } from './src/replay/assets.ts';
 
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,7 +30,7 @@ const configure: NonNullable<ProxyOptions['configure']> = (proxy) => {
   proxy.on('proxyRes', (upstream, _req, res) => upstream.on('close', () => res.destroy()));
   proxy.on('error', (_error, _req, res) => res.destroy());
 };
-const proxied = drive ? Object.fromEntries(['/events', '/commands'].map((route) => [route, { target: drive, changeOrigin: false, configure }])) : undefined;
+const proxied = drive ? Object.fromEntries(['/events', '/commands', '/files'].map((route) => [route, { target: drive, changeOrigin: false, configure }])) : undefined;
 
 // The replay page (#32): `pnpm build:replay` builds `replay.html` alone into
 // ../_site/replay/, its index, with `base: './'` so it works under whatever
@@ -60,6 +61,8 @@ const replayPayload: Plugin = {
       if (!existsSync(admission)) this.error(`exercise/${dir}/${name}.json: published but never admitted (no ${name}.admission.json beside it; scripts/admission.py admit ${name})`);
       this.emitFile({ type: 'asset', fileName: `data/${name}.js`, source: wrap(readFileSync(path.join(dirname, dir, `${name}.json`), 'utf8')) });
       this.emitFile({ type: 'asset', fileName: `data/${name}.admission.json`, source: readFileSync(admission, 'utf8') });
+      // Its files, by digest: the bytes when declared clean, withheld when not (#372).
+      for (const asset of publishedAssets(path.join(dirname, dir), name, JSON.parse(readFileSync(admission, 'utf8')))) this.emitFile({ type: 'asset', ...asset });
     }
   },
 };

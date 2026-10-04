@@ -9,6 +9,7 @@
  */
 
 import type { IdleGapBody } from '../session/gap.ts';
+import type { FileSource } from './files.ts';
 import type { LogLine, Open } from './log.ts';
 
 /**
@@ -103,6 +104,11 @@ export interface DriveTransport {
    * drive cannot log never costs the command: it goes without it.
    */
   dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack>;
+  /**
+   * A tool call's file, by digest (#372): `serve`'s `GET /files/<sha256>`, a recording's published asset, a
+   * script's own. Unchecked: `files.ts`'s `read` hashes what it answers. Absent: this session has no files.
+   */
+  readonly file?: FileSource;
   /** The connection's state now, then each change, and why when it is not live. Absent: always `live`. */
   watchLink?(listener: (link: Link, why?: string) => void): () => void;
   /** The call waiting on the operator now, then each change: `undefined` when none waits. Absent: none ever does (a replay). */

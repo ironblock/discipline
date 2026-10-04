@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 
+import type { FileSource } from '../drive/files.ts';
 import { ReplayTransport } from '../drive/recorded.ts';
 import type { Recording } from '../drive/recorded.ts';
 import { useSession } from '../session/useSession.ts';
@@ -138,13 +139,16 @@ export function Replay({
   recording,
   speed = 1,
   example = false,
+  files,
 }: {
   readonly name: string;
   readonly recording: Recording;
   readonly speed?: number;
   readonly example?: boolean;
+  /** The recording's published files by digest (#372). */
+  readonly files?: FileSource;
 }) {
-  const transport = useMemo(() => new ReplayTransport(recording, { speed }), [recording, speed]);
+  const transport = useMemo(() => new ReplayTransport(recording, { speed, ...(files ? { files } : {}) }), [recording, speed, files]);
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);
   const [surface, setSurface] = useState<Surface>({ curtain: true, gaps: false });
@@ -169,6 +173,7 @@ export function Replay({
         surface={surface}
         onSurface={setSurface}
         follow
+        {...(transport.file ? { files: transport.file } : {})}
         composer={{ phases: PHASES, dispatch: () => transport.dispatch(), hint: `replaying: ${recording.title}` }}
       />
     </Frame>

@@ -16,6 +16,7 @@ import type { Response, ScriptedPrompt, Unplaced } from './script.ts';
 import type { Beat, Trigger } from './specimen.ts';
 import type { IdleGapBody } from '../session/gap.ts';
 import type { Ack, Command, Decision, DriveTransport, Prompt } from './transport.ts';
+import type { FileAnswer } from './files.ts';
 
 /** The gap a snapshot assumes between beats: a person reading, then typing. */
 export const READING_GAP_MS = 20_000;
@@ -139,6 +140,12 @@ export class CannedTransport implements DriveTransport {
   readonly #decided = new Map<string, NonNullable<Extract<Unplaced, { kind: 'tool.end' }>['approval']>>();
   readonly #opened = performance.now();
   #next = 0;
+
+  /** The script's files, by the digest it gives them: unchecked, as a server's are (#372). */
+  readonly file = (sha256: string): Promise<FileAnswer> => {
+    const found = this.#beats.flatMap((b) => b.events).flatMap((e) => (e.kind === 'tool.end' ? (e.files ?? []) : [])).find((f) => f.sha256 === sha256);
+    return Promise.resolve(found ? { kind: 'bytes', bytes: found.bytes } : { kind: 'not-found' });
+  };
 
   constructor(beats: readonly Beat[], options: CannedOptions = {}) {
     this.#beats = beats;
