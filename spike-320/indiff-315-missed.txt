@@ -1,0 +1,10 @@
+diet/src/bin/drive.rs:324:14: replace += with *= in ended
+diet/src/drive/serve.rs:236:9: replace Server::finish with ()
+diet/src/drive/serve.rs:238:36: replace + with - in Server::finish
+diet/src/drive/serve.rs:239:47: replace && with || in Server::finish
+diet/src/drive/serve.rs:239:43: replace > with == in Server::finish
+diet/src/drive/serve.rs:239:43: replace > with < in Server::finish
+diet/src/drive/serve.rs:239:43: replace > with >= in Server::finish
+diet/src/drive/serve.rs:239:65: replace < with == in Server::finish
+diet/src/drive/serve.rs:239:65: replace < with > in Server::finish
+diet/src/drive/serve.rs:239:65: replace < with <= in Server::finish

@@ -1,0 +1,55 @@
+diet/src/bin/drive.rs:76:5: replace serve_usage -> String with String::new()
+diet/src/bin/drive.rs:76:5: replace serve_usage -> String with "xyzzy".into()
+diet/src/bin/drive.rs:183:24: replace == with != in serve_args
+diet/src/bin/drive.rs:324:14: replace += with *= in ended
+diet/src/bin/drive.rs:943:76: delete - in written
+diet/src/bin/drive.rs:989:74: delete - in cache
+diet/src/bin/drive.rs:1017:76: delete - in census
+diet/src/drive/mod.rs:739:9: replace Heads::about_to_call with ()
+diet/src/drive/mod.rs:1346:14: replace match guard issued == id with true in issued_head
+diet/src/drive/projection.rs:94:9: replace Engine::describes -> String with String::new()
+diet/src/drive/projection.rs:94:9: replace Engine::describes -> String with "xyzzy".into()
+diet/src/drive/projection.rs:189:5: replace timings_of -> Option<record::Timings> with None
+diet/src/drive/projection.rs:189:5: replace timings_of -> Option<record::Timings> with Some(Default::default())
+diet/src/drive/projection.rs:198:26: replace match guard n.to_string() == text with true in timings_of
+diet/src/drive/projection.rs:198:26: replace match guard n.to_string() == text with false in timings_of
+diet/src/drive/projection.rs:198:40: replace == with != in timings_of
+diet/src/drive/projection.rs:344:17: delete match arm Line::Cancelled{request, ..} | Line::RequestFailed{request, ..} in Walk<'a>::over
+diet/src/drive/projection.rs:438:21: delete match arm Line::IdleGap{..} in Walk<'a>::line
+diet/src/drive/projection.rs:439:21: delete match arm Line::Refused{..} in Walk<'a>::line
+diet/src/drive/regimen.rs:69:48: replace match guard !value.is_empty() with true in regime_of
+diet/src/drive/regimen.rs:92:35: replace == with != in regime_of
+diet/src/drive/regimen.rs:105:47: replace match guard !table.is_empty() with true in regime_of
+diet/src/drive/regimen.rs:225:5: replace cache_ttl_of -> Result<Option<CacheTtl>, String> with Ok(None)
+diet/src/drive/regimen.rs:248:47: replace match guard word == NO_CACHE with true in cache_ttl_of
+diet/src/drive/regimen.rs:248:47: replace match guard word == NO_CACHE with false in cache_ttl_of
+diet/src/drive/regimen.rs:248:52: replace == with != in cache_ttl_of
+diet/src/drive/registry.rs:62:43: replace % with / in tables
+diet/src/drive/registry.rs:63:30: delete ! in tables
+diet/src/drive/registry.rs:62:43: replace % with + in tables
+diet/src/drive/serve.rs:176:56: replace | with ^ in Credential::admits
+diet/src/drive/serve.rs:194:54: replace | with ^ in base64
+diet/src/drive/serve.rs:194:37: replace | with ^ in base64
+diet/src/drive/serve.rs:236:9: replace Server::finish with ()
+diet/src/drive/serve.rs:238:36: replace + with - in Server::finish
+diet/src/drive/serve.rs:239:47: replace && with || in Server::finish
+diet/src/drive/serve.rs:239:43: replace > with == in Server::finish
+diet/src/drive/serve.rs:239:43: replace > with < in Server::finish
+diet/src/drive/serve.rs:239:43: replace > with >= in Server::finish
+diet/src/drive/serve.rs:239:65: replace < with == in Server::finish
+diet/src/drive/serve.rs:239:65: replace < with > in Server::finish
+diet/src/drive/serve.rs:239:65: replace < with <= in Server::finish
+diet/src/drive/serve.rs:294:9: replace <impl Drop for Server>::drop with ()
+diet/src/drive/serve.rs:556:19: replace > with >= in Serving<S>::command
+diet/src/drive/serve.rs:687:32: replace || with && in idle_gap
+diet/src/drive/serve.rs:756:25: replace > with >= in read_request
+diet/src/drive/serve.rs:764:12: replace > with >= in read_request
+diet/src/drive/serve.rs:802:22: replace < with > in read_body
+diet/src/drive/serve.rs:803:28: replace - with + in read_body
+diet/src/drive/serve.rs:803:28: replace - with / in read_body
+diet/src/drive/serve.rs:830:33: replace == with != in respond_with
+diet/src/drive/session.rs:567:9: replace <impl fmt::Debug for Session<S>>::fmt -> fmt::Result with Ok(Default::default())
+diet/src/drive/session.rs:859:36: replace + with - in Session<S>::wait_from
+diet/src/drive/session.rs:864:41: replace >= with < in Session<S>::wait_from
+diet/src/drive/session.rs:881:9: replace <impl Drop for Session<S>>::drop with ()
+diet/src/drive/session.rs:1333:55: replace match guard *request == flight.request with true in crashed

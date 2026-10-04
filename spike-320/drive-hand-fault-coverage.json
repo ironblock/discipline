@@ -1,0 +1,11 @@
+{
+ "covered": 211,
+ "uncovered": [
+  [
+   "drive.serve-bin-cap-cuts-reasoning",
+   "no generated mutant on its lines"
+  ]
+ ],
+ "nonrs": 2,
+ "total": 214
+}

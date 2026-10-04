@@ -1,0 +1,135 @@
+diet/src/bin/drive.rs:134:5: replace serve_args -> Option<ServeArgs> with Some(Default::default())
+diet/src/bin/drive.rs:356:5: replace created -> Result<(std::fs::File, bool), String> with Ok((Default::default(), true))
+diet/src/bin/drive.rs:356:5: replace created -> Result<(std::fs::File, bool), String> with Ok((Default::default(), false))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((None, Some(((String::new(), Default::default()), true))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((None, Some(((String::new(), Default::default()), false))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((None, Some((("xyzzy".into(), Default::default()), true))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((None, Some((("xyzzy".into(), Default::default()), false))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), true)), None))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), true)), Some(((String::new(), Default::default()), true))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), true)), Some(((String::new(), Default::default()), false))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), true)), Some((("xyzzy".into(), Default::default()), true))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), true)), Some((("xyzzy".into(), Default::default()), false))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), false)), None))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), false)), Some(((String::new(), Default::default()), true))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), false)), Some(((String::new(), Default::default()), false))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), false)), Some((("xyzzy".into(), Default::default()), true))))
+diet/src/bin/drive.rs:401:5: replace outputs -> Result<(Option<(std::fs::File, bool)>, Option<((String, std::fs::File), bool)>,), String, > with Ok((Some((Default::default(), false)), Some((("xyzzy".into(), Default::default()), false))))
+diet/src/bin/drive.rs:419:5: replace served_session -> std::sync::Arc<Session<HttpStream>> with Arc::new(Session::new())
+diet/src/bin/drive.rs:419:5: replace served_session -> std::sync::Arc<Session<HttpStream>> with Arc::new(Session::from_iter([Default::default()]))
+diet/src/bin/drive.rs:419:5: replace served_session -> std::sync::Arc<Session<HttpStream>> with Arc::new(Session::new(Default::default()))
+diet/src/bin/drive.rs:419:5: replace served_session -> std::sync::Arc<Session<HttpStream>> with Arc::new(Session::from(Default::default()))
+diet/src/bin/drive.rs:449:5: replace started -> Result<Running, ExitCode> with Ok(Default::default())
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((None, Some((true, (Default::default(), (String::new(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((None, Some((true, (Default::default(), ("xyzzy".into(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((None, Some((false, (Default::default(), (String::new(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((None, Some((false, (Default::default(), ("xyzzy".into(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((Some(true), Some((true, (Default::default(), (String::new(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((Some(true), Some((true, (Default::default(), ("xyzzy".into(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((Some(true), Some((false, (Default::default(), (String::new(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((Some(true), Some((false, (Default::default(), ("xyzzy".into(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((Some(false), Some((true, (Default::default(), (String::new(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((Some(false), Some((true, (Default::default(), ("xyzzy".into(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((Some(false), Some((false, (Default::default(), (String::new(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:493:5: replace started_writers -> Result<(Option<bool>, Option<(bool, (diet::formats::record::Regime, (String, std::fs::File)),)>, diet::drive::serve::Emptied,), String, > with Ok((Some(false), Some((false, (Default::default(), ("xyzzy".into(), Default::default())))), Default::default()))
+diet/src/bin/drive.rs:562:51: replace + with - in written_record
+diet/src/bin/drive.rs:562:51: replace + with * in written_record
+diet/src/bin/drive.rs:590:5: replace trunk -> RequestShape with Default::default()
+diet/src/bin/drive.rs:612:5: replace listen_on -> Result<IpAddr, ExitCode> with Ok(Default::default())
+diet/src/bin/drive.rs:636:5: replace listener -> Result<std::net::TcpListener, ExitCode> with Ok(Default::default())
+diet/src/bin/drive.rs:703:5: replace registered_regime -> Result<diet::formats::record::Regime, String> with Ok(Default::default())
+diet/src/bin/drive.rs:716:5: replace bearer_from -> Result<Bearer, String> with Ok(Default::default())
+diet/src/bin/drive.rs:730:5: replace credential_from -> Result<Credential, String> with Ok(Default::default())
+diet/src/bin/drive.rs:867:5: replace declared -> Result<(Regime, IsolationPolicy, SeamPolicy), (u8, String)> with Ok((Default::default(), Default::default(), Default::default()))
+diet/src/bin/drive.rs:912:5: replace answering -> Result<(Option<Stub>, Endpoint), (u8, String)> with Ok((None, Default::default()))
+diet/src/bin/drive.rs:912:5: replace answering -> Result<(Option<Stub>, Endpoint), (u8, String)> with Ok((Some(Default::default()), Default::default()))
+diet/src/bin/drive.rs:989:5: replace cache -> Value with Default::default()
+diet/src/bin/drive.rs:1017:5: replace census -> Value with Default::default()
+diet/src/bin/drive.rs:1079:5: replace shape -> RequestShape with Default::default()
+diet/src/drive/mod.rs:563:9: replace <impl Ratifier for Interviewer<'_, T>>::ratify -> Vec<Patch> with vec![Default::default()]
+diet/src/drive/mod.rs:620:5: replace fold -> Result<(Vec<Patch>, Uncaptured), String> with Ok((vec![], Default::default()))
+diet/src/drive/mod.rs:620:5: replace fold -> Result<(Vec<Patch>, Uncaptured), String> with Ok((vec![Default::default()], Default::default()))
+diet/src/drive/mod.rs:758:5: replace linted_head -> Result<crate::client::head::Head, Halt> with Ok(Default::default())
+diet/src/drive/mod.rs:788:5: replace run -> Result<Drive, Halt> with Ok(Default::default())
+diet/src/drive/mod.rs:1255:9: replace && with || in archive
+diet/src/drive/mod.rs:1279:21: replace && with || in archive
+diet/src/drive/mod.rs:1343:5: replace issued_head -> Option<crate::client::head::Head> with Some(Default::default())
+diet/src/drive/canned.rs:82:5: replace script -> Script with Default::default()
+diet/src/drive/canned.rs:119:5: replace acts -> Vec<Act> with vec![Default::default()]
+diet/src/drive/canned.rs:132:5: replace acts_as_first_registered -> Vec<Act> with vec![Default::default()]
+diet/src/drive/engine.rs:145:5: replace matches -> Result<EngineIdentity, String> with Ok(Default::default())
+diet/src/drive/engine.rs:194:5: replace expected -> Result<Expected<'a>, String> with Ok(Default::default())
+diet/src/drive/engine.rs:229:5: replace check -> Result<Passed, String> with Ok(Default::default())
+diet/src/drive/engine.rs:263:5: replace check_served -> Result<Passed, String> with Ok(Default::default())
+diet/src/drive/engine.rs:264:51: replace + with * in check_served
+diet/src/drive/projection.rs:75:5: replace cited -> Option<Engine> with Some(Default::default())
+diet/src/drive/projection.rs:174:5: replace role_of -> Role with Default::default()
+diet/src/drive/projection.rs:116:5: replace sidecar_value -> crate::formats::record::json::Value with Default::default()
+diet/src/drive/projection.rs:266:5: replace project -> Result<Projection, String> with Ok(Default::default())
+diet/src/drive/projection.rs:330:9: replace Walk<'a>::over -> Self with Default::default()
+diet/src/drive/regimen.rs:55:5: replace regime_of -> Result<Regime, String> with Ok(Default::default())
+diet/src/drive/regimen.rs:192:5: replace regime_registered -> Result<Regime, String> with Ok(Default::default())
+diet/src/drive/regimen.rs:225:5: replace cache_ttl_of -> Result<Option<CacheTtl>, String> with Ok(Some(Default::default()))
+diet/src/drive/regimen.rs:274:5: replace sampled -> Value with Default::default()
+diet/src/drive/registry.rs:159:5: replace identity -> Result<Identity, String> with Ok(Default::default())
+diet/src/drive/registry.rs:228:5: replace weight_set -> Result<Weights, String> with Ok(Default::default())
+diet/src/drive/serve.rs:156:9: replace Credential::basic -> Option<Self> with Some(Default::default())
+diet/src/drive/serve.rs:238:36: replace + with * in Server::finish
+diet/src/drive/serve.rs:256:9: replace Server::start -> io::Result<Self> with Ok(Default::default())
+diet/src/drive/serve.rs:282:9: replace Server::addr -> SocketAddr with Default::default()
+diet/src/drive/serve.rs:300:13: replace && with || in <impl Drop for Server>::drop
+diet/src/drive/serve.rs:339:9: replace <impl Clone for Serving<S>>::clone -> Self with Default::default()
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("", "", Handler::new()); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("", "", Handler::from_iter([Default::default()])); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("", "", Handler::new(Default::default())); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("", "", Handler::from(Default::default())); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("", "xyzzy", Handler::new()); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("", "xyzzy", Handler::from_iter([Default::default()])); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("", "xyzzy", Handler::new(Default::default())); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("", "xyzzy", Handler::from(Default::default())); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("xyzzy", "", Handler::new()); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("xyzzy", "", Handler::from_iter([Default::default()])); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("xyzzy", "", Handler::new(Default::default())); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("xyzzy", "", Handler::from(Default::default())); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("xyzzy", "xyzzy", Handler::new()); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("xyzzy", "xyzzy", Handler::from_iter([Default::default()])); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("xyzzy", "xyzzy", Handler::new(Default::default())); 2]
+diet/src/drive/serve.rs:394:5: replace routes -> [(&'static str, &'static str, Handler<S>); 2] with [("xyzzy", "xyzzy", Handler::from(Default::default())); 2]
+diet/src/drive/serve.rs:453:39: replace + with * in Serving<S>::connection
+diet/src/drive/serve.rs:475:13: replace && with || in Serving<S>::connection
+diet/src/drive/serve.rs:574:9: replace Serving<S>::run -> (u16, BTreeMap<String, Value>) with (0, BTreeMap::from_iter([(String::new(), Default::default())]))
+diet/src/drive/serve.rs:574:9: replace Serving<S>::run -> (u16, BTreeMap<String, Value>) with (0, BTreeMap::from_iter([("xyzzy".into(), Default::default())]))
+diet/src/drive/serve.rs:574:9: replace Serving<S>::run -> (u16, BTreeMap<String, Value>) with (1, BTreeMap::from_iter([(String::new(), Default::default())]))
+diet/src/drive/serve.rs:574:9: replace Serving<S>::run -> (u16, BTreeMap<String, Value>) with (1, BTreeMap::from_iter([("xyzzy".into(), Default::default())]))
+diet/src/drive/serve.rs:635:9: replace Command::from_object -> Option<Posted> with Some(Default::default())
+diet/src/drive/serve.rs:675:5: replace idle_gap -> Option<IdleGap> with Some(Default::default())
+diet/src/drive/serve.rs:710:5: replace empty -> Value with Default::default()
+diet/src/drive/serve.rs:714:5: replace integer -> Value with Default::default()
+diet/src/drive/serve.rs:750:5: replace read_request -> Result<Request, Unread> with Ok(Default::default())
+diet/src/drive/session.rs:522:9: replace State::refuse -> Refusal with Default::default()
+diet/src/drive/session.rs:548:9: replace Shared<S>::lock -> MutexGuard<'_, State> with MutexGuard::new()
+diet/src/drive/session.rs:548:9: replace Shared<S>::lock -> MutexGuard<'_, State> with MutexGuard::from_iter([Default::default()])
+diet/src/drive/session.rs:548:9: replace Shared<S>::lock -> MutexGuard<'_, State> with MutexGuard::new(Default::default())
+diet/src/drive/session.rs:548:9: replace Shared<S>::lock -> MutexGuard<'_, State> with MutexGuard::from(Default::default())
+diet/src/drive/session.rs:584:9: replace Session<S>::open -> Self with Default::default()
+diet/src/drive/session.rs:592:9: replace Session<S>::open_serving -> Self with Default::default()
+diet/src/drive/session.rs:596:9: replace Session<S>::opened_as -> Self with Default::default()
+diet/src/drive/session.rs:645:9: replace Session<S>::ask -> Result<Admitted, Rejected> with Ok(Default::default())
+diet/src/drive/session.rs:826:9: replace Session<S>::settlement -> Settlement with Default::default()
+diet/src/drive/session.rs:832:9: replace Session<S>::trunk -> Vec<Message> with vec![Default::default()]
+diet/src/drive/session.rs:851:9: replace Session<S>::events_from -> Vec<Logged> with vec![Default::default()]
+diet/src/drive/session.rs:859:9: replace Session<S>::wait_from -> Vec<Logged> with vec![Default::default()]
+diet/src/drive/session.rs:859:36: replace + with * in Session<S>::wait_from
+diet/src/drive/session.rs:870:44: replace - with + in Session<S>::wait_from
+diet/src/drive/session.rs:870:44: replace - with / in Session<S>::wait_from
+diet/src/drive/session.rs:894:5: replace from -> Vec<Logged> with vec![Default::default()]
+diet/src/drive/session.rs:904:5: replace line_of -> log::Line with Default::default()
+diet/src/drive/session.rs:1083:5: replace failed_line -> log::Event with Default::default()
+diet/src/drive/session.rs:1102:5: replace gap_line -> log::Event with Default::default()
+diet/src/drive/session.rs:1127:5: replace command_of -> log::Command with Default::default()
+diet/src/drive/session.rs:1119:5: replace role_of -> log::Role with Default::default()
+diet/src/drive/session.rs:1136:5: replace refusal_of -> log::Refusal with Default::default()
+diet/src/drive/session.rs:1146:5: replace settle_reason_in_the_log -> log::SettleReason with Default::default()
+diet/src/drive/session.rs:1156:5: replace state_of -> log::State with Default::default()
+diet/src/drive/session.rs:1174:35: replace + with * in call
+diet/src/drive/session.rs:1316:5: replace settle_reason_of -> SettleReason with Default::default()
