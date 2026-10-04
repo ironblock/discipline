@@ -36,7 +36,7 @@ wall_clock_seconds	300
 # a count that did not know it would keep splitting.
 #
 # 20, the real number, not a number shaded down to leave headroom for
-# `verify.yml`'s diet, pages and repo jobs: reserving margin here is a second
+# `verify.yml`'s diet and repo jobs: reserving margin here is a second
 # budget nobody declared, competing with the one this file exists to be.
 # Nothing balances shards by cost any more (#112): if twenty does not get the
 # slowest shard under `wall_clock_seconds`, that is an UNMET BUDGET, and an

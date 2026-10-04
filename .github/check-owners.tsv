@@ -67,7 +67,7 @@ bsd	bsd	2
 # a package of its own, split by name (#262). No recompute.sh runs `diet`
 # (#268's review), so recompute's job needs no toolchain. ---
 injections	injections	2
-recompute	recompute	2
+recompute	recompute	3
 
 # --- exercise: the web surface. Its own job, because it is the one package
 # that needs Node, pnpm and a browser rather than the Rust toolchain. ---

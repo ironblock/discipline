@@ -4829,21 +4829,21 @@ import pathlib
 
 path = pathlib.Path('.github/check-owners.tsv')
 source = path.read_text(encoding="utf-8")
-old = 'recompute\trecompute\t2\n'
+old = 'recompute\trecompute\t3\n'
 if source.count(old) != 1:
     raise SystemExit(f"the anchor appears {source.count(old)} times")
 path.write_text(source.replace(old, 'recompute\trecompute\t1\n', 1), encoding="utf-8")
 EOF
 }
 
-# A sharded job's matrix short of the table: shard 2 never starts, every rule still reading the table (#268's review).
+# A sharded job's matrix hardcoded: shards 2 and 3 never start, every rule still reading the table (#268's review).
 inject_ci_sharded_matrix_not_the_table() {
   python3 - <<'EOF'
 import pathlib
 
 path = pathlib.Path('.github/workflows/pkg-recompute.yml')
 source = path.read_text(encoding="utf-8")
-old = 'shard: [1, 2]'
+old = 'shard: [1, 2, 3]'
 if source.count(old) != 1:
     raise SystemExit(f"the anchor appears {source.count(old)} times")
 path.write_text(source.replace(old, 'shard: [1]', 1), encoding="utf-8")
@@ -9018,7 +9018,7 @@ selftest() {
   seeded_case "an injection no shard applies"          ci inject_ci_injection_shard_drops_one \
     '`injections`.s 2 shards run none of 1 member\(s\), so nothing runs them'
   seeded_case "a results directory no shard re-derives" ci inject_ci_recompute_shard_drops_one \
-    '`recompute`.s 2 shards run none of 2 member\(s\), so nothing runs them'
+    '`recompute`.s 3 shards run none of 3 member\(s\), so nothing runs them'
   seeded_case "a sharded job never told its shard"     ci inject_ci_sharded_workflow_without_shard \
     'pkg-injections\.yml: .injections. is sharded, and its workflow is not the sharded form'
   seeded_case "a split into one shard"                 ci inject_ci_shard_count_one \
@@ -9026,13 +9026,13 @@ selftest() {
   seeded_case "a sharded matrix that is not the table" ci inject_ci_sharded_matrix_not_the_table \
     'pkg-recompute\.yml: .recompute. is sharded, and its workflow is not the sharded form'
   seeded_case "a check that runs one shard whatever"   ci inject_ci_check_runs_one_shard \
-    '.recompute..s 2 shards run none of [0-9]+ member\(s\), so nothing runs them'
+    '.recompute..s 3 shards run none of [0-9]+ member\(s\), so nothing runs them'
   seeded_case "a line separator YAML does not split on" ci inject_ci_sharded_workflow_line_separator \
     "pkg-recompute\\.yml:[0-9]+: .recompute. is sharded, and its workflow carries '.u2028'"
   seeded_case "a listing with no line of its own"      ci inject_ci_listing_unmarked \
     '.recompute.: verify\.sh --only recompute under VERIFY_LIST_MEMBERS exited 3, not 3 with its members LISTED'
   seeded_case "a shard that runs fewer than it lists"  ci inject_ci_recompute_runs_fewer_than_listed \
-    '.recompute..s 2 shards run none of 2 member\(s\), so nothing runs them'
+    '.recompute..s 3 shards run none of 3 member\(s\), so nothing runs them'
   seeded_case "an applier that applies fewer than it lists" ci inject_ci_injections_applies_fewer_than_listed \
     '.injections..s 2 shards run none of 2 member\(s\), so nothing runs them'
   seeded_case "a wrapper that runs shard 1 when not listing" ci inject_ci_recompute_wrapper_shard_one_when_running \
