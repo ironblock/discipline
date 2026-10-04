@@ -1,0 +1,1 @@
+a `tool_call` carries `stdout` without `stdout_bytes`

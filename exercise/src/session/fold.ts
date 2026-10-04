@@ -417,6 +417,7 @@ export function fold(lines: readonly LogLine[]): Session {
     switch (e.kind) {
       case 'session.start':
       case 'refused':
+      case 'tool_call':
       case 'stop.asked':
         break;
       case 'idle.gap': {

@@ -1,0 +1,19 @@
+{"head":[{"content":"You are working in a git repository. Use the bash tool to run commands.","role":"system"}],"kind":"session.start","model":"qwen3.8-flash-next (CONSTRUCTED: the deltas, response, progress and timings are I0's turn 1, substrates/measurements/2026-10-02-i0-tool-call-captures/turn1.http, and the tool_call's stdout is that run's tool-output.txt; the tool_call's argv, confinement and run are constructed)","opened":1790944103000,"provenance":"constructed","seq":0,"t":0,"version":3}
+{"kind":"ask","seq":1,"t":5,"text":"[be135a0c73102528] How many files are in the current directory? Run `ls | wc -l` with the bash tool and tell me the number.","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"cache":0,"kind":"progress","processed":0,"request":3,"seq":4,"t":20,"time_ms":0,"total":334}
+{"cache":0,"kind":"progress","processed":278,"request":3,"seq":5,"t":25,"time_ms":97058,"total":334}
+{"cache":0,"kind":"progress","processed":330,"request":3,"seq":6,"t":30,"time_ms":105926,"total":334}
+{"cache":0,"kind":"progress","processed":334,"request":3,"seq":7,"t":35,"time_ms":106893,"total":334}
+{"kind":"delta","request":3,"seq":8,"t":40,"tool_call":{"arguments":"{","id":"7GJeYs3ux1SaqFVPB5ee2AExFLbsukd7","index":0,"name":"bash"}}
+{"kind":"delta","request":3,"seq":9,"t":45,"tool_call":{"arguments":"\"command\":\"","index":0}}
+{"kind":"delta","request":3,"seq":10,"t":50,"tool_call":{"arguments":"ls","index":0}}
+{"kind":"delta","request":3,"seq":11,"t":55,"tool_call":{"arguments":" |","index":0}}
+{"kind":"delta","request":3,"seq":12,"t":60,"tool_call":{"arguments":" wc","index":0}}
+{"kind":"delta","request":3,"seq":13,"t":65,"tool_call":{"arguments":" -","index":0}}
+{"kind":"delta","request":3,"seq":14,"t":70,"tool_call":{"arguments":"l","index":0}}
+{"kind":"delta","request":3,"seq":15,"t":75,"tool_call":{"arguments":"\"","index":0}}
+{"kind":"delta","request":3,"seq":16,"t":80,"tool_call":{"arguments":"}","index":0}}
+{"finish_reason":"tool_calls","kind":"response","seq":17,"t":85,"text":"","timings":{"cache_n":0,"draft_n":24,"draft_n_accepted":23,"predicted_ms":9431.498,"predicted_n":30,"prompt_ms":106897.407,"prompt_n":334},"to_request":3}
+{"arguments":"{\"command\":\"ls | wc -l\"}","argv":["sh","-c","ls | wc -l"],"confined":["/usr/bin/bwrap","--unshare-all","--die-with-parent","--new-session","--ro-bind","/usr","/usr","--proc","/proc","--dev","/dev","--tmpfs","/dev/shm","--bind","/work/tree","/work/tree","--remount-ro","/","--remount-ro","/dev","--remount-ro","/dev/shm","--chdir","/work/tree","--","sh","-c","ls | wc -l"],"exit":0,"id":"7GJeYs3ux1SaqFVPB5ee2AExFLbsukd7","isolation":"sandbox","kind":"tool_call","name":"bash","network":"none","outcome":"ran","request":3,"seq":18,"stderr":"","stderr_bytes":0,"stdout":"      18\n","stdout_bytes":9,"t":90,"turn":1}

@@ -1,0 +1,1 @@
+a `tool_call` cites seq 1, which is not an earlier `request`

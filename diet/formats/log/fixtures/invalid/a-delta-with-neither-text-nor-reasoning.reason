@@ -1,1 +1,1 @@
-a delta carries exactly one of text and reasoning
+a delta carries exactly one of text, reasoning and tool_call
