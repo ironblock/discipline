@@ -31,9 +31,34 @@ Cell words: `pass`, `fail`, `n/a (reason)`, `unreported`, `unadjudicated`, and `
 
 ## Middle rung
 
-<!-- Written by the data seat (Track 4): each record's admission words, with the measurement and admission directories by digest. -->
+Two admission records sit on `linux-pc`'s 24 GiB accelerator. Each one's word is derived by `admission/derive_admission.py` (#183) from the three results it cites. Each result is pinned by the sha256 of its file manifest, and `verify.sh --only admission` re-derives every word and refuses a record whose word or digests differ.
 
-*The data seat writes this section.*
+**`accel24-llamacpp-qwen38-27b-iq3s`, the floor for new claims: admitted at `9d84a552fc94`.**
+
+| result | directory | manifest sha256 | word |
+|---|---|---|---|
+| cells | `admission/accel24-llamacpp-qwen38-27b-iq3s/9d84a552fc94/` | `199c9bd24ced5d11…` | identity, kwarg delivery, output invariance, headroom, checkpoint restore `pass`; canary `baseline` (the rung's first draw); rendered effort `n/a` (a template fact, carried on the registry entry) |
+| depth probe | `…/9d84a552fc94/depth/` | `3a488da76d1923f0…` | `pass` (no cliff) |
+| parity fire | `results/2026-10-01-extraction-acceptance-parity-candidate/` | `3d4ac379368f04cc…` | `supported` |
+
+- **The fingerprint:** `9d84a552fc940b7f…`, over engine, weights, template, serving line and reasoning state.
+- **Registry lag:** the registry entry's `admission` text still reads "not admitted", from before the depth probe and the parity fire landed. The record's derived word is `admitted`; #393 carries the fix.
+- **Characterization beside it,** which admits nothing:
+  - the quant ladder: `measurements/2026-10-03-qwen38-27b-quality-ladder/`, SHA256SUMS `ab0aa80e876752ed…`;
+  - its size-matched addendum: `…-quality-ladder-size-matched/`, `ea6c20cc6f0a901b…`.
+
+**`accel24-beellama-qwen27b-q4kxl`, the archived substrate of record: admitted at `7c254834cc2c`.**
+
+| result | directory | manifest sha256 | word |
+|---|---|---|---|
+| cells | `admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/` | `edbbedbf275d1299…` | identity, kwarg delivery, canary, output invariance, headroom, checkpoint restore `pass`; rendered effort `n/a` (as above) |
+| depth probe | `…/7c254834cc2c/depth/` | `944fdd3729424a89…` | `pass` |
+| parity fire | `results/2026-09-25-extraction-acceptance-parity/` | `a615bdefc7939c15…` | `supported` |
+
+- **The fingerprint:** `7c254834cc2c49ac…`.
+- **Headroom** passes by construction on the reference line: Q9 as amended (#143, [5889255742](https://github.com/ironblock/discipline/issues/143#issuecomment-5889255742)).
+- **OS-only instances** recorded after the admission (2026-09-29), `2026-10-01` and `2026-10-02`, each carry an `admission_note` saying the admission stands, as ruled. The current one is `2026-10-02`, restored with its fingerprint check and canary (`measurements/2026-10-02-floor-restore/`).
+- **The vision cell** (#373) reads `accepted` on this line, in `…/7c254834cc2c/vision/`, outside the cells manifest. It is evidence for the registry's `vision` field, not an admission result. It merged in #392, and `verify.sh --only admission` re-derives it against the registry.
 
 ## Top rung
 
@@ -65,13 +90,15 @@ Cross-engine KLD includes the engines' numerical differences, which can only ove
 
 **Client-visible differences** from the llama.cpp line, for whoever fires its cells: `reasoning_effort: "high"` is a 400 (the template knows `low`, `medium`, `xhigh`), content may open with a blank line after the reasoning, there is no `/slots` endpoint, and the sampler card is TabbyAPI's defaults unless a request sets its own (§5, the registry entry).
 
-<!-- Written by the data seat (Track 4): the top rung's admission words (none yet), with directories by digest. -->
+**Admission words: none.** No directory exists under `admission/ada48-tabbyapi-exl3-qwen38flashnext-2p05/`, and the registry's `admission` reads `unadmitted`. Its admission is #396. The receipts that pin the line, which admit nothing, are:
+- `measurements/2026-10-03-ada48-tabbyapi/`: versions, the frozen package set, the redacted config and its diff, the per-file weight digests, the API checks and the switch log;
+- `measurements/2026-10-03-characterization/`, SHA256SUMS `addeb2e36613bea0…`.
 
 ## Bottom rung
 
-<!-- Written by the data seat (Track 4): admission words, if any, with directories by digest. -->
+**Admission words: none.** No directory exists under `admission/` for a bottom-rung substrate.
 
-*The data seat writes this section.*
+`cpu-beellama-qwen3-1p7b-q4km` is registered and serves as the parity fire's seat B. That is a role inside another rung's result, not an admission of its own. No cell, depth probe or parity fire has been run with it as the rung under test.
 
 ## Engine lines
 
