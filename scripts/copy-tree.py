@@ -12,7 +12,7 @@ That last part is the point. A sandbox's sources must look newer than any
 artifact a previous case left in the shared cargo target, or cargo declares
 the target fresh and runs the wrong binary (verify.sh's `sandbox()`). The
 mode matters too, because a copied script is run by name. So this is
-`copyfile` and then `copymode`, never `copy2`.
+`copyfile` and then the source's mode, never `copy2`.
 
 It replaces `cp -L --parents`, which BSD `cp` refuses, in verify.sh's
 sandbox and in check-injections.py, which calls `copy_tree` in-process.
@@ -24,8 +24,10 @@ Stdlib only. Exit 0 with every path copied; 1 if one cannot be, naming it;
 
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
+import stat
 import sys
 
 EXIT_FAILED = 1
@@ -36,11 +38,17 @@ def copy_tree(src: pathlib.Path, dest: pathlib.Path, paths: list[str]) -> int:
     """Copy each path under `src` to the same path under `dest`, following
     links, keeping the mode, with a new mtime. Returns how many were copied.
     An `OSError` names its path."""
+    # Each directory made once and each source stated once: the per-file
+    # cost is the copy itself, as it was for one batched `cp`.
+    made: set[pathlib.Path] = set()
     for path in paths:
         source, target = src / path, dest / path
-        target.parent.mkdir(parents=True, exist_ok=True)
+        if target.parent not in made:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            made.add(target.parent)
+        mode = os.stat(source).st_mode
         shutil.copyfile(source, target)
-        shutil.copymode(source, target)
+        os.chmod(target, stat.S_IMODE(mode))
     return len(paths)
 
 
