@@ -1,0 +1,4 @@
+  [OK]   NVMe link Gen3 (8GT/s x2)
+  [OK]   dummy-EDID kargs absent (console/VRAM)
+  [OK]   ReBAR / Above4G (3090 32G BAR)
+verify-box: PASS

@@ -1,0 +1,44 @@
+### 12:17:45 fetch HF drafter
+Fetching 5 files:   0%|          | 0/5 [00:00<?, ?it/s]Fetching 5 files:  20%|██        | 1/5 [00:00<00:01,  3.37it/s]Fetching 5 files:  60%|██████    | 3/5 [00:01<00:00,  2.63it/s]Fetching 5 files: 100%|██████████| 5/5 [00:33<00:00,  8.40s/it]Fetching 5 files: 100%|██████████| 5/5 [00:33<00:00,  6.61s/it]
+[32m✓ Downloaded[0m
+  path: $HOME/Models/Qwen3.8-27B-DFlash2-hf
+  rc=0 3.6G
+##### 12:18:18 exl3-4.00-dfl2
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-hf
+
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-4.00bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+[exl3-4.00-dfl2] loaded in 21s; VRAM 20.4 GiB alloc / 23.1 GiB used
+[exl3-4.00-dfl2] code: prompt_n=53 predicted_n=320 predicted_per_second=74.06 time=4.3s accepted_draft_tokens=228 rejected_draft_tokens=416 cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-4.00-dfl2] code2: prompt_n=53 predicted_n=320 predicted_per_second=93.49 time=3.4s accepted_draft_tokens=228 rejected_draft_tokens=416 cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[exl3-4.00-dfl2] prose: prompt_n=54 predicted_n=320 predicted_per_second=80.12 time=4.0s accepted_draft_tokens=212 rejected_draft_tokens=544 cached_tokens=0 | text: '<think>\nThe user wants a 400-word essay about the Mac Pro 20'
+  rc=0 vram=21 MiB
+##### 12:18:58 exl3-5.00-dfl2
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-hf
+
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-5.00bpw
+
+Traceback (most recent call last):
+  File "$HOME/setup/exl3bench.py", line 28, in <module>
+    main()
+  File "$HOME/setup/exl3bench.py", line 12, in main
+    model, config, cache, tokenizer, draft_model, draft_config, draft_cache = model_init.init(args)
+                                                                              ^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model_init.py", line 360, in init
+    model.load(
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model.py", line 656, in load
+    for _ in f: pass
+             ^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model.py", line 581, in load_gen
+    yield from self._load_autosplit(
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model_ls.py", line 274, in _load_autosplit
+    raise RuntimeError("Insufficient VRAM in split for model and cache")
+RuntimeError: Insufficient VRAM in split for model and cache
+  rc=1 vram=21 MiB
+##### 12:19:19 DONE

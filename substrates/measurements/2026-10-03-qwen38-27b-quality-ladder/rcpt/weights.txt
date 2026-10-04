@@ -1,0 +1,12 @@
+# Weight files of this measurement on linux-pc, read 2026-10-03. Sizes in bytes (stat). Publisher sha256 and Hugging Face
+# revision from the host's download metadata; the Q8_0 reference was also re-hashed on the host before the floor stopped
+# (scripts/w334.sh line 44 aborts the window on a mismatch; window.log shows the window proceeded).
+29047086048  a680f44a06920e5d689774823782006aa3acc8db95750323373b24139b67e348  4ca720788d1e01f1bff70c033e0d0028fd02e502  unsloth/Qwen3.8-27B-GGUF  Qwen3.8-27B-Q8_0.gguf
+8771311680   f3369f8d36968ab7dd12f5ff11452680aef9371aa19c9922d22ccd5e58c2d9c8  d562806dbafae37109975e970aae91b43e73b440  ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF  Qwen3.8-27B-GSQ-RCO-IQ2_XS-mtp.gguf
+9607981120   e6406238a5cc0043775cd1963b6f9e5b8707400276e38d9fde742304906b1330  d562806dbafae37109975e970aae91b43e73b440  ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF  Qwen3.8-27B-GSQ-RCO-IQ2_S-mtp.gguf
+10442827840  63f29a2189a6b4cc31f81e093d3856ad293a5583114439f41ae1ed7af4093262  d562806dbafae37109975e970aae91b43e73b440  ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF  Qwen3.8-27B-GSQ-RCO-IQ3_XXS-mtp.gguf
+12120016960  58fd826723939933dc86f45b7fe04545cbc2de1c70f6fe2cdd3858c87a98c12f  d562806dbafae37109975e970aae91b43e73b440  ISTA-DASLab/Qwen3.8-27B-GSQ-RCO-GGUF  Qwen3.8-27B-GSQ-RCO-IQ3_S-mtp.gguf
+# EXL3 (turboderp/Qwen3.8-27B-exl3): size = the sum of the *.safetensors files; per-file sha256 in #336 weights-digests.txt
+16860809795  (2 files)  113cf7ab958054860e43fb7f3063b1af19171095  turboderp/Qwen3.8-27B-exl3 branch 4.00bpw
+19901680029  (3 files)  a35e75a73baee51da709329d19294245cbeeb5d8  turboderp/Qwen3.8-27B-exl3 branch 5.00bpw
+22942550421  (3 files)  d32ba0bbd17de6bed8d5bbfb8c19f16f228f67ff  turboderp/Qwen3.8-27B-exl3 branch 6.00bpw

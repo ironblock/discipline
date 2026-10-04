@@ -7,11 +7,13 @@
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
 #   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
+#   verify.sh --only recompute --scope DIR[,DIR]   re-derive those directories (selftest only, #318)
 #   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
 #   verify.sh --site DIR      check a built site as Pages would serve it (#32): check_site
 #   verify.sh --selftest      prove the gate goes red on seeded faults (bash 4+)
 #   verify.sh --selftest --shard K/N    run this job's share of the faults
+#   verify.sh --selftest --shard K/N --shard-plan F   ...with plan F's packing (#319)
 #   verify.sh --selftest --scope-plan F re-prove only what plan F does not inherit (#112)
 #   verify.sh --selftest --census PATH  write what this run ran, for the sum
 #   verify.sh --selftest --derive-scopes DIR   re-harvest the test cases' scopes
@@ -344,9 +346,13 @@ check_regimen() {
 # it would run and run none (#262): scripts/check-ci-coverage.py asks THIS
 # function, under VERIFY_CHECK_SHARD, so the wiring from the job's env to the
 # script is on the path it proves complete, not beside it.
+# VERIFY_RECOMPUTE_SCOPE is `--scope` on this check (#318): the directories a
+# seeded case mutated, comma-separated, so the case re-derives those and not
+# every directory's minutes-long recompute.sh. The package job never sets it.
+VERIFY_RECOMPUTE_SCOPE=""
 check_recompute() {
   python3 scripts/check-recompute.py --root results ${VERIFY_CHECK_SHARD:+--shard "$VERIFY_CHECK_SHARD"} \
-    ${VERIFY_LIST_MEMBERS:+--names}
+    ${VERIFY_RECOMPUTE_SCOPE:+--only "$VERIFY_RECOMPUTE_SCOPE"} ${VERIFY_LIST_MEMBERS:+--names}
 }
 
 # A rung's admission word, derived from its admission directory rather than trusted as written (#183): the
@@ -701,8 +707,9 @@ SELFTEST_DERIVE=""
 
 # --- the shard ------------------------------------------------------------
 #
-# `--selftest --shard K/N` runs the faults a hash of their id assigns to shard
-# K, so N jobs between them run each fault exactly once.
+# `--selftest --shard K/N` runs the faults assigned to shard K -- by
+# `--shard-plan`'s packing where it names the fault, by a hash of its id where
+# it does not -- so N jobs between them run each fault exactly once.
 #
 # IT WAS A HARVESTED PLAN, and before that arithmetic. Arithmetic -- every Nth
 # fault -- split the count and not the cost (#87); a plan packed from measured
@@ -720,6 +727,16 @@ SELFTEST_DERIVE=""
 # absence is a failure rather than a silence: a missing census is a missing
 # shard, and the aggregate refuses.
 #
+# MEASURED SECONDS PACK THE SHARDS, WHERE THERE ARE ANY (#319). The plan job
+# packs every fault the newest trunk census timed, longest first into the
+# emptiest shard (scripts/scope-selftest.py --pack-out), and `--shard-plan`
+# hands each shard that packing: a fault the plan names runs in the plan's
+# shard, and every other fault -- new on this branch, or never timed -- takes
+# the hash as before. Every shard reads the same plan, so the union is still
+# the whole list, and the census still proves it from the ordinals rather than
+# from the plan. A plan packed for another N is refused: its shards past this
+# run's N would run nothing, and the census would say so only after the run.
+#
 # 0 means unsharded -- one job runs the lot, which is what a contributor gets.
 SELFTEST_SHARD=0
 SELFTEST_SHARDS=1
@@ -736,6 +753,9 @@ SELFTEST_RAN_IDS=()
 SELFTEST_INHERITED=()
 SELFTEST_TOUCHED=()
 SELFTEST_CENSUS=""
+SELFTEST_SHARD_PLAN=""
+# `ID<TAB>SECONDS` for each seeded_case this shard ran, for the next plan (#319).
+SELFTEST_SECONDS=()
 
 # Whether the next counted fault belongs to this shard, counting it either
 # way. Every counted fault calls this exactly once, in declaration order, so
@@ -758,9 +778,12 @@ nothing can say which shard runs it" >&2
     claim_fault "$ident"
     return
   fi
-  local crc
-  crc="$(printf '%s' "$ident" | cksum)"
-  if [ $(( ${crc%% *} % SELFTEST_SHARDS + 1 )) -eq "$SELFTEST_SHARD" ]; then
+  local crc owner="${SHARD_PLAN[$ident]-}"
+  if [ -z "$owner" ]; then
+    crc="$(printf '%s' "$ident" | cksum)"
+    owner=$(( ${crc%% *} % SELFTEST_SHARDS + 1 ))
+  fi
+  if [ "$owner" -eq "$SELFTEST_SHARD" ]; then
     claim_fault "$ident"
     return
   fi
@@ -811,6 +834,51 @@ load_scope_plan() {
     esac
     SCOPE_INHERIT["$ident"]="$sha"
   done < "$path"
+}
+
+# Read `--shard-plan` into SHARD_PLAN, `selftest`'s local (#319). A
+# `shards<TAB>N` row that must be this run's N, then `assign<TAB>ID<TAB>K`
+# rows with 1 <= K <= N, each id once; `#` lines are comments. Anything else
+# is refused rather than half-read: a plan this run cannot follow exactly is
+# not a packing, and the hash is the fallback only for faults it does not name.
+load_shard_plan() {
+  local path="$SELFTEST_SHARD_PLAN" key ident k extra n=""
+  [ -f "$path" ] || {
+    echo "selftest: --shard-plan ${path} is not there" >&2
+    exit "$EXIT_MISUSE"
+  }
+  while IFS=$'\t' read -r key ident k extra || [ -n "${key:-}" ]; do
+    case "$key" in ''|\#*) continue ;; esac
+    if [ "$key" = "shards" ] && [ -z "$n" ] && [ -z "${k:-}" ]; then
+      n="${ident:-}"
+      case "$n" in ''|*[!0-9]*) n="x" ;; esac
+      if [ "$n" != "$SELFTEST_SHARDS" ]; then
+        echo "selftest: ${path} was packed for ${ident:-no} shard(s), and this run has ${SELFTEST_SHARDS}" >&2
+        exit "$EXIT_MISUSE"
+      fi
+      continue
+    fi
+    if [ "$key" != "assign" ] || [ -z "$n" ] || [ -z "${ident:-}" ] || [ -n "${extra:-}" ]; then
+      echo "selftest: ${path}: not a \`shards<TAB>N\` row followed by \`assign<TAB>ID<TAB>K\` rows: ${key} ${ident:-} ${k:-}" >&2
+      exit "$EXIT_MISUSE"
+    fi
+    # Ten digits or more is past any shard count and past what `[ -lt ]`
+    # compares without erroring, which an `if` would read as in range.
+    case "${k:-}" in ''|*[!0-9]*|0*|??????????*) k=0 ;; esac
+    if [ "$k" -lt 1 ] || [ "$k" -gt "$SELFTEST_SHARDS" ]; then
+      echo "selftest: ${path}: '${ident}' is assigned outside shards 1..${SELFTEST_SHARDS}" >&2
+      exit "$EXIT_MISUSE"
+    fi
+    if [ -n "${SHARD_PLAN[$ident]-}" ]; then
+      echo "selftest: ${path}: '${ident}' is assigned twice" >&2
+      exit "$EXIT_MISUSE"
+    fi
+    SHARD_PLAN["$ident"]="$k"
+  done < "$path"
+  [ -n "$n" ] || {
+    echo "selftest: ${path} says nothing about how many shards it was packed for" >&2
+    exit "$EXIT_MISUSE"
+  }
 }
 
 selftest_cleanup() {
@@ -974,8 +1042,7 @@ log_carries_every() {
 catcher_signatures() { printf '%s' "${1//$'\x1f'/$'\n'}"; }
 
 seeded_case() {
-  local label="$1" check="$2" inject="$3" expect="$4" scope="${5-}" ident="${6-}"
-  local box="$SELFTEST_BOX"
+  local check="$2" inject="$3" ident="${6-}"
   local started="$SECONDS"
   [ -n "$ident" ] || ident="${check}.${inject#inject_}"
   # Recorded before the shard is consulted. This list answers "has every check
@@ -984,11 +1051,23 @@ seeded_case() {
   SEEDED_CHECKS+=("$check")
   in_shard "$ident" || return 0
   SELFTEST_CASES=$(( SELFTEST_CASES + 1 ))
+  # Timed whatever the verdict, so the next plan packs this fault by what it
+  # cost here (#319). The case itself is run_seeded_case, below, so that every
+  # one of its returns comes back through this line.
+  run_seeded_case "$@"
+  SELFTEST_SECONDS+=("${ident}"$'\t'"$(( SECONDS - started ))")
+}
 
-  # A `test` case says which tests it needs; an `injections` case MAY name the
-  # one injection it needs (#112); anything else says nothing, because
-  # `--scope` narrows only those two checks and verify.sh refuses it
-  # elsewhere. Both halves are reported here rather than left to become a
+run_seeded_case() {
+  local label="$1" check="$2" inject="$3" expect="$4" scope="${5-}" ident="${6-}"
+  local box="$SELFTEST_BOX"
+  local started="$SECONDS"
+  [ -n "$ident" ] || ident="${check}.${inject#inject_}"
+
+  # A `test` case says which tests it needs; an `injections` or `bsd` case
+  # MAY name the one injection it needs (#112); a `recompute` case MAY name
+  # the directories it mutated (#318); anything else says nothing, because
+  # `--scope` narrows only those checks and verify.sh refuses it elsewhere. Both halves are reported here rather than left to become a
   # confusing exit 2 from inside the box, and scripts/check-fault-manifest.py
   # refuses the same two states before a run ever starts.
   local -a scoped=()
@@ -1007,13 +1086,13 @@ seeded_case() {
       return
     fi
     scoped=(--scope "$scope")
-  elif { [ "$check" = "injections" ] || [ "$check" = "bsd" ]; } && [ -n "$scope" ]; then
+  elif { [ "$check" = "injections" ] || [ "$check" = "bsd" ] || [ "$check" = "recompute" ]; } && [ -n "$scope" ]; then
     scoped=(--scope "$scope")
   elif [ -n "$scope" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
-    SELFTEST_BROKEN+=("${label}: only the test, injections and bsd checks take a scope")
-    not_red "$ident" "$check" "only the test, injections and bsd checks take a scope"
+    SELFTEST_BROKEN+=("${label}: only the test, injections, bsd and recompute checks take a scope")
+    not_red "$ident" "$check" "only the test, injections, bsd and recompute checks take a scope"
     return
   fi
   # One log per case, kept for the run, because the box itself is overwritten
@@ -5253,10 +5332,10 @@ import pathlib
 
 path = pathlib.Path('.github/workflows/pkg-injections.yml')
 source = path.read_text(encoding="utf-8")
-old = '          VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n'
+old = '          VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n'
 if source.count(old) != 1:
     raise SystemExit(f"the anchor appears {source.count(old)} times")
-path.write_text(source.replace(old, '          SHARD_IGNORED: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n', 1), encoding="utf-8")
+path.write_text(source.replace(old, '          SHARD_IGNORED: ${{ matrix.shard }}/${{ strategy.job-total }}\n', 1), encoding="utf-8")
 EOF
 }
 
@@ -5281,7 +5360,7 @@ import pathlib
 
 path = pathlib.Path('.github/workflows/pkg-recompute.yml')
 source = path.read_text(encoding="utf-8")
-old = 'shard: ${{ fromJSON(needs.plan.outputs.shards) }}'
+old = 'shard: [1, 2, 3]'
 if source.count(old) != 1:
     raise SystemExit(f"the anchor appears {source.count(old)} times")
 path.write_text(source.replace(old, 'shard: [1]', 1), encoding="utf-8")
@@ -7884,6 +7963,14 @@ prove_mechanics() {
   expect_exit "nor with a shim that edits through GNU's -i" 2 \
     bash "${bsd}/gnu-shaped/scripts/check-bsd-sed.sh" "${bsd}/gnu-shaped"
 
+  # A recompute case narrowed to the directories it mutated (#318) names
+  # directories that are there, or the narrowing is a misuse: a scope that
+  # matched nothing would re-derive nothing and pass.
+  expect_exit "a recompute scope naming no directory is a misuse" 2 \
+    python3 "${ROOT}/scripts/check-recompute.py" --root "${ROOT}/results" --only no-such-directory
+  expect_exit "a recompute scope that is not a list of names is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --only recompute --scope '../results'
+
   # ...but an ordinary binary must not trip the loose heuristics. Over-strict
   # is a failure too: a gate that cries wolf on every binary gets switched off.
   #
@@ -8917,6 +9004,8 @@ selftest() {
   # refuses outright.
   local -A SCOPE_INHERIT=()
   [ -z "$SELFTEST_SCOPE_PLAN" ] || load_scope_plan
+  local -A SHARD_PLAN=()
+  [ -z "$SELFTEST_SHARD_PLAN" ] || load_shard_plan
   # THE SANDBOXES' TARGET MAY BE A CACHED ONE (#306): CI names a directory a
   # Cargo cache restores into, so the dependencies are compiled once per
   # lockfile, toolchain and runner image rather than on every shard. Unset, a
@@ -9200,7 +9289,8 @@ selftest() {
   seeded_case "the float rule widened past the record" test    inject_regimen_float_rule_widened \
     'formats::regimen::tests::the_float_rule_and_the_records_decimal_rule_agree \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "a summary the rows do not carry"       recompute inject_recompute_summary_not_derived \
-    'the report does not re-derive'
+    'the report does not re-derive' \
+    '_template'
   seeded_case "a held word the results derive as admitted" admission inject_admission_held_while_derived \
     'holds a word the results derive as'
   seeded_case "a cited result edited after the record" admission inject_admission_record_not_recomputed \
@@ -9226,13 +9316,17 @@ selftest() {
   seeded_case "an admission record the glob cannot see" admission inject_admission_record_moved \
     'admission.record-not-found'
   seeded_case "a results directory declaring no kind" recompute inject_recompute_kind_undeclared \
-    'front-matter .kind. is None'
+    'front-matter .kind. is None' \
+    '2026-01-30-seeded-undeclared'
   seeded_case "a recompute that cannot fail"          recompute inject_recompute_cannot_fail \
-    'does not compare the report to the artefacts'
+    'does not compare the report to the artefacts' \
+    '_template'
   seeded_case "a probe blinded by a trailing comment"  recompute inject_recompute_probe_blinded_by_a_comment \
-    'does not compare the report to the artefacts'
+    'does not compare the report to the artefacts' \
+    '_template'
   seeded_case "a recompute that edits what it checks"  recompute inject_recompute_tampers \
-    'tampering, not recomputation'
+    'tampering, not recomputation' \
+    '_template'
   seeded_case "a claim consuming evidence outside"     results   inject_results_consumes_outside \
     'outside the run directory'
   seeded_case "a claim consuming its own record"       results   inject_results_consumes_the_record \
@@ -9240,9 +9334,11 @@ selftest() {
   seeded_case "a claim consuming a file not there"     results   inject_results_consumes_a_missing_file \
     'which is not a file here'
   seeded_case "reproducible, with nothing to run"      recompute inject_recompute_script_missing \
-    'carries no recompute.sh'
+    'carries no recompute.sh' \
+    '_template'
   seeded_case "the template carrying the opt-out"      recompute inject_recompute_template_opts_out \
-    'the template declares .historical-observation.'
+    'the template declares .historical-observation.' \
+    '_template'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
   seeded_case "a figure typed in Conclusion"          results  inject_results_figure_typed_in_conclusion \
@@ -9440,11 +9536,14 @@ selftest() {
   seeded_case "a shared body written out under another name" test inject_number_terminal_body_regrown \
     'has a shared terminal.s body written out again' 'test:conformance/the_integer_terminal'
   seeded_case "historical, and carrying a recompute"   recompute inject_recompute_historical_with_a_script \
-    'declares .historical-observation. and carries a recompute\.sh'
+    'declares .historical-observation. and carries a recompute\.sh' \
+    '2026-01-30-seeded-historical'
   seeded_case "historical with no reason stated"       recompute inject_recompute_historical_without_a_reason \
-    'states no .historical_reason.'
+    'states no .historical_reason.' \
+    '2026-01-30-seeded-unreasoned'
   seeded_case "historical with a reason that says nothing" recompute inject_recompute_historical_reason_blank \
-    'states no .historical_reason.'
+    'states no .historical_reason.' \
+    '2026-01-31-seeded-blank-reason'
   seeded_case "only the template recomputes"           recompute inject_recompute_only_the_template_recomputes \
     'results are present and none recomputed'
   seeded_case "a check no workflow runs"              ci       inject_ci \
@@ -10025,6 +10124,11 @@ selftest() {
         printf 'inherited\t%s\n' "${SELFTEST_INHERITED[@]}"
       [ "${#SELFTEST_TOUCHED[@]}" -eq 0 ] ||
         printf 'touched\t%s\n' "${SELFTEST_TOUCHED[@]}"
+      # What each seeded_case took here, which the next run's plan packs by
+      # (#319). A row of its own, not a column on `ordinal`: a branch that has
+      # not rebased reads `ordinal` rows by their arity and would read none.
+      [ "${#SELFTEST_SECONDS[@]}" -eq 0 ] ||
+        printf 'seconds\t%s\n' "${SELFTEST_SECONDS[@]}"
       [ "${#SELFTEST_NOT_RED[@]}" -eq 0 ] ||
         printf 'not_red\t%s\n' "${SELFTEST_NOT_RED[@]}"
     } > "$SELFTEST_CENSUS" || {
@@ -10528,7 +10632,8 @@ def share(shard, n=None, of=SHARDS):
     return [i for i in range(1, n + 1) if (i - 1) % of + 1 == shard]
 
 
-def write(case, shard, ordinals, said_total=None, said_shards=None, inherited=(), not_red=()):
+def write(case, shard, ordinals, said_total=None, said_shards=None, inherited=(), not_red=(),
+          timed=False, stranger=False):
     # Each shard's artifact arrives in a directory of its own, as
     # download-artifact leaves them.
     where = root / case / f"shard-{shard}"
@@ -10537,7 +10642,11 @@ def write(case, shard, ordinals, said_total=None, said_shards=None, inherited=()
         f"shard\t{shard}\n"
         f"shards\t{SHARDS if said_shards is None else said_shards}\n"
         f"total\t{total if said_total is None else said_total}\n"
-        + "".join(f"ordinal\t{n}\n" for n in ordinals)
+        + "".join(f"ordinal\t{n}\tfault.{n}\n" if timed else f"ordinal\t{n}\n" for n in ordinals)
+        # #319: what each fault the shard ran took, and -- for the refusal --
+        # seconds for a fault it did not run.
+        + "".join(f"seconds\tfault.{n}\t7\n" for n in (ordinals if timed else ()))
+        + ("seconds\tfault.not-run-here\t7\n" if stranger else "")
         # #112: a fault the scope plan inherited, declared by the shard that
         # owns it with the commit it was last seen red at.
         + "".join(f"inherited\t{n}\tfault.{n}\tabc1234\n" for n in inherited)
@@ -10552,6 +10661,8 @@ def write(case, shard, ordinals, said_total=None, said_shards=None, inherited=()
 
 for k in range(1, SHARDS + 1):
     write("whole", k, share(k))
+    write("timed-whole", k, share(k), timed=True)
+    write("timed-stranger", k, share(k), timed=True, stranger=(k == 1))
     # Each shard inherits its first fault and runs the rest: every fault is
     # still accounted for once, and none of the inherited is called a pass.
     write("inherited-whole", k, share(k)[1:], inherited=share(k)[:1])
@@ -10612,6 +10723,12 @@ EOF
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/wrong-total"
   expect_exit "one fault claimed by two shards" 1 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/twice"
+  expect_exit "a whole whose shards timed every fault they ran" 0 \
+    python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/timed-whole"
+  # Exit 1 alone cannot fail: an unknown row is refused too. It names the row.
+  expect_exit "seconds for a fault the shard did not run are refused" 0 \
+    bash -c 'rc=0; out="$(python3 "$1" "$2" 2>&1)" || rc=$?; [ "$rc" -eq 1 ] && grep -qF "seconds for fault.not-run-here, which this shard did not run" <<<"$out"' \
+    _ "${ROOT}/scripts/check-selftest-census.py" "${census}/timed-stranger"
   expect_exit "a whole with some faults inherited rather than re-proven" 0 \
     python3 "${ROOT}/scripts/check-selftest-census.py" "${census}/inherited-whole"
   expect_exit "one fault both re-proven and declared inherited" 1 \
@@ -10823,6 +10940,52 @@ EOF
     bash "${ROOT}/verify.sh" --only injections --scope inject_this_repository_does_not_define
   expect_exit "a shard outside 1..N is a misuse" 2 \
     bash "${ROOT}/verify.sh" --selftest --shard 9/8
+  # The shard plan's refusals (#319), each before any fault runs. Each greps
+  # its own message: every one of them exits 2, so the status alone could be
+  # any of the others.
+  local plans; scratch; plans="$SCRATCH"
+  printf 'shards\t3\nassign\tx.a\t1\n' > "${plans}/three"
+  printf 'shards\t2\nassign\tx.a\t3\n' > "${plans}/outside"
+  printf 'shards\t2\nassign\tx.a\t1\nassign\tx.a\t2\n' > "${plans}/twice"
+  printf 'assign\tx.a\t1\n' > "${plans}/headless"
+  printf '# a plan of comments\n' > "${plans}/silent"
+  # AND THE PLAN IS FOLLOWED: the real in_shard and load_shard_plan, run for
+  # every shard of three over five faults. The plan moves each of its three
+  # off the shard the hash gives it (x.a and x.c hash to 2, x.b to 1); the two
+  # it does not name keep the hash; every fault runs in exactly one shard.
+  printf 'shards\t3\nassign\tx.a\t3\nassign\tx.b\t3\nassign\tx.c\t1\n' > "${plans}/packed"
+  expect_exit "a shard plan's faults run in its shard, the others by the hash, each once" 0 \
+    "$BASH" -c "$(declare -f in_shard claim_fault load_shard_plan)"'
+      EXIT_MISUSE=2 SELFTEST_SHARDS=3 SELFTEST_SHARD_PLAN="$1"
+      declare -A SCOPE_INHERIT=() SHARD_PLAN=(); SELFTEST_RAN=(); SELFTEST_RAN_IDS=()
+      load_shard_plan
+      out="$(for k in 1 2 3; do SELFTEST_SHARD=$k SELFTEST_UNITS=0
+        for i in x.a x.b x.c fresh.one fresh.two; do in_shard "$i" && echo "$k $i"; done; done | sort)"
+      [ "$out" = "$(printf "1 fresh.two\n1 x.c\n2 fresh.one\n3 x.a\n3 x.b")" ]' \
+    _ "${plans}/packed"
+  expect_exit "a shard plan without --shard is a misuse" 0 \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "needs --shard K/N" <<<"$out"' \
+    _ "${ROOT}/verify.sh" "${plans}/three"
+  expect_exit "a shard plan packed for another N is refused" 0 \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "packed for 3 shard(s), and this run has 2" <<<"$out"' \
+    _ "${ROOT}/verify.sh" "${plans}/three"
+  expect_exit "a shard plan assigning outside 1..N is refused" 0 \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "assigned outside shards 1..2" <<<"$out"' \
+    _ "${ROOT}/verify.sh" "${plans}/outside"
+  expect_exit "a shard plan assigning one fault twice is refused" 0 \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "is assigned twice" <<<"$out"' \
+    _ "${ROOT}/verify.sh" "${plans}/twice"
+  expect_exit "a shard plan that never says its N is refused" 0 \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "row followed by" <<<"$out"' \
+    _ "${ROOT}/verify.sh" "${plans}/headless"
+  expect_exit "a shard plan of nothing but comments is refused" 0 \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "says nothing about how many shards it was packed for" <<<"$out"' \
+    _ "${ROOT}/verify.sh" "${plans}/silent"
+  # Its message is the one --shard, --census and --scope-plan share outside a
+  # selftest, and the flag is named in it.
+  expect_exit "a shard plan outside --selftest is a misuse" 0 \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --only hygiene --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "and --shard-plan are for --selftest" <<<"$out"' \
+    _ "${ROOT}/verify.sh" "${plans}/three"
   # --site checks a site and nothing else, in either order, and names a
   # directory that is not there (#32 I3).
   expect_exit "--site beside --selftest is a misuse" 2 \
@@ -10922,6 +11085,14 @@ while [ "$#" -gt 0 ]; do
       esac
       shift 2
       ;;
+    --shard-plan)
+      [ "$#" -ge 2 ] || { echo "verify: --shard-plan needs a path" >&2; exit "$EXIT_MISUSE"; }
+      case "$2" in
+        /*) SELFTEST_SHARD_PLAN="$2" ;;
+        *)  SELFTEST_SHARD_PLAN="$(pwd)/$2" ;;
+      esac
+      shift 2
+      ;;
     --site)
       [ "$#" -ge 2 ] || { echo "verify: --site needs the site's directory" >&2; exit "$EXIT_MISUSE"; }
       # Resolved here, against the directory the caller is in, as --census is.
@@ -10949,7 +11120,7 @@ cd "$ROOT"
 if [ -n "$SITE_DIR" ]; then
   if [ "$mode" != "site" ] || [ "${#selected[@]}" -ne 0 ] || [ -n "$VERIFY_SCOPE_GIVEN" ] ||
      [ -n "$VERIFY_HISTORY_RANGE" ] || [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ] ||
-     [ -n "$SELFTEST_SCOPE_PLAN" ] || [ -n "$SELFTEST_DERIVE" ]; then
+     [ -n "$SELFTEST_SCOPE_PLAN" ] || [ -n "$SELFTEST_SHARD_PLAN" ] || [ -n "$SELFTEST_DERIVE" ]; then
     echo "verify: --site checks a site and nothing else" >&2
     exit "$EXIT_MISUSE"
   fi
@@ -10962,8 +11133,15 @@ fi
 # an ordinary run would let a workflow think it had sharded a gate that in
 # fact ran whole, or ran nothing.
 if [ "$mode" != "selftest" ] &&
-   { [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ] || [ -n "$SELFTEST_SCOPE_PLAN" ]; }; then
-  echo "verify: --shard, --census and --scope-plan are for --selftest" >&2
+   { [ "$SELFTEST_SHARD" -ne 0 ] || [ -n "$SELFTEST_CENSUS" ] || [ -n "$SELFTEST_SCOPE_PLAN" ] ||
+     [ -n "$SELFTEST_SHARD_PLAN" ]; }; then
+  echo "verify: --shard, --census, --scope-plan and --shard-plan are for --selftest" >&2
+  exit "$EXIT_MISUSE"
+fi
+# A packing is a packing of shards: without --shard there is nothing to pack
+# into, and ignoring the plan would let a workflow think it had packed.
+if [ -n "$SELFTEST_SHARD_PLAN" ] && [ "$SELFTEST_SHARD" -eq 0 ]; then
+  echo "verify: --shard-plan packs shards, so it needs --shard K/N" >&2
   exit "$EXIT_MISUSE"
 fi
 # A scope narrows ONE check, so it may only be given when that check is the
@@ -10975,7 +11153,7 @@ fi
 # be a misuse rather than silently no scope at all.
 if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
   if [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ]; then
-    echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
+    echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections, --only bsd or --only recompute" >&2
     exit "$EXIT_MISUSE"
   fi
   case "${selected[0]}" in
@@ -10997,8 +11175,21 @@ if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
         exit "$EXIT_MISUSE"
       }
       ;;
+    recompute)
+      # Directory names under results/, comma-separated (#318). The script
+      # refuses a name that is not there; this refuses a spelling that is
+      # not a list of names at all.
+      case "$VERIFY_SCOPE" in
+        ''|,*|*,|*,,*|*[!A-Za-z0-9._,-]*|.*|*,.*|-*|*,-*) ;;
+        *) VERIFY_RECOMPUTE_SCOPE="$VERIFY_SCOPE" ;;
+      esac
+      [ -n "$VERIFY_RECOMPUTE_SCOPE" ] || {
+        echo "verify: --scope '$VERIFY_SCOPE': the recompute check takes results directory names, comma-separated" >&2
+        exit "$EXIT_MISUSE"
+      }
+      ;;
     *)
-      echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections or --only bsd" >&2
+      echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections, --only bsd or --only recompute" >&2
       exit "$EXIT_MISUSE"
       ;;
   esac

@@ -1,0 +1,650 @@
+{
+ "1": {
+  "0b2b1147cf48": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "4f22a33fd68c": {
+   "verdict": "accepts",
+   "edit": "no"
+  },
+  "1ed52a410ec8": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "e72eda46dde3": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "2": {
+  "c4e002ac4395": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "819afea96314": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "3814f3aa627a": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "754ac3e6927c": {
+   "verdict": "questions",
+   "edit": "no"
+  }
+ },
+ "3": {
+  "c21dbcfa9758": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "33e5ae38bf34": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "ce6ba3a4d447": {
+   "verdict": null,
+   "edit": "yes"
+  },
+  "c84425b1b18f": {
+   "verdict": "declines",
+   "edit": "no"
+  }
+ },
+ "4": {
+  "883abece6cbc": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "cad84faab8fc": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "c91e82163137": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "67684d29e084": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "5": {
+  "51745bba2a1c": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "5bfeacc16090": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "a4729a0db3bd": {
+   "verdict": "accepts",
+   "edit": "no"
+  },
+  "f488e2bef40a": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "6": {
+  "89050dce481a": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "acd8be2d874c": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "8366f014859f": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "96952405f4fe": {
+   "verdict": "questions",
+   "edit": "no"
+  }
+ },
+ "7": {
+  "473b87e3543f": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "ecc5c4835ef1": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "6dca7dd6b3d1": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "78871dce0c1c": {
+   "verdict": null,
+   "edit": "yes"
+  }
+ },
+ "8": {
+  "a6276bce24a5": {
+   "verdict": "accepts",
+   "edit": "no"
+  },
+  "f5c5ed093115": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "24b9cde7fc6d": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "145c9a0f8a2b": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "9": {
+  "355291db9e50": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "324430ae621d": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "047883901b80": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "7cedee33ec76": {
+   "verdict": "questions",
+   "edit": "no"
+  }
+ },
+ "10": {
+  "6a943eca7feb": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "492675de4710": {
+   "verdict": null,
+   "edit": "yes"
+  },
+  "d75b8fb87d0f": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "bf6fc4bdd4a7": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "11": {
+  "7eb7eff84d2a": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "2e51b8ba2c58": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "cc1e539ad489": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "f395d70deaf9": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "12": {
+  "e2b8ed88d73e": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "589e4ea3ba45": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "e8da4eafba55": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "eb5f60021a41": {
+   "verdict": "accepts",
+   "edit": "no"
+  }
+ },
+ "13": {
+  "f3fad2ad01fe": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "630f658af816": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "951de4024309": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "eb5a58340b75": {
+   "verdict": "declines",
+   "edit": "no"
+  }
+ },
+ "14": {
+  "b3c3c682484e": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "797c68e5f1f3": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "329179f66694": {
+   "verdict": null,
+   "edit": "yes"
+  },
+  "9e6138ba027e": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "15": {
+  "41a63823147b": {
+   "verdict": "accepts",
+   "edit": "no"
+  },
+  "830d24e66da4": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "7b78c0c6eb5f": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "d45b22f39b5a": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "16": {
+  "e03879d6ce0f": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "710e31e3d2c5": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "db776d7c9591": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "bf0f4802ee41": {
+   "verdict": "questions",
+   "edit": "no"
+  }
+ },
+ "17": {
+  "bc86fc83bea8": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "3a2da06196da": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "18ee4f1b0c59": {
+   "verdict": null,
+   "edit": "yes"
+  },
+  "09c56b6372ae": {
+   "verdict": "ignores",
+   "edit": "no"
+  }
+ },
+ "18": {
+  "e895d7d63df2": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "d4afc836ab0e": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "dbf460dcd33c": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "2d5a9ddcdccc": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "19": {
+  "7204f236fd4c": {
+   "verdict": "accepts",
+   "edit": "no"
+  },
+  "1d28ac969115": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "bf5e338732ab": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "6700b0a6bcef": {
+   "verdict": "questions",
+   "edit": "no"
+  }
+ },
+ "20": {
+  "66cae112b221": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "2a58d49210a1": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "f1a099c91723": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "27c0c8bc6618": {
+   "verdict": "ignores",
+   "edit": "no"
+  }
+ },
+ "21": {
+  "23e9bc343036": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "15c4b78c212b": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "23ba69ca7d10": {
+   "verdict": null,
+   "edit": "yes"
+  },
+  "384fbd465932": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "22": {
+  "ebfe249c5342": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "c6d4d5d51b71": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "57c2a66f3bdd": {
+   "verdict": "accepts",
+   "edit": "no"
+  },
+  "8bcf524465eb": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "23": {
+  "5826644a7214": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "45c1ddd13da1": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "f2b6fef1e13d": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "9ddb84c73fa3": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "24": {
+  "92776f22dd5c": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "25c818cf1362": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "a260fa85c9cc": {
+   "verdict": null,
+   "edit": "yes"
+  },
+  "04c8b4072897": {
+   "verdict": "ignores",
+   "edit": "no"
+  }
+ },
+ "25": {
+  "5bd8021414d8": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "425b34b0c996": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "2b75403c84cb": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "35bb57d58489": {
+   "verdict": "ignores",
+   "edit": "no"
+  }
+ },
+ "26": {
+  "668801fa656b": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "b5b5cf047672": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "95192fb8c9a8": {
+   "verdict": "accepts",
+   "edit": "no"
+  },
+  "03e9db7850d5": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "27": {
+  "8a08e7c6a9fc": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "31c5e2b4134b": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "9ed9f865dfcb": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "1ba7fb90ccff": {
+   "verdict": "declines",
+   "edit": "no"
+  }
+ },
+ "28": {
+  "62e8db576066": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "4f88520de67a": {
+   "verdict": null,
+   "edit": "yes"
+  },
+  "41c1e8c85c5b": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "c9f8a20f6ef7": {
+   "verdict": "declines",
+   "edit": "no"
+  }
+ },
+ "29": {
+  "816364cb4d8b": {
+   "verdict": "accepts",
+   "edit": "no"
+  },
+  "74450a034314": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "058f9a6df70e": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "47d966d5249b": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "30": {
+  "6f24990b85bb": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "d1d89ffd1139": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "e508621a67c6": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "5a566735e157": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "31": {
+  "575d2ba5ebcc": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "83081e6c915c": {
+   "verdict": null,
+   "edit": "yes"
+  },
+  "63dc7fd27bc8": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "3e9e834039b9": {
+   "verdict": "declines",
+   "edit": "no"
+  }
+ },
+ "32": {
+  "2c156a5d0955": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "1a5db0d614d2": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "bb33f252e8db": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "3e4299b30f3a": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "33": {
+  "b80dc5013596": {
+   "verdict": "accepts",
+   "edit": "no"
+  },
+  "6b047e9dcc2a": {
+   "verdict": "questions",
+   "edit": "no"
+  },
+  "b087e2fad13e": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "9fa27e72819e": {
+   "verdict": "accepts",
+   "edit": "yes"
+  }
+ },
+ "34": {
+  "6392cf29e750": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "306aacc6a154": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "a22a3fe5babd": {
+   "verdict": "ignores",
+   "edit": "no"
+  },
+  "8ef6099bc842": {
+   "verdict": "questions",
+   "edit": "no"
+  }
+ },
+ "35": {
+  "79d251f79254": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "350cb085a84a": {
+   "verdict": null,
+   "edit": "yes"
+  },
+  "c1e7f2dd3638": {
+   "verdict": "declines",
+   "edit": "no"
+  },
+  "791d30f7352b": {
+   "verdict": "ignores",
+   "edit": "no"
+  }
+ },
+ "36": {
+  "ebe22edd1d6e": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "f0964e1160b4": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "c8171c34b0fe": {
+   "verdict": "accepts",
+   "edit": "yes"
+  },
+  "ebb5ac019462": {
+   "verdict": "accepts",
+   "edit": "no"
+  }
+ }
+}

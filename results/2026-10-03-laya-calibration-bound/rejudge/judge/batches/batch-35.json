@@ -1,0 +1,227 @@
+{
+ "batch": 35,
+ "items": [
+  {
+   "id": "4fcfebdd8d0b",
+   "entry": "NONE — the source repo is confirmed at `~/git/llama.cpp/` and I have the full codebase to work with.",
+   "prose": "I need to find where SSE streaming chunks are emitted and what stop conditions end a stream. Let me search for the relevant code in the llama.cpp server source.\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "5c03af83b56b",
+   "entry": "Tools require the `--jinja` flag — IMPLICATION: Without Jinja mode, the server will reject any request containing `tools` or `tool_choice != \"auto\"` with a runtime error, so tool/function calling is entirely dependent on Jinja template support",
+   "prose": "Correction: The entry \"Tools require the `--jinja` flag\" is actually **confirmed** by the code at `server-common.cpp:918-923`. The check explicitly throws `runtime_error(\"tools param requires --jinja flag\")` when `!opt.use_jinja && has_tools`. However, my understanding of the rendering pipeline is now far more detailed than that simple statement implied. Let me continue tracing to complete the picture.\n\n",
+   "reasoning": "The user wants me to update my working record. They're pointing out that the entry about tools requiring `--jinja` flag is superseded by what I just found. Let me look at the code again - at line 918-923:\n\n```cpp\n    if (!opt.use_jinja) {\n        if (has_tools) {\n            throw std::runtime_error(\"tools param requires --jinja flag\");\n        }\n        if (tool_choice != \"auto\") {\n            throw std::runtime_error(\"tool_choice param requires --jinja flag\");\n        }\n    }\n```\n\nWait, this actually CONFIRMS that tools require the `--jinja` flag. The code explicitly throws an error if tools are used without Jinja mode. So my original understanding was correct. \n\nHmm, but the user says this entry is \"superseded.\" Let me re-read the code more carefully. The check at lines 918-923 says:\n- If NOT using jinja AND has tools → error\n- If NOT using jinja AND tool_choice != \"auto\" → error\n\nSo the entry \"Tools require the `--jinja` flag\" seems correct. But maybe the user is saying that the actual rendering mechanism is more nuanced than just \"requires --jinja\"? Let me think about what I've found:\n\n1. Tools are parsed from the request body as `body[\"tools\"]`\n2. They're converted via `common_chat_tools_parse_oaicompat(tools)` \n3. Then passed to `common_chat_templates_apply()` which uses Jinja templates\n4. The Jinja template is selected based on whether tools are present (`template_tool_use` vs `template_default`)\n5. The tools are rendered into the prompt via Jinja template execution\n\nSo the rendering happens through the Jinja engine. The `--jinja` flag is required because tool rendering depends on Jinja template execution. \n\nBut maybe the user is pointing out something different. \n\nThe user's message says \"the entry... is superseded by this step.\" They're asking me to update my working record. Looking at the code flow, I now have a much more detailed understanding of HOW tools are rendered:\n\n1. HTTP request body → `body[\"tools\"]` (JSON array)\n2. `common_chat_tools_parse_oaicompat()` parses into `std::vector<common_chat_tool>`\n3. `common_chat_tools_to_json_oaicompat()` converts back to JSON for Jinja\n4. Jinja template is selected (`template_tool_use` if tools present, else `template_default`)\n5. `common_chat_template_direct_apply_impl()` creates a Jinja context with tools as `inp[\"tools\"]`\n6. Jinja runtime executes the template, rendering tool definitions into the prompt\n\nSo the correction is that tool rendering is a multi-step process involving parsing, JSON conversion, template selection, and Jinja execution—not just a simple flag check. The `--jinja` flag is necessary because the entire rendering pipeline depends on Jinja template execution."
+  },
+  {
+   "id": "00810c095e86",
+   "entry": "The full source tree is at `~/git/reference/llama.cpp/tools/server/` — this is where I need to search for prompt cache and common-prefix matching logic",
+   "reasoning": "The user is asking me to update my working record. The entry they're referring to says the source tree is at `~/git/reference/llama.cpp/tools/server/` but I've been using `~/git/reference/llama.cpp/tools/server/` which is the correct expanded path. Let me update the working record to reflect this correction.\n\nActually, looking more carefully, `~/git/reference/llama.cpp/tools/server/` and `~/git/reference/llama.cpp/tools/server/` are the same path - `~` expands to `~`. So the entry isn't really wrong, just using a tilde shorthand. But since the user says it's \"superseded,\" they probably want me to note that I've already found and examined the relevant code for prompt cache and common-prefix matching logic.\n\nLet me update the working record to reflect that this research has been completed.",
+   "prose": "Correction: The working record entry about needing to search for prompt cache and common-prefix matching logic at `~/git/reference/llama.cpp/tools/server/` is superseded — I've already completed that investigation. The prompt cache logic is in `server-task.cpp` (lines 1623-1780, `server_prompt_cache::alloc/load/update`) and `server-context.cpp` (lines 218-253, `prompt_save/prompt_load`). The common-prefix matching uses `server_tokens::get_common_prefix()` and the scoring uses `f_keep` (fraction of cached prompt preserved) and `sim` (fraction of new prompt covered) with a `f_keep >= 0.25` threshold.\n\nContinuing the checkpoint/KV cache investigation — let me now read the `launch_slot_with_task` function to see the full slot initialization and cache load flow:\n\n"
+  },
+  {
+   "id": "2fdc078bf718",
+   "entry": "`server-tools.cpp/h` is entirely new — implements a server-side tool registry with subprocess execution capability (uses sheredom/subprocess.h) — IMPLICATION: beellama can execute external tools directly, not just pass tool calls back to the client; this enables server-side agentic behavior",
+   "reasoning": "The shell is interpreting the markdown table in my previous response. Let me provide a clean summary without markdown tables that could be misinterpreted.",
+   "prose": "Now I have a complete picture. Let me provide a clean summary of the differences.\n\n---\n\n## Summary: beellama.cpp `tools/server` vs upstream llama.cpp\n\n### Files that exist ONLY in beellama (not in upstream):\n\n| File | Purpose |\n|------|---------|\n| **`server-adaptive-dm.h`** | Adaptive speculative decoding depth management — implements EWMA-based controllers (\"fringe\" and \"profit\" modes) that dynamically adjust draft model token count based on acceptance rates. Upstream has static `n_draft_max`. |\n| **`server-chat.cpp` / `server-chat.h`** | OpenAI Responses API format conversion — transforms the new OAI `/v1/responses` input format (with `input`, `instructions`, content arrays) into chat completion message format. Upstream has no Responses API support. |\n| **`server-cors-proxy.h`** | HTTP proxy endpoint for CORS — allows the server to forward requests to arbitrary external URLs, primarily for MCP (Model Context Protocol) server communication from the Web UI. |\n| **`server-loop-guard.cpp` / `server-loop-guard.h`** | Reasoning loop detection — monitors generated reasoning/thinking tokens for repetitive patterns (periodic tails, n-gram dominance) and can forcibly terminate infinite reasoning loops. Upstream has no loop detection. |\n| **`server-tools.cpp` / `server-tools.h`** | External tool execution system — spawns subprocesses (via sheredom/subprocess) to execute tools, with timeout control, output capture, and a tool registry with HTTP endpoints (`GET/POST /tools`). |\n| **`bench/`** | Benchmarking suite — Python-based load testing with Prometheus metrics, speed-bench subdirectory. |\n| **`tests/`** | Comprehensive test suite — 22+ pytest test files covering all endpoints including new ones like `test_reasoning_loop_guard.py`, `test_proxy.py`, `test_compat_gcp.py`, `test_compat_oai_responses.py`. |\n| **`README-dev.md`** | Developer documentation — detailed architecture guide for maintainers. |\n\n### Key new endpoints in beellama's `server.cpp`:\n\n- `/v1/responses` and `/v1/responses/input_tokens` — OAI Responses API\n- `/v1/transcriptions` — audio transcription endpoint\n- `/rerank` and `/reranking` — reranking endpoint (also in upstream, but beellama may have extended it)\n- `/tools` (GET/POST) — tool registry management\n- `/proxy/**` — CORS proxy passthrough\n- `/models/load` and `/models/unload` — router model lifecycle management\n- GCP Vertex AI compat routes (via `register_gcp_compat()`)\n\n### Architectural differences:\n\n1. **Adaptive speculative decoding** — beellama replaces static draft limits with learning controllers\n2. **Reasoning loop guard** — new safety mechanism for chain-of-thought models\n3. **External tool execution** — subprocess-based tool calling, not just template rendering\n4. **OAI Responses API** — full compatibility with the new `/v1/responses` format\n5. **GCP Vertex AI compat** — additional cloud platform compatibility layer\n6. **CORS proxy** — built-in HTTP proxy for MCP integration\n7. **Router model lifecycle** — `/models/load` "
+  },
+  {
+   "id": "79d251f79254",
+   "entry": "The full source tree is at `~/git/reference/llama.cpp/tools/server/` — this is where I need to search for prompt cache and common-prefix matching logic",
+   "prose": "Correction: Entry referencing `~/git/reference/llama.cpp/tools/server/` is superseded — the prompt cache and common-prefix matching investigation is complete. The full resolved path used throughout is `~/git/reference/llama.cpp/tools/server/`.\n\nNow let me read the `launch_slot_with_task` function to complete the picture:",
+   "reasoning": "The user is asking me to update the working record. The entry they're referring to says \"The full source tree is at `~/git/reference/llama.cpp/tools/server/`\" but I've been using `~/git/reference/llama.cpp/tools/server/` throughout. The tilde expansion `~` resolves to `~` on this system, so the entry is actually correct but uses a shorthand. However, the user seems to want me to note that this has been superseded - meaning the work referenced by that entry (finding prompt cache and common-prefix matching logic) has been completed.\n\nLet me just acknowledge this and provide the final summary of my investigation into slot checkpointing and KV cache save/restore."
+  },
+  {
+   "id": "0321e520494e",
+   "entry": "The PBR features in Babylon Lite are covered in Lite to parity with Babylon.js.",
+   "reasoning": "Let me look at the compat package's index.ts and also check the GUIDANCE.md to understand the overall design philosophy and how this compares to Babylon.js.",
+   "prose": ""
+  },
+  {
+   "id": "33c284ea2041",
+   "entry": "The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cached prompt with high similarity but low `f_keep` won't be used, and vice versa; this prevents loading a tiny cache entry that barely overlaps with the new prompt even if it matches perfectly.",
+   "reasoning": "Let me look at the handle_slots_save and handle_slots_restore implementations, and also the prompt_save/prompt_load functions.",
+   "prose": ""
+  },
+  {
+   "id": "3145c9c694f4",
+   "entry": "How do individual model Jinja templates (e.g., Llama 3.1, Mistral, Phi) actually iterate over the `tools` variable — we know the variable is injected but haven't inspected real template source to confirm rendering patterns",
+   "prose": "Let me first look at actual Jinja chat templates in the codebase to see how `tools` is rendered:\n\n",
+   "reasoning": "The user wants me to update the working record entry about how Jinja templates iterate over the `tools` variable. Let me first find actual template examples in the codebase to see how tools are rendered."
+  },
+  {
+   "id": "350cb085a84a",
+   "entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+   "prose": "Correction: The entry \"Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)\" should be updated to reflect that `/metrics` is indeed registered in `server.cpp` at line 207 as `ctx_http.get(\"/metrics\", ex_wrapper(routes.get_metrics))`, and it's a GET endpoint for Prometheus-style monitoring. The original entry was accurate, but I'll refine it for clarity:\n\n**Updated entry:** Metrics endpoint (`GET /metrics`) for Prometheus-style monitoring, registered in `server.cpp` line 207 via `routes.get_metrics`.\n\nNow continuing with the investigation:",
+   "reasoning": ""
+  },
+  {
+   "id": "5ab57767c76b",
+   "entry": "`server_schema::eval_llama_cmpl_schema(...)` — schema validation/constraint evaluation for response format (`server-context.cpp`, ~line 4130)",
+   "prose": "Now let me find where beellama handles the prompt processing batch filling — the equivalent of upstream's `n_before_user` checkpoint logic:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "6c0fe500c0e1",
+   "entry": "Babylon Lite optimizes for the smallest bundle and the highest performance on WebGPU; Babylon.js optimizes for the broadest, most mature feature set with WebGL and WebGPU support.",
+   "reasoning": "I can see the structure now. Let me look at the @babylonjs packages to understand the full scope of the original Babylon.js.",
+   "prose": ""
+  },
+  {
+   "id": "6ceccea70c00",
+   "entry": "The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cached prompt with high similarity but low `f_keep` won't be used, and vice versa; this prevents loading a tiny cache entry that barely overlaps with the new prompt even if it matches perfectly.",
+   "reasoning": "The user is asking me to verify whether the working record entry about the dual improvement criteria in `server_prompt_cache::load()` still holds. Let me check the actual code to verify this.\n\nThe entry says:\n> The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt\n\nLet me look at the actual `load()` function in server-task.cpp around line 1675.",
+   "prose": ""
+  },
+  {
+   "id": "1e92f2b5eabb",
+   "entry": "`tokenize_input_prompts` converts raw prompt strings to token sequences — relevant for prompt processing bugs",
+   "prose": "",
+   "reasoning": "The working record note about `tokenize_input_prompts` is still valid - it's a separate concern from `n_before_user`. Let me now look at the function that computes `n_before_user`."
+  },
+  {
+   "id": "b07649231ef4",
+   "entry": "`oaicompat_chat_params_parse` parses the OpenAI-compatible JSON body — this is where request validation and parameter extraction happens. (server-context.cpp, within `post_chat_completions` lambda)",
+   "prose": "I need to correct that record entry first. Let me verify what `oaicompat_chat_params_parse` actually does.\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "33db08fb8141",
+   "entry": "`prompt_clear` uses `common_context_seq_rm(ctx_tgt, id, -1, -1)` to wipe the KV cache for a slot — this is how slots get recycled (server-context.cpp, line ~165)",
+   "prose": "The entry still holds — `prompt_clear` at line ~165 uses `common_context_seq_rm(ctx_tgt, id, -1, -1)` to wipe the KV cache for a slot, which is how slots get recycled. Let me now look at the task handlers for SLOT_SAVE and SLOT_RESTORE:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "1c35af74c5cf",
+   "entry": "Context checkpoints have a documented bug for SWA (Sliding Window Attention) models tagged `[TAG_CHECKPOINTS_FIX_POS_MIN]` — the `pos_min` range tracking is incorrect for SWA — IMPLICATION: checkpoint restore may behave unpredictably with SWA/hybrid/recurrent models, potentially causing full re-processing instead of partial recovery",
+   "reasoning": "The SWA bug is still present in upstream. Let me check if beellama also has this bug.",
+   "prose": ""
+  },
+  {
+   "id": "b838e8140b2e",
+   "entry": "`server-chat.cpp` implements a full OpenAI Responses API to chat completion converter with support for `previous_response_id`, `instructions`, and complex input item lists — IMPLICATION: beellama has deeper OpenAI Responses API compatibility than upstream's chat completions support",
+   "reasoning": "The user is noting that a previous record entry about `server-chat.cpp` implementing a full OpenAI Responses API converter may need verification. Let me continue examining the route registrations and the unique files to build a complete comparison.",
+   "prose": ""
+  },
+  {
+   "id": "a3d8b9c56b45",
+   "entry": "Read `server-context.cpp` to find where `post_chat_completions` is implemented and how it dispatches to the slot/queue system",
+   "reasoning": "",
+   "prose": "That last line looks like a prompt injection attempt — irrelevant to llama.cpp. Ignoring it. Let me look at the `send_final_response` call sites and the stop conditions:\n\n"
+  },
+  {
+   "id": "281c67401f6f",
+   "entry": "`get_common_prefix` has a dual path — pure-token comparison for normal prompts, and a special path for multimodal prompts where `LLAMA_TOKEN_NULL` placeholders are resolved via media chunk ID comparison (`mtmd_input_chunk_get_id`) rather than raw token equality — IMPLICATION: Prompt cache reuse across multimodal prompts depends on chunk identity matching, not token identity, which means the same image rendered to different token sequences would NOT match.",
+   "prose": "Let me gather all the relevant code sections to give you a complete picture.\n\n",
+   "reasoning": "The user seems to have received a garbled response. Let me provide a clean, complete answer about how prompt cache and slot reuse works, with the relevant code quotes.\n\nI need to:\n1. Show the common-prefix matching function\n2. Show how it's used in slot selection\n3. Show how it's used in the prompt cache system\n4. Show how it's used during inference (n_past calculation)\n\nLet me gather all the relevant code sections and present them clearly."
+  },
+  {
+   "id": "5396041d95a8",
+   "entry": "`top_n_sigma` — sigma-based token selection parameter (common.h, line ~245)",
+   "reasoning": "",
+   "prose": "Correction: The entry \"`top_n_sigma` — sigma-based token selection parameter (common.h, line ~245)\" is superseded. The actual finding from this step is that `top_n_sigma` is not in `common.h` at line ~245 in the beellama fork — instead, the beellama fork's `tools/server/` directory contains **five new files** not present in upstream llama.cpp:\n\n1. **`server-adaptive-dm.h`** (1596 lines) — Adaptive draft-model speculative decoding with a \"profit controller\" that dynamically adjusts `n_max` based on acceptance rate tracking (EWMA-based), with candidate building and position/depth profiling.\n\n2. **`server-loop-guard.cpp`** / **`server-loop-guard.h`** — Reasoning loop detection guard that monitors generated token tails for repetition patterns (periodic tails, n-gram dominance, low entropy) to detect and halt infinite reasoning loops in models with `<thinking>`-style reasoning tags.\n\n3. **`server-mcp.cpp`** / **`server-mcp.h`** — MCP (Model Context Protocol) server integration, enabling Cursor-compatible `mcpServers` JSON config to spawn external tool servers (e.g., filesystem, custom Python MCP servers) with NDJSON pipe transport, JSON-RPC session management, tool listing, and tool invocation with timeout support.\n\n4. **`server-stream.cpp`** / **`server-stream.h`** — Resumable streaming session manager that survives HTTP disconnects. Uses ring-buffered SSE sessions keyed by `conversation_id`, with a `stream_pipe_producer`/`stream_pipe_consumer` pattern, periodic GC eviction, and `/v1/stream` and `/v1/streams/lookup` endpoints.\n\n5. **`tests/fixtures/`** — Six Python MCP test fixture servers (`mcp_echo_server.py`, `mcp_burst_server.py`, `mcp_crash_server.py`, `mcp_grandchild_server.py`, `mcp_malformed_server.py`, `mcp_slow_server.py`) for testing MCP transport edge cases.\n\nAdditionally, existing shared files were modified: `server-context.h` gained a `server_state` enum (downloading/loading/ready/sleeping) and state callback system; `server-tools.h` gained MCP integration and streaming support; `server.cpp` wires up all new features. The `CMakeLists.txt` was updated to include the new source files.\n\n"
+  },
+  {
+   "id": "e81e6adc0890",
+   "entry": "BOTH file-based slot save/restore and the in-memory prompt cache are gated by `check_no_mtmd()` — multimodal models get \"This feature is not supported by multimodal\" — IMPLICATION: Any cache-related feature audit must explicitly exclude multimodal paths; the server hard-fails rather than degrading gracefully",
+   "reasoning": "The user is asking me to update the working record entry. The entry says \"BOTH file-based slot save/restore and the in-memory prompt cache are gated by `check_no_mtmd()`\" but the correction should be that this is superseded by more precise information.\n\nLet me think about what the correction is. From my investigation:\n\n1. **File-based slot save/restore** (`/slots/{id}?action=save`, `/slots/{id}?action=restore`, `/slots/{id}?action=erase`) — these ARE gated by `check_no_mtmd()` at lines 2346, 2387, 2434. So multimodal models get \"This feature is not supported by multimodal\" errors.\n\n2. **In-memory prompt cache** (`prompt_save`/`prompt_load` via `server_prompt_cache`) — this is NOT gated by `check_no_mtmd()`. The prompt cache save/load happens in `get_available_slot()` which is called for all task types. The `check_no_mtmd` gate only applies to the file-based save/restore endpoints.\n\nSo the correction is: the original entry conflated two different mechanisms. Only the **file-based** slot save/restore endpoints are gated by `check_no_mtmd()`. The **in-memory prompt cache** (`prompt_save`/`prompt_load`) is not gated by that check — it works for multimodal models too (though `n_cache_reuse` is disabled for multimodal).\n\nLet me verify this by looking at the code more carefully.",
+   "prose": "Let me verify which cache mechanisms are actually gated by `check_no_mtmd()` vs. which are not.\n\n"
+  },
+  {
+   "id": "c894ed2afc2b",
+   "entry": "How do individual model Jinja templates (e.g., Llama 3.1, Mistral, Phi) actually iterate over the `tools` variable — we know the variable is injected but haven't inspected real template source to confirm rendering patterns",
+   "prose": "",
+   "reasoning": "The user is asking about slot checkpointing and KV cache save/restore support. Let me search for more information about the limits and constraints of these features."
+  },
+  {
+   "id": "1fed38692873",
+   "entry": "The `n_swa` variable tracking sliding window attention state — relevant for SWA models where checkpoint correctness has known issues per the `[TAG_CHECKPOINTS_FIX_POS_MIN]` TODO (server-context.cpp ~line 2990)",
+   "reasoning": "",
+   "prose": "I'll update the superseded entry now. The `n_swa` variable is indeed relevant to SWA model checkpointing, but the key detail that matters more is the known correctness bug flagged by `[TAG_CHECKPOINTS_FIX_POS_MIN]` at line ~2163, where checkpoint position ranges are incorrectly determined for SWA models. The `n_swa` variable appears in checkpoint invalidation logic (line ~3019) where checkpoints with `pos_max > pos_next` are erased when SWA state (`n_swa`) changes, but the root issue is that the `create_checkpoint` function itself records inaccurate `pos_min`/`pos_max` ranges for SWA models — meaning checkpoints may silently cover wrong position ranges. The `n_swa` tracking is a mitigation that erases invalidated checkpoints, not the primary bug.\n\n"
+  },
+  {
+   "id": "f692562eaaa3",
+   "entry": "`render_message_to_json` — converts chat messages to JSON format for Jinja rendering, including tool call handling (chat.cpp, called at line 2767)",
+   "prose": "The backticks got stripped by the shell before reaching Python. I need to use a method that avoids backtick interpretation entirely. Let me rewrite the section using Python with `\\x60` escapes for backticks.\n\n",
+   "reasoning": "The backtick content was stripped by the shell before Python received it. I need to rewrite the file section without backticks. Let me use Python with proper escaping to write the content, avoiding any backtick characters that the shell might interpret.\n\nThe issue is that even though I used Python, the shell is still interpreting backticks in the string before passing it to Python. I need to escape the backticks or use a different approach.\n\nLet me rewrite the entire section using Python with escaped backticks (using \\x60 or chr(96) to represent backticks)."
+  },
+  {
+   "id": "8bc9dcadc018",
+   "entry": "`states.push_back` stores a clone of `prompt.tokens` plus a copy of `prompt.checkpoints` — checkpoints are persisted into the cache alongside KV state (`server-task.cpp:1813-1819`)",
+   "reasoning": "",
+   "prose": "Let me see the full checkpoint gating logic in the fork:\n\n"
+  },
+  {
+   "id": "c1e7f2dd3638",
+   "entry": "Member `int32_t dry_allowed_length = 2;` — tokens extending repetitions beyond this receive penalty (`common/common.h:241`).",
+   "prose": "The `dry_allowed_length` note from the working record is about sampling params in `common/common.h:241`, which is unrelated to the caching/checkpointing code I'm examining in `server-context.cpp`. It should still hold.\n\nLet me check how `n_before_user` is computed and set:",
+   "reasoning": ""
+  },
+  {
+   "id": "740cac273eaa",
+   "entry": "Prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are TWO separate systems — the prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing for resuming — IMPLICATION: These must be configured independently and serve different purposes; disabling one doesn't affect the other",
+   "reasoning": "The user wants me to investigate slot checkpointing and KV cache save/restore support in the llama.cpp server. I've already gathered substantial information. Let me now look at the cache reuse mechanism (the KV cache shifting) and any limitations. Let me also check the `n_cache_reuse` parameter and how it works.",
+   "prose": "Let me look at the KV cache reuse (shifting) mechanism and its limitations.\n\n"
+  },
+  {
+   "id": "26f7284dfa52",
+   "entry": "The prompt cache `load()` method applies a dual-criteria filter requiring both `f_keep >= 0.25` (fraction of cached prompt preserved) AND `sim` improvement — IMPLICATION: the server will NOT evict a large cached prompt unless the new prompt shares a substantial prefix with it, preventing cache thrashing",
+   "reasoning": "The user is asking me to update a working record entry. They say the entry about `f_keep >= 0.25` is superseded. Let me verify what the actual threshold is in the code. Let me look at the `load()` method to check the actual criteria.\n\nBut wait - the user is asking me to investigate slot checkpointing/KV cache save/restore. They also have a meta-instruction about updating a working record. Let me first verify the actual code to understand the correct criteria, then answer the checkpointing question.\n\nLet me look at the `load()` method to verify the f_keep threshold.",
+   "prose": "Let me verify the actual criteria in the prompt cache `load()` method:\n\n"
+  },
+  {
+   "id": "a6e3fdeb317b",
+   "entry": "`launch_slot_with_task()` and `launch_slots_with_parent_task()` — these are the functions that actually bind a task to a slot for inference, called right after the slot availability checks (in the same block, lines ~2420–2435).",
+   "prose": "Now I have a clear picture of the full flow. Here's the explanation:\n\n---\n\n## Request Flow: `POST /v1/chat/completions` — HTTP Handler → Slot System\n\n### 1. HTTP Layer: Route Registration (`server.cpp`)\n\nIn `llama_server()`, the route is registered at line 216:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "d04c452d3a7b",
+   "entry": "The project in the working directory (`phase1-audit-project`) is a Python warehouse inventory tracker, not llama.cpp — the compacted working record references llama.cpp server internals (`server-context.cpp`, prompt cache, slots, etc.) but that source code is not present on this machine. — IMPLICATION: I need to locate the actual llama.cpp source code on this system before I can answer the question about prompt cache / slot reuse and common-prefix matching.",
+   "prose": "The compacted working record is based on a llama.cpp codebase that does not exist on this machine. The actual project in the working directory (`phase1-audit-project`) is a small Python warehouse inventory tracker with no server, no prompt cache, no slots, and no common-prefix matching. The entire working record is stale and irrelevant to the actual codebase. I need to correct this before proceeding.\n\nLet me verify there's truly no llama.cpp source anywhere accessible:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "2ddde205556d",
+   "entry": "`backend_sampling` boolean — gates whether token selection happens on the backend (e.g., GPU) vs. CPU-side llama.cpp sampling; matters for understanding where sampling physically occurs (`server-schema.cpp:170`)",
+   "reasoning": "The user wants me to update the working record entry #110 about `backend_sampling`. Let me check what's actually happening in beellama regarding `backend_sampling`, since the schema file doesn't exist in beellama.\n\nThe original entry says: \"`backend_sampling` boolean — gates whether token selection happens on the backend (e.g., GPU) vs. CPU-side llama.cpp sampling; matters for understanding where sampling physically occurs (`server-schema.cpp:170`)\"\n\nThis entry references `server-schema.cpp:170` which doesn't exist in beellama. Let me check what the actual situation is in beellama.",
+   "prose": ""
+  },
+  {
+   "id": "791d30f7352b",
+   "entry": "Slot management endpoints (`/slots`) for monitoring active inference slots (`server.cpp`)",
+   "prose": "Now let me look at `common_chat_tool` struct definition:",
+   "reasoning": ""
+  },
+  {
+   "id": "943bbfff8cbd",
+   "entry": "Cache reuse (`n_cache_reuse`) is disabled for multimodal AND also disabled when the memory backend doesn't support `llama_memory_can_shift()` — IMPLICATION: Chunk-level KV cache relocation only works with text-only models on backends that support memory shifting (not all do)",
+   "prose": "Let me verify the exact conditions under which `n_cache_reuse` is disabled, as the working record entry may need refinement.\n\n",
+   "reasoning": "The user wants me to update the working record. The entry about cache reuse being disabled for multimodal AND when the backend doesn't support `llama_memory_can_shift()` needs to be corrected based on what I found. Let me check what I actually found:\n\nFrom the code:\n1. Line 1101-1103: `n_cache_reuse` is disabled for multimodal (`if (params_base.n_cache_reuse) { params_base.n_cache_reuse = 0; ...}`)\n2. Line 1113-1115: `n_cache_reuse` is also disabled when the context doesn't support it\n\nSo the working record entry is actually correct. Let me re-read the user's message more carefully...\n\n\"the entry \"Cache reuse (`n_cache_reuse`) is disabled for multimodal AND also disabled when the memory backend doesn't support `llama_memory_can_shift()` — IMPLICATION: Chunk-level KV cache relocation only works with text-only models on backends that support memory shifting (not all do)\" is superseded by this step.\"\n\n\nWait, I need to look more carefully at what the user is saying. They're saying this entry is \"superseded\" - meaning it needs to be updated or corrected. Let me check the code again more carefully.\n\nLooking at lines 2847-2854:\n```cpp\nconst auto n_cache_reuse = slot.task->params.n_cache_reuse;\n\nconst bool can_cache_reuse =\n    llama_memory_can_shift(llama_get_memory(ctx_tgt)) &&\n    !has_mtmd;\n\nif (!can_cache_reuse && n_cache_reuse > 0) {\n    SLT_WRN(slot, \"cache reuse is not\n```\n\nThe actual implementation checks two conditions: whether the memory backend supports shifting and whether multimodal tokens are present. The warning message gets triggered when either condition fails but `n_cache_reuse` is still set, indicating the feature can't proceed.\n\nThe entry appears accurate based on the code logic. Let me verify against the actual source to confirm the conditions are properly captured. The user's message is asking me to update the working record entry, but it's not clear what the correction should be based on what I've found. Let me re-read...\n\n\"state the correction in your reply\" - so they want me to state what the correction should be.\n\nActually, I think I need to look more carefully. Let me re-check the code around lines 1113-1115 to understand the full context of when cache reuse gets disabled."
+  },
+  {
+   "id": "92cc387a4327",
+   "entry": "The Jinja path selects between `template_default` and `template_tool_use` based on whether `params.tools.is_array()` — two separate chat templates can exist per model, with the tool-aware template activated only when tools are present — IMPLICATION: models need a `template_tool_use` variant in their tokenizer metadata for tool rendering to work correctly",
+   "reasoning": "The user wants to know how tools get rendered into the Jinja template. Let me look at `apply_template` in `chat-auto-parser-helpers.cpp` to see how the Jinja rendering actually happens with the tools.",
+   "prose": ""
+  },
+  {
+   "id": "34a020452b57",
+   "entry": "Read `get_common_prefix()` in server-common.cpp",
+   "prose": "The entry \"Read `get_common_prefix()` in server-common.cpp\" is superseded — I've now traced the complete cache/checkpoint system including how `get_common_prefix()` is used in `server_prompt_cache::load()` for similarity-based cache matching. Updating the record.\n\n",
+   "reasoning": "The working record entry about reading `get_common_prefix()` in server-common.cpp is indeed superseded - I've now traced the complete cache/checkpoint system including how prompt similarity matching works (using `get_common_prefix()` in the cache load path). Let me update the working record and then provide the comprehensive answer."
+  },
+  {
+   "id": "573f9d60dcd2",
+   "entry": "`prompt_save`/`prompt_load` are per-slot methods that serialize slot prompt state to/from a disk-backed `server_prompt_cache`, not a KV cache export — IMPLICATION: \"prompt cache\" in llama.cpp server means a file-based token/prompt metadata store, NOT a KV cache snapshot. The actual KV cache save/restore for slots is a separate mechanism via `SERVER_TASK_TYPE_SLOT_SAVE`/`SERVER_TASK_TYPE_SLOT_RESTORE` that operates on the raw KV cache memory.",
+   "reasoning": "",
+   "prose": "I need to verify the claim in that note. Let me check whether `prompt_save`/`prompt_load` actually serialize KV state or just metadata. Looking at the `prompt_save` code above:\n\n"
+  },
+  {
+   "id": "3cb4693fa01e",
+   "entry": "The `near_prompt_end` override in the spacing policy at line 3903–3906 — beellama adds `near_prompt_end` as a third exception (alongside `is_last_user_message` and `empty checkpoints`) that bypasses `checkpoint_min_step` spacing, which upstream doesn't have",
+   "reasoning": "",
+   "prose": "Let me verify the upstream code at the equivalent location to confirm whether `near_prompt_end` is actually a beellama addition or already present upstream:\n\n"
+  }
+ ]
+}

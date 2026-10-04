@@ -107,9 +107,9 @@ NARROWING_FLAGS = (
     # fault it does not re-prove is DECLARED in the census at the commit it
     # was last seen red, which is the thing a narrowing flag here hides.
     ("--scope", re.compile(r"--scope(?![-\w])"),
-     "narrows the test check to part of the suite, or the injections check to "
-     "one injection; the selftest scopes its own "
-     "sandboxes and CI must not"),
+     "narrows the test check to part of the suite, the injections check to "
+     "one injection, or the recompute check to some directories; the selftest "
+     "scopes its own sandboxes and CI must not"),
     ("--range", re.compile(r"--range\b"),
      "narrows the history check to a slice somebody chose; the range CI must "
      "scan is the one its event names, and a chosen one is a gate reading past "
@@ -166,9 +166,13 @@ SHARDABLE = ("injections", "bsd", "recompute")
 
 
 # The one form a sharded package's workflow takes, comments aside (#262):
-# a plan job reading the package's shard count from check-owners.tsv into a
-# matrix, and one job per shard running the package's check with
-# VERIFY_CHECK_SHARD=K/N, recording what it ran for the gate's census.
+# one job per shard running the package's check with VERIFY_CHECK_SHARD=K/N,
+# recording what it ran for the gate's census. The matrix is the table's
+# count spelled out, `[1, ..., N]`, and N is `strategy.job-total`: a matrix
+# needs its list before any job starts, and a plan job that read the count
+# cost a runner and a slot under the account's twenty for every package on
+# every run (#352). Spelled from the table here, so a list that is not
+# exactly 1..N for the table's count is a line that does not match.
 # Compared line for line from `on:` to the end, blank lines included, so
 # nothing can start fewer shards than the table declares, run a different
 # check, list instead, or skip the census upload.
@@ -179,39 +183,19 @@ permissions:
   contents: read
 
 jobs:
-  plan:
-    name: {pkg} plan
-    runs-on: ubuntu-latest
-    outputs:
-      shards: ${{{{ steps.read.outputs.shards }}}}
-      count: ${{{{ steps.read.outputs.count }}}}
-    steps:
-      - uses: actions/checkout@v5
-      - name: Read the split this package declares
-        id: read
-        run: |
-          set -euo pipefail
-          count="$(awk -F'\\t' -v pkg={pkg} '!/^#/ && NF>=3 && $2 == pkg {{ print $3 }}' .github/check-owners.tsv)"
-          case "$count" in
-            ''|*[!0-9]*) echo "::error::{pkg} declares no shard count in check-owners.tsv"; exit 1 ;;
-          esac
-          printf 'count=%s\\n' "$count" >> "$GITHUB_OUTPUT"
-          printf 'shards=[%s]\\n' "$(seq -s, 1 "$count")" >> "$GITHUB_OUTPUT"
-
   checks:
     name: {pkg} ${{{{ matrix.shard }}}}
-    needs: plan
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{{{ fromJSON(needs.plan.outputs.shards) }}}}
+        shard: [{shards}]
     steps:
       - uses: actions/checkout@v5
 
       - name: Run the checks this package owns, one shard
         env:
-          VERIFY_CHECK_SHARD: ${{{{ matrix.shard }}}}/${{{{ needs.plan.outputs.count }}}}
+          VERIFY_CHECK_SHARD: ${{{{ matrix.shard }}}}/${{{{ strategy.job-total }}}}
           VERIFY_MEMBERS_RAN: ${{{{ runner.temp }}}}/members-ran.tsv
         run: |
           set -euo pipefail
@@ -274,9 +258,10 @@ def owners(failures: list[str]) -> dict[str, str]:
             failures.append(f"{OWNERS}:{number}: `{check}` is owned twice")
         table[check] = owner
         if len(parts) >= 3 and parts[2].strip():
-            # As the plan job's awk reads it: `03` or ` 3` would pass a
-            # strip-and-isdigit here and be refused by every shard (#268's
-            # fourth review), so the column is exactly a number.
+            # Exactly a number, as the plan job's awk once read it (#268's
+            # fourth review): `03` or ` 3` would pass a strip-and-isdigit, and
+            # since #352 the workflow's matrix is spelled from this column, so
+            # the column is the one spelling of the count.
             count = parts[2]
             if not re.fullmatch(r"[1-9][0-9]*", count) or int(count) < 2:
                 failures.append(f"{OWNERS}:{number}: `{check}`'s shard count is {count!r}, not a whole number of 2 or more")
@@ -1108,7 +1093,7 @@ def main() -> int:
             # every line is compared, blank ones included -- a blank-looking
             # line inside a run block is script text too (#268's fourth).
             found = [lines[0], *(l for l in lines[1:body] if l and not l.startswith("#")), *lines[body:]]
-            wanted = [f"name: pkg-{owner}", *SHARDED_WORKFLOW_BODY.format(pkg=owner).split("\n")]
+            wanted = [f"name: pkg-{owner}", *SHARDED_WORKFLOW_BODY.format(pkg=owner, shards=", ".join(str(k) for k in range(1, SHARDS[check] + 1))).split("\n")]
             if found != wanted:
                 at = next((i for i, (a, b) in enumerate(zip(found, wanted)) if a != b), min(len(found), len(wanted)))
                 failures.append(

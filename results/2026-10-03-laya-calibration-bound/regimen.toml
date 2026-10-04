@@ -1,0 +1,7 @@
+# The regimen this run applied: #165's re-judge (400 sampled single-judged archive items, three fresh blind Sonnet
+# judgments each, 36 batches) and laya-typed-decisions classifying the same 400 items under both of #165's
+# questions on two served paths of one converted artifact, with its fp32 PyTorch forward as the parity reference.
+# Pre-registration 5962826904 with amendments 1-6 (pre-registration.md).
+arm = "laya-calibration-bound"
+substrates = ["apple32-sidekick-laya-typed-ane", "apple32-sidekick-laya-typed-gpu", "apple32-torch-laya-typed-fp32"]
+dogma_version = 0

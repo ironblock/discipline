@@ -1,0 +1,11 @@
+pass B
+start 2026-10-03T17:17:30-0700
+pid 27222
+sidekickd 0.7.0 (Foundation Models shim built with macOS SDK 27.0)
+commit d12c2221a17049480c073454bb36f0ce3e3cda3e
+rustc 1.99.0 (b940084d7 2026-09-28)
+cargo 1.99.0 (5f94df478 2026-08-27)
+1740a6d8e9a6b38cec1ca9be40016c34b04ff10b5ebd0fd269fd957c7fa75537  ~/git/me/sidekick/.dev-data/discipline-165/pass-b.toml
+3c90d616764c6d81a53631bb3efb735e396c57bac63dc362631e756c824b7f2d  ~/git/me/sidekick/.dev-data/builds/sidekick-v0.7.0/target/release/sidekickd
+warm-up: all four buckets loaded on first attempt (GPU loads 4–10 s, no 504); live placement ready 17:18:11
+stop 2026-10-03T17:19:55-0700 (SIGTERM, pid 27222 exited)

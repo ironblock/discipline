@@ -1,0 +1,5 @@
+config-redacted.yml differs from the live config.yml (sha256 e52b13bbceecdc9896925d299fb497b6350905e34632ee971a7c71ec44e50518)
+in exactly three lines, all values that are not to be published; no setting that affects serving was changed:
+  line 1  (comment): the host's nickname and a local path in the rollback note were replaced
+  line 4  network.port: replaced by <port>
+  line 11 model.model_dir: the local models directory was replaced by <models directory>

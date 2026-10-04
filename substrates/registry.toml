@@ -895,6 +895,70 @@ weights_main = "6c8aaa9a542084f2457eab775d4eeb51f92a70c0fd9de28d5edb0ddec3c08d30
 weights_main_file = "tokenizer/tokenizer.json, byte-identical in convaiinnovations/laya-typed-decisions at 1a793eb568e6718f15941d08f85432581df534e3 (read at both hub revisions, #247's review); Apache-2.0"
 sampler_card = "none: counting only, each fragment tokenized alone without special tokens"
 
+# laya-typed-decisions, the judge seat's decision model, on the laptop (#165). Two
+# served paths of one converted artifact, one daemon run each, and the fp32 PyTorch
+# forward the parity is measured against. A substrate here is a classification
+# run: no sampler, one forward per request.
+[substrate.apple32-sidekick-laya-typed-ane]
+equipment = "macbook-pro-2021"
+pinned = true
+hub_id = "convaiinnovations/laya-typed-decisions"
+hub_revision = "1a793eb568e6718f15941d08f85432581df534e3"
+weights_main = "4fa56de72383a9d3efa9cfa78955733c81b9fc8067a587ca4beb82c78107a24e"
+weights_main_file = "model.safetensors, 842,609,220 bytes, hashed on the laptop from the hub snapshot at the revision; Apache-2.0"
+description = "laya-typed-decisions served by sidekickd 0.7.0 over /v1/classify with compute_units cpu_and_ne (the manifest's choice), Core ML on the M1 Max; 1401-2061 of 1419-2079 ops on the ANE per bucket"
+engine_name = "sidekickd"
+engine_identity = "3c90d616764c6d81a53631bb3efb735e396c57bac63dc362631e756c824b7f2d"
+engine_identity_is = "the sha256 of the sidekickd 0.7.0 binary, built by the Sidekick program from a clean worktree at tag v0.7.0 (commit d12c2221a17049480c073454bb36f0ce3e3cda3e) with the coreml feature, rustc 1.99.0, Xcode 27.0 (27A266a), on macOS 27.0 (26A428)"
+converted_by = "sidekick v0.6.0 (0d4b451938399cfe1f23386c9a7a422dfa2d1ef8), tools/convert_laya.py, laya 0.3.22 common.py cb77c34b3b5abfc1f59eb1a73357ad80238df397ffdddcfaf634c01949f89b3f, buckets 128/256/512/1024, 2026-10-03T00:28:49Z on this host"
+classifier_toml_sha256 = "d16ddfdcef4d5156177c23a7661f76faba6938b4964d5e2c4b3d9825f54687a8"
+engine_single_digest_suffices = "measured 2026-10-04 with otool -L on the laptop: the build directory holds no shared object, and every library the binary links is a system framework or a dylib under /usr/lib or /usr/lib/swift (CoreML, FoundationModels, Foundation, libSystem, the Swift runtime), so the rest of the engine is the operating system, pinned by its build 26A428"
+sampler_card = "none: one forward per request, the raw softmax at T = 1 over the scorer's per-option logits; no request sets calibration"
+compute_units = "cpu_and_ne"
+placement_sha256 = "f843653508889aeb44549882b4ffb6e4913dc8c2d114ce294fc52762b7542369"
+placement_sha256_is = "the [placement] table of classifier.toml as converted (from the table header to the end of the file): compute_units cpu_and_ne, chip Apple M1 Max, macos_build 26A428, source conversion, 2026-10-02 (#165 5963635666)"
+placement_read = "stale = false: /v1/models at pass A's start and end showed all four buckets source live, state ready, no stale key, 1401/1419, 1521/1539, 1701/1719, 2061/2079 ops on the ANE (results/2026-10-03-laya-calibration-bound/laya/passA/models-*.json); served_pass.py refuses to start otherwise"
+current = false
+current_note = "served on demand for #165's pass A only; the daemon was started and stopped by the Sidekick program"
+served = "2026-10-04T00:10:51Z/2026-10-04T00:17:27Z"
+served_is = "the daemon log's `sidekickd starting` line and the run record's stop (SIGTERM), from the Sidekick program's files (results/2026-10-03-laya-calibration-bound/sidekick/pass-a.daemon.log, pass-a.record.txt); the run record's start, 00:10:54Z, is when it was written down"
+
+[substrate.apple32-sidekick-laya-typed-gpu]
+equipment = "macbook-pro-2021"
+pinned = true
+hub_id = "convaiinnovations/laya-typed-decisions"
+hub_revision = "1a793eb568e6718f15941d08f85432581df534e3"
+weights_main = "4fa56de72383a9d3efa9cfa78955733c81b9fc8067a587ca4beb82c78107a24e"
+weights_main_file = "model.safetensors, 842,609,220 bytes, hashed on the laptop from the hub snapshot at the revision; Apache-2.0"
+description = "laya-typed-decisions served by sidekickd 0.7.0 over /v1/classify with compute_units cpu_and_gpu (an operator override in the daemon config), Core ML on the M1 Max; every op on the GPU"
+engine_name = "sidekickd"
+engine_identity = "3c90d616764c6d81a53631bb3efb735e396c57bac63dc362631e756c824b7f2d"
+engine_identity_is = "the sha256 of the sidekickd 0.7.0 binary, built by the Sidekick program from a clean worktree at tag v0.7.0 (commit d12c2221a17049480c073454bb36f0ce3e3cda3e) with the coreml feature, rustc 1.99.0, Xcode 27.0 (27A266a), on macOS 27.0 (26A428)"
+converted_by = "sidekick v0.6.0 (0d4b451938399cfe1f23386c9a7a422dfa2d1ef8), tools/convert_laya.py, laya 0.3.22 common.py cb77c34b3b5abfc1f59eb1a73357ad80238df397ffdddcfaf634c01949f89b3f, buckets 128/256/512/1024, 2026-10-03T00:28:49Z on this host"
+classifier_toml_sha256 = "d16ddfdcef4d5156177c23a7661f76faba6938b4964d5e2c4b3d9825f54687a8"
+engine_single_digest_suffices = "measured 2026-10-04 with otool -L on the laptop: the build directory holds no shared object, and every library the binary links is a system framework or a dylib under /usr/lib or /usr/lib/swift (CoreML, FoundationModels, Foundation, libSystem, the Swift runtime), so the rest of the engine is the operating system, pinned by its build 26A428"
+sampler_card = "none: one forward per request, the raw softmax at T = 1 over the scorer's per-option logits; no request sets calibration"
+compute_units = "cpu_and_gpu"
+placement_sha256_is = "none: the conversion's [placement] table records cpu_and_ne only, and the cpu_and_gpu path has no conversion record (#165 5973863758); its placement is read live"
+placement_read = "stale = false: /v1/models at pass B's start and end showed all four buckets source live, state ready, no stale key, every op on the GPU (1419/1539/1719/2079; results/2026-10-03-laya-calibration-bound/laya/passB/models-*.json)"
+current = false
+current_note = "served on demand for #165's pass B only; the daemon was started and stopped by the Sidekick program"
+served = "2026-10-04T00:17:27Z/2026-10-04T00:19:55Z"
+served_is = "the daemon log's `sidekickd starting` line and the run record's stop (SIGTERM), from the Sidekick program's files (results/2026-10-03-laya-calibration-bound/sidekick/pass-b.daemon.log, pass-b.record.txt); the run record's start, 00:17:30Z, is when it was written down"
+
+[substrate.apple32-torch-laya-typed-fp32]
+equipment = "macbook-pro-2021"
+pinned = true
+hub_id = "convaiinnovations/laya-typed-decisions"
+hub_revision = "1a793eb568e6718f15941d08f85432581df534e3"
+weights_main = "4fa56de72383a9d3efa9cfa78955733c81b9fc8067a587ca4beb82c78107a24e"
+weights_main_file = "model.safetensors, 842,609,220 bytes, hashed on the laptop from the hub snapshot at the revision; Apache-2.0"
+description = "laya-typed-decisions' own fp32 PyTorch forward on the laptop's CPU, built through sidekick v0.6.0's reference tooling (tools/classifier_reference.py laya_build/laya_logits, convert_laya's loaders); the reference the served paths are compared with"
+engine_name = "torch"
+engine_identity = "2.13.0"
+engine_identity_is = "the library version; transformers 4.57.6, safetensors 0.8.0, tokenizers 0.22.2, numpy 2.5.3, python 3.12.13 arm64"
+sampler_card = "none: fp32 logits per request, with sidekick's ideal-fp16 oracle beside them"
+
 # The sense bakeoff's four embedder cells. A substrate here is an ENCODER RUN,
 # not a served model: no server, no sampler, a pinned library on this host's
 # CPU cores turning the register's texts and the senses into vectors once,

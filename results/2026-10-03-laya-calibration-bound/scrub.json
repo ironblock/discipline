@@ -1,0 +1,41 @@
+[
+ {
+  "path": "rejudge/check_batch.py",
+  "original_sha256": "3a4fe63d57d34993fc6a9492c4b85f8619a55a220c053a396de4a77652dc120f",
+  "scrubbed_sha256": "efd14bbe96fa3f1b83b0453b194f32fb43669979494204a29463a981fdf206ec",
+  "substitutions": [
+   {
+    "from": "the seat's transcript directory under ~/.claude/projects (the project's directory name, which carries the operator's login, and the session id)",
+    "to": "/<project>/<session>/"
+   }
+  ],
+  "occurrences": 1,
+  "lines_changed": 1
+ },
+ {
+  "path": "rejudge/judge/run-log.jsonl",
+  "original_sha256": "b6e6c6f699944773e4bd7a76fbbacf36f0d7a1f57549c30f9999622a7231d4e4",
+  "scrubbed_sha256": "79be6250fc5d7bf6ada273ecb40a7beaf333e505ace73cfb91e953e1572af88a",
+  "substitutions": [
+   {
+    "from": "/Users/<user>/",
+    "to": "~/"
+   }
+  ],
+  "occurrences": 6,
+  "lines_changed": 3
+ },
+ {
+  "path": "sidekick/REDACTED.sha256",
+  "original_sha256": "9eee37e6cef5b9d400be188ce3ee2509a8c2d031df5626fff09a9987f9156ffb",
+  "scrubbed_sha256": "d7ec1d2ae06f8d6735b4e976339c76381ba5e324c9fa546f29806d0b3ac8d4ce",
+  "substitutions": [
+   {
+    "from": "the Sidekick session's scratchpad path, quoted in pass-a.warm.txt's substitution column",
+    "to": "<session temp dir>"
+   }
+  ],
+  "occurrences": 1,
+  "lines_changed": 1
+ }
+]

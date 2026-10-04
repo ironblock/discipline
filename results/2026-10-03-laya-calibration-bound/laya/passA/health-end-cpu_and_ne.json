@@ -1,0 +1,134 @@
+{
+ "chat": {
+  "availability": {
+   "state": "available"
+  },
+  "context_limit": 4096,
+  "fm_sdk": "27.0",
+  "model": "apple-fm",
+  "model_capabilities": [
+   "guided_generation",
+   "tool_calling",
+   "vision"
+  ],
+  "variant": "AFM 3 Core",
+  "variant_id": "core3"
+ },
+ "chunked_models": {},
+ "classifiers": {
+  "models": [
+   "laya-typed-decisions"
+  ],
+  "resident": 1,
+  "supported": true
+ },
+ "compute_plans": {
+  "live": true,
+  "models": {
+   "laya-typed-decisions": {
+    "1024": {
+     "ane": 2061,
+     "cpu": 18,
+     "gpu": 0,
+     "off_ane_ops": {
+      "add": 1,
+      "cast": 1,
+      "equal": 2,
+      "expand_dims": 3,
+      "gather": 1,
+      "greater_equal": 2,
+      "mul": 1,
+      "reshape": 1,
+      "select": 4,
+      "sub": 1,
+      "tile": 1
+     },
+     "source": "live",
+     "state": "ready",
+     "unassigned": 2602
+    },
+    "128": {
+     "ane": 1401,
+     "cpu": 18,
+     "gpu": 0,
+     "off_ane_ops": {
+      "add": 1,
+      "cast": 1,
+      "equal": 2,
+      "expand_dims": 3,
+      "gather": 1,
+      "greater_equal": 2,
+      "mul": 1,
+      "reshape": 1,
+      "select": 4,
+      "sub": 1,
+      "tile": 1
+     },
+     "source": "live",
+     "state": "ready",
+     "unassigned": 1462
+    },
+    "256": {
+     "ane": 1521,
+     "cpu": 18,
+     "gpu": 0,
+     "off_ane_ops": {
+      "add": 1,
+      "cast": 1,
+      "equal": 2,
+      "expand_dims": 3,
+      "gather": 1,
+      "greater_equal": 2,
+      "mul": 1,
+      "reshape": 1,
+      "select": 4,
+      "sub": 1,
+      "tile": 1
+     },
+     "source": "live",
+     "state": "ready",
+     "unassigned": 1702
+    },
+    "512": {
+     "ane": 1701,
+     "cpu": 18,
+     "gpu": 0,
+     "off_ane_ops": {
+      "add": 1,
+      "cast": 1,
+      "equal": 2,
+      "expand_dims": 3,
+      "gather": 1,
+      "greater_equal": 2,
+      "mul": 1,
+      "reshape": 1,
+      "select": 4,
+      "sub": 1,
+      "tile": 1
+     },
+     "source": "live",
+     "state": "ready",
+     "unassigned": 2002
+    }
+   }
+  }
+ },
+ "compute_unit_overrides": {
+  "applied": {},
+  "unmatched": []
+ },
+ "embeddings": {
+  "models": [
+   "bge-small-en-v1.5",
+   "embeddinggemma-300m",
+   "f2llm-v2-160m",
+   "lfm2.5-embedding-350m",
+   "static-floor"
+  ],
+  "resident": 0
+ },
+ "seq_caps": {},
+ "skipped_models": [],
+ "status": "ok",
+ "uptime_secs": 351
+}

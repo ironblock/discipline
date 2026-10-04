@@ -1,0 +1,770 @@
+{
+ "floor": {
+  "edit": {
+   "base_rates": {
+    "no": 0.795,
+    "yes": 0.205
+   },
+   "held_out_n": 400,
+   "median_ece": {
+    "100": {
+     "F1_consistency": 0.0848,
+     "F2_base_rate": 0.025
+    },
+    "1600": {
+     "F1_consistency": 0.0214,
+     "F2_base_rate": 0.0069
+    },
+    "200": {
+     "F1_consistency": 0.0603,
+     "F2_base_rate": 0.02
+    },
+    "400": {
+     "F1_consistency": 0.0424,
+     "F2_base_rate": 0.0125
+    },
+    "800": {
+     "F1_consistency": 0.0301,
+     "F2_base_rate": 0.01
+    }
+   }
+  },
+  "verdict": {
+   "base_rates": {
+    "accepts": 0.2267,
+    "declines": 0.1436,
+    "ignores": 0.4433,
+    "questions": 0.1864
+   },
+   "held_out_n": 397,
+   "median_ece": {
+    "100": {
+     "F1_consistency": 0.0388,
+     "F2_base_rate": 0.0333
+    },
+    "1600": {
+     "F1_consistency": 0.01,
+     "F2_base_rate": 0.0083
+    },
+    "200": {
+     "F1_consistency": 0.0274,
+     "F2_base_rate": 0.0233
+    },
+    "397": {
+     "F1_consistency": 0.0201,
+     "F2_base_rate": 0.0176
+    },
+    "400": {
+     "F1_consistency": 0.0192,
+     "F2_base_rate": 0.0167
+    },
+    "800": {
+     "F1_consistency": 0.014,
+     "F2_base_rate": 0.0121
+    }
+   }
+  }
+ },
+ "folds": {
+  "A": 200,
+  "B": 200
+ },
+ "inputs": {
+  "laya/fp32.jsonl": "19c5a8a6356565de356b18923cd8d5c6a12e7a502a8ec7dbfc2becf513de2082",
+  "laya/passA/responses-cpu_and_ne.jsonl": "4a302d4093ab01e25e636eb28da00a61224af3cc2dab9d9b07bff6db3a1b38d9",
+  "laya/passB/responses-cpu_and_gpu.jsonl": "2b711e79bd80fac310256f9ac6892d8dd7ce9ad7908199f6c08dc366b45f1483",
+  "laya/requests.jsonl": "58524c7189cfe748835c29a906416599d3d79534f2f17e85eaa00190d8897ae9",
+  "rejudge/judge/ids.json": "5b3097ecd17a47d727b0a560a0c6fb9f2d2004df4f5e719e5131d42ddd41545d",
+  "rejudge/judge/verdicts-01.json": "cd5772af58760ef47e6354b2919d7ebf7de00c148d6325c5d62c529a1f6ba2e7",
+  "rejudge/judge/verdicts-02.json": "8af83a7e03da4c028a76f2cb7348f91079730104d73894bdbad19d31dcca63ff",
+  "rejudge/judge/verdicts-03.json": "9e5c5064cef7f87e889db313fe65b057a9a474f9e5dcd8e50f627740d1651ddf",
+  "rejudge/judge/verdicts-04.json": "ba2455998f547154dca87956a57a4477b1af5874619af3762012fcc4471d8d32",
+  "rejudge/judge/verdicts-05.json": "8d9fa361a5cb79f952741a9bbd7704322fb250178dd7f462697fd1ab20581531",
+  "rejudge/judge/verdicts-06.json": "9da5ad6079eb440d1811332c11cf4b2ecb3f866470df9c3b0ca8c43c9366439c",
+  "rejudge/judge/verdicts-07.json": "23b9a5ed8117fcde37f05fd0b38908890d7263f26dcd7cd529ffe8a123bcb0c2",
+  "rejudge/judge/verdicts-08.json": "7253582340c149660aca899beccdbbbc9e247ea930378e0c0c5d42f4ba385e9e",
+  "rejudge/judge/verdicts-09.json": "9cbdad28cb09d4289b095f49244c96f32f6dd8038ba499b797660ad55c345c3c",
+  "rejudge/judge/verdicts-10.json": "1cd6d7e66a1a9f2cc4be33acf9bfd4753573fe9e5d4d108a3062352ab9a658c4",
+  "rejudge/judge/verdicts-11.json": "9593bf11d852addbcc0f3cd90d7bbee4ce7f506ef3a98411cc15f87886f7680e",
+  "rejudge/judge/verdicts-12.json": "e5ac6ba15a5166a56cf6f74f58073182e4e25c3ac26f52a6d35160482225fe76",
+  "rejudge/judge/verdicts-13.json": "cde68aa5bb4ae9b16e62394fd2e42c30e60f20eeb76d86275a4d625fa4d90806",
+  "rejudge/judge/verdicts-14.json": "feb755cd3edaaed2cc6671dd70d0c5441858ccf34a30ee09f61bcea20b23da1e",
+  "rejudge/judge/verdicts-15.json": "5442d926c6dfb26eb5e886f2eb1a145a57dfbb677f49954d961d4d7d07ec5075",
+  "rejudge/judge/verdicts-16.json": "ccd6f4ff4c386935c657d47d23aac2ecdf1dbffa13756e8910f547dca4dd98cf",
+  "rejudge/judge/verdicts-17.json": "2801c8ba5b9e738c05c9d69d37a03dcedfc96dcea7bba3bb316df46cc24aba05",
+  "rejudge/judge/verdicts-18.json": "f8b993cc0486e1feaa4f28e44b3334fddcf3298d55aa4011b1f894b70bbf7718",
+  "rejudge/judge/verdicts-19.json": "c78a8919a63c95244b314255f754bb4cb8ad90a9c49643a2620c184ee6f9c4dc",
+  "rejudge/judge/verdicts-20.json": "850bf509a3e474c1ce30f617a395988fc4d2066cc6cd19d289018fd68217e210",
+  "rejudge/judge/verdicts-21.json": "6d48a70916313c312c519f0ddd048e83a3fcaf984cfdc36d7a09e944f724ae87",
+  "rejudge/judge/verdicts-22.json": "92606768d03447dd0fa2ab773abb13efdd7a803dbd754d5f486dc89ed3643330",
+  "rejudge/judge/verdicts-23.json": "b2eeceb3a1a435e3a4478a99e3ce10ee7ac32fbe1e804626071599ebbcb0f014",
+  "rejudge/judge/verdicts-24.json": "82968f75ea20f7d5fde04217c0ec8d0b808346f90172ae3a664408c8d1bc02a9",
+  "rejudge/judge/verdicts-25.json": "153361edf0c3ad13837a26a31ff10947b67234083259817c86a2eee2dc8d7003",
+  "rejudge/judge/verdicts-26.json": "3b61cb25a2d0966de416b5abcbf5f53eb3cb70cee6f2b0bcca67ad1532d18042",
+  "rejudge/judge/verdicts-27.json": "0891beb8c862108b52c57a034afe767f38e9678067c8e225fd89dec5f21e9b6d",
+  "rejudge/judge/verdicts-28.json": "3e223dfca48b4e6d4c167ea497d773583e491667b43886795d9028a7b1a98086",
+  "rejudge/judge/verdicts-29.json": "13ccc7648ef96e78bfd9ca18a6e96786a57c0c28fa7b079e60066c92e85b1ad1",
+  "rejudge/judge/verdicts-30.json": "638d1c0e5e5c47ce126fe69002410964ad3618a777797a7efc96302797be0f7a",
+  "rejudge/judge/verdicts-31.json": "13b5f28d7613f71b7cc3ae4a07b751f3dfa2241135065564ab7ed8cbc5b026b0",
+  "rejudge/judge/verdicts-32.json": "2c130f5b203dbd2f46fb5556ccbf2df0e4b0e5bc3c878b711212213d5a5ff4be",
+  "rejudge/judge/verdicts-33.json": "c3d8f364d3810adbc8c33f36741ec2e75d71942800002076090fce2d55e21b4d",
+  "rejudge/judge/verdicts-34.json": "53f42c03715f7aaca70d564bc1a1895d6e76be499dff447b37dfe259f45d4c02",
+  "rejudge/judge/verdicts-35.json": "534e04bc437ac4042e8b336976f46020881967dd5869fca328ef55f5aed0aee7",
+  "rejudge/judge/verdicts-36.json": "e6c47a9e83a01b19a0de5f9bc62ec324881e8e227b80a54503d4a1d8bedd313f",
+  "rejudge/sample.json": "8439593bf71066386ad78cb1f5e53d41525cba9ee3cb2805c4362b664ee66d3b"
+ },
+ "judges": {
+  "edit": {
+   "archive_vs_fresh_majority": {
+    "agree": 397,
+    "n": 400,
+    "per_stratum": {
+     "2026-09-21-false-nomination-framing-v2 | accepts": {
+      "agree": 28,
+      "n": 28
+     },
+     "2026-09-21-false-nomination-framing-v2 | declines": {
+      "agree": 19,
+      "n": 20
+     },
+     "2026-09-21-false-nomination-framing-v2 | ignores": {
+      "agree": 59,
+      "n": 59
+     },
+     "2026-09-21-false-nomination-framing-v2 | questions": {
+      "agree": 24,
+      "n": 24
+     },
+     "2026-09-27-false-nomination-edit-rate | accepts": {
+      "agree": 27,
+      "n": 28
+     },
+     "2026-09-27-false-nomination-edit-rate | declines": {
+      "agree": 22,
+      "n": 22
+     },
+     "2026-09-27-false-nomination-edit-rate | ignores": {
+      "agree": 62,
+      "n": 62
+     },
+     "2026-09-27-false-nomination-edit-rate | questions": {
+      "agree": 23,
+      "n": 23
+     },
+     "2026-09-29-false-nomination-edit-rate-second-substrate | accepts": {
+      "agree": 32,
+      "n": 33
+     },
+     "2026-09-29-false-nomination-edit-rate-second-substrate | declines": {
+      "agree": 15,
+      "n": 15
+     },
+     "2026-09-29-false-nomination-edit-rate-second-substrate | ignores": {
+      "agree": 64,
+      "n": 64
+     },
+     "2026-09-29-false-nomination-edit-rate-second-substrate | questions": {
+      "agree": 22,
+      "n": 22
+     }
+    },
+    "rate": 0.9925
+   },
+   "d": 0.01,
+   "d_ci95": [
+    0.0033,
+    0.0183
+   ],
+   "e3": 0.0003,
+   "e3_ci95": [
+    0.0,
+    0.001
+   ],
+   "fleiss_kappa": 0.9693,
+   "majority_counts": {
+    "no": 318,
+    "yes": 82
+   },
+   "n_items": 400,
+   "no_majority": 0,
+   "per_record_d": {
+    "2026-09-21-false-nomination-framing-v2": {
+     "d": 0.0051,
+     "n": 131
+    },
+    "2026-09-27-false-nomination-edit-rate": {
+     "d": 0.0198,
+     "n": 135
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate": {
+     "d": 0.005,
+     "n": 134
+    }
+   },
+   "per_stratum_d": {
+    "2026-09-21-false-nomination-framing-v2 | accepts": {
+     "d": 0.0238,
+     "n": 28
+    },
+    "2026-09-21-false-nomination-framing-v2 | declines": {
+     "d": 0.0,
+     "n": 20
+    },
+    "2026-09-21-false-nomination-framing-v2 | ignores": {
+     "d": 0.0,
+     "n": 59
+    },
+    "2026-09-21-false-nomination-framing-v2 | questions": {
+     "d": 0.0,
+     "n": 24
+    },
+    "2026-09-27-false-nomination-edit-rate | accepts": {
+     "d": 0.0476,
+     "n": 28
+    },
+    "2026-09-27-false-nomination-edit-rate | declines": {
+     "d": 0.0303,
+     "n": 22
+    },
+    "2026-09-27-false-nomination-edit-rate | ignores": {
+     "d": 0.0108,
+     "n": 62
+    },
+    "2026-09-27-false-nomination-edit-rate | questions": {
+     "d": 0.0,
+     "n": 23
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate | accepts": {
+     "d": 0.0202,
+     "n": 33
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate | declines": {
+     "d": 0.0,
+     "n": 15
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate | ignores": {
+     "d": 0.0,
+     "n": 64
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate | questions": {
+     "d": 0.0,
+     "n": 22
+    }
+   }
+  },
+  "verdict": {
+   "archive_vs_fresh_majority": {
+    "agree": 373,
+    "n": 397,
+    "per_stratum": {
+     "2026-09-21-false-nomination-framing-v2 | accepts": {
+      "agree": 28,
+      "n": 28
+     },
+     "2026-09-21-false-nomination-framing-v2 | declines": {
+      "agree": 18,
+      "n": 20
+     },
+     "2026-09-21-false-nomination-framing-v2 | ignores": {
+      "agree": 56,
+      "n": 59
+     },
+     "2026-09-21-false-nomination-framing-v2 | questions": {
+      "agree": 23,
+      "n": 24
+     },
+     "2026-09-27-false-nomination-edit-rate | accepts": {
+      "agree": 28,
+      "n": 28
+     },
+     "2026-09-27-false-nomination-edit-rate | declines": {
+      "agree": 19,
+      "n": 22
+     },
+     "2026-09-27-false-nomination-edit-rate | ignores": {
+      "agree": 54,
+      "n": 60
+     },
+     "2026-09-27-false-nomination-edit-rate | questions": {
+      "agree": 19,
+      "n": 23
+     },
+     "2026-09-29-false-nomination-edit-rate-second-substrate | accepts": {
+      "agree": 31,
+      "n": 32
+     },
+     "2026-09-29-false-nomination-edit-rate-second-substrate | declines": {
+      "agree": 15,
+      "n": 15
+     },
+     "2026-09-29-false-nomination-edit-rate-second-substrate | ignores": {
+      "agree": 61,
+      "n": 64
+     },
+     "2026-09-29-false-nomination-edit-rate-second-substrate | questions": {
+      "agree": 21,
+      "n": 22
+     }
+    },
+    "rate": 0.9395
+   },
+   "d": 0.0792,
+   "d_ci95": [
+    0.0583,
+    0.1017
+   ],
+   "e3": 0.0178,
+   "e3_ci95": [
+    0.0098,
+    0.0289
+   ],
+   "fleiss_kappa": 0.8864,
+   "majority_counts": {
+    "accepts": 90,
+    "declines": 57,
+    "ignores": 176,
+    "questions": 74
+   },
+   "n_items": 400,
+   "no_majority": 3,
+   "per_record_d": {
+    "2026-09-21-false-nomination-framing-v2": {
+     "d": 0.0763,
+     "n": 131
+    },
+    "2026-09-27-false-nomination-edit-rate": {
+     "d": 0.084,
+     "n": 135
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate": {
+     "d": 0.0771,
+     "n": 134
+    }
+   },
+   "per_stratum_d": {
+    "2026-09-21-false-nomination-framing-v2 | accepts": {
+     "d": 0.0238,
+     "n": 28
+    },
+    "2026-09-21-false-nomination-framing-v2 | declines": {
+     "d": 0.0,
+     "n": 20
+    },
+    "2026-09-21-false-nomination-framing-v2 | ignores": {
+     "d": 0.0904,
+     "n": 59
+    },
+    "2026-09-21-false-nomination-framing-v2 | questions": {
+     "d": 0.1667,
+     "n": 24
+    },
+    "2026-09-27-false-nomination-edit-rate | accepts": {
+     "d": 0.0238,
+     "n": 28
+    },
+    "2026-09-27-false-nomination-edit-rate | declines": {
+     "d": 0.0606,
+     "n": 22
+    },
+    "2026-09-27-false-nomination-edit-rate | ignores": {
+     "d": 0.1075,
+     "n": 62
+    },
+    "2026-09-27-false-nomination-edit-rate | questions": {
+     "d": 0.1159,
+     "n": 23
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate | accepts": {
+     "d": 0.0707,
+     "n": 33
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate | declines": {
+     "d": 0.0444,
+     "n": 15
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate | ignores": {
+     "d": 0.0625,
+     "n": 64
+    },
+    "2026-09-29-false-nomination-edit-rate-second-substrate | questions": {
+     "d": 0.1515,
+     "n": 22
+    }
+   }
+  }
+ },
+ "laya": {
+  "edit": {
+   "abstain_n": 18,
+   "abstention_band_logits": 0.05,
+   "majority_class_rate": 0.795,
+   "n_with_majority": 400,
+   "parity_400": {
+    "A_vs_B_agree": 399,
+    "A_vs_fp32_agree": 399,
+    "B_vs_fp32_agree": 400,
+    "fp32_margin_lt_0p05": 18,
+    "fp32_margins_of_changed": {
+     "A": [
+      0.0051
+     ],
+     "B": []
+    }
+   },
+   "passes": {
+    "A": {
+     "T_at_range_bound": {
+      "A": false,
+      "B": false
+     },
+     "T_deployed_all": 2.0013,
+     "T_fit_on_fold": {
+      "A": 1.6484,
+      "B": 2.5334
+     },
+     "agreement_with_fresh_majority": {
+      "agree": 254,
+      "answered_agree": 248,
+      "answered_n": 382,
+      "answered_rate": 0.6492,
+      "coverage": 0.955,
+      "n": 400,
+      "rate": 0.635
+     },
+     "compute_units": "cpu_and_ne",
+     "confusion_majority_by_predicted": {
+      "no": [
+       142,
+       176
+      ],
+      "yes": [
+       78,
+       4
+      ]
+     },
+     "ece_classwise_T1": 0.3459,
+     "ece_classwise_crossfit": 0.3279,
+     "ece_top1_T1": 0.0695,
+     "ece_top1_T1_ci95": [
+      0.0558,
+      0.1293
+     ],
+     "ece_top1_crossfit": 0.0616,
+     "ece_top1_crossfit_by_fold": {
+      "A": 0.0726,
+      "B": 0.0728
+     },
+     "ece_top1_crossfit_ci95": [
+      0.0406,
+      0.1173
+     ],
+     "predicted_counts": {
+      "no": 180,
+      "yes": 220
+     }
+    },
+    "B": {
+     "T_at_range_bound": {
+      "A": false,
+      "B": false
+     },
+     "T_deployed_all": 1.9922,
+     "T_fit_on_fold": {
+      "A": 1.6461,
+      "B": 2.5109
+     },
+     "agreement_with_fresh_majority": {
+      "agree": 255,
+      "answered_agree": 248,
+      "answered_n": 382,
+      "answered_rate": 0.6492,
+      "coverage": 0.955,
+      "n": 400,
+      "rate": 0.6375
+     },
+     "compute_units": "cpu_and_gpu",
+     "confusion_majority_by_predicted": {
+      "no": [
+       141,
+       177
+      ],
+      "yes": [
+       78,
+       4
+      ]
+     },
+     "ece_classwise_T1": 0.3453,
+     "ece_classwise_crossfit": 0.3277,
+     "ece_top1_T1": 0.0616,
+     "ece_top1_T1_ci95": [
+      0.0536,
+      0.1257
+     ],
+     "ece_top1_crossfit": 0.0671,
+     "ece_top1_crossfit_by_fold": {
+      "A": 0.0615,
+      "B": 0.0793
+     },
+     "ece_top1_crossfit_ci95": [
+      0.041,
+      0.1203
+     ],
+     "predicted_counts": {
+      "no": 181,
+      "yes": 219
+     }
+    }
+   }
+  },
+  "verdict": {
+   "abstain_n": 12,
+   "abstention_band_logits": 0.05,
+   "majority_class_rate": 0.4433,
+   "n_with_majority": 397,
+   "parity_400": {
+    "A_vs_B_agree": 399,
+    "A_vs_fp32_agree": 399,
+    "B_vs_fp32_agree": 400,
+    "fp32_margin_lt_0p05": 12,
+    "fp32_margins_of_changed": {
+     "A": [
+      0.0117
+     ],
+     "B": []
+    }
+   },
+   "passes": {
+    "A": {
+     "T_at_range_bound": {
+      "A": true,
+      "B": true
+     },
+     "T_deployed_all": 20.0,
+     "T_fit_on_fold": {
+      "A": 20.0,
+      "B": 20.0
+     },
+     "agreement_with_fresh_majority": {
+      "agree": 106,
+      "answered_agree": 103,
+      "answered_n": 385,
+      "answered_rate": 0.2675,
+      "coverage": 0.9698,
+      "n": 397,
+      "rate": 0.267
+     },
+     "compute_units": "cpu_and_ne",
+     "confusion_majority_by_predicted": {
+      "accepts": [
+       40,
+       48,
+       2,
+       0
+      ],
+      "declines": [
+       11,
+       44,
+       2,
+       0
+      ],
+      "ignores": [
+       25,
+       146,
+       1,
+       4
+      ],
+      "questions": [
+       13,
+       60,
+       1,
+       0
+      ]
+     },
+     "ece_classwise_T1": 0.1908,
+     "ece_classwise_crossfit": 0.1027,
+     "ece_top1_T1": 0.2344,
+     "ece_top1_T1_ci95": [
+      0.1904,
+      0.2792
+     ],
+     "ece_top1_crossfit": 0.0112,
+     "ece_top1_crossfit_by_fold": {
+      "A": 0.0446,
+      "B": 0.0345
+     },
+     "ece_top1_crossfit_ci95": [
+      0.0036,
+      0.0576
+     ],
+     "predicted_counts": {
+      "accepts": 89,
+      "declines": 6,
+      "ignores": 4,
+      "questions": 298
+     }
+    },
+    "B": {
+     "T_at_range_bound": {
+      "A": true,
+      "B": true
+     },
+     "T_deployed_all": 20.0,
+     "T_fit_on_fold": {
+      "A": 20.0,
+      "B": 20.0
+     },
+     "agreement_with_fresh_majority": {
+      "agree": 106,
+      "answered_agree": 103,
+      "answered_n": 385,
+      "answered_rate": 0.2675,
+      "coverage": 0.9698,
+      "n": 397,
+      "rate": 0.267
+     },
+     "compute_units": "cpu_and_gpu",
+     "confusion_majority_by_predicted": {
+      "accepts": [
+       40,
+       48,
+       2,
+       0
+      ],
+      "declines": [
+       11,
+       44,
+       2,
+       0
+      ],
+      "ignores": [
+       26,
+       145,
+       1,
+       4
+      ],
+      "questions": [
+       13,
+       60,
+       1,
+       0
+      ]
+     },
+     "ece_classwise_T1": 0.1911,
+     "ece_classwise_crossfit": 0.1027,
+     "ece_top1_T1": 0.2343,
+     "ece_top1_T1_ci95": [
+      0.1898,
+      0.2791
+     ],
+     "ece_top1_crossfit": 0.0098,
+     "ece_top1_crossfit_by_fold": {
+      "A": 0.0446,
+      "B": 0.0345
+     },
+     "ece_top1_crossfit_ci95": [
+      0.0029,
+      0.0558
+     ],
+     "predicted_counts": {
+      "accepts": 90,
+      "declines": 6,
+      "ignores": 4,
+      "questions": 297
+     }
+    }
+   }
+  }
+ },
+ "rule": {
+  "edit": {
+   "F1_consistency": {
+    "bound": 0.0427,
+    "bound_interval": [
+     0.0424,
+     0.0434
+    ],
+    "floor": 0.0424,
+    "measured_crossfit_ece_passA": 0.0616,
+    "reading": "miscalibrated",
+    "size_rule_fires": false
+   },
+   "F2_base_rate": {
+    "bound": 0.0128,
+    "bound_interval": [
+     0.0125,
+     0.0135
+    ],
+    "floor": 0.0125,
+    "measured_crossfit_ece_passA": 0.0616,
+    "reading": "miscalibrated",
+    "size_rule_fires": false
+   }
+  },
+  "verdict": {
+   "F1_consistency": {
+    "bound": 0.0379,
+    "bound_interval": [
+     0.0299,
+     0.049
+    ],
+    "floor": 0.0201,
+    "measured_crossfit_ece_passA": 0.0112,
+    "reading": "calibrated",
+    "size_rule_fires": false
+   },
+   "F2_base_rate": {
+    "bound": 0.0354,
+    "bound_interval": [
+     0.0274,
+     0.0465
+    ],
+    "floor": 0.0176,
+    "measured_crossfit_ece_passA": 0.0112,
+    "reading": "calibrated",
+    "size_rule_fires": false
+   }
+  }
+ },
+ "seed": 7325542256462664817,
+ "tokens": {
+  "A": {
+   "buckets": {
+    "1024": 108,
+    "256": 347,
+    "512": 345
+   },
+   "compute_units": {
+    "cpu_and_ne": 800
+   },
+   "model": {
+    "laya-typed-decisions@1a793eb568e6718f15941d08f85432581df534e3": 800
+   },
+   "possibly_truncated_bucket_1024": 108,
+   "prompt_tokens_at_1024": 28,
+   "tokens_match_fp32": 800,
+   "version": {
+    "0.7.0": 800
+   }
+  },
+  "B": {
+   "buckets": {
+    "1024": 108,
+    "256": 347,
+    "512": 345
+   },
+   "compute_units": {
+    "cpu_and_gpu": 800
+   },
+   "model": {
+    "laya-typed-decisions@1a793eb568e6718f15941d08f85432581df534e3": 800
+   },
+   "possibly_truncated_bucket_1024": 108,
+   "prompt_tokens_at_1024": 28,
+   "tokens_match_fp32": 800,
+   "version": {
+    "0.7.0": 800
+   }
+  },
+  "fp32_at_max_len": 28
+ }
+}

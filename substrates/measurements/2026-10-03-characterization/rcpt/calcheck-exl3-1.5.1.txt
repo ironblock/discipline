@@ -1,0 +1,8 @@
+calibration c4.utf8 chars=1328115
+calibration code.utf8 chars=1345810
+calibration multilingual.utf8 chars=223218
+calibration technical.utf8 chars=348978
+calibration tiny.utf8 chars=261057
+calibration wiki.utf8 chars=2087714
+corpus code.txt chars=1500000 windows=1500 found_in_calibration=0
+corpus prose.txt chars=1288556 windows=1289 found_in_calibration=0

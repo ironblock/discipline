@@ -47,3 +47,13 @@
 # Added 2026-09-20 with the first JavaScript package (`exercise/`); disclosed
 # on that PR as an edit outside its directory.
 ssh-user-at-host	(git|hg)@(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|sr\.ht):|@[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z]+\.[0-9]+)?[:()']
+#
+# AND A PYTHON REQUIREMENTS PIN, by the same argument as the lockfile key form. `pip freeze` (and `uv pip freeze`)
+# spells a pinned package as `name==1.2.3.4`, and a four-part version that opens with 10 reads to `private-ipv4` as a
+# private address (a CUDA library's pin in `rtx6000ada-host`'s frozen package set, #143). The exempt form is a
+# whole line that is a pin and nothing else: a package name, `==`, a four-part version, end of line, as `pip freeze`
+# writes it. An address anywhere else -- a URL, a host field, a bare line, or after `==` with anything else on the line
+# -- still fires. The scanner hands this file grep's `path:line:content`, so the pattern anchors on that prefix (path,
+# line number) and the package name follows it directly, and the history check scans patches, so a leading `+` or `-` is allowed there. (A line that is nothing but `name==10.x.x.x` is exempt whatever the name says; that is the cost of
+# reading lines, not files.)
+private-ipv4	^[^:]+:[0-9]+:[+-]?[A-Za-z0-9][A-Za-z0-9._-]*==10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$

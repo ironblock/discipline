@@ -1,0 +1,29 @@
+power.limit [W], power.max_limit [W], clocks.max.sm [MHz]
+300.00 W, 300.00 W, 3105 MHz
+##### recheck-plain 12:20:08
+ -- Loading $HOME/models/Qwen3.8-27B-exl3-4.00bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+[recheck-plain] loaded in 15s; VRAM 15.1 GiB alloc / 18.1 GiB used
+[recheck-plain] code: prompt_n=53 predicted_n=320 predicted_per_second=49.85 time=6.4s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[recheck-plain] code2: prompt_n=53 predicted_n=320 predicted_per_second=49.95 time=6.4s cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[recheck-plain] prose: prompt_n=54 predicted_n=320 predicted_per_second=49.89 time=6.4s cached_tokens=0 | text: '<think>\nThe user wants a 400-word essay about the Mac Pro 20'
+  rc=0
+##### recheck-dfl 12:20:50
+ -- Loading $HOME/models/Qwen3.8-27B-DFlash2-hf
+
+ -- Loading $HOME/models/Qwen3.8-27B-exl3-4.00bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+[recheck-dfl] loaded in 13s; VRAM 20.4 GiB alloc / 23.3 GiB used
+[recheck-dfl] code: prompt_n=53 predicted_n=320 predicted_per_second=84.16 time=3.8s accepted_draft_tokens=228 rejected_draft_tokens=416 cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[recheck-dfl] code2: prompt_n=53 predicted_n=320 predicted_per_second=92.75 time=3.5s accepted_draft_tokens=228 rejected_draft_tokens=416 cached_tokens=0 | text: '<think>\nThe user wants a complete Python module implementing'
+[recheck-dfl] prose: prompt_n=54 predicted_n=320 predicted_per_second=82.22 time=3.9s accepted_draft_tokens=211 rejected_draft_tokens=552 cached_tokens=0 | text: '<think>\nThe user wants a 400-word essay about the Mac Pro 20'
+  rc=0
+power.draw [W], clocks.current.sm [MHz], temperature.gpu
+56.69 W, 225 MHz, 74
+DONE

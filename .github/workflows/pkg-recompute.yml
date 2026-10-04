@@ -5,9 +5,11 @@ name: pkg-recompute
 # here, so the table and the workflow cannot drift apart.
 #
 # SHARDED. `recompute` re-derives every results directory from its own artefacts. At 324 s it is past the 300 s budget on its own, so it is a package of its own, split by directory name (#262).
-# The shard count is the table's third column, read here into a matrix: the
-# table is the one place the split is declared, and every shard runs the one
-# check with VERIFY_CHECK_SHARD=K/N. scripts/check-ci-coverage.py proves the
+# The shard count is the table's third column, spelled here as the matrix
+# because a matrix needs its list before any job starts (#352): the table is
+# the one place the split is declared, scripts/check-ci-coverage.py refuses a
+# list that is not exactly 1..N for it, and every shard runs the one check
+# with VERIFY_CHECK_SHARD=K/N, N being the matrix's own size. scripts/check-ci-coverage.py proves the
 # shards complete -- every member in exactly one -- and refuses a package
 # whose measured seconds per shard pass the budget.
 
@@ -18,39 +20,19 @@ permissions:
   contents: read
 
 jobs:
-  plan:
-    name: recompute plan
-    runs-on: ubuntu-latest
-    outputs:
-      shards: ${{ steps.read.outputs.shards }}
-      count: ${{ steps.read.outputs.count }}
-    steps:
-      - uses: actions/checkout@v5
-      - name: Read the split this package declares
-        id: read
-        run: |
-          set -euo pipefail
-          count="$(awk -F'\t' -v pkg=recompute '!/^#/ && NF>=3 && $2 == pkg { print $3 }' .github/check-owners.tsv)"
-          case "$count" in
-            ''|*[!0-9]*) echo "::error::recompute declares no shard count in check-owners.tsv"; exit 1 ;;
-          esac
-          printf 'count=%s\n' "$count" >> "$GITHUB_OUTPUT"
-          printf 'shards=[%s]\n' "$(seq -s, 1 "$count")" >> "$GITHUB_OUTPUT"
-
   checks:
     name: recompute ${{ matrix.shard }}
-    needs: plan
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v5
 
       - name: Run the checks this package owns, one shard
         env:
-          VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}
+          VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}
           VERIFY_MEMBERS_RAN: ${{ runner.temp }}/members-ran.tsv
         run: |
           set -euo pipefail

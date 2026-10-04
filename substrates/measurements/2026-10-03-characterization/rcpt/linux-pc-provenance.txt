@@ -1,0 +1,13 @@
+# linux-pc: dates and engine of the 2026-09-22 27B short-prompt runs, read 2026-10-03 (file mtimes are host local time, UTC-07:00)
+mtime 2026-09-22 10:26:34.932849618 -0700 rco27b-matrix.sh
+mtime 2026-09-22 10:34:10.822435672 -0700 rco27b.log
+mtime 2026-09-22 12:11:59.149453114 -0700 exl3-setup.log
+mtime 2026-09-22 12:04:04.707567268 -0700 exl3bench.py
+mtime 2026-09-22 12:12:34.905821339 -0700 exl3-run.sh
+mtime 2026-09-22 12:16:47.175487651 -0700 exl3-run.log
+mtime 2026-09-22 12:17:44.958104868 -0700 exl3-dfl.sh
+mtime 2026-09-22 12:19:19.259112126 -0700 exl3-dfl.log
+exl3_venv exllamav3 1.5.1 torch 2.13.0+cu132
+exl3_package_mtime 2026-09-22 12:05:18.865330938 -0700
+mainline_commit 4ceb1719101f32637b841206c172f3f058ffc182
+ik_commit c5b5773bed338c5f3b985d277764a4d780b83d42
