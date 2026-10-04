@@ -1,0 +1,121 @@
+# #388's seeded faults: log v4, the approval on a tool_call and the denylist and declined refusals.
+
+[[fault]]
+id = "test.log_refused_call_approval_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a refused tool_call carrying an approval read"
+failure_class = "log.refused-call-approval-read"
+legacy_signature = "log/fixtures/invalid/a-refused-call-carrying-an-approval\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_approval_decided_after_its_line_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "an approval decided after its line read"
+failure_class = "log.approval-decided-after-its-line-read"
+legacy_signature = "log/fixtures/invalid/an-approval-decided-after-its-line\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_preseeded_approval_decided_at_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a preseeded approval carrying its decided_at read"
+failure_class = "log.preseeded-approval-decided-at-read"
+legacy_signature = "log/fixtures/invalid/a-preseeded-approval-carrying-its-decided-at\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_approval_decided_at_unrequired"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a once approval without its decided_at read"
+failure_class = "log.approval-decided-at-unrequired"
+legacy_signature = "log/fixtures/invalid/a-once-approval-without-its-decided-at\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_approval_scope_outside_its_vocabulary_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "an approval scope outside its vocabulary read"
+failure_class = "log.approval-scope-outside-its-vocabulary-read"
+legacy_signature = "log/fixtures/invalid/an-approval-scope-outside-its-vocabulary\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_approval_read_in_a_v3_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "an approval read in a log that declares v3"
+failure_class = "log.approval-read-in-a-v3-log"
+legacy_signature = "log/fixtures/invalid/a-v3-log-carrying-an-approval\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_denylist_read_in_a_v3_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a denylist refusal read in a log that declares v3"
+failure_class = "log.denylist-read-in-a-v3-log"
+legacy_signature = "log/fixtures/invalid/a-v3-log-carrying-a-denylist-refusal\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_denylist_refused_call_argv_unrequired"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a bash call refused for the denylist without its argv read"
+failure_class = "log.denylist-refused-call-argv-unrequired"
+legacy_signature = "log/fixtures/invalid/a-bash-call-refused-for-the-denylist-without-its-argv\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_declined_call_argv_unrequired"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a declined bash call without its argv read"
+failure_class = "log.declined-call-argv-unrequired"
+legacy_signature = "log/fixtures/invalid/a-bash-call-declined-without-its-argv\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_cwd_unrequired_with_argv"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a bash call in a v4 log that ran without its cwd read"
+failure_class = "log.cwd-unrequired-with-argv"
+legacy_signature = "log/fixtures/invalid/a-bash-call-that-ran-without-its-cwd\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_approval_why_unrequired"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a once approval without its why read"
+failure_class = "log.approval-why-unrequired"
+legacy_signature = "log/fixtures/invalid/a-once-approval-without-its-why\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_tool_call_file_content_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a tool_call file with its content inlined read"
+failure_class = "log.tool-call-file-content-read"
+legacy_signature = "log/fixtures/invalid/a-tool-call-file-with-its-content-inlined\\.jsonl"
+migrated = false

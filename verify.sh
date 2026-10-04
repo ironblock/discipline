@@ -2700,6 +2700,189 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+# Log v4 (#388, ruled at 5981578575 and 5981588394): a tool_call's approval,
+# barred under `refused`; its decided_at never after the line's `t`, refused on
+# `preseeded` and required of every other scope; its scope a closed
+# vocabulary; and the approval and the denylist refusal refused in a v3 log.
+
+inject_log_refused_call_approval_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '                "stderr_bytes",\n                "approval",\n'
+new = '                "stderr_bytes",\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_approval_decided_after_its_line_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if decided_at > t {'
+new = '    if false && decided_at > t {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_preseeded_approval_decided_at_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if preseeded {'
+new = '    if false && preseeded {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_approval_decided_at_unrequired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if !preseeded {'
+new = '        if false && !preseeded {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_approval_scope_outside_its_vocabulary_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '.tag("scope", ApprovalScope::from_tag)'
+new = '.tag("scope", |tag| ApprovalScope::from_tag(tag).or(Some(ApprovalScope::Once)))'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_approval_read_in_a_v3_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = 'may_v4("approval", Holds::Approval),'
+new = 'may_v3("approval", Holds::Approval),'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_denylist_read_in_a_v3_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if refused_in_v4 {'
+new = '    if false && refused_in_v4 {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v4 (#388, ratified at 5982002587): a bash call refused for the denylist,
+# or declined by the operator, parsed, so it carries its argv -- one fault per
+# reason.
+
+inject_log_denylist_refused_call_argv_unrequired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if parsed && !has_argv {'
+new = '    if parsed && !has_argv && reason != ToolRefusal::Denylist {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_declined_call_argv_unrequired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if parsed && !has_argv {'
+new = '    if parsed && !has_argv && reason != ToolRefusal::Declined {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v4 (#388, ruled at 5982826236): a bash call's cwd comes with its argv in
+# a v4 log, and a prompted approval says why it prompted.
+
+inject_log_cwd_unrequired_with_argv() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if declared >= cwd_since() && has_argv && !has_cwd {'
+new = '    if false && declared >= cwd_since() && has_argv && !has_cwd {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_approval_why_unrequired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '    if prompted && approval.why.is_none() {'
+new = '    if false && prompted && approval.why.is_none() {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Log v4 (#388, ruled at 5983588924): a tool_call's file is recorded by
+# reference, never inlined.
+
+inject_log_tool_call_file_content_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '                .find(|field| !RECORDED_FILE.iter().any(|f| f.key == field.as_str()))'
+new = '                .find(|_| false)'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # #79: the check that a `prefix.changed` is a change at all. Disabled, a row
 # over two requests that hash the same is accepted -- and a cache census reads
 # a mutation the file itself denies.
@@ -10073,6 +10256,30 @@ selftest() {
     'log/fixtures/invalid/a-stream-with-text-and-a-zero-byte-count\.jsonl' 'test:conformance/formats::log'
   seeded_case "a read call that failed carrying a policy read" test inject_log_non_bash_call_policy_read \
     'log/fixtures/invalid/a-read-call-that-failed-carrying-a-policy\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a refused tool_call carrying an approval read" test inject_log_refused_call_approval_read \
+    'log/fixtures/invalid/a-refused-call-carrying-an-approval\.jsonl' 'test:conformance/formats::log'
+  seeded_case "an approval decided after its line read" test inject_log_approval_decided_after_its_line_read \
+    'log/fixtures/invalid/an-approval-decided-after-its-line\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a preseeded approval carrying its decided_at read" test inject_log_preseeded_approval_decided_at_read \
+    'log/fixtures/invalid/a-preseeded-approval-carrying-its-decided-at\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a once approval without its decided_at read" test inject_log_approval_decided_at_unrequired \
+    'log/fixtures/invalid/a-once-approval-without-its-decided-at\.jsonl' 'test:conformance/formats::log'
+  seeded_case "an approval scope outside its vocabulary read" test inject_log_approval_scope_outside_its_vocabulary_read \
+    'log/fixtures/invalid/an-approval-scope-outside-its-vocabulary\.jsonl' 'test:conformance/formats::log'
+  seeded_case "an approval read in a log that declares v3" test inject_log_approval_read_in_a_v3_log \
+    'log/fixtures/invalid/a-v3-log-carrying-an-approval\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a denylist refusal read in a log that declares v3" test inject_log_denylist_read_in_a_v3_log \
+    'log/fixtures/invalid/a-v3-log-carrying-a-denylist-refusal\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a bash call refused for the denylist without its argv read" test inject_log_denylist_refused_call_argv_unrequired \
+    'log/fixtures/invalid/a-bash-call-refused-for-the-denylist-without-its-argv\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a declined bash call without its argv read" test inject_log_declined_call_argv_unrequired \
+    'log/fixtures/invalid/a-bash-call-declined-without-its-argv\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a bash call in a v4 log that ran without its cwd read" test inject_log_cwd_unrequired_with_argv \
+    'log/fixtures/invalid/a-bash-call-that-ran-without-its-cwd\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a once approval without its why read" test inject_log_approval_why_unrequired \
+    'log/fixtures/invalid/a-once-approval-without-its-why\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a tool_call file with its content inlined read" test inject_log_tool_call_file_content_read \
+    'log/fixtures/invalid/a-tool-call-file-with-its-content-inlined\.jsonl' 'test:conformance/formats::log'
   seeded_case "a head change that is not a change"    test     inject_record_prefix_change_not_a_change \
     'record/fixtures/invalid/prefix-change-that-is-not-a-change\.jsonl' 'test:conformance/formats::record'
   seeded_case "the miss classes reordered"           test     inject_record_prefix_precedence_reordered \

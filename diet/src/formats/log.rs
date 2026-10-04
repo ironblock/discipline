@@ -1,4 +1,4 @@
-//! The session event log, v3 (#297), which reads v2, v1 and v0.
+//! The session event log, v4 (#388), which reads v3, v2, v1 and v0.
 //!
 //! `diet/formats/log/grammar.pest` says what a log document is: one event
 //! per line, in the record's value space. This module is its one reader and
@@ -51,6 +51,38 @@
 //! carries one is refused the same way. `lane` on a `tool_call` is reserved
 //! until #80's Q1 and refused as any undeclared key is.
 //!
+//! v4 (#388, ruled on #298 point 10 and at 5981578575, 5981588394 and
+//! 5982826236) adds a `tool_call`'s `approval`, the decision it ran under: an
+//! object of its `scope` ([`ApprovalScope`]: `once`, `session`, `workspace`
+//! or `preseeded`), `decided_at`, a count of milliseconds on the line's own
+//! clock, never greater than the line's `t`, and `why`, the prompting
+//! segment's reason, one word of an open set whose first words are the gate
+//! module's `unparsable`, `dynamic` and `not_approved` (#402; #298
+//! 5983544366). `decided_at` and `why` are
+//! required of `once`, `session` and `workspace`, where the call prompted and
+//! an operator decided it, and refused on `preseeded`, which no prompt decided
+//! ([`decided_as_its_scope_says`]). `approval` is optional under `ran`, `command_failed` and
+//! `cancelled`, on any name -- a free read or an unconfined scripted call
+//! carries none -- and refused under `refused` ([`outcome_keys`]). v4 also
+//! adds the [`ToolRefusal`]s `denylist` and `declined`; each is refused after
+//! the call parsed, so a refused `bash` call carries its `argv`
+//! ([`argv_if_it_parsed`], ratified at 5982002587). And v4 adds a `bash`
+//! call's `cwd`, the command's working directory as the runner passed it,
+//! absolute or a tilde form never expanded to a user ([`is_a_working_directory`]):
+//! it comes with `argv` -- a `cwd` without an `argv` is refused on any line,
+//! and in a log that declares v4 an `argv` without a `cwd` is refused
+//! ([`cwd_with_argv`]), so `cwd` is required, optional and forbidden exactly
+//! where `argv` is. `not_allowed` stays readable and no v4 writer
+//! writes it. An unanswered prompt is the `cancelled` outcome, unchanged;
+//! `lane` stays reserved, and there is no `operator` kind. And v4 adds a
+//! `tool_call`'s `files` (ruled at 5983588924): the files a call left, each
+//! by reference -- its `path` relative to the recording's directory, its
+//! `sha256`, `media_type` and `bytes` -- and never its content
+//! ([`RECORDED_FILE`]), optional under `ran` and `command_failed` on any name
+//! and refused under `refused` and `cancelled` ([`outcome_keys`]). A log that
+//! declares 0 to 3 and carries `approval`, `cwd`, `files`, `denylist` or
+//! `declined` is refused the same way. v4 is closed with `files`.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -82,10 +114,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 3;
+pub const VERSION: i64 = 4;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -289,9 +321,10 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// Why the drive did not run a call (v3, ruled on #297).
+    /// Why the drive did not run a call (v3, ruled on #297; v4, #388).
     ToolRefusal {
-        /// The allowlist does not admit it.
+        /// The allowlist does not admit it. Readable; no v4 writer writes
+        /// it (#298 point 10).
         NotAllowed => "not_allowed",
         /// The tool loop's step limit was reached.
         MaxSteps => "max_steps",
@@ -299,6 +332,25 @@ vocabulary! {
         Unparsable => "unparsable",
         /// It names a tool the session did not declare.
         UnknownTool => "unknown_tool",
+        /// The destructive denylist refuses it (v4).
+        Denylist => "denylist",
+        /// The operator was asked and said no (v4).
+        Declined => "declined",
+    }
+}
+
+vocabulary! {
+    /// How far an approval a call ran under reaches (v4, #388): the
+    /// operator's choice at the prompt, or a pre-seeded session set.
+    ApprovalScope {
+        /// This call only.
+        Once => "once",
+        /// Every call of the same shape for the rest of the session.
+        Session => "session",
+        /// Every call of the same shape in the workspace, persisted.
+        Workspace => "workspace",
+        /// The session started with it allowed: no prompt decided it.
+        Preseeded => "preseeded",
     }
 }
 
@@ -381,6 +433,35 @@ pub struct Output {
     /// What it printed.
     pub text: String,
     /// How many bytes that is.
+    pub bytes: u64,
+}
+
+/// The decision a call ran under (v4, #388): its scope, and when an
+/// operator decided it, on the line's own clock. A `preseeded` approval was
+/// decided by no prompt and carries no `decided_at`; every other scope
+/// carries one, never after the line's `t`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Approval {
+    /// How far it reaches.
+    pub scope: ApprovalScope,
+    /// When it was decided: milliseconds since the session opened.
+    pub decided_at: Option<u64>,
+    /// Why the call prompted: the prompting segment's reason, one word of an
+    /// open set (ruled at 5982826236).
+    pub why: Option<String>,
+}
+
+/// A file a call left, recorded by reference and never inlined (v4, ruled
+/// at 5983588924).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedFile {
+    /// Where it is, relative to the recording's directory.
+    pub path: String,
+    /// The sha256 of its bytes.
+    pub sha256: String,
+    /// Its media type, `type/subtype`.
+    pub media_type: String,
+    /// How many bytes it is.
     pub bytes: u64,
 }
 
@@ -570,6 +651,8 @@ pub enum Event {
         outcome: ToolOutcome,
         /// The command as the drive asked for it.
         argv: Option<Vec<String>>,
+        /// Its working directory, as the runner passed it (v4).
+        cwd: Option<String>,
         /// What actually ran, runner and all.
         confined: Option<Vec<String>>,
         /// The confinement it ran under.
@@ -586,6 +669,10 @@ pub enum Event {
         stdout: Option<Output>,
         /// What it printed on standard error.
         stderr: Option<Output>,
+        /// The decision it ran under, when it ran under one (v4).
+        approval: Option<Approval>,
+        /// The files it left, by reference (v4).
+        files: Option<Vec<RecordedFile>>,
     },
 }
 
@@ -1408,9 +1495,13 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 id,
                 isolation,
                 network,
+                argv,
+                cwd,
                 ..
             } => {
                 confinement_recorded(claimed, *isolation, *network)
+                    .map_err(|why| at(index, why))?;
+                cwd_with_argv(declared, argv.is_some(), cwd.is_some())
                     .map_err(|why| at(index, why))?;
                 called_from(*request, &requests).map_err(|why| at(index, why))?;
                 called_once(*request, *turn, id, &request_turns, &mut calls)
@@ -1622,6 +1713,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             if name == "bash" {
                 argv_if_it_parsed(object, reason)?;
             }
+            let approval = fields.approval("approval")?;
+            if let Some(approval) = &approval {
+                decided_as_its_scope_says(approval, fields.count("t")?)?;
+            }
             Event::ToolCall {
                 request: fields.count("request")?,
                 turn: fields.turn("turn")?,
@@ -1630,6 +1725,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 arguments: fields.string("arguments")?,
                 outcome,
                 argv: fields.optional_strings("argv")?,
+                cwd: fields.optional_working_directory("cwd")?,
                 confined: fields.optional_strings("confined")?,
                 isolation,
                 network,
@@ -1638,6 +1734,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 policy: fields.optional_digest("policy")?,
                 stdout: fields.output("stdout", "stdout_bytes")?,
                 stderr: fields.output("stderr", "stderr_bytes")?,
+                approval,
+                files: fields.optional_files("files")?,
             }
         }
     };
@@ -1671,7 +1769,13 @@ pub const EXEC: &[&str] = &["argv", "confined", "isolation", "network", "policy"
 /// other neither required nor refused (ruled at 5975651100): a
 /// cancelled `bash` call always says its `isolation` and `network`, and its
 /// `confined` only if the command had started. A refused `bash` call's
-/// `argv` follows its reason ([`argv_if_it_parsed`]).
+/// `argv` follows its reason ([`argv_if_it_parsed`]). `approval` (v4) is
+/// optional under `ran`, `command_failed` and `cancelled`, on any name, and
+/// forbidden under `refused`: a refused call ran under no decision (ruled at
+/// 5981588394 (c)). `files` (v4) is optional under `ran` and
+/// `command_failed`, on any name, and forbidden under `refused` and
+/// `cancelled`: a call that never finished left nothing to record (ruled at
+/// 5983588924).
 #[must_use]
 pub fn outcome_keys(outcome: ToolOutcome) -> (&'static [&'static str], &'static [&'static str]) {
     match outcome {
@@ -1714,6 +1818,8 @@ pub fn outcome_keys(outcome: ToolOutcome) -> (&'static [&'static str], &'static 
                 "stdout_bytes",
                 "stderr",
                 "stderr_bytes",
+                "approval",
+                "files",
             ],
         ),
         ToolOutcome::Cancelled => (
@@ -1726,6 +1832,7 @@ pub fn outcome_keys(outcome: ToolOutcome) -> (&'static [&'static str], &'static 
                 "stdout_bytes",
                 "stderr",
                 "stderr_bytes",
+                "files",
             ],
         ),
     }
@@ -1734,7 +1841,9 @@ pub fn outcome_keys(outcome: ToolOutcome) -> (&'static [&'static str], &'static 
 /// A refused `bash` call carries `argv` exactly when it parsed (#297): one
 /// refused `not_allowed` or `max_steps` was read into an argv before it was
 /// refused; one refused `unparsable` or `unknown_tool` never was, and an argv
-/// for it would be invented.
+/// for it would be invented. One refused `denylist` or `declined` (v4) was
+/// read into an argv too: the denylist matches a parsed command, and the
+/// operator was shown one (ratified on #388 at 5982002587).
 fn argv_if_it_parsed(
     object: &BTreeMap<String, Value>,
     reason: Option<ToolRefusal>,
@@ -1742,7 +1851,13 @@ fn argv_if_it_parsed(
     let Some(reason) = reason else {
         return Ok(());
     };
-    let parsed = matches!(reason, ToolRefusal::NotAllowed | ToolRefusal::MaxSteps);
+    let parsed = matches!(
+        reason,
+        ToolRefusal::NotAllowed
+            | ToolRefusal::MaxSteps
+            | ToolRefusal::Denylist
+            | ToolRefusal::Declined
+    );
     let has_argv = object.contains_key("argv");
     if parsed && !has_argv {
         return Err(format!(
@@ -1757,6 +1872,106 @@ fn argv_if_it_parsed(
         ));
     }
     Ok(())
+}
+
+/// An approval's `decided_at` and `why` fit its scope and its line (v4,
+/// ruled at 5981588394 (b) and (d), and at 5982826236): a `once`, `session`
+/// or `workspace` approval prompted and an operator decided it, so it says
+/// why and when; no prompt decided a `preseeded` one, so it says neither;
+/// and a decision comes no later than the line written at the call's
+/// outcome.
+fn decided_as_its_scope_says(approval: &Approval, t: u64) -> Result<(), String> {
+    let scope = approval.scope.tag();
+    let preseeded = approval.scope == ApprovalScope::Preseeded;
+    let prompted = !preseeded;
+    if prompted && approval.why.is_none() {
+        return Err(format!(
+            "a `{scope}` approval carries no `why`: the call prompted"
+        ));
+    }
+    if !prompted && approval.why.is_some() {
+        return Err("a `preseeded` approval carries `why`: no prompt asked".to_owned());
+    }
+    let Some(decided_at) = approval.decided_at else {
+        if !preseeded {
+            return Err(format!(
+                "a `{scope}` approval carries no `decided_at`: an operator decided it"
+            ));
+        }
+        return Ok(());
+    };
+    if preseeded {
+        return Err("a `preseeded` approval carries `decided_at`: no prompt decided it".to_owned());
+    }
+    if decided_at > t {
+        return Err(format!(
+            "an approval's `decided_at` is {decided_at}, after its line's `t` {t}: a call is \
+             decided before its outcome is written"
+        ));
+    }
+    Ok(())
+}
+
+/// The version a `tool_call`'s `cwd` arrived in, read off [`schema`].
+fn cwd_since() -> i64 {
+    schema(Kind::ToolCall)
+        .iter()
+        .find(|field| field.key == "cwd")
+        .map_or(i64::MAX, |field| field.since)
+}
+
+/// In a log that declares the version `cwd` arrived in, a `tool_call` that
+/// carries `argv` carries `cwd` (v4, ruled at 5982826236). The other
+/// direction, no `cwd` without an `argv`, is every line's
+/// ([`fits_its_outcome`]); this one is the whole log's, because a v3 line
+/// carries an `argv` and could not carry a `cwd`.
+fn cwd_with_argv(declared: i64, has_argv: bool, has_cwd: bool) -> Result<(), String> {
+    if declared >= cwd_since() && has_argv && !has_cwd {
+        return Err(format!(
+            "a `tool_call` carries `argv` without `cwd`, in a log that declares v{declared}: \
+             a command's argv and its working directory come together"
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `text` is a working directory as the runner passes one (v4,
+/// ruled at 5982826236): absolute, or the home as a tilde, `~` or `~/...`,
+/// never expanded and never another user's (`~user/...`).
+fn is_a_working_directory(text: &str) -> bool {
+    text.starts_with('/') || text == "~" || text.starts_with("~/")
+}
+
+/// Whether `text` is a recorded file's path as 5983588924 has it, relative
+/// to the recording's directory: one or more non-empty components, none
+/// `.` or `..`, joined by single `/` -- so not empty, not absolute, no
+/// trailing `/` and no `//` -- with no `\\` anywhere; and a tilde never
+/// expanded to a user, which this reader takes as no leading `~` at all, a
+/// home not being the recording's directory (the spelling is this
+/// reader's judgement call).
+fn is_a_recorded_path(text: &str) -> bool {
+    !text.starts_with('~')
+        && !text.contains('\\')
+        && text
+            .split('/')
+            .all(|component| !component.is_empty() && component != "." && component != "..")
+}
+
+/// Whether `text` is a media type as this reader spells one: `type/subtype`,
+/// each side non-empty, one `/`, no whitespace.
+fn is_a_media_type(text: &str) -> bool {
+    text.split_once('/').is_some_and(|(kind, subtype)| {
+        !kind.is_empty() && !subtype.is_empty() && !subtype.contains('/')
+    }) && !text.chars().any(char::is_whitespace)
+}
+
+/// Whether `text` is one word of an approval's `why`: a lowercase letter,
+/// then lowercase letters, digits and `_` (5982826236; the spelling is
+/// this reader's choice).
+fn is_a_reason_word(text: &str) -> bool {
+    let mut chars = text.chars();
+    chars.next().is_some_and(|first| first.is_ascii_lowercase())
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 /// A `tool_call`'s keys fit its outcome ([`outcome_keys`]), and each stream's
@@ -1848,6 +2063,14 @@ fn fits_its_outcome(
             ));
         }
     }
+    // `cwd` follows `argv` (v4, ruled at 5982826236): forbidden wherever
+    // `argv` is absent, so wherever `argv` is forbidden.
+    if object.contains_key("cwd") && !object.contains_key("argv") {
+        return Err(
+            "a `tool_call` carries `cwd` without `argv`: a working directory is a command's"
+                .to_owned(),
+        );
+    }
     Ok(())
 }
 
@@ -1904,6 +2127,8 @@ pub enum Tags {
     EngineIdentity,
     /// [`Provenance`] (v3).
     Provenance,
+    /// [`ApprovalScope`] (v4).
+    ApprovalScope,
 }
 
 impl Tags {
@@ -1923,6 +2148,7 @@ impl Tags {
         Self::ToolRefusal,
         Self::EngineIdentity,
         Self::Provenance,
+        Self::ApprovalScope,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -1943,6 +2169,7 @@ impl Tags {
             Self::ToolRefusal => "ToolRefusal",
             Self::EngineIdentity => "EngineIdentity",
             Self::Provenance => "Provenance",
+            Self::ApprovalScope => "ApprovalScope",
         }
     }
 
@@ -1967,6 +2194,7 @@ impl Tags {
             Self::ToolRefusal => of(ToolRefusal::ALL, ToolRefusal::tag),
             Self::EngineIdentity => of(EngineIdentity::ALL, EngineIdentity::tag),
             Self::Provenance => of(Provenance::ALL, Provenance::tag),
+            Self::ApprovalScope => of(ApprovalScope::ALL, ApprovalScope::tag),
         }
     }
 }
@@ -2005,6 +2233,15 @@ pub enum Holds {
     /// A `delta`'s tool-call fragment: an object of the keys
     /// [`TOOL_CALL_PIECE`] declares (v3).
     ToolCallPiece,
+    /// A `tool_call`'s [`Approval`]: an object of the keys [`APPROVAL`]
+    /// declares (v4).
+    Approval,
+    /// A working directory as [`is_a_working_directory`] has it: absolute,
+    /// or the home as `~` or `~/...` (v4).
+    WorkingDirectory,
+    /// A `tool_call`'s files: a non-empty list of objects of the keys
+    /// [`RECORDED_FILE`] declares (v4).
+    Files,
 }
 
 /// One key a kind carries.
@@ -2088,6 +2325,45 @@ const fn must_v3(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// An optional key that arrived in v4.
+const fn may_v4(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 4,
+    }
+}
+
+/// A key that arrived in v4 and is required wherever its object is written.
+const fn must_v4(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 4,
+    }
+}
+
+/// The keys a `tool_call`'s `approval` carries: its scope always, and when
+/// it was decided and why it prompted, which [`decided_as_its_scope_says`]
+/// requires of every scope but `preseeded` and refuses there. Arrived in v4.
+pub const APPROVAL: &[Field] = &[
+    must_v4("scope", Holds::Tag(Tags::ApprovalScope)),
+    may_v4("decided_at", Holds::Count),
+    may_v4("why", Holds::Text),
+];
+
+/// The keys of each entry of a `tool_call`'s `files`: all four, always, and
+/// nothing else -- a file is recorded by reference, never inlined (ruled at
+/// 5983588924). Arrived in v4.
+pub const RECORDED_FILE: &[Field] = &[
+    must_v4("path", Holds::Text),
+    must_v4("sha256", Holds::Digest),
+    must_v4("media_type", Holds::Text),
+    must_v4("bytes", Holds::Count),
+];
+
 /// The keys a `delta`'s `tool_call` carries: the call's index always, its
 /// id and name on its first fragment only, as the server sent them, and the
 /// fragment of its arguments. Arrived in v3.
@@ -2123,7 +2399,8 @@ fn is_a_digest(text: &str) -> bool {
             .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
 }
 
-/// The keys of the object a key holds, for the holders that are objects.
+/// The keys of the object a key holds, for the holders that are objects, or
+/// of each entry, for [`Holds::Files`], a list of them.
 #[must_use]
 pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
     match holds {
@@ -2131,6 +2408,8 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Usage => Some(USAGE),
         Holds::Serving => Some(SERVING),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
+        Holds::Approval => Some(APPROVAL),
+        Holds::Files => Some(RECORDED_FILE),
         _ => None,
     }
 }
@@ -2149,6 +2428,12 @@ pub fn introduced(kind: Kind) -> i64 {
 /// its key is scoped by the key's `since`.
 #[must_use]
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
+    let refused_in_v4 = tags == Tags::ToolRefusal
+        && ToolRefusal::from_tag(tag)
+            .is_some_and(|reason| [ToolRefusal::Denylist, ToolRefusal::Declined].contains(&reason));
+    if refused_in_v4 {
+        return 4;
+    }
     let capped =
         tags == Tags::SettleReason && SettleReason::from_tag(tag) == Some(SettleReason::Capped);
     if capped {
@@ -2297,6 +2582,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v3("arguments", Text),
                 must_v3("outcome", Tag(Tags::ToolOutcome)),
                 may_v3("argv", Holds::Strings),
+                may_v4("cwd", Holds::WorkingDirectory),
                 may_v3("confined", Holds::Strings),
                 may_v3("isolation", Tag(Tags::Isolation)),
                 may_v3("network", Tag(Tags::Network)),
@@ -2307,6 +2593,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v3("stdout_bytes", Count),
                 may_v3("stderr", Text),
                 may_v3("stderr_bytes", Count),
+                may_v4("approval", Holds::Approval),
+                may_v4("files", Holds::Files),
             ];
             F
         }
@@ -2361,7 +2649,7 @@ pub const BINDINGS: &str = "formats/log/log.ts";
 fn ts_holds(holds: Holds) -> String {
     match holds {
         Holds::Count | Holds::Millis => "number".to_owned(),
-        Holds::Text | Holds::Digest => "string".to_owned(),
+        Holds::Text | Holds::Digest | Holds::WorkingDirectory => "string".to_owned(),
         Holds::Version => READS
             .iter()
             .map(ToString::to_string)
@@ -2373,6 +2661,8 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Serving => "Serving".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
+        Holds::Approval => "Approval".to_owned(),
+        Holds::Files => "RecordedFile[]".to_owned(),
         Holds::Head => "HeadMessage[]".to_owned(),
         Holds::Tag(tags) => tags.name().to_owned(),
     }
@@ -2464,6 +2754,8 @@ pub fn typescript() -> String {
         ("Usage", USAGE),
         ("Serving", SERVING),
         ("ToolCallPiece", TOOL_CALL_PIECE),
+        ("Approval", APPROVAL),
+        ("RecordedFile", RECORDED_FILE),
     ] {
         let _ = writeln!(out, "export interface {name} {{");
         for field in fields {
@@ -2765,6 +3057,7 @@ fn to_value(line: &Line) -> Value {
             arguments,
             outcome,
             argv,
+            cwd,
             confined,
             isolation,
             network,
@@ -2773,6 +3066,8 @@ fn to_value(line: &Line) -> Value {
             policy,
             stdout,
             stderr,
+            approval,
+            files,
         } => {
             put("request", count(*request));
             put("turn", count(u64::from(*turn)));
@@ -2787,6 +3082,9 @@ fn to_value(line: &Line) -> Value {
                         Value::Array(list.iter().map(|item| text(item)).collect()),
                     );
                 }
+            }
+            if let Some(cwd) = cwd {
+                put("cwd", text(cwd));
             }
             if let Some(isolation) = isolation {
                 put("isolation", text(isolation.tag()));
@@ -2808,6 +3106,34 @@ fn to_value(line: &Line) -> Value {
                     put(text_key, text(&output.text));
                     put(bytes_key, count(output.bytes));
                 }
+            }
+            if let Some(approval) = approval {
+                let mut object = BTreeMap::from([("scope".to_owned(), text(approval.scope.tag()))]);
+                if let Some(decided_at) = approval.decided_at {
+                    object.insert("decided_at".to_owned(), count(decided_at));
+                }
+                if let Some(why) = &approval.why {
+                    object.insert("why".to_owned(), text(why));
+                }
+                put("approval", Value::Object(object));
+            }
+            if let Some(files) = files {
+                put(
+                    "files",
+                    Value::Array(
+                        files
+                            .iter()
+                            .map(|file| {
+                                Value::Object(BTreeMap::from([
+                                    ("path".to_owned(), text(&file.path)),
+                                    ("sha256".to_owned(), text(&file.sha256)),
+                                    ("media_type".to_owned(), text(&file.media_type)),
+                                    ("bytes".to_owned(), count(file.bytes)),
+                                ]))
+                            })
+                            .collect(),
+                    ),
+                );
             }
             Kind::ToolCall
         }
@@ -3027,6 +3353,98 @@ impl Fields<'_> {
             name: inner.optional_string("name").map_err(within)?,
             arguments: inner.string("arguments").map_err(within)?,
         })
+    }
+
+    /// A `tool_call`'s `approval`, when carried: an object of [`APPROVAL`]'s
+    /// keys (v4). That its `decided_at` fits its scope and its line is
+    /// [`decided_as_its_scope_says`]'s rule, not this reader's.
+    fn approval(&self, key: &str) -> Result<Option<Approval>, String> {
+        if !self.0.contains_key(key) {
+            return Ok(None);
+        }
+        let inner = Fields(self.object(key, APPROVAL)?);
+        let within = |why: String| format!("`{key}`: {why}");
+        Ok(Some(Approval {
+            scope: inner
+                .tag("scope", ApprovalScope::from_tag)
+                .map_err(within)?,
+            decided_at: inner.optional_count("decided_at").map_err(within)?,
+            why: match inner.optional_string("why").map_err(within)? {
+                Some(why) if !is_a_reason_word(&why) => {
+                    return Err(format!(
+                        "`{key}`: `why` is `{why}`, which is not one word: a lowercase letter, \
+                         then lowercase letters, digits and `_`"
+                    ));
+                }
+                why => why,
+            },
+        }))
+    }
+
+    /// A `tool_call`'s `files`, when carried (v4, ruled at 5983588924): a
+    /// non-empty list, each entry all four of [`RECORDED_FILE`]'s keys and
+    /// nothing else -- no `content`, `data` or any other inlining of the file.
+    fn optional_files(&self, key: &str) -> Result<Option<Vec<RecordedFile>>, String> {
+        let Some(value) = self.0.get(key) else {
+            return Ok(None);
+        };
+        let Value::Array(entries) = value else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a call that left no file carries no `{key}`"
+            ));
+        }
+        let mut files = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !RECORDED_FILE.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!(
+                    "carries `{extra}`: a file is recorded by reference, never inlined"
+                )));
+            }
+            let inner = Fields(entry);
+            let path = inner.string("path").map_err(at)?;
+            if !is_a_recorded_path(&path) {
+                return Err(at(format!(
+                    "`path` is `{path}`, which is not relative to the recording's directory: \
+                     one or more components joined by single `/`, none empty, `.` or `..`, no \
+                     `\\` and no leading `~`"
+                )));
+            }
+            let media_type = inner.string("media_type").map_err(at)?;
+            if !is_a_media_type(&media_type) {
+                return Err(at(format!(
+                    "`media_type` is `{media_type}`, which is not a `type/subtype`"
+                )));
+            }
+            files.push(RecordedFile {
+                path,
+                sha256: inner.digest("sha256").map_err(at)?,
+                media_type,
+                bytes: inner.count("bytes").map_err(at)?,
+            });
+        }
+        Ok(Some(files))
+    }
+
+    /// A `tool_call`'s `cwd`, when carried: a working directory as
+    /// [`is_a_working_directory`] has it (v4).
+    fn optional_working_directory(&self, key: &str) -> Result<Option<String>, String> {
+        match self.optional_string(key)? {
+            Some(cwd) if !is_a_working_directory(&cwd) => Err(format!(
+                "`{key}` is `{cwd}`, which is not a working directory: absolute (`/...`), or \
+                 the home as `~` or `~/...`, never relative and never another user's"
+            )),
+            cwd => Ok(cwd),
+        }
     }
 
     fn optional_flag(&self, key: &str) -> Result<Option<bool>, String> {
@@ -3303,6 +3721,8 @@ mod tests {
             },
             // v3: a call whose outcome never arrived, written after its
             // request ended -- a `tool_call` cites a request, never ends one.
+            // v4: it ran under a session-scoped approval, decided before the
+            // line (its `t` is 165).
             Event::ToolCall {
                 request: 29,
                 turn: 4,
@@ -3311,6 +3731,7 @@ mod tests {
                 arguments: "{\"command\":\"ls\"}".to_owned(),
                 outcome: ToolOutcome::Cancelled,
                 argv: None,
+                cwd: None,
                 confined: None,
                 isolation: Some(Isolation::Sandbox),
                 network: Some(Network::None),
@@ -3319,6 +3740,12 @@ mod tests {
                 policy: None,
                 stdout: None,
                 stderr: None,
+                approval: Some(Approval {
+                    scope: ApprovalScope::Session,
+                    decided_at: Some(160),
+                    why: Some("not_approved".to_owned()),
+                }),
+                files: None,
             },
         ];
         events
@@ -3339,7 +3766,11 @@ mod tests {
             (Holds::Version, Value::Integer(n)) => READS.contains(n),
             (Holds::Millis, Value::Decimal(d)) => !d.as_str().starts_with('-'),
             (
-                Holds::Timings | Holds::Usage | Holds::Serving | Holds::ToolCallPiece,
+                Holds::Timings
+                | Holds::Usage
+                | Holds::Serving
+                | Holds::ToolCallPiece
+                | Holds::Approval,
                 Value::Object(object),
             ) => {
                 let declared = object_fields(holds).expect("an object holder");
@@ -3354,6 +3785,21 @@ mod tests {
             }
             (Holds::Text, Value::String(_)) | (Holds::Flag, Value::Boolean(_)) => true,
             (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
+            (Holds::WorkingDirectory, Value::String(cwd)) => is_a_working_directory(cwd),
+            (Holds::Files, Value::Array(entries)) => {
+                !entries.is_empty()
+                    && entries.iter().all(|entry| match entry {
+                        Value::Object(entry) => {
+                            entry.iter().all(|(key, value)| {
+                                RECORDED_FILE
+                                    .iter()
+                                    .find(|f| f.key == key)
+                                    .is_some_and(|f| written_as(f.holds, value))
+                            }) && RECORDED_FILE.iter().all(|f| entry.contains_key(f.key))
+                        }
+                        _ => false,
+                    })
+            }
             (Holds::Strings, Value::Array(items)) => {
                 items.iter().all(|item| matches!(item, Value::String(_)))
             }
@@ -3446,14 +3892,17 @@ mod tests {
                 }
                 // Into a nested object: its keys, one level down, get the
                 // same written-somewhere, omitted-somewhere pin.
-                if let (Some(inner_fields), Value::Object(inner)) =
-                    (object_fields(field.holds), value)
-                {
-                    for nested in inner_fields {
-                        if inner.contains_key(nested.key) {
-                            nested_written.insert((field.key, nested.key));
-                        } else {
-                            nested_omitted.insert((field.key, nested.key));
+                // A list of objects (`files`, v4) gets the same pin, entry by
+                // entry.
+                let inners = objects_in(value);
+                if let Some(inner_fields) = object_fields(field.holds) {
+                    for inner in inners {
+                        for nested in inner_fields {
+                            if inner.contains_key(nested.key) {
+                                nested_written.insert((field.key, nested.key));
+                            } else {
+                                nested_omitted.insert((field.key, nested.key));
+                            }
                         }
                     }
                 }
@@ -3515,6 +3964,22 @@ mod tests {
         every_nested_key_is_written_and_omitted_as_declared(&nested_written, &nested_omitted);
     }
 
+    /// The objects a value holds: itself, if it is one; each entry, if it is
+    /// a list of them (`files`, v4); none otherwise.
+    fn objects_in(value: &Value) -> Vec<&BTreeMap<String, Value>> {
+        match value {
+            Value::Object(inner) => vec![inner],
+            Value::Array(items) => items
+                .iter()
+                .filter_map(|item| match item {
+                    Value::Object(inner) => Some(inner),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// The nested half of [`the_schema_is_what_every_kind_writes`]: every key
     /// of every object holder is written somewhere, and is left out
     /// somewhere exactly when it is optional.
@@ -3527,6 +3992,8 @@ mod tests {
             ("usage", USAGE),
             ("serving", SERVING),
             ("tool_call", TOOL_CALL_PIECE),
+            ("approval", APPROVAL),
+            ("files", RECORDED_FILE),
         ] {
             for inner in inner_fields {
                 assert!(
@@ -3854,6 +4321,455 @@ mod tests {
         }
     }
 
+    /// WHAT ARRIVED IN v4 IS REFUSED IN A LOG THAT DECLARES v3 (#388, ruled
+    /// at 5981588394 (a), 5982826236 and 5983588924): an `approval`, a `cwd`,
+    /// `files`, and each of
+    /// the two refusals v4 adds, `denylist` and `declined`, each named in the
+    /// refusal. As v4, each line reads once its `argv` carries its `cwd`.
+    #[test]
+    fn a_v3_log_carrying_what_arrived_in_v4_is_refused() {
+        let call = |rest: &str| {
+            format!(
+                concat!(
+                    r#"{{"head":[{{"content":"you are the trunk","role":"system"}}],"kind":"session.start","model":"a-model","opened":1,"seq":0,"t":0,"version":3}}"#,
+                    "\n",
+                    r#"{{"kind":"ask","seq":1,"t":5,"text":"x","turn":1}}"#,
+                    "\n",
+                    r#"{{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}}"#,
+                    "\n",
+                    r#"{{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}}"#,
+                    "\n",
+                    r#"{{{rest}"arguments":"{{}}","id":"c","kind":"tool_call","name":"bash","request":3,"seq":4,"t":20,"turn":1}}"#,
+                    "\n"
+                ),
+                rest = rest
+            )
+        };
+        for (what, rest) in [
+            (
+                "`tool_call` carries `approval`",
+                r#""approval":{"scope":"preseeded"},"argv":["true"],"isolation":"none","network":"host","outcome":"cancelled","#,
+            ),
+            (
+                "`tool_call` carries `files`",
+                r#""argv":["true"],"confined":["true"],"exit":0,"files":[{"bytes":1,"media_type":"text/plain","path":"a.txt","sha256":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}],"isolation":"none","network":"none","outcome":"ran","stderr":"","stderr_bytes":0,"stdout":"","stdout_bytes":0,"#,
+            ),
+            (
+                "`tool_call` carries `cwd`",
+                r#""argv":["true"],"cwd":"/work/tree","isolation":"none","network":"host","outcome":"cancelled","#,
+            ),
+            (
+                "`tool_call`'s `reason` is `denylist`",
+                r#""argv":["true"],"outcome":"refused","reason":"denylist","#,
+            ),
+            (
+                "`tool_call`'s `reason` is `declined`",
+                r#""argv":["true"],"outcome":"refused","reason":"declined","#,
+            ),
+        ] {
+            let document = call(rest);
+            let refused = parse(&document).expect_err(&format!("{what} was read as v3"));
+            assert!(
+                refused.why.contains(&format!(
+                    "{what}, which arrived in v4, and this log declares v3"
+                )),
+                "{refused}"
+            );
+            let mut as_v4 = document.replace(r#""version":3"#, r#""version":4"#);
+            if !as_v4.contains(r#""cwd""#) {
+                as_v4 = as_v4.replace(
+                    r#""argv":["true"],"#,
+                    r#""argv":["true"],"cwd":"/work/tree","#,
+                );
+            }
+            parse(&as_v4).unwrap_or_else(|why| panic!("{what}, as v4: {why}"));
+        }
+    }
+
+    /// AN APPROVAL'S `decided_at` AND `why` FIT ITS SCOPE AND ITS LINE (#388,
+    /// ruled at 5981588394 (b) and (d), and at 5982826236): each required of
+    /// `once`, `session` and `workspace` and refused on `preseeded`;
+    /// `decided_at` never after the line's `t` -- equal to it reads, one past
+    /// it does not; `why` one word as [`is_a_reason_word`] spells it -- under
+    /// every outcome that admits an approval: `ran`, `command_failed` and
+    /// `cancelled`.
+    #[test]
+    fn an_approvals_decided_at_fits_its_scope_and_its_line() {
+        for (outcome, rest) in [
+            ("ran", ""),
+            ("command_failed", r#""exit":1,"#),
+            ("cancelled", ""),
+        ] {
+            the_scope_rule_holds_under(outcome, rest);
+        }
+    }
+
+    fn the_scope_rule_holds_under(outcome: &str, rest: &str) {
+        let call = |approval: &str| {
+            format!(
+                concat!(
+                    r#"{{"approval":{approval},"arguments":"{{}}",{rest}"id":"c","kind":"tool_call","#,
+                    r#""name":"read","outcome":"{outcome}","request":3,"seq":9,"t":45,"turn":1}}"#
+                ),
+                approval = approval,
+                rest = rest,
+                outcome = outcome
+            )
+        };
+        let refused_naming = |approval: String, needle: &str, what: &str| {
+            let why = line(&call(&approval)).expect_err(&format!("{what} under {outcome}"));
+            assert!(why.contains(needle), "{what} under {outcome}: {why}");
+        };
+        for scope in ApprovalScope::ALL {
+            let tag = scope.tag();
+            if *scope == ApprovalScope::Preseeded {
+                line(&call(&format!(r#"{{"scope":"{tag}"}}"#))).unwrap_or_else(|why| {
+                    panic!("{tag} under {outcome}, without `decided_at` and `why`: {why}")
+                });
+                for decided_at in [0, 45, 46] {
+                    refused_naming(
+                        format!(r#"{{"decided_at":{decided_at},"scope":"{tag}"}}"#),
+                        "a `preseeded` approval carries `decided_at`",
+                        "a preseeded approval with `decided_at`",
+                    );
+                }
+                refused_naming(
+                    format!(r#"{{"scope":"{tag}","why":"not_approved"}}"#),
+                    "a `preseeded` approval carries `why`",
+                    "a preseeded approval with `why`",
+                );
+                continue;
+            }
+            let prompted =
+                |decided_at: &str, why: &str| format!(r#"{{{decided_at}"scope":"{tag}"{why}}}"#);
+            let why_held = r#","why":"not_approved""#;
+            refused_naming(
+                prompted("", why_held),
+                &format!("a `{tag}` approval carries no `decided_at`"),
+                &format!("{tag} without `decided_at`"),
+            );
+            refused_naming(
+                prompted(r#""decided_at":45,"#, ""),
+                &format!("a `{tag}` approval carries no `why`"),
+                &format!("{tag} without `why`"),
+            );
+            for decided_at in [0, 45] {
+                line(&call(&prompted(
+                    &format!(r#""decided_at":{decided_at},"#),
+                    why_held,
+                )))
+                .unwrap_or_else(|why| {
+                    panic!("{tag} under {outcome}, decided at {decided_at}: {why}")
+                });
+            }
+            refused_naming(
+                prompted(r#""decided_at":46,"#, why_held),
+                "`decided_at` is 46, after its line's `t` 45",
+                &format!("{tag} decided after its line"),
+            );
+            // `why` is one word of an open set, spelled as this reader
+            // declares (5982826236; the spelling is a judgement call).
+            for word in ["a", "network", "writes_outside_2"] {
+                line(&call(&prompted(
+                    r#""decided_at":45,"#,
+                    &format!(r#","why":"{word}""#),
+                )))
+                .unwrap_or_else(|why| panic!("{tag} under {outcome}, why `{word}`: {why}"));
+            }
+            for word in ["", "Network", "netWork", "two words", "1st", "_x", "a-b"] {
+                refused_naming(
+                    prompted(r#""decided_at":45,"#, &format!(r#","why":"{word}""#)),
+                    &format!("`why` is `{word}`, which is not one word"),
+                    &format!("{tag} why `{word}`"),
+                );
+            }
+        }
+    }
+
+    /// A BASH CALL IN A v4 LOG SAYS WHERE IT RAN (#388, ruled at 5982826236):
+    /// a `tool_call` that carries `argv` carries `cwd` in a log that declares
+    /// v4 -- the whole log's rule, since a v3 line carries `argv` and no
+    /// `cwd` -- and every line refuses a `cwd` without an `argv`. A `cwd` is
+    /// absolute or a tilde form never expanded to a user; a relative path,
+    /// an empty one and another user's home are refused.
+    #[test]
+    fn a_bash_call_in_a_v4_log_says_where_it_ran() {
+        let log = |version: i64, call: &str| {
+            format!(
+                concat!(
+                    r#"{{"head":[{{"content":"you are the trunk","role":"system"}}],"kind":"session.start","model":"a-model","opened":1,"seq":0,"t":0,"version":{version}}}"#,
+                    "\n",
+                    r#"{{"kind":"ask","seq":1,"t":5,"text":"x","turn":1}}"#,
+                    "\n",
+                    r#"{{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}}"#,
+                    "\n",
+                    r#"{{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}}"#,
+                    "\n",
+                    r#"{{{call}"arguments":"{{}}","id":"c","kind":"tool_call","request":3,"seq":4,"t":20,"turn":1}}"#,
+                    "\n"
+                ),
+                version = version,
+                call = call
+            )
+        };
+        let ran = |cwd: &str| {
+            format!(
+                r#""argv":["true"],{cwd}"confined":["true"],"exit":0,"isolation":"sandbox","name":"bash","network":"none","outcome":"ran","stderr":"","stderr_bytes":0,"stdout":"","stdout_bytes":0,"#
+            )
+        };
+        // Every outcome under which a bash call carries `argv`: in v4 its
+        // `cwd` comes with it; in v3 it never could. `denylist` and
+        // `declined` are themselves v4's, so a v3 log refuses them by the
+        // version gate, never by this rule.
+        let failed = r#""argv":["true"],"confined":["true"],"exit":1,"isolation":"none","name":"bash","network":"none","outcome":"command_failed","stderr":"","stderr_bytes":0,"stdout":"","stdout_bytes":0,"#;
+        let cancelled = r#""argv":["true"],"isolation":"sandbox","name":"bash","network":"none","outcome":"cancelled","#;
+        let refused_for = |reason: &str| {
+            format!(r#""argv":["true"],"name":"bash","outcome":"refused","reason":"{reason}","#)
+        };
+        for (what, call, in_v3) in [
+            ("ran", ran(""), true),
+            ("command_failed", failed.to_owned(), true),
+            ("cancelled", cancelled.to_owned(), true),
+            ("refused not_allowed", refused_for("not_allowed"), true),
+            ("refused max_steps", refused_for("max_steps"), true),
+            ("refused denylist", refused_for("denylist"), false),
+            ("refused declined", refused_for("declined"), false),
+        ] {
+            let refused = parse(&log(4, &call))
+                .expect_err(&format!("{what}: a v4 argv without its cwd was read"));
+            assert!(
+                refused.why.contains(
+                    "a `tool_call` carries `argv` without `cwd`, in a log that declares v4"
+                ),
+                "{what}: {refused}"
+            );
+            let as_v3 = parse(&log(3, &call));
+            if in_v3 {
+                as_v3.unwrap_or_else(|why| panic!("{what}: a v3 argv was refused: {why}"));
+            } else {
+                let why = as_v3.expect_err(&format!("{what}: read in a v3 log"));
+                assert!(why.why.contains("which arrived in v4"), "{what}: {why}");
+            }
+        }
+        for cwd in ["/", "/work/tree", "~", "~/src/repo"] {
+            parse(&log(4, &ran(&format!(r#""cwd":"{cwd}","#))))
+                .unwrap_or_else(|why| panic!("cwd `{cwd}` was refused: {why}"));
+        }
+        for cwd in ["", "work/tree", "./tree", "~user/tree", "~user", "~~"] {
+            let refused = parse(&log(4, &ran(&format!(r#""cwd":"{cwd}","#))))
+                .expect_err(&format!("cwd `{cwd}` was read"));
+            assert!(
+                refused.why.contains(&format!(
+                    "`cwd` is `{cwd}`, which is not a working directory"
+                )),
+                "{refused}"
+            );
+        }
+        for call in [
+            r#""cwd":"/work/tree","name":"read","outcome":"ran","#,
+            r#""cwd":"/work/tree","name":"bash","outcome":"refused","reason":"unparsable","#,
+        ] {
+            let refused = parse(&log(4, call)).expect_err("a cwd without an argv was read");
+            assert!(
+                refused
+                    .why
+                    .contains("a `tool_call` carries `cwd` without `argv`"),
+                "{refused}"
+            );
+        }
+    }
+
+    /// A CALL'S FILES ARE REFERENCES, UNDER AN OUTCOME THAT FINISHED (#388,
+    /// ruled at 5983588924): `files` reads under `ran` and `command_failed`
+    /// on any name, and is refused under `refused` and `cancelled`; it is a
+    /// non-empty list; each entry carries `path`, `sha256`, `media_type` and
+    /// `bytes` and nothing else, so no content is inlined; a `path` is
+    /// relative to the recording's directory -- not empty, not absolute, no
+    /// `..`, no `~` -- and a `media_type` is a `type/subtype`.
+    #[test]
+    #[allow(clippy::too_many_lines)] // one list of cases, written out
+    fn a_tool_calls_files_are_references_under_an_outcome_that_finished() {
+        const SHA: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        const STREAMS_HELD: &str = r#""stderr":"","stderr_bytes":0,"stdout":"","stdout_bytes":0,"#;
+        let entry = |path: &str, more: &str| {
+            format!(
+                r#"{{"bytes":48213,{more}"media_type":"image/png","path":"{path}","sha256":"{SHA}"}}"#
+            )
+        };
+        let call = |name: &str, outcome: &str, rest: &str, files: &str| {
+            format!(
+                r#"{{{rest}"arguments":"{{}}","files":{files},"id":"c","kind":"tool_call","name":"{name}","outcome":"{outcome}","request":3,"seq":9,"t":45,"turn":1}}"#
+            )
+        };
+        let one = format!("[{}]", entry("shots/turn-1.png", ""));
+        let bash_ran = format!(
+            r#""argv":["true"],"confined":["true"],"cwd":"/work/tree","exit":0,"isolation":"none","network":"none",{STREAMS_HELD}"#
+        );
+        let bash_failed = format!(
+            r#""argv":["true"],"confined":["true"],"cwd":"/work/tree","exit":1,"isolation":"none","network":"none",{STREAMS_HELD}"#
+        );
+        for (what, text) in [
+            ("bash ran", call("bash", "ran", &bash_ran, &one)),
+            (
+                "bash command_failed",
+                call("bash", "command_failed", &bash_failed, &one),
+            ),
+            ("read ran", call("read", "ran", r#""exit":0,"#, &one)),
+            (
+                "edit command_failed",
+                call("edit", "command_failed", r#""exit":1,"#, &one),
+            ),
+            (
+                "two files",
+                call(
+                    "read",
+                    "ran",
+                    "",
+                    &format!("[{},{}]", entry("a.png", ""), entry("b/c.png", "")),
+                ),
+            ),
+        ] {
+            line(&text).unwrap_or_else(|why| panic!("{what}: files were refused: {why}"));
+        }
+        let refused = |what: &str, text: String, needle: &str| {
+            let why = line(&text).expect_err(&format!("{what} was read"));
+            assert!(why.contains(needle), "{what}: {why}");
+        };
+        refused(
+            "files under refused",
+            call(
+                "bash",
+                "refused",
+                r#""argv":["rm"],"cwd":"/w","reason":"denylist","#,
+                &one,
+            ),
+            "a `tool_call` whose outcome is `refused` carries `files`",
+        );
+        refused(
+            "files under cancelled",
+            call(
+                "bash",
+                "cancelled",
+                r#""isolation":"sandbox","network":"none","#,
+                &one,
+            ),
+            "a `tool_call` whose outcome is `cancelled` carries `files`",
+        );
+        refused(
+            "an empty files",
+            call("read", "ran", "", "[]"),
+            "`files` is empty",
+        );
+        refused(
+            "files that are not a list",
+            call("read", "ran", "", &entry("a.png", "")),
+            "`files` is not a list",
+        );
+        for path in [
+            "",
+            "/etc/passwd",
+            "../up.png",
+            "shots/../../up.png",
+            "shots/..",
+            "~",
+            "~/a.png",
+            "~user/a.png",
+            "a//b.png",
+            ".",
+            "./a.png",
+            "a/./b.png",
+            "shots/",
+        ] {
+            refused(
+                &format!("path `{path}`"),
+                call("read", "ran", "", &format!("[{}]", entry(path, ""))),
+                &format!("`path` is `{path}`, which is not relative to the recording's directory"),
+            );
+        }
+        // A backslash anywhere, written escaped in the line.
+        for (written, read) in [(r"a\\b.png", r"a\b.png"), (r"\\a.png", r"\a.png")] {
+            refused(
+                &format!("path `{read}`"),
+                call("read", "ran", "", &format!("[{}]", entry(written, ""))),
+                &format!("`path` is `{read}`, which is not relative to the recording's directory"),
+            );
+        }
+        // The accepted form: one or more non-empty components, none `.` or
+        // `..`, joined by single `/`.
+        for path in [
+            "a.png",
+            "shots/turn-1.png",
+            "a/b/c.d/.hidden",
+            "..a/b..",
+            "a~/b",
+        ] {
+            line(&call("read", "ran", "", &format!("[{}]", entry(path, ""))))
+                .unwrap_or_else(|why| panic!("path `{path}` was refused: {why}"));
+        }
+        for inlined in [
+            r#""content":"iVBOR","#,
+            r#""data":"iVBOR","#,
+            r#""base64":"iVBOR","#,
+        ] {
+            let key = inlined.split('"').nth(1).expect("a key");
+            refused(
+                &format!("an entry with `{key}`"),
+                call("read", "ran", "", &format!("[{}]", entry("a.png", inlined))),
+                &format!(
+                    "`files[0]`: carries `{key}`: a file is recorded by reference, never inlined"
+                ),
+            );
+        }
+        for missing in ["path", "sha256", "media_type", "bytes"] {
+            let Value::Object(mut object) = json::line(&entry("a.png", ""))
+                .map(Value::Object)
+                .expect("an entry")
+            else {
+                panic!("an object");
+            };
+            object.remove(missing);
+            let mut rendered = String::new();
+            json::render(&Value::Object(object), &mut rendered);
+            refused(
+                &format!("an entry without `{missing}`"),
+                call("read", "ran", "", &format!("[{rendered}]")),
+                &format!("`files[0]`: no `{missing}`"),
+            );
+        }
+        refused(
+            "a sha256 that is not a digest",
+            call(
+                "read",
+                "ran",
+                "",
+                &format!("[{}]", entry("a.png", "").replace(SHA, "f1e2569d")),
+            ),
+            "`files[0]`: `sha256` is not a sha256",
+        );
+        for media_type in ["png", "image/", "/png", "image/png/x", "image /png"] {
+            refused(
+                &format!("media_type `{media_type}`"),
+                call(
+                    "read",
+                    "ran",
+                    "",
+                    &format!("[{}]", entry("a.png", "").replace("image/png", media_type)),
+                ),
+                &format!("`media_type` is `{media_type}`, which is not a `type/subtype`"),
+            );
+        }
+        refused(
+            "a negative byte count",
+            call(
+                "read",
+                "ran",
+                "",
+                &format!("[{}]", entry("a.png", "").replace("48213", "-1")),
+            ),
+            "`files[0]`: `bytes` is negative",
+        );
+    }
+
     #[test]
     fn a_gap_in_seq_is_refused() {
         let mut lines = every_event();
@@ -3916,7 +4832,11 @@ mod tests {
         );
         assert_eq!(
             tags(ToolRefusal::ALL.iter().map(|it| it.tag()).collect()),
-            "not_allowed max_steps unparsable unknown_tool"
+            "not_allowed max_steps unparsable unknown_tool denylist declined"
+        );
+        assert_eq!(
+            tags(ApprovalScope::ALL.iter().map(|it| it.tag()).collect()),
+            "once session workspace preseeded"
         );
         assert_eq!(
             tags(EngineIdentity::ALL.iter().map(|it| it.tag()).collect()),
@@ -4057,6 +4977,24 @@ mod tests {
     /// outcome lists say, so its entry in them changes nothing a line can
     /// show.
     ///
+    /// `approval` (v4, ruled at 5981588394 (c)) is optional under `ran`,
+    /// `command_failed` and `cancelled`, on every name, and forbidden under
+    /// `refused`; a refused `bash` call carries `argv` for `denylist` and
+    /// `declined` too (ratified at 5982002587), and a refused `read` carries
+    /// none (#388).
+    ///
+    /// `cwd` (v4, ruled at 5982826236) is written beside every `argv`, and
+    /// is dropped and added with it, as a stream's byte count is with its
+    /// text. To this line reader it is optional wherever `argv` is carried,
+    /// and forbidden wherever `argv` is: a `cwd` without an `argv` is every
+    /// line's refusal. That an `argv` carries its `cwd` is the whole log's
+    /// rule in a log that declares v4
+    /// ([`a_bash_call_in_a_v4_log_says_where_it_ran`]).
+    ///
+    /// `files` (v4, ruled at 5983588924) is optional under `ran` and
+    /// `command_failed`, on every name, and forbidden under `refused` and
+    /// `cancelled`.
+    ///
     /// The names are `bash` and two others, `read` and `edit`, so a reader
     /// that singled out one other name rather than `bash` goes red too.
     #[test]
@@ -4075,7 +5013,7 @@ mod tests {
         const BASH_STREAMS: &[&str] = &["stdout", "stdout_bytes", "stderr", "stderr_bytes"];
         let exec = |isolation: &str, network: &str| {
             format!(
-                r#""argv":["true"],"confined":["true"],"isolation":"{isolation}","network":"{network}","#
+                r#""argv":["true"],"cwd":"/work/tree","confined":["true"],"isolation":"{isolation}","network":"{network}","#
             )
         };
         let line_of = |name: &str, outcome: &str, rest: &str| {
@@ -4086,10 +5024,10 @@ mod tests {
         let policy = format!(r#""policy":"{POLICY}","#);
         let ran_bash = format!("{}\"exit\":0,{STREAMS_HELD}", exec("sandbox", "none"));
         let ran_unrecorded = format!(
-            r#""argv":["true"],"exit":0,"isolation":"unrecorded","network":"unrecorded",{STREAMS_HELD}"#
+            r#""argv":["true"],"cwd":"/work/tree","exit":0,"isolation":"unrecorded","network":"unrecorded",{STREAMS_HELD}"#
         );
         let ran_isolation_unrecorded = format!(
-            r#""argv":["true"],"exit":0,"isolation":"unrecorded","network":"none",{STREAMS_HELD}"#
+            r#""argv":["true"],"cwd":"/work/tree","exit":0,"isolation":"unrecorded","network":"none",{STREAMS_HELD}"#
         );
         let ran_network_unrecorded =
             format!("{}\"exit\":0,{STREAMS_HELD}", exec("sandbox", "unrecorded"));
@@ -4100,11 +5038,11 @@ mod tests {
         let failed_vm = format!("{}\"exit\":1,{policy}{STREAMS_HELD}", exec("vm", "none"));
         let failed_unprofiled = format!("{}\"exit\":1,{STREAMS_HELD}", exec("none", "none"));
         let failed_unrecorded = format!(
-            r#""argv":["true"],"exit":1,"isolation":"unrecorded","network":"unrecorded",{STREAMS_HELD}"#
+            r#""argv":["true"],"cwd":"/work/tree","exit":1,"isolation":"unrecorded","network":"unrecorded",{STREAMS_HELD}"#
         );
         let cancelled_bash = exec("sandbox", "none");
         let cancelled_unrecorded =
-            r#""argv":["true"],"isolation":"unrecorded","network":"unrecorded","#.to_owned();
+            r#""argv":["true"],"cwd":"/work/tree","isolation":"unrecorded","network":"unrecorded","#.to_owned();
         let read_ran = format!("\"exit\":0,{STREAMS_HELD}");
         let read_failed = format!("\"exit\":1,{STREAMS_HELD}");
         let read_failed_bare = "\"exit\":1,".to_owned();
@@ -4117,119 +5055,145 @@ mod tests {
                 .collect()
         };
         let not_run = |more: &[&'static str]| -> Vec<&'static str> {
-            ["exit", "policy"]
+            ["exit", "policy", "files"]
                 .into_iter()
                 .chain(BASH_STREAMS.iter().copied())
                 .chain(more.iter().copied())
                 .collect()
         };
-        let streams = || vec!["stdout", "stderr"];
+        // A refused call ran under no decision: `approval` is barred (v4).
+        let refused_bars = |more: &[&'static str]| -> Vec<&'static str> {
+            not_run(more).into_iter().chain(["approval"]).collect()
+        };
+        let streams_or_approval = || vec!["stdout", "stderr", "approval", "files"];
         let table: Vec<Row> = vec![
             (
                 "bash ran",
                 line_of("bash", "ran", &ran_bash),
                 streams_and(&["argv", "confined", "isolation", "network"]),
                 vec!["reason", "policy"],
-                vec!["exit"],
+                vec!["exit", "approval", "cwd", "files"],
             ),
             (
                 "bash ran, unrecorded",
                 line_of("bash", "ran", &ran_unrecorded),
                 streams_and(&["argv", "isolation", "network"]),
                 vec!["reason", "policy", "confined"],
-                vec!["exit"],
+                vec!["exit", "approval", "cwd", "files"],
             ),
             (
                 "bash ran, only isolation unrecorded",
                 line_of("bash", "ran", &ran_isolation_unrecorded),
                 streams_and(&["argv", "isolation", "network"]),
                 vec!["reason", "policy", "confined"],
-                vec![],
+                vec!["approval", "cwd", "files"],
             ),
             (
                 "bash ran, only network unrecorded",
                 line_of("bash", "ran", &ran_network_unrecorded),
                 streams_and(&["argv", "confined", "isolation", "network"]),
                 vec!["reason", "policy"],
-                vec![],
+                vec!["approval", "cwd", "files"],
             ),
             (
                 "bash command_failed",
                 line_of("bash", "command_failed", &failed_bash),
                 streams_and(&["argv", "confined", "isolation", "network", "policy"]),
                 vec!["reason"],
-                vec!["exit"],
+                vec!["exit", "approval", "cwd", "files"],
             ),
             (
                 "bash command_failed under vm",
                 line_of("bash", "command_failed", &failed_vm),
                 streams_and(&["argv", "confined", "isolation", "network", "policy"]),
                 vec!["reason"],
-                vec![],
+                vec!["approval", "cwd", "files"],
             ),
             (
                 "bash command_failed under no profile",
                 line_of("bash", "command_failed", &failed_unprofiled),
                 streams_and(&["argv", "confined", "isolation", "network"]),
                 vec!["reason", "policy"],
-                vec![],
+                vec!["approval", "cwd", "files"],
             ),
             (
                 "bash command_failed, unrecorded",
                 line_of("bash", "command_failed", &failed_unrecorded),
                 streams_and(&["argv", "isolation", "network"]),
                 vec!["reason", "policy", "confined"],
-                vec![],
+                vec!["approval", "cwd", "files"],
             ),
             (
                 "bash refused not_allowed",
                 line_of(
                     "bash",
                     "refused",
-                    r#""argv":["rm"],"reason":"not_allowed","#,
+                    r#""argv":["rm"],"cwd":"/work/tree","reason":"not_allowed","#,
                 ),
                 vec!["reason", "argv"],
-                not_run(&["confined", "isolation", "network"]),
-                vec![],
+                refused_bars(&["confined", "isolation", "network"]),
+                vec!["cwd"],
             ),
             (
                 "bash refused max_steps",
                 line_of(
                     "bash",
                     "refused",
-                    r#""argv":["true"],"reason":"max_steps","#,
+                    r#""argv":["true"],"cwd":"/work/tree","reason":"max_steps","#,
                 ),
                 vec!["reason", "argv"],
-                not_run(&["confined", "isolation", "network"]),
-                vec![],
+                refused_bars(&["confined", "isolation", "network"]),
+                vec!["cwd"],
             ),
             (
                 "bash refused unparsable",
                 line_of("bash", "refused", r#""reason":"unparsable","#),
                 vec!["reason"],
-                not_run(&["argv", "confined", "isolation", "network"]),
+                refused_bars(&["argv", "cwd", "confined", "isolation", "network"]),
                 vec![],
             ),
             (
                 "bash refused unknown_tool",
                 line_of("bash", "refused", r#""reason":"unknown_tool","#),
                 vec!["reason"],
-                not_run(&["argv", "confined", "isolation", "network"]),
+                refused_bars(&["argv", "cwd", "confined", "isolation", "network"]),
                 vec![],
+            ),
+            (
+                "bash refused denylist",
+                line_of(
+                    "bash",
+                    "refused",
+                    r#""argv":["rm","-rf","/"],"cwd":"/work/tree","reason":"denylist","#,
+                ),
+                vec!["reason", "argv"],
+                refused_bars(&["confined", "isolation", "network"]),
+                vec!["cwd"],
+            ),
+            (
+                "bash refused declined",
+                line_of(
+                    "bash",
+                    "refused",
+                    r#""argv":["true"],"cwd":"/work/tree","reason":"declined","#,
+                ),
+                vec!["reason", "argv"],
+                refused_bars(&["confined", "isolation", "network"]),
+                vec!["cwd"],
             ),
             (
                 "bash cancelled",
                 line_of("bash", "cancelled", &cancelled_bash),
                 vec!["isolation", "network"],
                 not_run(&["reason"]),
-                vec!["confined"],
+                vec!["confined", "approval", "cwd"],
             ),
             (
                 "bash cancelled, unrecorded",
                 line_of("bash", "cancelled", &cancelled_unrecorded),
                 vec!["isolation", "network"],
                 not_run(&["reason", "confined"]),
-                vec![],
+                vec!["approval", "cwd"],
             ),
             (
                 "read ran",
@@ -4239,11 +5203,12 @@ mod tests {
                     "reason",
                     "policy",
                     "argv",
+                    "cwd",
                     "confined",
                     "isolation",
                     "network",
                 ],
-                streams(),
+                streams_or_approval(),
             ),
             (
                 "read ran, no streams",
@@ -4253,11 +5218,12 @@ mod tests {
                     "reason",
                     "policy",
                     "argv",
+                    "cwd",
                     "confined",
                     "isolation",
                     "network",
                 ],
-                streams(),
+                streams_or_approval(),
             ),
             (
                 "read command_failed",
@@ -4267,11 +5233,12 @@ mod tests {
                     "reason",
                     "policy",
                     "argv",
+                    "cwd",
                     "confined",
                     "isolation",
                     "network",
                 ],
-                streams(),
+                streams_or_approval(),
             ),
             (
                 "read command_failed, no streams",
@@ -4281,32 +5248,40 @@ mod tests {
                     "reason",
                     "policy",
                     "argv",
+                    "cwd",
                     "confined",
                     "isolation",
                     "network",
                 ],
-                streams(),
+                streams_or_approval(),
             ),
             (
                 "read refused",
                 line_of("read", "refused", r#""reason":"unknown_tool","#),
                 vec!["reason"],
-                not_run(&["argv", "confined", "isolation", "network"]),
+                refused_bars(&["argv", "cwd", "confined", "isolation", "network"]),
                 vec![],
             ),
             (
                 "read refused not_allowed",
                 line_of("read", "refused", r#""reason":"not_allowed","#),
                 vec!["reason"],
-                not_run(&["argv", "confined", "isolation", "network"]),
+                refused_bars(&["argv", "cwd", "confined", "isolation", "network"]),
+                vec![],
+            ),
+            (
+                "read refused declined",
+                line_of("read", "refused", r#""reason":"declined","#),
+                vec!["reason"],
+                refused_bars(&["argv", "cwd", "confined", "isolation", "network"]),
                 vec![],
             ),
             (
                 "read cancelled",
                 line_of("read", "cancelled", ""),
                 vec![],
-                not_run(&["reason", "argv", "confined", "isolation", "network"]),
-                vec![],
+                not_run(&["reason", "argv", "cwd", "confined", "isolation", "network"]),
+                vec!["approval"],
             ),
         ];
         // Every name but `bash` is one rule, so each `read` row is also an
@@ -4340,11 +5315,35 @@ mod tests {
                 Value::String(POLICY.to_owned())
             } else if key == "stdout" || key == "stderr" {
                 Value::String(String::new())
+            } else if key == "approval" {
+                Value::Object(BTreeMap::from([
+                    ("decided_at".to_owned(), Value::Integer(40)),
+                    ("scope".to_owned(), Value::String("once".to_owned())),
+                    ("why".to_owned(), Value::String("not_approved".to_owned())),
+                ]))
+            } else if key == "cwd" {
+                Value::String("/work/tree".to_owned())
+            } else if key == "files" {
+                Value::Array(vec![Value::Object(BTreeMap::from([
+                    ("bytes".to_owned(), Value::Integer(1)),
+                    (
+                        "media_type".to_owned(),
+                        Value::String("text/plain".to_owned()),
+                    ),
+                    ("path".to_owned(), Value::String("out/a.txt".to_owned())),
+                    ("sha256".to_owned(), Value::String(POLICY.to_owned())),
+                ]))])
             } else {
                 Value::Integer(0)
             }
         };
+        // A key's partner goes and comes with it: a stream's byte count with
+        // its text, and `cwd` with `argv` (v4), so a probe of `argv` tests
+        // `argv`'s own rule rather than the pairing's.
         let partner = |key: &str| {
+            if key == "argv" {
+                return Some("cwd");
+            }
             STREAMS
                 .iter()
                 .find(|(text, _)| *text == key)
