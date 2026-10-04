@@ -40,12 +40,15 @@ def copy_tree(src: pathlib.Path, dest: pathlib.Path, paths: list[str]) -> int:
     An `OSError` names its path."""
     # Each directory made once and each source stated once: the per-file
     # cost is the copy itself, as it was for one batched `cp`.
-    made: set[pathlib.Path] = set()
+    # Plain strings, not Path objects: per file, the copy is the cost.
+    root, into = os.fspath(src), os.fspath(dest)
+    made: set[str] = set()
     for path in paths:
-        source, target = src / path, dest / path
-        if target.parent not in made:
-            target.parent.mkdir(parents=True, exist_ok=True)
-            made.add(target.parent)
+        source, target = os.path.join(root, path), os.path.join(into, path)
+        parent = os.path.dirname(target)
+        if parent not in made:
+            os.makedirs(parent, exist_ok=True)
+            made.add(parent)
         mode = os.stat(source).st_mode
         shutil.copyfile(source, target)
         os.chmod(target, stat.S_IMODE(mode))
