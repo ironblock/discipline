@@ -62,7 +62,19 @@ Two admission records sit on `linux-pc`'s 24 GiB accelerator. Each one's word is
 
 ## Top rung
 
-**Line:** `ada48-tabbyapi-exl3-qwen38flashnext-2p05`. Qwen3.8-Flash-Next as EXL3 2.05 bpw with its MTP head, served by TabbyAPI + ExLlamaV3 1.5.2: one 262,144-token paged pool, four concurrent requests, `cache_mode 8,8`, MTP with 3 draft tokens. It took over from `ada48-llamacpp-qwen38flashnext-q20` at 2026-10-03T16:22Z after 23 s of downtime, on the maintainer's go ([5971023545](https://github.com/ironblock/discipline/issues/143#issuecomment-5971023545), `measurements/2026-10-03-ada48-tabbyapi/`). The llama.cpp launch file stays on the host for rollback.
+**Line:** `ada48-tabbyapi-exl3-qwen38flashnext-2p05`. Qwen3.8-Flash-Next as EXL3 2.05 bpw with its MTP head, served by TabbyAPI + ExLlamaV3: one paged KV pool shared by four concurrent requests, `cache_mode 8,8`, MTP with 3 draft tokens. It took over from `ada48-llamacpp-qwen38flashnext-q20` at 2026-10-03T16:22Z after 23 s of downtime, on the maintainer's go ([5971023545](https://github.com/ironblock/discipline/issues/143#issuecomment-5971023545), `measurements/2026-10-03-ada48-tabbyapi/`). The llama.cpp launch file stays on the host for rollback.
+
+**Engine upgrade, 2026-10-04 (#401, on the maintainer's decision):** ExLlamaV3 1.5.2 → **1.5.4**, and the pool 262,144 → **606,208 tokens**. `max_seq_len` stays 262,144 per request.
+- **Why:** 1.5.3–1.5.4 fix the quantized cache (an off-by-one for unaligned geometries) and MTP prefix-cache hashing, both on this line's paths.
+- **Measured in the window ([#401](https://github.com/ironblock/discipline/issues/401)):**
+  - KLD identical: 0.0860 / 0.2297.
+  - The four-way concurrency check is clean.
+  - VRAM after load: 41,238 MiB against 43,762, at the same pool.
+  - Identical greedy repeats are deterministic on 1.5.4 and drift on 1.5.2.
+  - Decode is 2–5% slower at 10k.
+- **Pool sizing:** the KV costs 18.9 KiB/token. 638,976 does not load. At 606,208, a full four-request fill leaves 978 MiB free.
+
+This is a new instance; the data seat writes its row.
 
 **State: unadmitted.** No admission cell has run on it. Its identity is the composite over its components (#337). Planning set three prerequisites before admission ([5966413123](https://github.com/ironblock/discipline/issues/143#issuecomment-5966413123)):
 
@@ -130,7 +142,34 @@ What each engine is in the ladder, and what was measured about it. Characterizat
 | 226,750 (full) | 586 | 35.5 | — |
 | 2 streams × ~112.6k | — | 29.9 aggregate | — |
 
-Draft acceptance rises to 0.92–0.97 at 126k and beyond on this prompt, so the deep MTP rows flatter typical use, and spec-off is the clean reading at depth. MTP n=3 adds nothing over n=2 for 300 MiB more. No matched depth reading of the 3.6 floor exists. DFlash2 against MTP, on this line and on EXL3, is #335.
+Draft acceptance rises to 0.92–0.97 at 126k and beyond on this prompt, so the deep MTP rows flatter typical use, and spec-off is the clean reading at depth. MTP n=3 adds nothing over n=2 for 300 MiB more. The 3.6 floor's first matched depth reading is in the #335 table below.
+
+**DFlash2 against MTP, EXL3 against GSQ-RCO, and the 3.6 floor at depth** (`linux-pc`, 2026-10-04, #335; four windows, every arm recorded in `measurements/2026-10-04-qwen38-27b-dflash2-exl3/` once it is committed). Measurement only: none of this is a floor decision. The bench is the profile's; decode tok/s is the mean of two warm repeats, and two-stream figures are totals.
+
+| line | KV | pool | 2k | ~100k | deep | 2 streams | free at peak |
+|---|---|---|---|---|---|---|---|
+| 3.6 floor, beellama, original DFlash | q5_0 / q4_1 | 160,000 | 74.4 | 40.9 | 37.4 (157k) | 30.1 | (1,208, #143) |
+| 3.8 IQ3_S, mainline, MTP n=2 | q8_0 | 229,376 | 68.1 | 43.1 | 35.5 (227k) | 29.9 | 1,966 |
+| 3.8 IQ3_S, mainline, DFlash2 Q4_K_M (Z-Lab GGUF) | q8_0 | 229,376 | 74.6 | 44.7 | 38.5 (226k) | 32.6 | 1,412 |
+| the same, DFlash2 Q3_K_M / Q2_K (Anbeeld) | q8_0 | 229,376 | — | 42.5 / 41.3 | — | — | — |
+| EXL3 `SC_3.00bpw_H4`, ExLlamaV3 1.5.4, DFlash2 (EXL3 drafter) | `5,4` | 229,376 | 100.5 | 52.5 | 45.1 (226k) | 55.2 | 3,406 |
+| EXL3 `SC_3.00bpw_H4`, the same | `8,8` | 196,608 | 111.1 | 57.9 | 60.6 (194k)\* | 59.0 | 874 |
+| EXL3 `SC_2.20bpw_H3`, the same | `8,8` | 229,376 | 142.7 | 60.6 | 35.5 (226k) | 51.7 | 1,778 |
+
+\* That depth's prompt ends on easier text (draft acceptance 0.53, against 0.33–0.40 elsewhere). Deep rows compare only at matched depths.
+
+- **KLD, the same harness as #334:**
+
+  | quant | size | code / prose KLD |
+  |---|---|---|
+  | EXL3 `SC_2.20bpw_H3` | 10.80 GB | 0.1226 / 0.1697 |
+  | GSQ-RCO IQ3_S | 12.12 GB | 0.0542 / 0.0860 |
+  | EXL3 `SC_3.00bpw_H4` | 13.45 GB | 0.0591 / 0.0738 |
+  | EXL3 `3.50bpw` | 15.34 GB | 0.0382 / 0.0421 |
+- **Not run:** EXL3 + MTP (dropped at the maintainer's direction; DFlash2 led everywhere it ran); EXL3 `3.50bpw` with the drafter, which did not load at 163,840 or more on 1.5.1. The README records every probe.
+- **No arm loaded a vision tower.**
+- **Headroom:** under the v0.1.0 bar (300 MiB free at peak fill, [5984376546](https://github.com/ironblock/discipline/issues/143#issuecomment-5984376546)), every row passes at the pool it ran.
+- **The floor refuses a request that doesn't fit its shared pool, rather than evicting the other slot's resident prompt:** HTTP 500 "Context size has been exceeded". #406.
 
 **Hazards the record carries** ([5922544337](https://github.com/ironblock/discipline/issues/143#issuecomment-5922544337), in the registry entries):
 - llama.cpp with `-fit` and no `--spec-draft-ngl 99` silently places the MTP draft on the host.
@@ -178,10 +217,12 @@ One line per ruling, oldest first. M is the maintainer; P is planning; D is Disp
 | 2026-10-03 | M | The top rung's serving line moves to TabbyAPI + EXL3, a new unadmitted substrate | [5971023545](https://github.com/ironblock/discipline/issues/143#issuecomment-5971023545) |
 | 2026-10-03 | P | On a laptop that serves a model, a helper runs on the Neural Engine or it evicts the served model | [5971097635](https://github.com/ironblock/discipline/issues/143#issuecomment-5971097635) |
 | 2026-10-04 | D | Distil #143 into this page, re-home its open definition of done, then close it (approved by the maintainer) | [5982627646](https://github.com/ironblock/discipline/issues/143#issuecomment-5982627646) |
+| 2026-10-04 | M | The headroom bar for v0.1.0 is 300 MiB free at peak fill, or no OOM at the registered pool under the bench; the 1,208 MiB rule is withdrawn | [5984376546](https://github.com/ironblock/discipline/issues/143#issuecomment-5984376546) |
+| 2026-10-04 | M | The top rung moves to ExLlamaV3 1.5.4 with a pool sized to that bar (606,208) | [#401 5984646282](https://github.com/ironblock/discipline/issues/401#issuecomment-5984646282) |
 
 ## Open questions
 
-- **The floor's ratification and switch.** Planning ruled the candidate the floor on 2026-10-02. The definition of done also needs the maintainer's ratification of it, and `linux-pc`'s serving line is still the 3.6. #393.
+- **The floor's ratification and switch.** Planning ruled the candidate the floor on 2026-10-02. The maintainer has not ratified a floor: a ratification posted on 2026-10-04 was retracted the same evening, and #393 is halted while the EXL3 and llama.cpp lines are compared (§ Engine lines). `linux-pc` still serves the 3.6. #393.
 - **The three-rung re-fire.** One existing claim, the maintainer's pick, re-fired on all three rungs under a pre-registered rule. Blocked on a bottom rung and an admitted top rung. #394.
 - **The record gate.** `check-record` refusing a claim record whose declared rung has no admission directory. #395.
 - **The top rung's admission** on the TabbyAPI + EXL3 line, beginning with the cache's quality. #396.
