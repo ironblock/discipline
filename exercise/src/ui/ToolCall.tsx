@@ -92,6 +92,8 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
           <span className="ex-elapsed" data-level={since.level}>
             running · {took(since.ms)}
           </span>
+        ) : node.writing ? (
+          'being written'
         ) : node.waiting ? (
           'waiting for the call before it'
         ) : refused ? (

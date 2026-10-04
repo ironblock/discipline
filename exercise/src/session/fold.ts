@@ -140,6 +140,8 @@ export interface ToolNode extends Provenance {
   readonly running: boolean;
   /** Not begun: a call before it on the same response is still running, and the drive runs them one at a time. */
   readonly waiting?: true;
+  /** Still being written: its response has not arrived, so the drive cannot have begun it. */
+  readonly writing?: true;
   /** What became of it; absent while it runs. */
   readonly outcome?: ToolOutcome;
   /** The command as the drive asked for it. */
@@ -615,9 +617,11 @@ export function fold(lines: readonly LogLine[]): Session {
   // has not begun.
   const callStarts = new Map<number, number>();
   const notBegun = new Set<number>();
+  const unanswered = new Set<number>();
   const lastEnded = new Map<number, number | undefined>();
   for (const [key, c] of calls) {
     const answered = generations.get(c.request)?.response?.t;
+    if (answered === undefined) unanswered.add(key);
     const before = lastEnded.has(c.request) ? lastEnded.get(c.request) : c.t;
     if (before === undefined) notBegun.add(key);
     callStarts.set(key, Math.max(c.t, answered ?? c.t, before ?? c.t));
@@ -673,8 +677,8 @@ export function fold(lines: readonly LogLine[]): Session {
             args: objectOf(text),
             after: id(c.request),
             startedAt,
-            running: line === undefined && !notBegun.has(slot.call),
-            ...(line === undefined && notBegun.has(slot.call) ? { waiting: true as const } : {}),
+            running: line === undefined && !notBegun.has(slot.call) && !unanswered.has(slot.call),
+            ...(line === undefined && unanswered.has(slot.call) ? { writing: true as const } : line === undefined && notBegun.has(slot.call) ? { waiting: true as const } : {}),
             ...(line
               ? {
                   outcome: line.outcome,

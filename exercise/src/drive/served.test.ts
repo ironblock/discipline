@@ -126,6 +126,8 @@ describe('v3 tool calls, as the courier commits them (diet/formats/log/fixtures/
     // Up to its fourth fragment (seq 11): one node, its id the first fragment's seq, its arguments so far.
     const [writing] = tools(log.slice(0, log.findIndex((l) => l.seq === 11) + 1));
     expect(writing?.kind === 'tool' && [writing.id, writing.arguments, writing.args]).toEqual(['8', '{"command":"ls |', {}]);
+    // Being written, not running: the drive cannot begin a call before its response arrives.
+    expect(writing?.kind === 'tool' && [writing.running, writing.writing]).toEqual([false, true]);
     const [done] = tools(log);
     expect(done?.kind === 'tool' && [done.id, done.arguments, done.args]).toEqual(['8', '{"command":"ls | wc -l"}', { command: 'ls | wc -l' }]);
     // It ran from its response (t 85) to its line (t 90).

@@ -3697,8 +3697,8 @@ inject_exercise_capped_from_settle_alone() {
 
 # A refused tool call drawn as ran (#300): the fold takes the drive's
 # refusal for a run, so the block says nothing of the refusal or its reason.
-# Typecheck and lint pass it; the fold of the constructed v3 log says each
-# call's outcome (served.test.ts).
+# Typecheck and lint pass it; the fold of the courier's v3 fixtures says
+# each call's outcome (served.test.ts).
 inject_exercise_refused_call_drawn_as_ran() {
   edit_in_place "s|^                  outcome: line.outcome,$|                  outcome: line.outcome === 'refused' ? 'ran' : line.outcome,|" exercise/src/session/fold.ts
 }
