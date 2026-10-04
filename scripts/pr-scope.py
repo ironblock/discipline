@@ -2,6 +2,9 @@
 """Classify a pull request's diff as `material` or `chore` (#276, ratified on #25).
 
     pr-scope.py --base REF [--head REF] [--census DIR]
+    pr-scope.py --machinery --base REF [--head REF]
+                                 whether the diff touches the selftest's
+                                 machinery, as `machinery=true|false`
     pr-scope.py --check          the classifier against its own cases
 
 A diff is MATERIAL when any of these holds, and a CHORE otherwise:
@@ -37,6 +40,15 @@ the value. Printed:
 reads every file and `history` every commit, so both are always named. CI
 runs every check whatever this prints; the lane changes only what the author
 owes locally and on the thread.
+
+THE SELFTEST'S MACHINERY is decided here and nowhere else (#398): `verify.sh`,
+or a file `scope-selftest.py`'s `MACHINERY_FILES` names, among the diff's
+paths. The chore lane reads it; `--machinery` prints it for verify.yml's
+`scope` job, which runs the scoped selftest on a pull request that touches
+it; and selftest-drift.py widens a pull request's drift refusal on it. It is
+read from the paths, never from the one reason printed above, which a
+protocol file outranks. `--machinery` prints one line, for `$GITHUB_OUTPUT`,
+and names the file that decided it on stderr.
 
 Stdlib only. Exit 0 with a verdict printed, 2 when the diff cannot be read.
 """
@@ -198,6 +210,15 @@ def in_gate_tree(path: str) -> str | None:
     return under(path, GATE_TREES)
 
 
+def machinery(files: list[str], scope=None) -> str | None:
+    """The first of `files` that is the selftest's machinery -- `verify.sh`,
+    or a file scope-selftest.py's MACHINERY_FILES names -- or None. The one
+    definition (#398): the chore lane, the `scope` job and the drift
+    refusal's widening all ask this."""
+    names = (scope or scope_selftest()).MACHINERY_FILES
+    return next((f for f in sorted(set(files)) if f == "verify.sh" or f in names), None)
+
+
 def importable(path: str, files: list[str], tree: pathlib.Path = ROOT) -> bool:
     """Whether `path` lies in a top-level Python package -- a directory whose
     `__init__.py` this diff adds or the tree carries -- or in a root
@@ -271,8 +292,8 @@ def classify(
         reason = f"{link} is {links[link]}, which the gate's sandbox does not copy as a file"
     elif protocol:
         reason = f"{protocol[0]} is protocol ({protocol[1]})"
-    elif changed_set & scope.MACHINERY_FILES:
-        reason = f"{sorted(changed_set & scope.MACHINERY_FILES)[0]} is the selftest's machinery"
+    elif machine := machinery(files, scope):
+        reason = f"{machine} is the selftest's machinery"
     elif tree := next(((f, entry) for f in files if (entry := in_gate_tree(f))), None):
         reason = f"{tree[0]} is in the gate's tree ({tree[1]})"
     elif root := next((f for f in files if unknown_root(f)), None):
@@ -384,6 +405,21 @@ ROOT_CASES = (
 )
 
 
+# What is the selftest's machinery (#398), each way: the gate itself, the
+# scoper #381 changed, the selftest's workflow (which reads as protocol),
+# machinery beside a doc; and a gate script, a workflow and a doc that are
+# not. The file that decides it, or None -- written here, not derived.
+MACHINERY_CASES = (
+    (("verify.sh",), "verify.sh"),
+    (("scripts/apply-lane-faults.py",), "scripts/apply-lane-faults.py"),
+    ((".github/workflows/gate-selftest.yml",), ".github/workflows/gate-selftest.yml"),
+    (("README.md", "scripts/gatelib.py"), "scripts/gatelib.py"),
+    (("scripts/hygiene.sh",), None),
+    ((".github/workflows/pages.yml",), None),
+    (("README.md",), None),
+)
+
+
 GIT_CASES = 4
 
 
@@ -473,11 +509,15 @@ def check() -> int:
         if in_gate_tree(path) != entry:
             wrong += 1
             print(f"pr-scope: {path} falls under {in_gate_tree(path)!r}, not the gate tree {entry!r}", file=sys.stderr)
+    for files, decider in MACHINERY_CASES:
+        if machinery(list(files)) != decider:
+            wrong += 1
+            print(f"pr-scope: {', '.join(files)} reads as machinery by {machinery(list(files))!r}, not {decider!r}", file=sys.stderr)
     for path, unknown in ROOT_CASES:
         if unknown_root(path) != unknown:
             wrong += 1
             print(f"pr-scope: the root entry {path} reads {'unknown' if unknown_root(path) else 'chore-able'}, not as declared", file=sys.stderr)
-    total = len(CASES) + len(PROTOCOL_CASES) + len(GATE_CASES) + len(ROOT_CASES) + GIT_CASES + 2
+    total = len(CASES) + len(PROTOCOL_CASES) + len(GATE_CASES) + len(ROOT_CASES) + len(MACHINERY_CASES) + GIT_CASES + 2
     if wrong:
         print(f"pr-scope: {wrong} of {total} case(s) misclassified", file=sys.stderr)
         return 1
@@ -509,6 +549,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--base", required=True, help="what the PR is measured against")
     parser.add_argument("--head", default="HEAD")
     parser.add_argument("--census", type=pathlib.Path, help="the base branch's latest full selftest's census directory")
+    parser.add_argument("--machinery", action="store_true", help="print only whether the diff touches the selftest's machinery")
     args = parser.parse_args(argv)
     try:
         files, links = changed(args.base, args.head)
@@ -521,6 +562,12 @@ def main(argv: list[str]) -> int:
     if not VERIFY.is_file():
         print("pr-scope: verify.sh is not in this tree; there is no gate to classify against", file=sys.stderr)
         return EXIT_BROKEN
+    if args.machinery:
+        machine = machinery(files)
+        print(f"machinery={'true' if machine else 'false'}")
+        print(f"pr-scope: {escaped(machine) + ' is' if machine else 'nothing in the diff is'} the selftest's machinery"
+              f"{', so this pull request runs the scoped selftest' if machine else ''} (#398)", file=sys.stderr)
+        return 0
     print("\n".join(report(*classify(files, args.census, links))))
     return 0
 

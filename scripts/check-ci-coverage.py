@@ -160,6 +160,14 @@ SECONDS_TABLE = pathlib.Path(__file__).resolve().parent.parent / ".github" / "ch
 SKIPPED_SELFTEST = "needs.selftest.result != 'skipped'"
 # ...and the one the repo job's drift refusal carries (#369, rule 17).
 PULL_REQUEST_ONLY = "github.event_name == 'pull_request'"
+# What the `scope` job is when `selftest_events` names `machinery` (#398, rule
+# 17): the one command that answers it, the step it writes to and the job
+# output the selftest's `if:` and check-job-results.py read.
+SCOPE_LINES = (
+    "      machinery: ${{ steps.machinery.outputs.machinery }}",
+    "        id: machinery",
+    '        run: python3 scripts/pr-scope.py --machinery --base "origin/${{ github.base_ref }}" --head HEAD >> "$GITHUB_OUTPUT"',
+)
 
 # Each check a declared split may name (#262). Its members are asked of
 # verify.sh itself -- `VERIFY_LIST_MEMBERS=1 VERIFY_CHECK_SHARD=K/N
@@ -1319,7 +1327,11 @@ def main() -> int:
     #    the selftest's shards is skipped only where the selftest was: its
     #    download and its step each carry `if: needs.selftest.result !=
     #    'skipped'` and nothing else, since check-job-results.py, before them,
-    #    refuses a skip the row does not declare.
+    #    refuses a skip the row does not declare. Where the row names
+    #    `machinery` (#398), the expression reads the `scope` job's output, so
+    #    the selftest job needs `[scope]` and nothing else, and the scope job
+    #    answers with `pr-scope.py --machinery` into that output -- the one
+    #    definition, never a second path list.
     if branches and events is not None:
         job = re.search(r"^  selftest:\n(.*?)(?=^  [^\s#]|\Z)", root_text, re.MULTILINE | re.DOTALL)
         ifs = re.findall(r"^    if: (.*)$", job.group(1), re.MULTILINE) if job else []
@@ -1329,6 +1341,21 @@ def main() -> int:
                 f"{BUDGET.name}'s selftest_events ({' '.join(events)}) and {BRANCHES.name} make (#369): "
                 f"{wanted_selftest_if}"
             )
+        if "machinery" in events:
+            selftest_needs = re.findall(r"^    needs: (.*)$", job.group(1), re.MULTILINE) if job else []
+            if selftest_needs != ["[scope]"]:
+                failures.append(
+                    f"{ROOT_WORKFLOW}: the `selftest` job needs {selftest_needs!r}, not `[scope]` alone; its "
+                    f"`if:` reads the scope job's machinery answer, which only a job it needs can give (#398)"
+                )
+            scope_job = re.search(r"^  scope:\n(.*?)(?=^  [^\s#]|\Z)", root_text, re.MULTILINE | re.DOTALL)
+            scope_text = scope_job.group(1) if scope_job else ""
+            for line in SCOPE_LINES:
+                if line not in scope_text.split("\n"):
+                    failures.append(
+                        f"{ROOT_WORKFLOW}: the `scope` job has no line `{line.strip()}`; it is how a pull "
+                        f"request's machinery answer reaches the selftest's `if:` (#398)"
+                    )
         gate = re.search(r"^  gate:\n(.*?)(?=^  [^\s#]|\Z)", root_text, re.MULTILINE | re.DOTALL)
         steps = gate.group(1) if gate else ""
         for marker in ("pattern: selftest-census-*", 'check-selftest-census.py "${{ runner.temp }}/census"'):

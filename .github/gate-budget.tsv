@@ -56,13 +56,18 @@ max_shards	20
 # other (#369, planning on the maintainer's word, #25 5976434649), until the
 # gate redesign. `schedule` is the nightly on the integration branch; `release`
 # is the release path -- a pull request into the release branch and a push to
-# it, the branch read from .github/branches.tsv. A pull request into the
-# integration branch and a push to it do not run it: their package checks and
-# fast checkers are unchanged, the nightly's drift opener files a fault it
-# finds not red, and the release path re-proves every fault before a release.
+# it, the branch read from .github/branches.tsv. `machinery` is a pull request
+# whose diff touches the selftest's machinery, as `pr-scope.py --machinery`
+# decides in verify.yml's `scope` job (#398): it runs the scoped selftest, the
+# faults the change reaches, which for a change to the selftest's own
+# functions or files is every one.
+# Any other pull request into the integration branch, and a push to it, does
+# not run it: their package checks and fast checkers are unchanged, the
+# nightly's drift opener files a fault it finds not red, and the release path
+# re-proves every fault before a release.
 #
 # Read by scripts/gatelib.py for both sides of the claim: check-ci-coverage.py
 # holds verify.yml's `selftest` job's `if:` to the expression these words make,
 # and check-job-results.py accepts a skipped `selftest` only on an event they
-# leave off. Words: `schedule`, `release`.
-selftest_events	schedule release
+# leave off. Words: `schedule`, `release`, `machinery`.
+selftest_events	schedule release machinery

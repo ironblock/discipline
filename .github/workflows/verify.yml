@@ -34,8 +34,9 @@ on:
     branches: [main, develop]
   pull_request:
   # THE NIGHTLY (#112). Since #369 it is where the integration branch's
-  # faults are proven: a pull request into it and a push to it run no
-  # selftest. An indirect dependency -- a helper, the runner image, the
+  # faults are proven: a push to it runs no selftest, and a pull request into
+  # it runs the scoped selftest only when its diff touches the selftest's
+  # machinery (#398). An indirect dependency -- a helper, the runner image, the
   # toolchain's own drift -- is what it catches, within a day. It runs the
   # full set on the default branch, and a fault it finds not red opens an
   # issue.
@@ -91,19 +92,46 @@ jobs:
   recompute:
     uses: ./.github/workflows/pkg-recompute.yml
 
-  # ON THE NIGHTLY AND THE RELEASE PATH ONLY (#369), until the gate redesign:
-  # the events .github/gate-budget.tsv's `selftest_events` names. A pull request
-  # into the integration branch and a push to it skip this job; their package
-  # checks are unchanged, the nightly's drift opener files what it finds, and
-  # the release path re-proves every fault before a release. The expression
-  # spells the release branch because a job's `if:` reads no file;
-  # scripts/check-ci-coverage.py holds it to that row and .github/branches.tsv,
-  # and check-job-results.py accepts it skipped only where the row says so.
-  # The `if:` follows `uses:`: a call is a job whose first line is its `uses:`
-  # (check-ci-coverage.py's CALLS).
+  # WHETHER A PULL REQUEST TOUCHES THE SELFTEST'S MACHINERY (#398): verify.sh,
+  # or a file scope-selftest.py's MACHINERY_FILES names, among the diff's
+  # paths -- `pr-scope.py --machinery`, the one definition, which the chore
+  # lane and the drift refusal's widening also read. The `selftest` job's
+  # `if:` needs the answer, and a job's `if:` reads only the outputs of the
+  # jobs it needs, so it is a job of its own: one checkout and one script,
+  # before the selftest starts. On any other event it runs no step and
+  # outputs nothing, which no `if:` reads as `true`. check-ci-coverage.py
+  # holds the command (rule 17); check-job-results.py reads the output.
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      machinery: ${{ steps.machinery.outputs.machinery }}
+    steps:
+      - uses: actions/checkout@v5
+        if: github.event_name == 'pull_request'
+        with:
+          # The base, for the merge base pr-scope.py diffs against.
+          fetch-depth: 0
+      - name: Does this pull request touch the selftest's machinery
+        id: machinery
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/pr-scope.py --machinery --base "origin/${{ github.base_ref }}" --head HEAD >> "$GITHUB_OUTPUT"
+
+  # ON THE NIGHTLY, THE RELEASE PATH AND A MACHINERY PULL REQUEST ONLY (#369,
+  # #398), until the gate redesign: the events .github/gate-budget.tsv's
+  # `selftest_events` names. Any other pull request into the integration
+  # branch, and a push to it, skips this job; their package checks are
+  # unchanged, the nightly's drift opener files what it finds, and the release
+  # path re-proves every fault before a release. A machinery pull request runs
+  # the scoped selftest: the faults its change reaches, which for the
+  # selftest's own functions or files is every one. The expression spells
+  # the release branch because a job's `if:` reads no file; scripts/check-ci-coverage.py holds it to that row and
+  # .github/branches.tsv, and check-job-results.py accepts it skipped only
+  # where the row says so. The `if:` follows `uses:`: a call is a job whose
+  # first line is its `uses:` (check-ci-coverage.py's CALLS).
   selftest:
     uses: ./.github/workflows/gate-selftest.yml
-    if: ${{ github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && github.ref_name == 'main') }}
+    if: ${{ github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && github.ref_name == 'main') || (github.event_name == 'pull_request' && needs.scope.outputs.machinery == 'true') }}
+    needs: [scope]
     # `actions: read` for the scope plan's base-branch censuses, `issues: read` for
     # the drift issues a pull request is refused on (#112).
     permissions:
@@ -113,7 +141,7 @@ jobs:
 
   gate:
     name: gate
-    needs: [diet, exercise, repo, bsd, injections, recompute, selftest]
+    needs: [diet, exercise, repo, bsd, injections, recompute, scope, selftest]
     if: always()
     runs-on: ubuntu-latest
     # `actions: read` on top of the workflow's `contents: read`, because this
@@ -152,7 +180,8 @@ jobs:
       # its failure must not hide this step's message about which job it was.
       # The event, so a `selftest` skipped by its own `if:` is accepted where
       # gate-budget.tsv's `selftest_events` declares it off, and nowhere else
-      # (#369).
+      # (#369); on a pull request, `needs` carries the `scope` job's machinery
+      # answer, and a skip where it is `true` is refused (#398).
       - name: Every job must have succeeded
         if: always()
         env:
