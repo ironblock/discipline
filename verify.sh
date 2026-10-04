@@ -965,10 +965,11 @@ sandbox() {
   # times a thousand files times two hundred cases. Measured on this tree,
   # back to back: 7.4s and 7.7s for the fork-per-file loop, 0.52s and 0.50s
   # for one batched `cp`. It cost as much as the compile it existed to feed.
+  # The copy is now one Python process (#380), measured in #380's body.
   local -a files=()
   while IFS= read -r -d '' path; do
     # -f after dereference: a broken symlink, or one pointing at a directory,
-    # would make `cp` fail mid-copy and leave a half-built sandbox.
+    # would make the copy fail mid-way and leave a half-built sandbox.
     if [ ! -f "${ROOT}/${path}" ]; then
       echo "selftest: ${path} is not a regular file (missing, or a symlink to one)" >&2
       return 1
@@ -980,21 +981,31 @@ sandbox() {
     return 1
   fi
 
-  # `--parents` rebuilds each path's directories under dest, and -L matches
-  # the dereference the check above tests for. Still deliberately NOT `-p`:
-  # preserving mtimes would make a box's sources look older than artifacts
-  # left in the shared cargo target by the case before it, so cargo would
-  # declare them fresh and run the wrong binary.
+  # scripts/copy-tree.py rebuilds each path's directories under dest and
+  # follows links, which the check above tests for (#380: it replaced `cp
+  # -L --parents`, which BSD `cp` refuses, so a stock Mac failed here). Still
+  # deliberately NOT preserving mtimes: that would make a box's sources look
+  # older than artifacts left in the shared cargo target by the case before
+  # it, so cargo would declare them fresh and run the wrong binary. The mode
+  # is kept; a copied script is run by name.
   #
-  # The pipeline's status is `cp`'s: `set -o pipefail` is in force and xargs
-  # exits non-zero if any `cp` it spawns does. Nothing here reads a status
-  # through a filter -- the rule this script opens with is about `| grep` and
-  # `| tee` standing in for a command's own exit code.
-  ( cd "$ROOT" && printf '%s\0' "${files[@]}" |
-      xargs -0 cp -L --parents -t "$dest" ) || {
+  # The pipeline's status is the copy's: `set -o pipefail` is in force, and
+  # one process copies the list. Nothing here reads a status through a filter
+  # -- the rule this script opens with is about `| grep` and `| tee` standing
+  # in for a command's own exit code.
+  printf '%s\0' "${files[@]}" | python3 "${ROOT}/scripts/copy-tree.py" "$ROOT" "$dest" || {
     echo "selftest: the sandbox tree could not be copied" >&2
     return 1
   }
+  # Read back, not trusted (#380): the box holds exactly as many files as the
+  # list it was given, counted on the tree before git touches it.
+  local copied
+  # NUL-counted: a path holding a newline is one file, not two lines.
+  copied="$(find "$dest" -type f -print0 | tr -dc '\0' | wc -c)"
+  if [ "${copied// /}" -ne "${#files[@]}" ]; then
+    echo "selftest: the sandbox holds ${copied// /} file(s) of the ${#files[@]} it was given" >&2
+    return 1
+  fi
 
   git -C "$dest" init --quiet
   git -C "$dest" add --all
@@ -5070,6 +5081,22 @@ old = "                .map(|item| value_of(key, &item))\n"
 new = "                .map(|item| Ok(Value::String(item.as_str().to_owned())))\n"
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The tree copy leaving the last path out (#380): every box the gate builds is
+# then not the tree it claims to be, and an injection applied there proves
+# nothing about the tree. Caught by check-injections.py reading its box back.
+inject_injections_copy_drops_a_file() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/copy-tree.py")
+source = path.read_text(encoding="utf-8")
+old = "    for path in paths:\n"
+if source.count(old) != 1:
+    raise SystemExit("copy-tree.py: no single loop over the paths")
+path.write_text(source.replace(old, "    for path in paths[:-1]:\n", 1), encoding="utf-8")
 EOF
 }
 
@@ -10137,6 +10164,8 @@ selftest() {
     'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
     'formats::regimen::tests::an_array_holds_scalars_read_by_the_same_reader \.\.\. FAILED' 'lib/formats::regimen::tests'
+  seeded_case "a tree copy that drops a file"        injections inject_injections_copy_drops_a_file \
+    'the box is missing 1 tracked path' inject_ci_trunk_typo
   seeded_case "a merged field an injection cannot see" injections inject_injections_struct_grew \
     'builds a Provenance without cohort'
   seeded_case "a literal the scan cannot place"       injections inject_injections_literal_unplaceable \
