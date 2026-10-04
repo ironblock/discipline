@@ -69,6 +69,7 @@ from collections.abc import Callable
 
 import argparse
 import datetime
+import decimal
 import hashlib
 import json
 import os
@@ -140,6 +141,166 @@ HTML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
 TEMPLATE_DIR = "_template"
 
 
+# FIGURES ARE REFERENCES, NOT DIGITS (#63, ruled 2026-10-02). Every directory
+# declares `figures`: `referenced` -- its body's numbers are `{{...}}`
+# references, resolved from the product, the front-matter and the record's
+# summary row at check time, and a typed figure is refused -- or `typed`, not
+# linted, its `known_defects` the disclosure. A directory dated after
+# FIGURES_LANDED must say `referenced`. On or before it, a missing key reads as
+# `typed` until the data seat's pass writes the key on every directory; that
+# pass makes a missing key a refusal by deleting this allowance.
+FIGURES = ("referenced", "typed")
+# Moved from 2026-10-02 to 2026-10-04 (ruled (c), #265 5977039806): a
+# dated directory that reached develop before this lint did reads as
+# `typed` like the ones before it, and moves the date again by the same rule.
+FIGURES_LANDED = "2026-10-04"
+
+# The sections that may carry no typed figure at all, and the ones that may
+# carry one only inside an `[uncited: <reason>]` marker, which declares it.
+FIGURES_NEVER_TYPED = ("Results", "Conclusion")
+# One line, and a reason with a word in it: an unterminated marker must not
+# reach across paragraphs to the next `]`, and `[uncited: 42]` declares
+# nothing (#265's review).
+#
+# No `<` or `>` in it (#265's third review): `<!--[uncited: x-->0.241<!--]-->`
+# was a marker to this reader and, its brackets stripped with the comments, a
+# bare figure to every other.
+UNCITED = re.compile(r"\[uncited:[^\]\n<>]*[A-Za-z][^\]\n<>]*\]")
+REFERENCE = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
+# What a typed figure is: an ISO date, as ONE token (#63's measurement: a
+# date tokenised as three numbers made every Conclusion unmigratable), or a
+# number standing on its own -- not a digit inside a word (`v2`, `sha256`)
+# and not an issue or ordinal reference (`#63`).
+#
+# A dot before the digits exempts them only after a word or a number -- the
+# `2` of `v1.2` -- never a leading-dot decimal: `.241` and `p < .05` are
+# figures (#265's third review).
+#
+# A `#` before the digits exempts them only when they are a bare integer,
+# an issue's number (`#63`); `#0.241` and `#14.2%` are figures (#265's fifth
+# review). And only outside Results and Conclusion, which admit no typed
+# figure at all: `#142 of every #1000 steps` there is refused (ruled (b) on
+# #265, 5973883143). See `typed_figures`.
+TYPED_FIGURE = re.compile(
+    r"(?<![A-Za-z0-9])(?<![A-Za-z0-9]\.)(?:\d{4}-\d{2}-\d{2}|\d+(?:[.,]\d+)*%?)(?![A-Za-z0-9])"
+)
+
+
+def typed_figures(text: str, section: str | None = None) -> list[str]:
+    """The typed figures in `text`, an issue number (`#` then a bare
+    integer) excepted outside Results and Conclusion."""
+    exempt = section not in FIGURES_NEVER_TYPED
+    return [
+        m.group(0)
+        for m in TYPED_FIGURE.finditer(text)
+        if not (exempt and m.start() > 0 and text[m.start() - 1] == "#" and m.group(0).isdigit())
+    ]
+# HEADINGS ARE A WHITELIST (#265's third and fourth reviews). Two reviews
+# found headings a renderer shows that this linter did not read -- indented,
+# setext, `<h2>`, in a blockquote, in a list item, `## Results ##` -- each
+# putting text a reader sees under "Results" in a laxer section. So in a
+# referenced body a heading is one of exactly two lines: `## <section>` at
+# column 0, the section one of the five, or the first `# ` line before them
+# (the title). Any other line that renders as a heading -- after stripping the
+# blockquote and list prefixes a heading can sit behind -- is refused.
+SECTION_LINE = re.compile(r"## (" + "|".join(SECTIONS) + r")")
+# A tab after `>` or a list marker is a container's separator too (#265's
+# fifth review: `>` TAB `## Results` rendered as a heading), and a leading tab
+# is an indent like spaces (its sixth: a tab-indented `## Results` in a list
+# item, and `>` space TAB `## Results`, rendered as headings). A footnote
+# definition's label is a container too: the text after `[^note]: ` is block
+# content, and `## Results` there renders as a heading (the review at
+# 727489e).
+CONTAINER_PREFIX = re.compile(
+    r"^(?: {0,3}\[\^[^\]\n]+\]:[ \t]*| {0,3}>[ \t]?| {0,3}(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)| {1,3}|\t)"
+)
+ATX = re.compile(r"#{1,6}(?:[ \t]|$)")
+SETEXT_UNDERLINE = re.compile(r"(?:=+|-+)[ \t]*$")
+HTML_HEADING = re.compile(r"<h[1-6](?:[\s>/]|$)", re.IGNORECASE)
+# A backslash before ASCII punctuation, which CommonMark renders as the
+# character alone: `\{\{` shows `{{` (#265's fourth review).
+BACKSLASH_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
+
+
+def visible(text: str) -> str:
+    """Text as a reader sees it, line for line: backslash escapes dropped,
+    HTML entities decoded, format characters (zero-width and the like)
+    removed. What the figure lint and the brace check read (#265's fourth
+    review: backslash-escaped braces, `&#123;&#123;` and a zero-width space
+    between braces all showed `{{`)."""
+    import html
+    import unicodedata
+
+    text = html.unescape(BACKSLASH_ESCAPE.sub(r"\1", text))
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
+def code_spans(line: str) -> list[tuple[int, int]]:
+    """The stretches of `line` inside a backtick code span: from a run of
+    backticks to the next run of the same length, or to the line's end when
+    none closes it -- fail closed, since a span may continue onto the next
+    line."""
+    runs = [(m.start(), m.end()) for m in re.finditer(r"`+", line)]
+    spans: list[tuple[int, int]] = []
+    k = 0
+    while k < len(runs):
+        start, end = runs[k]
+        close = next((j for j in range(k + 1, len(runs)) if runs[j][1] - runs[j][0] == end - start), None)
+        if close is None:
+            spans.append((end, len(line)))
+            break
+        spans.append((end, runs[close][0]))
+        k = close + 1
+    return spans
+
+
+def misread_structure(line: str) -> str | None:
+    """Why `line` would make this linter's reading of comments and fences
+    differ from a renderer's, or None (#265's sixth review). `rendered_headings`
+    blanks comments before it looks for code, so a `<!--` inside a code span
+    opened a comment no renderer shows, hiding a heading the reader sees; and
+    a backtick fence whose info string holds a backtick is no fence to a
+    renderer, which then shows the headings this linter read as code."""
+    for marker in re.finditer(r"<!--|-->", line):
+        if any(start <= marker.start() < end for start, end in code_spans(line)):
+            return f"a comment marker `{marker.group(0)}` inside a code span"
+    opener = CODE_FENCE.match(line)
+    if opener and opener.group(1)[0] == "`" and "`" in line[opener.end():]:
+        return "a backtick fence whose info string holds a backtick, which renders as no fence"
+    return None
+
+
+def unread_heading(lines: list[str], at: int, first_section: int, title_at: int | None) -> bool:
+    """Whether line `at` renders as a heading this linter does not read."""
+    line = lines[at]
+    if SECTION_LINE.fullmatch(line) or at == title_at:
+        return False
+    if HTML_HEADING.search(line):
+        return True
+    rest = line
+    while True:
+        stripped = CONTAINER_PREFIX.sub("", rest, count=1)
+        if stripped == rest:
+            break
+        rest = stripped
+    if ATX.match(rest):
+        return True
+    previous = lines[at - 1] if at > 0 else ""
+    return bool(SETEXT_UNDERLINE.match(rest.strip()) and rest.strip() and previous.strip()
+                and not CONTAINER_PREFIX.sub("", previous).strip() == "")
+# `ns.key.key[0]`, or one of three functions over one: the whole grammar.
+REF_PATH = re.compile(r"(product|front|summary)((?:\.[A-Za-z_][A-Za-z0-9_-]*|\[\d+\])+)")
+REF_CALL = re.compile(r"(count|round|pct)\(\s*([^,()]+?)\s*(?:,\s*(\d+)\s*)?\)")
+# The front-matter digests a reference may name: each is checked against a
+# file here, so a digest a section needs is written as one of these
+# (#63, ruled 2026-10-02).
+FRONT_DIGESTS = (("product_sha256",), ("pre_registration_sha256",))
+REF_STEP = re.compile(r"\.([A-Za-z_][A-Za-z0-9_-]*)|\[(\d+)\]")
+
+
+class Written(str):
+    """A JSON number as it was written, so a rendered figure is the product's
+    own digits and not a float's re-spelling of them."""
 # THE CLAIM'S PROVENANCE, AS FIELDS (#32, ruled on the thread; written into
 # every directory by #245). Each of these four is either present at the top
 # level of the front-matter or named in `absent = { field = "reason" }` --
@@ -378,11 +539,18 @@ def split_front_matter(text: str) -> tuple[str | None, str, str | None, str | No
 
 def body_sections(body: str) -> list[str]:
     """Level-2 headings in document order, ignoring fenced code blocks."""
+    return list(rendered_headings(body).values())
+
+
+def rendered_headings(body: str) -> dict[int, str]:
+    """The level-2 headings a renderer shows, by line index: none inside a
+    fenced code block or an HTML comment."""
     # A heading inside an HTML comment is not a heading: it renders as nothing.
-    body = HTML_COMMENT.sub("", body)
-    headings: list[str] = []
+    # The comment is blanked to its newlines, so line indices still count.
+    body = HTML_COMMENT.sub(lambda m: "\n" * m.group(0).count("\n"), body)
+    headings: dict[int, str] = {}
     fence: str | None = None
-    for line in body.split("\n"):
+    for index, line in enumerate(body.split("\n")):
         opener = CODE_FENCE.match(line)
         if fence is None:
             if opener:
@@ -390,7 +558,7 @@ def body_sections(body: str) -> list[str]:
             else:
                 match = HEADING.match(line)
                 if match:
-                    headings.append(match.group(1))
+                    headings[index] = match.group(1)
             continue
         # Inside a fence: only a run of the same character, at least as long as
         # the opener, with nothing but whitespace after it, closes the block.
@@ -433,6 +601,7 @@ def check_run(directory: pathlib.Path) -> list[str]:
     # --- run.jsonl: diet's verdict, relayed ------------------------------
     verdict = record_verdict(directory / "run.jsonl")
     summary: dict | None = None
+    written_summary: dict | None = None
     recorded_regime: dict | None = None
     claims: list[dict] = []
     recorded_source: dict | None = None
@@ -453,6 +622,10 @@ def check_run(directory: pathlib.Path) -> list[str]:
             fail("results.summary-record-count", f"run.jsonl holds {len(summaries)} summary rows, expected exactly 1")
         else:
             summary = summaries[0]
+            written_summary = next(
+                written for line in value.get("canonical", "").splitlines()
+                if line.strip() and (written := as_written(line)).get("record") == "summary"
+            )
         recorded_regime = value.get("regime")
         claims = [r for r in rows if r.get("record") == "claim"]
         recorded_source = value.get("source")
@@ -815,11 +988,24 @@ def check_run(directory: pathlib.Path) -> list[str]:
             f"README.md sections are {headings!r}, expected exactly {SECTIONS!r} in order"
         )
 
+    # --- figures (#63) ---------------------------------------------------
+    figures = figures_declared(name, front, fail)
+    rendered = None
+    if figures == "referenced":
+        rendered = lint_figures(directory, front, body, written_summary, fail)
+    if RENDERED is not None and rendered is not None:
+        RENDERED[directory.resolve()] = rendered
+    if FIGURES_SEEN is not None and figures in FIGURES and name != TEMPLATE_DIR:
+        FIGURES_SEEN[figures] += 1
+
     # --- the claim's provenance fields (#32) ---------------------------------
     post_hoc = check_claim_fields(directory, front, fail) if name != TEMPLATE_DIR else None
 
     if LEDGER is not None and not failures and name != TEMPLATE_DIR:
         row = ledger_row(directory, front, claims)
+        row["figures"] = figures
+        if rendered is not None:
+            row["report"] = rendered
         row["provenance"] = {
             **{key: front[key] for key in (*CLAIM_FIELDS, *CLAIM_PROVENANCE) if key in front},
             "absent": front.get("absent", {}),
@@ -829,6 +1015,289 @@ def check_run(directory: pathlib.Path) -> list[str]:
         }
         LEDGER.append(row)
     return failures
+
+
+def as_written(text: str) -> dict:
+    """JSON with every number kept as the digits it was written in."""
+    return json.loads(text, parse_float=Written, parse_int=Written)
+
+
+def figures_declared(name: str, front: dict, fail: Callable[[str, str], None]) -> str | None:
+    """The directory's `figures` word, or None when it declares none it may."""
+    dated = DIR_NAME.fullmatch(name)
+    after = bool(dated) and dated.group(1) > FIGURES_LANDED
+    word = front.get("figures")
+    if word is None:
+        if after:
+            fail(
+                "results.figures-undeclared",
+                f"front-matter declares no `figures`, and a directory dated after "
+                f"{FIGURES_LANDED} must declare `figures = \"referenced\"` (#63)",
+            )
+            return None
+        return "typed"
+    if word not in FIGURES:
+        fail("results.figures-undeclared", f"front-matter `figures` is {word!r}, which is neither {' nor '.join(FIGURES)}")
+        return None
+    if word == "typed" and after:
+        fail(
+            "results.figures-undeclared",
+            f"front-matter `figures` is \"typed\", and a directory dated after "
+            f"{FIGURES_LANDED} must be `referenced` (#63)",
+        )
+        return None
+    return word
+
+
+# What precedes the first level-2 heading -- the title and any introduction
+# -- is linted as a section of its own, like Observation (#265's review: six
+# of the fifteen directories carry figures there).
+PREAMBLE = "preamble"
+
+
+def sections_of(body: str) -> dict[str, str]:
+    """Each level-2 section's text, and the preamble before the first, read
+    as written: nothing in the body is exempt (#63, ruled 2026-10-02).
+
+    Where a section ends is read twice -- every `## ` line a heading, and only
+    the headings a renderer shows (`rendered_headings`) -- and each line is
+    linted under the stricter of the two. A `## Notes` inside a fenced block
+    in Conclusion therefore cannot carry what follows out of Conclusion, and a
+    misread fence cannot carry Conclusion's text into a laxer section."""
+    shown = rendered_headings(body)
+    found: dict[str, list[str]] = {PREAMBLE: []}
+    blind = aware = PREAMBLE
+    for index, line in enumerate(body.split("\n")):
+        heading = HEADING.match(line)
+        if heading:
+            blind = heading.group(1)
+        if index in shown:
+            aware = shown[index]
+        # The heading line is linted too: under the other reading it may be
+        # text a renderer shows inside the section it seems to open.
+        current = aware if aware in FIGURES_NEVER_TYPED else blind
+        found.setdefault(current, []).append(line)
+    return {name: "\n".join(lines) for name, lines in found.items()}
+
+
+def the_product(directory: pathlib.Path, front: dict) -> tuple[dict | None, str | None]:
+    """The one file here whose SHA-256 is `product_sha256`, read as JSON with
+    its numbers as written -- or why there is none."""
+    sha = front.get("product_sha256")
+    if not isinstance(sha, str):
+        return None, "front-matter carries no `product_sha256`"
+    matches = sorted(p for p in directory.iterdir() if p.is_file() and digest_of(p) == sha)
+    if len(matches) != 1:
+        return None, (
+            f"{len(matches)} file(s) here hash to `product_sha256` {sha}; a reference "
+            f"resolves against exactly one product"
+        )
+    try:
+        product = as_written(matches[0].read_text(encoding="utf-8"))
+    except (ValueError, OSError) as err:
+        return None, f"the product, `{matches[0].name}`, is not JSON: {err}"
+    return (product, None) if isinstance(product, dict) else (None, f"the product, `{matches[0].name}`, is not a JSON object")
+
+
+def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None, str | None]:
+    """One `{{...}}` reference rendered, or why it cannot be."""
+    text = text.strip()
+    call = REF_CALL.fullmatch(text)
+    target, function, places = (call.group(2), call.group(1), call.group(3)) if call else (text, None, None)
+    path = REF_PATH.fullmatch(target)
+    if not path:
+        return None, f"`{{{{{text}}}}}` is not a reference: want product., front. or summary. and a path, or count(), round() or pct() of one"
+    scope = scopes.get(path.group(1))
+    if isinstance(scope, str):
+        return None, f"`{{{{{text}}}}}`: {scope}"
+    steps: tuple[object, ...] = tuple(
+        int(index) if index else key for key, index in REF_STEP.findall(path.group(2))
+    )
+    found, value = resolve(scope, steps)
+    if not found:
+        return None, f"`{{{{{text}}}}}` names `{target}`, which {path.group(1)} does not carry"
+    # `front` is a date, or one of the three `[regime]` keys checked against
+    # the record's start row -- nothing else, counted or not (#265's reviews:
+    # a front string, and then any other `[regime]` key, which only the
+    # author's own regimen.toml backs, carried a figure past the lint).
+    # A date only: `datetime.datetime` is a `datetime.date` too, and its time
+    # part is digits an author chose (#265's third review).
+    if path.group(1) == "front" and type(value) is not datetime.date \
+            and not (len(steps) >= 2 and steps[0] == "regime" and steps[1] in REQUIRED_REGIME_KEYS) \
+            and steps not in FRONT_DIGESTS:
+        return None, (
+            f"`{{{{{text}}}}}` names `{target}`; a front-matter reference is a date, "
+            f"`regime.arm`, `regime.substrates` or `regime.dogma_version`, or a digest this "
+            f"linter checks (`product_sha256`, `pre_registration_sha256`) -- the values "
+            f"something backs; reference the summary row or the product"
+        )
+    if function == "count":
+        if isinstance(value, (list, dict)):
+            return str(len(value)), None
+        return None, f"`{{{{{text}}}}}` counts `{target}`, which is not a list or a table"
+    # `front` is a date or a `[regime]` value, nothing else (#265's review): a
+    # front-matter string is checked against nothing, so a figure in one is a
+    # typed figure in a costume, and a front-matter number re-spells through
+    # TOML -- `summary` holds the same number as written.
+    if path.group(1) == "front" and type(value) is datetime.date:
+        return value.isoformat(), None
+    if isinstance(value, bool):
+        shown = "true" if value else "false"
+    elif isinstance(value, (Written, str, int, float, datetime.date)):
+        shown = str(value)
+    else:
+        return None, f"`{{{{{text}}}}}` names `{target}`, which is not one value"
+    if function in ("round", "pct"):
+        if not isinstance(value, Written) or int(places or 0) > 12:
+            return None, f"`{{{{{text}}}}}` rounds `{target}`, which is not a number the product or summary wrote, or asks for more than 12 places"
+        try:
+            number = decimal.Decimal(shown)
+            if function == "pct":
+                number *= 100
+            number = number.quantize(
+                decimal.Decimal(1).scaleb(-int(places or 0)),
+                rounding=decimal.ROUND_HALF_EVEN,
+                context=decimal.Context(prec=60),
+            )
+        except decimal.InvalidOperation:
+            return None, f"`{{{{{text}}}}}` rounds `{target}`, which does not round to that many places"
+        shown = f"{number}%" if function == "pct" else str(number)
+    return shown, None
+
+
+def lint_figures(
+    directory: pathlib.Path, front: dict, body: str, summary: dict | None, fail: Callable[[str, str], None]
+) -> str | None:
+    """A `referenced` directory's body: no typed figure where none may stand,
+    every reference resolved. Returns the rendered body, or None if it fails."""
+    # NOTHING IS EXEMPT (#63, ruled 2026-10-02, withdrawing the code
+    # exemption on #265's measurement). A stdlib reader is not a CommonMark
+    # parser, and three reviews found a finder that saw code, a link target or
+    # a comment where a renderer shows prose -- each a figure the lint could
+    # not see and a reference the resolver skipped. An exemption that cannot
+    # fail closed is a hole with a name, so the body is read as written: a
+    # figure in a code sample, a URL or a comment in Results or Conclusion is
+    # refused like any other, and every `{{...}}` is resolved.
+    clean = True
+    lines = body.split("\n")
+    first_section = next((i for i, line in enumerate(lines) if HEADING.match(line)), len(lines))
+    title_at = next((i for i, line in enumerate(lines[:first_section]) if re.match(r"# \S", line)), None)
+    for at, line in enumerate(lines):
+        if unread_heading(lines, at, first_section, title_at):
+            clean = False
+            fail(
+                "results.heading-unread",
+                f"line {at + 1} of the body, {line[:60]!r}, is a heading a renderer shows "
+                f"and this linter does not read as a section; a referenced body's headings are "
+                f"`## <section>` at column 0, one of {', '.join(SECTIONS)}, and its title the "
+                f"first `# ` line before them (#63)",
+            )
+    for at, line in enumerate(lines):
+        why = misread_structure(line)
+        if why:
+            clean = False
+            fail(
+                "results.heading-unread",
+                f"line {at + 1} of the body, {line[:60]!r}, carries {why}; this linter cannot read "
+                f"which headings a renderer shows past it, so a referenced body may not (#63)",
+            )
+    # EVERY SECTION LINE IS ONE A RENDERER SHOWS (#265's review at e3f12a8):
+    # `rendered_headings` blanks `<!--` to the next `-->` across blocks and
+    # opens a fence inside an HTML block, where no renderer does -- an
+    # unclosed `<!--` in a paragraph, in an attribute or a link destination,
+    # or a fence in a `<div>`, hid a `## Results` GitHub shows. The whitelist
+    # refuses every other line that renders as a heading, so once each
+    # `## <section>` line must be one this linter reads as shown, the two
+    # readings coincide.
+    shown_at = rendered_headings(body)
+    for at, line in enumerate(lines):
+        if SECTION_LINE.fullmatch(line) and at not in shown_at:
+            clean = False
+            fail(
+                "results.heading-unread",
+                f"line {at + 1} of the body, {line!r}, is a section heading this linter reads as "
+                f"hidden in a comment or a fence; a renderer may show it, so a referenced body's "
+                f"section headings stand outside both (#63)",
+            )
+    # SECTIONS FROM THE RAW LINES (#265's fifth review): where a section
+    # starts is read from the lines the whitelist and the renderer read, never
+    # from decoded text -- an escaped or comment-hidden `## Observation` in
+    # Results is no heading to a reader, so it must not move what follows into
+    # a laxer section. `visible()` is applied to each section's text, for the
+    # figure lint only.
+    for section, raw_text in sections_of(body).items():
+        # References come out at the raw positions the resolver reads, THEN
+        # the text is decoded (#265's sixth review): decoding first turned
+        # `\{\{` or `&#123;&#123;` in a comment into `{{`, and the figure
+        # between two such spans was stripped as a reference the resolver
+        # never saw.
+        text = visible(REFERENCE.sub(" ", raw_text))
+        uncited = UNCITED.findall(text)
+        if uncited and section in FIGURES_NEVER_TYPED:
+            clean = False
+            fail(
+                "results.figure-typed",
+                f"the {section} section declares a figure `{uncited[0]}`; {section} carries "
+                f"no typed figure, cited or not -- reference the field instead (#63)",
+            )
+        bare = UNCITED.sub(" ", text)
+        typed = typed_figures(bare, section)
+        if typed:
+            clean = False
+            where = "may carry one only inside `[uncited: <reason>]`" if section not in FIGURES_NEVER_TYPED else "carries none"
+            fail(
+                "results.figure-typed",
+                f"the {section} section types the figure(s) {', '.join(repr(t) for t in typed[:5])}; "
+                f"{section} {where} -- reference the product, front-matter or summary field (#63)",
+            )
+
+    references = list(REFERENCE.finditer(body))
+    needs_product = any("product." in m.group(1) for m in references)
+    product, why = the_product(directory, front) if needs_product else (None, "no reference names the product")
+    scopes: dict[str, object] = {
+        "product": product if product is not None else why,
+        "front": front,
+        "summary": summary if summary is not None else "the record's summary row could not be read",
+    }
+    rendered: list[str] = []
+    at = 0
+    unreadable: set[str] = set()
+    for match in references:
+        shown, problem = resolve_reference(match.group(1), scopes)
+        if problem:
+            clean = False
+            # A scope that cannot be read is said once, not once per figure.
+            scope = next((n for n, v in scopes.items() if isinstance(v, str) and problem.endswith(v)), None)
+            if scope is None or scope not in unreadable:
+                fail("results.reference-unresolved", problem)
+            if scope is not None:
+                unreadable.add(scope)
+            continue
+        rendered.append(body[at : match.start()])
+        rendered.append(shown or "")
+        at = match.end()
+    rendered.append(body[at:])
+    # EVERY `{{` IS A REFERENCE OR AN ERROR (#265's third review): a brace
+    # pair this grammar did not match -- `{{product.x}` -- was neither
+    # resolved nor refused, and rendered as written.
+    # Braces as a reader sees them: escapes, entities and format characters
+    # dropped (visible), and comments, tags and emphasis markers removed, which
+    # GitHub never shows -- `{<!-- -->{x}<!-- -->}` and `{*{*x*}*}` read `{{x}}`
+    # (#265's fifth review). Strikethrough's `~` too, and a link down to its
+    # text: `{~{x}~}` and `{[{](#a)x}[}](#a)}` read `{{x}}` (its sixth).
+    seen = visible("".join(rendered) if clean else REFERENCE.sub(" ", body))
+    seen = re.sub(r"!?\[([^\]\n]*)\]\([^)\n]*\)", r"\1", seen)
+    left = re.sub(r"<!--.*?-->|<[^>\n]*>|[*_`~]", "", seen, flags=re.DOTALL)
+    for stray in re.finditer(r"\{\{|\}\}", left):
+        clean = False
+        fail(
+            "results.reference-unresolved",
+            f"`{left[max(0, stray.start() - 20) : stray.end() + 20].strip()}` carries a "
+            f"`{stray.group(0)}` that is no reference; every `{{{{...}}}}` resolves, and nothing else "
+            f"in a referenced body is written with double braces",
+        )
+        break
+    return "".join(rendered) if clean else None
 
 
 def sibling_fronts(directory: pathlib.Path) -> dict[str, tuple[object, object]]:
@@ -1032,6 +1501,13 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
 # None when no ledger was asked for.
 LEDGER: list[dict] | None = None
 
+# A referenced directory's rendered body, for `--render` (#63).
+RENDERED: dict[pathlib.Path, str] | None = None
+
+# How many directories declared each `figures` word, printed so a reader of
+# the gate sees how many are still typed (#63).
+FIGURES_SEEN: dict[str, int] | None = None
+
 # The rule a claim was decided by: a pre-registered decision rule it consumed,
 # by any name the directories have used (`decision-rule.toml`,
 # `decision-rule-v2.toml`). Matched by name, since the claim row names its
@@ -1203,6 +1679,12 @@ def main(argv: list[str]) -> int:
         help="write the results ledger here if every directory passes (#32 I2)",
     )
     parser.add_argument(
+        "--render",
+        type=pathlib.Path,
+        metavar="DIR",
+        help="lint one directory and print its report with every figure rendered (#63)",
+    )
+    parser.add_argument(
         "directories",
         nargs="*",
         type=pathlib.Path,
@@ -1211,12 +1693,18 @@ def main(argv: list[str]) -> int:
     )
     args = parser.parse_args(argv)
 
+    if args.render is not None:
+        if args.root or args.directories or args.ledger is not None:
+            parser.error("--render takes one directory and nothing else")
+        args.directories = [args.render]
     if not args.root and not args.directories:
         parser.error("nothing to lint: pass --root DIR or one or more run directories")
 
-    global DIET, LEDGER
+    global DIET, LEDGER, RENDERED, FIGURES_SEEN
     if args.ledger is not None:
         LEDGER = []
+    RENDERED = {}
+    FIGURES_SEEN = dict.fromkeys(FIGURES, 0)
     resolved = resolve_diet()
     if resolved is None:
         print(
@@ -1226,7 +1714,11 @@ def main(argv: list[str]) -> int:
         )
         return 2
     DIET, sha = resolved
-    print(f"check-results: record verdicts from {DIET} sha256={sha}")
+    # To stderr under --render, whose stdout is the report and nothing else.
+    print(
+        f"check-results: record verdicts from {DIET} sha256={sha}",
+        file=sys.stderr if args.render is not None else sys.stdout,
+    )
 
     targets: list[pathlib.Path] = []
     failures: list[str] = []
@@ -1274,7 +1766,17 @@ def main(argv: list[str]) -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"check-results: {checked} directory(ies) pass")
+    if args.render is not None:
+        rendered = RENDERED.get(args.render.resolve())
+        if rendered is None:
+            print(f"check-results: {args.render} declares `figures = \"typed\"`; there is nothing to render", file=sys.stderr)
+            return 1
+        sys.stdout.write(rendered)
+        return 0
+    print(
+        f"check-results: {checked} directory(ies) pass; figures referenced in "
+        f"{FIGURES_SEEN['referenced']}, still typed in {FIGURES_SEEN['typed']} (#63)"
+    )
     if args.ledger is not None:
         args.ledger.write_text(json.dumps({"version": 1, "directories": LEDGER}, indent=1) + "\n", encoding="utf-8")
         print(f"check-results: the ledger, {len(LEDGER)} directory(ies), to {args.ledger}")

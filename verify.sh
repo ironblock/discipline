@@ -4255,6 +4255,525 @@ readme.write_text(source.replace(row, "", 1), encoding="utf-8")
 EOF
 }
 
+# FIGURES ARE REFERENCES (#63). Each case copies the one synthetic
+# `referenced` directory into results/ and breaks one thing, so the fixture's
+# text has one source and each case is the fixture plus its fault.
+inject_results_figure_typed_in_conclusion() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, 0.142 of it.", 1), encoding="utf-8")
+EOF
+}
+
+# A figure in a fenced block in Conclusion is refused like one in prose: code
+# is not exempt (#63, ruled 2026-10-02). The block opens with a `## Notes`
+# line, so the case also proves that a heading a renderer does not show cannot
+# carry the figure out of Conclusion into a section that would allow it.
+inject_results_figure_in_conclusion_fence() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+fence = "the product's own.\n\n```text\n## Notes\n[uncited: a sample] the rate was 0.271\n```\n"
+path.write_text(source.replace(old, fence, 1), encoding="utf-8")
+EOF
+}
+
+# A heading a renderer shows that this linter does not read as a section
+# (#265's third review): an indented ` ## Results` puts a figure a reader
+# sees under Results into Test, where a marker would let it stand.
+inject_results_figure_under_unread_heading() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "## Results\n"
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, " ## Results\n\nThe rate was [uncited: a sample, 0.241].\n\n" + old, 1), encoding="utf-8")
+EOF
+}
+
+# A reference whose closer is one brace short (#265's third review): matched
+# by no reference, so neither resolved nor refused, and rendered as written.
+inject_results_reference_unclosed() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {{product.decode_rate}.", 1), encoding="utf-8")
+EOF
+}
+
+# A leading-dot decimal in Conclusion (#265's third review): `.241` is a figure.
+inject_results_figure_leading_dot() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, at .241.", 1), encoding="utf-8")
+EOF
+}
+
+# A marker built from HTML comments (#265's third review): a reader sees the bare figure.
+inject_results_marker_split_by_comments() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Observation\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '## Observation\n\nAcross <!--[uncited: a sample-->7<!--]--> directories.\n', 1), encoding="utf-8")
+EOF
+}
+
+# A setext heading (#265's third review): `Results` over dashes renders as a heading.
+inject_results_setext_heading() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'Results\n-------\n\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A heading in a blockquote (#265's fourth review): GitHub renders it as one.
+inject_results_heading_in_blockquote() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '> ## Results\n>\n> The rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# Backslash-escaped braces (#265's fourth review): a reader sees `{{` and an unresolved reference.
+inject_results_braces_escaped() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, \\{\\{product.decode_rate\\}\\}.", 1), encoding="utf-8")
+EOF
+}
+
+# An `<h2` at a line's end, closed on the next (#265's fourth review): an HTML heading.
+inject_results_h2_open_at_line_end() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '<h2\n>Results</h2>\n\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A second `# ` line (#265's fourth review): only the first is the title.
+inject_results_second_title() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Observation\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '# Results\n\nThe rate was [uncited: a sample, 0.241].\n\n## Observation\n', 1), encoding="utf-8")
+EOF
+}
+
+# A `## ` section outside the five (#265's fourth review): the whitelist.
+inject_results_unlisted_section() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '## Notes\n\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# An escaped `## Observation` in Results (#265's fifth review): a heading only to decoded text, so sections are read from the raw lines.
+inject_results_heading_only_when_decoded() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Conclusion\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '\\## Observation\n\nThe decode rate was [uncited: see the product, 0.241].\n\n## Conclusion\n', 1), encoding="utf-8")
+EOF
+}
+
+# A heading after `>` and a tab (#265's fifth review): a container's separator.
+inject_results_heading_behind_a_tab() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '>\t## Results\n>\n> The rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A figure between escaped braces in comments (#265's sixth review): decoded first, the braces read as a reference and hid it.
+inject_results_figure_hidden_by_escaped_braces() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, at a rate of <!-- \\{\\{ -->0.241<!-- \\}\\} -->.", 1), encoding="utf-8")
+EOF
+}
+
+# A tab-indented heading in a list item (#265's sixth review): a leading tab is an indent.
+inject_results_heading_tab_indented() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '- a note\n\n\t## Results\n\n\tThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A heading after a list marker and a tab (#265's sixth review, M1).
+inject_results_heading_after_list_marker_tab() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '-\t## Results\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# Braces split by emphasis markers (#265's sixth review, M1): a reader sees `{{`.
+inject_results_braces_split_by_emphasis() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {*{*product.decode_rate*}*}.", 1), encoding="utf-8")
+EOF
+}
+
+# Braces split by strikethrough (#265's sixth review, M2): a reader sees `{{`.
+inject_results_braces_split_by_strikethrough() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {~{product.decode_rate}~}.", 1), encoding="utf-8")
+EOF
+}
+
+# Braces split by link syntax (#265's sixth review, M2): a reader sees the link text, `{{`.
+inject_results_braces_split_by_link() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {[{](#x)product.decode_rate}[}](#x)}.", 1), encoding="utf-8")
+EOF
+}
+
+# A comment marker inside a code span (#265's sixth review): no comment to a renderer, so the heading it hid shows.
+inject_results_comment_marker_in_code_span() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'The run used the `<!--` marker.\n\n## Results\n\n<!--\n## Test\n-->\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A backtick fence whose info string holds a backtick (#265's sixth review): no fence to a renderer.
+inject_results_backtick_fence_info_backtick() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '```js`x\n## Results\n<!--\n## Test\n-->\nThe rate was [uncited: a sample, 0.241].\n<div>\n```\n</div>\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A `## Results` hidden by a `<!--` no renderer opens (#265's review at e3f12a8): read as a comment here, shown by GitHub.
+inject_results_section_hidden_by_unclosed_comment() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'The run used the <!-- marker.\n\n## Results\n\n<!--\n## Test\n-->\nThe rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# A `## Results` hidden by a fence opened inside an HTML block (#265's review at e3f12a8): no fence to a renderer.
+inject_results_section_hidden_by_fence_in_html() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '<div>\n```\n</div>\n\n## Results\n\n<!--\n## Test\n-->\nThe rate was [uncited: a sample, 0.241].\n\n<div>\n```\n</div>\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# Integers after a hash in Conclusion (ruled (b) on #265): an issue number's
+# spelling exempts nothing in Results or Conclusion.
+inject_results_hash_integers_in_conclusion() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, #142 of every #1000 steps.", 1), encoding="utf-8")
+EOF
+}
+
+# A `## Results` after a footnote label (#265's review at 727489e): block content, so a heading.
+inject_results_heading_in_footnote() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '1 file of product].\n\n## Results\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '1 file of product].[^note]\n\n[^note]: ## Results\n    The rate was [uncited: a sample, 0.241].\n\n## Results\n', 1), encoding="utf-8")
+EOF
+}
+
+# Integers after a hash in Results (ruled (b) on #265; the review at 727489e asked for this section's seed).
+inject_results_hash_integers_in_results() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '## Results\n\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '## Results\n\nOf every #1000 steps, #142 decoded.\n\n', 1), encoding="utf-8")
+EOF
+}
+
+# Braces split by an HTML comment (#265's fifth review): a reader sees `{{`.
+inject_results_braces_split_by_markup() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, {<!-- -->{product.decode_rate}<!-- -->}.", 1), encoding="utf-8")
+EOF
+}
+
+# A figure after `#` (#265's fifth review): only a bare integer is an issue number.
+inject_results_figure_after_hash() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own, #0.142 of it.", 1), encoding="utf-8")
+EOF
+}
+
+inject_results_figure_typed_in_test() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = 'nothing was fired\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, 'nothing was fired 3 times\n', 1), encoding="utf-8")
+EOF
+}
+
+inject_results_figure_uncited_in_conclusion() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = "the product's own."
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, "the product's own [uncited: a guess, 3].", 1), encoding="utf-8")
+EOF
+}
+
+inject_results_reference_unresolved() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+old = '{{product.of_steps}}'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '{{product.of_stepz}}', 1), encoding="utf-8")
+EOF
+}
+
+# The value a headline figure references, altered: the product no longer
+# hashes to `product_sha256`, so no figure can be rendered from it.
+inject_results_referenced_product_altered() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/report.json")
+source = path.read_text(encoding="utf-8")
+old = '0.142'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '0.241', 1), encoding="utf-8")
+EOF
+}
+
+inject_results_figures_undeclared() {
+  # Copied under a far-future date, so the directory is dated past
+  # FIGURES_LANDED however often that constant moves (ruled (c), #265).
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/2099-12-31-figures-undeclared
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2099-12-31-figures-undeclared/README.md")
+source = path.read_text(encoding="utf-8")
+old = 'figures = "referenced"\n'
+if source.count(old) != 1:
+    raise SystemExit(f"the anchor appears {source.count(old)} times")
+path.write_text(source.replace(old, '', 1), encoding="utf-8")
+EOF
+}
+
 # THE CLAIM'S PROVENANCE FIELDS (#32): each broken once, in one directory.
 # A field neither given nor declared absent.
 inject_results_claim_field_undeclared() {
@@ -9419,6 +9938,74 @@ selftest() {
     '_template'
   seeded_case "a consumed digest gone stale"          results  inject_results_consumed_digest_stale \
     'but the committed file hashes to'
+  seeded_case "a figure typed in Conclusion"          results  inject_results_figure_typed_in_conclusion \
+    "the Conclusion section types the figure\\(s\\) '0\\.142'.*\\[results\\.figure-typed\\]"
+  seeded_case "a figure in a fence in Conclusion"     results  inject_results_figure_in_conclusion_fence \
+    "the Conclusion section types the figure\\(s\\) '0\\.271'.*\\[results\\.figure-typed\\]"
+  seeded_case "a figure under a heading not read"     results  inject_results_figure_under_unread_heading \
+    "' ## Results', is a heading a renderer shows and this linter does not read as a section.*\\[results\\.heading-unread\\]"
+  seeded_case "a reference one brace short"           results  inject_results_reference_unclosed \
+    "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+  seeded_case "a leading-dot figure in Conclusion" results inject_results_figure_leading_dot \
+    "the Conclusion section types the figure\(s\) '241'.*\[results\.figure-typed\]"
+  seeded_case "a marker split by comments" results inject_results_marker_split_by_comments \
+    "the Observation section types the figure\(s\) '7'.*\[results\.figure-typed\]"
+  seeded_case "a setext heading" results inject_results_setext_heading \
+    "'-------', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a heading in a blockquote" results inject_results_heading_in_blockquote \
+    "'> ## Results', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "braces escaped past the check" results inject_results_braces_escaped \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "an h2 opened at a line's end" results inject_results_h2_open_at_line_end \
+    "'<h2', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a second title" results inject_results_second_title \
+    "'# Results', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a section outside the five" results inject_results_unlisted_section \
+    "'## Notes', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a heading only when decoded" results inject_results_heading_only_when_decoded \
+    "the Results section declares a figure .\[uncited: see the product, 0\.241\]..*\[results\.figure-typed\]"
+  seeded_case "a heading behind a tab" results inject_results_heading_behind_a_tab \
+    ">.t## Results., is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "braces split by markup" results inject_results_braces_split_by_markup \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "a figure between escaped braces" results inject_results_figure_hidden_by_escaped_braces \
+    "the Conclusion section types the figure\(s\) '0\.241'.*\[results\.figure-typed\]"
+  seeded_case "a tab-indented heading in a list item" results inject_results_heading_tab_indented \
+    "'.t## Results', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a heading after a list marker and a tab" results inject_results_heading_after_list_marker_tab \
+    "'-.t## Results', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "braces split by emphasis" results inject_results_braces_split_by_emphasis \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "braces split by strikethrough" results inject_results_braces_split_by_strikethrough \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "braces split by link syntax" results inject_results_braces_split_by_link \
+    "carries a .\{\{. that is no reference.*\[results\.reference-unresolved\]"
+  seeded_case "a comment marker in a code span" results inject_results_comment_marker_in_code_span \
+    "carries a comment marker .<!--. inside a code span.*\[results\.heading-unread\]"
+  seeded_case "a fence whose info string holds a backtick" results inject_results_backtick_fence_info_backtick \
+    "carries a backtick fence whose info string holds a backtick.*\[results\.heading-unread\]"
+  seeded_case "a heading in a footnote definition" results inject_results_heading_in_footnote \
+    "'\[\^note\]: ## Results', is a heading a renderer shows.*\[results\.heading-unread\]"
+  seeded_case "a section hidden by an unclosed comment" results inject_results_section_hidden_by_unclosed_comment \
+    "'## Results', is a section heading this linter reads as hidden in a comment or a fence.*\[results\.heading-unread\]"
+  seeded_case "a section hidden by a fence in an HTML block" results inject_results_section_hidden_by_fence_in_html \
+    "'## Results', is a section heading this linter reads as hidden in a comment or a fence.*\[results\.heading-unread\]"
+  seeded_case "a figure after a hash" results inject_results_figure_after_hash \
+    "the Conclusion section types the figure\(s\) '0\.142'.*\[results\.figure-typed\]"
+  seeded_case "integers after a hash in Conclusion" results inject_results_hash_integers_in_conclusion \
+    "the Conclusion section types the figure\(s\) '142', '1000'.*\[results\.figure-typed\]"
+  seeded_case "integers after a hash in Results" results inject_results_hash_integers_in_results \
+    "the Results section types the figure\(s\) '1000', '142'.*\[results\.figure-typed\]"
+  seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \
+    "the Test section types the figure\\(s\\) '3'.*\\[results\\.figure-typed\\]"
+  seeded_case "an uncited figure in Conclusion"       results  inject_results_figure_uncited_in_conclusion \
+    'the Conclusion section declares a figure .*\[results\.figure-typed\]'
+  seeded_case "a reference to a field not there"      results  inject_results_reference_unresolved \
+    'names .product\.of_stepz., which product does not carry.*\[results\.reference-unresolved\]'
+  seeded_case "a referenced product value altered"    results  inject_results_referenced_product_altered \
+    '0 file\(s\) here hash to .product_sha256.*\[results\.reference-unresolved\]'
+  seeded_case "a new directory declaring no figures"  results  inject_results_figures_undeclared \
+    'declares no .figures., and a directory dated after.*\[results\.figures-undeclared\]'
   seeded_case "a claim field neither given nor absent" results inject_results_claim_field_undeclared \
     'neither gives .claim_issue. nor declares it in .absent.*\[results\.claim-field-undeclared\]'
   seeded_case "one record in two directories"       results inject_results_product_shared \
@@ -10235,6 +10822,18 @@ prove_selftest_mechanics() {
   local relay; scratch; relay="$SCRATCH"
   cp -r "${ROOT}/results/_template" "${relay}/2026-01-30-no-substrate"
   strip_substrates "${relay}/2026-01-30-no-substrate/run.jsonl"
+  # FIGURES ARE REFERENCES (#63): the synthetic `referenced` directory passes,
+  # and `--render` prints its figures from the data -- `pct()` of the
+  # product's 0.142 is 14.2% -- with nothing else on stdout. And the template,
+  # which every new directory is copied from, passes as `referenced`.
+  expect_exit "a referenced report passes and renders its figures from the data" 0 \
+    bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
+      && python3 scripts/check-results.py tests/fixtures/results-referenced/2026-10-03-figures-referenced \
+      && out=\$(python3 scripts/check-results.py --render tests/fixtures/results-referenced/2026-10-03-figures-referenced 2>/dev/null) \
+      && grep -qF '14.2% at one place' <<<\"\$out\" && ! grep -q '{{' <<<\"\$out\""
+  expect_exit "and the template passes as referenced" 0 \
+    bash -c "cd '${ROOT}' && python3 scripts/check-results.py results/_template"
+
   # A copy of the template is a claim directory, so it declares its four
   # provenance fields (#32): absent here, since the record refusal is the one
   # failure this case reads.

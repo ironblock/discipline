@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 170
+mechanics_assertions = 172
 unseedable_guards = 2
 migrated = 0
 
@@ -1705,6 +1705,24 @@ legacy_signature = ""
 migrated = false
 
 [[fault]]
+id = "mech.a-referenced-report-passes-and-renders-its-figures-from-the-data"
+kind = "mechanics"
+check = "results"
+label = "a referenced report passes and renders its figures from the data"
+failure_class = "results.clean"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
+id = "mech.and-the-template-passes-as-referenced"
+kind = "mechanics"
+check = "results"
+label = "and the template passes as referenced"
+failure_class = "results.clean"
+legacy_signature = ""
+migrated = false
+
+[[fault]]
 id = "mech.post-hoc-is-derived-from-the-two-times-both-ways"
 kind = "mechanics"
 check = "results"
@@ -3154,6 +3172,312 @@ check = "results"
 label = "a consumed digest gone stale"
 failure_class = "results.provenance-unchecked"
 legacy_signature = "but the committed file hashes to"
+migrated = false
+
+[[fault]]
+id = "results.results_figure_typed_in_conclusion"
+kind = "seeded-gate"
+check = "results"
+label = "a figure typed in Conclusion"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '0\\.142'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_figure_under_unread_heading"
+kind = "seeded-gate"
+check = "results"
+label = "a figure under a heading not read"
+failure_class = "results.heading-unread"
+legacy_signature = "' ## Results', is a heading a renderer shows and this linter does not read as a section.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_reference_unclosed"
+kind = "seeded-gate"
+check = "results"
+label = "a reference one brace short"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_figure_leading_dot"
+kind = "seeded-gate"
+check = "results"
+label = "a leading-dot figure in Conclusion"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '241'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_marker_split_by_comments"
+kind = "seeded-gate"
+check = "results"
+label = "a marker split by comments"
+failure_class = "results.figure-typed"
+legacy_signature = "the Observation section types the figure\\(s\\) '7'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_setext_heading"
+kind = "seeded-gate"
+check = "results"
+label = "a setext heading"
+failure_class = "results.heading-unread"
+legacy_signature = "'-------', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_in_blockquote"
+kind = "seeded-gate"
+check = "results"
+label = "a heading in a blockquote"
+failure_class = "results.heading-unread"
+legacy_signature = "'> ## Results', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_braces_escaped"
+kind = "seeded-gate"
+check = "results"
+label = "braces escaped past the check"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_h2_open_at_line_end"
+kind = "seeded-gate"
+check = "results"
+label = "an h2 opened at a line's end"
+failure_class = "results.heading-unread"
+legacy_signature = "'<h2', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_second_title"
+kind = "seeded-gate"
+check = "results"
+label = "a second title"
+failure_class = "results.heading-unread"
+legacy_signature = "'# Results', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_unlisted_section"
+kind = "seeded-gate"
+check = "results"
+label = "a section outside the five"
+failure_class = "results.heading-unread"
+legacy_signature = "'## Notes', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_only_when_decoded"
+kind = "seeded-gate"
+check = "results"
+label = "a heading only when decoded"
+failure_class = "results.figure-typed"
+legacy_signature = "the Results section declares a figure .\\[uncited: see the product, 0\\.241\\]..*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_behind_a_tab"
+kind = "seeded-gate"
+check = "results"
+label = "a heading behind a tab"
+failure_class = "results.heading-unread"
+legacy_signature = ">.t## Results., is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_braces_split_by_markup"
+kind = "seeded-gate"
+check = "results"
+label = "braces split by markup"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_figure_hidden_by_escaped_braces"
+kind = "seeded-gate"
+check = "results"
+label = "a figure between escaped braces"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '0\\.241'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_tab_indented"
+kind = "seeded-gate"
+check = "results"
+label = "a tab-indented heading in a list item"
+failure_class = "results.heading-unread"
+legacy_signature = "'.t## Results', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_after_list_marker_tab"
+kind = "seeded-gate"
+check = "results"
+label = "a heading after a list marker and a tab"
+failure_class = "results.heading-unread"
+legacy_signature = "'-.t## Results', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_braces_split_by_emphasis"
+kind = "seeded-gate"
+check = "results"
+label = "braces split by emphasis"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_braces_split_by_strikethrough"
+kind = "seeded-gate"
+check = "results"
+label = "braces split by strikethrough"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_braces_split_by_link"
+kind = "seeded-gate"
+check = "results"
+label = "braces split by link syntax"
+failure_class = "results.reference-unresolved"
+legacy_signature = "carries a .\\{\\{. that is no reference.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_comment_marker_in_code_span"
+kind = "seeded-gate"
+check = "results"
+label = "a comment marker in a code span"
+failure_class = "results.heading-unread"
+legacy_signature = "carries a comment marker .<!--. inside a code span.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_backtick_fence_info_backtick"
+kind = "seeded-gate"
+check = "results"
+label = "a fence whose info string holds a backtick"
+failure_class = "results.heading-unread"
+legacy_signature = "carries a backtick fence whose info string holds a backtick.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_heading_in_footnote"
+kind = "seeded-gate"
+check = "results"
+label = "a heading in a footnote definition"
+failure_class = "results.heading-unread"
+legacy_signature = "'\\[\\^note\\]: ## Results', is a heading a renderer shows.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_section_hidden_by_unclosed_comment"
+kind = "seeded-gate"
+check = "results"
+label = "a section hidden by an unclosed comment"
+failure_class = "results.heading-unread"
+legacy_signature = "'## Results', is a section heading this linter reads as hidden in a comment or a fence.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_section_hidden_by_fence_in_html"
+kind = "seeded-gate"
+check = "results"
+label = "a section hidden by a fence in an HTML block"
+failure_class = "results.heading-unread"
+legacy_signature = "'## Results', is a section heading this linter reads as hidden in a comment or a fence.*\\[results\\.heading-unread\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_figure_after_hash"
+kind = "seeded-gate"
+check = "results"
+label = "a figure after a hash"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '0\\.142'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_hash_integers_in_conclusion"
+kind = "seeded-gate"
+check = "results"
+label = "integers after a hash in Conclusion"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '142', '1000'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_hash_integers_in_results"
+kind = "seeded-gate"
+check = "results"
+label = "integers after a hash in Results"
+failure_class = "results.figure-typed"
+legacy_signature = "the Results section types the figure\\(s\\) '1000', '142'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_figure_in_conclusion_fence"
+kind = "seeded-gate"
+check = "results"
+label = "a figure in a fence in Conclusion"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section types the figure\\(s\\) '0\\.271'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_figure_typed_in_test"
+kind = "seeded-gate"
+check = "results"
+label = "a figure typed in Test, uncited"
+failure_class = "results.figure-typed"
+legacy_signature = "the Test section types the figure\\(s\\) '3'.*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_figure_uncited_in_conclusion"
+kind = "seeded-gate"
+check = "results"
+label = "an uncited figure in Conclusion"
+failure_class = "results.figure-typed"
+legacy_signature = "the Conclusion section declares a figure .*\\[results\\.figure-typed\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_reference_unresolved"
+kind = "seeded-gate"
+check = "results"
+label = "a reference to a field not there"
+failure_class = "results.reference-unresolved"
+legacy_signature = "names .product\\.of_stepz., which product does not carry.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_referenced_product_altered"
+kind = "seeded-gate"
+check = "results"
+label = "a referenced product value altered"
+failure_class = "results.reference-unresolved"
+legacy_signature = "0 file\\(s\\) here hash to .product_sha256.*\\[results\\.reference-unresolved\\]"
+migrated = false
+
+[[fault]]
+id = "results.results_figures_undeclared"
+kind = "seeded-gate"
+check = "results"
+label = "a new directory declaring no figures"
+failure_class = "results.figures-undeclared"
+legacy_signature = "declares no .figures., and a directory dated after.*\\[results\\.figures-undeclared\\]"
 migrated = false
 
 [[fault]]
