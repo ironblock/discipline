@@ -1073,6 +1073,36 @@ fn a_drive_server_refuses_a_canned_regimen_against_a_live_server() {
         said.contains("b8-e486f80") && said.contains(&diet::drive::canned::build_info()),
         "both values, the registry's literal among them: {said}"
     );
+    assert!(
+        said.contains(diet::drive::engine::CANNED_SERVER_ONLY),
+        "and where a canned substrate is served: {said}"
+    );
+}
+
+#[test]
+fn a_drive_server_refuses_a_canned_regimen_against_a_server_whose_props_has_no_build_info() {
+    // The stand-in's case (#219's dry run): `/props` answers with no
+    // `build_info` at all, and the refusal still says who serves canned.
+    let stub = Stub::serving(vec![Act::Answer("{}".to_owned())]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &dev_loop()]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("no string `build_info`")
+            && said.contains(diet::drive::engine::CANNED_SERVER_ONLY),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_drive_server_refuses_a_registered_model_substrate_without_the_canned_sentence() {
+    let regimen = regimen_registered("accel24-beellama-qwen27b-q4kxl");
+    let stub = Stub::serving(vec![props_saying("b8-e486f80")]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &regimen.0.to_string_lossy()]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        !said.contains(diet::drive::engine::CANNED_SERVER_ONLY),
+        "{said}"
+    );
 }
 
 #[test]
