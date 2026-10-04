@@ -191,6 +191,9 @@ export class CannedTransport implements DriveTransport {
         timings: { prompt_n: 0, cache_n: 0, prompt_ms: 0, predicted_n: 0, predicted_ms: 0 },
       });
     }
+    // Every call the model made leaves one line: one cut off mid-command, `cancelled` (#297, ruled 5973541934).
+    // Placed calls, not played begins: a call's fragment streams with its response, before its `tool.begin` plays.
+    for (const call of this.#placer.openCalls()) this.#emit({ kind: 'tool.end', t: now, id: call, exit: 0, output: '', cancelled: true });
     for (const fork of open.forks) this.#emit({ kind: 'fork.settled', t: now, id: fork, outcome: 'cancelled' });
     if (open.turn !== undefined) this.#emit({ kind: 'turn.settled', t: now, turn: open.turn, reason: 'cancelled' });
     return { ok: true };
@@ -209,15 +212,17 @@ export class CannedTransport implements DriveTransport {
     if (beat.trigger !== trigger) return { ok: false, refused: 'off-script' };
     this.#next += 1;
     const start = this.#now();
-    for (const event of expand(beat, start, ask)) {
+    const events = expand(beat, start, ask);
+    for (const [i, event] of events.entries()) {
+      const ahead = events.slice(i + 1);
       const delay = (event.t - start) / this.#speed;
       if (delay <= 0) {
-        this.#emit(event);
+        this.#emit(event, ahead);
         continue;
       }
       const timer = setTimeout(() => {
         this.#timers.delete(timer);
-        this.#emit(event);
+        this.#emit(event, ahead);
       }, delay);
       this.#timers.add(timer);
     }
@@ -228,7 +233,7 @@ export class CannedTransport implements DriveTransport {
     return Math.round((performance.now() - this.#opened) * this.#speed);
   }
 
-  #emit(event: Unplaced): void {
+  #emit(event: Unplaced, ahead: readonly Unplaced[] = []): void {
     // An admitted command's gap: placed, and logged, before the first line the command pushes.
     if (this.#gap) {
       const gap = this.#gap;
@@ -236,7 +241,7 @@ export class CannedTransport implements DriveTransport {
       this.#push(this.#placer.line({ kind: 'idle.gap', t: event.t, ...gap }));
     }
     this.#played.push(event);
-    for (const line of this.#placer.place(event)) this.#push(line);
+    for (const line of this.#placer.place(event, ahead)) this.#push(line);
   }
 
   #push(line: LogLine): void {

@@ -131,6 +131,8 @@ export interface ToolEnd extends At {
   readonly output: string;
   /** The harness cut the output before the model saw it. */
   readonly truncated?: boolean;
+  /** The turn was cancelled before the call's outcome: its exit and output are not placed. */
+  readonly cancelled?: true;
 }
 
 export interface TurnSettled extends At {

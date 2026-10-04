@@ -406,6 +406,30 @@ check_pages() {
   bash scripts/hygiene.sh --patterns scripts/pages-patterns.tsv --tree pages
 }
 
+# Every session the surface places, read by diet's own log reader (ruled on
+# #300, 5974717646): a placed log is served-shaped, and two readers that
+# never meet drift -- the class that blanked the rehearsal's page (#288).
+# What is read is each log's PROJECTION (exercise/src/drive/projection.ts):
+# the kinds and keys the format does not have yet, declared there, taken
+# out. Run inside check_exercise's subshell, from exercise/.
+check_exercise_projections() {
+  local dir file out rc=0
+  (cd .. && cargo build --locked --quiet -p discipline-diet --bin diet) || return
+  dir="$(mktemp -d)" || return 2
+  if node scripts/export-projections.mjs "$dir" >/dev/null; then
+    for file in "$dir"/*.log; do
+      out="$(cd .. && cargo run --locked --quiet -p discipline-diet --bin diet -- check-log "$file")" || {
+        printf 'exercise: %s: diet check-log refuses the placed projection: %s\n' "$(basename "$file" .log)" "$out" >&2
+        rc=1
+      }
+    done
+  else
+    rc=$?
+  fi
+  rm -rf "${dir:?}"
+  return "$rc"
+}
+
 # The web surface in exercise/: its typecheck, its lint, and every story as a
 # browser test (Vitest runs each Storybook story in Chromium, the plain unit
 # tests in Node). It needs Node, at the version exercise/package.json
@@ -435,6 +459,7 @@ check_exercise() {
       pnpm lint &&
       pnpm exec playwright install chromium &&
       pnpm test &&
+      check_exercise_projections &&
       python3 scripts/test_render_ledger.py &&
       python3 scripts/test_admission.py &&
       pnpm build:replay &&
@@ -3668,6 +3693,21 @@ inject_exercise_example_bundled_into_page() {
 # not capped (capped.test.ts).
 inject_exercise_capped_from_settle_alone() {
   edit_in_place "s|slot.line.reason === 'failed' \&\& cappedTurns.has(slot.line.turn)|slot.line.reason === 'failed'|" exercise/src/session/fold.ts
+}
+
+# A refused tool call drawn as ran (#300): the fold takes the drive's
+# refusal for a run, so the block says nothing of the refusal or its reason.
+# Typecheck and lint pass it; the fold of the constructed v3 log says each
+# call's outcome (served.test.ts).
+inject_exercise_refused_call_drawn_as_ran() {
+  edit_in_place "s|^                  outcome: line.outcome,$|                  outcome: line.outcome === 'refused' ? 'ran' : line.outcome,|" exercise/src/session/fold.ts
+}
+
+# A placed core line diet's reader refuses (#300): an `ask` carrying a key
+# the format does not have. Typecheck, lint and the fold all pass it -- the
+# surface ignores the key -- so only diet's reader, over the projection, says.
+inject_exercise_placed_line_refused() {
+  edit_in_place "s|        return \[{ kind: 'ask', t: e.t, turn: e.turn, text: e.text }\];|        return [{ kind: 'ask', t: e.t, turn: e.turn, text: e.text, ...({ asked_by: 'person' } as object) }];|" exercise/src/drive/place.ts
 }
 
 # The meter reading a progress frame's old, nested shape again (#288): what
@@ -9389,6 +9429,10 @@ selftest() {
     "replay-smoke: kitchen-sink's label is on the page but out of view"
   seeded_case "a capped turn read from the settle word alone" exercise inject_exercise_capped_from_settle_alone \
     'FAIL.*capped\.test\.ts.*is not read from the settle word alone'
+  seeded_case "a refused tool call drawn as ran" exercise inject_exercise_refused_call_drawn_as_ran \
+    'FAIL.*served\.test\.ts.*folds a ran, a refused and a policy-failed call'
+  seeded_case "a placed core line diet's reader refuses" exercise inject_exercise_placed_line_refused \
+    'diet check-log refuses the placed projection: .*`ask` carries no `asked_by`'
   seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
     "replay-smoke: kitchen-sink is bundled into the page's code"
   seeded_case "the meter reading a progress frame's old shape" exercise inject_exercise_progress_read_nested \

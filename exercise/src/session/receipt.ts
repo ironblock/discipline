@@ -48,7 +48,7 @@ export function receiptOf(lines: readonly LogLine[]): Omit<Receipt, 'liveEntries
   const trunkDone = [
     ...asks.map((e) => e.t),
     ...of('response').filter((e) => trunkRequests.has(e.to_request)).map((e) => e.t),
-    ...of('tool.end').map((e) => e.t),
+    ...of('tool_call').map((e) => e.t),
   ];
   const idleBeforeRefill = of('seam').map((seam) => {
     const last = Math.max(...trunkDone.filter((t) => t <= seam.t));

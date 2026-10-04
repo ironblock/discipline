@@ -2,6 +2,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor } from 'storybook/test';
 
 import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
+import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
+import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
+import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import { App } from '../App.tsx';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
@@ -202,5 +205,54 @@ export const ServedCappedMaxTokens: Story = {
     await waitFor(async () => expect(canvasElement.querySelector('.ex-turnend')).not.toBeNull());
     const answer = canvasElement.querySelector('.ex-trunk [data-tone="assistant"]') as HTMLElement;
     await expect(answer.querySelector('.ex-stop[data-level="warn"]')?.textContent).toBe('hit max tokens');
+  },
+};
+
+/**
+ * The one tool call `serve` drew from a courier's v3 fixture (#297), once its outcome line has arrived: the fixture
+ * ends there, the turn still open, as a drive's log does between a call and the step after it.
+ */
+const servedCall = async (root: HTMLElement) => {
+  await waitFor(async () => {
+    const calls = root.querySelectorAll<HTMLElement>('.ex-trunk [data-tone="tool"]');
+    await expect(calls.length).toBe(1);
+    await expect(calls[0]!.textContent).not.toContain('running ·');
+  });
+  return root.querySelector<HTMLElement>('.ex-trunk [data-tone="tool"]')!;
+};
+
+/** `?drive`, log v3 (#300): a call that ran -- I0's streamed turn, its fragments assembled -- and what confined it. */
+export const ServedToolCallRan: Story = {
+  name: '?drive: a tool call that ran, and what confined it (v3)',
+  args: { drive: true, web: serving(toolCallRan) },
+  play: async ({ canvasElement }) => {
+    const call = await servedCall(canvasElement);
+    await expect(call.querySelector('.ex-call-outcome')).toBeNull();
+    await expect(call.querySelector('.ex-exit')?.textContent).toBe('exit 0');
+    await expect(call.querySelector('.ex-confinement')?.textContent).toBe('isolation sandbox · network none');
+    await expect(call.querySelector('.ex-tool__call')?.textContent).toContain('ls | wc -l');
+  },
+};
+
+/** `?drive`, log v3 (#300): a call the drive refused, drawn as refused with its reason, never as ran. */
+export const ServedToolCallRefused: Story = {
+  name: '?drive: a tool call the drive refused (v3)',
+  args: { drive: true, web: serving(toolCallRefused) },
+  play: async ({ canvasElement }) => {
+    const call = await servedCall(canvasElement);
+    await expect(call.querySelector('.ex-call-outcome[data-outcome="refused"]')?.textContent).toBe('refused · not on the allowlist');
+    await expect(call.querySelector('.ex-exit')).toBeNull();
+    await expect(call.querySelector('.ex-confinement')).toBeNull();
+  },
+};
+
+/** `?drive`, log v3 (#300): a call that failed under its policy, drawn as that, never as a plain failure. */
+export const ServedToolCallFailedUnderPolicy: Story = {
+  name: '?drive: a tool call that failed under its policy (v3)',
+  args: { drive: true, web: serving(toolCallFailed) },
+  play: async ({ canvasElement }) => {
+    const call = await servedCall(canvasElement);
+    await expect(call.querySelector('.ex-call-outcome[data-outcome="command_failed"]')?.textContent).toBe('failed under policy');
+    await expect(call.querySelector('.ex-tool__stderr')?.textContent).toContain('Operation not permitted');
   },
 };

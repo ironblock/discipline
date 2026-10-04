@@ -12,7 +12,7 @@
  * node waits on, which is what the gaps overlay outlines.
  */
 
-import type { Authority, FailReason, ForkLane, ForkOutcome, Lane, LineOf, LogLine, Need, Open, PatchOp, SeamReason, SettleReason, Timings, Tool } from '../drive/log.ts';
+import type { Authority, FailReason, ForkLane, ForkOutcome, IsolationWord, Lane, LineOf, LogLine, Need, NetworkWord, Open, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
 import { NEEDS_OF } from '../drive/log.ts';
 import { receiptOf } from './receipt.ts';
 import type { Receipt } from './receipt.ts';
@@ -119,20 +119,40 @@ export interface AssistantNode extends Provenance, Generation {
   readonly outOfContext?: OffTrunk;
 }
 
+/**
+ * A tool call: from its first streamed fragment (its `id` is that delta's
+ * `seq`, so it is the same node from the moment the model writes it) to its
+ * `tool_call` line, which says what became of it (v3, #297).
+ */
 export interface ToolNode extends Provenance {
   readonly kind: 'tool';
   readonly id: string;
   readonly turn: number;
   readonly tool: Tool;
+  /** The arguments text as the model wrote it, as far as it has streamed. */
+  readonly arguments: string;
+  /** The same, read as the JSON object a tool takes; empty while it does not read as one. */
   readonly args: Readonly<Record<string, unknown>>;
   /** The assistant node that made the call (its request's `seq`): the model wrote it, as the end of that generation. */
   readonly after: string;
-  /** Session time the call began. */
+  /** Session time the call began: its response, or the call before it ending, or its fragment if later. */
   readonly startedAt: number;
   readonly running: boolean;
+  /** Not begun: a call before it on the same response is still running, and the drive runs them one at a time. */
+  readonly waiting?: true;
+  /** What became of it; absent while it runs. */
+  readonly outcome?: ToolOutcome;
+  /** The command as the drive asked for it. */
+  readonly argv?: readonly string[];
+  /** What ran, under which mechanism and network: absent where the log does not say. */
+  readonly confinement?: { readonly confined?: readonly string[]; readonly isolation?: IsolationWord; readonly network?: NetworkWord };
   readonly exit?: number;
   readonly output?: string;
-  readonly truncated?: boolean;
+  readonly stderr?: string;
+  /** Why the drive refused it. */
+  readonly refusal?: ToolRefusal;
+  /** The policy it failed under: the Seatbelt profile's sha256. */
+  readonly policy?: string;
   readonly ms?: number;
   /** Session time the call ended; absent while it runs. */
   readonly endedAt?: number;
@@ -325,6 +345,16 @@ function generation(g: GenerationBuilder, trunkSlot: number): Generation {
   };
 }
 
+/** A call's arguments read as the object a tool takes; a text that does not read as one (yet) is no arguments. */
+function objectOf(text: string): Readonly<Record<string, unknown>> {
+  try {
+    const value: unknown = JSON.parse(text);
+    return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
 function meterOf(frames: readonly LineOf<'progress'>[]): Meter {
   const last = frames.at(-1)!;
   const top = frames.reduce((best, f) => (f.processed > best.processed ? f : best), frames[0]!);
@@ -375,14 +405,16 @@ export function fold(lines: readonly LogLine[]): Session {
   const generations = new Map<number, GenerationBuilder>();
   const asks = new Map<number, LineOf<'ask'>>();
   const firstRequestOfTurn = new Map<number, number>();
-  const tools = new Map<number, { begin: LineOf<'tool.begin'>; end?: LineOf<'tool.end'> }>();
+  // Each call, keyed by the `seq` of its first fragment (or of its line, where none streamed); found by its request and index.
+  const calls = new Map<number, { request: number; t: number; first?: LineOf<'delta'>; id?: string; name?: Tool; args: string; line?: LineOf<'tool_call'> }>();
+  const callAt = new Map<string, number>();
   const forks = new Map<number, { fork: LineOf<'fork'>; request?: number; settled?: LineOf<'fork.settled'>; patches: LineOf<'patch'>[] }>();
   const entries = new Map<string, Mutable<Omit<MemoryEntry, 'fresh' | 'landedAt'>> & { seq: number }>();
 
   type Slot =
     | { kind: 'user'; turn: number }
     | { kind: 'assistant'; request: number }
-    | { kind: 'tool'; begin: number }
+    | { kind: 'tool'; call: number }
     | { kind: 'settled'; line: LineOf<'turn.settled'> };
   const system = start.head.find((m) => m.role === 'system');
   const eras: { seam?: LineOf<'seam'>; system: SystemNode; slots: Slot[] }[] = [
@@ -417,7 +449,6 @@ export function fold(lines: readonly LogLine[]): Session {
     switch (e.kind) {
       case 'session.start':
       case 'refused':
-      case 'tool_call':
       case 'stop.asked':
         break;
       case 'idle.gap': {
@@ -460,9 +491,29 @@ export function fold(lines: readonly LogLine[]): Session {
           if (f) f.request = e.seq;
         }
         break;
-      case 'delta':
-        generations.get(e.request)?.deltas.push(e);
+      case 'delta': {
+        const g = generations.get(e.request);
+        if (!('tool_call' in e) || e.tool_call === undefined) {
+          g?.deltas.push(e);
+          break;
+        }
+        // A fragment placed after its response (an authored call, `place.ts`) is not the answer being written.
+        if (g && !g.response) g.deltas.push(e);
+        const piece = e.tool_call;
+        const key = `${e.request}/${piece.index}`;
+        const at = callAt.get(key);
+        const call = at !== undefined ? calls.get(at) : undefined;
+        if (call) {
+          call.args += piece.arguments;
+          if (call.id === undefined && piece.id !== undefined) call.id = piece.id;
+          if (call.name === undefined && piece.name !== undefined) call.name = piece.name;
+        } else {
+          calls.set(e.seq, { request: e.request, t: e.t, first: e, ...(piece.id !== undefined ? { id: piece.id } : {}), ...(piece.name !== undefined ? { name: piece.name } : {}), args: piece.arguments });
+          callAt.set(key, e.seq);
+          era().slots.push({ kind: 'tool', call: e.seq });
+        }
         break;
+      }
       case 'progress':
         generations.get(e.request)?.frames.push(e);
         break;
@@ -482,13 +533,14 @@ export function fold(lines: readonly LogLine[]): Session {
         if (g) g.failed = e;
         break;
       }
-      case 'tool.begin':
-        tools.set(e.seq, { begin: e });
-        era().slots.push({ kind: 'tool', begin: e.seq });
-        break;
-      case 'tool.end': {
-        const t = tools.get(e.begin);
-        if (t) t.end = e;
+      case 'tool_call': {
+        const streamed = [...calls.values()].find((c) => c.request === e.request && c.id === e.id && !c.line);
+        if (streamed) streamed.line = e;
+        else {
+          // A call whose fragments the log does not carry: drawn from its line alone.
+          calls.set(e.seq, { request: e.request, t: e.t, id: e.id, name: e.name, args: e.arguments, line: e });
+          era().slots.push({ kind: 'tool', call: e.seq });
+        }
         break;
       }
       case 'turn.settled':
@@ -558,6 +610,20 @@ export function fold(lines: readonly LogLine[]): Session {
     }
   }
 
+  // When each call began running -- AN INFERENCE, as v3 has no start line (ruled on #300, ruling 3): its response, or
+  // the call before it on that response ending, or its own fragment if later. A call whose predecessor has not ended
+  // has not begun.
+  const callStarts = new Map<number, number>();
+  const notBegun = new Set<number>();
+  const lastEnded = new Map<number, number | undefined>();
+  for (const [key, c] of calls) {
+    const answered = generations.get(c.request)?.response?.t;
+    const before = lastEnded.has(c.request) ? lastEnded.get(c.request) : c.t;
+    if (before === undefined) notBegun.add(key);
+    callStarts.set(key, Math.max(c.t, answered ?? c.t, before ?? c.t));
+    lastEnded.set(c.request, c.line?.t);
+  }
+
   // Trunk nodes, era by era.
   const trunkPrefixAt = (timings: Timings | undefined) => (timings ? timings.prompt_n + timings.cache_n + timings.predicted_n : undefined);
   let previousEraEnd: Timings | undefined;
@@ -593,18 +659,37 @@ export function fold(lines: readonly LogLine[]): Session {
           return brand(node);
         }
         case 'tool': {
-          const { begin, end } = tools.get(slot.begin)!;
+          const c = calls.get(slot.call)!;
+          const line = c.line;
+          const startedAt = callStarts.get(slot.call)!;
+          const text = line?.arguments ?? c.args;
+          const confinement = line && (line.confined || line.isolation || line.network) ? { ...(line.confined ? { confined: line.confined } : {}), ...(line.isolation ? { isolation: line.isolation } : {}), ...(line.network ? { network: line.network } : {}) } : undefined;
           return brand<ToolNode>({
             kind: 'tool',
-            id: id(begin.seq),
-            turn: begin.turn,
-            tool: begin.tool,
-            args: begin.args,
-            after: id(begin.request),
-            startedAt: begin.t,
-            running: end === undefined,
-            ...(end ? { exit: end.exit, output: end.output, ms: end.t - begin.t, endedAt: end.t, ...(end.truncated ? { truncated: true } : {}) } : {}),
-            ...provenance(begin, end),
+            id: id(slot.call),
+            turn: line?.turn ?? generations.get(c.request)?.request.turn ?? 0,
+            tool: line?.name ?? c.name ?? '',
+            arguments: text,
+            args: objectOf(text),
+            after: id(c.request),
+            startedAt,
+            running: line === undefined && !notBegun.has(slot.call),
+            ...(line === undefined && notBegun.has(slot.call) ? { waiting: true as const } : {}),
+            ...(line
+              ? {
+                  outcome: line.outcome,
+                  ms: Math.max(0, line.t - startedAt),
+                  endedAt: line.t,
+                  ...(line.argv ? { argv: line.argv } : {}),
+                  ...(confinement ? { confinement } : {}),
+                  ...(line.exit !== undefined ? { exit: line.exit } : {}),
+                  ...(line.stdout !== undefined ? { output: line.stdout } : {}),
+                  ...(line.stderr ? { stderr: line.stderr } : {}),
+                  ...(line.reason !== undefined ? { refusal: line.reason } : {}),
+                  ...(line.policy !== undefined ? { policy: line.policy } : {}),
+                }
+              : {}),
+            ...provenance(c.first, line),
           });
         }
         case 'settled':
