@@ -1,0 +1,36 @@
+# The KLD tool on rtx6000ada-host: the llama-perplexity build that produced the Q8_0 reference and every GGUF KLD row (2026-09-30, 2026-10-02). Read 2026-10-03.
+tree $HOME/src/llama-q8sparse (the tree kld/kldwin.sh, kld/ref.sh and kld/udq4.sh call; all reads below are from it)
+## git
+HEAD e7051efc8002847f7269c5606318431179b5904e
+porcelain_lines 0
+e7051ef HEAD@{2026-09-25 17:18:19 -0700}: commit: CUDA: sparse FA conversion: cell-major f16 layout, convert each row once
+0df4a52 HEAD@{2026-09-25 16:54:37 -0700}: commit: CUDA: sparse flash attention with a quantized KV cache
+103e5b3 HEAD@{2026-09-25 14:06:57 -0700}: reset: moving to HEAD
+103e5b3 HEAD@{2026-09-25 14:06:57 -0700}: 
+## build-cuda/bin (sha256, size, mtime)
+633b467b5740750ee46b34c2540f3f61b002fe15c038c7c1d16b95df9df54753 15960 2026-09-25 17:16:49.021328841 -0700 llama-perplexity
+00ca63e6cf392a77d02b9f3e3844ab8eed874e796903b8094bd1d7a630ad0eca 953600 2026-09-25 17:09:55.143444618 -0700 libggml-base.so.0.24.0
+24a2dece6007549d9f8790ddbea8575d2eb4bbbcb7dcfb7843c5063ab9c63e62 1250688 2026-09-25 17:09:55.255445811 -0700 libggml-cpu.so.0.24.0
+39071cb8692d12feb28dc596bf0b61be30732a4d85176dafabfd5e323f0045fd 65816728 2026-09-25 17:16:46.595830422 -0700 libggml-cuda.so.0.24.0
+5986171f17531ad08aaaa6487422faeb357d66fa65bc13431302a2d6f1c0492c 59592 2026-09-25 17:16:46.682831349 -0700 libggml.so.0.24.0
+25621cf7c7e508454ecb592467008e66d792b4f45ef7f3ee17e2de48550b5d15 475936 2026-09-25 17:16:48.443671754 -0700 libllama-bench-impl.so
+750ab1ef983bef7a200e4e026907995933e16e886fc24d4d1dc75608ad06fc97 6413064 2026-09-25 17:16:47.166836508 -0700 libllama-common.so.0.4.1
+841a5205171d0e4ec2407a737fb97fd823dbe82bdc92b42427164b5af71ff103 167800 2026-09-25 17:16:48.891617459 -0700 libllama-perplexity-impl.so
+faa2f625e6f6e41cec6d060e11ebe248922fe1f07c9e264825752e020427649f 7220544 2026-09-25 17:16:47.992845313 -0700 libllama-server-impl.so
+4ad07ccd5a847187b76106a4a52ec5f43d31bec1f426a23605cafc73d9274b83 4747584 2026-09-25 17:16:46.877833427 -0700 libllama.so.0.4.1
+eb0a72b451bfcd4612a70e9658236e14c452004bb42ee6ea853c01bd096c189e 2000832 2026-09-25 17:16:47.772842968 -0700 libmtmd.so.0.4.1
+## same tree, for comparison with the serving line (b7-e7051ef llama-server 41e6591d...)
+7990b3ad08c0794176141b06d5ceeda294af93578b7c86b1d962a3bdccfac3aa 17872 2026-09-25 17:16:48.121979588 -0700 llama-server (a thin launcher, built in the same pass; not used for any measurement)
+## the KLD runs (log mtimes)
+  2026-09-30 17:20:05.219786321 -0700 kld-coder_bf16-code.log
+  2026-09-30 17:20:42.930231714 -0700 kld-coder_bf16-prose.log
+  2026-09-30 17:16:27.469971888 -0700 kld-coder_iq4nl-code.log
+  2026-09-30 17:17:03.791490627 -0700 kld-coder_iq4nl-prose.log
+  2026-09-30 17:18:06.129379766 -0700 kld-q2_bf16-code.log
+  2026-09-30 17:19:28.205349151 -0700 kld-q2_bf16-prose.log
+  2026-09-30 17:13:58.462843820 -0700 kld-q2_iq4nl-code.log
+  2026-09-30 17:15:17.637974587 -0700 kld-q2_iq4nl-prose.log
+  2026-10-02 18:10:32.150155851 -0700 kld-udq4-code.log
+  2026-10-02 18:29:19.630784767 -0700 kld-udq4-prose.log
+  2026-09-30 17:12:54.987087109 -0700 ref.log
+  2026-09-30 17:20:51.925337956 -0700 window.log

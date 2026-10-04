@@ -1,0 +1,43 @@
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-3.05bpw
+ -- CPU-offloaded experts (worker): model.language_model.layers.0.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.1.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.2.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.3.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.4.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.5.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.6.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.7.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.8.mlp
+ -- CPU-offloaded experts (worker): model.language_model.layers.9.mlp
+
+ -- CPU MoE worker started: 10 layers, avx2, 16 threads
+ -- Warming up...
+
+ -- Loading tokenizer...
+[exl3-305] loaded in 51s; VRAM used 43.5 GiB
+[exl3-305] base-code.kld chunk 1/12 running KLD 0.05638 PPL 1.7380 (2s)
+[exl3-305] base-code.kld chunk 2/12 running KLD 0.05596 PPL 1.8194 (5s)
+[exl3-305] base-code.kld chunk 3/12 running KLD 0.04945 PPL 1.6766 (7s)
+[exl3-305] base-code.kld chunk 4/12 running KLD 0.04108 PPL 1.5292 (10s)
+[exl3-305] base-code.kld chunk 5/12 running KLD 0.03741 PPL 1.4330 (12s)
+[exl3-305] base-code.kld chunk 6/12 running KLD 0.03529 PPL 1.4038 (14s)
+[exl3-305] base-code.kld chunk 7/12 running KLD 0.03526 PPL 1.4037 (17s)
+[exl3-305] base-code.kld chunk 8/12 running KLD 0.03548 PPL 1.3864 (19s)
+[exl3-305] base-code.kld chunk 9/12 running KLD 0.03559 PPL 1.3720 (21s)
+[exl3-305] base-code.kld chunk 10/12 running KLD 0.03481 PPL 1.3662 (24s)
+[exl3-305] base-code.kld chunk 11/12 running KLD 0.03431 PPL 1.3570 (26s)
+[exl3-305] base-code.kld chunk 12/12 running KLD 0.03328 PPL 1.3491 (29s)
+RESULT exl3-305 base-code.kld: PPL(Q) 1.349132 PPL(base) 1.346347 Mean KLD 0.033283 ± 0.001044 99.9% KLD 2.090547 Median KLD 0.000120 Same top 97.215 ± 0.105 % n=24564
+[exl3-305] base-prose.kld chunk 1/12 running KLD 0.10032 PPL 1.2816 (2s)
+[exl3-305] base-prose.kld chunk 2/12 running KLD 0.13726 PPL 2.0214 (5s)
+[exl3-305] base-prose.kld chunk 3/12 running KLD 0.12025 PPL 1.9616 (7s)
+[exl3-305] base-prose.kld chunk 4/12 running KLD 0.12129 PPL 2.1249 (9s)
+[exl3-305] base-prose.kld chunk 5/12 running KLD 0.11533 PPL 2.4897 (12s)
+[exl3-305] base-prose.kld chunk 6/12 running KLD 0.10599 PPL 2.7872 (14s)
+[exl3-305] base-prose.kld chunk 7/12 running KLD 0.10687 PPL 3.0189 (16s)
+[exl3-305] base-prose.kld chunk 8/12 running KLD 0.10368 PPL 3.2273 (19s)
+[exl3-305] base-prose.kld chunk 9/12 running KLD 0.09960 PPL 3.3625 (21s)
+[exl3-305] base-prose.kld chunk 10/12 running KLD 0.09445 PPL 3.2764 (24s)
+[exl3-305] base-prose.kld chunk 11/12 running KLD 0.09233 PPL 3.1480 (26s)
+[exl3-305] base-prose.kld chunk 12/12 running KLD 0.08947 PPL 3.0145 (28s)
+RESULT exl3-305 base-prose.kld: PPL(Q) 3.014490 PPL(base) 2.950894 Mean KLD 0.089471 ± 0.001527 99.9% KLD 2.894039 Median KLD 0.016406 Same top 90.523 ± 0.187 % n=24564

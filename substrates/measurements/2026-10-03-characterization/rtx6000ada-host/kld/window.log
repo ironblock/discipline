@@ -1,0 +1,12 @@
+2026-10-01T00:12:58Z DOWNTIME START prod pid 584322 stopped
+2026-10-01T00:13:59Z q2_iq4nl code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.416255 ± 0.011703|Mean KLD: 0.159282 ± 0.003911|99.9% KLD: 6.933649|Same top p: 93.576 ± 0.156 %|
+2026-10-01T00:15:18Z q2_iq4nl prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 3.539863 ± 0.047055|Mean KLD: 0.386626 ± 0.005038|99.9% KLD: 7.064059|Same top p: 79.885 ± 0.256 %|
+2026-10-01T00:16:28Z coder_iq4nl code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.424571 ± 0.011782|Mean KLD: 0.163955 ± 0.004162|99.9% KLD: 7.614526|Same top p: 93.621 ± 0.156 %|
+2026-10-01T00:17:04Z coder_iq4nl prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 4.652229 ± 0.066119|Mean KLD: 0.712619 ± 0.008083|99.9% KLD: 10.472239|Same top p: 72.163 ± 0.286 %|
+2026-10-01T00:18:06Z q2_bf16 code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.411230 ± 0.011646|Mean KLD: 0.154783 ± 0.003820|99.9% KLD: 6.976605|Same top p: 93.759 ± 0.154 %|
+2026-10-01T00:19:28Z q2_bf16 prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 3.519713 ± 0.046822|Mean KLD: 0.382619 ± 0.005034|99.9% KLD: 7.342983|Same top p: 79.930 ± 0.256 %|
+2026-10-01T00:20:05Z coder_bf16 code rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 1.420622 ± 0.011755|Mean KLD: 0.161162 ± 0.004100|99.9% KLD: 7.563936|Same top p: 93.808 ± 0.154 %|
+2026-10-01T00:20:43Z coder_bf16 prose rc=0 chunk PPL ln(PPL(Q)/PPL(base)) KL Divergence Δp RMS Same top p|Mean PPL(Q) : 4.621021 ± 0.065501|Mean KLD: 0.708680 ± 0.008048|99.9% KLD: 10.239740|Same top p: 72.199 ± 0.286 %|
+2026-10-01T00:20:43Z arms done
+2026-10-01T00:20:43Z restore: begin
+2026-10-01T00:20:51Z RESTORED b8-e486f80 exe=$HOME/src/llama-prod2/build-cuda/bin/llama-server

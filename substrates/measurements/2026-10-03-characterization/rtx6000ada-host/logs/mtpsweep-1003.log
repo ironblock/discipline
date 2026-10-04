@@ -1,0 +1,165 @@
+2026-10-03T16:43:48Z tabby before: pid=665174
+2026-10-03T16:43:55Z DOWNTIME START vram=2 MiB
+2026-10-03T16:43:55Z arm n3: -mtp -ndt 3
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "n3", "event": "loaded", "load_s": 34, "vram_used_gib": 43.8}
+{"tag": "n3", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "n3", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 6.3, "per_req": [83.42], "agg_wall": 40.4, "pn": [10082], "cached": [0], "pp": [3070], "a": 0.529, "errors": []}
+{"tag": "n3", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 1.9, "per_req": [140.44], "agg_wall": 132.2, "pn": [10082], "cached": [9984], "pp": [918], "a": 0.584, "errors": []}
+{"tag": "n3", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.1, "per_req": [128.08], "agg_wall": 121.3, "pn": [10082], "cached": [9984], "pp": [921], "a": 0.503, "errors": []}
+{"tag": "n3", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 16.0, "per_req": [46.19, 44.49, 20.8, 43.28], "agg_wall": 63.9, "pn": [9851, 10418, 10082, 10081], "cached": [0, 0, 9984, 0], "pp": [1283, 1042, 26, 1139], "a": 0.501, "errors": []}
+{"tag": "n3", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.3, "per_req": [47.04, 45.36, 44.62, 43.87], "agg_wall": 162.3, "pn": [9851, 10082, 10081, 10418], "cached": [9728, 9984, 9984, 10240], "pp": [1052, 220, 432, 524], "a": 0.505, "errors": []}
+{"tag": "n3", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.2, "per_req": [46.91, 46.03, 45.52, 44.57], "agg_wall": 164.7, "pn": [10082, 10418, 9851, 10081], "cached": [9984, 10240, 9728, 9984], "pp": [219, 523, 1049, 430], "a": 0.52, "errors": []}
+{"tag": "n3", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 30.9, "per_req": [161.29], "agg_wall": 8.3, "pn": [101664], "cached": [9984], "pp": [3125], "a": 0.761, "errors": []}
+{"tag": "n3", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 1.6, "per_req": [163.6], "agg_wall": 155.6, "pn": [101664], "cached": [101632], "pp": [458], "a": 0.775, "errors": []}
+{"tag": "n3", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 1.7, "per_req": [161.27], "agg_wall": 153.5, "pn": [101664], "cached": [101632], "pp": [460], "a": 0.761, "errors": []}
+2026-10-03T16:45:47Z arm n3 rc=0
+2026-10-03T16:45:47Z arm n8: -mtp -ndt 8
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "n8", "event": "loaded", "load_s": 25, "vram_used_gib": 45.5}
+{"tag": "n8", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "n8", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 9.3, "per_req": [43.54], "agg_wall": 27.5, "pn": [10082], "cached": [0], "pp": [2927], "a": 0.202, "errors": []}
+{"tag": "n8", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 5.0, "per_req": [52.66], "agg_wall": 51.5, "pn": [10082], "cached": [9984], "pp": [885], "a": 0.247, "errors": []}
+{"tag": "n8", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 4.0, "per_req": [66.57], "agg_wall": 64.8, "pn": [10082], "cached": [9984], "pp": [912], "a": 0.227, "errors": []}
+{"tag": "n8", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 18.4, "per_req": [38.79, 34.25, 17.73, 33.37], "agg_wall": 55.8, "pn": [9851, 10418, 10082, 10081], "cached": [0, 0, 9984, 0], "pp": [1213, 984, 25, 1077], "a": 0.254, "errors": []}
+{"tag": "n8", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 8.4, "per_req": [36.01, 33.07, 32.79, 32.43], "agg_wall": 122.3, "pn": [9851, 10418, 10082, 10081], "cached": [9728, 10240, 9984, 9984], "pp": [1013, 511, 215, 418], "a": 0.247, "errors": []}
+{"tag": "n8", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 8.8, "per_req": [33.07, 33.07, 32.53, 30.84], "agg_wall": 116.7, "pn": [10418, 9851, 10082, 10081], "cached": [10240, 9728, 9984, 9984], "pp": [514, 1023, 216, 421], "a": 0.233, "errors": []}
+{"tag": "n8", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 33.8, "per_req": [67.19], "agg_wall": 7.6, "pn": [101664], "cached": [9984], "pp": [3056], "a": 0.239, "errors": []}
+{"tag": "n8", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 2.8, "per_req": [93.47], "agg_wall": 90.9, "pn": [101664], "cached": [101632], "pp": [457], "a": 0.383, "errors": []}
+{"tag": "n8", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 3.5, "per_req": [75.0], "agg_wall": 73.4, "pn": [101664], "cached": [101632], "pp": [456], "a": 0.28, "errors": []}
+2026-10-03T16:47:51Z arm n8 rc=0
+2026-10-03T16:47:51Z arm n1: -mtp -ndt 1
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "n1", "event": "loaded", "load_s": 23, "vram_used_gib": 43.8}
+{"tag": "n1", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "n1", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 5.4, "per_req": [115.34], "agg_wall": 47.2, "pn": [10082], "cached": [0], "pp": [3139], "a": 0.766, "errors": []}
+{"tag": "n1", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.3, "per_req": [117.45], "agg_wall": 111.7, "pn": [10082], "cached": [9984], "pp": [910], "a": 0.753, "errors": []}
+{"tag": "n1", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.3, "per_req": [119.14], "agg_wall": 113.2, "pn": [10082], "cached": [9984], "pp": [917], "a": 0.778, "errors": []}
+{"tag": "n1", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 14.9, "per_req": [23.94, 53.72, 53.13, 52.8], "agg_wall": 68.7, "pn": [10082, 10418, 10081, 9851], "cached": [9984, 0, 0, 0], "pp": [25, 1047, 1155, 1315], "a": 0.747, "errors": []}
+{"tag": "n1", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 5.3, "per_req": [55.3, 54.62, 54.07, 53.39], "agg_wall": 193.4, "pn": [10082, 10081, 9851, 10418], "cached": [9984, 9984, 9728, 10240], "pp": [210, 412, 993, 504], "a": 0.747, "errors": []}
+{"tag": "n1", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 5.2, "per_req": [54.8, 54.46, 54.18, 54.18], "agg_wall": 196.0, "pn": [10082, 9851, 10418, 10081], "cached": [9984, 9728, 10240, 9984], "pp": [210, 1019, 498, 414], "a": 0.775, "errors": []}
+{"tag": "n1", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 33.0, "per_req": [117.6], "agg_wall": 7.7, "pn": [101664], "cached": [9984], "pp": [2971], "a": 0.803, "errors": []}
+{"tag": "n1", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 2.2, "per_req": [121.84], "agg_wall": 117.5, "pn": [101664], "cached": [101632], "pp": [462], "a": 0.869, "errors": []}
+{"tag": "n1", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 2.3, "per_req": [116.16], "agg_wall": 112.2, "pn": [101664], "cached": [101632], "pp": [461], "a": 0.778, "errors": []}
+2026-10-03T16:49:32Z arm n1 rc=0
+2026-10-03T16:49:32Z arm n6: -mtp -ndt 6
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "n6", "event": "loaded", "load_s": 24, "vram_used_gib": 44.6}
+{"tag": "n6", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "n6", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 5.9, "per_req": [105.98], "agg_wall": 43.7, "pn": [10082], "cached": [0], "pp": [2920], "a": 0.318, "errors": []}
+{"tag": "n6", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.6, "per_req": [102.28], "agg_wall": 97.9, "pn": [10082], "cached": [9984], "pp": [908], "a": 0.287, "errors": []}
+{"tag": "n6", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.9, "per_req": [91.29], "agg_wall": 87.8, "pn": [10082], "cached": [9984], "pp": [915], "a": 0.24, "errors": []}
+{"tag": "n6", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 17.7, "per_req": [40.66, 19.49, 37.57, 36.55], "agg_wall": 57.9, "pn": [9851, 10082, 10418, 10081], "cached": [0, 9984, 0, 0], "pp": [1212, 25, 984, 1076], "a": 0.328, "errors": []}
+{"tag": "n6", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 7.7, "per_req": [41.5, 36.72, 35.55, 35.28], "agg_wall": 132.2, "pn": [9851, 10418, 10081, 10082], "cached": [9728, 10240, 9984, 9984], "pp": [977, 499, 408, 210], "a": 0.31, "errors": []}
+{"tag": "n6", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 7.6, "per_req": [37.74, 36.63, 35.77, 35.77], "agg_wall": 134.0, "pn": [9851, 10418, 10082, 10081], "cached": [9728, 10240, 9984, 9984], "pp": [990, 502, 212, 411], "a": 0.314, "errors": []}
+{"tag": "n6", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 32.1, "per_req": [143.68], "agg_wall": 8.0, "pn": [101664], "cached": [9984], "pp": [3029], "a": 0.5, "errors": []}
+{"tag": "n6", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 2.4, "per_req": [109.32], "agg_wall": 105.8, "pn": [101664], "cached": [101632], "pp": [459], "a": 0.335, "errors": []}
+{"tag": "n6", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 2.4, "per_req": [109.16], "agg_wall": 105.6, "pn": [101664], "cached": [101632], "pp": [459], "a": 0.335, "errors": []}
+2026-10-03T16:51:22Z arm n6 rc=0
+2026-10-03T16:51:22Z arm n2: -mtp -ndt 2
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "n2", "event": "loaded", "load_s": 22, "vram_used_gib": 43.8}
+{"tag": "n2", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "n2", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 5.2, "per_req": [128.27], "agg_wall": 49.1, "pn": [10082], "cached": [0], "pp": [3132], "a": 0.643, "errors": []}
+{"tag": "n2", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.0, "per_req": [132.28], "agg_wall": 124.9, "pn": [10082], "cached": [9984], "pp": [908], "a": 0.643, "errors": []}
+{"tag": "n2", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.1, "per_req": [128.9], "agg_wall": 122.0, "pn": [10082], "cached": [9984], "pp": [913], "a": 0.613, "errors": []}
+{"tag": "n2", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 16.2, "per_req": [21.67, 42.97, 42.13, 41.76], "agg_wall": 63.2, "pn": [10082, 9851, 10418, 10081], "cached": [9984, 0, 0, 0], "pp": [25, 1313, 1045, 1153], "a": 0.594, "errors": []}
+{"tag": "n2", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.4, "per_req": [44.24, 43.87, 43.25, 43.12], "agg_wall": 159.2, "pn": [10081, 10082, 9851, 10418], "cached": [9984, 9984, 9728, 10240], "pp": [402, 210, 1006, 497], "a": 0.608, "errors": []}
+{"tag": "n2", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.4, "per_req": [45.97, 44.1, 43.26, 43.12], "agg_wall": 159.3, "pn": [9851, 10418, 10082, 10081], "cached": [9728, 10240, 9984, 9984], "pp": [984, 503, 211, 411], "a": 0.613, "errors": []}
+{"tag": "n2", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 32.8, "per_req": [131.03], "agg_wall": 7.8, "pn": [101664], "cached": [9984], "pp": [2975], "a": 0.664, "errors": []}
+{"tag": "n2", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 1.8, "per_req": [145.4], "agg_wall": 139.0, "pn": [101664], "cached": [101632], "pp": [456], "a": 0.806, "errors": []}
+{"tag": "n2", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 2.0, "per_req": [132.79], "agg_wall": 127.5, "pn": [101664], "cached": [101632], "pp": [460], "a": 0.685, "errors": []}
+2026-10-03T16:53:04Z arm n2 rc=0
+2026-10-03T16:53:04Z arm n4: -mtp -ndt 4
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "n4", "event": "loaded", "load_s": 22, "vram_used_gib": 43.8}
+{"tag": "n4", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "n4", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 5.5, "per_req": [111.14], "agg_wall": 46.3, "pn": [10082], "cached": [0], "pp": [3125], "a": 0.39, "errors": []}
+{"tag": "n4", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.3, "per_req": [117.29], "agg_wall": 111.5, "pn": [10082], "cached": [9984], "pp": [911], "a": 0.41, "errors": []}
+{"tag": "n4", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.2, "per_req": [120.95], "agg_wall": 114.8, "pn": [10082], "cached": [9984], "pp": [911], "a": 0.431, "errors": []}
+{"tag": "n4", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 16.4, "per_req": [43.72, 20.59, 40.92, 40.77], "agg_wall": 62.5, "pn": [9851, 10082, 10418, 10081], "cached": [0, 9984, 0, 0], "pp": [1307, 25, 1041, 1148], "a": 0.415, "errors": []}
+{"tag": "n4", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.9, "per_req": [43.98, 43.14, 40.78, 39.77], "agg_wall": 147.9, "pn": [9851, 10418, 10081, 10082], "cached": [9728, 10240, 9984, 9984], "pp": [1009, 502, 412, 212], "a": 0.411, "errors": []}
+{"tag": "n4", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.8, "per_req": [42.64, 42.22, 41.55, 40.79], "agg_wall": 151.2, "pn": [10082, 10418, 9851, 10081], "cached": [9984, 10240, 9728, 9984], "pp": [208, 491, 1006, 415], "a": 0.424, "errors": []}
+{"tag": "n4", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 32.3, "per_req": [129.3], "agg_wall": 7.9, "pn": [101664], "cached": [9984], "pp": [3025], "a": 0.494, "errors": []}
+{"tag": "n4", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 1.8, "per_req": [150.23], "agg_wall": 143.5, "pn": [101664], "cached": [101632], "pp": [459], "a": 0.615, "errors": []}
+{"tag": "n4", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 2.1, "per_req": [127.69], "agg_wall": 122.8, "pn": [101664], "cached": [101632], "pp": [461], "a": 0.486, "errors": []}
+2026-10-03T16:54:47Z arm n4 rc=0
+2026-10-03T16:54:47Z arm dyn8: -mtp -ndt 8 -dds
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "dyn8", "event": "loaded", "load_s": 22, "vram_used_gib": 45.5}
+{"tag": "dyn8", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "dyn8", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 5.9, "per_req": [94.69], "agg_wall": 43.2, "pn": [10082], "cached": [0], "pp": [3125], "a": 0.372, "errors": []}
+{"tag": "dyn8", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.1, "per_req": [130.56], "agg_wall": 123.4, "pn": [10082], "cached": [9984], "pp": [912], "a": 0.551, "errors": []}
+{"tag": "dyn8", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.1, "per_req": [126.12], "agg_wall": 119.4, "pn": [10082], "cached": [9984], "pp": [911], "a": 0.529, "errors": []}
+{"tag": "dyn8", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 16.6, "per_req": [41.56, 41.56, 20.6, 39.39], "agg_wall": 61.8, "pn": [10418, 9851, 10082, 10081], "cached": [0, 0, 9984, 0], "pp": [1044, 1309, 25, 1150], "a": 0.381, "errors": []}
+{"tag": "dyn8", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.8, "per_req": [43.65, 42.03, 40.48, 40.48], "agg_wall": 150.3, "pn": [9851, 10418, 10082, 10081], "cached": [9728, 10240, 9984, 9984], "pp": [985, 504, 212, 412], "a": 0.396, "errors": []}
+{"tag": "dyn8", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.8, "per_req": [45.54, 42.15, 40.56, 40.36], "agg_wall": 149.6, "pn": [9851, 10418, 10081, 10082], "cached": [9728, 10240, 9984, 9984], "pp": [1003, 483, 400, 205], "a": 0.397, "errors": []}
+{"tag": "dyn8", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 32.5, "per_req": [118.44], "agg_wall": 7.9, "pn": [101664], "cached": [9984], "pp": [3019], "a": 0.45, "errors": []}
+{"tag": "dyn8", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 2.1, "per_req": [126.54], "agg_wall": 121.7, "pn": [101664], "cached": [101632], "pp": [459], "a": 0.517, "errors": []}
+{"tag": "dyn8", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 2.3, "per_req": [117.77], "agg_wall": 113.6, "pn": [101664], "cached": [101632], "pp": [456], "a": 0.464, "errors": []}
+2026-10-03T16:56:32Z arm dyn8 rc=0
+2026-10-03T16:56:32Z arm n3b: -mtp -ndt 3
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "n3b", "event": "loaded", "load_s": 22, "vram_used_gib": 43.8}
+{"tag": "n3b", "event": "prompt_tail", "tail": " during the Battl\n\nContinue the passage above in the same register for several paragraphs.\nassistant\n<think>\n"}
+{"tag": "n3b", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 5.2, "per_req": [126.9], "agg_wall": 48.9, "pn": [10082], "cached": [0], "pp": [3126], "a": 0.529, "errors": []}
+{"tag": "n3b", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.0, "per_req": [139.2], "agg_wall": 131.0, "pn": [10082], "cached": [9984], "pp": [911], "a": 0.584, "errors": []}
+{"tag": "n3b", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.1, "per_req": [126.88], "agg_wall": 120.1, "pn": [10082], "cached": [9984], "pp": [912], "a": 0.503, "errors": []}
+{"tag": "n3b", "depth": 10000, "conc": 4, "rep": 0, "wall_s": 16.1, "per_req": [45.57, 43.91, 21.08, 42.72], "agg_wall": 63.7, "pn": [9851, 10418, 10082, 10081], "cached": [0, 0, 9984, 0], "pp": [1312, 1045, 25, 1152], "a": 0.501, "errors": []}
+{"tag": "n3b", "depth": 10000, "conc": 4, "rep": 1, "wall_s": 6.4, "per_req": [46.48, 44.82, 44.09, 43.33], "agg_wall": 159.8, "pn": [9851, 10082, 10081, 10418], "cached": [9728, 9984, 9984, 10240], "pp": [967, 207, 402, 491], "a": 0.505, "errors": []}
+{"tag": "n3b", "depth": 10000, "conc": 4, "rep": 2, "wall_s": 6.3, "per_req": [46.54, 45.67, 45.15, 44.2], "agg_wall": 162.9, "pn": [10082, 10418, 9851, 10081], "cached": [9984, 10240, 9728, 9984], "pp": [211, 501, 1023, 418], "a": 0.52, "errors": []}
+{"tag": "n3b", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 32.4, "per_req": [161.31], "agg_wall": 7.9, "pn": [101664], "cached": [9984], "pp": [2980], "a": 0.761, "errors": []}
+{"tag": "n3b", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 1.6, "per_req": [163.65], "agg_wall": 155.6, "pn": [101664], "cached": [101632], "pp": [461], "a": 0.775, "errors": []}
+{"tag": "n3b", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 1.7, "per_req": [161.69], "agg_wall": 153.8, "pn": [101664], "cached": [101632], "pp": [460], "a": 0.761, "errors": []}
+2026-10-03T16:58:13Z arm n3b rc=0
+2026-10-03T16:58:13Z arms done
+2026-10-03T16:58:13Z restore: begin
+2026-10-03T16:58:40Z RESTORED tabby pid=682233 health={"status":"healthy","issues":[]}

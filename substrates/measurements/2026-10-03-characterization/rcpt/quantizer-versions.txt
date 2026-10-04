@@ -1,0 +1,8 @@
+# The ExLlamaV3 version that made each EXL3 quant, read 2026-10-03 from the quant's quantization_config.json ("version"),
+# with that file's sha256 prefix. Columns: host, quant directory, version, bits, quantization_config.json sha256 prefix.
+rtx6000ada-host  Qwen3.8-Flash-Next-exl3-2.05bpw  1.4.4  2.05  c057f732f92379da
+rtx6000ada-host  Qwen3.8-Flash-Next-exl3-3.05bpw  1.4.4  3.05  c6ad4cb2f24b2d2c
+rtx6000ada-host  Qwen3.8-27B-exl3-4.00bpw         1.4.2  4.0   c85767fc0bd991d1
+linux-pc         Qwen3.8-27B-exl3-4.00bpw         1.4.2  4.0   c85767fc0bd991d1
+linux-pc         Qwen3.8-27B-exl3-5.00bpw         1.4.2  5.0   4f8bceb2f19ac0d0
+linux-pc         Qwen3.8-27B-exl3-6.00bpw         1.4.2  6.0   7ec4237c9fd04d65

@@ -1,0 +1,118 @@
+##### 10:26:38 PHASE A: llama-bench (mainline)
+--- bench IQ2_XS
+Starting container...                   	[32m [ OK ]
+[0mInstalling basic packages...            	[32m [ OK ]
+[0mSetting up devpts mounts...             	[32m [ OK ]
+[0mSetting up read-only mounts...          	[32m [ OK ]
+[0mSetting up read-write mounts...         	[32m [ OK ]
+[0mSetting up host's sockets integration...	[32m [ OK ]
+[0mSetting up host's nvidia integration... 	[32m [ OK ]
+[0mIntegrating host's themes, icons, fonts...	[32m [ OK ]
+[0mSetting up distrobox profile...         	[32m [ OK ]
+[0mSetting up sudo...                      	[32m [ OK ]
+[0mSetting up user's group list...         	[32m [ OK ]
+[0m
+Container Setup Complete!
+| model                          |       size |     params | backend    | ngl |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --: | --------------: | -------------------: |
+| qwen35 27B IQ2_XXS - 2.0625 bpw |   8.16 GiB |    27.32 B | CUDA       |  99 |   1 |          pp2048 |       1293.24 ± 6.20 |
+| qwen35 27B IQ2_XXS - 2.0625 bpw |   8.16 GiB |    27.32 B | CUDA       |  99 |   1 |           tg128 |         51.45 ± 0.03 |
+
+build: 4ceb171 (1)
+--- bench IQ2_S
+| model                          |       size |     params | backend    | ngl |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --: | --------------: | -------------------: |
+| qwen35 27B IQ3_XXS - 3.0625 bpw |   8.94 GiB |    27.32 B | CUDA       |  99 |   1 |          pp2048 |       1305.75 ± 6.77 |
+| qwen35 27B IQ3_XXS - 3.0625 bpw |   8.94 GiB |    27.32 B | CUDA       |  99 |   1 |           tg128 |         50.08 ± 0.05 |
+
+build: 4ceb171 (1)
+--- bench IQ3_XXS
+| model                          |       size |     params | backend    | ngl |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --: | --------------: | -------------------: |
+| qwen35 27B IQ3_S - 3.4375 bpw  |   9.72 GiB |    27.32 B | CUDA       |  99 |   1 |          pp2048 |       1326.69 ± 6.31 |
+| qwen35 27B IQ3_S - 3.4375 bpw  |   9.72 GiB |    27.32 B | CUDA       |  99 |   1 |           tg128 |         48.78 ± 0.02 |
+
+build: 4ceb171 (1)
+--- bench IQ3_S
+| model                          |       size |     params | backend    | ngl |  fa |            test |                  t/s |
+| ------------------------------ | ---------: | ---------: | ---------- | --: | --: | --------------: | -------------------: |
+| qwen35 27B IQ3_S - 3.4375 bpw  |  11.28 GiB |    27.32 B | CUDA       |  99 |   1 |          pp2048 |       1394.44 ± 4.85 |
+| qwen35 27B IQ3_S - 3.4375 bpw  |  11.28 GiB |    27.32 B | CUDA       |  99 |   1 |           tg128 |         47.52 ± 0.04 |
+
+build: 4ceb171 (1)
+##### 10:28:39 PHASE B: server plain (mainline)
+[main-IQ2_XS] server up after ~8 s; VRAM 9590 MiB
+[main-IQ2_XS] code: prompt_n=97  prompt_per_second=216.37  predicted_n=320  predicted_per_second=49.99 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[main-IQ2_XS] code2: prompt_n=4  prompt_per_second=24.95  predicted_n=320  predicted_per_second=50.12 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[main-IQ2_XS] prose: prompt_n=56  prompt_per_second=173.67  predicted_n=320  predicted_per_second=50.03 | finish= length | text: "We need answer user's request: Write a thoughtful 400-word e"
+[main-IQ2_S] server up after ~10 s; VRAM 10264 MiB
+[main-IQ2_S] code: prompt_n=97  prompt_per_second=217.00  predicted_n=320  predicted_per_second=48.63 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[main-IQ2_S] code2: prompt_n=4  prompt_per_second=24.81  predicted_n=320  predicted_per_second=48.73 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[main-IQ2_S] prose: prompt_n=56  prompt_per_second=173.48  predicted_n=320  predicted_per_second=48.75 | finish= length | text: 'We need to respond to user: "Write a thoughtful 400-word ess'
+[main-IQ3_XXS] server up after ~10 s; VRAM 11060 MiB
+[main-IQ3_XXS] code: prompt_n=97  prompt_per_second=205.60  predicted_n=320  predicted_per_second=47.34 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[main-IQ3_XXS] code2: prompt_n=4  prompt_per_second=24.84  predicted_n=320  predicted_per_second=47.50 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[main-IQ3_XXS] prose: prompt_n=56  prompt_per_second=174.86  predicted_n=320  predicted_per_second=47.43 | finish= length | text: "We need answer user's request: thoughtful 400-word essay on "
+[main-IQ3_S] server up after ~10 s; VRAM 12660 MiB
+[main-IQ3_S] code: prompt_n=97  prompt_per_second=229.85  predicted_n=320  predicted_per_second=46.11 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[main-IQ3_S] code2: prompt_n=4  prompt_per_second=21.66  predicted_n=320  predicted_per_second=46.22 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[main-IQ3_S] prose: prompt_n=56  prompt_per_second=177.58  predicted_n=320  predicted_per_second=46.23 | finish= length | text: 'We need answer user\'s request: "Write a thoughtfully 400-wor'
+##### 10:30:37 PHASE C: server + MTP n_max=2 (mainline, nextn inline)
+[mainmtp-IQ2_XS] server up after ~10 s; VRAM 10470 MiB
+[mainmtp-IQ2_XS] code: prompt_n=97  prompt_per_second=168.43  predicted_n=320  predicted_per_second=65.34  draft_n=289  draft_n_accepted=173 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[mainmtp-IQ2_XS] code2: prompt_n=4  prompt_per_second=24.26  predicted_n=320  predicted_per_second=66.72  draft_n=287  draft_n_accepted=174 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[mainmtp-IQ2_XS] prose: prompt_n=56  prompt_per_second=156.96  predicted_n=320  predicted_per_second=73.07  draft_n=263  draft_n_accepted=187 | finish= length | text: "We need answer user's request: Write a thoughtful 400-word e"
+0.13.567.012 I slot print_timing: id  0 | task 0 | draft acceptance = 0.59862 (  173 accepted /   289 generated), mean len =  2.19
+0.18.842.905 I slot print_timing: id  0 | task 150 | draft acceptance = 0.60627 (  174 accepted /   287 generated), mean len =  2.21
+0.23.609.857 I slot print_timing: id  0 | task 297 | draft acceptance = 0.71103 (  187 accepted /   263 generated), mean len =  2.42
+[mainmtp-IQ2_S] server up after ~10 s; VRAM 11146 MiB
+[mainmtp-IQ2_S] code: prompt_n=97  prompt_per_second=178.42  predicted_n=320  predicted_per_second=66.88  draft_n=279  draft_n_accepted=179 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[mainmtp-IQ2_S] code2: prompt_n=4  prompt_per_second=24.53  predicted_n=320  predicted_per_second=68.09  draft_n=277  draft_n_accepted=180 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[mainmtp-IQ2_S] prose: prompt_n=56  prompt_per_second=160.29  predicted_n=320  predicted_per_second=68.55  draft_n=276  draft_n_accepted=181 | finish= length | text: 'We need to respond to user: "Write a thoughtful 400-word ess'
+0.13.297.613 I slot print_timing: id  0 | task 0 | draft acceptance = 0.64158 (  179 accepted /   279 generated), mean len =  2.28
+0.18.475.424 I slot print_timing: id  0 | task 144 | draft acceptance = 0.64982 (  180 accepted /   277 generated), mean len =  2.29
+0.23.523.641 I slot print_timing: id  0 | task 285 | draft acceptance = 0.65580 (  181 accepted /   276 generated), mean len =  2.31
+[mainmtp-IQ3_XXS] server up after ~10 s; VRAM 11942 MiB
+[mainmtp-IQ3_XXS] code: prompt_n=97  prompt_per_second=173.13  predicted_n=320  predicted_per_second=63.91  draft_n=288  draft_n_accepted=174 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[mainmtp-IQ3_XXS] code2: prompt_n=4  prompt_per_second=24.62  predicted_n=320  predicted_per_second=65.48  draft_n=284  draft_n_accepted=176 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[mainmtp-IQ3_XXS] prose: prompt_n=56  prompt_per_second=159.32  predicted_n=320  predicted_per_second=71.90  draft_n=259  draft_n_accepted=189 | finish= length | text: "We need answer user's request: thoughtful 400-word essay on "
+0.13.587.657 I slot print_timing: id  0 | task 0 | draft acceptance = 0.60417 (  174 accepted /   288 generated), mean len =  2.21
+0.18.949.057 I slot print_timing: id  0 | task 149 | draft acceptance = 0.61972 (  176 accepted /   284 generated), mean len =  2.24
+0.23.782.656 I slot print_timing: id  0 | task 294 | draft acceptance = 0.72973 (  189 accepted /   259 generated), mean len =  2.45
+[mainmtp-IQ3_S] server up after ~10 s; VRAM 13540 MiB
+[mainmtp-IQ3_S] code: prompt_n=97  prompt_per_second=181.31  predicted_n=320  predicted_per_second=62.60  draft_n=292  draft_n_accepted=172 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[mainmtp-IQ3_S] code2: prompt_n=4  prompt_per_second=24.70  predicted_n=320  predicted_per_second=64.36  draft_n=288  draft_n_accepted=174 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[mainmtp-IQ3_S] prose: prompt_n=56  prompt_per_second=164.14  predicted_n=320  predicted_per_second=69.99  draft_n=264  draft_n_accepted=186 | finish= length | text: 'We need answer user\'s request: "Write a thoughtful 400-word '
+0.13.808.239 I slot print_timing: id  0 | task 0 | draft acceptance = 0.58904 (  172 accepted /   292 generated), mean len =  2.18
+0.19.254.429 I slot print_timing: id  0 | task 151 | draft acceptance = 0.60417 (  174 accepted /   288 generated), mean len =  2.21
+0.24.196.751 I slot print_timing: id  0 | task 298 | draft acceptance = 0.70455 (  186 accepted /   264 generated), mean len =  2.41
+##### 10:32:15 PHASE D: server plain (ik)
+[ik-IQ2_XS] server up after ~4 s; VRAM 9898 MiB
+[ik-IQ2_XS] code: prompt_n=97  prompt_per_second=166.17  predicted_n=320  predicted_per_second=49.72 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[ik-IQ2_XS] code2: prompt_n=5  prompt_per_second=83.71  predicted_n=320  predicted_per_second=49.71 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[ik-IQ2_XS] prose: prompt_n=98  prompt_per_second=369.47  predicted_n=320  predicted_per_second=49.69 | finish= length | text: "We need answer user's request: Write a thoughtful 400-word e"
+slot apply_checkp: id  0 | task 644 | erased invalidated context checkpoint (pos_min = 415, pos_max = 415, size = 149.631 MiB)
+slot create_check: id  0 | task 644 | created context checkpoint 1 of 32 (pos_min = 92, pos_max = 92, n_tokens = 93, size = 149.628 MiB, took 190.32 ms)
+slot create_check: id  0 | task 644 | created context checkpoint 2 of 32 (pos_min = 416, pos_max = 416, n_tokens = 417, size = 149.631 MiB, took 101.57 ms)
+[ik-IQ2_S] server up after ~4 s; VRAM 10572 MiB
+[ik-IQ2_S] code: prompt_n=97  prompt_per_second=189.73  predicted_n=320  predicted_per_second=48.48 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[ik-IQ2_S] code2: prompt_n=5  prompt_per_second=75.92  predicted_n=320  predicted_per_second=48.44 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[ik-IQ2_S] prose: prompt_n=98  prompt_per_second=366.24  predicted_n=320  predicted_per_second=48.47 | finish= length | text: 'We need to respond to user: "Write a thoughtful 400-word ess'
+slot apply_checkp: id  0 | task 644 | erased invalidated context checkpoint (pos_min = 415, pos_max = 415, size = 149.631 MiB)
+slot create_check: id  0 | task 644 | created context checkpoint 1 of 32 (pos_min = 92, pos_max = 92, n_tokens = 93, size = 149.628 MiB, took 188.04 ms)
+slot create_check: id  0 | task 644 | created context checkpoint 2 of 32 (pos_min = 416, pos_max = 416, n_tokens = 417, size = 149.631 MiB, took 102.22 ms)
+[ik-IQ3_XXS] server up after ~4 s; VRAM 11368 MiB
+[ik-IQ3_XXS] code: prompt_n=97  prompt_per_second=218.39  predicted_n=320  predicted_per_second=47.56 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[ik-IQ3_XXS] code2: prompt_n=5  prompt_per_second=80.25  predicted_n=320  predicted_per_second=47.53 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[ik-IQ3_XXS] prose: prompt_n=98  prompt_per_second=374.80  predicted_n=320  predicted_per_second=47.50 | finish= length | text: "We need answer user's request: thoughtful 400-word essay on "
+slot apply_checkp: id  0 | task 644 | erased invalidated context checkpoint (pos_min = 415, pos_max = 415, size = 149.631 MiB)
+slot create_check: id  0 | task 644 | created context checkpoint 1 of 32 (pos_min = 92, pos_max = 92, n_tokens = 93, size = 149.628 MiB, took 182.62 ms)
+slot create_check: id  0 | task 644 | created context checkpoint 2 of 32 (pos_min = 416, pos_max = 416, n_tokens = 417, size = 149.631 MiB, took 103.76 ms)
+[ik-IQ3_S] server up after ~4 s; VRAM 12968 MiB
+[ik-IQ3_S] code: prompt_n=97  prompt_per_second=201.14  predicted_n=320  predicted_per_second=46.54 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[ik-IQ3_S] code2: prompt_n=5  prompt_per_second=82.63  predicted_n=320  predicted_per_second=46.52 | finish= length | text: 'We need answer user: "Write a complete Python module impleme'
+[ik-IQ3_S] prose: prompt_n=98  prompt_per_second=383.09  predicted_n=320  predicted_per_second=46.53 | finish= length | text: 'We need answer user\'s request: "Write a thoughtfully 400-wor'
+slot apply_checkp: id  0 | task 644 | erased invalidated context checkpoint (pos_min = 415, pos_max = 415, size = 149.631 MiB)
+slot create_check: id  0 | task 644 | created context checkpoint 1 of 32 (pos_min = 92, pos_max = 92, n_tokens = 93, size = 149.628 MiB, took 178.75 ms)
+slot create_check: id  0 | task 644 | created context checkpoint 2 of 32 (pos_min = 416, pos_max = 416, n_tokens = 417, size = 149.631 MiB, took 101.26 ms)
+##### 10:34:10 DONE

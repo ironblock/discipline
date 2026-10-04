@@ -1,0 +1,14 @@
+# Engine identity of the TabbyAPI + ExLlamaV3 line on rtx6000ada-host, read 2026-10-03 (inference seat).
+tabbyapi_git be74bf0a00bcb3a518e6feb7606f150c189be637 (clean tree apart from the local config.yml and api_tokens.yml)
+exllamav3_version 1.5.2
+exllamav3_source release wheel https://github.com/turboderp-org/exllamav3/releases/download/v1.5.2/exllamav3-1.5.2%2Bcu132.torch2.11.0-cp312-cp312-linux_x86_64.whl
+exllamav3_wheel_sha256 aeb8bbd84248e4d88391024c14e33532e790d07aac8c9340da17800de918cfed (GitHub release asset digest)
+exllamav3_tag v1.5.2 -> commit 12414d0af7b3beeabdda5990f6b554b996fa1416
+exllamav3_ext_so_sha256 0b2d43c21bb23225cd17637e2b971f8dd19bb8f5ed6ec5c02fee663c34527b4a (the installed compiled extension)
+torch 2.11.0+cu130
+cuda_runtime 13.0 (torch's bundled runtime)
+python 3.12.14
+nvidia_driver 615.71.09
+venv_freeze tabby-venv-freeze-2026-10-03.txt (90 packages; TabbyAPI's editable install recorded by commit)
+config config-redacted.yml (live file sha256 e52b13bbceecdc9896925d299fb497b6350905e34632ee971a7c71ec44e50518; the redacted copy differs only in the three lines shown in config-redaction.diff)
+weights turboderp/Qwen3.8-Flash-Next-exl3 branch 2.05bpw_h4_ng4; per-file sha256 in exl3-205bpw-sha256.txt

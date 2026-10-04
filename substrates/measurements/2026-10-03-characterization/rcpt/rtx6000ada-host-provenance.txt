@@ -1,0 +1,10 @@
+# rtx6000ada-host: dates and engine of the ExLlamaV3 runs in logs/exl3-*.log and logs/exl3win-1002.log, read 2026-10-03 (mtimes in host local time, UTC-07:00)
+mtime 2026-09-21 22:44:44.109864645 -0700 exl3bench.py
+mtime 2026-09-21 22:47:54.825632962 -0700 exl3-fn-mcl20.log
+mtime 2026-09-21 22:49:59.581832786 -0700 exl3-fn-mcl14.log
+mtime 2026-09-21 22:51:51.926913247 -0700 exl3-fn-mcl10.log
+mtime 2026-09-22 12:21:22.067126984 -0700 exl3-recheck.log
+mtime 2026-10-02 17:28:01.397355268 -0700 exl3win.sh
+mtime 2026-10-02 17:49:17.340823416 -0700 exl3win-1002.log
+exl3_venv (exl3bench, exl3kld v1 rows, exl3win) exllamav3 1.5.1 torch 2.13.0+cu132
+exl3_package_mtime 2026-09-21 21:31:42.171700645 -0700
