@@ -26,10 +26,13 @@ Determining the range:
 
   pull_request  the event payload's base.sha..head.sha, plus title and body
   push          the event payload's before..after; on a new branch, where
-                `before` is all zeros, the merge base with the default branch
+                `before` is all zeros, or a force-push, where it is not in
+                this checkout, the merge base with the default branch
   otherwise     origin/<default>..HEAD -- the history you have not published;
-                on a schedule event (the nightly), whose own ref IS the
-                default branch, origin/<that ref> when no origin/HEAD is set
+                the default branch is origin/HEAD, else the payload's
+                repository.default_branch, else a nightly's own ref, else
+                origin/main or master, else .github/branches.tsv's
+                integration_branch (default_branch(), #385, #386)
 
 `--range A..B` overrides all three. It is how a CI red is reproduced on the
 machine that caused it: the inferred range is empty on a checkout that matches
@@ -108,20 +111,49 @@ def event() -> dict:
 
 
 def default_branch() -> str:
-    # A NIGHTLY runs on the default branch, so its own ref is that branch:
-    # `origin/<ref>` is the base, and the range is what is not yet published,
-    # which on a nightly is nothing. An Actions checkout sets no origin/HEAD,
-    # and since the default branch was renamed (#326) neither fallback below
-    # exists there, so the first develop nightly could name no base at all.
+    # Where the default branch is read, in order (#386, ruled (a) at
+    # 5982083482). An Actions checkout sets no origin/HEAD, and since the
+    # rename (#326) origin/main does not exist until the release branch is
+    # cut, so without these a force-push to develop named no base at all:
+    #   * origin/HEAD, set by a clone and by `git remote set-head`;
+    #   * the event payload's `repository.default_branch`, which a push event
+    #     carries: what the default branch IS on this run, the branch the
+    #     checkout fetched;
+    #   * on a schedule event, the run's own ref, since a nightly always runs
+    #     on the default branch (#385);
+    #   * origin/main and origin/master, the names before the rename;
+    #   * .github/branches.tsv's `integration_branch`, what the default
+    #     branch should be, last because during a rename it can name a branch
+    #     this checkout has not fetched.
     own = os.environ.get("GITHUB_REF_NAME", "")
     nightly = [f"origin/{own}"] if os.environ.get("GITHUB_EVENT_NAME") == "schedule" and own else []
-    candidates = ("origin/HEAD", *nightly, "origin/main", "origin/master")
+    # determine() has already read the payload, so an unreadable one never
+    # gets here.
+    declared = ((event().get("repository") or {}).get("default_branch") or "").strip()
+    payload = [f"origin/{declared}"] if declared else []
+    table = [f"origin/{integration}"] if (integration := integration_branch()) else []
+    candidates = ("origin/HEAD", *payload, *nightly, "origin/main", "origin/master", *table)
     for candidate in candidates:
         if git("rev-parse", "--verify", "--quiet", candidate, check=False):
             return candidate
     raise Undeterminable(
         f"no {', '.join(candidates)} to compare against; pass --range explicitly"
     )
+
+
+def integration_branch() -> str:
+    """.github/branches.tsv's `integration_branch`, or "" when the table is
+    not there or does not say."""
+    table = ROOT / ".github" / "branches.tsv"
+    try:
+        lines = table.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return ""
+    for line in lines:
+        key, tab, value = line.partition("\t")
+        if tab and key == "integration_branch":
+            return value.strip()
+    return ""
 
 
 def reachable(name: str) -> bool:

@@ -9,8 +9,10 @@
 # (.github/gate-budget.tsv's `selftest_events`, #369). Everything that RUNS
 # reads it as the default branch -- `github.event.repository.default_branch`
 # in a workflow, `origin/HEAD` or
-# `gh repo view --json defaultBranchRef` in a script -- never from here. Its
-# row exists for scripts/check-ci-coverage.py alone: a `branches:` list cannot
+# `gh repo view --json defaultBranchRef` in a script -- and from here only as
+# check-history.py's last resort, when neither origin/HEAD nor the event
+# names it (#386, ruled at 5982083482). Otherwise its row exists for
+# scripts/check-ci-coverage.py: a `branches:` list cannot
 # take an expression, so the triggers spell it, and the check compares that
 # spelling to this row (ruled on #326, comment 5972929414, Q2).
 #
