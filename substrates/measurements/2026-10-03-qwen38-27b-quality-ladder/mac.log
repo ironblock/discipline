@@ -1,0 +1,7 @@
+2026-10-03T20:31:48Z verify-box before rc=0
+2026-10-03T20:31:59Z box window launched
+2026-10-03T20:55:10Z box restored
+2026-10-03T20:55:30Z fingerprint rc=0
+2026-10-03T20:55:30Z verify-box after rc=0
+2026-10-03T21:00:45Z canary rc=0 rate: 36/36 = 1.000   95% CI [0.904, 1.000] verdict: PASS — canary consistent with pinned substrate 
+2026-10-03T21:00:45Z MAC-END

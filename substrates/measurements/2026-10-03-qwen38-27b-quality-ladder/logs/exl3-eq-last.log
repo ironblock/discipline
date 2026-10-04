@@ -1,0 +1,9 @@
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-4.00bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+[eq-last] loaded in 14s; VRAM used 15.6 GiB
+[eq-last] base-code.kld chunk 1/2 running KLD 0.00688 PPL 1.9701 (5s)
+[eq-last] base-code.kld chunk 2/2 running KLD 0.00850 PPL 2.0979 (9s)
+RESULT eq-last base-code.kld: PPL(Q) 2.097876 PPL(base) 2.082067 Mean KLD 0.008502 ± 0.000388 99.9% KLD 0.323833 Median KLD 0.000609 Same top 97.777 ± 0.230 % n=4094
