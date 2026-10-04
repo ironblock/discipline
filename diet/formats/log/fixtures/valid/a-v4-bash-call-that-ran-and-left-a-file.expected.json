@@ -1,0 +1,98 @@
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model (CONSTRUCTED: no session wrote it; the screenshot's sha256 and byte count are constructed, and the sha256 is of the text `constructed: shots/turn-1.png`, not of a file)",
+      "opened": 1790000000000,
+      "provenance": "constructed",
+      "seq": 0,
+      "t": 0,
+      "version": 4
+    },
+    {
+      "kind": "ask",
+      "seq": 1,
+      "t": 5,
+      "text": "take a screenshot",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 3,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 3,
+      "seq": 4,
+      "t": 20,
+      "tool_call": {
+        "arguments": "{\"command\":\"screenshot shots/turn-1.png\"}",
+        "id": "call-0",
+        "index": 0,
+        "name": "bash"
+      }
+    },
+    {
+      "finish_reason": "tool_calls",
+      "kind": "response",
+      "seq": 5,
+      "t": 25,
+      "text": "",
+      "to_request": 3
+    },
+    {
+      "arguments": "{\"command\":\"screenshot shots/turn-1.png\"}",
+      "argv": [
+        "sh",
+        "-c",
+        "screenshot shots/turn-1.png"
+      ],
+      "confined": [
+        "sh",
+        "-c",
+        "screenshot shots/turn-1.png"
+      ],
+      "cwd": "/work/tree",
+      "exit": 0,
+      "files": [
+        {
+          "bytes": 48213,
+          "media_type": "image/png",
+          "path": "shots/turn-1.png",
+          "sha256": "943a0bb9f327199bf247328c3ebef3c053d906b96a8dcbb6970eb8d0c6f1c88a"
+        }
+      ],
+      "id": "call-0",
+      "isolation": "sandbox",
+      "kind": "tool_call",
+      "name": "bash",
+      "network": "none",
+      "outcome": "ran",
+      "request": 3,
+      "seq": 6,
+      "stderr": "",
+      "stderr_bytes": 0,
+      "stdout": "",
+      "stdout_bytes": 0,
+      "t": 30,
+      "turn": 1
+    }
+  ],
+  "torn": 0
+}

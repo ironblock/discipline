@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 3;
-export const READS = [0, 1, 2, 3] as const;
+export const VERSION = 4;
+export const READS = [0, 1, 2, 3, 4] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -106,6 +106,8 @@ export type ToolRefusal =
   | "max_steps"
   | "unparsable"
   | "unknown_tool"
+  | "denylist"
+  | "declined"
 ;
 
 export type EngineIdentity =
@@ -116,6 +118,13 @@ export type EngineIdentity =
 export type Provenance =
   | "placed"
   | "constructed"
+;
+
+export type ApprovalScope =
+  | "once"
+  | "session"
+  | "workspace"
+  | "preseeded"
 ;
 
 export interface HeadMessage {
@@ -151,11 +160,24 @@ export interface ToolCallPiece {
   arguments: string;
 }
 
+export interface Approval {
+  scope: ApprovalScope;
+  decided_at?: number;
+  why?: string;
+}
+
+export interface RecordedFile {
+  path: string;
+  sha256: string;
+  media_type: string;
+  bytes: number;
+}
+
 export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3;
+  version: 0 | 1 | 2 | 3 | 4;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -285,6 +307,7 @@ export type ToolCallLine = {
   arguments: string;
   outcome: ToolOutcome;
   argv?: string[];
+  cwd?: string;
   confined?: string[];
   isolation?: Isolation;
   network?: Network;
@@ -295,6 +318,8 @@ export type ToolCallLine = {
   stdout_bytes?: number;
   stderr?: string;
   stderr_bytes?: number;
+  approval?: Approval;
+  files?: RecordedFile[];
 };
 
 export type LogLine =
