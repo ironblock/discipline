@@ -161,7 +161,8 @@ def observed() -> dict[str, set[str]]:
         )
         raise SystemExit(2)
     for line in lane_faults.stdout.splitlines():
-        _lane, fault_id, _signature, _cls = line.split("	")
+        # lane, id, signatures, class, scope (#360)
+        _lane, fault_id, _signature, _cls, _scope = line.split("	")
         seen["lane-fault"].add(fault_id)
     if FIXTURES.is_dir():
         for d in FIXTURES.iterdir():

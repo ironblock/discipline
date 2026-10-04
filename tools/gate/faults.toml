@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 172
+mechanics_assertions = 175
 unseedable_guards = 2
 migrated = 0
 
@@ -1833,6 +1833,30 @@ check = "-"
 label = "a recompute scope that is not a list of names is a misuse"
 failure_class = "recompute.scope-misspelled"
 expected_exit = "2"
+migrated = false
+[[fault]]
+id = "mech.a-lanes-scope-naming-no-registered-lane-is-a-misuse"
+kind = "mechanics"
+check = "-"
+label = "a lanes scope naming no registered lane is a misuse"
+failure_class = "lanes.no-lane"
+expected_exit = "2"
+migrated = false
+[[fault]]
+id = "mech.a-lanes-scope-that-is-not-a-list-of-names-is-a-misuse"
+kind = "mechanics"
+check = "-"
+label = "a lanes scope that is not a list of names is a misuse"
+failure_class = "lanes.scope-malformed"
+expected_exit = "2"
+migrated = false
+[[fault]]
+id = "mech.a-lanes-case-with-no-scope-is-wrong-at-generation"
+kind = "mechanics"
+check = "-"
+label = "a lanes case with no scope is WRONG at generation"
+failure_class = "lanes.no-scope"
+expected_exit = "0"
 migrated = false
 [[fault]]
 id = "mech.an-ordinary-binary-does-not-false-positive"
@@ -4642,6 +4666,14 @@ check = "ci"
 label = "a branch spelled in a script"
 failure_class = "wiring.branch-literal"
 legacy_signature = "scope-selftest.py:[0-9]+: .*names a branch literally"
+migrated = false
+[[fault]]
+id = "lanes.lanes_scope_drops_a_second_lane"
+kind = "seeded-gate"
+check = "lanes"
+label = "a two-lane catcher resolved to one lane"
+failure_class = "lanes.scope-drops-a-lane"
+legacy_signature = "resolved to \\[.client.\\], not \\[.client., .drive.\\]"
 migrated = false
 [[fault]]
 id = "ci.ci_selftest_on_every_event"

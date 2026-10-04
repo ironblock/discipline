@@ -15,8 +15,10 @@ manifests exist; this script is what applies them continuously rather than
 once: `--verify` (this file's `lanes` check) confirms every registered lane
 is present and green, `--list` is what `verify.sh --selftest` reads to turn
 every declared fault into a seeded case -- one signature per catcher, every
-one required (#239) -- and `--apply-only LANE ID` is the
-injection that case runs.
+one required (#239), and the lanes its catchers run in (#360) -- and
+`--apply-only LANE ID` is the injection that case runs. `--verify --lanes
+A,B` runs only those lanes, which is how a lane fault's case runs its scope,
+and `--selftest` proves the resolution that derives it.
 
 THREE THINGS THIS PROVES, RULED ON #76:
 
@@ -39,6 +41,7 @@ from __future__ import annotations
 import argparse
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 import tomllib
@@ -156,16 +159,122 @@ def run_command(command: str, root: pathlib.Path) -> tuple[int, str]:
     return proc.returncode, proc.stdout + proc.stderr
 
 
-def cmd_verify(root: pathlib.Path, registry_path: pathlib.Path) -> int:
+# WHICH LANES A CATCHER RUNS IN (#360, ruled (a) at #360 5977576784). Every
+# lane's command is `cargo test ... -- FILTER [--skip NAME]...`, and cargo
+# runs a test when FILTER is a substring of its path and no `--skip` is. So a
+# catcher -- a test path a fault's `catches` names -- resolves to the set of
+# lanes whose registered command selects it by that rule, read from the
+# command itself. A lane fault's scope is the union over its catchers; a
+# catcher selected by two lanes runs in both. A command this cannot read as
+# `cargo test` selects nothing, so a catcher only it could run resolves to no
+# lane, and the generated case is WRONG before anything runs.
+def lane_selection(command: str) -> tuple[str, list[str]] | None:
+    """(filter, skips) from a lane's command, or None for any command this
+    does not read exactly: `cargo test` with only `-p NAME` and
+    `--no-fail-fast` before `--`, and after it one filter and `--skip NAME`
+    pairs. A word it does not know -- `--exact`, `--lib`, `--skip=`, a
+    filter before `--`, a flag's value -- would change what cargo runs, so
+    it is refused rather than read past (#381's review)."""
+    try:
+        words = shlex.split(command)
+    except ValueError:
+        return None
+    if words[:2] != ["cargo", "test"] or "--" not in words:
+        return None
+    split = words.index("--")
+    before, after = words[2:split], words[split + 1:]
+    i = 0
+    while i < len(before):
+        if before[i] == "-p" and i + 1 < len(before):
+            i += 2
+        elif before[i] == "--no-fail-fast":
+            i += 1
+        else:
+            return None
+    filters, skips, i = [], [], 0
+    while i < len(after):
+        if after[i] == "--skip" and i + 1 < len(after):
+            skips.append(after[i + 1]); i += 2
+        elif not after[i].startswith("-"):
+            filters.append(after[i]); i += 1
+        else:
+            return None
+    if len(filters) != 1:
+        return None
+    return filters[0], skips
+
+
+def selects(selection: tuple[str, list[str]] | None, path: str) -> bool:
+    if selection is None:
+        return False
+    flt, skips = selection
+    return flt in path and not any(s in path for s in skips)
+
+
+def lane_scope(catches: list[str], commands: dict[str, str]) -> list[str] | None:
+    """The sorted lanes a fault's catchers run in, or None when any catcher
+    resolves to no lane."""
+    selections = {name: lane_selection(command) for name, command in commands.items()}
+    scope: set[str] = set()
+    for path in catches:
+        lanes = {name for name, sel in selections.items() if selects(sel, path)}
+        if not lanes:
+            return None
+        scope |= lanes
+    return sorted(scope)
+
+
+def lane_fixtures() -> list[str]:
+    """Where the resolution is wrong, each said; empty when it is right."""
+    wrong = []
+    commands = {
+        "client": "cargo test -p x -- client --skip every_seeded_fault",
+        "drive": "cargo test -p x -- drive --skip every_seeded_fault",
+        "digest": "cargo test -p x -- digest:: --skip every_seeded_fault",
+        "synthetic": "printf 'not cargo'; exit 1",
+        # Shapes this does not read exactly select nothing (#381's review).
+        "before": "cargo test -p x drive",
+        "exact": "cargo test -p x -- drive --exact",
+        "lib": "cargo test -p x --lib -- drive",
+        "threads": "cargo test -p x -- drive --test-threads 1",
+        "equals": "cargo test -p x -- drive --skip=client",
+    }
+    for catches, want in (
+        (["drive::serve::tests::a"], ["drive"]),
+        # A catcher two filters select runs in both lanes, never one.
+        (["drive::client::tests::a"], ["client", "drive"]),
+        (["drive::serve::tests::a", "client::tests::b"], ["client", "drive"]),
+        (["digest::tests::a"], ["digest"]),
+        (["digester::tests::a"], None),
+        (["drive::every_seeded_fault_still_names"], None),
+        (["nobody::tests::a"], None),
+    ):
+        got = lane_scope(catches, commands)
+        if got != want:
+            wrong.append(f"{catches} resolved to {got}, not {want}")
+    return wrong
+
+
+def cmd_verify(root: pathlib.Path, registry_path: pathlib.Path, only: list[str] | None = None) -> int:
     found = Findings(root, registry_path)
     for problem in found.problems:
         print(f"apply-lane-faults: {problem}", file=sys.stderr)
+    # A SCOPE (#360): run only the lanes named. A name no lane carries, or no
+    # name at all, is a misuse, not a smaller run that passes.
+    if only is not None:
+        unknown = sorted(set(only) - set(found.lanes))
+        if not only or unknown:
+            print(f"apply-lane-faults: --lanes names {', '.join(unknown) or 'no lane'}; "
+                  f"registered: {', '.join(sorted(found.lanes))}", file=sys.stderr)
+            return EXIT_BROKEN
 
     broken = False
     dirty = False
     total_faults = 0
     total_catchers = 0
     for name, (package, faults) in sorted(found.lanes.items()):
+        if only is not None and name not in only:
+            continue
         total_faults += len(faults)
         total_catchers += sum(len(f.get("catches") or []) for f in faults)
         rc, log = run_command(package["command"], root)
@@ -186,8 +295,10 @@ def cmd_verify(root: pathlib.Path, registry_path: pathlib.Path) -> int:
         return EXIT_BROKEN
     if found.problems or dirty:
         return EXIT_DIRTY
+    ran = len(found.lanes) if only is None else len(set(only))
     print(
-        f"apply-lane-faults: {len(found.lanes)} lane(s) registered and green, "
+        f"apply-lane-faults: {ran} lane(s) of {len(found.lanes)} registered run and green"
+        f"{'' if only is None else ' (' + ', '.join(sorted(set(only))) + ')'}, "
         f"{total_faults} fault(s) declared, {total_catchers} catcher(s) among them"
     )
     return 0
@@ -219,9 +330,16 @@ def cmd_list(root: pathlib.Path, registry_path: pathlib.Path) -> int:
         print(f"apply-lane-faults: {problem}", file=sys.stderr)
     if found.problems:
         return EXIT_DIRTY
+    commands = {name: package["command"] for name, (package, _faults) in found.lanes.items()}
     for name, (_package, faults) in sorted(found.lanes.items()):
         for fault in faults:
             catches = fault.get("catches") or []
+            # Every column filled (#381's review): `read` with a tab IFS folds
+            # two tabs into one, so an empty class would shift the scope into
+            # the class's place and the case would read as scope-less.
+            if not fault.get("failure_class"):
+                print(f"apply-lane-faults: {fault['id']} declares no failure_class", file=sys.stderr)
+                return EXIT_BROKEN
             if not catches:
                 print(
                     # `fault["id"]` is already lane-prefixed (every gate.toml
@@ -244,6 +362,9 @@ def cmd_list(root: pathlib.Path, registry_path: pathlib.Path) -> int:
                         fault["id"],
                         SIGNATURE_SEPARATOR.join(failure_signature(c) for c in catches),
                         fault.get("failure_class", ""),
+                        # The lanes its catchers run in (#360), comma-joined;
+                        # empty when a catcher resolves to none.
+                        ",".join(lane_scope(catches, commands) or []),
                     ]
                 )
             )
@@ -306,7 +427,9 @@ def main(argv: list[str]) -> int:
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--verify", action="store_true", help="run every registered lane's command")
-    group.add_argument("--list", action="store_true", help="print lane<TAB>id<TAB>signatures<TAB>class, one fault per line; the signatures, one per catcher, are joined by the ASCII unit separator")
+    group.add_argument("--list", action="store_true", help="print lane<TAB>id<TAB>signatures<TAB>class<TAB>scope, one fault per line; the signatures, one per catcher, are joined by the ASCII unit separator; the scope is the lanes its catchers run in, comma-joined, empty when one runs in none")
+    group.add_argument("--selftest", action="store_true", help="the lane resolution's fixtures")
+    parser.add_argument("--lanes", help="with --verify: only these lanes, comma-joined (#360)")
     group.add_argument(
         "--apply-only",
         nargs=2,
@@ -320,9 +443,19 @@ def main(argv: list[str]) -> int:
         pathlib.Path(args.registry) if args.registry else root / DEFAULT_REGISTRY
     )
 
+    if args.lanes is not None and not args.verify:
+        print("apply-lane-faults: --lanes narrows --verify and nothing else", file=sys.stderr)
+        return EXIT_BROKEN
+    if args.selftest:
+        wrong = lane_fixtures()
+        for line in wrong:
+            print(f"apply-lane-faults: {line}", file=sys.stderr)
+        print(f"apply-lane-faults: lane resolution fixtures, {len(wrong)} wrong")
+        return EXIT_DIRTY if wrong else 0
     try:
         if args.verify:
-            return cmd_verify(root, registry_path)
+            return cmd_verify(root, registry_path,
+                              None if args.lanes is None else [l for l in args.lanes.split(",") if l])
         if args.list:
             return cmd_list(root, registry_path)
         lane, fault_id = args.apply_only
