@@ -114,10 +114,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 4;
+pub const VERSION: i64 = 5;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -158,6 +158,13 @@ vocabulary! {
         Progress => "progress",
         /// A call the model made, and what became of it (v3).
         ToolCall => "tool_call",
+        /// A side call off the trunk's warm tail, in the gap after a settled
+        /// turn, under the regimen's warrant (v5, #374).
+        Fork => "fork",
+        /// How a fork ended (v5, #374).
+        ForkSettled => "fork.settled",
+        /// One entry a fork's answer patched into working memory (v5, #374).
+        Patch => "patch",
     }
 }
 
@@ -224,6 +231,55 @@ vocabulary! {
     Lane {
         /// The canonical session.
         Trunk => "trunk",
+        /// A fork's single call off the trunk's warm tail, never appended
+        /// to it (v5, #374).
+        Interview => "interview",
+    }
+}
+
+vocabulary! {
+    /// What warranted a fork: the regimen's rule, never the model's choice
+    /// (v5, #374, ruled at 5985110649).
+    Warrant {
+        /// The settled turn read a file.
+        Read => "read",
+        /// The settled turn's ask was marked a scoping question.
+        Scoping => "scoping",
+    }
+}
+
+vocabulary! {
+    /// How a fork ended (v5, #374).
+    ForkOutcome {
+        /// It answered, and its answer was folded into patches.
+        Value => "value",
+        /// It answered that it had nothing to record.
+        Decline => "decline",
+        /// It answered in a shape the fold could not read.
+        Unparseable => "unparseable",
+        /// Its call stopped at its output cap.
+        Truncated => "truncated",
+        /// Its call ended without an answer.
+        Failed => "failed",
+        /// It was stopped.
+        Cancelled => "cancelled",
+    }
+}
+
+vocabulary! {
+    /// What a patch does to working memory: `object::Patch`'s variants
+    /// (v5, #374).
+    PatchOp {
+        /// A new entry.
+        Add => "add",
+        /// An entry that replaces an earlier one.
+        Supersede => "supersede",
+        /// An entry resolved.
+        Resolve => "resolve",
+        /// An entry retired.
+        Retire => "retire",
+        /// An entry parked.
+        Park => "park",
     }
 }
 
@@ -494,6 +550,8 @@ pub enum Event {
         turn: u32,
         /// What was asked.
         text: String,
+        /// Whether the operator marked it a scoping question (v5, #374).
+        scoping: Option<bool>,
     },
     /// The state moved.
     Settlement {
@@ -512,6 +570,9 @@ pub enum Event {
         /// body starts with, as the client hashes them (v2, ruled on #157,
         /// so a live record's request names the prefix it sent).
         head_sha256: Option<String>,
+        /// The `seq` of the fork it is the call of, on the `interview` lane
+        /// (v5, #374).
+        fork: Option<u64>,
     },
     /// A command was refused.
     Refused {
@@ -674,6 +735,51 @@ pub enum Event {
         /// The files it left, by reference (v4).
         files: Option<Vec<RecordedFile>>,
     },
+    /// A side call off the trunk's warm tail (v5, #374).
+    Fork {
+        /// The lane its call is made on: `interview`.
+        lane: Lane,
+        /// The settled turn it follows.
+        of_turn: u32,
+        /// The `seq` of that turn's trunk `request`, whose answer it forks
+        /// from.
+        at: u64,
+        /// What warranted it.
+        why: Warrant,
+        /// What it asks.
+        question: String,
+    },
+    /// How a fork ended (v5, #374).
+    ForkSettled {
+        /// The `seq` of the fork.
+        fork: u64,
+        /// How.
+        outcome: ForkOutcome,
+    },
+    /// One entry a fork's answer patched into working memory (v5, #374).
+    Patch {
+        /// The `seq` of the fork.
+        fork: u64,
+        /// What it does.
+        op: PatchOp,
+        /// The entry.
+        entry: PatchEntry,
+        /// The id of the entry it replaces, exactly when `op` is
+        /// `supersede`.
+        supersedes: Option<String>,
+    },
+}
+
+/// A patch's entry (v5, #374): its id, its text, and its category when the
+/// fold names one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchEntry {
+    /// The entry's id.
+    pub id: String,
+    /// What it records.
+    pub text: String,
+    /// Its category, when named.
+    pub category: Option<String>,
 }
 
 /// A call's token counts as the server reported them in its `usage`
@@ -1197,6 +1303,109 @@ fn gap_once(
     Ok(())
 }
 
+/// What the whole-log rules of #374's forks (v5) carry from line to line.
+#[derive(Default)]
+struct Forks {
+    /// The turns settled `final`.
+    finals: BTreeSet<u32>,
+    /// The trunk requests that have a `response`.
+    answered: BTreeSet<u64>,
+    /// Each fork's `seq`, to the turn it follows.
+    of_turn: BTreeMap<u64, u32>,
+    /// Each settled fork's `seq`, to how it ended.
+    settled: BTreeMap<u64, ForkOutcome>,
+}
+
+impl Forks {
+    /// A `fork` (#374): on the `interview` lane, after the latest turn
+    /// settled `final` and before the next `ask`, at that turn's answered
+    /// trunk request, and the only fork in its gap.
+    fn fork(
+        &mut self,
+        seq: u64,
+        (lane, of_turn, at): (Lane, u32, u64),
+        turns: u32,
+        trunk: &BTreeMap<u32, u64>,
+    ) -> Result<(), String> {
+        if lane != Lane::Interview {
+            return Err(format!(
+                "a fork on the `{}` lane: a fork's call is made on `interview`",
+                lane.tag()
+            ));
+        }
+        if of_turn != turns || !self.finals.contains(&of_turn) {
+            return Err(format!(
+                "a fork of turn {of_turn} outside its gap: a fork follows the latest turn \
+                 (here {turns}) once it settled `final`, before the next `ask`"
+            ));
+        }
+        if trunk.get(&of_turn) != Some(&at) || !self.answered.contains(&at) {
+            return Err(format!(
+                "a fork at seq {at}, which is not turn {of_turn}'s answered trunk `request`"
+            ));
+        }
+        if self.of_turn.values().any(|turn| *turn == of_turn) {
+            return Err(format!(
+                "a second fork in the gap after turn {of_turn}: at most one fork per gap"
+            ));
+        }
+        self.of_turn.insert(seq, of_turn);
+        Ok(())
+    }
+
+    /// A `request`'s `fork` (#374): an `interview` request names an earlier
+    /// fork not yet settled; a trunk request names none.
+    fn request(&self, lane: Lane, fork: Option<u64>) -> Result<(), String> {
+        let Some(fork) = fork else {
+            if lane == Lane::Interview {
+                return Err(
+                    "an `interview` request carries no `fork`: it names the fork it is the \
+                     call of"
+                        .to_owned(),
+                );
+            }
+            return Ok(());
+        };
+        if lane == Lane::Trunk {
+            return Err(format!(
+                "a trunk request carries `fork` {fork}: only an `interview` request is a fork's"
+            ));
+        }
+        if !self.of_turn.contains_key(&fork) {
+            return Err(format!("`fork` {fork} is not an earlier `fork`"));
+        }
+        if self.settled.contains_key(&fork) {
+            return Err(format!("`fork` {fork} is already settled"));
+        }
+        Ok(())
+    }
+
+    /// A `fork.settled` (#374): once per fork, after it.
+    fn settle(&mut self, fork: u64, outcome: ForkOutcome) -> Result<(), String> {
+        if !self.of_turn.contains_key(&fork) {
+            return Err(format!("`fork` {fork} is not an earlier `fork`"));
+        }
+        if self.settled.insert(fork, outcome).is_some() {
+            return Err(format!("fork {fork} settled twice"));
+        }
+        Ok(())
+    }
+
+    /// A `patch` (#374): it cites a fork already settled `value`.
+    fn patch(&self, fork: u64) -> Result<(), String> {
+        match self.settled.get(&fork) {
+            Some(outcome) if *outcome != ForkOutcome::Value => Err(format!(
+                "a patch of fork {fork}, which settled `{}`: only a fork settled `value` patches",
+                outcome.tag()
+            )),
+            Some(_) => Ok(()),
+            None => Err(format!(
+                "a patch of fork {fork}, which is not an earlier settled `fork`"
+            )),
+        }
+    }
+}
+
 /// A request ends once: a `response`, a `cancelled` or a `request.failed`
 /// (the module's own rule, "a cancelled call is `cancelled`, never a
 /// `response`"; found by #137's review).
@@ -1409,6 +1618,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
     let mut capped = BTreeSet::new();
     let mut request_turns = BTreeMap::new();
     let mut calls = BTreeSet::new();
+    let mut forks = Forks::default();
     let mut claimed = false;
     let mut last_t = 0_u64;
     for (index, line) in lines.iter().enumerate() {
@@ -1441,13 +1651,16 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 }
                 turns = *turn;
             }
-            Event::Request { turn, lane, .. } => {
+            Event::Request {
+                turn, lane, fork, ..
+            } => {
                 if *turn == 0 || *turn != turns {
                     return Err(at(
                         index,
                         format!("a request for turn {turn} where the latest is {turns}"),
                     ));
                 }
+                forks.request(*lane, *fork).map_err(|why| at(index, why))?;
                 requests.insert(line.seq);
                 request_turns.insert(line.seq, *turn);
                 if *lane == Lane::Trunk {
@@ -1466,6 +1679,9 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 }
                 if *reason == SettleReason::Capped {
                     settled_capped(*turn, &trunk, &capped).map_err(|why| at(index, why))?;
+                }
+                if *reason == SettleReason::Final {
+                    forks.finals.insert(*turn);
                 }
                 settlings.insert(line.seq);
                 latest_settling = Some(line.seq);
@@ -1488,7 +1704,24 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 {
                     capped.insert(*to_request);
                 }
+                if let Event::Response { to_request, .. } = event
+                    && trunk.values().any(|request| request == to_request)
+                {
+                    forks.answered.insert(*to_request);
+                }
             }
+            Event::Fork {
+                lane,
+                of_turn,
+                at: forked_at,
+                ..
+            } => forks
+                .fork(line.seq, (*lane, *of_turn, *forked_at), turns, &trunk)
+                .map_err(|why| at(index, why))?,
+            Event::ForkSettled { fork, outcome } => forks
+                .settle(*fork, *outcome)
+                .map_err(|why| at(index, why))?,
+            Event::Patch { fork, .. } => forks.patch(*fork).map_err(|why| at(index, why))?,
             Event::ToolCall {
                 request,
                 turn,
@@ -1591,6 +1824,16 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
         Kind::Ask => Event::Ask {
             turn: fields.turn("turn")?,
             text: fields.string("text")?,
+            scoping: match fields.optional_flag("scoping")? {
+                Some(false) => {
+                    return Err(
+                        "`scoping` is `false`: only the operator's mark, `true`, is \
+                                written (#374)"
+                            .to_owned(),
+                    );
+                }
+                scoping => scoping,
+            },
         },
         Kind::Settlement => Event::Settlement {
             from: fields.tag("from", State::from_tag)?,
@@ -1600,6 +1843,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             turn: fields.turn("turn")?,
             lane: fields.tag("lane", Lane::from_tag)?,
             head_sha256: fields.optional_digest("head_sha256")?,
+            fork: fields.optional_count("fork")?,
         },
         Kind::Refused => Event::Refused {
             command: fields.tag("command", Command::from_tag)?,
@@ -1736,6 +1980,39 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 stderr: fields.output("stderr", "stderr_bytes")?,
                 approval,
                 files: fields.optional_files("files")?,
+            }
+        }
+        Kind::Fork => Event::Fork {
+            lane: fields.tag("lane", Lane::from_tag)?,
+            of_turn: fields.turn("of_turn")?,
+            at: fields.count("at")?,
+            why: fields.tag("why", Warrant::from_tag)?,
+            question: fields.string("question")?,
+        },
+        Kind::ForkSettled => Event::ForkSettled {
+            fork: fields.count("fork")?,
+            outcome: fields.tag("outcome", ForkOutcome::from_tag)?,
+        },
+        Kind::Patch => {
+            let op = fields.tag("op", PatchOp::from_tag)?;
+            let supersedes = fields.optional_string("supersedes")?;
+            if (op == PatchOp::Supersede) != supersedes.is_some() {
+                return Err(format!(
+                    "a patch whose `op` is `{}` {} `supersedes`: a patch names the entry it \
+                     replaces exactly when its `op` is `supersede`",
+                    op.tag(),
+                    if supersedes.is_some() {
+                        "carries"
+                    } else {
+                        "lacks"
+                    }
+                ));
+            }
+            Event::Patch {
+                fork: fields.count("fork")?,
+                op,
+                entry: fields.entry("entry")?,
+                supersedes,
             }
         }
     };
@@ -2129,6 +2406,12 @@ pub enum Tags {
     Provenance,
     /// [`ApprovalScope`] (v4).
     ApprovalScope,
+    /// [`Warrant`] (v5).
+    Warrant,
+    /// [`ForkOutcome`] (v5).
+    ForkOutcome,
+    /// [`PatchOp`] (v5).
+    PatchOp,
 }
 
 impl Tags {
@@ -2149,6 +2432,9 @@ impl Tags {
         Self::EngineIdentity,
         Self::Provenance,
         Self::ApprovalScope,
+        Self::Warrant,
+        Self::ForkOutcome,
+        Self::PatchOp,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -2170,6 +2456,9 @@ impl Tags {
             Self::EngineIdentity => "EngineIdentity",
             Self::Provenance => "Provenance",
             Self::ApprovalScope => "ApprovalScope",
+            Self::Warrant => "Warrant",
+            Self::ForkOutcome => "ForkOutcome",
+            Self::PatchOp => "PatchOp",
         }
     }
 
@@ -2195,6 +2484,9 @@ impl Tags {
             Self::EngineIdentity => of(EngineIdentity::ALL, EngineIdentity::tag),
             Self::Provenance => of(Provenance::ALL, Provenance::tag),
             Self::ApprovalScope => of(ApprovalScope::ALL, ApprovalScope::tag),
+            Self::Warrant => of(Warrant::ALL, Warrant::tag),
+            Self::ForkOutcome => of(ForkOutcome::ALL, ForkOutcome::tag),
+            Self::PatchOp => of(PatchOp::ALL, PatchOp::tag),
         }
     }
 }
@@ -2242,6 +2534,9 @@ pub enum Holds {
     /// A `tool_call`'s files: a non-empty list of objects of the keys
     /// [`RECORDED_FILE`] declares (v4).
     Files,
+    /// A `patch`'s [`PatchEntry`]: an object of the keys [`PATCH_ENTRY`]
+    /// declares (v5).
+    Entry,
 }
 
 /// One key a kind carries.
@@ -2364,6 +2659,34 @@ pub const RECORDED_FILE: &[Field] = &[
     must_v4("bytes", Holds::Count),
 ];
 
+/// The keys of a `patch`'s entry: its id and text always, its category when
+/// the fold names one. Arrived in v5.
+pub const PATCH_ENTRY: &[Field] = &[
+    must_v5("id", Holds::Text),
+    must_v5("text", Holds::Text),
+    may_v5("category", Holds::Text),
+];
+
+/// An optional key that arrived in v5.
+const fn may_v5(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 5,
+    }
+}
+
+/// A key that arrived in v5 and is required wherever its object is written.
+const fn must_v5(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 5,
+    }
+}
+
 /// The keys a `delta`'s `tool_call` carries: the call's index always, its
 /// id and name on its first fragment only, as the server sent them, and the
 /// fragment of its arguments. Arrived in v3.
@@ -2410,6 +2733,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
+        Holds::Entry => Some(PATCH_ENTRY),
         _ => None,
     }
 }
@@ -2420,6 +2744,7 @@ pub fn introduced(kind: Kind) -> i64 {
     match kind {
         Kind::Progress => 1,
         Kind::ToolCall => 3,
+        Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         _ => 0,
     }
 }
@@ -2433,6 +2758,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
             .is_some_and(|reason| [ToolRefusal::Denylist, ToolRefusal::Declined].contains(&reason));
     if refused_in_v4 {
         return 4;
+    }
+    if tags == Tags::Lane && Lane::from_tag(tag) == Some(Lane::Interview) {
+        return 5;
     }
     let capped =
         tags == Tags::SettleReason && SettleReason::from_tag(tag) == Some(SettleReason::Capped);
@@ -2481,7 +2809,11 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             F
         }
         Kind::Ask => {
-            const F: &[Field] = &[must("turn", Count), must("text", Text)];
+            const F: &[Field] = &[
+                must("turn", Count),
+                must("text", Text),
+                may_v5("scoping", Holds::Flag),
+            ];
             F
         }
         Kind::Settlement => {
@@ -2493,6 +2825,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("turn", Count),
                 must("lane", Tag(Tags::Lane)),
                 may_v2("head_sha256", Holds::Digest),
+                may_v5("fork", Count),
             ];
             F
         }
@@ -2598,6 +2931,32 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
+        Kind::Fork => {
+            const F: &[Field] = &[
+                must_v5("lane", Tag(Tags::Lane)),
+                must_v5("of_turn", Count),
+                must_v5("at", Count),
+                must_v5("why", Tag(Tags::Warrant)),
+                must_v5("question", Text),
+            ];
+            F
+        }
+        Kind::ForkSettled => {
+            const F: &[Field] = &[
+                must_v5("fork", Count),
+                must_v5("outcome", Tag(Tags::ForkOutcome)),
+            ];
+            F
+        }
+        Kind::Patch => {
+            const F: &[Field] = &[
+                must_v5("fork", Count),
+                must_v5("op", Tag(Tags::PatchOp)),
+                must_v5("entry", Holds::Entry),
+                may_v5("supersedes", Text),
+            ];
+            F
+        }
     }
 }
 
@@ -2662,6 +3021,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Strings => "string[]".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
+        Holds::Entry => "PatchEntry".to_owned(),
         Holds::Files => "RecordedFile[]".to_owned(),
         Holds::Head => "HeadMessage[]".to_owned(),
         Holds::Tag(tags) => tags.name().to_owned(),
@@ -2756,6 +3116,7 @@ pub fn typescript() -> String {
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
+        ("PatchEntry", PATCH_ENTRY),
     ] {
         let _ = writeln!(out, "export interface {name} {{");
         for field in fields {
@@ -2885,9 +3246,16 @@ fn to_value(line: &Line) -> Value {
             }
             Kind::SessionStart
         }
-        Event::Ask { turn, text: asked } => {
+        Event::Ask {
+            turn,
+            text: asked,
+            scoping,
+        } => {
             put("turn", count(u64::from(*turn)));
             put("text", text(asked));
+            if let Some(scoping) = scoping {
+                put("scoping", Value::Boolean(*scoping));
+            }
             Kind::Ask
         }
         Event::Settlement { from, to } => {
@@ -2899,11 +3267,15 @@ fn to_value(line: &Line) -> Value {
             turn,
             lane,
             head_sha256,
+            fork,
         } => {
             put("turn", count(u64::from(*turn)));
             put("lane", text(lane.tag()));
             if let Some(digest) = head_sha256 {
                 put("head_sha256", text(digest));
+            }
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
             }
             Kind::Request
         }
@@ -3136,6 +3508,46 @@ fn to_value(line: &Line) -> Value {
                 );
             }
             Kind::ToolCall
+        }
+        Event::Fork {
+            lane,
+            of_turn,
+            at,
+            why,
+            question,
+        } => {
+            put("lane", text(lane.tag()));
+            put("of_turn", count(u64::from(*of_turn)));
+            put("at", count(*at));
+            put("why", text(why.tag()));
+            put("question", text(question));
+            Kind::Fork
+        }
+        Event::ForkSettled { fork, outcome } => {
+            put("fork", count(*fork));
+            put("outcome", text(outcome.tag()));
+            Kind::ForkSettled
+        }
+        Event::Patch {
+            fork,
+            op,
+            entry,
+            supersedes,
+        } => {
+            put("fork", count(*fork));
+            put("op", text(op.tag()));
+            let mut object = BTreeMap::from([
+                ("id".to_owned(), text(&entry.id)),
+                ("text".to_owned(), text(&entry.text)),
+            ]);
+            if let Some(category) = &entry.category {
+                object.insert("category".to_owned(), text(category));
+            }
+            put("entry", Value::Object(object));
+            if let Some(replaced) = supersedes {
+                put("supersedes", text(replaced));
+            }
+            Kind::Patch
         }
     };
     put("kind", text(kind.tag()));
@@ -3447,6 +3859,17 @@ impl Fields<'_> {
         }
     }
 
+    /// A `patch`'s `entry`: an object of [`PATCH_ENTRY`]'s keys (v5).
+    fn entry(&self, key: &str) -> Result<PatchEntry, String> {
+        let inner = Fields(self.object(key, PATCH_ENTRY)?);
+        let within = |why: String| format!("`{key}`: {why}");
+        Ok(PatchEntry {
+            id: inner.string("id").map_err(within)?,
+            text: inner.string("text").map_err(within)?,
+            category: inner.optional_string("category").map_err(within)?,
+        })
+    }
+
     fn optional_flag(&self, key: &str) -> Result<Option<bool>, String> {
         match self.0.get(key) {
             None => Ok(None),
@@ -3556,11 +3979,12 @@ mod tests {
     /// One of every event, in an order the rules that span lines accept.
     #[allow(clippy::too_many_lines)]
     fn every_event() -> Vec<Line> {
-        let events = vec![
+        let mut events = vec![
             start().event,
             Event::Ask {
                 turn: 1,
                 text: "say hi".to_owned(),
+                scoping: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -3570,6 +3994,7 @@ mod tests {
                 turn: 1,
                 lane: Lane::Trunk,
                 head_sha256: None,
+                fork: None,
             },
             Event::Delta {
                 request: 3,
@@ -3601,6 +4026,7 @@ mod tests {
             Event::Ask {
                 turn: 2,
                 text: "again".to_owned(),
+                scoping: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -3610,6 +4036,7 @@ mod tests {
                 turn: 2,
                 lane: Lane::Trunk,
                 head_sha256: None,
+                fork: None,
             },
             Event::RequestFailed {
                 request: 13,
@@ -3638,6 +4065,7 @@ mod tests {
             Event::Ask {
                 turn: 3,
                 text: "once more".to_owned(),
+                scoping: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -3647,6 +4075,7 @@ mod tests {
                 turn: 3,
                 lane: Lane::Trunk,
                 head_sha256: None,
+                fork: None,
             },
             Event::Progress {
                 request: 20,
@@ -3694,6 +4123,7 @@ mod tests {
             Event::Ask {
                 turn: 4,
                 text: "a very long one".to_owned(),
+                scoping: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -3703,6 +4133,7 @@ mod tests {
                 turn: 4,
                 lane: Lane::Trunk,
                 head_sha256: None,
+                fork: None,
             },
             Event::RequestFailed {
                 request: 29,
@@ -3748,6 +4179,91 @@ mod tests {
                 files: None,
             },
         ];
+        // v5 (#374): a scoping turn answered and settled `final`, then the
+        // one fork of its gap, its interview call, its settling `value`, and
+        // the two patches it folded into.
+        let asked = events.len() as u64;
+        let (request, fork) = (asked + 2, asked + 6);
+        events.extend([
+            Event::Ask {
+                turn: 5,
+                text: "what are we building".to_owned(),
+                scoping: Some(true),
+            },
+            Event::Settlement {
+                from: State::Awaiting,
+                to: State::Turn,
+            },
+            Event::Request {
+                turn: 5,
+                lane: Lane::Trunk,
+                head_sha256: None,
+                fork: None,
+            },
+            Event::Response {
+                to_request: request,
+                text: "a tracker".to_owned(),
+                finish_reason: None,
+                reasoning: None,
+                timings: None,
+                usage: None,
+                capped: None,
+            },
+            Event::TurnSettled {
+                turn: 5,
+                reason: SettleReason::Final,
+            },
+            Event::Settlement {
+                from: State::Turn,
+                to: State::Awaiting,
+            },
+            Event::Fork {
+                lane: Lane::Interview,
+                of_turn: 5,
+                at: request,
+                why: Warrant::Scoping,
+                question: "what did the operator decide".to_owned(),
+            },
+            Event::Request {
+                turn: 5,
+                lane: Lane::Interview,
+                head_sha256: None,
+                fork: Some(fork),
+            },
+            Event::Response {
+                to_request: fork + 1,
+                text: "{\"decisions\":[]}".to_owned(),
+                finish_reason: None,
+                reasoning: None,
+                timings: None,
+                usage: None,
+                capped: None,
+            },
+            Event::ForkSettled {
+                fork,
+                outcome: ForkOutcome::Value,
+            },
+            Event::Patch {
+                fork,
+                op: PatchOp::Add,
+                entry: PatchEntry {
+                    id: "d1".to_owned(),
+                    text: "a tracker".to_owned(),
+                    category: None,
+                },
+                supersedes: None,
+            },
+            Event::Patch {
+                fork,
+                op: PatchOp::Supersede,
+                entry: PatchEntry {
+                    id: "d2".to_owned(),
+                    text: "a tracker for one team".to_owned(),
+                    category: Some("scope".to_owned()),
+                },
+                supersedes: Some("d1".to_owned()),
+            },
+        ]);
         events
             .into_iter()
             .enumerate()
@@ -3770,7 +4286,8 @@ mod tests {
                 | Holds::Usage
                 | Holds::Serving
                 | Holds::ToolCallPiece
-                | Holds::Approval,
+                | Holds::Approval
+                | Holds::Entry,
                 Value::Object(object),
             ) => {
                 let declared = object_fields(holds).expect("an object holder");
@@ -4154,6 +4671,7 @@ mod tests {
                                 || why.contains("carries `policy` under no profile")
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
+                        || (tags == Tags::PatchOp && why.contains("`supersedes`"))
                 },
                 |_| true,
             )
@@ -4812,7 +5330,8 @@ mod tests {
         assert_eq!(
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
-             cancelled request.failed turn.settled idle.gap progress tool_call"
+             cancelled request.failed turn.settled idle.gap progress tool_call fork \
+             fork.settled patch"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -4841,6 +5360,22 @@ mod tests {
         assert_eq!(
             tags(EngineIdentity::ALL.iter().map(|it| it.tag()).collect()),
             "checked_commit literal_matched"
+        );
+        assert_eq!(
+            tags(Lane::ALL.iter().map(|it| it.tag()).collect()),
+            "trunk interview"
+        );
+        assert_eq!(
+            tags(Warrant::ALL.iter().map(|it| it.tag()).collect()),
+            "read scoping"
+        );
+        assert_eq!(
+            tags(ForkOutcome::ALL.iter().map(|it| it.tag()).collect()),
+            "value decline unparseable truncated failed cancelled"
+        );
+        assert_eq!(
+            tags(PatchOp::ALL.iter().map(|it| it.tag()).collect()),
+            "add supersede resolve retire park"
         );
     }
 

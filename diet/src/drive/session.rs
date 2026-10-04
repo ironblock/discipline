@@ -935,6 +935,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
         Event::Asked { turn, text } => log::Event::Ask {
             turn: *turn,
             text: text.clone(),
+            // A scoping mark arrives with #374's interview layer.
+            scoping: None,
         },
         Event::Requested {
             turn,
@@ -946,6 +948,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 Lane::Trunk => log::Lane::Trunk,
             },
             head_sha256: Some(head_sha256.clone()),
+            fork: None,
         },
         Event::Settled { from, to } => log::Event::Settlement {
             from: state_of(*from),
@@ -2569,6 +2572,7 @@ pub(in crate::drive) mod tests {
             log::Event::Ask {
                 turn: 1,
                 text: "say \"hi\"\n".to_owned(),
+                scoping: None,
             },
             log::Event::Settlement {
                 from: log::State::Awaiting,
@@ -2578,6 +2582,7 @@ pub(in crate::drive) mod tests {
                 turn: 1,
                 lane: log::Lane::Trunk,
                 head_sha256: Some("a".repeat(64)),
+                fork: None,
             },
             log::Event::Refused {
                 command: log::Command::Cancel,
