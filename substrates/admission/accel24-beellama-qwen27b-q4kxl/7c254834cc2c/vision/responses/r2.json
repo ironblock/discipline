@@ -1,0 +1,14 @@
+{
+ "n": 2,
+ "started": "2026-10-04T17:01:21.088719Z",
+ "ended": "2026-10-04T17:01:22.264057Z",
+ "status": 200,
+ "headers": {
+  "Connection": "close",
+  "Content-Type": "application/json; charset=utf-8",
+  "Server": "llama.cpp",
+  "Content-Length": "941",
+  "Access-Control-Allow-Origin": ""
+ },
+ "body": "{\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"NPC7\",\"reasoning_content\":\"The user wants the text from the image transcribed exactly.\\n\\n1.  **Identify the text:** The image contains the text \\\"NPC7\\\" in a pixelated, blue font.\\n2.  **Transcribe:** NPC7.\\n\"}}],\"created\":1791133282,\"model\":\"Qwen3.6-27B\",\"system_fingerprint\":\"b0-unknown-dirty\",\"object\":\"chat.completion\",\"usage\":{\"completion_tokens\":56,\"prompt_tokens\":1100,\"total_tokens\":1156,\"prompt_tokens_details\":{\"cached_tokens\":1096},\"completion_tokens_details\":{\"reasoning_tokens\":52,\"visible_tokens\":6}},\"id\":\"chatcmpl-txL6Dgf94mrXvknQpnnkTTy9m7eUIIiO\",\"timings\":{\"cache_n\":1096,\"prompt_n\":4,\"prompt_ms\":57.806,\"prompt_per_token_ms\":14.4515,\"prompt_per_second\":69.19696917275024,\"predicted_n\":56,\"predicted_ms\":1071.429,\"predicted_per_token_ms\":19.132660714285716,\"predicted_per_second\":52.26664576000836,\"draft_n\":284,\"draft_n_accepted\":37}}"
+}

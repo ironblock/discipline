@@ -1,0 +1,31 @@
+# #373's vision cell on the floor (ruled 5982304569): one image through the registered serving line, typed by a planted
+# detail. recompute.sh re-derives `word` from responses/ and refuses when it, or the registry's `vision`, disagrees.
+word = "accepted"
+per_request = ["accepted", "accepted", "accepted"]
+n = 3
+token_sha256 = "4a7a69c6fc1bc9741ed1d3b5e9c79c0eb4d2d7dfc4b3aa8dc65eb1a88ddfd971"
+image_sha256 = "8019829f111563aec18794a1693e5243da9a774a392e91b2b0a46c1a8c820501"
+max_tokens = 8192
+sampler = "temperature 0.6, top_k 20, top_p 1.0, min_p 0.0"
+sampler_is = "the substrate's registered sampler_card; reasoning as the serving line has it (no chat_template_kwargs sent)"
+projector_sha256 = "05353347512982ee62317b9d8c89372bc815f4b4043580e7ef3ad411ec1a1cd3"
+projector_is = "the mmproj the serving line loads, pinned by this directory's fingerprint.json (weights.projector) and the registry's weights_projector"
+substrate = "accel24-beellama-qwen27b-q4kxl"
+instance = "2026-10-02"
+preflight = "fingerprint.py --check against the 2026-10-02 capture with --hash-models: SUBSTRATE IDENTICAL, 4b194a74ff6ab263; the running exe 980845d6..., read from /proc (preflight/)"
+window = "2026-10-04T17:01:01Z/2026-10-04T17:01:26Z"
+window_is = "the first request's start and the last's end (preflight/window.txt); granted by Track 6 on #373 (5982346540), production untouched, one client"
+
+[raw]
+"make_image.py" = "b3bda7a98f0f5c0deecba719a2d7de91ba74518f7a761778c9c3db7d0d11a29a"
+"run_cell.py" = "44da07ad019283a7df7ebef67bd48e9276650b7846380978730521e1ac5dc085"
+"derive.py" = "a61f7633ad856147a31d2aa35ed56a22008cf981df628da9e14da00bc113a986"
+"image.png" = "8019829f111563aec18794a1693e5243da9a774a392e91b2b0a46c1a8c820501"
+"token.sha256" = "0bb3c12afcd87d10f0809b7ac06b54ca2aa0dc517263c45d8bf4c21423848525"
+"request.json" = "80478e877908578f7529d86c2029e20d02dc412fa5751f79a8057d2268f5c123"
+"responses/r1.json" = "361823ca103c36ba7e65defd7d627427942b44831f59e849f0e59e90b9270a04"
+"responses/r2.json" = "1df0ec3fd8b22c35864c84834ad04ee8d3457eb284417f59f4baff050d94a821"
+"responses/r3.json" = "71a86e5f829348cee3a9e940163418ce55e676020d78b54ae54066924dfc2466"
+"preflight/fingerprint-check.log" = "219875ea37d12658550fa1064c7c0f589a98d269def8ab815f4fd7d9ed642684"
+"preflight/exe.txt" = "8cf421632494aae8dcaa14508dc01afcb33507c9659c2d2a4079926f0e47131d"
+"preflight/window.txt" = "46dcbc1958c254285fce34a3c58457232f1969465c603579abf386a109b11bed"

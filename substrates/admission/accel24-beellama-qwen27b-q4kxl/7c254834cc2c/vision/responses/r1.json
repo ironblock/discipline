@@ -1,0 +1,14 @@
+{
+ "n": 1,
+ "started": "2026-10-04T17:01:01.384822Z",
+ "ended": "2026-10-04T17:01:21.088249Z",
+ "status": 200,
+ "headers": {
+  "Connection": "close",
+  "Content-Type": "application/json; charset=utf-8",
+  "Server": "llama.cpp",
+  "Content-Length": "1828",
+  "Access-Control-Allow-Origin": ""
+ },
+ "body": "{\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"NPC7\",\"reasoning_content\":\"The user wants me to identify the text in the image.\\n\\n1.  **Analyze the image:** I see a sequence of characters drawn in a pixelated, blocky font against a white background. The color of the text is a dark blue.\\n2.  **Identify the characters:**\\n    *   The first character consists of two vertical bars connected by a diagonal line of pixels going down from left to right. This is clearly the letter **N**.\\n    *   The second character has a vertical bar on the left, with two horizontal bars extending to the right from the top and middle. This is the letter **P**.\\n    *   The third character has a vertical bar on the left, with horizontal bars at the top and bottom extending to the right, forming a 'C' shape. This is the letter **C**.\\n    *   The fourth character has a horizontal bar at the top and a diagonal line of pixels going down to the left. This is the number **7**.\\n3.  **Combine the characters:** The sequence is \\\"N\\\", \\\"P\\\", \\\"C\\\", \\\"7\\\".\\n4.  **Final check:** The text is \\\"NPC7\\\". The request is to answer with the text only.\\n\"}}],\"created\":1791133281,\"model\":\"Qwen3.6-27B\",\"system_fingerprint\":\"b0-unknown-dirty\",\"object\":\"chat.completion\",\"usage\":{\"completion_tokens\":262,\"prompt_tokens\":1100,\"total_tokens\":1362,\"prompt_tokens_details\":{\"cached_tokens\":0},\"completion_tokens_details\":{\"reasoning_tokens\":258,\"visible_tokens\":6}},\"id\":\"chatcmpl-SDktjZMXmWzj8T6KBsE015ymJLxBAlNb\",\"timings\":{\"cache_n\":0,\"prompt_n\":1100,\"prompt_ms\":15364.406,\"prompt_per_token_ms\":13.96764181818182,\"prompt_per_second\":71.5940466556273,\"predicted_n\":262,\"predicted_ms\":3759.309,\"predicted_per_token_ms\":14.348507633587786,\"predicted_per_second\":69.69365912724918,\"draft_n\":946,\"draft_n_accepted\":193}}"
+}

@@ -1,0 +1,14 @@
+{
+ "n": 3,
+ "started": "2026-10-04T17:01:22.264522Z",
+ "ended": "2026-10-04T17:01:26.215395Z",
+ "status": 200,
+ "headers": {
+  "Connection": "close",
+  "Content-Type": "application/json; charset=utf-8",
+  "Server": "llama.cpp",
+  "Content-Length": "1881",
+  "Access-Control-Allow-Origin": ""
+ },
+ "body": "{\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"NPC7\",\"reasoning_content\":\"The user wants me to identify the text in the image.\\n\\n1.  **Analyze the image:**\\n    *   The image shows text written in a pixelated, blocky font.\\n    *   The color of the text is a dark blue.\\n    *   The background is white.\\n    *   There are black borders at the very top and bottom.\\n\\n2.  **Examine the characters:**\\n    *   The first character is an 'N'. It's formed by vertical bars on the left and right, connected by diagonal blocks in the middle.\\n    *   The second character is a 'P'. It has a vertical bar on the left and a loop at the top right.\\n    *   The third character is a 'C'. It's a 'C' shape, open on the right side.\\n    *   The fourth character is a '7'. It has a horizontal bar on top and a diagonal stroke going down to the left.\\n\\n3.  **Combine the characters:**\\n    *   The sequence is \\\"N\\\", \\\"P\\\", \\\"C\\\", \\\"7\\\".\\n    *   So the text is \\\"NPC7\\\".\\n\\n4.  **Final Verification:**\\n    *   Does it look like \\\"NPC7\\\"? Yes.\\n    *   Is there any other text? No.\\n    *   The prompt asks for \\\"Answer with the text only\\\".\\n\\n5.  **Construct the final response:**\\n    *   \\\"NPC7\\\"\\n\"}}],\"created\":1791133286,\"model\":\"Qwen3.6-27B\",\"system_fingerprint\":\"b0-unknown-dirty\",\"object\":\"chat.completion\",\"usage\":{\"completion_tokens\":316,\"prompt_tokens\":1100,\"total_tokens\":1416,\"prompt_tokens_details\":{\"cached_tokens\":1096},\"completion_tokens_details\":{\"reasoning_tokens\":312,\"visible_tokens\":4}},\"id\":\"chatcmpl-UXlTo0EQXZGYTC0GyT9efmSGfvCw56nJ\",\"timings\":{\"cache_n\":1096,\"prompt_n\":4,\"prompt_ms\":57.333,\"prompt_per_token_ms\":14.33325,\"prompt_per_second\":69.7678474874854,\"predicted_n\":316,\"predicted_ms\":3848.098,\"predicted_per_token_ms\":12.177525316455696,\"predicted_per_second\":82.11849074529806,\"draft_n\":1025,\"draft_n_accepted\":244}}"
+}

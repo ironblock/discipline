@@ -99,7 +99,7 @@ def verify_digests(adm_dir: pathlib.Path, root: pathlib.Path, adm: dict) -> list
         if (name in want and path != want[name]) or (name == "parity" and not target.is_relative_to((root / "results").resolve())):
             out.append(f"admission.results-unreadable: {rel}'s {name} path {path!r} is not the record's own")
             continue
-        got = manifest_sha(root / path, ("depth/",) if name == "cells" else (), {"admission.toml", "admission-recompute.sh"} if name == "cells" else ())
+        got = manifest_sha(root / path, ("depth/", "vision/") if name == "cells" else (), {"admission.toml", "admission-recompute.sh"} if name == "cells" else ())
         if got != r.get("manifest_sha256"):
             out.append(f"admission.record-does-not-recompute: {rel}'s {name} ({path}) hashes to {got[:16]}, not {str(r.get('manifest_sha256'))[:16]}")
     return out
