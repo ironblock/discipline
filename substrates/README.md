@@ -291,6 +291,7 @@ An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB tha
 | `serving_flags`, `serving_context`, `serving_slots` | the serving line, without paths or keys | read off the running process's command line (`/proc/<pid>/cmdline`) |
 | `sampler_card` | what the line fixes, or "none on the serving line; each request sets its own" | -- |
 | `chat_template_sha256` | optional: the served template's digest | from `GET /props` `chat_template` |
+| `vision`, `vision_is` | whether the line takes an image: `accepted`, `refused`, `answered-without-seeing` or `unreported`, and the cell that says so (#373) | the vision cell under the line's admission fingerprint directory (`substrates/admission/<substrate>/<fp>/vision/`), whose `recompute.sh` re-derives the word; anything but `unreported` needs that cell, and the admission check refuses a word without one |
 
 **Instances.** One instance, with the date of its reads and `current = true`, says what deployment pinned the entry (see Instances above). A later change to the operating system, engine or line is a new instance, never an edit.
 

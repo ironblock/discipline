@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Recompute the floor's admission record (#143): each of the three results it cites is re-hashed as a file
 # manifest (every file under the result, sorted by path, one "path<TAB>sha256" line each; the cells result
-# excludes depth/ and the admission files) and must equal the digest admission.toml states; each result's own
+# excludes depth/, vision/ (#373: the vision cell, which is evidence for the registry's `vision`, not an admission
+# result) and the admission files) and must equal the digest admission.toml states; each result's own
 # recompute must exit 0; and each result's word must be the one admission.toml records.
 # Exit 0 when all hold, 1 when any fails.
 set -uo pipefail
@@ -15,7 +16,7 @@ def manifest(root, exclude=(), exact=()):
     files = sorted(p for p in root.rglob("*") if p.is_file() and not any(p.relative_to(root).as_posix().startswith(e) for e in exclude)
                    and p.relative_to(root).as_posix() not in exact and "__pycache__" not in p.parts)
     return "".join(f"{p.relative_to(root).as_posix()}\t{hashlib.sha256(p.read_bytes()).hexdigest()}\n" for p in files)
-EXCLUDE = {"cells": ("depth/",)}
+EXCLUDE = {"cells": ("depth/", "vision/")}
 EXACT = {"cells": {"admission.toml", "admission-recompute.sh"}}
 # the structure is the rule's, not the record's: exactly these three results, each run through its own recompute.sh
 if sorted(adm["results"]) != ["cells", "depth", "parity"]: fails.append(f"the results are {sorted(adm['results'])}, not cells, depth and parity")

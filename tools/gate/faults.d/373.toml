@@ -1,0 +1,18 @@
+# #373: the floor's vision cell -- the registry's `vision` must equal the word its cell re-derives.
+[[fault]]
+id = "admission.admission_vision_disagrees"
+kind = "seeded-gate"
+check = "admission"
+label = "the registry's vision disagrees with its cell"
+failure_class = "admission.rule-broken"
+legacy_signature = "vision: the registry's vision for accel24-beellama-qwen27b-q4kxl is 'refused'; the cell derives 'accepted'"
+migrated = false
+
+[[fault]]
+id = "admission.admission_vision_uncelled"
+kind = "seeded-gate"
+check = "admission"
+label = "a vision word with no cell behind it"
+failure_class = "admission.rule-broken"
+legacy_signature = "admission: accel24-llamacpp-qwen38-27b-iq3s's vision is 'accepted' and no vision cell under substrates/admission/ names it"
+migrated = false

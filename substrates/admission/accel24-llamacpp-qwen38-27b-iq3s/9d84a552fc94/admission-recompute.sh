@@ -15,7 +15,7 @@ def manifest(root, exclude=(), exact=()):
     files = sorted(p for p in root.rglob("*") if p.is_file() and not any(p.relative_to(root).as_posix().startswith(e) for e in exclude)
                    and p.relative_to(root).as_posix() not in exact and "__pycache__" not in p.parts)
     return "".join(f"{p.relative_to(root).as_posix()}\t{hashlib.sha256(p.read_bytes()).hexdigest()}\n" for p in files)
-EXCLUDE = {"cells": ("depth/",)}
+EXCLUDE = {"cells": ("depth/", "vision/")}  # vision/ beside depth/, as derive_admission.py spells it (#373)
 EXACT = {"cells": {"admission.toml", "admission-recompute.sh"}}
 # the structure is the rule's, not the record's: exactly these three results, each run through its own recompute.sh
 if sorted(adm["results"]) != ["cells", "depth", "parity"]: fails.append(f"the results are {sorted(adm['results'])}, not cells, depth and parity")

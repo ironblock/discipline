@@ -1,7 +1,7 @@
 # The floor's admission record (#143): the three results planning named, cited by digest. The word is derived
 # from the results by substrates/admission/derive_admission.py (#183), which verify.sh's admission check runs. Each result's
 # manifest_sha256 is the sha256 of its file manifest: every file under the path, sorted, one "path<TAB>sha256"
-# line each (the cells result excludes depth/, admission.toml and admission-recompute.sh, by exact name). admission-recompute.sh re-derives all of it.
+# line each (the cells result excludes depth/ and vision/ by prefix, and admission.toml and admission-recompute.sh by exact name; vision/ since #373). admission-recompute.sh re-derives all of it.
 substrate = "accel24-beellama-qwen27b-q4kxl"
 fingerprint = "7c254834cc2c49ac3aab43483fffdc5a7d421fc5b0bc6fcde99564b9d59b0aa9"
 word = "admitted"

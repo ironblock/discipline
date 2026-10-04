@@ -369,7 +369,37 @@ check_admission() {
   python3 substrates/check-fingerprints.py --selftest &&
     python3 substrates/check-fingerprints.py &&
     python3 substrates/admission/derive_admission.py --selftest &&
-    python3 substrates/admission/derive_admission.py --all
+    python3 substrates/admission/derive_admission.py --all &&
+    check_vision_cells
+}
+
+# The vision cells (#373): each re-derives its word from its raw responses and refuses when the registry's `vision`
+# for its substrate disagrees. Finding none is a failure, not a pass: a check that runs nothing proves nothing.
+check_vision_cells() {
+  local n=0 f
+  for f in substrates/admission/*/*/vision/recompute.sh; do
+    [ -f "$f" ] || continue
+    n=$((n + 1))
+    bash "$f" || { echo "admission: $f exited non-zero"; return 1; }
+  done
+  [ "$n" -gt 0 ] || { echo "admission: no vision cell found under substrates/admission/; a check that runs nothing is not a pass"; return 1; }
+  # The registry side (#392's review, M2): every `vision` is one of the four words, and every word but `unreported`
+  # has a cell whose cell.toml names that substrate. A cell checks the registry; this checks the registry has cells.
+  python3 -B - <<'PYEOF' || return 1
+import pathlib, sys, tomllib
+subs = tomllib.loads(pathlib.Path("substrates/registry.toml").read_text())["substrate"]
+celled = {tomllib.loads(p.read_text())["substrate"] for p in pathlib.Path("substrates/admission").glob("*/*/vision/cell.toml")}
+bad = 0
+for name, sub in sorted(subs.items()):
+    if "vision" not in sub: continue
+    w = sub["vision"]
+    if w not in ("accepted", "refused", "answered-without-seeing", "unreported"):
+        print(f"admission: {name}'s vision is {w!r}, not accepted, refused, answered-without-seeing or unreported"); bad += 1
+    elif w != "unreported" and name not in celled:
+        print(f"admission: {name}'s vision is {w!r} and no vision cell under substrates/admission/ names it"); bad += 1
+sys.exit(1 if bad else 0)
+PYEOF
+  echo "admission: $n vision cell(s) re-derive and agree with the registry, and every registry vision word has its cell"
 }
 
 # Lane-declared seeded faults, applied for real. Nine lanes write their own
@@ -4137,6 +4167,28 @@ p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="
 old = 'pairs = [[name, components[name]] for name in order]'
 assert old in s, "the component recipe moved"
 p.write_text(s.replace(old, 'pairs = [[name, components[name]] for name in sorted(order)]', 1), encoding="utf-8")
+PYEOF
+}
+# #373: the registry's vision for the floor disagrees with what its vision cell derives.
+inject_admission_vision_disagrees() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/registry.toml"); s = p.read_text(encoding="utf-8")
+head = "[substrate.accel24-beellama-qwen27b-q4kxl]\n"
+i = s.index(head)
+old = 'vision = "accepted"'
+j = s.index(old, i)
+p.write_text(s[:j] + 'vision = "refused"' + s[j + len(old):], encoding="utf-8")
+PYEOF
+}
+# #373: a vision word on a substrate no cell names -- the registry claiming a measurement it does not have.
+inject_admission_vision_uncelled() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/registry.toml"); s = p.read_text(encoding="utf-8")
+head = "[substrate.accel24-llamacpp-qwen38-27b-iq3s]\n"
+assert head in s, "the candidate's entry moved"
+p.write_text(s.replace(head, head + 'vision = "accepted"\n', 1), encoding="utf-8")
 PYEOF
 }
 # #202: the recipe narrowed back to the exe alone, the defect it exists to close.
@@ -10080,6 +10132,10 @@ selftest() {
     'ada48-tabbyapi-exl3-qwen38flashnext-2p05: engine_identity changed'
   seeded_case "the component recipe made order-insensitive" admission inject_admission_engine_components_sorted \
     'FAIL  engine: the declared order, not a sort, is what the identity hashes'
+  seeded_case "the registry's vision disagrees with its cell" admission inject_admission_vision_disagrees \
+    "vision: the registry's vision for accel24-beellama-qwen27b-q4kxl is 'refused'; the cell derives 'accepted'"
+  seeded_case "a vision word with no cell behind it" admission inject_admission_vision_uncelled \
+    "admission: accel24-llamacpp-qwen38-27b-iq3s's vision is 'accepted' and no vision cell under substrates/admission/ names it"
   seeded_case "the engine recipe narrowed to the exe" admission inject_admission_engine_recipe_exe_only \
     'FAIL  engine: a library changed with the exe held changes the fingerprint'
   seeded_case "the engine recipe's library pattern narrowed" admission inject_admission_engine_pattern_narrowed \

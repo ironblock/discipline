@@ -177,7 +177,7 @@ architecture = "x86_64"
 os = "macOS 26.6.2 (build 25G83)"
 os_is = "measured with sw_vers on this host, 2026-10-04 (the data seat), matching track three's 26.6.2 on #299 (5976378789, point 9); the entry said 26.5.2 (25F84) from its 2026-09-05 reading. os is instance state and outside the hardware fingerprint"
 denial_signal = "none"
-denial_signal_is = "a Seatbelt (sandbox-exec) denial on this host has no signal of its own: EPERM exits 1, curl exits 7 or 6, indistinguishable from an ordinary failure (#29, 5954670587); a declaration until a reader enforces eligibility (#299, ruled 5976386318 point 9)"
+denial_signal_is = "a Seatbelt (sandbox-exec) denial on this host has no signal of its own: EPERM exits 1, curl exits 7 or 6, indistinguishable from an ordinary failure (measured on #29, 5946632451; ruled 5954670587); a declaration until a reader enforces eligibility (#299, ruled 5976386318 point 9)"
 not_measured = "storage devices and firmware; power supply."
 no_served_substrate_because = """
 Nothing in this program serves a model on this machine: its GPU is not adept at \
@@ -367,6 +367,8 @@ weights_draft = "08e4dffcd7893a4c15981ab2061afa128013731be60f1a6847785a3d630f7c8
 weights_draft_file = "Qwen3.6-27B-DFlash-IQ4_XS.gguf"
 weights_projector = "05353347512982ee62317b9d8c89372bc815f4b4043580e7ef3ad411ec1a1cd3"
 weights_projector_file = "mmproj-BF16.gguf"
+vision = "accepted"
+vision_is = "the vision cell (#373, ruled 5982304569): one synthetic image with a planted four-character token through the registered serving line, three sequential requests at the registered sampler, max_tokens 8192, reasoning as the line has it; all three replies named the token. Read 2026-10-04T17:01Z on instance 2026-10-02 against this projector (substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/vision/; its recompute.sh re-derives the word and refuses when this field disagrees). The vocabulary is accepted | refused | answered-without-seeing | unreported; anything but accepted is ineligible for T1"
 
 sampler_card = "temperature 0.6, top_k 20, top_p 1.0, min_p 0.0"
 sampler_card_is = """
