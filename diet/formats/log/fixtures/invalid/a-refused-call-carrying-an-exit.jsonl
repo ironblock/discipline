@@ -1,0 +1,7 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":3}
+{"kind":"ask","seq":1,"t":5,"text":"list the files","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"delta","request":3,"seq":4,"t":20,"tool_call":{"arguments":"{\"command\":\"rm -rf build\"}","id":"call-0","index":0,"name":"bash"}}
+{"finish_reason":"tool_calls","kind":"response","seq":5,"t":25,"text":"","to_request":3}
+{"arguments":"{\"command\":\"rm -rf build\"}","argv":["sh","-c","rm -rf build"],"exit":0,"id":"call-0","kind":"tool_call","name":"bash","outcome":"refused","reason":"not_allowed","request":3,"seq":6,"t":30,"turn":1}

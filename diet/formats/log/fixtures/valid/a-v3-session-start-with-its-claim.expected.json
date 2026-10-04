@@ -1,0 +1,74 @@
+{
+  "events": [
+    {
+      "engine_build": "b0-unknown-dirty",
+      "engine_identity": "literal_matched",
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model (CONSTRUCTED: the session.start claim names the floor's registry entry, substrates/registry.toml's sha256 on this tree and the floor's registered build_info literal; no serve start wrote it. It is replaced by the first real drive's start, #177)",
+      "opened": 1790000000000,
+      "provenance": "constructed",
+      "registry_sha256": "c4bd454be848f49f7851eb093dd2c2c9046fe944df7681d8a3625e21a1757da3",
+      "seq": 0,
+      "substrate": "accel24-beellama-qwen27b-q4kxl",
+      "t": 0,
+      "version": 3
+    },
+    {
+      "kind": "ask",
+      "seq": 1,
+      "t": 5,
+      "text": "say hello",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 3,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 3,
+      "seq": 4,
+      "t": 20,
+      "text": "hello"
+    },
+    {
+      "finish_reason": "stop",
+      "kind": "response",
+      "seq": 5,
+      "t": 25,
+      "text": "hello",
+      "to_request": 3
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 6,
+      "t": 30,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 7,
+      "t": 35,
+      "to": "awaiting"
+    }
+  ],
+  "torn": 0
+}

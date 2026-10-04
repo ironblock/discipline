@@ -1,0 +1,9 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model (CONSTRUCTED: a placed replay's shape -- no substrate claim, since no serve start made one, and a bash call that ran whose recording says its argv but not its confinement, so isolation and network are unrecorded and confined is absent)","opened":1790000000000,"provenance":"constructed","seq":0,"t":0,"version":3}
+{"kind":"ask","seq":1,"t":5,"text":"list the files","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"delta","request":3,"seq":4,"t":20,"tool_call":{"arguments":"{\"command\":\"ls\"}","id":"call-0","index":0,"name":"bash"}}
+{"finish_reason":"tool_calls","kind":"response","seq":5,"t":25,"text":"","to_request":3}
+{"arguments":"{\"command\":\"ls\"}","argv":["sh","-c","ls"],"exit":0,"id":"call-0","isolation":"unrecorded","kind":"tool_call","name":"bash","network":"unrecorded","outcome":"ran","request":3,"seq":6,"stderr":"","stderr_bytes":0,"stdout":"a\n","stdout_bytes":2,"t":30,"turn":1}
+{"kind":"turn.settled","reason":"final","seq":7,"t":35,"turn":1}
+{"from":"turn","kind":"settlement","seq":8,"t":40,"to":"awaiting"}

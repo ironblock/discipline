@@ -1,4 +1,4 @@
-//! The session event log, v2 (#157, #30 I0), which reads v1 and v0.
+//! The session event log, v3 (#297), which reads v2, v1 and v0.
 //!
 //! `diet/formats/log/grammar.pest` says what a log document is: one event
 //! per line, in the record's value space. This module is its one reader and
@@ -27,6 +27,29 @@
 //! [`at_most_one`]) and `capped`, a `session.start`'s `serving`, and a
 //! `request`'s `head_sha256`. A log that declares 0 or 1 and carries one is
 //! refused the same way.
+//!
+//! v3 (#297, from the #117 courier) adds the `tool_call` kind, one line per
+//! call the model made, written at its outcome, whose keys must fit that
+//! outcome ([`outcome_keys`]) and its name (only `bash` carries the [`EXEC`]
+//! keys, `policy` among them, and only `bash` must carry its streams; a
+//! `policy` only under an `isolation` that names a profile, `sandbox` or
+//! `vm`), whose
+//! streams' byte counts are `0` exactly when their text is empty and are not
+//! otherwise compared with it (output that is not UTF-8 is written as lossy
+//! text), whose `isolation` and
+//! `network` each admit `unrecorded` on its own, only where no substrate
+//! claim was made (a placed replay), and which names its request's turn and is
+//! written at most once per call; a `delta`'s `id` and `name` only on a
+//! call's first fragment, and a line for every streamed call, are the
+//! writer's obligations, not read here; a `session.start`'s substrate claim, its four
+//! keys together or not at all ([`all_or_none`]); a `session.start`'s
+//! `provenance`, `placed` or `constructed`, absent when a session wrote the
+//! log as it ran; a `delta`'s third piece,
+//! `tool_call`, a fragment of a streamed call; `turn.settled`'s reason
+//! `capped`, which requires the turn's trunk `response` to carry `capped:
+//! true`; and a `cancelled`'s `reasoning`. A log that declares 0, 1 or 2 and
+//! carries one is refused the same way. `lane` on a `tool_call` is reserved
+//! until #80's Q1 and refused as any undeclared key is.
 //!
 //! # A torn final line
 //!
@@ -59,10 +82,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 2;
+pub const VERSION: i64 = 3;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2];
+pub const READS: &[i64] = &[0, 1, 2, 3];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -101,6 +124,8 @@ vocabulary! {
         IdleGap => "idle.gap",
         /// The server's count of a call's prompt prefilled so far (v1).
         Progress => "progress",
+        /// A call the model made, and what became of it (v3).
+        ToolCall => "tool_call",
     }
 }
 
@@ -213,6 +238,89 @@ vocabulary! {
         Timeout => "timeout",
         /// Anything else that ended it without an answer.
         Failed => "failed",
+        /// Its trunk call stopped at its output cap (v3, #290).
+        Capped => "capped",
+    }
+}
+
+vocabulary! {
+    /// What became of a call the model made (v3).
+    ToolOutcome {
+        /// The command ran and exited, or a signal ended it.
+        Ran => "ran",
+        /// The drive did not run it.
+        Refused => "refused",
+        /// The command failed under its confinement's policy (#29's I5).
+        CommandFailed => "command_failed",
+        /// Its outcome never arrived: the turn was cancelled, or the session
+        /// ended, mid-command.
+        Cancelled => "cancelled",
+    }
+}
+
+vocabulary! {
+    /// How confined a call's command was: `diet/src/isolation`'s
+    /// `Isolation::tag`, word for word (v3).
+    Isolation {
+        /// Unconfined, declared.
+        None => "none",
+        /// The sandbox.
+        Sandbox => "sandbox",
+        /// A virtual machine.
+        Vm => "vm",
+        /// Not recorded: a placed replay's call, whose confinement the
+        /// recording does not say (#297). Not one of the isolation module's
+        /// words; a served session may not write it.
+        Unrecorded => "unrecorded",
+    }
+}
+
+vocabulary! {
+    /// What a call's command could reach on the network:
+    /// `diet/src/isolation`'s `Network::tag`, word for word (v3).
+    Network {
+        /// Nothing.
+        None => "none",
+        /// The host's network.
+        Host => "host",
+        /// Not recorded, as [`Isolation::Unrecorded`] (#297).
+        Unrecorded => "unrecorded",
+    }
+}
+
+vocabulary! {
+    /// Why the drive did not run a call (v3, ruled on #297).
+    ToolRefusal {
+        /// The allowlist does not admit it.
+        NotAllowed => "not_allowed",
+        /// The tool loop's step limit was reached.
+        MaxSteps => "max_steps",
+        /// Its arguments are not what the tool takes.
+        Unparsable => "unparsable",
+        /// It names a tool the session did not declare.
+        UnknownTool => "unknown_tool",
+    }
+}
+
+vocabulary! {
+    /// How the engine's identity was established at the start-time check
+    /// (v3, ruled on #297 Q4).
+    EngineIdentity {
+        /// The server's `build_info` named a commit, and it was checked.
+        CheckedCommit => "checked_commit",
+        /// The server names no commit; its literal `build_info` matched.
+        LiteralMatched => "literal_matched",
+    }
+}
+
+vocabulary! {
+    /// Who wrote a log that a session did not write as it ran (v3, ruled on
+    /// #297 at 5976392264). Absent, a session wrote it as it ran.
+    Provenance {
+        /// A recording placed into the log, replayed rather than served.
+        Placed => "placed",
+        /// Written by hand, as a fixture is: no session ran it.
+        Constructed => "constructed",
     }
 }
 
@@ -225,13 +333,55 @@ pub struct HeadMessage {
     pub content: String,
 }
 
-/// What one delta carries: exactly one of the two.
+/// What one delta carries: exactly one of the three.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Piece {
     /// Answer text.
     Text(String),
     /// Reasoning text, from a model that thinks.
     Reasoning(String),
+    /// A fragment of a streamed tool call, as the server sent it (v3). The
+    /// stream's `type` is not kept: it is always `"function"`.
+    ToolCall {
+        /// Which call of the response it belongs to.
+        index: u64,
+        /// The call's id, on its first fragment only.
+        id: Option<String>,
+        /// The function's name, on its first fragment only.
+        name: Option<String>,
+        /// This fragment of the arguments text.
+        arguments: String,
+    },
+}
+
+/// What a `session.start` claims serves it (v3, #292): the regimen's
+/// substrate, the registry it was read from, and the engine the start-time
+/// check passed. Its four keys come together or not at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubstrateClaim {
+    /// The substrate's registry id.
+    pub substrate: String,
+    /// The sha256 of the registry the id was read from.
+    pub registry_sha256: String,
+    /// The `build_info` the engine check passed.
+    pub engine_build: String,
+    /// How the engine's identity was established.
+    pub engine_identity: EngineIdentity,
+}
+
+/// One output stream of a call's command: its text, whole, and its length
+/// in bytes beside it, so a reader can size a line before parsing it (v3,
+/// ruled on #297 Q3). The count is what the command produced and the text
+/// its decoding, lossy where the output is not UTF-8, so the two may
+/// differ and the reader does not compare them; it refuses only a count
+/// that is `0` beside a text that is not empty, or not `0` beside one that
+/// is (ruled at 5975957135).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Output {
+    /// What it printed.
+    pub text: String,
+    /// How many bytes that is.
+    pub bytes: u64,
 }
 
 /// What happened.
@@ -251,6 +401,11 @@ pub enum Event {
         /// What serves the session, as the client declares it (v2, #30
         /// D7/N10): its dialect, and its concurrency when declared.
         serving: Option<Serving>,
+        /// What the session claims serves it (v3, #292), when it was started
+        /// against a regimen.
+        claim: Option<SubstrateClaim>,
+        /// Who wrote the log, when a session did not write it as it ran (v3).
+        provenance: Option<Provenance>,
     },
     /// An ask was admitted.
     Ask {
@@ -324,6 +479,9 @@ pub enum Event {
         request: u64,
         /// What arrived before the stop. Never an answer.
         partial: String,
+        /// The reasoning that streamed before the stop, beside `partial`
+        /// (v3, #291).
+        reasoning: Option<String>,
     },
     /// A call ended without an answer.
     RequestFailed {
@@ -392,6 +550,42 @@ pub enum Event {
         processed: u64,
         /// Milliseconds of prefill so far, by the server's clock.
         time_ms: u64,
+    },
+    /// A call the model made, written once its outcome is known: every call
+    /// leaves exactly one (v3, ruled on #297). Which keys it carries is
+    /// [`outcome_keys`]'s.
+    ToolCall {
+        /// The `seq` of the `request` whose response carried the call.
+        request: u64,
+        /// The turn.
+        turn: u32,
+        /// The call's id, as streamed.
+        id: String,
+        /// The function's name.
+        name: String,
+        /// The arguments text assembled from the streamed fragments, byte for
+        /// byte, never parsed.
+        arguments: String,
+        /// What became of it.
+        outcome: ToolOutcome,
+        /// The command as the drive asked for it.
+        argv: Option<Vec<String>>,
+        /// What actually ran, runner and all.
+        confined: Option<Vec<String>>,
+        /// The confinement it ran under.
+        isolation: Option<Isolation>,
+        /// The network it had.
+        network: Option<Network>,
+        /// Its exit status; absent when a signal ended it.
+        exit: Option<u64>,
+        /// Why it was refused.
+        reason: Option<ToolRefusal>,
+        /// The sha256 of the confinement policy it failed under.
+        policy: Option<String>,
+        /// What it printed.
+        stdout: Option<Output>,
+        /// What it printed on standard error.
+        stderr: Option<Output>,
     },
 }
 
@@ -968,6 +1162,90 @@ fn cites(event: &Event, requests: &BTreeSet<u64>, ended: &mut BTreeSet<u64>) -> 
     }
 }
 
+/// A `tool_call` cites an earlier `request`, as [`cites`] has it, but does
+/// not end it: the call's line is written at its outcome, which can come
+/// after its request's `response` (v3).
+fn called_from(cited: u64, requests: &BTreeSet<u64>) -> Result<(), String> {
+    if !requests.contains(&cited) {
+        return Err(format!(
+            "a `tool_call` cites seq {cited}, which is not an earlier `request`"
+        ));
+    }
+    Ok(())
+}
+
+/// A `tool_call` names its request's turn, and a call -- its request and
+/// its `id` -- leaves at most one line (v3, #297 Q1: every call the model
+/// made leaves exactly one line; that each streamed call leaves one is the
+/// writer's obligation, not read here).
+fn called_once(
+    request: u64,
+    turn: u32,
+    id: &str,
+    request_turns: &BTreeMap<u64, u32>,
+    calls: &mut BTreeSet<(u64, String)>,
+) -> Result<(), String> {
+    if let Some(&asked) = request_turns.get(&request)
+        && asked != turn
+    {
+        return Err(format!(
+            "a `tool_call` names turn {turn}, and its request {request} is turn {asked}"
+        ));
+    }
+    if !calls.insert((request, id.to_owned())) {
+        return Err(format!(
+            "a second `tool_call` for call `{id}` of request {request}: a call leaves one line"
+        ));
+    }
+    Ok(())
+}
+
+/// A served session -- its `session.start` carries the substrate claim --
+/// records each call's confinement: `unrecorded` is a placed replay's word,
+/// allowed only where the claim is absent, and `isolation` and `network` are
+/// each checked on their own (#297, ruled at 5975651100).
+fn confinement_recorded(
+    claimed: bool,
+    isolation: Option<Isolation>,
+    network: Option<Network>,
+) -> Result<(), String> {
+    if claimed && isolation == Some(Isolation::Unrecorded) {
+        return Err(
+            "a `tool_call` whose `isolation` is `unrecorded`, in a session whose \
+             `session.start` carries the substrate claim"
+                .to_owned(),
+        );
+    }
+    if claimed && network == Some(Network::Unrecorded) {
+        return Err(
+            "a `tool_call` whose `network` is `unrecorded`, in a session whose \
+             `session.start` carries the substrate claim"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+/// A turn settled `capped` stopped at its output cap: its trunk call's
+/// `response` -- the turn's latest trunk `request`'s -- says so with
+/// `capped: true` (v3, #290).
+fn settled_capped(
+    turn: u32,
+    trunk: &BTreeMap<u32, u64>,
+    capped: &BTreeSet<u64>,
+) -> Result<(), String> {
+    let response_capped = trunk
+        .get(&turn)
+        .is_some_and(|request| capped.contains(request));
+    if !response_capped {
+        return Err(format!(
+            "turn {turn} settled `capped`, and its trunk `response` does not carry \
+             `capped: true`"
+        ));
+    }
+    Ok(())
+}
+
 /// `seq` counts from 0 without a gap, and `t` never goes back.
 fn in_order(line: &Line, index: usize, last_t: u64) -> Result<(), String> {
     if line.seq != index as u64 {
@@ -1025,6 +1303,7 @@ fn beyond(line: &Line, declared: i64) -> Option<String> {
 }
 
 /// Every rule that no single line can break alone.
+#[allow(clippy::too_many_lines)]
 fn check(lines: &[Line]) -> Result<(), LogError> {
     let at = |index: usize, why: String| LogError {
         line: index + 1,
@@ -1039,6 +1318,11 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
     let mut ended = BTreeSet::new();
     let mut latest_settling = None;
     let mut gapped = BTreeSet::new();
+    let mut trunk = BTreeMap::new();
+    let mut capped = BTreeSet::new();
+    let mut request_turns = BTreeMap::new();
+    let mut calls = BTreeSet::new();
+    let mut claimed = false;
     let mut last_t = 0_u64;
     for (index, line) in lines.iter().enumerate() {
         in_order(line, index, last_t).map_err(|why| at(index, why))?;
@@ -1050,6 +1334,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::SessionStart { .. } if index > 0 => {
                 return Err(at(index, "a second `session.start`".to_owned()));
             }
+            Event::SessionStart { claim, .. } => claimed = claim.is_some(),
             Event::Settlement { from, to } => {
                 if *from != state {
                     return Err(at(
@@ -1069,7 +1354,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 }
                 turns = *turn;
             }
-            Event::Request { turn, .. } => {
+            Event::Request { turn, lane, .. } => {
                 if *turn == 0 || *turn != turns {
                     return Err(at(
                         index,
@@ -1077,16 +1362,23 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                     ));
                 }
                 requests.insert(line.seq);
+                request_turns.insert(line.seq, *turn);
+                if *lane == Lane::Trunk {
+                    trunk.insert(*turn, line.seq);
+                }
             }
             Event::StopAsked { turn } if *turn == 0 || *turn > turns => {
                 return Err(at(index, format!("a stop for turn {turn}, never asked")));
             }
-            Event::TurnSettled { turn, .. } => {
+            Event::TurnSettled { turn, reason } => {
                 if *turn == 0 || *turn > turns {
                     return Err(at(index, format!("turn {turn} settled, never asked")));
                 }
                 if !settled.insert(*turn) {
                     return Err(at(index, format!("turn {turn} settled twice")));
+                }
+                if *reason == SettleReason::Capped {
+                    settled_capped(*turn, &trunk, &capped).map_err(|why| at(index, why))?;
                 }
                 settlings.insert(line.seq);
                 latest_settling = Some(line.seq);
@@ -1101,6 +1393,28 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             | Event::Cancelled { .. }
             | Event::RequestFailed { .. }) => {
                 cites(event, &requests, &mut ended).map_err(|why| at(index, why))?;
+                if let Event::Response {
+                    to_request,
+                    capped: Some(true),
+                    ..
+                } = event
+                {
+                    capped.insert(*to_request);
+                }
+            }
+            Event::ToolCall {
+                request,
+                turn,
+                id,
+                isolation,
+                network,
+                ..
+            } => {
+                confinement_recorded(claimed, *isolation, *network)
+                    .map_err(|why| at(index, why))?;
+                called_from(*request, &requests).map_err(|why| at(index, why))?;
+                called_once(*request, *turn, id, &request_turns, &mut calls)
+                    .map_err(|why| at(index, why))?;
             }
             _ => {}
         }
@@ -1132,6 +1446,25 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             return Err(format!("`{kind_tag}` carries no `{key}`"));
         }
     }
+    let together = all_or_none(kind);
+    let carried: Vec<&str> = together
+        .iter()
+        .copied()
+        .filter(|key| object.contains_key(*key))
+        .collect();
+    if !carried.is_empty() && carried.len() < together.len() {
+        let missing: Vec<String> = together
+            .iter()
+            .filter(|key| !object.contains_key(**key))
+            .map(|key| format!("`{key}`"))
+            .collect();
+        return Err(format!(
+            "`{kind_tag}` carries `{}` without {}: its keys {} come together or not at all",
+            carried[0],
+            missing.join(" and "),
+            together.join(", ")
+        ));
+    }
     let event = match kind {
         Kind::SessionStart => {
             let version = fields.integer("version")?;
@@ -1149,6 +1482,19 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     None => None,
                     Some(_) => Some(fields.serving("serving")?),
                 },
+                // Built only when all four are carried: [`all_or_none`] is
+                // the one rule that refuses a part of the claim.
+                claim: if together.iter().all(|key| object.contains_key(*key)) {
+                    Some(SubstrateClaim {
+                        substrate: fields.string("substrate")?,
+                        registry_sha256: fields.digest("registry_sha256")?,
+                        engine_build: fields.string("engine_build")?,
+                        engine_identity: fields.tag("engine_identity", EngineIdentity::from_tag)?,
+                    })
+                } else {
+                    None
+                },
+                provenance: fields.optional_tag("provenance", Provenance::from_tag)?,
             }
         }
         Kind::Ask => Event::Ask {
@@ -1171,14 +1517,35 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
         },
         Kind::Delta => Event::Delta {
             request: fields.count("request")?,
-            piece: match (object.get("text"), object.get("reasoning")) {
-                (Some(_), None) => Piece::Text(fields.string("text")?),
-                (None, Some(_)) => Piece::Reasoning(fields.string("reasoning")?),
-                (Some(_), Some(_)) => {
-                    return Err("a delta carries both `text` and `reasoning`".to_owned());
-                }
-                (None, None) => {
-                    return Err("a delta carries neither `text` nor `reasoning`".to_owned());
+            piece: {
+                let pieces: Vec<&str> = exactly_one(kind)
+                    .iter()
+                    .copied()
+                    .filter(|key| object.contains_key(*key))
+                    .collect();
+                match (
+                    object.contains_key("text"),
+                    object.contains_key("reasoning"),
+                    object.contains_key("tool_call"),
+                ) {
+                    (true, false, false) => Piece::Text(fields.string("text")?),
+                    (false, true, false) => Piece::Reasoning(fields.string("reasoning")?),
+                    (false, false, true) => fields.tool_call_piece("tool_call")?,
+                    (false, false, false) => {
+                        return Err(
+                            "a delta carries none of `text`, `reasoning` and `tool_call`"
+                                .to_owned(),
+                        );
+                    }
+                    _ => {
+                        let named: Vec<String> =
+                            pieces.iter().map(|key| format!("`{key}`")).collect();
+                        return Err(format!(
+                            "a delta carries {}: exactly one of `text`, `reasoning` and \
+                             `tool_call`",
+                            named.join(" and ")
+                        ));
+                    }
                 }
             },
         },
@@ -1208,6 +1575,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
         Kind::Cancelled => Event::Cancelled {
             request: fields.count("request")?,
             partial: fields.string("partial")?,
+            reasoning: fields.optional_string("reasoning")?,
         },
         Kind::RequestFailed => Event::RequestFailed {
             request: fields.count("request")?,
@@ -1242,12 +1610,245 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             processed: fields.count("processed")?,
             time_ms: fields.count("time_ms")?,
         },
+        Kind::ToolCall => {
+            let outcome = fields.tag("outcome", ToolOutcome::from_tag)?;
+            let isolation = fields.optional_tag("isolation", Isolation::from_tag)?;
+            let network = fields.optional_tag("network", Network::from_tag)?;
+            let reason = fields.optional_tag("reason", ToolRefusal::from_tag)?;
+            let unrecorded = isolation == Some(Isolation::Unrecorded);
+            let profiled = matches!(isolation, Some(Isolation::Sandbox | Isolation::Vm));
+            let name = fields.string("name")?;
+            fits_its_outcome(object, &name, outcome, unrecorded, profiled)?;
+            if name == "bash" {
+                argv_if_it_parsed(object, reason)?;
+            }
+            Event::ToolCall {
+                request: fields.count("request")?,
+                turn: fields.turn("turn")?,
+                id: fields.string("id")?,
+                name,
+                arguments: fields.string("arguments")?,
+                outcome,
+                argv: fields.optional_strings("argv")?,
+                confined: fields.optional_strings("confined")?,
+                isolation,
+                network,
+                exit: fields.optional_count("exit")?,
+                reason,
+                policy: fields.optional_digest("policy")?,
+                stdout: fields.output("stdout", "stdout_bytes")?,
+                stderr: fields.output("stderr", "stderr_bytes")?,
+            }
+        }
     };
     Ok(Line {
         seq: fields.count("seq")?,
         t: fields.count("t")?,
         event,
     })
+}
+
+/// Each output stream's text and the key that carries its length in bytes.
+pub const STREAMS: &[(&str, &str)] = &[("stdout", "stdout_bytes"), ("stderr", "stderr_bytes")];
+
+/// The keys that say what a command ran as and under what: only a `bash`
+/// call carries them (#297, ruled from #300's build). Any other tool --
+/// `read`, `edit` -- ran no command, and an argv for it would be invented.
+/// `policy` is one of them (ruled at 5975957135): nothing but `bash` ran
+/// under a profile, so nothing else has a profile to name.
+pub const EXEC: &[&str] = &["argv", "confined", "isolation", "network", "policy"];
+
+/// The keys a `tool_call` must carry, then the keys it may not, for each
+/// outcome (v3, ruled on #297): what ran says what ran it and what it
+/// printed; what failed under a policy names the policy; what was refused
+/// says why and ran nothing; what was cancelled never finished. `exit` is
+/// never required: a signal leaves none. The [`EXEC`] keys required here
+/// (`policy` among them, under `command_failed`) are required of a `bash`
+/// call only, and forbidden on any other (ruled at 5975957135); `policy` is
+/// required, and allowed, only under an `isolation` that names a profile,
+/// `sandbox` or `vm` (ruled at #299, 5976386318 point 6); the
+/// [`STREAMS`] required here are required of a `bash` call only, and on any
+/// other neither required nor refused (ruled at 5975651100): a
+/// cancelled `bash` call always says its `isolation` and `network`, and its
+/// `confined` only if the command had started. A refused `bash` call's
+/// `argv` follows its reason ([`argv_if_it_parsed`]).
+#[must_use]
+pub fn outcome_keys(outcome: ToolOutcome) -> (&'static [&'static str], &'static [&'static str]) {
+    match outcome {
+        ToolOutcome::Ran => (
+            &[
+                "argv",
+                "isolation",
+                "network",
+                "confined",
+                "stdout",
+                "stdout_bytes",
+                "stderr",
+                "stderr_bytes",
+            ],
+            &["reason", "policy"],
+        ),
+        ToolOutcome::CommandFailed => (
+            &[
+                "argv",
+                "isolation",
+                "network",
+                "confined",
+                "stdout",
+                "stdout_bytes",
+                "stderr",
+                "stderr_bytes",
+                "policy",
+            ],
+            &["reason"],
+        ),
+        ToolOutcome::Refused => (
+            &["reason"],
+            &[
+                "confined",
+                "isolation",
+                "network",
+                "exit",
+                "policy",
+                "stdout",
+                "stdout_bytes",
+                "stderr",
+                "stderr_bytes",
+            ],
+        ),
+        ToolOutcome::Cancelled => (
+            &["isolation", "network"],
+            &[
+                "exit",
+                "reason",
+                "policy",
+                "stdout",
+                "stdout_bytes",
+                "stderr",
+                "stderr_bytes",
+            ],
+        ),
+    }
+}
+
+/// A refused `bash` call carries `argv` exactly when it parsed (#297): one
+/// refused `not_allowed` or `max_steps` was read into an argv before it was
+/// refused; one refused `unparsable` or `unknown_tool` never was, and an argv
+/// for it would be invented.
+fn argv_if_it_parsed(
+    object: &BTreeMap<String, Value>,
+    reason: Option<ToolRefusal>,
+) -> Result<(), String> {
+    let Some(reason) = reason else {
+        return Ok(());
+    };
+    let parsed = matches!(reason, ToolRefusal::NotAllowed | ToolRefusal::MaxSteps);
+    let has_argv = object.contains_key("argv");
+    if parsed && !has_argv {
+        return Err(format!(
+            "a `bash` call refused `{}` carries no `argv`: it parsed",
+            reason.tag()
+        ));
+    }
+    if !parsed && has_argv {
+        return Err(format!(
+            "a `bash` call refused `{}` carries `argv`: it never parsed",
+            reason.tag()
+        ));
+    }
+    Ok(())
+}
+
+/// A `tool_call`'s keys fit its outcome ([`outcome_keys`]), and each stream's
+/// text and byte count come together or not at all ([`STREAMS`]). Only a
+/// call named `bash` carries the [`EXEC`] keys, and only a `bash` call must
+/// carry its streams. A call whose `isolation` is `unrecorded` carries no
+/// `confined`, whatever its outcome requires (5974732908). `confined` is
+/// keyed to `isolation` alone: `network` alone `unrecorded` leaves
+/// `confined` as its outcome says (ruled at 5975827372). A `bash` call
+/// carries `policy` only when `profiled`, its `isolation` `sandbox` or `vm`,
+/// and a `command_failed` one must then (ruled at #299, 5976386318 point 6).
+fn fits_its_outcome(
+    object: &BTreeMap<String, Value>,
+    name: &str,
+    outcome: ToolOutcome,
+    unrecorded: bool,
+    profiled: bool,
+) -> Result<(), String> {
+    let bash = name == "bash";
+    for (text_key, bytes_key) in STREAMS {
+        let (has_text, has_bytes) = (
+            object.contains_key(*text_key),
+            object.contains_key(*bytes_key),
+        );
+        if has_text != has_bytes {
+            let (carried, missing) = if has_text {
+                (text_key, bytes_key)
+            } else {
+                (bytes_key, text_key)
+            };
+            return Err(format!(
+                "a `tool_call` carries `{carried}` without `{missing}`: a stream's text and \
+                 its byte count come together"
+            ));
+        }
+    }
+    if unrecorded && object.contains_key("confined") {
+        return Err(
+            "a `tool_call` whose `isolation` is `unrecorded` carries `confined`".to_owned(),
+        );
+    }
+    let (required, forbidden) = outcome_keys(outcome);
+    for needed in required {
+        if unrecorded && *needed == "confined" {
+            continue;
+        }
+        // `policy` names the profile that confined a command, so a call no
+        // profile confined -- `isolation` `none` or `unrecorded` -- has none
+        // to name (ruled at #299, 5976386318 point 6).
+        if !profiled && *needed == "policy" {
+            continue;
+        }
+        if !bash && EXEC.contains(needed) {
+            continue;
+        }
+        if !bash
+            && STREAMS
+                .iter()
+                .any(|(text, bytes)| needed == text || needed == bytes)
+        {
+            continue;
+        }
+        if !object.contains_key(*needed) {
+            return Err(format!(
+                "a `tool_call` whose outcome is `{}` carries no `{needed}`",
+                outcome.tag()
+            ));
+        }
+    }
+    for barred in forbidden {
+        if object.contains_key(*barred) {
+            return Err(format!(
+                "a `tool_call` whose outcome is `{}` carries `{barred}`",
+                outcome.tag()
+            ));
+        }
+    }
+    if bash && !profiled && object.contains_key("policy") {
+        return Err(format!(
+            "a `bash` call whose outcome is `{}` carries `policy` under no profile: only \
+             `isolation` `sandbox` or `vm` confines a command under one",
+            outcome.tag()
+        ));
+    }
+    for exec in EXEC {
+        if !bash && object.contains_key(*exec) {
+            return Err(format!(
+                "a `tool_call` named `{name}` carries `{exec}`: only a `bash` call ran a command"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The keys a kind must carry, then the keys it may: read off [`schema`],
@@ -1291,6 +1892,18 @@ pub enum Tags {
     GapEnd,
     /// [`Role`].
     Role,
+    /// [`ToolOutcome`] (v3).
+    ToolOutcome,
+    /// [`Isolation`] (v3).
+    Isolation,
+    /// [`Network`] (v3).
+    Network,
+    /// [`ToolRefusal`] (v3).
+    ToolRefusal,
+    /// [`EngineIdentity`] (v3).
+    EngineIdentity,
+    /// [`Provenance`] (v3).
+    Provenance,
 }
 
 impl Tags {
@@ -1304,6 +1917,12 @@ impl Tags {
         Self::SettleReason,
         Self::GapEnd,
         Self::Role,
+        Self::ToolOutcome,
+        Self::Isolation,
+        Self::Network,
+        Self::ToolRefusal,
+        Self::EngineIdentity,
+        Self::Provenance,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -1318,6 +1937,12 @@ impl Tags {
             Self::SettleReason => "SettleReason",
             Self::GapEnd => "GapEnd",
             Self::Role => "Role",
+            Self::ToolOutcome => "ToolOutcome",
+            Self::Isolation => "Isolation",
+            Self::Network => "Network",
+            Self::ToolRefusal => "ToolRefusal",
+            Self::EngineIdentity => "EngineIdentity",
+            Self::Provenance => "Provenance",
         }
     }
 
@@ -1336,6 +1961,12 @@ impl Tags {
             Self::SettleReason => of(SettleReason::ALL, SettleReason::tag),
             Self::GapEnd => of(GapEnd::ALL, GapEnd::tag),
             Self::Role => of(Role::ALL, Role::tag),
+            Self::ToolOutcome => of(ToolOutcome::ALL, ToolOutcome::tag),
+            Self::Isolation => of(Isolation::ALL, Isolation::tag),
+            Self::Network => of(Network::ALL, Network::tag),
+            Self::ToolRefusal => of(ToolRefusal::ALL, ToolRefusal::tag),
+            Self::EngineIdentity => of(EngineIdentity::ALL, EngineIdentity::tag),
+            Self::Provenance => of(Provenance::ALL, Provenance::tag),
         }
     }
 }
@@ -1369,6 +2000,11 @@ pub enum Holds {
     /// A `session.start`'s [`Serving`]: an object of the keys [`SERVING`]
     /// declares (v2).
     Serving,
+    /// A list of text (v3).
+    Strings,
+    /// A `delta`'s tool-call fragment: an object of the keys
+    /// [`TOOL_CALL_PIECE`] declares (v3).
+    ToolCallPiece,
 }
 
 /// One key a kind carries.
@@ -1432,6 +2068,36 @@ const fn must_v2(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// An optional key that arrived in v3.
+const fn may_v3(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 3,
+    }
+}
+
+/// A key that arrived in v3 and is required wherever its object is written.
+const fn must_v3(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 3,
+    }
+}
+
+/// The keys a `delta`'s `tool_call` carries: the call's index always, its
+/// id and name on its first fragment only, as the server sent them, and the
+/// fragment of its arguments. Arrived in v3.
+pub const TOOL_CALL_PIECE: &[Field] = &[
+    must_v3("index", Holds::Count),
+    may_v3("id", Holds::Text),
+    may_v3("name", Holds::Text),
+    must_v3("arguments", Holds::Text),
+];
+
 /// The keys a `response`'s `usage` carries, as the server names them
 /// (`prompt_tokens_details.cached_tokens` flattened to `cached_tokens`).
 /// A server that sends `usage` sends both counts; only the cache count is
@@ -1464,6 +2130,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Timings => Some(TIMINGS),
         Holds::Usage => Some(USAGE),
         Holds::Serving => Some(SERVING),
+        Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         _ => None,
     }
 }
@@ -1473,13 +2140,20 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
 pub fn introduced(kind: Kind) -> i64 {
     match kind {
         Kind::Progress => 1,
+        Kind::ToolCall => 3,
         _ => 0,
     }
 }
 
-/// The version a tag of `tags` arrived in.
+/// The version a tag of `tags` arrived in. A vocabulary that arrived with
+/// its key is scoped by the key's `since`.
 #[must_use]
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
+    let capped =
+        tags == Tags::SettleReason && SettleReason::from_tag(tag) == Some(SettleReason::Capped);
+    if capped {
+        return 3;
+    }
     let context_overflow =
         tags == Tags::FailReason && FailReason::from_tag(tag) == Some(FailReason::ContextOverflow);
     i64::from(context_overflow)
@@ -1513,6 +2187,11 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("model", Text),
                 must("head", Head),
                 may_v2("serving", Holds::Serving),
+                may_v3("substrate", Text),
+                may_v3("registry_sha256", Holds::Digest),
+                may_v3("engine_build", Text),
+                may_v3("engine_identity", Tag(Tags::EngineIdentity)),
+                may_v3("provenance", Tag(Tags::Provenance)),
             ];
             F
         }
@@ -1545,6 +2224,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("request", Count),
                 may("text", Text),
                 may("reasoning", Text),
+                may_v3("tool_call", Holds::ToolCallPiece),
             ];
             F
         }
@@ -1565,7 +2245,11 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             F
         }
         Kind::Cancelled => {
-            const F: &[Field] = &[must("request", Count), must("partial", Text)];
+            const F: &[Field] = &[
+                must("request", Count),
+                must("partial", Text),
+                may_v3("reasoning", Text),
+            ];
             F
         }
         Kind::RequestFailed => {
@@ -1604,6 +2288,28 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
+        Kind::ToolCall => {
+            const F: &[Field] = &[
+                must_v3("request", Count),
+                must_v3("turn", Count),
+                must_v3("id", Text),
+                must_v3("name", Text),
+                must_v3("arguments", Text),
+                must_v3("outcome", Tag(Tags::ToolOutcome)),
+                may_v3("argv", Holds::Strings),
+                may_v3("confined", Holds::Strings),
+                may_v3("isolation", Tag(Tags::Isolation)),
+                may_v3("network", Tag(Tags::Network)),
+                may_v3("exit", Count),
+                may_v3("reason", Tag(Tags::ToolRefusal)),
+                may_v3("policy", Holds::Digest),
+                may_v3("stdout", Text),
+                may_v3("stdout_bytes", Count),
+                may_v3("stderr", Text),
+                may_v3("stderr_bytes", Count),
+            ];
+            F
+        }
     }
 }
 
@@ -1611,7 +2317,23 @@ pub fn schema(kind: Kind) -> &'static [Field] {
 #[must_use]
 pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
     match kind {
-        Kind::Delta => &["text", "reasoning"],
+        Kind::Delta => &["text", "reasoning", "tool_call"],
+        _ => &[],
+    }
+}
+
+/// Optional keys a line of `kind` carries all of or none of: a
+/// `session.start`'s substrate claim (v3, #292). A session started without
+/// a regimen carries none of them.
+#[must_use]
+pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
+    match kind {
+        Kind::SessionStart => &[
+            "substrate",
+            "registry_sha256",
+            "engine_build",
+            "engine_identity",
+        ],
         _ => &[],
     }
 }
@@ -1649,6 +2371,8 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Flag => "boolean".to_owned(),
         Holds::Usage => "Usage".to_owned(),
         Holds::Serving => "Serving".to_owned(),
+        Holds::Strings => "string[]".to_owned(),
+        Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Head => "HeadMessage[]".to_owned(),
         Holds::Tag(tags) => tags.name().to_owned(),
     }
@@ -1656,7 +2380,7 @@ fn ts_holds(holds: Holds) -> String {
 
 fn ts_name(kind: Kind) -> String {
     kind.tag()
-        .split('.')
+        .split(['.', '_'])
         .map(|part| {
             let mut chars = part.chars();
             chars.next().map_or_else(String::new, |first| {
@@ -1667,15 +2391,43 @@ fn ts_name(kind: Kind) -> String {
         .collect()
 }
 
+/// The bindings' half of [`all_or_none`]: the keys together, or none of them.
+fn ts_all_or_none(out: &mut String, kind: Kind, all: &[&str]) {
+    use std::fmt::Write as _;
+    if all.is_empty() {
+        return;
+    }
+    let typed: Vec<String> = all
+        .iter()
+        .map(|key| {
+            let holds = schema(kind)
+                .iter()
+                .find(|f| f.key == *key)
+                .map(|f| f.holds)
+                .expect("`all_or_none` names only keys the schema declares");
+            format!("{key}: {}", ts_holds(holds))
+        })
+        .collect();
+    let never: Vec<String> = all.iter().map(|key| format!("{key}?: never")).collect();
+    let _ = write!(
+        out,
+        " & ({{ {} }} | {{ {} }})",
+        typed.join("; "),
+        never.join("; ")
+    );
+}
+
 /// The TypeScript bindings for this format, generated from [`schema`] and
 /// the vocabularies. Deterministic, and independent of where it is run from:
 /// it reads nothing but this module.
 ///
 /// # Panics
 ///
-/// If [`exactly_one`] or [`at_most_one`] names a key [`schema`] does not
-/// declare for the same kind -- a table defect, and one the schema's own test refuses first.
+/// If [`exactly_one`], [`at_most_one`] or [`all_or_none`] names a key
+/// [`schema`] does not declare for the same kind -- a table defect, and one
+/// the schema's own test refuses first.
 #[must_use]
+#[allow(clippy::too_many_lines)]
 pub fn typescript() -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
@@ -1707,7 +2459,12 @@ pub fn typescript() -> String {
         out.push_str(";\n\n");
     }
     out.push_str("export interface HeadMessage {\n  role: Role;\n  content: string;\n}\n\n");
-    for (name, fields) in [("Timings", TIMINGS), ("Usage", USAGE), ("Serving", SERVING)] {
+    for (name, fields) in [
+        ("Timings", TIMINGS),
+        ("Usage", USAGE),
+        ("Serving", SERVING),
+        ("ToolCallPiece", TOOL_CALL_PIECE),
+    ] {
         let _ = writeln!(out, "export interface {name} {{");
         for field in fields {
             let optional = if field.required { "" } else { "?" };
@@ -1719,11 +2476,12 @@ pub fn typescript() -> String {
         let name = ts_name(*kind);
         let one = exactly_one(*kind);
         let some = at_most_one(*kind);
+        let all = all_or_none(*kind);
         let _ = writeln!(out, "export type {name} = {{");
         out.push_str("  seq: number;\n  t: number;\n");
         let _ = writeln!(out, "  kind: \"{}\";", kind.tag());
         for field in schema(*kind) {
-            if one.contains(&field.key) || some.contains(&field.key) {
+            if one.contains(&field.key) || some.contains(&field.key) || all.contains(&field.key) {
                 continue;
             }
             let optional = if field.required { "" } else { "?" };
@@ -1768,6 +2526,7 @@ pub fn typescript() -> String {
             }
             out.push(')');
         }
+        ts_all_or_none(&mut out, *kind, all);
         out.push_str(";\n\n");
     }
     out.push_str("export type LogLine =\n");
@@ -1797,6 +2556,8 @@ fn to_value(line: &Line) -> Value {
             model,
             head,
             serving,
+            claim,
+            provenance,
         } => {
             put("version", Value::Integer(*version));
             put("opened", count(*opened));
@@ -1820,6 +2581,15 @@ fn to_value(line: &Line) -> Value {
                     object.insert("concurrency".to_owned(), count(concurrency));
                 }
                 put("serving", Value::Object(object));
+            }
+            if let Some(claim) = claim {
+                put("substrate", text(&claim.substrate));
+                put("registry_sha256", text(&claim.registry_sha256));
+                put("engine_build", text(&claim.engine_build));
+                put("engine_identity", text(claim.engine_identity.tag()));
+            }
+            if let Some(provenance) = provenance {
+                put("provenance", text(provenance.tag()));
             }
             Kind::SessionStart
         }
@@ -1860,6 +2630,23 @@ fn to_value(line: &Line) -> Value {
             match piece {
                 Piece::Text(piece) => put("text", text(piece)),
                 Piece::Reasoning(piece) => put("reasoning", text(piece)),
+                Piece::ToolCall {
+                    index,
+                    id,
+                    name,
+                    arguments,
+                } => {
+                    let mut object = BTreeMap::from([
+                        ("index".to_owned(), count(*index)),
+                        ("arguments".to_owned(), text(arguments)),
+                    ]);
+                    for (key, value) in [("id", id), ("name", name)] {
+                        if let Some(value) = value {
+                            object.insert(key.to_owned(), text(value));
+                        }
+                    }
+                    put("tool_call", Value::Object(object));
+                }
             }
             Kind::Delta
         }
@@ -1903,9 +2690,16 @@ fn to_value(line: &Line) -> Value {
             }
             Kind::Response
         }
-        Event::Cancelled { request, partial } => {
+        Event::Cancelled {
+            request,
+            partial,
+            reasoning,
+        } => {
             put("request", count(*request));
             put("partial", text(partial));
+            if let Some(reasoning) = reasoning {
+                put("reasoning", text(reasoning));
+            }
             Kind::Cancelled
         }
         Event::RequestFailed {
@@ -1962,6 +2756,60 @@ fn to_value(line: &Line) -> Value {
             put("processed", count(*processed));
             put("time_ms", count(*time_ms));
             Kind::Progress
+        }
+        Event::ToolCall {
+            request,
+            turn,
+            id,
+            name,
+            arguments,
+            outcome,
+            argv,
+            confined,
+            isolation,
+            network,
+            exit,
+            reason,
+            policy,
+            stdout,
+            stderr,
+        } => {
+            put("request", count(*request));
+            put("turn", count(u64::from(*turn)));
+            put("id", text(id));
+            put("name", text(name));
+            put("arguments", text(arguments));
+            put("outcome", text(outcome.tag()));
+            for (key, list) in [("argv", argv), ("confined", confined)] {
+                if let Some(list) = list {
+                    put(
+                        key,
+                        Value::Array(list.iter().map(|item| text(item)).collect()),
+                    );
+                }
+            }
+            if let Some(isolation) = isolation {
+                put("isolation", text(isolation.tag()));
+            }
+            if let Some(network) = network {
+                put("network", text(network.tag()));
+            }
+            if let Some(exit) = exit {
+                put("exit", count(*exit));
+            }
+            if let Some(reason) = reason {
+                put("reason", text(reason.tag()));
+            }
+            if let Some(policy) = policy {
+                put("policy", text(policy));
+            }
+            for ((text_key, bytes_key), output) in STREAMS.iter().zip([stdout, stderr]) {
+                if let Some(output) = output {
+                    put(text_key, text(&output.text));
+                    put(bytes_key, count(output.bytes));
+                }
+            }
+            Kind::ToolCall
         }
     };
     put("kind", text(kind.tag()));
@@ -2101,6 +2949,86 @@ impl Fields<'_> {
         }
     }
 
+    fn digest(&self, key: &str) -> Result<String, String> {
+        self.optional_digest(key)?
+            .ok_or_else(|| format!("no `{key}`"))
+    }
+
+    fn optional_count(&self, key: &str) -> Result<Option<u64>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(_) => self.count(key).map(Some),
+        }
+    }
+
+    fn optional_tag<T>(
+        &self,
+        key: &str,
+        from_tag: fn(&str) -> Option<T>,
+    ) -> Result<Option<T>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(_) => self.tag(key, from_tag).map(Some),
+        }
+    }
+
+    /// A list of text, when carried (v3).
+    fn optional_strings(&self, key: &str) -> Result<Option<Vec<String>>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| match item {
+                    Value::String(text) => Ok(text.clone()),
+                    _ => Err(format!("`{key}` holds an item that is not a string")),
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .map(Some),
+            Some(_) => Err(format!("`{key}` is not a list")),
+        }
+    }
+
+    /// An output stream: its text and its byte count, when both are carried.
+    /// That they come together is [`fits_its_outcome`]'s rule, not this
+    /// reader's. The count is `0` exactly when the text is empty, in both
+    /// directions, and is not compared with the text's length otherwise:
+    /// output that is not UTF-8 is written as lossy text ([`Output`]).
+    fn output(&self, text_key: &str, bytes_key: &str) -> Result<Option<Output>, String> {
+        match (
+            self.optional_string(text_key)?,
+            self.optional_count(bytes_key)?,
+        ) {
+            (Some(text), Some(bytes)) => {
+                if text.is_empty() && bytes != 0 {
+                    return Err(format!(
+                        "`{text_key}` is empty and `{bytes_key}` is {bytes}: no text decodes \
+                         from a non-zero count"
+                    ));
+                }
+                if !text.is_empty() && bytes == 0 {
+                    return Err(format!(
+                        "`{text_key}` carries text and `{bytes_key}` is 0: zero bytes decode to \
+                         nothing"
+                    ));
+                }
+                Ok(Some(Output { text, bytes }))
+            }
+            _ => Ok(None),
+        }
+    }
+
+    /// A `delta`'s `tool_call`: an object of [`TOOL_CALL_PIECE`]'s keys.
+    fn tool_call_piece(&self, key: &str) -> Result<Piece, String> {
+        let inner = Fields(self.object(key, TOOL_CALL_PIECE)?);
+        let within = |why: String| format!("`{key}`: {why}");
+        Ok(Piece::ToolCall {
+            index: inner.count("index").map_err(within)?,
+            id: inner.optional_string("id").map_err(within)?,
+            name: inner.optional_string("name").map_err(within)?,
+            arguments: inner.string("arguments").map_err(within)?,
+        })
+    }
+
     fn optional_flag(&self, key: &str) -> Result<Option<bool>, String> {
         match self.0.get(key) {
             None => Ok(None),
@@ -2197,6 +3125,8 @@ mod tests {
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
                 serving: None,
+                claim: None,
+                provenance: None,
                 head: vec![HeadMessage {
                     role: Role::System,
                     content: "you are the trunk".to_owned(),
@@ -2240,6 +3170,7 @@ mod tests {
             Event::Cancelled {
                 request: 3,
                 partial: "Hi".to_owned(),
+                reasoning: None,
             },
             Event::TurnSettled {
                 turn: 1,
@@ -2370,6 +3301,25 @@ mod tests {
                 from: State::Turn,
                 to: State::Awaiting,
             },
+            // v3: a call whose outcome never arrived, written after its
+            // request ended -- a `tool_call` cites a request, never ends one.
+            Event::ToolCall {
+                request: 29,
+                turn: 4,
+                id: "call-0".to_owned(),
+                name: "bash".to_owned(),
+                arguments: "{\"command\":\"ls\"}".to_owned(),
+                outcome: ToolOutcome::Cancelled,
+                argv: None,
+                confined: None,
+                isolation: Some(Isolation::Sandbox),
+                network: Some(Network::None),
+                exit: None,
+                reason: None,
+                policy: None,
+                stdout: None,
+                stderr: None,
+            },
         ];
         events
             .into_iter()
@@ -2388,7 +3338,10 @@ mod tests {
             (Holds::Count | Holds::Millis, Value::Integer(n)) => *n >= 0,
             (Holds::Version, Value::Integer(n)) => READS.contains(n),
             (Holds::Millis, Value::Decimal(d)) => !d.as_str().starts_with('-'),
-            (Holds::Timings | Holds::Usage | Holds::Serving, Value::Object(object)) => {
+            (
+                Holds::Timings | Holds::Usage | Holds::Serving | Holds::ToolCallPiece,
+                Value::Object(object),
+            ) => {
                 let declared = object_fields(holds).expect("an object holder");
                 object.iter().all(|(key, value)| {
                     declared
@@ -2401,6 +3354,9 @@ mod tests {
             }
             (Holds::Text, Value::String(_)) | (Holds::Flag, Value::Boolean(_)) => true,
             (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
+            (Holds::Strings, Value::Array(items)) => {
+                items.iter().all(|item| matches!(item, Value::String(_)))
+            }
             (Holds::Tag(tags), Value::String(tag)) => tags.tags().contains(&tag.as_str()),
             (Holds::Head, Value::Array(messages)) => messages.iter().all(|m| match m {
                 Value::Object(message) => {
@@ -2548,6 +3504,13 @@ mod tests {
                     kind.tag()
                 );
             }
+            for key in all_or_none(*kind) {
+                assert!(
+                    schema(*kind).iter().any(|f| f.key == *key && !f.required),
+                    "`{}`: `all_or_none` names `{key}`, which is not an optional key",
+                    kind.tag()
+                );
+            }
         }
         every_nested_key_is_written_and_omitted_as_declared(&nested_written, &nested_omitted);
     }
@@ -2559,8 +3522,12 @@ mod tests {
         nested_written: &BTreeSet<(&str, &str)>,
         nested_omitted: &BTreeSet<(&str, &str)>,
     ) {
-        for (outer, inner_fields) in [("timings", TIMINGS), ("usage", USAGE), ("serving", SERVING)]
-        {
+        for (outer, inner_fields) in [
+            ("timings", TIMINGS),
+            ("usage", USAGE),
+            ("serving", SERVING),
+            ("tool_call", TOOL_CALL_PIECE),
+        ] {
             for inner in inner_fields {
                 assert!(
                     nested_written.contains(&(outer, inner.key)),
@@ -2694,13 +3661,35 @@ mod tests {
 
     /// `key` in `object` is read with `tags`: each of its tags parses there,
     /// and a tag only another vocabulary carries does not.
+    ///
+    /// A `tool_call`'s `outcome` decides which other keys the line carries
+    /// ([`outcome_keys`]), so no one line accepts all four outcomes: there, a
+    /// tag counts as read when the refusal is the outcome's keys rule, which
+    /// runs only once the tag has parsed as a [`ToolOutcome`] (v3). Likewise
+    /// `unrecorded` in `isolation` beside a `confined` is refused by the
+    /// confinement rule, which runs only once the tag has parsed; so is a
+    /// `policy` beside an `isolation` that names no profile, or none beside
+    /// one that does (ruled at #299, 5976386318 point 6); and a
+    /// `bash` refusal's `reason` decides its `argv`
+    /// ([`argv_if_it_parsed`]), which runs only once the reason has parsed.
     fn the_reader_reads_it_as(object: &BTreeMap<String, Value>, key: &str, tags: Tags) {
         let with = |tag: &str| {
             let mut changed = object.clone();
             changed.insert(key.to_owned(), Value::String(tag.to_owned()));
             let mut rendered = String::new();
             json::render(&Value::Object(changed), &mut rendered);
-            line(&rendered).is_ok()
+            line(&rendered).map_or_else(
+                |why| {
+                    (tags == Tags::ToolOutcome && why.contains("whose outcome is"))
+                        || (tags == Tags::Isolation
+                            && (why.contains("`isolation` is `unrecorded` carries `confined`")
+                                || why.contains("carries no `confined`")
+                                || why.contains("carries `policy` under no profile")
+                                || why.contains("carries no `policy`")))
+                        || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
+                },
+                |_| true,
+            )
         };
         let own = tags.tags();
         for tag in &own {
@@ -2907,7 +3896,7 @@ mod tests {
         assert_eq!(
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
-             cancelled request.failed turn.settled idle.gap progress"
+             cancelled request.failed turn.settled idle.gap progress tool_call"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -2919,7 +3908,510 @@ mod tests {
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
-            "final cancelled max_steps timeout failed"
+            "final cancelled max_steps timeout failed capped"
         );
+        assert_eq!(
+            tags(ToolOutcome::ALL.iter().map(|it| it.tag()).collect()),
+            "ran refused command_failed cancelled"
+        );
+        assert_eq!(
+            tags(ToolRefusal::ALL.iter().map(|it| it.tag()).collect()),
+            "not_allowed max_steps unparsable unknown_tool"
+        );
+        assert_eq!(
+            tags(EngineIdentity::ALL.iter().map(|it| it.tag()).collect()),
+            "checked_commit literal_matched"
+        );
+    }
+
+    /// A `tool_call`'s `isolation` and `network` are the drive's own words:
+    /// `diet/src/isolation`'s `Isolation::tag` and `Network::tag`, every one,
+    /// in order, plus `unrecorded` and nothing else (v3; `unrecorded` ruled
+    /// on #297 for a placed replay, which the drive never writes). Two
+    /// spellings of one policy are two readers that can disagree.
+    #[test]
+    fn the_policy_words_are_the_isolation_modules() {
+        use crate::isolation;
+        let plus_unrecorded = |mut words: Vec<&'static str>| {
+            words.push("unrecorded");
+            words
+        };
+        assert_eq!(
+            Isolation::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>(),
+            plus_unrecorded(
+                isolation::Isolation::ALL
+                    .iter()
+                    .map(|it| it.tag())
+                    .collect::<Vec<_>>()
+            )
+        );
+        assert_eq!(
+            Network::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>(),
+            plus_unrecorded(
+                isolation::Network::ALL
+                    .iter()
+                    .map(|it| it.tag())
+                    .collect::<Vec<_>>()
+            )
+        );
+    }
+
+    /// A STREAM'S TEXT AND ITS BYTE COUNT COME TOGETHER (v3, ruled on #297
+    /// Q3), refused by that rule itself: each half of each stream left out
+    /// of a `ran` line is refused naming the pair, not only by the outcome's
+    /// required keys, which would refuse it too and say less.
+    #[test]
+    fn a_streams_text_and_its_byte_count_come_together() {
+        let ran = concat!(
+            r#"{"argv":["true"],"arguments":"{}","confined":["true"],"exit":0,"#,
+            r#""id":"c","isolation":"none","kind":"tool_call","name":"bash","network":"host","#,
+            r#""outcome":"ran","request":3,"seq":9,"stderr":"","stderr_bytes":0,"#,
+            r#""stdout":"","stdout_bytes":0,"t":45,"turn":1}"#
+        );
+        let object = json::line(ran).expect("an object");
+        line(ran).expect("the whole line reads");
+        for (text_key, bytes_key) in STREAMS {
+            for (dropped, kept) in [(text_key, bytes_key), (bytes_key, text_key)] {
+                let mut without = object.clone();
+                without.remove(*dropped);
+                let mut rendered = String::new();
+                json::render(&Value::Object(without), &mut rendered);
+                let refused = line(&rendered).expect_err("half a stream was read");
+                assert!(
+                    refused.contains(&format!("carries `{kept}` without `{dropped}`")),
+                    "{refused}"
+                );
+            }
+        }
+    }
+
+    /// A STREAM'S BYTE COUNT IS `0` EXACTLY WHEN ITS TEXT IS EMPTY, AND IS
+    /// NOT OTHERWISE COMPARED WITH IT (v3, ruled on #297 at 5975957135):
+    /// each stream's empty text beside a non-zero count is refused, and its
+    /// text beside a zero count is refused, each naming both keys; a text
+    /// whose length differs from its count -- a lossy decoding of output that
+    /// is not UTF-8 -- still reads.
+    #[test]
+    fn a_streams_byte_count_is_zero_exactly_when_its_text_is_empty() {
+        let ran = |stream: &str, text: &str, bytes: u64| {
+            let (other, _) = STREAMS
+                .iter()
+                .find(|(key, _)| *key != stream)
+                .expect("two streams");
+            format!(
+                concat!(
+                    r#"{{"argv":["true"],"arguments":"{{}}","confined":["true"],"exit":0,"#,
+                    r#""id":"c","isolation":"none","kind":"tool_call","name":"bash","network":"host","#,
+                    r#""outcome":"ran","request":3,"seq":9,"{stream}":"{text}","{stream}_bytes":{bytes},"#,
+                    r#""{other}":"","{other}_bytes":0,"t":45,"turn":1}}"#
+                ),
+                stream = stream,
+                text = text,
+                bytes = bytes,
+                other = other,
+            )
+        };
+        for (stream, bytes_key) in STREAMS {
+            let refused = line(&ran(stream, "", 1)).expect_err("empty text with a count was read");
+            assert!(
+                refused.contains(&format!("`{stream}` is empty and `{bytes_key}` is 1")),
+                "{refused}"
+            );
+            let refused = line(&ran(stream, "a", 0)).expect_err("text with no bytes was read");
+            assert!(
+                refused.contains(&format!("`{stream}` carries text and `{bytes_key}` is 0")),
+                "{refused}"
+            );
+            line(&ran(stream, "\u{fffd}", 1))
+                .unwrap_or_else(|why| panic!("a lossy `{stream}` was refused: {why}"));
+            line(&ran(stream, "a", 1))
+                .unwrap_or_else(|why| panic!("a whole `{stream}` was refused: {why}"));
+        }
+    }
+
+    /// EVERY KEY A `tool_call` MUST CARRY, AND EVERY KEY IT MAY NOT, FOR EACH
+    /// OUTCOME AND NAME (v3, ruled on #297: the design, Q1, 5974151057,
+    /// 5974672735, 5974732908, 5974810417, 5975651100, 5975827372,
+    /// 5975957135). The table below is
+    /// the rule as ruled, written out here rather than read from
+    /// [`outcome_keys`], so an entry gone from either list there is a case
+    /// here the reader no longer refuses. From a line that reads, each
+    /// required key dropped is refused naming it, each forbidden key added is
+    /// refused naming it, and each optional key dropped (where the line
+    /// carries it) or added (where it does not) still reads.
+    ///
+    /// Two rows for each `unrecorded` alone, without a claim: `isolation` and
+    /// `network` admit it each on its own (5975651100). A non-`bash` call's
+    /// streams are optional under `ran` and `command_failed`, written both
+    /// with and without them (5975651100); a `bash` call's are required.
+    /// `policy` is required of a `bash` `command_failed` and forbidden on
+    /// every other name (5975957135). A refused `bash` call carries `argv`
+    /// for each reason that parsed (`not_allowed`, `max_steps`) and for none
+    /// that did not (`unparsable`, `unknown_tool`), and a refused `read`
+    /// carries none whatever its reason (5974810417, 5974672735).
+    ///
+    /// A stream's text and its byte count come together
+    /// ([`a_streams_text_and_its_byte_count_come_together`]), so a text key
+    /// is dropped or added with its byte count, and the refusal must name the
+    /// text key. A byte count alone is refused by the pairing whatever the
+    /// outcome lists say, so its entry in them changes nothing a line can
+    /// show.
+    ///
+    /// The names are `bash` and two others, `read` and `edit`, so a reader
+    /// that singled out one other name rather than `bash` goes red too.
+    #[test]
+    #[allow(clippy::too_many_lines)] // one table, written out
+    fn a_tool_calls_keys_fit_its_outcome_and_name() {
+        // (what, the line, required, forbidden, optional)
+        type Row = (
+            &'static str,
+            String,
+            Vec<&'static str>,
+            Vec<&'static str>,
+            Vec<&'static str>,
+        );
+        const POLICY: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+        const STREAMS_HELD: &str = r#""stderr":"","stderr_bytes":0,"stdout":"","stdout_bytes":0,"#;
+        const BASH_STREAMS: &[&str] = &["stdout", "stdout_bytes", "stderr", "stderr_bytes"];
+        let exec = |isolation: &str, network: &str| {
+            format!(
+                r#""argv":["true"],"confined":["true"],"isolation":"{isolation}","network":"{network}","#
+            )
+        };
+        let line_of = |name: &str, outcome: &str, rest: &str| {
+            format!(
+                r#"{{{rest}"arguments":"{{}}","id":"c","kind":"tool_call","name":"{name}","outcome":"{outcome}","request":3,"seq":9,"t":45,"turn":1}}"#
+            )
+        };
+        let policy = format!(r#""policy":"{POLICY}","#);
+        let ran_bash = format!("{}\"exit\":0,{STREAMS_HELD}", exec("sandbox", "none"));
+        let ran_unrecorded = format!(
+            r#""argv":["true"],"exit":0,"isolation":"unrecorded","network":"unrecorded",{STREAMS_HELD}"#
+        );
+        let ran_isolation_unrecorded = format!(
+            r#""argv":["true"],"exit":0,"isolation":"unrecorded","network":"none",{STREAMS_HELD}"#
+        );
+        let ran_network_unrecorded =
+            format!("{}\"exit\":0,{STREAMS_HELD}", exec("sandbox", "unrecorded"));
+        let failed_bash = format!(
+            "{}\"exit\":1,{policy}{STREAMS_HELD}",
+            exec("sandbox", "none")
+        );
+        let failed_vm = format!("{}\"exit\":1,{policy}{STREAMS_HELD}", exec("vm", "none"));
+        let failed_unprofiled = format!("{}\"exit\":1,{STREAMS_HELD}", exec("none", "none"));
+        let failed_unrecorded = format!(
+            r#""argv":["true"],"exit":1,"isolation":"unrecorded","network":"unrecorded",{STREAMS_HELD}"#
+        );
+        let cancelled_bash = exec("sandbox", "none");
+        let cancelled_unrecorded =
+            r#""argv":["true"],"isolation":"unrecorded","network":"unrecorded","#.to_owned();
+        let read_ran = format!("\"exit\":0,{STREAMS_HELD}");
+        let read_failed = format!("\"exit\":1,{STREAMS_HELD}");
+        let read_failed_bare = "\"exit\":1,".to_owned();
+
+        let streams_and = |more: &[&'static str]| -> Vec<&'static str> {
+            BASH_STREAMS
+                .iter()
+                .copied()
+                .chain(more.iter().copied())
+                .collect()
+        };
+        let not_run = |more: &[&'static str]| -> Vec<&'static str> {
+            ["exit", "policy"]
+                .into_iter()
+                .chain(BASH_STREAMS.iter().copied())
+                .chain(more.iter().copied())
+                .collect()
+        };
+        let streams = || vec!["stdout", "stderr"];
+        let table: Vec<Row> = vec![
+            (
+                "bash ran",
+                line_of("bash", "ran", &ran_bash),
+                streams_and(&["argv", "confined", "isolation", "network"]),
+                vec!["reason", "policy"],
+                vec!["exit"],
+            ),
+            (
+                "bash ran, unrecorded",
+                line_of("bash", "ran", &ran_unrecorded),
+                streams_and(&["argv", "isolation", "network"]),
+                vec!["reason", "policy", "confined"],
+                vec!["exit"],
+            ),
+            (
+                "bash ran, only isolation unrecorded",
+                line_of("bash", "ran", &ran_isolation_unrecorded),
+                streams_and(&["argv", "isolation", "network"]),
+                vec!["reason", "policy", "confined"],
+                vec![],
+            ),
+            (
+                "bash ran, only network unrecorded",
+                line_of("bash", "ran", &ran_network_unrecorded),
+                streams_and(&["argv", "confined", "isolation", "network"]),
+                vec!["reason", "policy"],
+                vec![],
+            ),
+            (
+                "bash command_failed",
+                line_of("bash", "command_failed", &failed_bash),
+                streams_and(&["argv", "confined", "isolation", "network", "policy"]),
+                vec!["reason"],
+                vec!["exit"],
+            ),
+            (
+                "bash command_failed under vm",
+                line_of("bash", "command_failed", &failed_vm),
+                streams_and(&["argv", "confined", "isolation", "network", "policy"]),
+                vec!["reason"],
+                vec![],
+            ),
+            (
+                "bash command_failed under no profile",
+                line_of("bash", "command_failed", &failed_unprofiled),
+                streams_and(&["argv", "confined", "isolation", "network"]),
+                vec!["reason", "policy"],
+                vec![],
+            ),
+            (
+                "bash command_failed, unrecorded",
+                line_of("bash", "command_failed", &failed_unrecorded),
+                streams_and(&["argv", "isolation", "network"]),
+                vec!["reason", "policy", "confined"],
+                vec![],
+            ),
+            (
+                "bash refused not_allowed",
+                line_of(
+                    "bash",
+                    "refused",
+                    r#""argv":["rm"],"reason":"not_allowed","#,
+                ),
+                vec!["reason", "argv"],
+                not_run(&["confined", "isolation", "network"]),
+                vec![],
+            ),
+            (
+                "bash refused max_steps",
+                line_of(
+                    "bash",
+                    "refused",
+                    r#""argv":["true"],"reason":"max_steps","#,
+                ),
+                vec!["reason", "argv"],
+                not_run(&["confined", "isolation", "network"]),
+                vec![],
+            ),
+            (
+                "bash refused unparsable",
+                line_of("bash", "refused", r#""reason":"unparsable","#),
+                vec!["reason"],
+                not_run(&["argv", "confined", "isolation", "network"]),
+                vec![],
+            ),
+            (
+                "bash refused unknown_tool",
+                line_of("bash", "refused", r#""reason":"unknown_tool","#),
+                vec!["reason"],
+                not_run(&["argv", "confined", "isolation", "network"]),
+                vec![],
+            ),
+            (
+                "bash cancelled",
+                line_of("bash", "cancelled", &cancelled_bash),
+                vec!["isolation", "network"],
+                not_run(&["reason"]),
+                vec!["confined"],
+            ),
+            (
+                "bash cancelled, unrecorded",
+                line_of("bash", "cancelled", &cancelled_unrecorded),
+                vec!["isolation", "network"],
+                not_run(&["reason", "confined"]),
+                vec![],
+            ),
+            (
+                "read ran",
+                line_of("read", "ran", &read_ran),
+                vec![],
+                vec![
+                    "reason",
+                    "policy",
+                    "argv",
+                    "confined",
+                    "isolation",
+                    "network",
+                ],
+                streams(),
+            ),
+            (
+                "read ran, no streams",
+                line_of("read", "ran", ""),
+                vec![],
+                vec![
+                    "reason",
+                    "policy",
+                    "argv",
+                    "confined",
+                    "isolation",
+                    "network",
+                ],
+                streams(),
+            ),
+            (
+                "read command_failed",
+                line_of("read", "command_failed", &read_failed),
+                vec![],
+                vec![
+                    "reason",
+                    "policy",
+                    "argv",
+                    "confined",
+                    "isolation",
+                    "network",
+                ],
+                streams(),
+            ),
+            (
+                "read command_failed, no streams",
+                line_of("read", "command_failed", &read_failed_bare),
+                vec![],
+                vec![
+                    "reason",
+                    "policy",
+                    "argv",
+                    "confined",
+                    "isolation",
+                    "network",
+                ],
+                streams(),
+            ),
+            (
+                "read refused",
+                line_of("read", "refused", r#""reason":"unknown_tool","#),
+                vec!["reason"],
+                not_run(&["argv", "confined", "isolation", "network"]),
+                vec![],
+            ),
+            (
+                "read refused not_allowed",
+                line_of("read", "refused", r#""reason":"not_allowed","#),
+                vec!["reason"],
+                not_run(&["argv", "confined", "isolation", "network"]),
+                vec![],
+            ),
+            (
+                "read cancelled",
+                line_of("read", "cancelled", ""),
+                vec![],
+                not_run(&["reason", "argv", "confined", "isolation", "network"]),
+                vec![],
+            ),
+        ];
+        // Every name but `bash` is one rule, so each `read` row is also an
+        // `edit` row: a reader that took `read` for the only other name
+        // would accept the `edit` line's exec keys.
+        let table: Vec<_> = table
+            .into_iter()
+            .flat_map(|(what, text, required, forbidden, optional)| {
+                let edit = what.strip_prefix("read ").map(|rest| {
+                    (
+                        format!("edit {rest}"),
+                        text.replace(r#""name":"read""#, r#""name":"edit""#),
+                        required.clone(),
+                        forbidden.clone(),
+                        optional.clone(),
+                    )
+                });
+                std::iter::once((what.to_owned(), text, required, forbidden, optional)).chain(edit)
+            })
+            .collect();
+        let value_of = |key: &str| -> Value {
+            if key == "argv" || key == "confined" {
+                Value::Array(vec![Value::String("true".to_owned())])
+            } else if key == "isolation" {
+                Value::String("sandbox".to_owned())
+            } else if key == "network" {
+                Value::String("none".to_owned())
+            } else if key == "reason" {
+                Value::String("not_allowed".to_owned())
+            } else if key == "policy" {
+                Value::String(POLICY.to_owned())
+            } else if key == "stdout" || key == "stderr" {
+                Value::String(String::new())
+            } else {
+                Value::Integer(0)
+            }
+        };
+        let partner = |key: &str| {
+            STREAMS
+                .iter()
+                .find(|(text, _)| *text == key)
+                .map(|(_, bytes)| *bytes)
+        };
+        let read_back = |object: &BTreeMap<String, Value>| {
+            let mut rendered = String::new();
+            json::render(&Value::Object(object.clone()), &mut rendered);
+            line(&rendered)
+        };
+        let mut probed = 0;
+        for (what, text, required, forbidden, optional) in &table {
+            line(text).unwrap_or_else(|why| panic!("{what}: the line does not read: {why}"));
+            let object = json::line(text).expect("an object");
+            for key in required {
+                let mut without = object.clone();
+                assert!(without.remove(*key).is_some(), "{what}: carries no `{key}`");
+                if let Some(bytes) = partner(key) {
+                    without.remove(bytes);
+                }
+                let refused = read_back(&without)
+                    .expect_err(&format!("{what}: a line without `{key}` was read"));
+                assert!(
+                    refused.contains(&format!("`{key}`")),
+                    "{what}, without `{key}`: {refused}"
+                );
+                probed += 1;
+            }
+            for key in forbidden {
+                let mut with = object.clone();
+                assert!(
+                    with.insert((*key).to_owned(), value_of(key)).is_none(),
+                    "{what}: already carries `{key}`"
+                );
+                if let Some(bytes) = partner(key) {
+                    with.insert(bytes.to_owned(), value_of(bytes));
+                }
+                let refused = read_back(&with)
+                    .expect_err(&format!("{what}: a line carrying `{key}` was read"));
+                assert!(
+                    refused.contains(&format!("`{key}`")),
+                    "{what}, with `{key}`: {refused}"
+                );
+                probed += 1;
+            }
+            for key in optional {
+                let mut changed = object.clone();
+                let carried = changed.remove(*key).is_some();
+                if carried {
+                    if let Some(bytes) = partner(key) {
+                        changed.remove(bytes);
+                    }
+                } else {
+                    changed.insert((*key).to_owned(), value_of(key));
+                    if let Some(bytes) = partner(key) {
+                        changed.insert(bytes.to_owned(), value_of(bytes));
+                    }
+                }
+                read_back(&changed).unwrap_or_else(|why| {
+                    panic!(
+                        "{what}, {} `{key}`: refused: {why}",
+                        if carried { "without" } else { "with" }
+                    )
+                });
+                probed += 1;
+            }
+        }
+        assert!(probed > 0, "nothing was probed");
     }
 }

@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 2;
-export const READS = [0, 1, 2] as const;
+export const VERSION = 3;
+export const READS = [0, 1, 2, 3] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -22,6 +22,7 @@ export type Kind =
   | "turn.settled"
   | "idle.gap"
   | "progress"
+  | "tool_call"
 ;
 
 export type State =
@@ -64,6 +65,7 @@ export type SettleReason =
   | "max_steps"
   | "timeout"
   | "failed"
+  | "capped"
 ;
 
 export type GapEnd =
@@ -77,6 +79,43 @@ export type Role =
   | "system"
   | "user"
   | "assistant"
+;
+
+export type ToolOutcome =
+  | "ran"
+  | "refused"
+  | "command_failed"
+  | "cancelled"
+;
+
+export type Isolation =
+  | "none"
+  | "sandbox"
+  | "vm"
+  | "unrecorded"
+;
+
+export type Network =
+  | "none"
+  | "host"
+  | "unrecorded"
+;
+
+export type ToolRefusal =
+  | "not_allowed"
+  | "max_steps"
+  | "unparsable"
+  | "unknown_tool"
+;
+
+export type EngineIdentity =
+  | "checked_commit"
+  | "literal_matched"
+;
+
+export type Provenance =
+  | "placed"
+  | "constructed"
 ;
 
 export interface HeadMessage {
@@ -105,16 +144,24 @@ export interface Serving {
   concurrency?: number;
 }
 
+export interface ToolCallPiece {
+  index: number;
+  id?: string;
+  name?: string;
+  arguments: string;
+}
+
 export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2;
+  version: 0 | 1 | 2 | 3;
   opened: number;
   model: string;
   head: HeadMessage[];
   serving?: Serving;
-};
+  provenance?: Provenance;
+} & ({ substrate: string; registry_sha256: string; engine_build: string; engine_identity: EngineIdentity } | { substrate?: never; registry_sha256?: never; engine_build?: never; engine_identity?: never });
 
 export type AskLine = {
   seq: number;
@@ -155,7 +202,7 @@ export type DeltaLine = {
   t: number;
   kind: "delta";
   request: number;
-} & ({ text: string; reasoning?: never } | { reasoning: string; text?: never });
+} & ({ text: string; reasoning?: never; tool_call?: never } | { reasoning: string; text?: never; tool_call?: never } | { tool_call: ToolCallPiece; text?: never; reasoning?: never });
 
 export type StopAskedLine = {
   seq: number;
@@ -181,6 +228,7 @@ export type CancelledLine = {
   kind: "cancelled";
   request: number;
   partial: string;
+  reasoning?: string;
 };
 
 export type RequestFailedLine = {
@@ -226,6 +274,29 @@ export type ProgressLine = {
   time_ms: number;
 };
 
+export type ToolCallLine = {
+  seq: number;
+  t: number;
+  kind: "tool_call";
+  request: number;
+  turn: number;
+  id: string;
+  name: string;
+  arguments: string;
+  outcome: ToolOutcome;
+  argv?: string[];
+  confined?: string[];
+  isolation?: Isolation;
+  network?: Network;
+  exit?: number;
+  reason?: ToolRefusal;
+  policy?: string;
+  stdout?: string;
+  stdout_bytes?: number;
+  stderr?: string;
+  stderr_bytes?: number;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -240,4 +311,5 @@ export type LogLine =
   | TurnSettledLine
   | IdleGapLine
   | ProgressLine
+  | ToolCallLine
 ;

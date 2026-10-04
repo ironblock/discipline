@@ -926,6 +926,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
                     Concurrency::Undeclared => None,
                 },
             }),
+            // v3's substrate claim, written once the session carries one
+            // (#292's v3 half, track three's own PR).
+            claim: None,
+            // A session writing as it runs carries no provenance word.
+            provenance: None,
         },
         Event::Asked { turn, text } => log::Event::Ask {
             turn: *turn,
@@ -1007,6 +1012,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
         Event::Cancelled { request, partial } => log::Event::Cancelled {
             request: *request,
             partial: partial.clone(),
+            // v3's reasoning before the stop, written once the session
+            // carries it (#291).
+            reasoning: None,
         },
         Event::Rejected {
             request,
@@ -2555,6 +2563,8 @@ pub(in crate::drive) mod tests {
                     role: log::Role::System,
                     content: HEAD.to_owned(),
                 }],
+                claim: None,
+                provenance: None,
             },
             log::Event::Ask {
                 turn: 1,
@@ -2610,6 +2620,7 @@ pub(in crate::drive) mod tests {
             log::Event::Cancelled {
                 request: 3,
                 partial: "Hel".to_owned(),
+                reasoning: None,
             },
             log::Event::Response {
                 to_request: 3,

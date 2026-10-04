@@ -1,0 +1,1 @@
+a `tool_call` whose outcome is `command_failed` carries no `policy`

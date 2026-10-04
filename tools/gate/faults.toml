@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 167
+mechanics_assertions = 172
 unseedable_guards = 2
 migrated = 0
 
@@ -2178,6 +2178,46 @@ id = "mech.the-gate-rejects-a-skipped-job"
 kind = "mechanics"
 check = "-"
 label = "the gate rejects a SKIPPED job"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.the-gate-accepts-a-skipped-selftest-on-a-pull-request-into-the-integration-branch"
+kind = "mechanics"
+check = "-"
+label = "the gate accepts a skipped selftest on a pull request into the integration branch"
+failure_class = "wiring.selftest-declared-off"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.the-gate-rejects-a-skipped-selftest-on-the-nightly"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects a skipped selftest on the nightly"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.the-gate-rejects-a-skipped-selftest-on-a-release-pull-request"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects a skipped selftest on a release pull request"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.the-gate-rejects-a-skipped-selftest-on-a-pull-request-with-no-base"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects a skipped selftest on a pull request with no base"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.the-gate-rejects-any-other-job-skipped-where-the-selftest-may-skip"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects any other job skipped where the selftest may skip"
 failure_class = "wiring.job-not-success"
 expected_exit = "1"
 migrated = false
@@ -4382,6 +4422,14 @@ failure_class = "gate.derive-accepts-a-fast-green"
 legacy_signature = "a scope naming another target selected something"
 migrated = false
 [[fault]]
+id = "derive.derive_drift_machinery_not_widened"
+kind = "seeded-gate"
+check = "derive"
+label = "a machinery change's drift refusal not widened"
+failure_class = "drift.machinery-not-widened"
+legacy_signature = "a verify\\.sh change under an open bsd issue found \\[\\]"
+migrated = false
+[[fault]]
 id = "ci.ci_pages_deploys_on_any_conclusion"
 kind = "seeded-gate"
 check = "ci"
@@ -4594,6 +4642,38 @@ check = "ci"
 label = "a branch spelled in a script"
 failure_class = "wiring.branch-literal"
 legacy_signature = "scope-selftest.py:[0-9]+: .*names a branch literally"
+migrated = false
+[[fault]]
+id = "ci.ci_selftest_on_every_event"
+kind = "seeded-gate"
+check = "ci"
+label = "the selftest run on every event"
+failure_class = "wiring.selftest-cadence"
+legacy_signature = "the .selftest. job's .if:. is \\[\\], not the one expression"
+migrated = false
+[[fault]]
+id = "ci.ci_selftest_off_the_nightly"
+kind = "seeded-gate"
+check = "ci"
+label = "the nightly dropped from the selftest's events"
+failure_class = "wiring.selftest-cadence"
+legacy_signature = "the .selftest. job's .if:. is \\[.\\$\\{\\{ \\(github"
+migrated = false
+[[fault]]
+id = "ci.ci_selftest_census_unconditional"
+kind = "seeded-gate"
+check = "ci"
+label = "the selftest census required where the selftest skips"
+failure_class = "wiring.selftest-census-condition"
+legacy_signature = "census step .check-selftest-census.py.* runs under \\[\\]"
+migrated = false
+[[fault]]
+id = "ci.ci_drift_refusal_off"
+kind = "seeded-gate"
+check = "ci"
+label = "the pull request's drift refusal switched off"
+failure_class = "wiring.drift-refusal-off"
+legacy_signature = "pkg-repo.yml: the step refusing a pull request on an open drift issue .* runs under \\[.false.\\]"
 migrated = false
 [[fault]]
 id = "derive.scope_ignores_touched"
@@ -6923,6 +7003,276 @@ legacy_signature = "the_schema_is_what_every_kind_writes \\.\\.\\. FAILED"
 migrated = false
 
 [[fault]]
+id = "test.log_tool_call_forbidden_keys_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a tool_call carrying a key its outcome forbids read"
+failure_class = "log.tool-call-forbidden-keys-read"
+legacy_signature = "log/fixtures/invalid/a-refused-call-carrying-an-exit\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_tool_call_required_keys_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a tool_call missing a key its outcome requires read"
+failure_class = "log.tool-call-required-keys-unchecked"
+legacy_signature = "log/fixtures/invalid/a-failed-call-without-its-policy\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_substrate_claim_in_part_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "part of a session.start's substrate claim read"
+failure_class = "log.substrate-claim-in-part-read"
+legacy_signature = "log/fixtures/invalid/a-session-start-with-part-of-its-claim\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_capped_settle_unchecked"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a capped settle whose response is not capped read"
+failure_class = "log.capped-settle-unchecked"
+legacy_signature = "log/fixtures/invalid/a-capped-settle-whose-response-is-not-capped\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_policy_unrequired_under_a_profile"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a failed bash call under a profile read without its policy"
+failure_class = "log.policy-unrequired-under-a-profile"
+legacy_signature = "log/fixtures/invalid/a-failed-call-without-its-policy\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_policy_read_under_no_profile"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a policy read on a bash call no profile confined"
+failure_class = "log.policy-read-under-no-profile"
+legacy_signature = "log/fixtures/invalid/a-policy-under-no-profile\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_provenance_outside_its_vocabulary_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a provenance outside its vocabulary read"
+failure_class = "log.provenance-outside-its-vocabulary"
+legacy_signature = "log/fixtures/invalid/a-provenance-outside-its-vocabulary\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_provenance_read_in_a_v2_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a provenance read in a log that declares v2"
+failure_class = "log.provenance-read-in-a-v2-log"
+legacy_signature = "log/fixtures/invalid/a-v2-log-carrying-a-provenance\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_tool_call_citing_anything_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a tool_call citing anything read as a request"
+failure_class = "log.tool-call-citing-anything-read"
+legacy_signature = "log/fixtures/invalid/a-tool-call-naming-no-request\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_stream_without_its_bytes_unpaired"
+kind = "seeded-gate"
+check = "test"
+target = "lib/formats::log::tests"
+label = "a stream's text and its byte count not paired"
+failure_class = "log.stream-without-its-bytes-unpaired"
+legacy_signature = "a_streams_text_and_its_byte_count_come_together \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.log_cancelled_call_exit_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a cancelled tool_call carrying an exit read"
+failure_class = "log.cancelled-call-exit-read"
+legacy_signature = "log/fixtures/invalid/a-cancelled-call-carrying-an-exit\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_capped_settle_read_in_a_v2_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a capped settle read in a log that declares v2"
+failure_class = "log.capped-settle-read-in-a-v2-log"
+legacy_signature = "log/fixtures/invalid/a-v2-log-settling-capped\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_tool_call_written_twice_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a call's tool_call written twice read"
+failure_class = "log.tool-call-written-twice-read"
+legacy_signature = "log/fixtures/invalid/a-call-written-twice\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_tool_call_naming_another_turn_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a tool_call naming another turn than its request's read"
+failure_class = "log.tool-call-naming-another-turn-read"
+legacy_signature = "log/fixtures/invalid/a-tool-call-naming-another-turn\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_bash_call_exec_keys_unrequired"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a bash call that ran without its argv read"
+failure_class = "log.bash-call-exec-keys-unrequired"
+legacy_signature = "log/fixtures/invalid/a-bash-call-that-ran-without-its-argv\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_non_bash_call_exec_keys_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a read call carrying an argv read"
+failure_class = "log.non-bash-call-exec-keys-read"
+legacy_signature = "log/fixtures/invalid/a-read-call-carrying-an-argv\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_bash_call_streams_unrequired"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a bash call that ran without its stdout read"
+failure_class = "log.bash-call-streams-unrequired"
+legacy_signature = "log/fixtures/invalid/a-bash-call-that-ran-without-its-stdout\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_unrecorded_isolation_in_a_served_session_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "an unrecorded isolation read in a served session"
+failure_class = "log.unrecorded-isolation-in-a-served-session-read"
+legacy_signature = "log/fixtures/invalid/an-unrecorded-isolation-in-a-served-session\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_unrecorded_network_in_a_served_session_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "an unrecorded network read in a served session"
+failure_class = "log.unrecorded-network-in-a-served-session-read"
+legacy_signature = "log/fixtures/invalid/an-unrecorded-network-in-a-served-session\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_unrecorded_call_confined_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "an unrecorded call carrying its confined read"
+failure_class = "log.unrecorded-call-confined-read"
+legacy_signature = "log/fixtures/invalid/an-unrecorded-call-carrying-its-confined\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_refused_unparsable_call_argv_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a refused unparsable bash call carrying an argv read"
+failure_class = "log.refused-unparsable-call-argv-read"
+legacy_signature = "log/fixtures/invalid/a-refused-unparsable-call-carrying-an-argv\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_refused_parsed_call_argv_unrequired"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a refused not_allowed bash call without its argv read"
+failure_class = "log.refused-parsed-call-argv-unrequired"
+legacy_signature = "log/fixtures/invalid/a-refused-not-allowed-call-without-its-argv\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_cancelled_bash_call_policy_words_unrequired"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a cancelled bash call without its policy words read"
+failure_class = "log.cancelled-bash-call-policy-words-unrequired"
+legacy_signature = "log/fixtures/invalid/a-cancelled-bash-call-without-its-policy-words\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_refused_call_policy_words_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a refused bash call carrying its policy words read"
+failure_class = "log.refused-call-policy-words-read"
+legacy_signature = "log/fixtures/invalid/a-refused-call-carrying-its-isolation\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_empty_stream_with_a_byte_count_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "an empty stream with a non-zero byte count read"
+failure_class = "log.empty-stream-with-a-byte-count-read"
+legacy_signature = "log/fixtures/invalid/an-empty-stream-with-a-non-zero-byte-count\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_stream_text_with_a_zero_byte_count_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a stream's text with a zero byte count read"
+failure_class = "log.stream-text-with-a-zero-byte-count-read"
+legacy_signature = "log/fixtures/invalid/a-stream-with-text-and-a-zero-byte-count\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_non_bash_call_policy_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a read call that failed carrying a policy read"
+failure_class = "log.non-bash-call-policy-read"
+legacy_signature = "log/fixtures/invalid/a-read-call-that-failed-carrying-a-policy\\.jsonl"
+migrated = false
+
+[[fault]]
 id = "test.record_prefix_change_not_a_change"
 kind = "seeded-gate"
 check = "test"
@@ -9190,6 +9540,24 @@ check = "exercise"
 label = "a capped turn read from the settle word alone"
 failure_class = "exercise.capped-settle"
 legacy_signature = "FAIL.*capped\\.test\\.ts.*is not read from the settle word alone"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_refused_call_drawn_as_ran"
+kind = "seeded-gate"
+check = "exercise"
+label = "a refused tool call drawn as ran"
+failure_class = "exercise.tool-outcome"
+legacy_signature = "FAIL.*served\\.test\\.ts.*folds a ran, a refused and a policy-failed call"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_placed_line_refused"
+kind = "seeded-gate"
+check = "exercise"
+label = "a placed core line diet's reader refuses"
+failure_class = "exercise.placed-projection"
+legacy_signature = "diet check-log refuses the placed projection: .*`ask` carries no `asked_by`"
 migrated = false
 
 [[fault]]

@@ -25,5 +25,10 @@
 }
 
 .ex-exit--ok { color: var(--ok); }
-.ex-truncated { color: var(--warn); }
 .ex-exit--bad { color: var(--bad); }
+
+/* What became of a call, where it is more than ran; and what confined it, said quietly. */
+.ex-call-outcome[data-level='warn'] { color: var(--warn); }
+.ex-call-outcome[data-level='bad'] { color: var(--bad); }
+.ex-confinement { color: var(--ink-faint); }
+.ex-tool__stderr { color: var(--ink-faint); }

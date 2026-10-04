@@ -2,7 +2,7 @@
 """A fault found not red on a full run opens an issue against its check, and a
 pull request touching that check is refused until it is closed (#112).
 
-    selftest-drift.py open DIR     on a full run (a push or the nightly, #326): every census under
+    selftest-drift.py open DIR     on a full run (the nightly or the release path, #369): every census under
                                    DIR is read for `not_red` rows, and each
                                    check with one gets ONE open issue, labelled
                                    `check:<CHECK>`, listing its faults
@@ -11,6 +11,16 @@ pull request touching that check is refused until it is closed (#112).
                                    (scope-selftest.py --checks-out); an open
                                    issue labelled `check:<name>` for any of
                                    them refuses the run, naming the issue
+    selftest-drift.py block-scope REPORT FILES
+                                   on a pull request that runs no selftest
+                                   (#369): REPORT is what `pr-scope.py`
+                                   printed for the diff, FILES the diff's
+                                   paths as `git diff --name-only -z` writes
+                                   them; the report's `checks:`
+                                   line is the list, widened to EVERY check
+                                   when FILES touch the selftest's machinery
+                                   (ruled (c) on #369, 5976704493), and
+                                   refused as `block` does
     selftest-drift.py --selftest   the fixtures, against a stand-in for `gh`
 
 The label is the mechanism and the issue is the record (ruled on #112,
@@ -150,6 +160,45 @@ def blocking(checks: list[str], gh: Gh) -> list[str]:
     return found
 
 
+# A change is MACHINERY (#369, ruled (c)) when the diff touches verify.sh or a
+# file scope-selftest.py's MACHINERY_FILES names: the scope plan this replaces
+# on pull requests re-proved every check for it. Decided from the diff's
+# paths, never from pr-scope's printed reason -- pr-scope prints one reason,
+# and a protocol file (a workflow, CONTRIBUTING.md) outranks machinery there,
+# so a change to gate-selftest.yml, or machinery beside a doc, reads as
+# protocol (#369's review). pr-scope's own verdict is untouched; the widening
+# is the refusal's.
+def machinery_files() -> frozenset[str]:
+    """scope-selftest.py's MACHINERY_FILES, read from it, not restated."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "scope_selftest", pathlib.Path(__file__).resolve().parent / "scope-selftest.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return frozenset(module.MACHINERY_FILES)
+
+
+def is_machinery(files: list[str], machinery: frozenset[str]) -> bool:
+    return "verify.sh" in files or bool(set(files) & machinery)
+
+
+def scope_checks(report: str, files: list[str], every: list[str], machinery: frozenset[str]) -> list[str]:
+    """The checks a pull request's drift refusal is asked about: pr-scope.py's
+    `checks:` line, or `every` check when `files` touch the machinery. A
+    report with no `checks:` line, or no files, is refused rather than read
+    as none."""
+    named = next((l[len("checks:"):] for l in report.splitlines() if l.startswith("checks:")), None)
+    if named is None:
+        raise ValueError("not pr-scope.py's report: no `checks:` line")
+    if not files:
+        raise ValueError("no changed files given, so nothing says whether this is machinery")
+    if is_machinery(files, machinery):
+        if not every:
+            raise ValueError("a machinery change, and no list of every check to widen to")
+        return sorted(every)
+    return [c.strip() for c in named.split(",") if c.strip()]
+
+
 def run_url() -> str:
     server, repo, run = (os.environ.get(k) for k in ("GITHUB_SERVER_URL", "GITHUB_REPOSITORY", "GITHUB_RUN_ID"))
     return f"{server}/{repo}/actions/runs/{run}" if server and repo and run else ""
@@ -279,6 +328,33 @@ def _blocks():
     return None
 
 
+@fixture("a machinery change under an open drift issue on a check pr-scope did not name is refused by name (#369)")
+def _machinery_widens():
+    gh = FakeGh({"check:bsd": [{"number": 8, "title": title("bsd"), "url": "u/8"}]})
+    every = ["bsd", "ci", "hygiene", "history", "results"]
+    machinery = machinery_files()
+    report = "material\nreason: it changes verify.sh, the gate itself\nchecks: hygiene, ci, history"
+    found = blocking(scope_checks(report, ["verify.sh"], every, machinery), gh)
+    if len(found) != 1 or "#8" not in found[0] or "check:bsd" not in found[0]:
+        return f"a verify.sh change under an open bsd issue found {found}"
+    # Machinery that pr-scope reports as protocol (#369's review): the
+    # selftest's workflow alone, and a machinery file beside a doc.
+    for files in ([".github/workflows/gate-selftest.yml"], ["scripts/gatelib.py", "CONTRIBUTING.md"]):
+        report = "material\nreason: x is protocol (y)\nchecks: hygiene, history"
+        if scope_checks(report, files, every, machinery) != sorted(every):
+            return f"a machinery change reported as protocol was not widened: {files}"
+    report = "material\nreason: results/x is in the gate's tree (results/)\nchecks: results, hygiene"
+    if scope_checks(report, ["results/x/README.md"], every, machinery) != ["results", "hygiene"]:
+        return "a change that is not machinery was widened"
+    for bad in (("material\nreason: x", ["verify.sh"]), ("checks: hygiene", [])):
+        try:
+            scope_checks(bad[0], bad[1], every, machinery)
+        except ValueError:
+            continue
+        return f"an unreadable input was read: {bad!r}"
+    return None
+
+
 @fixture("an open issue for a check the PR does not touch does not refuse it")
 def _unrelated():
     gh = FakeGh({"check:ci": [{"number": 7, "title": title("ci")}]})
@@ -314,7 +390,7 @@ def selftest() -> int:
 def main(argv: list[str]) -> int:
     if argv == ["--selftest"]:
         return selftest()
-    if len(argv) != 2 or argv[0] not in ("open", "block"):
+    if not ((len(argv) == 2 and argv[0] in ("open", "block")) or (len(argv) == 3 and argv[0] == "block-scope")):
         print(__doc__.split("\n\n", 2)[1], file=sys.stderr)
         return EXIT_BROKEN
     gh = Gh(os.environ.get("GITHUB_REPOSITORY"))
@@ -329,19 +405,27 @@ def main(argv: list[str]) -> int:
                 print(f"selftest-drift: {line}")
             print(f"selftest-drift: {len(set(rows))} fault(s) not red")
             return 0
-        checks = [c.strip() for c in target.read_text(encoding="utf-8").splitlines() if c.strip()]
+        if argv[0] == "block-scope":
+            every = subprocess.run([sys.executable, str(pathlib.Path(__file__).resolve().parent / "scope-selftest.py"),
+                                    "--list-checks"], capture_output=True, text=True)
+            if every.returncode != 0:
+                raise Broken(f"scope-selftest.py --list-checks exited {every.returncode}: {every.stderr.strip()}")
+            files = [f for f in pathlib.Path(argv[2]).read_bytes().decode("utf-8").split("\0") if f]
+            checks = scope_checks(target.read_text(encoding="utf-8"), files, every.stdout.split(), machinery_files())
+        else:
+            checks = [c.strip() for c in target.read_text(encoding="utf-8").splitlines() if c.strip()]
         found = blocking(checks, gh)
     except (Broken, OSError, ValueError) as err:
         print(f"selftest-drift: {err}", file=sys.stderr)
         return EXIT_BROKEN
     if found:
-        print("selftest-drift: this pull request re-proves a check with an open drift issue from a full run. "
+        print("selftest-drift: this pull request touches or re-proves a check with an open drift issue from a full run. "
               "If this pull request is the fix, close the issue and re-run it; the next full run "
               "reopens it if the fix did not hold. Open:", file=sys.stderr)
         for line in found:
             print(f"  {line}", file=sys.stderr)
         return EXIT_REFUSED
-    print(f"selftest-drift: no open drift issue for the {len(checks)} check(s) this pull request re-proves")
+    print(f"selftest-drift: no open drift issue for the {len(checks)} check(s) this pull request touches or re-proves")
     return 0
 
 

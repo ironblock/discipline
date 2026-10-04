@@ -88,3 +88,30 @@ describe('the canned transport, ended (#289, as `diet`’s `Session::end`)', () 
     transport.close();
   });
 });
+
+describe('the canned transport, cancelled mid-call (#300)', () => {
+  it('ends a call whose fragment streamed with its response, before its begin played: every call leaves one line', async () => {
+    const transport = new CannedTransport(SPECIMEN, { speed: 1 });
+    const lines: LogLine[] = [];
+    let cancelled = false;
+    transport.subscribe((line) => {
+      lines.push(line);
+      // Just after a response that ends in calls: its fragments are placed, its `tool.begin` is still a timer.
+      if (!cancelled && line.kind === 'response' && line.finish_reason === 'tool_calls') {
+        cancelled = true;
+        queueMicrotask(() => void transport.dispatch({ kind: 'cancel' }));
+      }
+    });
+    await transport.dispatch({ kind: 'ask', text: 'first' });
+    for (let i = 0; i < 400 && !lines.some((l) => l.kind === 'turn.settled'); i++) await new Promise((resolve) => setTimeout(resolve, 25));
+    transport.close();
+    expect(cancelled).toBe(true);
+    const ids = (kind: 'fragment' | 'line') =>
+      lines.flatMap((l) => (kind === 'fragment' ? (l.kind === 'delta' && 'tool_call' in l && l.tool_call?.id !== undefined ? [l.tool_call.id] : []) : l.kind === 'tool_call' ? [l.id] : []));
+    expect(ids('fragment').length).toBeGreaterThan(0);
+    expect(ids('line').sort()).toEqual(ids('fragment').sort());
+    expect(lines.filter((l) => l.kind === 'tool_call').map((l) => l.outcome)).toContain('cancelled');
+    const tools = fold(lines).eras.flatMap((era) => era.nodes).filter((n) => n.kind === 'tool');
+    expect(tools.some((n) => n.kind === 'tool' && n.running)).toBe(false);
+  }, 15_000);
+});

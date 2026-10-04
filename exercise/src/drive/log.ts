@@ -66,8 +66,27 @@ export interface Timings {
   readonly predicted_ms: number;
 }
 
-/** The tools a model may call (AHEAD, R2's later bump). Only `bash` is drawn by name; any other as `name(args)`. */
+/** The tools a model may call: the function name as the server spelled it. Only `bash` is drawn by name; any other as `name(args)`. */
 export type Tool = Open<'bash'>;
+
+/**
+ * What became of a call (v3, #297, ruled 5973541934): it ran; the drive
+ * refused it before running it; it ran and failed under its policy (a
+ * refused syscall on macOS, #29 I5: never `denied`); or the turn or session
+ * ended before its outcome arrived.
+ */
+export type ToolOutcome = Open<V0.ToolOutcome>;
+
+/** Why the drive refused a call (v3, #297 Q2, ruled 5973541934). */
+export type ToolRefusal = Open<V0.ToolRefusal>;
+
+/**
+ * The mechanism a command ran under (`Isolation::tag`, diet/src/isolation/policy.rs), or `unrecorded`: a replayed
+ * session that never said, allowed only where `session.start` carries no substrate claim (ruled on #300).
+ */
+export type IsolationWord = Open<V0.Isolation>;
+/** The network a command had (`Network::tag`), or `unrecorded`, as for isolation. */
+export type NetworkWord = Open<V0.Network>;
 
 /** How a fork ended: the one enum, ruled on #117 (2026-09-26, naming 6) for the record (AHEAD, R4). */
 export type ForkOutcome = Open<'value' | 'decline' | 'mimicry' | 'unparseable' | 'thinking_exhausted' | 'rejected' | 'timeout' | 'truncated' | 'output_too_large'>;
@@ -117,7 +136,15 @@ export type Request = Omit<V0.RequestLine, 'lane'> & {
 };
 
 export type Refused = V0.RefusedLine;
-/** A piece of a call's answer: exactly one of `text` and `reasoning`. */
+
+/**
+ * One fragment of a tool call as the server streamed it (v3, #297 item 3):
+ * `id` and `name` on the call's first fragment only, `arguments` a piece of
+ * the arguments text, `index` which of the response's calls it belongs to.
+ */
+export type ToolCallPiece = V0.ToolCallPiece;
+
+/** A piece of a call's answer: exactly one of `text`, `reasoning` and, from v3, `tool_call`. */
 export type Delta = V0.DeltaLine;
 export type StopAsked = V0.StopAskedLine;
 
@@ -159,29 +186,16 @@ export type IdleGap = V0.IdleGapLine;
  */
 export type ProgressFrame = V0.ProgressLine;
 
+// ------------------------------------------------------------------ v3's tool call
+
+/**
+ * A call the model made, and what became of it: one line per call, written
+ * when its outcome is known (v3, #297). The format's own line, generated;
+ * which keys fit which outcome is its reader's rule.
+ */
+export type ToolCall = V0.ToolCallLine;
+
 // ------------------------------------------------------------------ AHEAD kinds
-
-/** AHEAD (R2's later bump, DoD 2): a tool call began. */
-export interface ToolBegin extends At {
-  readonly kind: 'tool.begin';
-  readonly turn: number;
-  /** The `seq` of the `request` whose answer made the call. */
-  readonly request: number;
-  readonly tool: Tool;
-  /** The call's arguments as the model gave them; `bash` takes `{ command }`. */
-  readonly args: Readonly<Record<string, unknown>>;
-}
-
-/** AHEAD (R2's later bump, DoD 2): a tool call ended. */
-export interface ToolEnd extends At {
-  readonly kind: 'tool.end';
-  /** The `seq` of its `tool.begin`. */
-  readonly begin: number;
-  readonly exit: number;
-  readonly output: string;
-  /** The harness cut the output before the model saw it. */
-  readonly truncated?: boolean;
-}
 
 /** AHEAD (R4): a side call off the trunk's warm tail, on a slot of its own. */
 export interface Fork extends At {
@@ -189,7 +203,7 @@ export interface Fork extends At {
   readonly lane: ForkLane;
   readonly slot: number;
   readonly of_turn: number;
-  /** The `seq` of the trunk line it branches from: a `request` (its answer) or a `tool.begin`. */
+  /** The `seq` of the trunk line it branches from: a `request` (its answer), or a tool call's first fragment. */
   readonly at: number;
   /** What `diet` noticed that made it ask. */
   readonly why: string;
@@ -253,8 +267,7 @@ export type LogLine =
   | TurnSettled
   | IdleGap
   | ProgressFrame
-  | ToolBegin
-  | ToolEnd
+  | ToolCall
   | Fork
   | ForkSettled
   | Patch
@@ -284,8 +297,7 @@ export const NEEDS_OF: { readonly [K in Kind]: readonly Need[] } = {
   'turn.settled': ['R2'],
   'idle.gap': ['R2'],
   progress: ['R3'],
-  'tool.begin': ['R2'],
-  'tool.end': ['R2'],
+  tool_call: ['R2'],
   fork: ['R4'],
   'fork.settled': ['R4'],
   patch: ['R5'],
