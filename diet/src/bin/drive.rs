@@ -103,6 +103,7 @@ fn serve_usage() -> String {
     out.push_str("for the substrate exactly, or else name its engine_commit, or serve refuses\n");
     out.push_str("to start. A canned substrate's literal is canned-<acts sha256>, which only\n");
     out.push_str("this crate's own canned server reports.\n");
+    out.push_str("--help prints this to stdout and exits 0; a usage error exits 2.\n");
     out
 }
 
@@ -127,6 +128,19 @@ struct ServeArgs {
     port: u16,
     allowed_origins: Vec<String>,
     max_output_tokens: u32,
+}
+
+/// Whether `args` asks for the usage: `--help` or `-h` where a flag goes.
+///
+/// Asked for, the usage is an answer, printed to stdout with exit 0; only a
+/// usage that is wrong exits 2 (#219 item 8). A flag's value is never read as
+/// the question, so `--model --help` is a model named `--help`. Pairs, as
+/// `serve_args` reads them: every `serve` flag takes a value, and a flag
+/// that took none would need this and `serve_args` to change together.
+fn asks_for_help(args: &[String]) -> bool {
+    args.iter()
+        .step_by(2)
+        .any(|flag| flag == "--help" || flag == "-h")
 }
 
 /// `serve`'s flags, or nothing when they are not a usage it takes.
@@ -767,13 +781,25 @@ fn usage() -> String {
     out.push_str("\nA JSON result goes to stdout. Exit 0 when the drive ran and its\n");
     out.push_str("record parses, 1 when the input is not usable, 2 on a usage error or\n");
     out.push_str("a drive that could not run, 3 when the record could not be filed.\n");
+    out.push_str("--help prints this to stdout and exits 0.\n");
     out
 }
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some(SERVE) {
+        if asks_for_help(&args[1..]) {
+            print!("{}", serve_usage());
+            return ExitCode::SUCCESS;
+        }
         return serve(&args[1..]);
+    }
+    if args
+        .first()
+        .is_some_and(|first| first == "--help" || first == "-h")
+    {
+        print!("{}", usage());
+        return ExitCode::SUCCESS;
     }
     let (Some(regimen_path), Some(worktree), Some(out_path)) =
         (args.first(), args.get(1), args.get(2))

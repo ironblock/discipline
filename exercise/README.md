@@ -19,6 +19,13 @@ npx --yes pnpm@11.20.0 -C exercise perf          # a performance trace: frames, 
 npx --yes pnpm@11.20.0 -C exercise build:replay  # the replay page for Pages (#32), into _site/replay/
 ```
 
+**Replay with no model:** with `dev` running, open
+`http://localhost:5173/?session=first-drive` (also `cancelled-capture`,
+`step-limit`; add `&speed=4` to hurry it), and a recorded session plays
+through to its receipt. **`verify`'s browser tests need Playwright's
+Chromium:** if this machine has none, run
+`npx --yes pnpm@11.20.0 -C exercise exec playwright install chromium` once.
+
 Every command in this file runs from the repository root; every file it
 cites is this directory's, `exercise/`, unless it says the repository's. pnpm
 is pinned in this directory's `package.json` (`packageManager`), and the commands run
@@ -63,21 +70,11 @@ It is admitted by the same `admit`, under the same snapshot, with an
 again.
 
 **Driving `diet`.** `?drive` drives `diet`'s own session, served over HTTP
-by `diet-drive serve` (#140; `src/drive/http.ts`). The page reaches it
-same-origin through the dev server's proxy:
-
-```
-cargo build -p discipline-diet --bin diet-drive
-target/debug/diet-drive serve --endpoint <llama-server>/v1/chat/completions \
-    --model <name> --head <file> --port 7801 --allow-origin http://localhost:5173
-DIET_DRIVE=http://127.0.0.1:7801 npx --yes pnpm@11.20.0 -C exercise dev   # then open /?drive
-```
-
-With no model at hand, `node exercise/scripts/model-stand-in.mjs` is one: every
-request answered with `diet`'s own captured llama-server reply, byte for
-byte (a random-weight model, so the words are noise), at
-`http://127.0.0.1:7901/v1/chat/completions`, with
-`exercise/scripts/model-stand-in.head.txt` as the head.
+by `diet-drive serve` (`src/drive/http.ts`); the page reaches it same-origin
+through the dev server's proxy (`vite.config.ts`). How to start one --
+`serve`, then this surface, with a model server or with none -- is in one
+place, the repository's [`diet/drive/BEGIN.md`](../diet/drive/BEGIN.md);
+this file keeps no recipe of its own.
 
 `npx --yes pnpm@11.20.0 -C exercise perf` (`scripts/perf.mjs`) drives a production build in headless
 Chromium through three sessions -- the kitchen sink, `first-drive` and

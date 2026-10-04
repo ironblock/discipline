@@ -32,6 +32,7 @@ use crate::client::stream::HttpStream;
 use crate::client::transport::{HttpReply, TransportFailure};
 
 use super::registry::{self, Identity};
+use crate::formats::record::Weights;
 
 /// How long the check waits for `/props`.
 pub const PROPS_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
@@ -222,6 +223,32 @@ fn expected<'a>(id: &str, identity: &'a Identity) -> Result<Expected<'a>, String
 /// What [`registry::identity`] refuses; a `/props` that did not answer, or
 /// did not answer `200`; and what [`build_info_of`] and [`matches`] refuse.
 pub fn check(
+    document: &str,
+    id: &str,
+    props: impl FnOnce() -> Result<HttpReply, TransportFailure>,
+) -> Result<Passed, String> {
+    // A canned substrate refused says where it IS served, since no model
+    // server ever passes its check (#219 item 11, ruled 5982113705).
+    let canned = registry::identity(document, id)
+        .is_ok_and(|identity| matches!(identity.weights, Weights::Canned { .. }));
+    checked(document, id, props).map_err(|why| {
+        if canned {
+            format!("{why}. {CANNED_SERVER_ONLY}")
+        } else {
+            why
+        }
+    })
+}
+
+/// What a refused canned substrate adds: who serves one, and what a model
+/// server is driven under instead.
+pub const CANNED_SERVER_ONLY: &str = "A canned substrate is served only by this crate's own \
+     canned server, never by a model server: drive a model server with no `--regimen` (a \
+     rehearsal), or under a substrate registered for it (substrates/README.md, \
+     its section Registering your own box)";
+
+/// [`check`], before a canned substrate's refusal is told where one is served.
+fn checked(
     document: &str,
     id: &str,
     props: impl FnOnce() -> Result<HttpReply, TransportFailure>,

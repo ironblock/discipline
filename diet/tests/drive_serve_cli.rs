@@ -1073,6 +1073,36 @@ fn a_drive_server_refuses_a_canned_regimen_against_a_live_server() {
         said.contains("b8-e486f80") && said.contains(&diet::drive::canned::build_info()),
         "both values, the registry's literal among them: {said}"
     );
+    assert!(
+        said.contains(diet::drive::engine::CANNED_SERVER_ONLY),
+        "and where a canned substrate is served: {said}"
+    );
+}
+
+#[test]
+fn a_drive_server_refuses_a_canned_regimen_against_a_server_whose_props_has_no_build_info() {
+    // The stand-in's case (#219's dry run): `/props` answers with no
+    // `build_info` at all, and the refusal still says who serves canned.
+    let stub = Stub::serving(vec![Act::Answer("{}".to_owned())]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &dev_loop()]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("no string `build_info`")
+            && said.contains(diet::drive::engine::CANNED_SERVER_ONLY),
+        "{said}"
+    );
+}
+
+#[test]
+fn a_drive_server_refuses_a_registered_model_substrate_without_the_canned_sentence() {
+    let regimen = regimen_registered("accel24-beellama-qwen27b-q4kxl");
+    let stub = Stub::serving(vec![props_saying("b8-e486f80")]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &regimen.0.to_string_lossy()]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        !said.contains(diet::drive::engine::CANNED_SERVER_ONLY),
+        "{said}"
+    );
 }
 
 #[test]
@@ -1357,4 +1387,69 @@ fn a_drive_server_refuses_a_record_without_a_regimen() {
     let _ = std::fs::remove_file(&path);
     assert_eq!(code, Some(2), "{said}");
     assert!(said.contains("--record needs --regimen"), "{said}");
+}
+
+/// What `diet-drive` exits with, and prints to stdout and stderr, for `args`.
+fn asked(args: &[&str]) -> (Option<i32>, String, String) {
+    let out = Command::new(DRIVE)
+        .args(args)
+        .output()
+        .expect("diet-drive runs");
+    (
+        out.status.code(),
+        String::from_utf8_lossy(&out.stdout).into_owned(),
+        String::from_utf8_lossy(&out.stderr).into_owned(),
+    )
+}
+
+#[test]
+fn a_drive_help_asked_for_is_an_answer_on_stdout_with_exit_0() {
+    // #219 item 8: `--help` exited 2, the code of a usage error, so the first
+    // exit code a stranger read said they had done something wrong.
+    for args in [
+        &["serve", "--help"][..],
+        &["serve", "-h"],
+        &[
+            "serve",
+            "--endpoint",
+            "http://127.0.0.1:1/v1/chat/completions",
+            "--help",
+        ],
+    ] {
+        let (code, stdout, stderr) = asked(args);
+        assert_eq!(code, Some(0), "{args:?}: {stderr}");
+        assert!(
+            stdout.starts_with("usage: diet-drive serve"),
+            "{args:?}: {stdout}"
+        );
+        assert!(stderr.is_empty(), "{args:?}: {stderr}");
+    }
+    for args in [&["--help"][..], &["-h"]] {
+        let (code, stdout, stderr) = asked(args);
+        assert_eq!(code, Some(0), "{args:?}: {stderr}");
+        assert!(
+            stdout.starts_with("usage: diet-drive <regimen>"),
+            "{args:?}: {stdout}"
+        );
+    }
+}
+
+#[test]
+fn a_drive_usage_error_still_exits_2_and_a_flags_value_is_never_the_question() {
+    for args in [
+        &["serve"][..],
+        &["serve", "--no-such-flag", "x"],
+        // `--help` as `--model`'s value is a model named `--help`; the
+        // usage is then wrong for want of `--endpoint` and `--head`.
+        &["serve", "--model", "--help"],
+        &[],
+    ] {
+        let (code, stdout, stderr) = asked(args);
+        assert_eq!(code, Some(2), "{args:?}: {stdout}");
+        assert!(stdout.is_empty(), "{args:?}: {stdout}");
+        assert!(
+            stderr.starts_with("usage: diet-drive"),
+            "{args:?}: {stderr}"
+        );
+    }
 }

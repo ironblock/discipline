@@ -259,7 +259,7 @@ An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB tha
 
 ## Registering your own box
 
-**A registered box is a declared fact, not an admitted rung.** An entry says what the box is. It does not say that results on it are comparable to anyone else's; that is #143's admission, which is separate work.
+**A registered box is a declared fact, not an admitted rung.** An entry says what the box is. It does not say that results on it are comparable to anyone else's; that is #143's admission (the substrate ladder: which substrates are admitted as rungs whose results may be compared), which is separate work.
 
 **The registry is compiled into the binary.** `diet/src/drive/registry.rs` reads `substrates/registry.toml` with `include_str!`. `diet-drive serve --regimen` therefore refuses an id it does not find, and it names the id: "`<id>` is not a substrate in the registry". To drive under a regimen on your own server:
 
@@ -273,7 +273,7 @@ An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB tha
 
 - **`entry_type`**, one the registry declares for real hardware: `accelerator-host`, `x86-workstation` or `apple-silicon-laptop`. (`canned-server` is diet-drive's own loopback server, not a machine.) Each type's `hardware_fields` are listed under `[entry_type.<type>]`; if your machine needs a type none of these fits, that is a new `[entry_type.*]` with its own field list.
 - **Every field its type declares**, as measured on the machine: the parts, memory and accelerator.
-  - No hostname, serial number, MAC address or location appears anywhere. Those are identity (the ruling on #52), and keeping them out is a rule reviewers hold you to; the hygiene gate catches only some shapes of them.
+  - No hostname, serial number, MAC address or location appears anywhere. Those are identity (the ruling on #52, which set what this registry records and what it leaves out), and keeping them out is a rule reviewers hold you to; the hygiene gate catches only some shapes of them.
   - A value you could not measure stays out of the identity. Record it on the entry with `<field>_inferred = true` only if the field is not one the type declares: `check-fingerprints.py` refuses an inferred field the type declares (an unverified claim cannot be part of an identifier). The laptop's core counts are the live case: recorded, inferred, and not in its type's `hardware_fields`.
 - **`hardware_fingerprint`**: the sha256 of exactly the declared fields, canonically serialised. `check-fingerprints.py` recomputes it and prints the digest it wants. The digest is also what a regimen's `substrate_hardware` must equal.
 
@@ -285,8 +285,8 @@ An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB tha
 | `engine_name` | the engine, e.g. `llama.cpp` | -- |
 | `engine_identity` | the sha256 of the running server binary | `sha256sum /proc/<pid>/exe` on Linux, with the process found by exact name (`pgrep -x llama-server`) |
 | `engine_libraries`, `engine_libraries_read`, `engine_fingerprint` | the shared objects beside the binary, which are where a llama.cpp build's engine lives | `python3 substrates/check-fingerprints.py --read-engine-pid <pid>` (or `--read-engine <path>` from disk), copied as it prints them; a static binary instead says why in `engine_single_digest_suffices` |
-| `engine_commit` **or** `engine_build_info` | what the start-time check compares with the server's `GET /props` `build_info` | if `build_info` names a commit (`bNNNN-<hash>`), `engine_commit` is the full 40-hex commit the hash resolves to in your checkout (`git rev-parse <hash>`). If it names none, as a prebuilt release reports `b0-unknown-dirty`, `engine_build_info` is that exact literal, and the check reports `engine_identity` as unreported (literal matched) (#157) |
-| `weights_main` | the sha256 of the model file | `sha256sum`. One file is one string. The drive refuses a list of shards today (#92) |
+| `engine_commit` **or** `engine_build_info` | what the start-time check compares with the server's `GET /props` `build_info` | if `build_info` names a commit (`bNNNN-<hash>`), `engine_commit` is the full 40-hex commit the hash resolves to in your checkout (`git rev-parse <hash>`). If it names none, as a prebuilt release reports `b0-unknown-dirty`, `engine_build_info` is that exact literal, and the check reports `engine_identity` as unreported (literal matched) (#157, whose second increment added the start-time engine check) |
+| `weights_main` | the sha256 of the model file | `sha256sum`. One file is one string; a model split into shards is a list of their digests, on one line, in the order the server loads them (#92, #211: how a record spells a set of weight files) |
 | `weights_main_file`, `weights_draft` | the file's name; a draft model's digest, if the server loads one | -- |
 | `serving_flags`, `serving_context`, `serving_slots` | the serving line, without paths or keys | read off the running process's command line (`/proc/<pid>/cmdline`) |
 | `sampler_card` | what the line fixes, or "none on the serving line; each request sets its own" | -- |
