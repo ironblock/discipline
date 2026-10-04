@@ -1,0 +1,9 @@
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-igor255
+
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-3.00bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "A-3.00bpw-c163840", "event": "loaded", "load_s": 19, "cache_size": 163840, "smi_used_mib": 23934, "smi_free_mib": 642, "torch_free_mib": 221}
+{"tag": "A-3.00bpw-c163840", "event": "too_little_free", "need": 1608}

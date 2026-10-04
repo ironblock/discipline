@@ -1,0 +1,13 @@
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-igor255
+
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-SC_2.20bpw_H3
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "P-c229376", "event": "loaded", "load_s": 10, "cache_size": 229376, "smi_used_mib": 21964, "smi_free_mib": 2612, "torch_free_mib": 2191}
+{"tag": "P-c229376", "event": "generator", "num_draft_tokens": 7}
+{"tag": "P-c229376", "depth": 2000, "conc": 1, "rep": 0, "wall_s": 3.8, "tg": [133.32], "agg_tok_s": 67.4, "prompt_n": [2004], "cached": [0], "pp": [1063], "acc": 200, "rej": 192, "a": 0.51, "smi_peak_mib": 22064, "errors": []}
+{"tag": "P-c229376", "depth": 2000, "conc": 1, "rep": 1, "wall_s": 2.1, "tg": [142.67], "agg_tok_s": 121.6, "prompt_n": [2004], "cached": [1792], "pp": [706], "acc": 201, "rej": 184, "a": 0.522, "smi_peak_mib": 22066, "errors": []}
+{"tag": "P-c229376", "depth": 2000, "conc": 1, "rep": 2, "wall_s": 2.1, "tg": [142.61], "agg_tok_s": 121.5, "prompt_n": [2004], "cached": [1792], "pp": [707], "acc": 201, "rej": 184, "a": 0.522, "smi_peak_mib": 22066, "errors": []}
+{"tag": "P-c229376", "event": "done", "smi_peak_mib": 22066, "free_at_peak_mib": 2510}

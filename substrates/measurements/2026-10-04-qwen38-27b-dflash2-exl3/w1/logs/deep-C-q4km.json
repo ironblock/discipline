@@ -1,0 +1,272 @@
+[
+ {
+  "tag": "C-q4km",
+  "depth": 2000,
+  "conc": 1,
+  "rep": 0,
+  "wall_s": 6.2,
+  "streams": [
+   {
+    "prompt_n": 2049,
+    "pp_tps": 786.8,
+    "n": 256,
+    "tg_tps": 71.27,
+    "draft_n": 246,
+    "draft_acc": 172,
+    "wall_s": 6.2,
+    "cached": 0
+   }
+  ],
+  "agg_tok_s": 41.3
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 2000,
+  "conc": 1,
+  "rep": 1,
+  "wall_s": 3.6,
+  "streams": [
+   {
+    "prompt_n": 4,
+    "pp_tps": 20.2,
+    "n": 256,
+    "tg_tps": 74.67,
+    "draft_n": 246,
+    "draft_acc": 172,
+    "wall_s": 3.6,
+    "cached": 2045
+   }
+  ],
+  "agg_tok_s": 70.6
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 2000,
+  "conc": 1,
+  "rep": 2,
+  "wall_s": 3.6,
+  "streams": [
+   {
+    "prompt_n": 4,
+    "pp_tps": 20.4,
+    "n": 256,
+    "tg_tps": 74.5,
+    "draft_n": 246,
+    "draft_acc": 172,
+    "wall_s": 3.6,
+    "cached": 2045
+   }
+  ],
+  "agg_tok_s": 70.5
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 100000,
+  "conc": 1,
+  "rep": 0,
+  "wall_s": 129.7,
+  "streams": [
+   {
+    "prompt_n": 99719,
+    "pp_tps": 810.8,
+    "n": 256,
+    "tg_tps": 44.08,
+    "draft_n": 284,
+    "draft_acc": 159,
+    "wall_s": 129.4,
+    "cached": 0
+   }
+  ],
+  "agg_tok_s": 2.0
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 100000,
+  "conc": 1,
+  "rep": 1,
+  "wall_s": 6.4,
+  "streams": [
+   {
+    "prompt_n": 4,
+    "pp_tps": 17.5,
+    "n": 256,
+    "tg_tps": 44.69,
+    "draft_n": 281,
+    "draft_acc": 160,
+    "wall_s": 6.1,
+    "cached": 99715
+   }
+  ],
+  "agg_tok_s": 40.1
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 100000,
+  "conc": 1,
+  "rep": 2,
+  "wall_s": 6.4,
+  "streams": [
+   {
+    "prompt_n": 4,
+    "pp_tps": 17.7,
+    "n": 256,
+    "tg_tps": 44.67,
+    "draft_n": 281,
+    "draft_acc": 160,
+    "wall_s": 6.1,
+    "cached": 99715
+   }
+  ],
+  "agg_tok_s": 40.0
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 226376,
+  "conc": 1,
+  "rep": 0,
+  "wall_s": 279.4,
+  "streams": [
+   {
+    "prompt_n": 127547,
+    "pp_tps": 469.4,
+    "n": 256,
+    "tg_tps": 38.45,
+    "draft_n": 231,
+    "draft_acc": 177,
+    "wall_s": 278.7,
+    "cached": 99203
+   }
+  ],
+  "agg_tok_s": 0.9
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 226376,
+  "conc": 1,
+  "rep": 1,
+  "wall_s": 7.9,
+  "streams": [
+   {
+    "prompt_n": 4,
+    "pp_tps": 14.9,
+    "n": 256,
+    "tg_tps": 38.48,
+    "draft_n": 231,
+    "draft_acc": 177,
+    "wall_s": 7.2,
+    "cached": 226746
+   }
+  ],
+  "agg_tok_s": 32.3
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 226376,
+  "conc": 1,
+  "rep": 2,
+  "wall_s": 7.9,
+  "streams": [
+   {
+    "prompt_n": 4,
+    "pp_tps": 14.8,
+    "n": 256,
+    "tg_tps": 38.49,
+    "draft_n": 231,
+    "draft_acc": 177,
+    "wall_s": 7.2,
+    "cached": 226746
+   }
+  ],
+  "agg_tok_s": 32.4
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 112688,
+  "conc": 2,
+  "rep": 0,
+  "wall_s": 402.1,
+  "streams": [
+   {
+    "prompt_n": 111051,
+    "pp_tps": 761.2,
+    "n": 256,
+    "tg_tps": 1.08,
+    "draft_n": 311,
+    "draft_acc": 151,
+    "wall_s": 381.3,
+    "cached": 1533
+   },
+   {
+    "prompt_n": 112619,
+    "pp_tps": 442.9,
+    "n": 256,
+    "tg_tps": 35.75,
+    "draft_n": 250,
+    "draft_acc": 171,
+    "wall_s": 401.8,
+    "cached": 0
+   }
+  ],
+  "agg_tok_s": 1.3
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 112688,
+  "conc": 2,
+  "rep": 1,
+  "wall_s": 15.7,
+  "streams": [
+   {
+    "prompt_n": 4,
+    "pp_tps": 8.9,
+    "n": 256,
+    "tg_tps": 23.17,
+    "draft_n": 314,
+    "draft_acc": 149,
+    "wall_s": 15.4,
+    "cached": 112580
+   },
+   {
+    "prompt_n": 4,
+    "pp_tps": 14.7,
+    "n": 256,
+    "tg_tps": 27.9,
+    "draft_n": 251,
+    "draft_acc": 171,
+    "wall_s": 13.6,
+    "cached": 112615
+   }
+  ],
+  "agg_tok_s": 32.5
+ },
+ {
+  "tag": "C-q4km",
+  "depth": 112688,
+  "conc": 2,
+  "rep": 2,
+  "wall_s": 15.7,
+  "streams": [
+   {
+    "prompt_n": 4,
+    "pp_tps": 8.5,
+    "n": 256,
+    "tg_tps": 23.37,
+    "draft_n": 314,
+    "draft_acc": 149,
+    "wall_s": 15.4,
+    "cached": 112580
+   },
+   {
+    "prompt_n": 4,
+    "pp_tps": 14.4,
+    "n": 256,
+    "tg_tps": 28.19,
+    "draft_n": 251,
+    "draft_acc": 171,
+    "wall_s": 13.5,
+    "cached": 112615
+   }
+  ],
+  "agg_tok_s": 32.6
+ }
+]

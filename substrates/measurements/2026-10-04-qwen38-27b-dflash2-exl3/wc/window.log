@@ -1,0 +1,12 @@
+2026-10-04T20:19:26Z preflight ok; floor pid=323283
+2026-10-04T20:19:27Z DOWNTIME START floor stopped vram=21
+2026-10-04T20:20:30Z R-base-c8192 rc=0 {"tag": "R-base-c8192", "event": "loaded", "load_s": 44, "cache_size": 8192, "smi_used_mib": 14684, "smi_free_mib": 9892, "torch_free_mib": 9471} {"tag": "R-base-c8192", "event": "done", "smi_peak_mib": 14778, "free_at_peak_mib": 9798} 
+2026-10-04T20:20:55Z P-c229376 rc=0 {"tag": "P-c229376", "event": "loaded", "load_s": 12, "cache_size": 229376, "smi_used_mib": 20360, "smi_free_mib": 4216, "torch_free_mib": 3795} {"tag": "P-c229376", "event": "done", "smi_peak_mib": 20454, "free_at_peak_mib": 4122} 
+2026-10-04T20:20:55Z pool choice (cq 5,4): 229376
+2026-10-04T20:31:25Z S3-dflash2-cq54 rc=0 {"tag": "S3-dflash2-cq54", "event": "loaded", "load_s": 9, "cache_size": 229376, "smi_used_mib": 20360, "smi_free_mib": 4216, "torch_free_mib": 3795} {"tag": "S3-dflash2-cq54", "event": "done", "smi_peak_mib": 21170, "free_at_peak_mib": 3406} 
+2026-10-04T20:31:33Z S3-dflash2-cq88 rc=1 
+2026-10-04T20:31:33Z phases done
+2026-10-04T20:31:33Z restore: begin
+2026-10-04T20:31:52Z provision-diet rc=0
+2026-10-04T20:31:53Z restored: pid=336843 exe=980845d60ae7a820 vram=23066
+2026-10-04T20:31:53Z END

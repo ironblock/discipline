@@ -1,0 +1,12 @@
+2026-10-04T21:08:38Z preflight ok; floor pid=345000; base files verified
+2026-10-04T21:08:39Z DOWNTIME START floor stopped vram=21
+2026-10-04T21:10:47Z kld SC_2.20 rc=0 RESULT exl3-SC_2.20bpw_H3 base-code.kld: PPL(Q) 1.767877 PPL(base) 1.648707 Mean KLD 0.122580 ± 0.002767 99.9% KLD 5.143884 Median KLD 0.002799 Same top 92.851 ± 0.164 % n=24564|RESULT exl3-SC_2.20bpw_H3 base-prose.kld: PPL(Q) 6.428451 PPL(base) 6.331690 Mean KLD 0.169692 ± 0.004494 99.9% KLD 10.693736 Median KLD 0.062713 Same top 84.546 ± 0.231 % n=24564|
+2026-10-04T21:10:56Z P-c262144 rc=1 
+2026-10-04T21:11:17Z P-c229376 rc=0 {"tag": "P-c229376", "event": "loaded", "load_s": 10, "cache_size": 229376, "smi_used_mib": 21964, "smi_free_mib": 2612, "torch_free_mib": 2191} {"tag": "P-c229376", "event": "done", "smi_peak_mib": 22066, "free_at_peak_mib": 2510} 
+2026-10-04T21:11:17Z pool choice (cq 8,8): 229376
+2026-10-04T21:21:44Z S22-dflash2-cq88 rc=0 {"tag": "S22-dflash2-cq88", "event": "loaded", "load_s": 9, "cache_size": 229376, "smi_used_mib": 21962, "smi_free_mib": 2614, "torch_free_mib": 2193} {"tag": "S22-dflash2-cq88", "event": "done", "smi_peak_mib": 22798, "free_at_peak_mib": 1778} 
+2026-10-04T21:21:44Z phases done
+2026-10-04T21:21:44Z restore: begin
+2026-10-04T21:22:03Z provision-diet rc=0
+2026-10-04T21:22:04Z restored: pid=358142 exe=980845d60ae7a820 vram=23066
+2026-10-04T21:22:04Z END
