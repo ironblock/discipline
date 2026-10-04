@@ -269,6 +269,19 @@
   pointer-events: auto;
 }
 
+/* A command waiting on the operator (#389) docks over the composer, in a row of its own. */
+.ex-session__composer > .ex-approval {
+  grid-row: 1;
+}
+
+.ex-session__composer[data-waiting] > .ex-composer {
+  grid-row: 2;
+}
+
+.ex-session__composer[data-waiting]::before {
+  grid-row: 1 / span 2;
+}
+
 /* Fades what scrolls under the composer, as wide as the composer; a theme
    with a lit field may turn it off. The live field is repainted here too,
    fixed like the page's, so a theme that repaints its field under the

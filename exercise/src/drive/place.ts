@@ -35,6 +35,12 @@
  *   carries its arguments only (ruling 4). A script's `truncated` is not
  *   placed: v3 logs what ran printed, whole, and what the model was shown is
  *   the record's (#297 Q3, #302);
+ * - log v4's keys (#388, AHEAD of the format on `develop`), only where a
+ *   script says them: a bash call's `cwd` beside its `argv`; a `tool.end`
+ *   `refused` is a `refused` line with its reason, its `argv` and `cwd`, and
+ *   no policy words (5982002587); a `tool.end`'s `approval` rides on a `ran`
+ *   or `cancelled` line. The specimen and the replayed sessions say none of
+ *   them, so what `diet check-log` reads of those is unchanged;
  * - the system prompt is the head's `system` message.
  *
  * A label nothing placed yet stays unresolved (-1): a script that names what
@@ -53,7 +59,7 @@ export class Placer {
   #seq = 0;
   readonly #labels = new Map<string, number>();
   /** Each placed call, by its label: what its `tool_call` line repeats. */
-  readonly #calls = new Map<string, { readonly request: number; readonly turn: number; readonly name: string; readonly arguments: string; readonly command?: string }>();
+  readonly #calls = new Map<string, { readonly request: number; readonly turn: number; readonly name: string; readonly arguments: string; readonly command?: string; readonly cwd?: string }>();
   /** The calls a `tool.end` has ended. */
   readonly #ended = new Set<string>();
   /** How many calls each request has made so far: the next call's `index`. */
@@ -104,7 +110,7 @@ export class Placer {
     this.#indexes.set(request, index + 1);
     const text = JSON.stringify(e.args);
     const command = e.tool === 'bash' && typeof e.args['command'] === 'string' ? e.args['command'] : undefined;
-    this.#calls.set(e.id, { request, turn: e.turn, name: e.tool, arguments: text, ...(command !== undefined ? { command } : {}) });
+    this.#calls.set(e.id, { request, turn: e.turn, name: e.tool, arguments: text, ...(command !== undefined ? { command } : {}), ...(command !== undefined && e.cwd !== undefined ? { cwd: e.cwd } : {}) });
     this.#name(e.id, offset);
     return { kind: 'delta', t, request, tool_call: { index, id: e.id, name: e.tool, arguments: text } };
   }
@@ -186,6 +192,9 @@ export class Placer {
         const call = this.#calls.get(e.id);
         if (!call || this.#ended.has(e.id)) return [];
         this.#ended.add(e.id);
+        // The command, where it is one; and where the script said, the directory it ran in (log v4's `cwd`, #388).
+        const argv = call.command !== undefined ? { argv: ['sh', '-c', call.command], ...(call.cwd !== undefined ? { cwd: call.cwd } : {}) } : {};
+        const approval = e.approval ? { approval: e.approval } : {};
         return [
           {
             kind: 'tool_call',
@@ -195,11 +204,15 @@ export class Placer {
             id: e.id,
             name: call.name,
             arguments: call.arguments,
-            ...(e.cancelled
-              ? { outcome: 'cancelled', ...(call.command !== undefined ? { argv: ['sh', '-c', call.command], isolation: 'unrecorded', network: 'unrecorded' } : {}) }
+            ...(e.refused !== undefined
+              ? // A parsed refusal carries the command it refused, and no policy words: it never ran (#388, 5982002587).
+                { outcome: 'refused', reason: e.refused, ...argv }
+              : e.cancelled
+              ? { outcome: 'cancelled', ...(call.command !== undefined ? { ...argv, isolation: 'unrecorded', network: 'unrecorded' } : {}), ...approval }
               : {
                   outcome: 'ran',
-                  ...(call.command !== undefined ? { argv: ['sh', '-c', call.command], isolation: 'unrecorded', network: 'unrecorded' } : {}),
+                  ...(call.command !== undefined ? { ...argv, isolation: 'unrecorded', network: 'unrecorded' } : {}),
+                  ...approval,
                   exit: e.exit,
                   stdout: e.output,
                   // A stream's text and its byte count come together (the format's rule): the count is of its UTF-8.

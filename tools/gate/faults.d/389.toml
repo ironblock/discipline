@@ -1,0 +1,19 @@
+# #389's seeded faults: the approval prompt in the surface.
+
+[[fault]]
+id = "exercise.exercise_decision_dropped"
+kind = "seeded-gate"
+check = "exercise"
+label = "a call's decision dropped by the fold"
+failure_class = "exercise.approval"
+legacy_signature = "FAIL.*approval\\.test\\.ts.*replays the decision from the log alone"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_prompt_not_docked"
+kind = "seeded-gate"
+check = "exercise"
+label = "a waiting call with no prompt docked"
+failure_class = "exercise.approval"
+legacy_signature = "FAIL.*Approval\\.stories\\.tsx.*a command waits on you; approved for the session"
+migrated = false

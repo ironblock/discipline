@@ -4,7 +4,8 @@ import type { AssistantNode, Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { bytes, count, lines, took } from './format.ts';
 import { Copy } from './Copy.tsx';
-import { alarmOf, callOf, callOutcomeOf, callRefusalOf } from './sets.ts';
+import { alarmOf, approvalOf, callOf, callOutcomeOf, callRefusalOf } from './sets.ts';
+import { usePromptOf } from './Approval.tsx';
 import { writingOf, writtenApart } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
 import { elapsed, useNow } from './surface.tsx';
@@ -26,11 +27,15 @@ const PEEK = 3;
  * And what became of it, as the log's `tool_call` says (v3, #297): a call
  * the drive refused says so and why, and printed nothing; one that failed
  * under its policy says that, never a plain failure; what confined it, where
- * the log says.
+ * the log says. A call the gate held for the operator (#389) waits on them,
+ * answered in the dock under the composer; one that ran under a decision says
+ * which, why it prompted and how long the operator took (log v4's `approval`,
+ * #388), all from its line, so a replay draws it as the session did.
  */
 export function ToolBlock({ node, caller, first = false }: { readonly node: Folded<ToolNode>; readonly caller?: Folded<AssistantNode> | undefined; readonly first?: boolean }) {
   const [open, setOpen] = useState(false);
   const since = elapsed(useNow(), node.startedAt);
+  const prompt = usePromptOf(node);
   // Arguments that do not read as the object a tool takes are shown as the model wrote them.
   const call = node.arguments === '' || Object.keys(node.args).length > 0 ? callOf(node.tool, node.args) : { label: node.tool, prompt: '', text: `${node.tool}(${node.arguments})`, known: false };
   const outcome = node.outcome !== undefined ? callOutcomeOf(node.outcome) : undefined;
@@ -60,6 +65,18 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       ),
       title: refused ? 'the drive refused the call: it did not run' : policyFailed ? `it ran, and failed under its policy: ${node.policy ?? 'the log names none'}` : 'what became of the call',
     };
+  // What it ran under: the operator's decision and why the gate held it, or the pre-seeded set.
+  const approval = node.approval && approvalOf(node.approval.scope);
+  const approved = node.approval &&
+    approval && {
+      value: (
+        <span className="ex-approval-chip" data-scope={node.approval.scope} data-level={approval.level}>
+          {approval.label}
+          {node.approval.decided_at !== undefined ? ` · ${took(Math.max(0, node.approval.decided_at - node.startedAt))} to decide` : ''}
+        </span>
+      ),
+      title: node.approval.why !== undefined ? `the gate held it: ${node.approval.why}` : 'what it ran under',
+    };
   const confined = node.confinement && {
     value: (
       <span className="ex-confinement">
@@ -86,9 +103,13 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
           }
         : {})}
       live={node.running}
-      alarm={refused || policyFailed ? alarmOf(outcome!.level) : node.exit !== undefined && node.exit !== 0 ? 'bad' : undefined}
+      alarm={prompt ? 'warn' : refused || policyFailed ? alarmOf(outcome!.level) : node.exit !== undefined && node.exit !== 0 ? 'bad' : undefined}
       output={
-        node.running ? (
+        prompt ? (
+          <span className="ex-elapsed" data-level="slow">
+            waiting on you · {took(since.ms)}
+          </span>
+        ) : node.running ? (
           <span className="ex-elapsed" data-level={since.level}>
             running · {took(since.ms)}
           </span>
@@ -104,7 +125,7 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
           `${said} in ${took(node.ms ?? 0)}`
         )
       }
-      stats={[became, confined, exit]}
+      stats={[became, approved, confined, exit]}
       provenance={node}
       id={node.id}
       actions={
@@ -114,6 +135,8 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
         </>
       }
     >
+      {node.cwd !== undefined || prompt ? <div className="ex-tool__cwd">in {node.cwd ?? prompt?.cwd}</div> : null}
+      {node.approval?.why !== undefined ? <div className="ex-tool__held">held: {node.approval.why}</div> : null}
       <pre className="ex-tool__call">
         {call.prompt ? <span className="ex-tool__prompt">{call.prompt} </span> : null}
         {open ? call.text : script.slice(0, PEEK).join('\n')}

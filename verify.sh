@@ -3786,6 +3786,21 @@ inject_exercise_refused_call_drawn_as_ran() {
   edit_in_place "s|^                  outcome: line.outcome,$|                  outcome: line.outcome === 'refused' ? 'ran' : line.outcome,|" exercise/src/session/fold.ts
 }
 
+# A call's decision dropped by the fold (#389): the line carries `approval`
+# (log v4, #388), and the call is drawn as if it ran under none -- the replay
+# then cannot say what it ran under. Typecheck and lint pass it.
+inject_exercise_decision_dropped() {
+  edit_in_place "s|^                  ...(line.approval ? { approval: line.approval } : {}),$|                  ...({}),|" exercise/src/session/fold.ts
+}
+
+# A call waiting on the operator with no prompt to answer it (#389): the
+# dock built and thrown away (`void`), never drawn, so the session waits on
+# an answer nobody can give. The condition and its narrowing are untouched,
+# so typecheck and lint pass it and the story is what fails.
+inject_exercise_prompt_not_docked() {
+  edit_in_place "s|^              {approving.waiting && approving.decide ? <ApprovalPrompt |              {approving.waiting \&\& approving.decide ? void <ApprovalPrompt |" exercise/src/ui/SessionView.tsx
+}
+
 # A placed core line diet's reader refuses (#300): an `ask` carrying a key
 # the format does not have. Typecheck, lint and the fold all pass it -- the
 # surface ignores the key -- so only diet's reader, over the projection, says.
@@ -10448,6 +10463,10 @@ selftest() {
     'FAIL.*capped\.test\.ts.*is not read from the settle word alone'
   seeded_case "a refused tool call drawn as ran" exercise inject_exercise_refused_call_drawn_as_ran \
     'FAIL.*served\.test\.ts.*folds a ran, a refused and a policy-failed call'
+  seeded_case "a call's decision dropped by the fold" exercise inject_exercise_decision_dropped \
+    'FAIL.*approval\.test\.ts.*replays the decision from the log alone'
+  seeded_case "a waiting call with no prompt docked" exercise inject_exercise_prompt_not_docked \
+    'FAIL.*Approval\.stories\.tsx.*a command waits on you; approved for the session'
   seeded_case "a placed core line diet's reader refuses" exercise inject_exercise_placed_line_refused \
     'diet check-log refuses the placed projection: .*`ask` carries no `asked_by`'
   seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \

@@ -10,7 +10,7 @@
 
 import type { CSSProperties } from 'react';
 
-import type { FailReason, ForkLane, ForkOutcome, PatchOp, SeamReason, SettleReason, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
+import type { ApprovalScope, FailReason, ForkLane, ForkOutcome, PatchOp, SeamReason, SettleReason, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
 import type { Stop } from '../session/fold.ts';
 import type { Refusal } from '../drive/transport.ts';
 
@@ -87,6 +87,16 @@ export const callRefusalOf = registry<ToolRefusal>({
   max_steps: { label: 'past the step limit', level: 'warn' },
   unparsable: { label: 'arguments unparsable', level: 'warn' },
   unknown_tool: { label: 'no such tool', level: 'warn' },
+  denylist: { label: 'on the denylist', level: 'warn' },
+  declined: { label: 'declined by the operator', level: 'warn' },
+});
+
+/** What a call ran under (log v4's `approval`, #388): the operator's scope, or the pre-seeded set. */
+export const approvalOf = registry<ApprovalScope>({
+  once: { label: 'approved once', level: 'ok' },
+  session: { label: 'approved for this session', level: 'ok' },
+  workspace: { label: 'approved for this workspace', level: 'ok' },
+  preseeded: { label: 'pre-seeded', level: 'quiet' },
 });
 
 // ------------------------------------------------------------------ fork outcomes

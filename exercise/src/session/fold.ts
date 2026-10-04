@@ -12,7 +12,7 @@
  * node waits on, which is what the gaps overlay outlines.
  */
 
-import type { Authority, FailReason, ForkLane, ForkOutcome, IsolationWord, Lane, LineOf, LogLine, Need, NetworkWord, Open, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
+import type { Approval, Authority, FailReason, ForkLane, ForkOutcome, IsolationWord, Lane, LineOf, LogLine, Need, NetworkWord, Open, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
 import { NEEDS_OF } from '../drive/log.ts';
 import { receiptOf } from './receipt.ts';
 import type { Receipt } from './receipt.ts';
@@ -135,6 +135,8 @@ export interface ToolNode extends Provenance {
   readonly args: Readonly<Record<string, unknown>>;
   /** The assistant node that made the call (its request's `seq`): the model wrote it, as the end of that generation. */
   readonly after: string;
+  /** The call as the drive names it: its request's `seq` and its id as the model streamed it. What a prompt names (#389). */
+  readonly call: { readonly request: number; readonly id: string } | undefined;
   /** Session time the call began: its response, or the call before it ending, or its fragment if later. */
   readonly startedAt: number;
   readonly running: boolean;
@@ -146,6 +148,10 @@ export interface ToolNode extends Provenance {
   readonly outcome?: ToolOutcome;
   /** The command as the drive asked for it. */
   readonly argv?: readonly string[];
+  /** The directory it ran in, or would have (log v4's `cwd`, #388). */
+  readonly cwd?: string;
+  /** The decision it ran under: the operator's on its prompt, or the pre-seeded set (log v4's `approval`, #388). */
+  readonly approval?: Approval;
   /** What ran, under which mechanism and network: absent where the log does not say. */
   readonly confinement?: { readonly confined?: readonly string[]; readonly isolation?: IsolationWord; readonly network?: NetworkWord };
   readonly exit?: number;
@@ -676,6 +682,7 @@ export function fold(lines: readonly LogLine[]): Session {
             arguments: text,
             args: objectOf(text),
             after: id(c.request),
+            call: c.id !== undefined ? { request: c.request, id: c.id } : undefined,
             startedAt,
             running: line === undefined && !notBegun.has(slot.call) && !unanswered.has(slot.call),
             ...(line === undefined && unanswered.has(slot.call) ? { writing: true as const } : line === undefined && notBegun.has(slot.call) ? { waiting: true as const } : {}),
@@ -685,6 +692,8 @@ export function fold(lines: readonly LogLine[]): Session {
                   ms: Math.max(0, line.t - startedAt),
                   endedAt: line.t,
                   ...(line.argv ? { argv: line.argv } : {}),
+                  ...(line.cwd !== undefined ? { cwd: line.cwd } : {}),
+                  ...(line.approval ? { approval: line.approval } : {}),
                   ...(confinement ? { confinement } : {}),
                   ...(line.exit !== undefined ? { exit: line.exit } : {}),
                   ...(line.stdout !== undefined ? { output: line.stdout } : {}),

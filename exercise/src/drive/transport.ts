@@ -14,8 +14,8 @@ import type { LogLine, Open } from './log.ts';
 /**
  * What a person can ask of the drive. Closed: the surface owns what it
  * sends, and a new command should break the build where it must be offered.
- * Named so far and not yet here: approve, deny, edit memory, retry,
- * annotate, a choice at ratify.
+ * Named so far and not yet here: edit memory, retry, annotate, a choice at
+ * ratify.
  */
 export type Command =
   /** A person's ask, for the trunk. */
@@ -25,7 +25,39 @@ export type Command =
   /** Declare a phase transition: ratify, render, refill. */
   | { readonly kind: 'seam'; readonly to: string }
   /** End the session: nothing more is asked of it (#289). */
-  | { readonly kind: 'end' };
+  | { readonly kind: 'end' }
+  /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
+  | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision };
+
+/** What the operator may answer a prompt with (#298 5981578399 point 8): a scope, or decline. Closed: the surface offers each. */
+export type Decision = 'once' | 'session' | 'workspace' | 'decline';
+
+/**
+ * One segment of a prompted command as the gate read it (#298 5982466351 point 9: the gate module's `Shape` and
+ * `Verdict`). `why` is on a prompting segment only.
+ */
+export interface Segment {
+  readonly text: string;
+  readonly program?: string;
+  readonly subcommand?: string;
+  readonly verdict: Open<'free' | 'approved' | 'prompt'>;
+  readonly why?: string;
+}
+
+/**
+ * A call waiting on the operator (#389, ruled 5982826097): `serve`'s `waiting` event, which is not a log line --
+ * the log has the decision, on the call's `tool_call` line, once it is taken. Found by its request and id, as
+ * that line is.
+ */
+export interface Prompt {
+  readonly request: number;
+  readonly id: string;
+  readonly command: string;
+  readonly cwd: string;
+  /** Why it prompted: an open set, drawn under its own name. */
+  readonly reason: string;
+  readonly segments: readonly Segment[];
+}
 
 /** Why a command was not taken. Open: the drive may refuse for reasons the surface has not heard of. */
 export type Refusal = Open<
@@ -46,6 +78,8 @@ export type Refusal = Open<
   | 'nothing-in-flight'
   | 'seam-not-built'
   | 'stale'
+  /** An answer to a prompt when none waits (#389); one naming another call than the one waiting is `stale`. */
+  | 'nothing-waiting'
   /** The HTTP transport's: the drive did not answer. */
   | 'unreachable'
 >;
@@ -71,4 +105,6 @@ export interface DriveTransport {
   dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack>;
   /** The connection's state now, then each change, and why when it is not live. Absent: always `live`. */
   watchLink?(listener: (link: Link, why?: string) => void): () => void;
+  /** The call waiting on the operator now, then each change: `undefined` when none waits. Absent: none ever does (a replay). */
+  watchPrompt?(listener: (prompt: Prompt | undefined) => void): () => void;
 }
