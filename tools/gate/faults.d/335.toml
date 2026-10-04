@@ -17,3 +17,21 @@ label = "a 10.x address of the prefix's shape, no suffix"
 failure_class = "hygiene.forbidden-pattern"
 legacy_signature = "hygiene: private-ipv4: seeded-faults/llamacpp-prefix-without-suffix\\.log:1:"
 migrated = false
+
+[[fault]]
+id = "hygiene.hygiene_llamacpp_prefix_wrong_level"
+kind = "seeded-gate"
+check = "hygiene"
+label = "a 10.x address before a letter that is not a level"
+failure_class = "hygiene.forbidden-pattern"
+legacy_signature = "hygiene: private-ipv4: seeded-faults/llamacpp-prefix-wrong-level\\.log:1:"
+migrated = false
+
+[[fault]]
+id = "hygiene.hygiene_llamacpp_prefix_unlisted_source"
+kind = "seeded-gate"
+check = "hygiene"
+label = "a 10.x address before a source the row does not list"
+failure_class = "hygiene.forbidden-pattern"
+legacy_signature = "hygiene: private-ipv4: seeded-faults/llamacpp-prefix-unlisted-source\\.log:1:"
+migrated = false

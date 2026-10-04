@@ -4125,6 +4125,30 @@ PYEOF2
   git add --all
 }
 
+# #335 (#419's review): the exemption's level letter and source are a list,
+# not any word. A valid address of the prefix's 2-3-3 shape followed by a
+# letter that is not a level, or by a source the row does not list, fires.
+inject_hygiene_llamacpp_prefix_wrong_level() {
+  python3 - <<'PYEOF2'
+import pathlib
+addr = ".".join(["10", "15", "200", "183"])
+d = pathlib.Path("seeded-faults"); d.mkdir(exist_ok=True)
+(d / "llamacpp-prefix-wrong-level.log").write_text(
+    f"{addr} X slot print_timing: id  0\n", encoding="utf-8")
+PYEOF2
+  git add --all
+}
+inject_hygiene_llamacpp_prefix_unlisted_source() {
+  python3 - <<'PYEOF2'
+import pathlib
+addr = ".".join(["10", "15", "200", "183"])
+d = pathlib.Path("seeded-faults"); d.mkdir(exist_ok=True)
+(d / "llamacpp-prefix-unlisted-source.log").write_text(
+    f"{addr} I main: listening\n", encoding="utf-8")
+PYEOF2
+  git add --all
+}
+
 inject_pages() {
   printf '<script src="https://cdn.example.com/x.js"></script>\n' >> pages/index.html
 }
@@ -10746,6 +10770,10 @@ selftest() {
     'hygiene: private-ipv4: seeded-faults/llamacpp-prefix-address-elsewhere\.log:1:'
   seeded_case "a 10.x address of the prefix's shape, no suffix" hygiene inject_hygiene_llamacpp_prefix_without_suffix \
     'hygiene: private-ipv4: seeded-faults/llamacpp-prefix-without-suffix\.log:1:'
+  seeded_case "a 10.x address before a letter that is not a level" hygiene inject_hygiene_llamacpp_prefix_wrong_level \
+    'hygiene: private-ipv4: seeded-faults/llamacpp-prefix-wrong-level\.log:1:'
+  seeded_case "a 10.x address before a source the row does not list" hygiene inject_hygiene_llamacpp_prefix_unlisted_source \
+    'hygiene: private-ipv4: seeded-faults/llamacpp-prefix-unlisted-source\.log:1:'
   seeded_case "external subresource on the site"      pages    inject_pages \
     'hygiene: external-subresource:'
   seeded_case "a ledger row citing a missing directory" results inject_results_ledger_row_cites_missing_directory \
