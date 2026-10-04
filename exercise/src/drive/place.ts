@@ -14,6 +14,27 @@
  * - a delta carrying both reasoning and text is two lines, reasoning first;
  * - a failure `disconnected` is `transport`;
  * - `session.end` is a `settlement` into `ended`;
+ * - a tool call is v3's (#297), and a placed log is served-shaped (ruled on
+ *   #300, 5974672622): a response that ends in calls is placed with the
+ *   calls' fragments BEFORE it, as a server streams them -- one `delta` per
+ *   call carrying a `tool_call` piece with the whole arguments text, at the
+ *   response's time -- read from the script's `tool.begin`s on that response,
+ *   which the placer is handed ahead (`place`'s `ahead`); the `tool.begin`
+ *   itself then places nothing. Each `tool.end` is its call's `tool_call`
+ *   line at the script's end time: `ran`, or `cancelled` with no exit or
+ *   output. A script's recording did not separate the streams: it kept one
+ *   output, the terminal's, and the placement puts all of it in `stdout`,
+ *   with `stderr` empty by construction, each with its UTF-8 byte count as
+ *   the format pairs them (ruled on #300, 5976370830). When each call began is not
+ *   placed: v3 has no start line, and the fold infers it (ruling 3). A
+ *   `bash` call's `argv` is `sh -c` and its command, as diet's own canned
+ *   commands are spelled (`diet/src/drive/canned.rs`), and its isolation and
+ *   network are `unrecorded`, with no `confined`: no script ever said what
+ *   confined its commands, and the format lets a log without a substrate
+ *   claim say so rather than guess (ruled on #300). A call of any other tool
+ *   carries its arguments only (ruling 4). A script's `truncated` is not
+ *   placed: v3 logs what ran printed, whole, and what the model was shown is
+ *   the record's (#297 Q3, #302);
  * - the system prompt is the head's `system` message.
  *
  * A label nothing placed yet stays unresolved (-1): a script that names what
@@ -31,11 +52,22 @@ type Placed = LogLine extends infer L ? (L extends LogLine ? Omit<L, 'seq'> : ne
 export class Placer {
   #seq = 0;
   readonly #labels = new Map<string, number>();
+  /** Each placed call, by its label: what its `tool_call` line repeats. */
+  readonly #calls = new Map<string, { readonly request: number; readonly turn: number; readonly name: string; readonly arguments: string; readonly command?: string }>();
+  /** The calls a `tool.end` has ended. */
+  readonly #ended = new Set<string>();
+  /** How many calls each request has made so far: the next call's `index`. */
+  readonly #indexes = new Map<number, number>();
   #turnOpen = false;
 
   /** The `seq` a label was placed at, if it has been. */
   seqOf(label: string): number | undefined {
     return this.#labels.get(label);
+  }
+
+  /** The calls placed (their fragments streamed) that no `tool.end` has ended yet: what a cancel must end. */
+  openCalls(): string[] {
+    return [...this.#calls.keys()].filter((label) => !this.#ended.has(label));
   }
 
   /** Every label placed so far, and its `seq`. */
@@ -48,9 +80,12 @@ export class Placer {
     return { ...line, seq: this.#seq++ } as LogLine;
   }
 
-  /** One scripted event, as the log's line or lines. */
-  place(event: Unplaced | DriveEvent): LogLine[] {
-    return this.#lines(event).map((line) => ({ ...line, seq: this.#seq++ }) as LogLine);
+  /**
+   * One scripted event, as the log's line or lines. AHEAD is what the script
+   * says next: a response ending in calls finds its calls there.
+   */
+  place(event: Unplaced | DriveEvent, ahead: readonly (Unplaced | DriveEvent)[] = []): LogLine[] {
+    return this.#lines(event, ahead).map((line) => ({ ...line, seq: this.#seq++ }) as LogLine);
   }
 
   #ref(label: string): number {
@@ -62,13 +97,28 @@ export class Placer {
     this.#labels.set(label, this.#seq + offset);
   }
 
-  #lines(e: Unplaced | DriveEvent): Placed[] {
+  /** A call's fragment, placed at OFFSET among the lines about to be: its label names that line. */
+  #fragment(e: Extract<Unplaced | DriveEvent, { kind: 'tool.begin' }>, t: number, offset: number): Placed {
+    const request = this.#ref(e.after);
+    const index = this.#indexes.get(request) ?? 0;
+    this.#indexes.set(request, index + 1);
+    const text = JSON.stringify(e.args);
+    const command = e.tool === 'bash' && typeof e.args['command'] === 'string' ? e.args['command'] : undefined;
+    this.#calls.set(e.id, { request, turn: e.turn, name: e.tool, arguments: text, ...(command !== undefined ? { command } : {}) });
+    this.#name(e.id, offset);
+    return { kind: 'delta', t, request, tool_call: { index, id: e.id, name: e.tool, arguments: text } };
+  }
+
+  #lines(e: Unplaced | DriveEvent, ahead: readonly (Unplaced | DriveEvent)[]): Placed[] {
     switch (e.kind) {
       case 'session.start': {
         const line: Omit<LineOf<'session.start'>, 'seq'> = {
           kind: 'session.start',
           t: e.t,
-          version: 0,
+          // The newest the placed lines use: v1's timings and progress, v2's reasoning, v3's tool calls.
+          version: 3,
+          // These lines were placed from a script, not served as they ran: the log says so (#297, ruled 5976392264).
+          provenance: 'placed',
           opened: SCRIPTED_OPENING,
           model: e.model,
           head: [{ role: 'system', content: e.system.text }],
@@ -111,7 +161,10 @@ export class Placer {
         // Its own label names its request, as a v0 reference to an answer would.
         this.#labels.set(e.id, request);
         if (e.stop === 'cancelled') return [{ kind: 'cancelled', t: e.t, request, partial: e.text }];
+        // Its calls, streamed before it.
+        const calls = e.stop === 'tool' ? ahead.filter((a): a is Extract<Unplaced | DriveEvent, { kind: 'tool.begin' }> => a.kind === 'tool.begin' && this.#ref(a.after) === request) : [];
         return [
+          ...calls.map((call, offset) => this.#fragment(call, e.t, offset)),
           {
             kind: 'response',
             t: e.t,
@@ -127,10 +180,37 @@ export class Placer {
       case 'request.failed':
         return [{ kind: 'request.failed', t: e.t, request: this.#ref(e.request), reason: e.reason === 'disconnected' ? 'transport' : e.reason, message: e.message }];
       case 'tool.begin':
-        this.#name(e.id);
-        return [{ kind: 'tool.begin', t: e.t, turn: e.turn, request: this.#ref(e.after), tool: e.tool, args: e.args }];
-      case 'tool.end':
-        return [{ kind: 'tool.end', t: e.t, begin: this.#ref(e.id), exit: e.exit, output: e.output, ...(e.truncated ? { truncated: true } : {}) }];
+        // Placed with its response; one the response was not handed is placed here, late, rather than lost.
+        return this.#calls.has(e.id) ? [] : [this.#fragment(e, e.t, 0)];
+      case 'tool.end': {
+        const call = this.#calls.get(e.id);
+        if (!call || this.#ended.has(e.id)) return [];
+        this.#ended.add(e.id);
+        return [
+          {
+            kind: 'tool_call',
+            t: e.t,
+            request: call.request,
+            turn: call.turn,
+            id: e.id,
+            name: call.name,
+            arguments: call.arguments,
+            ...(e.cancelled
+              ? { outcome: 'cancelled', ...(call.command !== undefined ? { argv: ['sh', '-c', call.command], isolation: 'unrecorded', network: 'unrecorded' } : {}) }
+              : {
+                  outcome: 'ran',
+                  ...(call.command !== undefined ? { argv: ['sh', '-c', call.command], isolation: 'unrecorded', network: 'unrecorded' } : {}),
+                  exit: e.exit,
+                  stdout: e.output,
+                  // A stream's text and its byte count come together (the format's rule): the count is of its UTF-8.
+                  stdout_bytes: new TextEncoder().encode(e.output).length,
+                  // A script kept one output, the terminal's: it is placed whole as stdout, and stderr as empty.
+                  stderr: '',
+                  stderr_bytes: 0,
+                }),
+          },
+        ];
+      }
       case 'turn.settled':
         this.#turnOpen = false;
         return [{ kind: 'turn.settled', t: e.t, turn: e.turn, reason: e.reason }];
@@ -193,6 +273,6 @@ export class Placer {
 /** A whole script, placed: the log, and where each label landed. */
 export function place(events: readonly (Unplaced | DriveEvent)[]): { readonly log: readonly LogLine[]; readonly labels: ReadonlyMap<string, number> } {
   const placer = new Placer();
-  const log = events.flatMap((e) => placer.place(e));
+  const log = events.flatMap((e, i) => placer.place(e, events.slice(i + 1)));
   return { log, labels: placer.labels() };
 }

@@ -9139,6 +9139,24 @@ legacy_signature = "FAIL.*capped\\.test\\.ts.*is not read from the settle word a
 migrated = false
 
 [[fault]]
+id = "exercise.exercise_refused_call_drawn_as_ran"
+kind = "seeded-gate"
+check = "exercise"
+label = "a refused tool call drawn as ran"
+failure_class = "exercise.tool-outcome"
+legacy_signature = "FAIL.*served\\.test\\.ts.*folds a ran, a refused and a policy-failed call"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_placed_line_refused"
+kind = "seeded-gate"
+check = "exercise"
+label = "a placed core line diet's reader refuses"
+failure_class = "exercise.placed-projection"
+legacy_signature = "diet check-log refuses the placed projection: .*`ask` carries no `asked_by`"
+migrated = false
+
+[[fault]]
 id = "exercise.exercise_progress_read_nested"
 kind = "seeded-gate"
 check = "exercise"

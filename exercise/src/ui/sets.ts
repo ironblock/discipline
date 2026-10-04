@@ -10,7 +10,7 @@
 
 import type { CSSProperties } from 'react';
 
-import type { FailReason, ForkLane, ForkOutcome, PatchOp, SeamReason, SettleReason, Tool } from '../drive/log.ts';
+import type { FailReason, ForkLane, ForkOutcome, PatchOp, SeamReason, SettleReason, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
 import type { Stop } from '../session/fold.ts';
 import type { Refusal } from '../drive/transport.ts';
 
@@ -72,6 +72,22 @@ export function callOf(tool: Tool, args: Readonly<Record<string, unknown>>): Cal
   const known = Object.hasOwn(TOOLS, tool) ? TOOLS[tool]?.(args) : undefined;
   return known ? { ...known, known: true } : { label: tool, prompt: '', text: `${tool}(${JSON.stringify(args)})`, known: false };
 }
+
+/** What became of a call (v3, #297). `ran` draws nothing of its own: its exit says how it went. */
+export const callOutcomeOf = registry<ToolOutcome>({
+  ran: { label: 'ran', level: 'ok' },
+  refused: { label: 'refused', level: 'warn' },
+  command_failed: { label: 'failed under policy', level: 'bad' },
+  cancelled: { label: 'cancelled', level: 'quiet' },
+});
+
+/** Why the drive refused a call (v3, #297 Q2). */
+export const callRefusalOf = registry<ToolRefusal>({
+  not_allowed: { label: 'not on the allowlist', level: 'warn' },
+  max_steps: { label: 'past the step limit', level: 'warn' },
+  unparsable: { label: 'arguments unparsable', level: 'warn' },
+  unknown_tool: { label: 'no such tool', level: 'warn' },
+});
 
 // ------------------------------------------------------------------ fork outcomes
 

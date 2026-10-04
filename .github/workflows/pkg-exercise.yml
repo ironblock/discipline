@@ -24,6 +24,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The check reads every placed session through diet's own log reader
+      # (#300), so it builds the `diet` binary: the pinned toolchain, and a
+      # Cargo cache keyed as #306's are, on the runner image.
+      - name: Resolve the pinned toolchain
+        run: |
+          cargo --version
+          rustc --version
+      - name: Name the runner image for the cache key
+        run: echo "RUNNER_IMAGE=${ImageOS:-unknown}-${ImageVersion:-unknown}" >> "$GITHUB_ENV"
+      - name: Restore the Cargo cache
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: exercise-${{ env.RUNNER_IMAGE }}
+
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: exercise/package.json
