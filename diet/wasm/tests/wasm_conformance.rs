@@ -282,6 +282,7 @@ fn native_verdict(func: &str, source: &str) -> String {
     match func {
         "check_record" => diet_wasm::check_record(source),
         "check_regimen" => diet_wasm::check_regimen(source),
+        "judge_argv" => diet_wasm::judge_argv(source),
         other => panic!("no native counterpart wired for {other}"),
     }
 }
@@ -373,6 +374,63 @@ fn record_corpus_matches_between_native_and_wasm() {
 #[test]
 fn regimen_corpus_matches_between_native_and_wasm() {
     assert_corpus_matches("regimen", "toml", "check_regimen");
+}
+
+/// The shell gate (#389, 5982832752): the same requests give the same
+/// segments and verdicts on both targets. The requests are
+/// `tests/shell_gate_cases.jsonl`, one per line, the cases' one source --
+/// refusals, prompts, free reads, dynamic syntax, a narrower denylist, and
+/// requests that are not requests at all, whose error envelopes must agree
+/// too. Each line is written to its own file, as the harness reads files.
+#[test]
+fn shell_gate_matches_between_native_and_wasm() {
+    let corpus = crate_root().join("tests/shell_gate_cases.jsonl");
+    let text = std::fs::read_to_string(&corpus)
+        .unwrap_or_else(|err| panic!("cannot read {}: {err}", corpus.display()));
+    let dir = target_dir().join("shell-gate-cases");
+    std::fs::create_dir_all(&dir)
+        .unwrap_or_else(|err| panic!("cannot create {}: {err}", dir.display()));
+    let mut calls = Vec::new();
+    let mut requests = Vec::new();
+    for (index, line) in text.lines().enumerate() {
+        let id = format!("case-{index:02}");
+        let path = dir.join(format!("{id}.json"));
+        std::fs::write(&path, line)
+            .unwrap_or_else(|err| panic!("cannot write {}: {err}", path.display()));
+        calls.push((id.clone(), "judge_argv".to_owned(), path));
+        requests.push((id, line.to_owned()));
+    }
+    assert!(
+        requests.len() >= 20,
+        "{} holds {} request(s); the comparison needs its corpus",
+        corpus.display(),
+        requests.len()
+    );
+    let wasm_results = call_wasm_batch(plain_glue(), "shell-gate", &calls);
+    let mut failures = Vec::new();
+    let mut refused = 0;
+    for (id, request) in &requests {
+        let native = native_verdict("judge_argv", request);
+        refused += usize::from(native.contains(r#""outcome":"refused""#));
+        match wasm_results.get(id) {
+            Some(wasm) if *wasm == native => {}
+            Some(wasm) => failures.push(format!(
+                "{id}: {request}\n    native: {native}\n    wasm:   {wasm}"
+            )),
+            None => failures.push(format!("{id}: the wasm batch produced no result at all")),
+        }
+    }
+    assert!(
+        refused > 0,
+        "no request in the corpus was refused; the comparison would not see a denylist"
+    );
+    assert!(
+        failures.is_empty(),
+        "{} of {} shell-gate request(s) disagree between native and wasm:\n  {}",
+        failures.len(),
+        requests.len(),
+        failures.join("\n  ")
+    );
 }
 
 /// Row 4's control, proved rather than assumed: a host call reachable from

@@ -102,6 +102,7 @@ pub mod registry;
 pub mod script;
 pub mod serve;
 pub mod session;
+pub mod shell_gate;
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};

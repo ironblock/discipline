@@ -1,0 +1,41 @@
+# #298's seeded faults: the shell gate's parse-and-shape rules (ruled at #298 5981578399 point 12).
+
+[[fault]]
+id = "test.shell_gate_later_segment_escapes"
+kind = "seeded-gate"
+check = "test"
+target = "lib/drive::shell_gate::tests"
+label = "a later segment escapes the denylist"
+failure_class = "shell-gate.later-segment-escapes"
+legacy_signature = "drive::shell_gate::tests::a_denylisted_program_in_any_segment_is_refused \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.shell_gate_wrapper_hides"
+kind = "seeded-gate"
+check = "test"
+target = "lib/drive::shell_gate::tests"
+label = "a wrapper hides a denylisted program"
+failure_class = "shell-gate.wrapper-hides"
+legacy_signature = "drive::shell_gate::tests::a_wrapper_does_not_hide_a_denylisted_program \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.shell_gate_dynamic_read_as_allowed"
+kind = "seeded-gate"
+check = "test"
+target = "lib/drive::shell_gate::tests"
+label = "dynamic syntax read as allowed"
+failure_class = "shell-gate.dynamic-allowed"
+legacy_signature = "drive::shell_gate::tests::dynamic_syntax_prompts_and_is_never_read_as_allowed \\.\\.\\. FAILED"
+migrated = false
+
+[[fault]]
+id = "test.shell_gate_session_covers_another_program"
+kind = "seeded-gate"
+check = "test"
+target = "lib/drive::shell_gate::tests"
+label = "a session approval covers another program"
+failure_class = "shell-gate.approval-covers-another"
+legacy_signature = "drive::shell_gate::tests::a_session_approval_covers_its_shape_and_no_other \\.\\.\\. FAILED"
+migrated = false
