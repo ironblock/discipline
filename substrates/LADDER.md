@@ -142,9 +142,9 @@ One line per ruling, oldest first. M is the maintainer; P is planning; D is Disp
 
 ## Open questions
 
-- **The floor's ratification and switch.** Planning ruled the candidate the floor on 2026-10-02. The definition of done also needs the maintainer's ratification of it, and `linux-pc`'s serving line is still the 3.6. Successor: DoD 2.
-- **The three-rung re-fire.** One existing claim, the maintainer's pick, re-fired on all three rungs under a pre-registered rule. Blocked on a bottom rung and an admitted top rung. Successor: DoD 3.
-- **The record gate.** `check-record` refusing a claim record whose declared rung has no admission directory. Successor: DoD 4.
-- **The top rung's admission** on the TabbyAPI + EXL3 line, beginning with the cache's quality. Successor: top rung.
+- **The floor's ratification and switch.** Planning ruled the candidate the floor on 2026-10-02. The definition of done also needs the maintainer's ratification of it, and `linux-pc`'s serving line is still the 3.6. #393.
+- **The three-rung re-fire.** One existing claim, the maintainer's pick, re-fired on all three rungs under a pre-registered rule. Blocked on a bottom rung and an admitted top rung. #394.
+- **The record gate.** `check-record` refusing a claim record whose declared rung has no admission directory. #395.
+- **The top rung's admission** on the TabbyAPI + EXL3 line, beginning with the cache's quality. #396.
 - **The bottom rung.** No candidate (`cpu-beellama-qwen3-1p7b-q4km`, MiniCPM5-2B on mainline, AFM 3 Core through sidekick) has an admission record.
 - **A laptop rung,** and whether `rtx6000ada-host` admits claims generally (Q13): both the maintainer's.
