@@ -209,6 +209,22 @@ def shard_count(reproven: int, total: int, ceiling: int) -> int:
     return max(1, -(-ceiling * max(0, reproven) // total))
 
 
+def pack(seconds: dict[str, int], shards: int) -> dict[str, int]:
+    """Each measured fault's shard, 1..shards: longest first, into the shard
+    with the fewest predicted seconds so far, the lower number on a tie (#319).
+    A fault with no measurement is not here; verify.sh hashes it as before.
+    Ordered by (seconds, id) so every reader of one cost table packs the same."""
+    if shards < 1:
+        raise Unusable("a packing needs at least one shard")
+    load = [0] * shards
+    plan: dict[str, int] = {}
+    for ident, cost in sorted(seconds.items(), key=lambda kv: (-kv[1], kv[0])):
+        k = min(range(shards), key=lambda i: (load[i], i))
+        plan[ident] = k + 1
+        load[k] += cost
+    return plan
+
+
 class Unusable(Exception):
     """The plan cannot be derived at all."""
 
@@ -1110,6 +1126,28 @@ def _shard_count():
     if max_shards(name="develop_shards") < 1:
         return "the checked-in budget declares no superseding ceiling"
     return None
+
+
+@fixture("a cost table packs longest-first into the emptiest shard, each fault once (#319)")
+def _pack():
+    costs = {"a": 300, "b": 200, "c": 120, "d": 100, "e": 90, "f": 10}
+    got = pack(costs, 2)
+    if got != {"a": 1, "b": 2, "c": 2, "d": 1, "e": 2, "f": 1}:
+        return f"packed as {got}"
+    if set(got) != set(costs) or not all(1 <= k <= 2 for k in got.values()):
+        return "the packing is not each listed fault in exactly one shard of 1..2"
+    if got != pack(dict(reversed(list(costs.items()))), 2):
+        return "the packing depends on the order the census was read in"
+    loads = {k: sum(c for i, c in costs.items() if got[i] == k) for k in (1, 2)}
+    if max(loads.values()) - min(loads.values()) > max(costs.values()):
+        return f"shard loads {loads} are further apart than the longest fault"
+    if pack({}, 3) != {}:
+        return "an empty cost table assigned something"
+    try:
+        pack(costs, 0)
+    except Unusable:
+        return None
+    return "zero shards were packed rather than refused"
 
 
 @fixture("a run's kind follows the event and the branch, before and after the rename (#326)")
