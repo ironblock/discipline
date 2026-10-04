@@ -3548,6 +3548,29 @@ flip = "0" if m.group(2) != "0" else "1"
 p.write_text(s[:m.start(2)] + flip + s[m.end(2):], encoding="utf-8")
 PYEOF
 }
+# #337: one component of rtx6000ada-host's TabbyAPI line drifted (the driver) while its engine_identity holds. The
+# composite must re-derive from the components, so the identity no longer agrees.
+inject_admission_engine_component_drifted() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/registry.toml"); s = p.read_text(encoding="utf-8")
+head = "[substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05.engine_components]\n"
+i = s.index(head) + len(head)
+old = 'nvidia_driver = "615.71.09"'
+j = s.index(old, i)
+p.write_text(s[:j] + 'nvidia_driver = "615.71.10"' + s[j + len(old):], encoding="utf-8")
+PYEOF
+}
+# #337: the component recipe made order-insensitive, so the registry's declared order no longer binds.
+inject_admission_engine_components_sorted() {
+  python3 - <<'PYEOF'
+import pathlib
+p = pathlib.Path("substrates/check-fingerprints.py"); s = p.read_text(encoding="utf-8")
+old = 'pairs = [[name, components[name]] for name in order]'
+assert old in s, "the component recipe moved"
+p.write_text(s.replace(old, 'pairs = [[name, components[name]] for name in sorted(order)]', 1), encoding="utf-8")
+PYEOF
+}
 # #202: the recipe narrowed back to the exe alone, the defect it exists to close.
 inject_admission_engine_recipe_exe_only() {
   python3 - <<'PYEOF'
@@ -8714,6 +8737,10 @@ selftest() {
     'FAIL  derive refuses a record missing a constitutional cell'
   seeded_case "an engine library changed under a held exe" admission inject_admission_engine_library_changed \
     'ada48-llamacpp-qwen38flashnext-q20: engine_fingerprint changed'
+  seeded_case "an engine component drifted under a held identity" admission inject_admission_engine_component_drifted \
+    'ada48-tabbyapi-exl3-qwen38flashnext-2p05: engine_identity changed'
+  seeded_case "the component recipe made order-insensitive" admission inject_admission_engine_components_sorted \
+    'FAIL  engine: the declared order, not a sort, is what the identity hashes'
   seeded_case "the engine recipe narrowed to the exe" admission inject_admission_engine_recipe_exe_only \
     'FAIL  engine: a library changed with the exe held changes the fingerprint'
   seeded_case "the engine recipe's library pattern narrowed" admission inject_admission_engine_pattern_narrowed \

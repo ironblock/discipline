@@ -76,6 +76,27 @@ hardware_fields = [
 ]
 
 # ---------------------------------------------------------------------------
+# engine component forms (#337, ruled 5975255706)
+# ---------------------------------------------------------------------------
+#
+# An engine with no executable to hash -- a Python/torch server -- is identified by
+# its components: "a binary plus its libraries" becomes "a commit plus its lock plus
+# its runtime". A substrate names its form in `engine_component_form` and records each
+# component in `engine_components`, every one with its `<component>_is` sentence.
+# `engine_identity` is the sha256 of the JSON array [[name, value], ...] in the order
+# declared HERE, separators "," and ":", UTF-8 (substrates/check-fingerprints.py,
+# composite_identity). The order is the format's, never the entry's or a sort, so the
+# identity re-derives from published data. A box preflight re-reads every live
+# component and refuses on any difference, naming the component that drifted.
+
+[engine_component_form.python-torch-exllamav3]
+components = [
+  "serving_commit", "exllamav3_wheel_sha256", "exllamav3_extension_sha256",
+  "torch", "cuda_runtime", "nvidia_driver", "python",
+  "package_set_sha256", "config_redacted_sha256", "config_redaction_diff_sha256",
+]
+
+# ---------------------------------------------------------------------------
 # equipment
 # ---------------------------------------------------------------------------
 
@@ -153,7 +174,10 @@ cpu = "Intel Xeon W-3235, 12 cores / 24 threads, 3.30 GHz"
 memory = "12 x 8 GiB DDR4 R-DIMM @ 2933 MHz, all twelve slots populated, six channels fully banked = 96 GiB"
 gpu = "AMD Radeon Pro W5700X, 16 GB, Metal 3"
 architecture = "x86_64"
-os = "macOS 26.5.2 (build 25F84)"
+os = "macOS 26.6.2 (build 25G83)"
+os_is = "measured with sw_vers on this host, 2026-10-04 (the data seat), matching track three's 26.6.2 on #299 (5976378789, point 9); the entry said 26.5.2 (25F84) from its 2026-09-05 reading. os is instance state and outside the hardware fingerprint"
+denial_signal = "none"
+denial_signal_is = "a Seatbelt (sandbox-exec) denial on this host has no signal of its own: EPERM exits 1, curl exits 7 or 6, indistinguishable from an ordinary failure (#29, 5954670587); a declaration until a reader enforces eligibility (#299, ruled 5976386318 point 9)"
 not_measured = "storage devices and firmware; power supply."
 no_served_substrate_because = """
 Nothing in this program serves a model on this machine: its GPU is not adept at \
@@ -801,6 +825,63 @@ process_started = "2026-10-03T06:58:31Z"
 process_started_is = "from the process read; the server was stopped at 06:58:30Z and answered health at 06:58:39Z, so production was down about 9 s for the revert (#143 5966611289). Earlier the same morning production was down 06:56:19Z-06:58:06Z for the side-port diagnosis and restored to e486f80 (substrates/measurements/2026-10-03-ada48-concurrency/diag-1003.log)"
 serving_is = "the revert launched from the 2026-09-28 launch file (#143 5966611289), so the running command line is instance 2026-09-28's, which the 2026-10-01 command line equalled but for the executable's checkout directory (serving_flags_are); weights unchanged, by the inference seat's statement, not re-read by the data seat; os, kernel, cuda and driver were not re-read and are taken from instance 2026-10-01 (whether the host rebooted in between is not recorded); the process maps libcudart.so.13.4.92, libcublas.so.13.8.0.4 and libcuda.so.615.71.09 (revert-process-read.json)"
 pinned_by = "the inference seat's revert of 2026-10-03 and its process read of the reverted server (substrates/measurements/2026-10-03-ada48-concurrency/; #143 5966611289)"
+current = false
+current_note = "retired as the serving line 2026-10-03T16:22:13Z, when production moved to TabbyAPI + ExLlamaV3 (ada48-tabbyapi-exl3-qwen38flashnext-2p05; substrates/measurements/2026-10-03-ada48-tabbyapi/switch.txt; #143 5971103350); the llama.cpp launch file stays on disk for rollback, and every result citing this instance keeps citing it"
+
+# rtx6000ada-host's serving line from 2026-10-03T16:22Z: a Python/torch engine, identified by the canonical digest of its
+# components in the python-torch-exllamav3 form (#337, ruled 5975255706). New and unadmitted (#143).
+[substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05]
+equipment = "rtx6000ada-host"
+description = "Qwen3.8-Flash-Next as EXL3 at 2.05 bpw (turboderp/Qwen3.8-Flash-Next-exl3, branch 2.05bpw_h4_ng4) with its 2-bit MTP head, served by TabbyAPI + ExLlamaV3 1.5.2 on the 48 GiB accelerator; the interactive drive's endpoint from 2026-10-03T16:22Z; a new substrate, not admitted (#143: admission is the three results)"
+pinned = true
+engine_name = "TabbyAPI + ExLlamaV3 (Python, torch)"
+engine_identity = "fbda332cab7dfadc794c1415d6d9502f05f1c7ab0bfb0b96b9a2ff129def64d8"
+engine_identity_is = "the composite over engine_components in the python-torch-exllamav3 form's order (#337, ruled 5975255706): a Python/torch engine has no executable and no library directory to hash, so its identity is its serving code's commit, its kernel library's wheel and compiled extension, the torch, CUDA runtime, driver and interpreter versions, the frozen package set and the redacted config with its redaction diff"
+engine_component_form = "python-torch-exllamav3"
+engine_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
+engine_commit_is = "TabbyAPI's git HEAD, clean apart from the local config.yml and api_tokens.yml (the inference seat, substrates/measurements/2026-10-03-ada48-tabbyapi/versions.txt)"
+weights_main = ["eba2be88e5afdc31cab98e2642a40e70044bce7896b0e643d6a48ad5e5715029", "55a60a6b08ae7098cd4a0c024c4f0736ff7607f54e6941e8f4dc394ac7def7ae", "7ece0208075139aae7f2eb8cf96a3ec2e0b43679dcfdbade887661eca99f3475", "9ecfe20e4fa114679d3040e5abc6800e4d3ae5708a33dde022d69e7d17d8a4f5", "92646b6fbf566c4d95aca40dbc0a0a3857568584c5645e40d46e23afc862e3b1"]
+weights_main_file = "model-0000N-of-00005.safetensors, the five shards; every file of the branch, the MTP mixer patch and the PLE table included, is in substrates/measurements/2026-10-03-ada48-tabbyapi/exl3-205bpw-sha256.txt (sha256 4a84bfae...)"
+sampler_card = "TabbyAPI's safe_defaults (temperature 0.8, top_k 40, top_p 0.95, min_p 0.05) unless a request sets its own"
+serving_context = 262144
+serving_slots = 4
+serving_context_is = "one paged KV pool of 262,144 tokens (cache_size) shared by up to four concurrent requests (max_batch_size), the analogue of --kv-unified; read off the config"
+serving_flags = "config.yml: backend exllamav3, max_seq_len 262144, cache_size 262144, cache_mode 8,8, max_batch_size 4, chunk_size 2048, ngram_ram true, reasoning true, draft_mode mtp with 3 draft tokens, auth required (substrates/measurements/2026-10-03-ada48-tabbyapi/config-redacted.yml; the live file sha256 e52b13bb..., three non-serving lines redacted per config-redaction.diff)"
+admission = "unadmitted: no admission cell has run on this line; admission is the three results on #143 (the behavioural fingerprint, the canary from its own baseline draw, the parity fire), unchanged by the component identity (#337, 5975255706)"
+preflight = "the box preflight re-reads every live component of engine_components and compares, refusing on any difference and naming the component that drifted, as llama.cpp's binary hash refuses (#337, 5975255706); the re-read is the inference seat's, on the host"
+hazards = "a different client surface from the llama.cpp line: reasoning_effort 'high' is a 400 (the template knows low, medium and xhigh) and content may open with a blank line after the reasoning (substrates/measurements/2026-10-03-ada48-tabbyapi/apicheck-results.jsonl); no slot erase and a different /props shape (the inference seat, as relayed on #143 5971023545, not in the committed checks). Quantization: mean KLD against the Q8_0 reference 0.086 (code) and 0.230 (prose), about half of the Q2_0 build's (substrates/measurements/2026-10-03-ada48-tabbyapi/kld-results.txt; the Q2_0 figures, substrates/measurements/2026-10-03-characterization/). Concurrency: the four-passage check stayed in its own passages after the switch (substrates/measurements/2026-10-03-ada48-tabbyapi/switch.txt). Nothing may be gated on token identity"
+
+[substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05.engine_components]
+serving_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
+serving_commit_is = "TabbyAPI's git HEAD, clean apart from the local config.yml and api_tokens.yml (substrates/measurements/2026-10-03-ada48-tabbyapi/versions.txt)"
+exllamav3_wheel_sha256 = "aeb8bbd84248e4d88391024c14e33532e790d07aac8c9340da17800de918cfed"
+exllamav3_wheel_sha256_is = "the ExLlamaV3 1.5.2 release wheel installed (cu132, torch 2.11.0, cp312), the GitHub release asset's digest; tag v1.5.2 is commit 12414d0af7b3beeabdda5990f6b554b996fa1416 (versions.txt)"
+exllamav3_extension_sha256 = "0b2d43c21bb23225cd17637e2b971f8dd19bb8f5ed6ec5c02fee663c34527b4a"
+exllamav3_extension_sha256_is = "the installed compiled extension, where the kernels live; it stands in for a JIT cache (versions.txt)"
+torch = "2.11.0+cu130"
+torch_is = "torch's version string in the serving venv (versions.txt)"
+cuda_runtime = "13.0"
+cuda_runtime_is = "the CUDA runtime torch bundles (versions.txt)"
+nvidia_driver = "615.71.09"
+nvidia_driver_is = "the NVIDIA driver version read on the host with the engine (versions.txt); it changes the numerics and is not in the frozen set"
+python = "3.12.14"
+python_is = "the serving venv's interpreter version (versions.txt); it changes the numerics and is not in the frozen set"
+package_set_sha256 = "5caa25fe4427364d1855ffc566837e4cf557b7f7b214e67294888f943edcb379"
+package_set_sha256_is = "sha256 of the serving venv's frozen package set, 90 packages, TabbyAPI's editable install recorded by commit (substrates/measurements/2026-10-03-ada48-tabbyapi/tabby-venv-freeze-2026-10-03.txt)"
+config_redacted_sha256 = "f989f2ae561e25ca84ac66f683adc56469ec4fcadf90a959c4fa0fd08507d064"
+config_redacted_sha256_is = "sha256 of the live config.yml with three non-serving lines redacted (substrates/measurements/2026-10-03-ada48-tabbyapi/config-redacted.yml, as #336 revision 3 corrected it, #337 5973573110); the live file is e52b13bb..."
+config_redaction_diff_sha256 = "7279b27bfd34ae2f2117e8061e44e1a0e78eeb0472d1ffb8dc1078a9aae7e08e"
+config_redaction_diff_sha256_is = "sha256 of the diff from the live config to the redacted copy, the three lines and nothing else (substrates/measurements/2026-10-03-ada48-tabbyapi/config-redaction.diff)"
+
+[[substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05.instance]]
+id = "2026-10-03"
+exllamav3_wheel_sha256 = "aeb8bbd84248e4d88391024c14e33532e790d07aac8c9340da17800de918cfed"
+exllamav3_extension_sha256 = "0b2d43c21bb23225cd17637e2b971f8dd19bb8f5ed6ec5c02fee663c34527b4a"
+python = "3.12.14"
+accelerator_driver_read = "615.71.09"
+process_started = "2026-10-03T16:22:15Z"
+process_started_is = "the serving process, from its elapsed time read at 16:33Z (substrates/measurements/2026-10-03-ada48-tabbyapi/process-now.txt); health first answered at 16:22:36Z, 23 s after the llama.cpp line stopped at 16:22:13Z (substrates/measurements/2026-10-03-ada48-tabbyapi/switch.txt)"
+pinned_by = "the inference seat's switch on 2026-10-03 and its receipts (substrates/measurements/2026-10-03-ada48-tabbyapi/; #143 5971103350 and 5971127133)"
 current = true
 
 [substrate.canned]

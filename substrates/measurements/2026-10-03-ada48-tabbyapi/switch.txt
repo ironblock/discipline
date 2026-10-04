@@ -1,0 +1,12 @@
+# The switch on rtx6000ada-host, 2026-10-03, as recorded by the switch command's own output (inference seat).
+llama.cpp b7-e7051ef (exe 41e6591d710fd4b5...) signalled to stop: 2026-10-03T16:22:13Z
+TabbyAPI /health first returned {"status":"healthy"}:   2026-10-03T16:22:36Z   (downtime 23 s)
+serving process: pid 665174 (TabbyAPI main.py, started 2026-10-03T16:22:15Z); VRAM after load 43762 MiB
+auth check: an unauthenticated GET of the models list returned 401
+models list (authenticated): ['Qwen3.8-Flash-Next-exl3-2.05bpw']
+post-switch concurrency check (contcheck.py, the four inputs of #143 5966621682, concurrent half, against the serving process):
+conc 0 a=0.42 'e of Midway in June 1942, the IJN sought to convert the remaining battleships into hybrid aircr
+conc 1 a=0.45 'The UN forces, primarily composed of the US Army and the Republic of Korea Army, were initially
+conc 2 a=0.42 'o explanation was given for his departure. In early 2014, the band announced that they had sign
+conc 3 a=0.45 'The proliferation of ironclad battleship designs came to an end in the 1890s as navies reached
+rollback: stop the TabbyAPI process by pid, start llama.cpp e7051ef from the saved launch file (one command)

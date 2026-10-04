@@ -38,6 +38,10 @@ substrate whose `engine_identity` is a 64-hex digest carries exactly one of:
   * `engine_libraries_unreadable`, saying why they can no longer be read;
   * `engine_single_digest_suffices`, saying why one digest is the whole engine
     (a static binary, stated as measured, or a digest that is not of an exe).
+  * `engine_components` (#337, 5975255706), for an engine with no executable to
+    hash -- a Python/torch server: a table of its components, each with its
+    `<component>_is` sentence, in the order its `engine_component_form` declares
+    in the registry, with `engine_identity` the sha256 of that ordered list.
 
 THE RECIPE, one for both sides: every regular shared-object file (a name ending
 `.so` or `.so.<n>...`, or on macOS `.dylib`, symlinks resolved and counted once, keyed by the real
@@ -86,7 +90,53 @@ def digest_of(entry: dict, fields: list[str]) -> str:
 
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 SHARED_OBJECT = re.compile(r"\.so(\.\d+)*$|\.dylib$")
-ENGINE_FORMS = ("engine_libraries", "engine_libraries_unreadable", "engine_single_digest_suffices")
+ENGINE_FORMS = ("engine_libraries", "engine_libraries_unreadable", "engine_single_digest_suffices", "engine_components")
+
+
+def composite_identity(order: list[str], components: dict) -> str:
+    """A component engine's identity (#337, 5975255706): the sha256 of the JSON array [[name, value], ...] in the
+    order its `engine_component_form` declares, separators "," and ":", UTF-8. The order is the registry's, never
+    the entry's or a sort, so the identity re-derives from published data and from nothing else."""
+    pairs = [[name, components[name]] for name in order]
+    return hashlib.sha256(json.dumps(pairs, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def check_components(name: str, sub: dict, registry: dict) -> int:
+    """`engine_components`: every component the entry's form declares is present, a non-empty string, with its
+    `<component>_is` sentence; nothing undeclared rides along; and engine_identity is their composite."""
+    form = sub.get("engine_component_form")
+    order = ((registry.get("engine_component_form") or {}).get(form) or {}).get("components")
+    if not isinstance(order, list) or not order:
+        print(f"  {name}: engine_component_form {form!r} is not declared with a components list"); return 1
+    if len(set(order)) != len(order) or not all(isinstance(k, str) and k for k in order):
+        print(f"  {name}: engine_component_form {form!r} declares a component twice or a name that is not a string"); return 1
+    components = sub["engine_components"]
+    if not isinstance(components, dict):
+        print(f"  {name}: engine_components is not a table"); return 1
+    values = {k for k in components if not k.endswith("_is")}
+    sentences = {k[:-3] for k in components if k.endswith("_is")}
+    problems = [f"{k} is missing" for k in order if k not in values]
+    problems += [f"{k} is not declared by the form" for k in sorted(values - set(order))]
+    problems += [f"{k}_is names no declared component" for k in sorted(sentences - set(order))]
+    problems += [f"{k} gives no {k}_is sentence" for k in order
+                 if not (isinstance(components.get(f"{k}_is"), str) and components[f"{k}_is"].strip())]
+    problems += [f"{k} is not a non-empty string" for k in order if k in values and not (isinstance(components[k], str) and components[k].strip())]
+    if problems:
+        print(f"  {name}: engine_components: {'; '.join(problems)}"); return 1
+    copies = [("engine_commit", sub.get("engine_commit"), "serving_commit")]
+    for inst in sub.get("instance") or []:
+        if inst.get("current") is True:
+            copies += [(f"the current instance's {k}", inst[k], k) for k in order if k in inst]
+    drifted = [f"{label} is {value!r}, the component {comp} is {components[comp]!r}"
+               for label, value, comp in copies if value is not None and comp in components and value != components[comp]]
+    if drifted:
+        print(f"  {name}: a copy of a component drifted: {'; '.join(drifted)}"); return 1
+    want = composite_identity(order, components)
+    if sub["engine_identity"] != want:
+        print(f"  {name}: engine_identity changed: stated {sub['engine_identity']}, the {len(order)} "
+              f"component(s) in {form}'s order hash to {want}"); return 1
+    print(f"  {name}: engine is {len(order)} component(s) in {form}'s order, engine_identity agrees")
+    return 0
 
 
 def engine_fingerprint(exe: str, libraries: dict) -> str:
@@ -226,6 +276,13 @@ def check_engines(registry: dict) -> int:
     bad = 0
     for name, sub in sorted((registry.get("substrate") or {}).items()):
         identity = sub.get("engine_identity")
+        # A component-form entry is inside the engine rule whatever its identity looks like: its identity is a
+        # derived digest, so a placeholder or an uppercase spelling must be refused here, never waved through as
+        # "outside the rule" (#362's review). Beside main's predicate, which stays as it was.
+        if ("engine_components" in sub or "engine_component_form" in sub) and not (isinstance(identity, str) and HEX64.match(identity)):
+            print(f"  {name}: carries an engine component form but engine_identity is {identity!r}, "
+                  f"not one lowercase sha256 digest"); bad += 1
+            continue
         if not (isinstance(identity, str) and HEX64.match(identity)):
             print(f"  {name}: outside the engine rule: engine_identity is "
                   f"{identity!r}, not one sha256 digest")
@@ -234,6 +291,12 @@ def check_engines(registry: dict) -> int:
         if len(forms) != 1:
             print(f"  {name}: engine_identity is one digest and the entry carries "
                   f"{forms or 'none'} of {', '.join(ENGINE_FORMS)}; exactly one is required"); bad += 1
+            continue
+        if forms[0] == "engine_components":
+            bad += check_components(name, sub, registry)
+            continue
+        if "engine_component_form" in sub:
+            print(f"  {name}: names an engine_component_form but carries no engine_components"); bad += 1
             continue
         if forms[0] != "engine_libraries":
             if not str(sub[forms[0]]).strip():
@@ -273,7 +336,7 @@ def selftest() -> int:
     import contextlib, io
     quiet = contextlib.redirect_stdout(io.StringIO())
     with quiet:
-        cases = _cases(exe, libs, base, changed) + _reader_cases()
+        cases = _cases(exe, libs, base, changed) + _reader_cases() + _component_cases()
     return _report(cases)
 
 
@@ -310,6 +373,52 @@ def _reader_cases():
             refused = True
         cases.append(("a symlink resolving outside the directory is refused", refused))
     return cases
+
+
+def _component_cases():
+    """The component form (#337): an agreeing entry passes; a drifted, missing, undeclared or unsentenced component
+    is refused; the declared order, not a sort, is what the identity hashes."""
+    order = ["serving_commit", "python"]
+    comps = {"serving_commit": "e" * 40, "serving_commit_is": "the serving code's git HEAD", "python": "3.12.14",
+             "python_is": "the interpreter's version"}
+    reg = lambda sub, o=order: {"engine_component_form": {"f": {"components": o}}, "substrate": {"s": sub}}
+    entry = lambda c, ident=None: {"engine_identity": ident or composite_identity(order, c), "engine_component_form": "f",
+                                   "engine_components": c}
+    good = entry(comps)
+    return [
+        ("a component entry whose identity agrees passes", check_engines(reg(good)) == 0),
+        ("a drifted component with the identity held is refused",
+         check_engines(reg(entry(dict(comps, python="3.12.15"), good["engine_identity"]))) == 1),
+        ("a missing component is refused",
+         check_engines(reg(entry({k: v for k, v in comps.items() if not k.startswith("python")}, good["engine_identity"]))) == 1),
+        ("a component without its _is sentence is refused",
+         check_engines(reg(entry({k: v for k, v in comps.items() if k != "python_is"}))) == 1),
+        ("a component the form does not declare is refused",
+         check_engines(reg(entry(dict(comps, torch="2.11.0", torch_is="torch")))) == 1),
+        ("an undeclared form is refused", check_engines(dict(reg(good), engine_component_form={})) == 1),
+        ("the declared order, not a sort, is what the identity hashes",
+         composite_identity(order, comps) != composite_identity(list(reversed(order)), comps)
+         and check_engines(reg(good, list(reversed(order)))) == 1),
+        ("a component whose value is not a string is refused",
+         check_engines(reg(entry(dict(comps, python=3.12), good["engine_identity"]))) == 1),
+        ("an _is sentence that is not a string is refused",
+         check_engines(reg(entry(dict(comps, python_is=["the interpreter"])))) == 1),
+        ("a component entry whose identity is a placeholder is refused, not waved outside the rule",
+         check_engines(reg(dict(good, engine_identity="pending"))) == 1
+         and check_engines(reg(dict(good, engine_identity=good["engine_identity"].upper()))) == 1),
+        ("an entry naming a component form, with no components and a placeholder identity, is refused",
+         check_engines(reg({"engine_identity": "pending", "engine_component_form": "f"})) == 1),
+        ("a form declaring a component twice is refused",
+         check_engines(reg(good, order + ["python"])) == 1),
+        ("a stray engine_component_form on another engine form is refused",
+         check_engines(reg({"engine_identity": "a" * 64, "engine_single_digest_suffices": "static",
+                            "engine_component_form": "f"})) == 1),
+        ("a copy of a component that drifted is refused",
+         check_engines(reg(dict(good, engine_commit="f" * 40), ["serving_commit", "python"])) == 1
+         and check_engines(reg(dict(good, engine_commit="e" * 40))) == 0),
+        ("a component form beside another engine form is refused",
+         check_engines(reg(dict(good, engine_single_digest_suffices="and also this"))) == 1),
+    ]
 
 
 def _cases(exe, libs, base, changed):
