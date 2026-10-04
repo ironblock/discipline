@@ -78,27 +78,23 @@ export type Tool = Open<'bash'>;
 export type ToolOutcome = Open<V0.ToolOutcome>;
 
 /**
- * Why the drive refused a call (v3, #297 Q2, ruled 5973541934). AHEAD (log v4, #388, ruled 5981588394):
- * `denylist`, the command matched the destructive denylist; `declined`, the operator declined its prompt.
+ * Why the drive refused a call (v3, #297 Q2, ruled 5973541934; v4, #388): among them `denylist`, the command
+ * matched the destructive denylist, and `declined`, the operator declined its prompt.
  */
-export type ToolRefusal = Open<V0.ToolRefusal | 'denylist' | 'declined'>;
+export type ToolRefusal = Open<V0.ToolRefusal>;
 
 /**
- * Under what a call ran (AHEAD, log v4, #388): the operator's decision on its prompt, or the pre-seeded session
- * set. `once` covers the exact line once; `session` and `workspace` its shape from then on (#298 5981578399 point 5).
+ * Under what a call ran (log v4, #388): the operator's decision on its prompt, or the pre-seeded session set.
+ * `once` covers the exact line once; `session` and `workspace` its shape from then on (#298 5981578399 point 5).
  */
-export type ApprovalScope = Open<'once' | 'session' | 'workspace' | 'preseeded'>;
+export type ApprovalScope = Open<V0.ApprovalScope>;
 
 /**
- * A call's approval, on its `tool_call` line (AHEAD, log v4, #388 5981578575, 5981588394, 5982826236): present
- * when it ran under a decision or a pre-seed. `decided_at` is session time (the line's clock), absent for
- * `preseeded`; `why` is the reason its prompting segment prompted (an open set of words), absent for `preseeded`.
+ * A call's approval, on its `tool_call` line (log v4, #388): present when it ran under a decision or a pre-seed.
+ * `decided_at` is session time (the line's clock), absent for `preseeded`; `why` is the reason its prompting
+ * segment prompted (an open set of words), absent for `preseeded`. The format's, with its scope open.
  */
-export interface Approval {
-  readonly scope: ApprovalScope;
-  readonly decided_at?: number;
-  readonly why?: string;
-}
+export type Approval = Omit<V0.Approval, 'scope'> & { readonly scope: ApprovalScope };
 
 /**
  * The mechanism a command ran under (`Isolation::tag`, diet/src/isolation/policy.rs), or `unrecorded`: a replayed
@@ -213,11 +209,9 @@ export type ProgressFrame = V0.ProgressLine;
  * when its outcome is known (v3, #297). The format's own line, generated;
  * which keys fit which outcome is its reader's rule.
  */
-export type ToolCall = Omit<V0.ToolCallLine, 'reason'> & {
+export type ToolCall = Omit<V0.ToolCallLine, 'reason' | 'approval'> & {
   readonly reason?: ToolRefusal;
-  /** AHEAD (log v4, #388 5982826236): a bash call's working directory as the runner passed it, beside `argv`. */
-  readonly cwd?: string;
-  /** AHEAD (log v4, #388): the decision it ran under. */
+  /** The decision it ran under (log v4, #388), its scope open as the surface's sets are. */
   readonly approval?: Approval;
 };
 
