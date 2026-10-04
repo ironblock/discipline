@@ -21,7 +21,9 @@ Extracted from the gate, gated in both directions (it can neither omit a proven 
 **Where a new fault's row goes (#383).** A pull request that adds seeded faults or mechanics assertions writes their rows to `tools/gate/faults.d/<ticket>.toml`, named for its ticket's number, a file no other pull request touches. It does not append to `faults.toml`, which every fault-adding pull request used to conflict on. Rules:
 - **One set:** `check-fault-manifest.py` and every reader of the table read `faults.toml` and every `faults.d/*.toml` as one set. Row order carries no meaning there.
 - **Ids are unique:** an id declared in two places is refused, naming both files.
-- **`[meta]` lives in `faults.toml` alone.**
+- **A ticket's second pull request,** while its first is still open, writes `faults.d/<ticket>-<slug>.toml`.
+- **Unseedable guards stay in `faults.toml`,** whose `[meta]` still counts them.
+- **`[meta]` lives in `faults.toml` alone,** and declares no count that is derived.
 - **Permanent:** a per-ticket file is its rows' permanent home, never folded back into `faults.toml` at a release.
 - **No hand-kept counts:** `mechanics_assertions` is counted, not kept, and the red count is derived the same way (#108).
 - **In `verify.sh`:** put a new case's `inject_*` function and its `seeded_case` or `expect_exit` line beside its own check's cases, not at the end of a list. Two pull requests appending at the same place conflict there.
