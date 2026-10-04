@@ -95,7 +95,8 @@ CALL = re.compile(r"\b([a-z_][a-z0-9_]*)\b")
 # shared by many injections, and which ones is not worth the second reader.
 MACHINERY_FUNCTIONS = frozenset(
     {
-        "seeded_case", "in_shard", "claim_fault", "load_scope_plan",
+        "seeded_case", "run_seeded_case", "in_shard", "claim_fault",
+        "load_scope_plan", "load_shard_plan",
         "sandbox", "sandbox_state", "not_red",
         "expect_exit", "edit_in_place", "seed_commit", "strip_substrates",
         "scratch", "prove_patterns", "inject_lane_fault", "scope_args",
@@ -223,6 +224,24 @@ def pack(seconds: dict[str, int], shards: int) -> dict[str, int]:
         plan[ident] = k + 1
         load[k] += cost
     return plan
+
+
+def shard_plan(seconds: dict[str, int], runs: set[str], shards: int) -> tuple[str, list[str]]:
+    """The `--shard-plan` file for a run of `shards` jobs re-proving `runs`,
+    and the lines the plan job prints about it (#319). Packs the faults in
+    `runs` that `seconds` measured; every other fault is left to the hash."""
+    measured = {i: s for i, s in seconds.items() if i in runs}
+    plan = pack(measured, shards)
+    body = f"shards\t{shards}\n" + "".join(f"assign\t{i}\t{k}\n" for i, k in sorted(plan.items()))
+    hashed = len(runs) - len(plan)
+    if not plan:
+        return body, [f"no measured seconds for any of the {len(runs)} fault(s) this run re-proves: "
+                      f"every one takes the hash, as before #319"]
+    lines = [f"{len(plan)} fault(s) packed by measured seconds, {hashed} by the hash (unmeasured)"]
+    for k in range(1, shards + 1):
+        mine = [i for i, s in plan.items() if s == k]
+        lines.append(f"  shard {k:2d}: {len(mine):4d} packed, {sum(measured[i] for i in mine):6d} s predicted")
+    return body, lines
 
 
 class Unusable(Exception):
@@ -639,6 +658,19 @@ def read_census(directory: pathlib.Path) -> tuple[dict[str, str], dict[str, set[
             for ident in ran:
                 red[ident] = commit
     return red, touched
+
+
+def read_seconds(directory: pathlib.Path) -> dict[str, int]:
+    """id -> the seconds its seeded_case took, from `seconds<TAB>ID<TAB>N`
+    rows (#319). A census written before #319 has none, and a malformed row
+    is skipped: check-selftest-census.py grades the rows, this only packs."""
+    seconds: dict[str, int] = {}
+    for path in sorted(p for p in directory.rglob("*") if p.is_file()):
+        for line in path.read_text(encoding="utf-8").splitlines():
+            parts = line.split("\t")
+            if parts[0] == "seconds" and len(parts) == 3 and parts[1] and parts[2].isdigit():
+                seconds[parts[1]] = max(seconds.get(parts[1], 0), int(parts[2]))
+    return seconds
 
 
 # --------------------------------------------------------------------------
@@ -1150,6 +1182,35 @@ def _pack():
     return "zero shards were packed rather than refused"
 
 
+@fixture("an unmeasured or inherited fault is left to the hash, and the plan names its N (#319)")
+def _shard_plan():
+    body, lines = shard_plan({"a": 30, "b": 20, "gone": 99, "kept": 50}, {"a", "b", "new"}, 2)
+    if body != "shards\t2\nassign\ta\t1\nassign\tb\t2\n":
+        return f"the plan read {body!r}"
+    if "2 fault(s) packed by measured seconds, 1 by the hash" not in lines[0]:
+        return f"the summary read {lines[0]!r}"
+    body, lines = shard_plan({}, {"a"}, 3)
+    if body != "shards\t3\n" or "every one takes the hash" not in lines[0]:
+        return f"a census with no seconds planned {body!r} and said {lines!r}"
+    return None
+
+
+@fixture("the census gives each fault the seconds its case took, and skips what it cannot read (#319)")
+def _seconds():
+    with tempfile.TemporaryDirectory() as box:
+        path = pathlib.Path(box) / "shard-1" / "census.tsv"
+        path.parent.mkdir()
+        path.write_text(
+            "shard\t1\nordinal\t1\ttest.a\tseconds\nseconds\ttest.a\t12\n"
+            "seconds\tlanes.b\tx\nseconds\tlanes.c\t3\t4\nseconds\tlanes.d\t0\n",
+            encoding="utf-8",
+        )
+        got = read_seconds(pathlib.Path(box))
+    if got != {"test.a": 12, "lanes.d": 0}:
+        return f"read {got}"
+    return None
+
+
 @fixture("a run's kind follows the event and the branch, before and after the rename (#326)")
 def _run_kind():
     for event, ref, base, default, want in (
@@ -1235,6 +1296,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--checks-out", help="also write the checks whose faults are re-proven, one per line, for selftest-drift.py block")
     parser.add_argument("--matrix", action="store_true", help="print the selftest matrix, [1..N], for the run --plan describes (every fault re-proven when --plan is not given)")
     parser.add_argument("--plan", help="with --matrix: a plan this script wrote")
+    parser.add_argument("--pack-out", help="with --matrix and --census: write the shard plan that packs the faults this run re-proves by their measured seconds, for verify.sh --shard-plan (#319)")
     parser.add_argument("--kind", nargs="?", const="", choices=("",) + KINDS, help="alone: print this run's kind from --event, --ref, --base-ref and --default-branch; with --matrix: the kind whose ceiling to divide (default full)")
     parser.add_argument("--event", default="", help="with --kind: github.event_name")
     parser.add_argument("--ref", default="", help="with --kind: github.ref_name")
@@ -1272,21 +1334,36 @@ def main(argv: list[str]) -> int:
         try:
             listed = set(listed_faults(ROOT))
             total = len(listed)
-            inherited = 0
+            inherited_ids: set[str] = set()
             if args.plan:
                 # Distinct ids the manifest lists: a duplicate or stale row must
                 # not make the count of what runs look smaller than it is.
-                inherited = len({line.split("\t")[1] for line in pathlib.Path(args.plan).read_text(encoding="utf-8").splitlines()
-                                 if line.startswith("inherit\t") and len(line.split("\t")) > 1} & listed)
+                inherited_ids = {line.split("\t")[1] for line in pathlib.Path(args.plan).read_text(encoding="utf-8").splitlines()
+                                 if line.startswith("inherit\t") and len(line.split("\t")) > 1} & listed
+            inherited = len(inherited_ids)
             if args.plan and args.kind not in (None, "", "scoped"):
                 raise Unusable(f"a {args.kind} run re-proves every fault; it takes no plan")
             ceiling = max_shards(name="develop_shards" if args.kind == "superseding" else "max_shards")
             n = shard_count(total - inherited, total, ceiling)
+            if args.pack_out:
+                runs = listed - set(inherited_ids)
+                census = pathlib.Path(args.census) if args.census else None
+                if census is not None and census.is_dir():
+                    seconds = read_seconds(census)
+                else:
+                    seconds = {}
+                    print(f"scope-selftest: no trunk census at {args.census or '(none given)'}: "
+                          "every fault takes the hash", file=sys.stderr)
+                body, lines = shard_plan(seconds, runs, n)
+                pathlib.Path(args.pack_out).write_text(body, encoding="utf-8")
         except (Unusable, OSError) as err:
             print(f"scope-selftest: {err}", file=sys.stderr)
             return EXIT_BROKEN
         print(json.dumps(list(range(1, n + 1))))
         print(f"scope-selftest: {total - inherited} of {total} fault(s) re-proven -> {n} shard(s)", file=sys.stderr)
+        if args.pack_out:
+            for line in lines:
+                print(f"scope-selftest: {line}", file=sys.stderr)
         return 0
     if not (args.base and args.census and args.out):
         print("scope-selftest: --base, --census and --out are all required", file=sys.stderr)
