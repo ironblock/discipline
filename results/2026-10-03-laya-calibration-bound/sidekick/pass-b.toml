@@ -1,0 +1,7 @@
+# Discipline #165, pass B: laya-typed-decisions moved to the GPU by the operator (D38).
+addr = "127.0.0.1:8790"
+model_idle_ttl_secs = 86400
+report_compute_plans = true
+
+[models."laya-typed-decisions"]
+compute_units = "cpu_and_gpu"

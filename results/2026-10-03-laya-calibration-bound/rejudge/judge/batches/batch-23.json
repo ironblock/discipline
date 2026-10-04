@@ -1,0 +1,227 @@
+{
+ "batch": 23,
+ "items": [
+  {
+   "id": "716a0d491a1f",
+   "entry": "The speculative decoding \"restore checkpoint\" path (line ~3536) is internal to the draft-model accept/reject loop — IMPLICATION: there's a separate internal checkpoint mechanism for speculative decoding (`slot.spec_ckpt`, `slot.spec_dft`) that is unrelated to the user-facing slot save/restore API. These are two completely different checkpointing systems that share the word \"checkpoint\" but serve different purposes.",
+   "reasoning": "",
+   "prose": "Good catch. Let me correct the working record first, then continue the investigation.\n\nThe entry about speculative decoding checkpoints being \"unrelated\" to user-facing save/restore is **partially incorrect**. While `slot.spec_ckpt` and `slot.prompt.checkpoints` are indeed separate mechanisms, they are not \"unrelated\" — `slot.prompt.checkpoints` (the context checkpoint system) is actually part of the same `server_prompt` object that gets saved/restored via the user-facing `/slots/{id}?action=save` API. The checkpoints are embedded within the `server_prompt` struct alongside the KV cache data. So the speculative decoding `spec_ckpt` is the internal draft-model mechanism, but `slot.prompt.checkpoints` are context-shift recovery checkpoints that *do* travel with the user-facing save/restore.\n\nLet me continue the investigation properly:\n\n"
+  },
+  {
+   "id": "686843a8df94",
+   "entry": "The speculative decoding \"restore checkpoint\" path (line ~3536) is internal to the draft-model accept/reject loop — IMPLICATION: there's a separate internal checkpoint mechanism for speculative decoding (`slot.spec_ckpt`, `slot.spec_dft`) that is unrelated to the user-facing slot save/restore API. These are two completely different checkpointing systems that share the word \"checkpoint\" but serve different purposes.",
+   "reasoning": "",
+   "prose": "Now let me look at the `create_checkpoint` function and the context checkpoint restoration path in detail:\n\n"
+  },
+  {
+   "id": "ea9bf8bfbe15",
+   "entry": "`states.push_back` stores a clone of `prompt.tokens` plus a copy of `prompt.checkpoints` — checkpoints are persisted into the cache alongside KV state (`server-task.cpp:1813-1819`)",
+   "prose": "Now I need to see the checkpoint creation section more carefully. Let me look at the fork's checkpoint creation and the mid-prompt checkpoint suppression logic:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "b1ff5e1fcb43",
+   "entry": "Read `common_chat_tools_parse_oaicompat` in chat.cpp (~line 530) to see how OpenAI tool definitions are parsed",
+   "reasoning": "The user wants me to update the working record. The entry about reading `common_chat_tools_parse_oaicompat` at line 530 is superseded because I've now traced the full chat template application flow. Let me first read that function to complete my understanding, then provide the update.\n\nActually, looking at the user's request more carefully, they want me to:\n1. Update the working record to note that the previous entry is superseded\n2. Continue investigating where tool/function definition rendering happens\n\nLet me read the `common_chat_tools_parse_oaicompat` function and also look at `common_chat_tools_to_json_oaicompat` which is used in the Jinja path.",
+   "prose": ""
+  },
+  {
+   "id": "edf2e2c862dc",
+   "entry": "`ctx_server.process_chat_completion(req, true)` is the key entry point — the second `true` arg likely means \"streaming.\" This function lives in `server-context.cpp` and is where the real flow begins. (`server.cpp`, route registration block)",
+   "prose": "Correction: The `process_chat_completion` function signature does NOT take a `stream` boolean as the second argument. Looking at the actual code, `process_chat_completion(req)` takes only the request struct — the streaming flag comes from `req.params.stream` inside the request itself. The `true` in the earlier observation was misattributed; it was likely from a different call site or a misunderstanding of the API.\n\nNow let me compare the beellama fork's server directory against upstream llama.cpp to identify files that differ in purpose.\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "67f910548b56",
+   "entry": "Prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are TWO separate systems — the prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing for resuming — IMPLICATION: These must be configured independently and serve different purposes; disabling one doesn't affect the other",
+   "reasoning": "The working record entry is actually accurate - the prompt cache and context checkpoints ARE two separate systems. Let me re-read the entry and the correction request more carefully.\n\nThe entry says:\n\"Prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are TWO separate systems — the prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing for resuming — IMPLICATION: These must be configured independently and serve different purposes; disabling one doesn't affect the other\"\n\nThis seems correct based on my analysis. The prompt cache (`server_prompt_cache`) stores full prompt KV states for reuse across different requests/slots. Context checkpoints (`common_prompt_checkpoint`) are intermediate save points within a single prompt processing run, used for resuming from a checkpoint position when the prompt needs to be re-processed.\n\nThe instruction says \"the entry is superseded by this step\" and asks me to \"state the correction.\" But I don't see what's incorrect about the entry. Let me re-read...\n\nActually, I think the instruction is asking me to update the working record entry based on the new information I've gathered. The entry is correct but might need refinement. Let me provide a more detailed/accurate version based on what I've learned.\n\nLooking at the code more carefully:\n1. Prompt cache (`--cache-ram` / `server_prompt_cache`): Stores full prompt KV states (main + draft context) for slot reuse. Uses LCP (longest common prefix) matching to find the best cache entry. LRU eviction. Used across requests.\n\n2. Context checkpoints (`--ctx-checkpoints` / `n_ctx_checkpoints`): Per-slot intermediate save points created DURING prompt processing (not after). Created at user message boundaries and near prompt end. Used to resume prompt processing from a checkpoint position rather than starting from scratch. Stored in `slot.prompt.checkpoints` list.\n\nThe key nuance I should add is that context checkpoints are created BEFORE `llama_decode()` is called for the current batch, so the checkpoint doesn't include the current batch. They're used when prompt processing needs to restart (e.g., due to context overflow, LoRA change, etc.) and can resume from the nearest checkpoint rather than re-processing from the beginning.\n\nAlso, `cache_idle_slots` is a third related feature - it saves idle slots to the prompt cache when a new task starts, and clears their KV cache to free memory (only works with `--cache-ram` enabled).\n\nLet me update the entry with more detail and accuracy.",
+   "prose": "The working record entry is essentially correct, but I can refine it with more precision based on the code I've examined. Here's the correction:\n\n**Correction:** The entry is accurate in its core claim, but needs two refinements:\n1. **Context checkpoints are created DURING prompt processing (before each batch decode), not after** — they capture KV state at user-message boundaries and near prompt end, stored in `slot.prompt.checkpoints`, and are used to resume prompt processing from a saved position rather than re-evaluating from scratch when context overflows or needs re-processing.\n2. **`cache_idle_slots` is a third related feature** — it saves idle slots' KV state to the prompt cache on new task arrival, then clears the slot's live KV to free memory. It requires `--cache-ram` to function. These are truly independent knobs: prompt cache governs cross-request slot reuse; checkpoints govern intra-prompt resume points; idle-slot caching governs memory reclamation.\n\nI'll continue the investigation now. Let me look at the slot selection logic that uses the prompt cache and how cache idle slots work.\n\n"
+  },
+  {
+   "id": "c627fd8aea8b",
+   "entry": "Trace how tool/function definitions are rendered into the chat template — look for `tools`, `tool_call`, `function_call` handling in template application code",
+   "reasoning": "The user's working record entry about tracing tool/function definitions rendering has been superseded by my current investigation into SSE streaming. I need to update the working record to reflect this new investigation focus.\n\nLet me continue tracing the SSE streaming pipeline. I need to look at:\n1. Where partial results are created in the slot update loop\n2. The stop conditions that end a stream\n3. The format_oai_sse and format_anthropic_sse functions\n\nLet me look at where partial results are created.",
+   "prose": "The working record entry \"Trace how tool/function definitions are rendered into the chat template\" is superseded — the current investigation has shifted to **tracing the SSE streaming pipeline**, including chunk emission and stream termination conditions.\n\n"
+  },
+  {
+   "id": "0d00143c75b4",
+   "entry": "Prompt cache (`--cache-ram`) and context checkpoints (`--ctx-checkpoints`) are TWO separate systems — the prompt cache stores full prompt KV states for slot reuse across requests, while context checkpoints are per-slot intermediate save points created during prompt processing for resuming — IMPLICATION: These must be configured independently and serve different purposes; disabling one doesn't affect the other",
+   "reasoning": "The user is asking about slot checkpointing and KV cache save/restore support in the llama.cpp server. I've already gathered substantial information. Let me compile what I've found and present a comprehensive answer.\n\nFrom the working record and my investigation, I have:\n\n1. **Prompt Cache** (`server_prompt_cache`) - stores full KV cache state for prompts\n2. **Context Checkpoints** (`common_prompt_checkpoint`) - partial KV cache snapshots during generation\n3. **Idle slot caching** (`cache_idle_slots`) - saves idle slots to prompt cache\n4. **Slot prompt similarity** - reuses slots based on prompt similarity\n\nLet me also check if there's any disk-based persistence or serialization of the KV cache.",
+   "prose": "I have gathered enough information to provide a comprehensive answer. Let me also check if there's any disk-based KV cache persistence.\n\n"
+  },
+  {
+   "id": "5bb7abeb1079",
+   "entry": "`packages/babylon-lite/` — the actual engine library source, need to examine for structural differences vs full Babylon.js",
+   "reasoning": "The user seems to have sent a message that looks like it might be a continuation of some thought process or a note about the frame-graph system. Let me look at the frame-graph code to understand the slot mechanism and the `launch_slots_with_parent_task` function. This seems to be a question about how child tasks are handled in the frame graph.\n\nLet me look at the frame-graph code to understand this.",
+   "prose": "Let me look at the frame-graph code to understand the slot mechanism you're asking about.\n\n"
+  },
+  {
+   "id": "f8087f2e4935",
+   "entry": "How does `res->next` callback get invoked by the HTTP layer — need to see the HTTP response streaming mechanism",
+   "reasoning": "Now let me look at how the HTTP layer invokes the `res->next` callback for streaming.",
+   "prose": "Now let me look at how the HTTP layer invokes the `res->next` callback for streaming responses:\n\n"
+  },
+  {
+   "id": "5826644a7214",
+   "entry": "The prompt cache `load()` function uses a **dual improvement criteria** — a cached prompt is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cached prompt with high similarity but low `f_keep` won't be used, and vice versa; this prevents loading a tiny cache entry that barely overlaps with the new prompt even if it matches perfectly.",
+   "prose": "Let me verify the dual improvement criteria in `server_prompt_cache::load()`.",
+   "reasoning": "The user wants me to check if the working record entry about the dual improvement criteria for prompt cache `load()` is still accurate. Let me look at the actual code in `server_prompt_cache::load()` to verify."
+  },
+  {
+   "id": "e7439f8fbae4",
+   "entry": "The `start_loop` method on `server_queue` is the main event loop that processes queued tasks and manages sleeping — it's where tasks get dispatched to slots (`server-context.cpp` / `server.cpp`)",
+   "reasoning": "",
+   "prose": "Let me continue investigating the slot save/restore HTTP endpoints and the checkpoint mechanism:\n\n"
+  },
+  {
+   "id": "5bded6a79138",
+   "entry": "The `frame-graph` module in the index — indicates a node-based/frame-graph rendering architecture, which is a significant architectural shift from Babylon.js",
+   "reasoning": "",
+   "prose": "Let me navigate to the correct repo and search for the Minecraft clone.\n\n"
+  },
+  {
+   "id": "41f1ec1064bb",
+   "entry": "BOTH file-based slot save/restore and the in-memory prompt cache are gated by `check_no_mtmd()` — multimodal models get \"This feature is not supported by multimodal\" — IMPLICATION: Any cache-related feature audit must explicitly exclude multimodal paths; the server hard-fails rather than degrading gracefully",
+   "reasoning": "The user is asking me to update the working record entry. The entry says \"BOTH file-based slot save/restore and the in-memory prompt cache are gated by `check_no_mtmd()`\" but the correction should be that this is superseded by more precise information.\n\nLet me think about what the correction is. From my investigation:\n\n1. **File-based slot save/restore** (`/slots/{id}?action=save`, `/slots/{id}?action=restore`, `/slots/{id}?action=erase`) — these ARE gated by `check_no_mtmd()` at lines 2346, 2387, 2434. So multimodal models get \"This feature is not supported by multimodal\" errors.\n\n2. **In-memory prompt cache** (`prompt_save`/`prompt_load` via `server_prompt_cache`) — this is NOT gated by `check_no_mtmd()`. The prompt cache save/load happens in `get_available_slot()` which is called for all task types. The `check_no_mtmd` gate only applies to the file-based save/restore endpoints.\n\nSo the correction is: the original entry conflated two different mechanisms. Only the **file-based** slot save/restore endpoints are gated by `check_no_mtmd()`. The **in-memory prompt cache** (`prompt_save`/`prompt_load`) is not gated by that check — it works for multimodal models too (though `n_cache_reuse` is disabled for multimodal).\n\nLet me verify this by looking at the code more carefully.",
+   "prose": "Let me verify which cache mechanisms are actually gated by `check_no_mtmd()` vs. which are not.\n\n"
+  },
+  {
+   "id": "cc60cb6e13c9",
+   "entry": "How does beellama's CMakeLists.txt wire in the new files (`server-adaptive-dm.h`, `server-loop-guard.cpp/h`) and what upstream files (`server-schema.cpp/h`, `server-stream.cpp/h`) were removed or replaced?",
+   "reasoning": "The user is asking me to update the working record entry about how beellama's CMakeLists.txt wires in the new files and what upstream files were removed/replaced. Let me state the correction based on what I've found:\n\n**Correction:**\n- Upstream `server-schema.cpp/h` and `server-stream.cpp/h` are **not** present in beellama's CMakeLists.txt. They were removed entirely, not just not compiled.\n- Beellama added `server-loop-guard.cpp/h` to the CMakeLists.txt (inside the `server-context` static library target).\n- `server-adaptive-dm.h` is a header-only file that is NOT listed in CMakeLists.txt — it's included via `#include` from server-context.cpp (header-only, no compilation needed).\n- The `server-stream.cpp/h` functionality (stream_session, conversation replay) was removed entirely — beellama does not have the stream session/replay system.\n- The `server-schema.cpp/h` functionality (JSON schema validation of request parameters) was also removed — beellama does not use the schema validation approach.\n\nSo the correction is:\n- `server-adaptive-dm.h` is a header-only addition included via `#include` from server-context.cpp, not listed in CMakeLists.txt as a compiled file.\n- `server-loop-guard.cpp/h` are added to the `server-context` static library in CMakeLists.txt.\n- `server-schema.cpp/h` and `server-stream.cpp/h` are completely absent from beellama — not replaced by anything, just removed.\n- The 176KB growth in server-context.cpp comes from beellama's speculative decoding (DFlash) system, reasoning loop guard integration, and adaptive draft model logic.",
+   "prose": "**Correction to the working record:**\n\nMy earlier entry asked \"how does beellama's CMakeLists.txt wire in the new files and what upstream files were removed or replaced?\" Now I have the full answer:\n\n**Added files in beellama's CMakeLists.txt:**\n- `server-loop-guard.cpp` and `server-loop-guard.h` are added to the `server-context` static library target — these implement a reasoning-loop detection system (periodic tail checks, n-gram dominance, low-entropy detection on reasoning tokens).\n- `server-adaptive-dm.h` is **not** listed in CMakeLists.txt because it is a header-only file (no `.cpp`). It is `#include`'d directly from `server-context.cpp` and defines adaptive draft model controllers (EWMA-based `fringe` and `profit` controllers) for speculative decoding.\n\n**Removed upstream files:**\n- `server-schema.cpp/h` — completely absent. Beellama does **not** use the JSON schema validation approach. The `server_schema::eval_llama_cmpl_schema()` call that upstream uses at line 4129 of server-context.cpp is gone. Beellama appears to rely on direct `common_params` struct fields instead of schema validation.\n- `server-stream.cpp/h` — completely absent. The `stream_session` infrastructure (persistent SSE ring buffers keyed by conversation ID, allowing clients to reconnect and replay) is not present in beellama. The `stream_session_attach_pipe()` call from upstream line 4336 is gone.\n\n**Net effect on server-context.cpp:**\n- Upstream: 218KB → Beellama: 394KB (+176KB)\n- The growth is driven by ~1112 mentions of speculative/dflash/draft (vs 142 upstream), the `server_adaptive_dm_state` struct (beellama's `server_slot` inherits from it), the `server_loop_guard` integration, and DFlash speculative decoding infrastructure.\n- Beellama's `server_slot` struct is `struct server_slot : server_adaptive_dm_state` — the adaptive draft model state is embedded directly into each slot."
+  },
+  {
+   "id": "2fc7f16d473e",
+   "entry": "Babylon Lite optimizes for the smallest bundle and the highest performance on WebGPU; Babylon.js optimizes for the broadest, most mature feature set with WebGL and WebGPU support.",
+   "reasoning": "The working record doesn't contain that entry. Let me look at the babylonjs packages to compare.",
+   "prose": ""
+  },
+  {
+   "id": "45c1ddd13da1",
+   "entry": "The `load` method's dual-scoring heuristic using `f_keep` (preservation of cached prompt) and `sim` (similarity to new prompt) with a 0.25 threshold — this is the eviction/selection policy for picking the best cached KV state (`server-task.cpp`, lines ~1676–1700)",
+   "prose": "Let me verify the exact dual-scoring heuristic and threshold in the `load` method to correct the record.",
+   "reasoning": ""
+  },
+  {
+   "id": "da93319ff255",
+   "entry": "Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting",
+   "prose": "**CORRECTION:** The working record entry about `n_cache_reuse` requirements is incomplete. Cache reuse requires **both** conditions to be true simultaneously:\n\n1. `llama_memory_can_shift()` must return true (backend support)\n2. **No multimodal data present** (`!has_mtmd`)\n\nFrom `server-context.cpp:2849`:\n",
+   "reasoning": "The user is asking me to update a working record entry that says \"Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting\". They say this is superseded by the current investigation step.\n\nLooking at my investigation, I found that `n_cache_reuse` has TWO requirements:\n1. `llama_memory_can_shift()` must return true\n2. Multimodal data must NOT be present (`!has_mtmd`)\n\nThe original entry only mentioned the memory backend requirement. Let me update it to include the multimodal limitation as well.\n\nLet me check the exact code to confirm:\n- Line 2849: `const bool can_cache_reuse = llama_memory_can_shift(llama_get_memory(ctx_tgt)) && !has_mtmd;`\n\nSo the correction is that cache reuse requires BOTH `llama_memory_can_shift()` returning true AND no multimodal data."
+  },
+  {
+   "id": "9e21e7f0d984",
+   "entry": "The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)",
+   "reasoning": "",
+   "prose": "The entry \"The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)\" is **superseded**. The correct detail is: the SSE ping mechanism is implemented inside the `rd.next()` callback lambda (around line 3990), where a timeout triggers `output = \":\\n\\n\"` and `return true` to keep the stream alive. It is not a separate \"bottom\" mechanism — it is embedded within the `next()` polling loop's stop-condition lambda.\n\nNow let me continue tracing the stop conditions. Let me look at the `process_token` function and the stopping-word logic:\n\n"
+  },
+  {
+   "id": "0f74849f2567",
+   "entry": "Read the full `handle_slots_save` implementation at line 4841+ in server-context.cpp to understand the save flow, file format, and what data is serialized.",
+   "reasoning": "",
+   "prose": "That note is still valid — I've been reading those exact functions. Let me now look at the HTTP endpoint handlers and the prompt_save/prompt_cache mechanism.\n\n"
+  },
+  {
+   "id": "2cdc50452166",
+   "entry": "The `grammar_lazy` flag logic — when `tool_choice == AUTO`, grammar constraints are deferred until a tool call prefix is detected. This matters for understanding when constrained decoding actually activates during tool-calling conversations. (`common/chat.cpp:1030`, `common/chat.cpp:1191`, `common/chat.cpp:1322`)",
+   "prose": "Let me first read the current content of the file, then explore the relevant source files to understand caching/checkpointing differences between upstream and the beellama fork.\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "2809c6e897c9",
+   "entry": "Look at `server_response_reader::next()` in server-queue.h to understand result pulling",
+   "reasoning": "",
+   "prose": "The working record note about `server_response_reader::next()` in `server-queue.h` still holds — we'll need it to understand result pulling. Let me look at the context around line 1708 where partial responses are sent per token:\n\n"
+  },
+  {
+   "id": "98effc581e79",
+   "entry": "`cache_idle_slots` automatically saves idle slots to the in-memory prompt cache when a new task starts, but only when `cache_ram_mib > 0` — IMPLICATION: without explicit cache configuration, idle slot state is lost when the slot is reassigned; the auto-save behavior is silently disabled",
+   "reasoning": "The user wants me to check whether the working record note about `cache_idle_slots` still holds. Let me verify the conditions under which `cache_idle_slots` is enabled and whether it requires `cache_ram_mib > 0`.\n\nLet me look at the code around line 1470 where `cache_idle_slots` is checked:",
+   "prose": "Let me verify the `cache_idle_slots` behavior:\n\n"
+  },
+  {
+   "id": "f2b6fef1e13d",
+   "entry": "The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)",
+   "prose": "The note about `sse_ping_interval` at ~line 3995 is still accurate — I can see it at line ~3995 in the earlier output. Let me continue tracing the stop conditions and the final response path.",
+   "reasoning": ""
+  },
+  {
+   "id": "f5497fcb8cac",
+   "entry": "The `n_swa` variable tracking sliding window attention state — relevant for SWA models where checkpoint correctness has known issues per the `[TAG_CHECKPOINTS_FIX_POS_MIN]` TODO (server-context.cpp ~line 2990)",
+   "reasoning": "",
+   "prose": "I'll update the superseded entry now. The `n_swa` variable is indeed relevant to SWA model checkpointing, but the key detail that matters more is the known correctness bug flagged by `[TAG_CHECKPOINTS_FIX_POS_MIN]` at line ~2163, where checkpoint position ranges are incorrectly determined for SWA models. The `n_swa` variable appears in checkpoint invalidation logic (line ~3019) where checkpoints with `pos_max > pos_next` are erased when SWA state (`n_swa`) changes, but the root issue is that the `create_checkpoint` function itself records inaccurate `pos_min`/`pos_max` ranges for SWA models — meaning checkpoints may silently cover wrong position ranges. The `n_swa` tracking is a mitigation that erases invalidated checkpoints, not the primary bug.\n\n"
+  },
+  {
+   "id": "e841a8545bfd",
+   "entry": "The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)",
+   "prose": "Working record entry #199 correction: The `alloc()` method's LCP-based deduplication behavior described at `server-task.cpp` lines 1620+ is accurate — it does remove obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. However, the broader context from `README-dev.md` clarifies that this is part of the `prompt_pool` system which operates as a FIFO cache with `limit_size` eviction (entry #200), not a score-based or LRU cache. The entry itself is not wrong, but it's worth noting this is the *prompt-level* cache (in-memory token deduplication), which is distinct from the *KV cache* save/restore mechanism that writes to disk. The two caching layers serve different purposes: prompt cache avoids re-tokenizing identical prompts, while KV cache save/restore preserves the actual computed key-value states for resumption.\n\nNow let me continue with the file comparison:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "aa6195e7731b",
+   "entry": "Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting",
+   "reasoning": "The user is asking me to update a working record entry about cache reuse (`n_cache_reuse`). Let me look at the code I just found to understand the full picture.\n\nFrom the grep results at line 2849-2854 in server-context.cpp:\n```cpp\nconst bool can_cache_reuse =\n    llama_memory_can_shift(llama_get_memory(ctx_tgt)) && // TODO: check draft model\n    // TODO: support cache reuse with mtmd\n    !has_mtmd;\n\nif (!can_cache_reuse && n_cache_reuse > 0) {\n    SLT_WRN(slot, \"cache reuse is not supported - ignoring n_cache_reuse = %d\\n\", n_cache_reuse);\n}\n```\n\nAnd from lines 1101-1115:\n```cpp\nif (params_base.n_cache_reuse) {\n    params_base.n_cache_reuse = 0;\n    SRV_WRN(\"%s\\n\", \"cache_reuse is not supported by multimodal, it will be disabled\");\n}\n...\nif (params_base.n_cache_reuse) {\n    params_base.n_cache_reuse = 0;\n    SRV_WRN(\"%s\\n\", \"cache_reuse is not supported by this context, it will be disabled\");\n}\n```\n\nSo the correction is that `n_cache_reuse` requires BOTH `llama_memory_can_shift()` AND `!has_mtmd` (no multimodal data). The existing entry #113 already says: \"KV cache chunk reuse (`n_cache_reuse`) requires BOTH `llama_memory_can_shift()` returning true AND no multimodal data (`!has_mtmd`) — multimodal prompts cannot use chunk shifting\"\n\nBut the user says the entry \"Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting\" is superseded. So I need to state the correction.\n\nLet me look at the code more carefully to ensure the correction is accurate.",
+   "prose": "The entry \"Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting\" is superseded. The complete condition is that `n_cache_reuse` requires **both** `llama_memory_can_shift()` returning true **and** the absence of multimodal data (`!has_mtmd`). The code at `server-context.cpp:2849-2854` explicitly gates it:\n\n"
+  },
+  {
+   "id": "b9d692d2b55c",
+   "entry": "The project in the working directory (`phase1-audit-project`) is a Python warehouse inventory tracker, not llama.cpp — the compacted working record references llama.cpp server internals (`server-context.cpp`, prompt cache, slots, etc.) but that source code is not present on this machine. — IMPLICATION: I need to locate the actual llama.cpp source code on this system before I can answer the question about prompt cache / slot reuse and common-prefix matching.",
+   "prose": "The compacted working record is based on a llama.cpp codebase that does not exist on this machine. The actual project in the working directory (`phase1-audit-project`) is a small Python warehouse inventory tracker with no server, no prompt cache, no slots, and no common-prefix matching. The entire working record is stale and irrelevant to the actual codebase. I need to correct this before proceeding.\n\nLet me verify there's truly no llama.cpp source anywhere accessible:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "a8b2c5cac414",
+   "entry": "Read the `on_new_task` callback handler in server-context.cpp (around line 1458) to trace slot selection and task assignment",
+   "prose": "",
+   "reasoning": "Let me look at the key streaming call sites - especially lines 1708, 3044-3047, and 3419 which are where partial responses are sent during token generation."
+  },
+  {
+   "id": "19e9ccc939d0",
+   "entry": "The parity testing infrastructure (pixel-diff golden references, `tests/lite/parity/`) is a key part of their quality assurance strategy — ensures Lite produces pixel-identical output to Babylon.js (in `tests/lite/parity/`)",
+   "reasoning": "The user is asking me to correct a statement about the parity testing infrastructure. The claim was that pixel-diff golden references in `tests/lite/parity/` ensure Lite produces pixel-identical output to Babylon.js. But looking at the feature comparison document, it says parity scenes validate against Babylon.js where a parity scene exists, but not all features have parity scenes. The README also mentions \"pixel-identical output to Babylon.js — in a fraction of the bundle size\" as a marketing statement, but the feature comparison doc clarifies that \"✅ on Lite means the feature is covered in Lite to parity with Babylon.js — validated by a pixel-diff against Babylon.js where a parity scene exists.\"\n\nSo the correction is: the parity testing infrastructure does not universally guarantee pixel-identical output to Babylon.js across all features. Rather, it validates parity for specific scenes/features where golden reference screenshots exist. The feature comparison doc explicitly notes that ✅ means \"validated by a pixel-diff against Babylon.js where a parity scene exists\" — implying not all features have such scenes, and ⚡ (partial) features are not fully validated to pixel-identical output.\n\nLet me look more carefully at the test structure to confirm this.\n\nActually, let me look at the tests directory to understand the parity testing infrastructure better.",
+   "prose": "Let me look at the parity testing infrastructure to verify the correction about pixel-identical output.\n\n"
+  },
+  {
+   "id": "5d2cab5706de",
+   "entry": "Read `get_common_prefix()` in server-common.cpp",
+   "reasoning": "The user is asking me to verify whether the \"Read `get_common_prefix()` in server-common.cpp\" entry from the working record is still valid. Let me check if `get_common_prefix` is actually in server-common.cpp or somewhere else.",
+   "prose": "Let me verify whether `get_common_prefix()` is actually in server-common.cpp as the working record suggests.\n\n"
+  },
+  {
+   "id": "9ddb84c73fa3",
+   "entry": "`workaround::map_developer_role_to_system(params.messages)` — role mapping workaround for templates that don't support \"developer\" role (chat.cpp, line ~2671)",
+   "prose": "Correction: The `workaround::map_developer_role_to_system(params.messages)` call at `common/chat.cpp:2671` is **conditional** — it only maps \"developer\" → \"system\" for templates that do **not** contain the `<|channel|>` token. GPT-OSS templates (which use `<|channel|>`) are explicitly excluded and keep the \"developer\" role intact. The original entry omitted this GPT-OSS exception.",
+   "reasoning": "The user is asking me to update a working record entry about the developer role mapping workaround. Let me check what the current understanding is and correct it based on what I found.\n\nLooking back at my earlier findings, at `common/chat.cpp:2671` area, I saw:\n\n```cpp\nif (src.find(\"<|channel|>\") == std::string::npos) {\n    // map developer to system for all models except for GPT-OSS\n    workaround::map_developer_role_to_system(params.messages);\n}\n```\n\nSo the correction is: this workaround specifically maps \"developer\" role to \"system\" for all models EXCEPT GPT-OSS (which uses `<|channel|>` tokens). The original entry didn't mention the GPT-OSS exception.\n\nLet me state this correction clearly."
+  },
+  {
+   "id": "9427a833c7d4",
+   "entry": "Read `get_common_prefix()` in server-common.cpp",
+   "reasoning": "The working record note about `get_common_prefix()` is still relevant but I've been looking at different areas. Let me check the `lora_should_clear_cache` function to understand how LoRA changes affect cache invalidation.",
+   "prose": ""
+  },
+  {
+   "id": "a89a9dea1655",
+   "entry": "Upstream's `server-models.h` uses a static `setup_child_server()` and `notify_router_sleeping_state()` pattern, while beellama's uses instance methods (`setup()`, `notify_to_router()`) with a more sophisticated `conv_model_tracker` for conversation-to-model routing — the beellama fork has evolved the router model management with resumable streaming awareness. — IMPLICATION: When comparing routing behavior, the key divergence is in how conversation IDs are tracked across child instances and how stream sessions are resolved.",
+   "reasoning": "",
+   "prose": "The entry holds. The diff confirms exactly what was stated: beellama replaced static methods with instance methods and added `conv_model_tracker` for conversation-to-model routing with resumable streaming support. The `remember()`, `alive()`, `lookup()`, and `forget()` methods are the core of this new routing mechanism.\n\nNow let me check the key unique file — `server-adaptive-dm.h` — more thoroughly:\n\n"
+  },
+  {
+   "id": "52c742bd836e",
+   "entry": "The cross-slot prompt cache (`server_prompt_cache`) is purely in-memory with LRU eviction — there is NO persistent disk-based prompt cache that survives server restarts — IMPLICATION: Prompt cache is lost on every server restart; the only persistent option is the slot file save/restore which doesn't work with multimodal",
+   "reasoning": "The user's message got cut off, but it seems like they were providing context about their audit findings. Let me continue investigating the slot checkpointing and KV cache save/restore features. I need to provide a comprehensive answer about:\n\n1. What checkpointing/KV cache save/restore support exists\n2. What are the limits/constraints\n\nLet me gather more information about the limits.",
+   "prose": "The message was cut off, but let me continue investigating the limits and constraints of slot checkpointing and KV cache save/restore.\n\n"
+  },
+  {
+   "id": "9335b50f22a7",
+   "entry": "Trace how tool/function definitions are rendered into the chat template — look for `tools`, `tool_call`, `function_call` handling in template application code",
+   "prose": "",
+   "reasoning": "The working record entry about tool/function definitions rendering has been superseded by the current investigation. Let me update it, then continue tracing the SSE streaming pipeline.\n\nI need to look at where `server_task_result_cmpl_partial` and `server_task_result_cmpl_final` are created and sent via `queue_results.send()`. Let me look at the key locations around lines 1874-1926 and 2270-2498."
+  },
+  {
+   "id": "9cdcf762e429",
+   "entry": "`common_prompt_checkpoint` struct in `server-context.cpp:177` — defines the checkpoint data structure used for speculative decoding rollback; may reveal checkpoint granularity and what state is captured",
+   "reasoning": "The user wants me to update the compacted working record with a correction about `common_prompt_checkpoint`. The diff shows that beellama has a `server_prompt_checkpoint` struct instead of `common_prompt_checkpoint`, and it includes a `ring_data` field for DFlash ring buffer state that upstream doesn't have.\n\nLet me first note the correction, then continue with the task of comparing caching/checkpointing between upstream and beellama, and update the markdown file.\n\nThe correction: `common_prompt_checkpoint` is not in `server-context.cpp:177` as previously recorded. In beellama, it's `server_prompt_checkpoint` and it's defined in `server-task.h` (not `server-context.cpp`), and it includes a `ring_data` field for DFlash ring buffer state that upstream's version doesn't have.\n\nLet me continue examining the differences and then update the markdown file.",
+   "prose": "**Correction to working record #267:** The `common_prompt_checkpoint` struct is NOT in `server-context.cpp:177`. In beellama, it's `server_prompt_checkpoint` defined in `server-task.h` (not `server-context.cpp`), and critically it includes an extra `ring_data` field (`std::vector<uint8_t> ring_data`) for DFlash ring buffer state that upstream's version lacks. The upstream struct is simpler — no ring buffer checkpointing.\n\nNow let me continue comparing the full checkpointing/caching differences:\n\n"
+  }
+ ]
+}

@@ -1,0 +1,11 @@
+pass A
+start 2026-10-03T17:10:54-0700
+pid 26935
+sidekickd 0.7.0 (Foundation Models shim built with macOS SDK 27.0)
+commit d12c2221a17049480c073454bb36f0ce3e3cda3e
+rustc 1.99.0 (b940084d7 2026-09-28)
+cargo 1.99.0 (5f94df478 2026-08-27)
+54a0c26dc40339f4abfcf61cacbf533364acdef1d082590758d3f135dcb5c2d0  ~/git/me/sidekick/.dev-data/discipline-165/pass-a.toml
+3c90d616764c6d81a53631bb3efb735e396c57bac63dc362631e756c824b7f2d  ~/git/me/sidekick/.dev-data/builds/sidekick-v0.7.0/target/release/sidekickd
+warm-up: one 504 on the first 1,024-bucket load (cold compile > request_timeout_secs 60); retried after the load finished, all four buckets then served in <0.5 s; live placement ready 17:14:54
+stop 2026-10-03T17:17:27-0700 (SIGTERM, pid 26935 exited)

@@ -1,0 +1,35 @@
+x8: bucket 128, units cpu_and_gpu, 4.4 s
+x20: bucket 256, units cpu_and_gpu, 6.6 s
+x38: bucket 512, units cpu_and_gpu, 6.6 s
+x90: bucket 1024, units cpu_and_gpu, 10.1 s
+compute_units cpu_and_gpu source operator
+{
+ "1024": {
+  "ane": 0,
+  "cpu": 0,
+  "gpu": 2079,
+  "source": "live",
+  "state": "ready"
+ },
+ "128": {
+  "ane": 0,
+  "cpu": 0,
+  "gpu": 1419,
+  "source": "live",
+  "state": "ready"
+ },
+ "256": {
+  "ane": 0,
+  "cpu": 0,
+  "gpu": 1539,
+  "source": "live",
+  "state": "ready"
+ },
+ "512": {
+  "ane": 0,
+  "cpu": 0,
+  "gpu": 1719,
+  "source": "live",
+  "state": "ready"
+ }
+}

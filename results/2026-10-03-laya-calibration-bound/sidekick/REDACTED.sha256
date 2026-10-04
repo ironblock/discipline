@@ -1,0 +1,8 @@
+# redacted sha256  original sha256 (MANIFEST.sha256)  file  changed-lines/total  substitution
+42f98089f60256d2d0780af0c7039545858b1fcdcf6176496f37947791f6a29d  4fe4d3486b333b3f4b4d6213e106ebaef57137b8d58bdf8dc12f34b2e7a8a81a  pass-a.record.txt  2/11  "/Users/<user>" -> "~"
+78982939df70d28349f85bcc20566b049022b5df1037527a16483c7e0314c8ea  600ecdc0340b6b128a6e24ee0a98a79dead05a9ab9baddb0dd0b9058162a5250  pass-b.record.txt  2/11  "/Users/<user>" -> "~"
+a529ec97a17cf879156a3c7c6aa76c48017953162b6ee6f63ad8981965d0c581  dcb4a7a02c4783400e8c25f3c395918e759dd126d341a5a2b6b29fe1dabc7cda  build.log  8/218  "/Users/<user>" -> "~"
+a7051bcc95660d36398b3ba060c529a31319a112814d4b0b160397b64917f1f1  a08aaf329b8b16051d4a85cd609308679089a6afafe6eff07bd1f3c59daedb6b  pass-a.daemon.log  5/7  "/Users/<user>" -> "~"
+a45729f0315e223e134a171d7fe4129f1e4504cb6f5bfdf90677453998e4c0ea  2808b04df42a05a3acb1fd94f63afc46b7d9f67628ca2651a5395d838e63cf4d  pass-b.daemon.log  5/6  "/Users/<user>" -> "~"
+7d2c11ab315b8e05ee7cdb00ca64985b78f140d9c9ff791f606a48f8dd613c9d  8f988fa9c38978dba50a46c87439524092ddcadcab019abe094f337ea3973d73  regrade.log  1/91  "/Users/<user>" -> "~"
+64fa3b00d6445730505b96653c6a8efeae6e499723f5925c9dea3f670d684650  9c0d56c0087d39d9776818bdf9d5b111cf66a7c1f2c1166aadb4db69f02116c3  pass-a.warm.txt  2/33  "<session temp dir>" -> "<tmp>"

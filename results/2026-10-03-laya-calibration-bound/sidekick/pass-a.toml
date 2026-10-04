@@ -1,0 +1,4 @@
+# Discipline #165, pass A: laya-typed-decisions on its manifest's compute units (cpu_and_ne).
+addr = "127.0.0.1:8790"
+model_idle_ttl_secs = 86400
+report_compute_plans = true
