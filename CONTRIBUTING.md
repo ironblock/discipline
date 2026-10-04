@@ -17,11 +17,11 @@ Two long-lived branches, named once in `.github/branches.tsv` (#326):
 - **The integration branch** (`develop`) is the repository's default branch and the base of every pull request. Merging into it never waits for a full run.
 - **The release branch** (`main`) takes only release pull requests from the integration branch. Nothing is versioned: a release is a tag on the release branch, not a version bump.
 
-What runs where:
-- **A pull request into the integration branch** (or into any branch but the release branch) runs a *scoped* selftest: the faults its diff reaches, plus every package job. Its newer push supersedes its older run.
-- **A push to the integration branch** runs the full selftest on `develop_shards` (`.github/gate-budget.tsv`). The next push cancels it: it is background, not a gate. The census pull requests are scoped against is the newest full run that *completed* on the integration branch, a push or the nightly.
+What runs where. Until the gate redesign, the selftest (every seeded fault proven red) runs on the nightly and the release path only: `.github/gate-budget.tsv`'s `selftest_events` (#369).
+- **A pull request into the integration branch** (or into any branch but the release branch) runs every package job -- the checks and fast checkers -- and no selftest. Its newer push supersedes its older run.
+- **A push to the integration branch** runs the same package jobs and no selftest; the next push cancels it.
 - **A release pull request and the push to the release branch** run the full selftest on `max_shards` and are never cancelled, so the release branch is green by construction. A release pull request is refused while any drift issue (`check:<name>`) is open.
-- **The nightly** runs the full selftest on the integration branch on `max_shards`. It and every push open drift issues; a pull request never does.
+- **The nightly** runs the full selftest on the integration branch on `max_shards`, and a fault it finds not red opens a drift issue. Its census is what the release path's selftest packs its shards by.
 - **Pages** publishes from the integration branch: the site is the working surface.
 
 Who cuts a release: the maintainer, or Dispatch on the maintainer's word, as a pull request from the integration branch into the release branch. It is reviewed and armed like any other pull request once its full run is green, merged with `--no-ff`, and the merge is tagged.

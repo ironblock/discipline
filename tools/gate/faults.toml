@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 165
+mechanics_assertions = 169
 unseedable_guards = 2
 migrated = 0
 
@@ -2164,6 +2164,38 @@ failure_class = "wiring.job-not-success"
 expected_exit = "1"
 migrated = false
 [[fault]]
+id = "mech.the-gate-accepts-a-skipped-selftest-on-a-pull-request-into-the-integration-branch"
+kind = "mechanics"
+check = "-"
+label = "the gate accepts a skipped selftest on a pull request into the integration branch"
+failure_class = "wiring.selftest-declared-off"
+expected_exit = "0"
+migrated = false
+[[fault]]
+id = "mech.the-gate-rejects-a-skipped-selftest-on-the-nightly"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects a skipped selftest on the nightly"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.the-gate-rejects-a-skipped-selftest-on-a-release-pull-request"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects a skipped selftest on a release pull request"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+[[fault]]
+id = "mech.the-gate-rejects-any-other-job-skipped-where-the-selftest-may-skip"
+kind = "mechanics"
+check = "-"
+label = "the gate rejects any other job skipped where the selftest may skip"
+failure_class = "wiring.job-not-success"
+expected_exit = "1"
+migrated = false
+[[fault]]
 id = "mech.the-gate-rejects-depending-on-no-jobs-at-all"
 kind = "mechanics"
 check = "-"
@@ -4270,6 +4302,30 @@ check = "ci"
 label = "a branch spelled in a script"
 failure_class = "wiring.branch-literal"
 legacy_signature = "scope-selftest.py:[0-9]+: .*names a branch literally"
+migrated = false
+[[fault]]
+id = "ci.ci_selftest_on_every_event"
+kind = "seeded-gate"
+check = "ci"
+label = "the selftest run on every event"
+failure_class = "wiring.selftest-cadence"
+legacy_signature = "the .selftest. job's .if:. is \\[\\], not the one expression"
+migrated = false
+[[fault]]
+id = "ci.ci_selftest_off_the_nightly"
+kind = "seeded-gate"
+check = "ci"
+label = "the nightly dropped from the selftest's events"
+failure_class = "wiring.selftest-cadence"
+legacy_signature = "the .selftest. job's .if:. is \\[.\\$\\{\\{ \\(github"
+migrated = false
+[[fault]]
+id = "ci.ci_selftest_census_unconditional"
+kind = "seeded-gate"
+check = "ci"
+label = "the selftest census required where the selftest skips"
+failure_class = "wiring.selftest-census-condition"
+legacy_signature = "census step .check-selftest-census.py.* runs under \\[\\]"
 migrated = false
 [[fault]]
 id = "derive.scope_ignores_touched"

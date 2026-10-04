@@ -156,6 +156,8 @@ LITERAL_EXCEPT = (
     ("scripts/check-history.py", "default_branch"),
 )
 SECONDS_TABLE = pathlib.Path(__file__).resolve().parent.parent / ".github" / "check-seconds.tsv"
+# The one condition the gate's selftest census steps carry (#369, rule 17).
+SKIPPED_SELFTEST = "needs.selftest.result != 'skipped'"
 
 # Each check a declared split may name (#262). Its members are asked of
 # verify.sh itself -- `VERIFY_LIST_MEMBERS=1 VERIFY_CHECK_SHARD=K/N
@@ -574,13 +576,15 @@ def shell_literals(text: str, pattern: re.Pattern, verify: bool) -> list[tuple[i
     return found
 
 
-def workflow_literals(text: str, pattern: re.Pattern, cancel: bool) -> list[tuple[int, str]]:
+def workflow_literals(text: str, pattern: re.Pattern, cancel: bool, allowed: frozenset = frozenset()) -> list[tuple[int, str]]:
     """(line, text) for each workflow line outside a comment that names a
-    branch, other than a trigger's `branches:` and the cancel expression."""
+    branch, other than a trigger's `branches:`, the cancel expression, and
+    a line in `allowed` exactly -- the selftest job's `if:`, which rule 17
+    holds to the tables (#369)."""
     found = []
     for number, line in enumerate(text.split("\n"), 1):
         code = line.strip()
-        if code.startswith("#") or BRANCH_KEY.match(line):
+        if code.startswith("#") or BRANCH_KEY.match(line) or code in allowed:
             continue
         if cancel and code.startswith("cancel-in-progress:"):
             continue
@@ -842,6 +846,13 @@ def main() -> int:
                 f"{BUDGET.name} declares no {key} as a positive whole number "
                 f"(found {value!r}); it is what CI is held to, and nothing else says it"
             )
+    # ...and when the selftest runs (#369): words gatelib reads, each once.
+    events = gatelib.selftest_events(declared.get("selftest_events"))
+    if events is None:
+        failures.append(
+            f"{BUDGET.name} declares `selftest_events` as {declared.get('selftest_events')!r}, not one or "
+            f"more of {', '.join(gatelib.SELFTEST_EVENT_WORDS)}, each once; it is when faults are proven (#369)"
+        )
 
     # 10. the site is published only from what the gate passed (#32 I3)
     #
@@ -1252,8 +1263,15 @@ def main() -> int:
         if not named.get(ROOT_WORKFLOW):
             failures.append(f"{ROOT_WORKFLOW}: names no branch under `push:`, so neither declared branch is gated on a push (#326)")
 
-    # 16. no branch is named literally outside the table, the triggers and the
-    #     cancel expression (#326)
+    # The selftest job's one `if:` (rule 17), the third place a workflow may
+    # spell the release branch: like the cancel expression, an `if:` reads no
+    # file, so it is spelled, and held to the tables.
+    wanted_selftest_if = (gatelib.selftest_expression(events, branches[1])
+                          if branches and events is not None else None)
+    selftest_if = frozenset({f"if: {wanted_selftest_if}"}) if wanted_selftest_if else frozenset()
+
+    # 16. no branch is named literally outside the table, the triggers, the
+    #     cancel expression and the selftest job's `if:` (#326, #369)
     #
     #    The integration branch is the repository's default and is read as
     #    such at run time; the release branch is read from .github/branches.tsv.
@@ -1266,7 +1284,8 @@ def main() -> int:
         pattern = literal_pattern(branches)
         hits: list[str] = []
         for wf in sorted(WORKFLOWS.glob("*.yml")):
-            for number, code in workflow_literals(wf.read_text(encoding="utf-8"), pattern, wf.name == ROOT_WORKFLOW):
+            for number, code in workflow_literals(wf.read_text(encoding="utf-8"), pattern, wf.name == ROOT_WORKFLOW,
+                                                  selftest_if if wf.name == ROOT_WORKFLOW else frozenset()):
                 hits.append(f".github/workflows/{wf.name}:{number}: {code}")
         for glob in LITERAL_SCANNED:
             for path in sorted(ROOT.glob(glob)):
@@ -1287,6 +1306,37 @@ def main() -> int:
                 f"{hit} -- names a branch literally; read the default branch at run time, or "
                 f"the release branch from {BRANCHES.name} (#326)"
             )
+
+    # 17. the selftest runs on exactly the events the budget declares (#369)
+    #
+    #    verify.yml's `selftest` job carries one `if:`, the expression
+    #    gatelib makes from `selftest_events` and the release branch, so the
+    #    job and the row cannot say two things -- the way rule 15 holds the
+    #    trigger lists to the branch table. A job with no `if:`, a second one,
+    #    or one that differs by a clause is refused. And the gate's census of
+    #    the selftest's shards is skipped only where the selftest was: its
+    #    download and its step each carry `if: needs.selftest.result !=
+    #    'skipped'` and nothing else, since check-job-results.py, before them,
+    #    refuses a skip the row does not declare.
+    if branches and events is not None:
+        job = re.search(r"^  selftest:\n(.*?)(?=^  [^\s#]|\Z)", root_text, re.MULTILINE | re.DOTALL)
+        ifs = re.findall(r"^    if: (.*)$", job.group(1), re.MULTILINE) if job else []
+        if ifs != [wanted_selftest_if]:
+            failures.append(
+                f"{ROOT_WORKFLOW}: the `selftest` job's `if:` is {ifs!r}, not the one expression "
+                f"{BUDGET.name}'s selftest_events ({' '.join(events)}) and {BRANCHES.name} make (#369): "
+                f"{wanted_selftest_if}"
+            )
+        gate = re.search(r"^  gate:\n(.*?)(?=^  [^\s#]|\Z)", root_text, re.MULTILINE | re.DOTALL)
+        steps = gate.group(1) if gate else ""
+        for marker in ("pattern: selftest-census-*", 'check-selftest-census.py "${{ runner.temp }}/census"'):
+            step = next((s for s in re.split(r"\n      - ", steps) if marker in s), None)
+            conditions = re.findall(r"^        if: (.*)$", step, re.MULTILINE) if step else []
+            if conditions != [SKIPPED_SELFTEST]:
+                failures.append(
+                    f"{ROOT_WORKFLOW}: the gate's selftest census step ({marker}) runs under {conditions!r}, "
+                    f"not `if: {SKIPPED_SELFTEST}` alone: skipped only where the selftest was (#369)"
+                )
 
     for message in failures:
         print(message, file=sys.stderr)

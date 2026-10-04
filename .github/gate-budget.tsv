@@ -7,8 +7,9 @@
 # Both are declared here and read out of here, never restated in a workflow.
 #
 # Readers: scripts/scope-selftest.py --matrix, which divides `max_shards` by
-# the share of faults a run re-proves (#112), or takes `develop_shards` for a
-# push to the integration branch (#326); verify.sh's `report_wall_clock`,
+# the share of faults a run re-proves (#112); scripts/gatelib.py, which reads
+# `selftest_events` for the workflow's check and the gate's (#369);
+# verify.sh's `report_wall_clock`,
 # which prints every run against `wall_clock_seconds`; and
 # scripts/check-ci-coverage.py, which refuses a file that declares either one
 # missing. NOTHING FAILS A RUN
@@ -49,15 +50,19 @@ wall_clock_seconds	300
 # Ruled on #87 (2026-09-23).
 max_shards	20
 
-# --- the ceiling on a superseding run ---
+# --- when the selftest runs ---
 #
-# A push to the integration branch runs the full selftest and is cancelled by
-# the next push (#326): it is background, not a gate, and its census is what
-# pull requests are scoped against once it completes. It runs on fewer shards
-# than `max_shards` so that pull-request runs keep room under the account's 20
-# concurrent jobs while it runs. A pull request into the release branch, a
-# push to it and the nightly still get `max_shards`. Read by
-# scripts/scope-selftest.py --matrix --kind superseding.
+# The selftest proves every fault red on the events this row names, and on no
+# other (#369, planning on the maintainer's word, #25 5976434649), until the
+# gate redesign. `schedule` is the nightly on the integration branch; `release`
+# is the release path -- a pull request into the release branch and a push to
+# it, the branch read from .github/branches.tsv. A pull request into the
+# integration branch and a push to it do not run it: their package checks and
+# fast checkers are unchanged, the nightly's drift opener files a fault it
+# finds not red, and the release path re-proves every fault before a release.
 #
-# Ruled on #326 (8 to start).
-develop_shards	8
+# Read by scripts/gatelib.py for both sides of the claim: check-ci-coverage.py
+# holds verify.yml's `selftest` job's `if:` to the expression these words make,
+# and check-job-results.py accepts a skipped `selftest` only on an event they
+# leave off. Words: `schedule`, `release`.
+selftest_events	schedule release

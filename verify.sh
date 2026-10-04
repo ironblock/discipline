@@ -5052,6 +5052,52 @@ path.write_text(source.replace(old, "    branches: [main]\n", 1), encoding="utf-
 EOF
 }
 
+# The selftest's `if:` dropped: it runs on every pull request again, and no
+# row says so (#369).
+inject_ci_selftest_on_every_event() {
+  python3 - <<'EOF'
+import pathlib, re
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+new, count = re.subn(r"^(  selftest:\n    uses: .*\n)    if: .*\n", r"\1", source, count=1, flags=re.M)
+if count != 1:
+    raise SystemExit("verify.yml: no selftest job with an if: to drop")
+path.write_text(new, encoding="utf-8")
+EOF
+}
+
+# The nightly dropped from the selftest's `if:` while the row still names it:
+# the integration branch's faults are then proven nowhere (#369).
+inject_ci_selftest_off_the_nightly() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+old = "    if: ${{ github.event_name == 'schedule' || ("
+if source.count(old) != 1:
+    raise SystemExit("verify.yml: no selftest if: naming the nightly first")
+path.write_text(source.replace(old, "    if: ${{ (", 1), encoding="utf-8")
+EOF
+}
+
+# The gate's census of the selftest's shards made unconditional: every pull
+# request, whose selftest is skipped, then fails on a census nobody wrote --
+# or, the other way, a conditional the gate can switch off (#369).
+inject_ci_selftest_census_unconditional() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path(".github/workflows/verify.yml")
+source = path.read_text(encoding="utf-8")
+old = "      - name: Every fault was run by exactly one shard\n        if: needs.selftest.result != 'skipped'\n"
+if source.count(old) != 1:
+    raise SystemExit("verify.yml: no conditional census step")
+path.write_text(source.replace(old, "      - name: Every fault was run by exactly one shard\n", 1), encoding="utf-8")
+EOF
+}
+
 # The release branch spelled in a script instead of read from the table: a
 # rename of the table would leave this script deciding by the old name.
 inject_ci_branch_literal_in_script() {
@@ -8339,6 +8385,26 @@ STRICT
       python3 "${ROOT}/scripts/check-job-results.py"
   expect_exit "the gate rejects depending on no jobs at all" 1 \
     env NEEDS='{}' python3 "${ROOT}/scripts/check-job-results.py"
+  # ...and the one declared exception (#369): `selftest` skipped is accepted on
+  # an event gate-budget.tsv's `selftest_events` leaves off, and on no other.
+  # The branches are read from the table, never spelled here.
+  local integration release skipped
+  integration="$(awk -F'\t' '$1 == "integration_branch" { print $2 }' "${ROOT}/.github/branches.tsv")"
+  release="$(awk -F'\t' '$1 == "release_branch" { print $2 }' "${ROOT}/.github/branches.tsv")"
+  skipped='{"repo":{"result":"success"},"selftest":{"result":"skipped"}}'
+  expect_exit "the gate accepts a skipped selftest on a pull request into the integration branch" 0 \
+    env NEEDS="$skipped" EVENT_NAME=pull_request BASE_REF="$integration" REF_NAME=7/merge \
+      python3 "${ROOT}/scripts/check-job-results.py"
+  expect_exit "the gate rejects a skipped selftest on the nightly" 1 \
+    env NEEDS="$skipped" EVENT_NAME=schedule REF_NAME="$integration" \
+      python3 "${ROOT}/scripts/check-job-results.py"
+  expect_exit "the gate rejects a skipped selftest on a release pull request" 1 \
+    env NEEDS="$skipped" EVENT_NAME=pull_request BASE_REF="$release" REF_NAME=7/merge \
+      python3 "${ROOT}/scripts/check-job-results.py"
+  expect_exit "the gate rejects any other job skipped where the selftest may skip" 1 \
+    env NEEDS='{"repo":{"result":"skipped"},"selftest":{"result":"skipped"}}' \
+      EVENT_NAME=pull_request BASE_REF="$integration" REF_NAME=7/merge \
+      python3 "${ROOT}/scripts/check-job-results.py"
 
   # A surface whose table sets `scan: all` must reject a file it cannot scan.
   # UTF-16 renders fine in a browser but encodes ASCII as two bytes, so it
@@ -9071,6 +9137,12 @@ selftest() {
     'repo-metadata.yml: its .push:. trigger names main, and'
   seeded_case "a branch spelled in a script" ci inject_ci_branch_literal_in_script \
     'scope-selftest.py:[0-9]+: .*names a branch literally'
+  seeded_case "the selftest run on every event" ci inject_ci_selftest_on_every_event \
+    "the .selftest. job's .if:. is \\[\\], not the one expression"
+  seeded_case "the nightly dropped from the selftest's events" ci inject_ci_selftest_off_the_nightly \
+    "the .selftest. job's .if:. is \\[.\\$\\{\\{ \\(github"
+  seeded_case "the selftest census required where the selftest skips" ci inject_ci_selftest_census_unconditional \
+    "census step .check-selftest-census.py.* runs under \\[\\]"
   seeded_case "CI narrowing the test check"           ci       inject_ci_scoped_test \
     'passes .--scope. to verify\.sh'
   seeded_case "CI narrowing the history check"        ci       inject_ci_ranged_history \

@@ -149,13 +149,15 @@ CHECK_INPUTS = {
 BUDGET = ROOT / ".github" / "gate-budget.tsv"
 BRANCHES = ROOT / ".github" / "branches.tsv"
 
-# What a run is, which decides whether it is scoped and how many shards it
-# gets (#326). `scoped`: a pull request into anything but the release branch
-# re-proves what its diff reaches, under `max_shards`. `superseding`: a push to
-# the integration branch runs every fault under `develop_shards`, and the next
-# push cancels it. `full`: a release pull request, a push to the release
-# branch and the nightly run every fault under `max_shards`, never cancelled.
-KINDS = ("scoped", "superseding", "full")
+# What a run is, which decides whether it is scoped (#326). `scoped`: a pull
+# request into anything but the release branch re-proves what its diff
+# reaches. `full`: everything else runs every fault. Both divide
+# `max_shards`. Since #369 the selftest runs only on the nightly and the
+# release path (.github/gate-budget.tsv's `selftest_events`), which are both
+# `full`; `scoped` stays for the plan's own fixtures and for a cadence that
+# names a pull request again. The `superseding` kind -- a push to the
+# integration branch, on `develop_shards` -- went with that push's selftest.
+KINDS = ("scoped", "full")
 
 
 def declared(name: str, path: pathlib.Path = BUDGET) -> str:
@@ -183,20 +185,13 @@ def run_kind(event: str, ref: str, base_ref: str, default_branch: str, release: 
 
     Before the rename the default branch IS the release branch, and the
     order of these tests keeps today's behaviour there: a pull request into
-    it is scoped (the default branch wins), a push to it is full and never
-    cancelled (the release branch wins). After it the two differ, and each
-    gets its own kind.
+    it is scoped (the default branch wins). Every push is full: a push to the
+    integration branch no longer runs the selftest at all (#369).
     """
     if event == "pull_request":
         if not default_branch:
             raise Unusable("a pull request's run needs the repository's default branch to say what it is")
         return "full" if base_ref == release and base_ref != default_branch else "scoped"
-    if event == "push":
-        if ref == release:
-            return "full"
-        if not default_branch:
-            raise Unusable("a push run needs the repository's default branch to say what it is")
-        return "superseding" if ref == default_branch else "full"
     return "full"
 
 
@@ -1155,8 +1150,6 @@ def _shard_count():
             return f"{reproven} of {total} under {ceiling} gave {got}, not {want}"
     if max_shards() < 1:
         return "the checked-in budget declares no ceiling"
-    if max_shards(name="develop_shards") < 1:
-        return "the checked-in budget declares no superseding ceiling"
     return None
 
 
@@ -1218,7 +1211,7 @@ def _run_kind():
         ("pull_request", "7/merge", "integration", "integration", "scoped"),
         ("pull_request", "7/merge", "release", "integration", "full"),
         ("pull_request", "7/merge", "feat/x", "integration", "scoped"),
-        ("push", "integration", "", "integration", "superseding"),
+        ("push", "integration", "", "integration", "full"),
         ("push", "release", "", "integration", "full"),
         ("schedule", "integration", "", "", "full"),
         # before it: one branch is both, and today's behaviour holds
@@ -1228,12 +1221,12 @@ def _run_kind():
         got = run_kind(event, ref, base, default, "release")
         if got != want:
             return f"{event} on {ref or base} with default {default or 'unknown'} is {got}, not {want}"
-    for event in ("pull_request", "push"):
-        try:
-            run_kind(event, "integration", "integration", "", "release")
-        except Unusable:
-            continue
-        return f"a {event} run with no default branch was given a kind rather than refused"
+    try:
+        run_kind("pull_request", "integration", "integration", "", "release")
+    except Unusable:
+        pass
+    else:
+        return "a pull_request run with no default branch was given a kind rather than refused"
     if declared("release_branch", BRANCHES) == declared("integration_branch", BRANCHES):
         return "the checked-in branch table names one branch twice"
     return None
@@ -1343,7 +1336,7 @@ def main(argv: list[str]) -> int:
             inherited = len(inherited_ids)
             if args.plan and args.kind not in (None, "", "scoped"):
                 raise Unusable(f"a {args.kind} run re-proves every fault; it takes no plan")
-            ceiling = max_shards(name="develop_shards" if args.kind == "superseding" else "max_shards")
+            ceiling = max_shards()
             n = shard_count(total - inherited, total, ceiling)
             if args.pack_out:
                 runs = listed - set(inherited_ids)

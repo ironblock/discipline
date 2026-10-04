@@ -199,3 +199,57 @@ def split_failures(check: str, count: int, whole: list[str], parts: list[list[st
     if stray:
         failures.append(f"`{check}`'s shards run {len(stray)} member(s) the unsplit check does not: {', '.join(stray[:5])}")
     return failures
+
+
+# WHEN THE SELFTEST RUNS (#369): the events `.github/gate-budget.tsv`'s
+# `selftest_events` row names, one word each. `schedule` is the nightly; and
+# `release` is the release path, a pull request into the release branch and a
+# push to it, the branch read from `.github/branches.tsv`. Read here by both
+# sides of the one claim -- check-ci-coverage.py, which holds verify.yml's
+# `selftest` job's `if:` to selftest_expression(), and check-job-results.py,
+# which accepts a skipped `selftest` only on an event this says is off -- so
+# the workflow and the verdict cannot read the row two ways.
+SELFTEST_EVENT_WORDS = ("schedule", "release")
+
+
+def table_value(path, key: str) -> str | None:
+    """`key`'s value in a `constant<TAB>value` table, or None."""
+    for line in path.read_text(encoding="utf-8").split("\n"):
+        name, tab, value = line.partition("\t")
+        if tab and name == key and not line.startswith("#"):
+            return value.strip()
+    return None
+
+
+def selftest_events(value: str | None) -> tuple[str, ...] | None:
+    """The row's words, in the order SELFTEST_EVENT_WORDS gives them, or None
+    when the row is missing, empty, repeats a word or names one it does not
+    know -- a word nothing reads would declare an event nobody runs on."""
+    words = (value or "").split()
+    if not words or len(set(words)) != len(words) or set(words) - set(SELFTEST_EVENT_WORDS):
+        return None
+    return tuple(w for w in SELFTEST_EVENT_WORDS if w in words)
+
+
+def selftest_expression(events: tuple[str, ...], release: str) -> str:
+    """The `if:` verify.yml's `selftest` job carries for `events`."""
+    clauses = []
+    if "schedule" in events:
+        clauses.append("github.event_name == 'schedule'")
+    if "release" in events:
+        clauses.append(f"(github.event_name == 'pull_request' && github.base_ref == '{release}')")
+        clauses.append(f"(github.event_name == 'push' && github.ref_name == '{release}')")
+    return "${{ " + " || ".join(clauses) + " }}"
+
+
+def selftest_runs(events: tuple[str, ...], release: str, event: str, base_ref: str, ref_name: str) -> bool:
+    """Whether a run with this event, base and ref runs the selftest -- the
+    same answer SELFTEST_EXPRESSION gives GitHub, in Python."""
+    if "schedule" in events and event == "schedule":
+        return True
+    if "release" in events:
+        if event == "pull_request" and base_ref == release:
+            return True
+        if event == "push" and ref_name == release:
+            return True
+    return False

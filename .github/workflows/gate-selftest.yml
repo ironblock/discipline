@@ -14,12 +14,12 @@ name: gate-selftest
 # is the only thing that can tell you it did.
 #
 # HOW MANY SHARDS IS NOT WRITTEN HERE (#87). It is derived by
-# scripts/scope-selftest.py --matrix, by the run's KIND (#326): a release
-# pull request, a push to the release branch and the nightly get
-# .github/gate-budget.tsv's `max_shards`; a push to the integration branch,
-# which the next push supersedes, gets `develop_shards`; and a pull request
-# re-proving a fraction of the faults gets that fraction of `max_shards`,
-# never fewer than one (#112). The harvested plan that balanced shards by
+# scripts/scope-selftest.py --matrix, by the run's KIND (#326): a full run
+# gets .github/gate-budget.tsv's `max_shards`, and a pull request re-proving
+# a fraction of the faults gets that fraction of it, never fewer than one
+# (#112). Since #369 this workflow runs only on the events gate-budget.tsv's
+# `selftest_events` names -- the nightly and the release path, both full --
+# by verify.yml's `if:` on the job that calls it. The harvested plan that balanced shards by
 # measured cost retired with that ruling; what packs them now is re-measured
 # by every full run's census (#319), and the budget is a number every run
 # prints, not a gate.
@@ -55,10 +55,9 @@ jobs:
 
       # WHAT KIND OF RUN THIS IS (#326), read from the event and the branch
       # table, never from a branch spelled here: `scoped` (a pull request into
-      # anything but the release branch), `superseding` (a push to the
-      # integration branch, the repository's default) or `full` (a release
-      # pull request, a push to the release branch, the nightly). Bound to a
-      # variable first, for the reason the count step below gives.
+      # anything but the release branch) or `full` (everything else: the
+      # release path and the nightly, which are where this runs since #369).
+      # Bound to a variable first, for the reason the count step below gives.
       - name: What kind of run this is
         id: kind
         run: |
@@ -69,8 +68,8 @@ jobs:
           echo "kind=${kind}" >> "$GITHUB_OUTPUT"
 
       # A PULL REQUEST RE-PROVES ONLY WHAT ITS DIFF CAN REACH (#112). The
-      # base branch's latest successful full run -- a push or the nightly, the
-      # newer; a superseded push run was cancelled and has no census (#326) --
+      # base branch's latest successful nightly -- since #369 the one run
+      # there that proves every fault and so writes a census --
       # says which faults ran red there, at which commit, and which files each
       # fault's injection touched; scripts/scope-selftest.py turns that and
       # this diff into a plan of faults to INHERIT, each declared in this
@@ -85,9 +84,12 @@ jobs:
       # EVERY RUN READS ONE, since #319: the census's `seconds` rows are what
       # the count step below packs the shards by. A scoped run reads its base
       # branch's, the one its scope plan is derived from; every other run --
-      # a push, the nightly, a release pull request -- reads the default
-      # branch's, because the release branch runs too rarely for its own to
-      # be current. Read by name from the repository, never spelled here.
+      # the nightly, a release pull request, a push to the release branch --
+      # reads the default branch's, because the release branch runs too
+      # rarely for its own to be current. Read by name from the repository,
+      # never spelled here. The newest successful NIGHTLY: since #369 a push
+      # to the integration branch runs no selftest, so its run, though it
+      # succeeds, carries no census to read.
       - name: Read the latest full run's censuses
         env:
           GH_TOKEN: ${{ github.token }}
@@ -105,13 +107,13 @@ jobs:
             run_id="$(gh run list --repo "${{ github.repository }}" --workflow verify.yml \
               --branch "$branch" --status success --limit 50 \
               --json databaseId,event \
-              --jq '[.[] | select(.event == "push" or .event == "schedule")][0].databaseId // empty')" \
+              --jq '[.[] | select(.event == "schedule")][0].databaseId // empty')" \
               || { echo "::warning::the runs on ${branch} could not be listed; every fault runs, by the hash"; run_id=""; }
           else
             echo "::warning::the default branch could not be read; every fault runs, by the hash"
           fi
           if [ -n "$run_id" ]; then
-            echo "the census is verify run ${run_id}, the newest successful push or nightly on ${branch}"
+            echo "the census is verify run ${run_id}, the newest successful nightly on ${branch}"
             gh run download "$run_id" --repo "${{ github.repository }}" \
               --pattern 'selftest-census-*' --dir "${{ runner.temp }}/base-census" \
               || echo "::warning::run ${run_id} on ${branch} has no census to read; every fault runs, by the hash"
@@ -154,7 +156,7 @@ jobs:
           retention-days: 7
 
       # After the scope, because the count is the scope's: the full list on a
-      # full or superseding run, what the plan does not inherit on a scoped
+      # full run, what the plan does not inherit on a scoped
       # one, divided by the ceiling the kind names.
       #
       # And the packing (#319): the faults this run re-proves that the census
