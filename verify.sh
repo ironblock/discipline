@@ -4670,9 +4670,10 @@ path.write_text(source.replace(old, '## Results\n\nOf every #1000 steps, #142 de
 EOF
 }
 
-# A front-matter number other than `claim_issue` referenced in Conclusion
+# A front-matter value other than `claim_issue` referenced in Conclusion
 # (#350): only a directory's own issue is admitted, so `{{front.issue}}`
-# stays a typed figure in a costume.
+# stays a typed figure in a costume. A string, so that no other check
+# (a front number unbound in the summary) catches it first.
 inject_results_front_reference_other_key() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
   python3 - <<'EOF'
@@ -4680,7 +4681,7 @@ import pathlib
 
 path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
 source = path.read_text(encoding="utf-8")
-for old, new in (('claim_issue = "63"\n', 'claim_issue = "63"\nissue = 63\n'),
+for old, new in (('claim_issue = "63"\n', 'claim_issue = "63"\nissue = "63"\n'),
                  ("the product's own.", "the product's own, as {{front.issue}} asked.")):
     if source.count(old) != 1:
         raise SystemExit(f"the anchor appears {source.count(old)} times")

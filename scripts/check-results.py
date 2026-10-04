@@ -1120,8 +1120,9 @@ def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None,
     found, value = resolve(scope, steps)
     if not found:
         return None, f"`{{{{{text}}}}}` names `{target}`, which {path.group(1)} does not carry"
-    # `front` is a date, or one of the three `[regime]` keys checked against
-    # the record's start row -- nothing else, counted or not (#265's reviews:
+    # `front` is a date, one of the three `[regime]` keys checked against the
+    # record's start row, a checked digest, or `claim_issue` (#350) -- nothing
+    # else, counted or not (#265's reviews:
     # a front string, and then any other `[regime]` key, which only the
     # author's own regimen.toml backs, carried a figure past the lint).
     # A date only: `datetime.datetime` is a `datetime.date` too, and its time
@@ -1146,7 +1147,7 @@ def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None,
         if isinstance(value, (list, dict)):
             return str(len(value)), None
         return None, f"`{{{{{text}}}}}` counts `{target}`, which is not a list or a table"
-    # `front` is a date or a `[regime]` value, nothing else (#265's review): a
+    # `front` is one of the values above, nothing else (#265's review): a
     # front-matter string is checked against nothing, so a figure in one is a
     # typed figure in a costume, and a front-matter number re-spells through
     # TOML -- `summary` holds the same number as written.

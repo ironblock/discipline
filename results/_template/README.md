@@ -30,14 +30,15 @@ double braces, rooted at `product.` (the one file here whose sha256 is
 `product_sha256`), `front.` (a date; `regime.arm`, `regime.substrates` or
 `regime.dogma_version`; `product_sha256` or `pre_registration_sha256`, the
 digests this linter checks; or `claim_issue`, rendered `#<n>`) or `summary.`,
-or `count()`, `round(…, n)` or `pct(…, n)` of one. `count()` is the number of members of the list or table
-the path names, never a line or byte count; `round` and `pct` round half-even,
-so a column of rounded figures does not drift. A `front.` path the
-front-matter lacks, or whose value is not one of those, is refused, never rendered
-empty. The linter renders every reference, wherever it stands --
-code included -- from the data at check time; `--render DIR` prints the
-result. Results and Conclusion carry no typed figure, not in prose, code, a
-link or a comment; elsewhere a figure stands only inside `[uncited: <reason>]`.
+or `count()`, `round(…, n)` or `pct(…, n)` of one. `count()` is the number of
+members of the list or table the path names, never a line or byte count;
+`round` and `pct` round half-even, so a column of rounded figures does not
+drift. A `front.` path the front-matter lacks, or whose value is not one of
+those, is refused, never rendered empty. The linter renders every reference,
+wherever it stands -- code included -- from the data at check time; `--render
+DIR` prints the result. Results and Conclusion carry no typed figure, not in
+prose, code, a link or a comment; elsewhere a figure stands only inside
+`[uncited: <reason>]`.
 
 A copy of this template must also give the claim's provenance (#32), each
 field at the top level or named in `absent = { field = "why it is absent" }`:
