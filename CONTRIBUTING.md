@@ -32,7 +32,7 @@ Nothing that runs spells either branch: workflows read `github.event.repository.
 
 
 # MILESTONES
-One milestone per tag, in the order the tags will be cut (`v0.1.0`, `v0.2.0`, ...). A milestone is what its release pull request contains, and it closes when the tag lands. Drives and trajectories are deliverables inside a version, never milestones of their own; programs (`program:dogma`, `program:claims`, `program:gate`) are labels, because they span versions. Ruled on #25 (2026-10-04, planning on the maintainer's word), applied in one pass by Dispatch and recorded there.
+One milestone per tag, in the order the tags will be cut (`v0.1.0`, `v0.2.0`, ...). A milestone is what its release pull request contains, and it closes when the tag lands. Drives and trajectories are deliverables inside a version, never milestones of their own; programs (`program:dogma`, `program:claims`, `program:gate`) are labels, because they span versions. Ruled on #25 (2026-10-04, planning on the maintainer's word: comments 5976434649 and 5976773552), applied in one pass by Dispatch and recorded there (5976838317). That a milestone is what its release pull request contains follows from *Branches and releases* above, not from the ruling.
 - **A child's milestone is never later than its parent's**, and the parent closes with its last child. Move the children first.
 - **An unmilestoned issue is backlog.** A version adopts it at a cut, or it ages out: an item no version has adopted after two cuts is closed "not adopted", and reopens with a version.
 - **Planning names what a version contains; Dispatch applies it** with the platform's tools and records the pass on #25, telling every session that holds a moved ticket its new home in the move itself.
