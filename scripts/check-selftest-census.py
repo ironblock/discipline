@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Add the selftest's shards back up, and refuse if they do not make a whole.
 
-`verify.sh --selftest --shard K/N` runs the faults a hash of their id assigns
-to shard K.
+`verify.sh --selftest --shard K/N` runs the faults assigned to shard K: by the
+plan job's packing of their measured seconds, or by a hash of their id (#319).
 That is a division of labour, not a selection of faults -- but the difference
 between those two is invisible from inside any one shard, because a shard that
 ran nothing and a shard that ran its share both exit 0 and both say `success`.
@@ -63,6 +63,11 @@ class Census:
         self.inherited: list[tuple[int, str, str]] = []
         self.commit: str | None = None
         self.touched: list[tuple[str, str]] = []
+        # #319: the ids this shard ran, and the seconds it measured for each,
+        # which the next run's plan packs by. A seconds row for a fault the
+        # shard did not run would pack a fault by a cost nobody measured.
+        self.ran_ids: set[str] = set()
+        self.seconds: list[tuple[int, str]] = []
         self.errors: list[str] = []
         self._parse()
 
@@ -97,6 +102,12 @@ class Census:
                 else:
                     self.errors.append(f"{self.path.name}:{number}: {parts[1]} was not seen red: {parts[3]}")
                 continue
+            if key == "seconds":
+                if len(parts) != 3 or not parts[1] or not parts[2].isdigit():
+                    self.errors.append(f"{self.path.name}:{number}: not `seconds<TAB>ID<TAB>N`")
+                else:
+                    self.seconds.append((number, parts[1]))
+                continue
             if key == "inherited":
                 if len(parts) != 4 or not parts[1].isdigit() or not parts[2] or not parts[3]:
                     self.errors.append(
@@ -107,6 +118,7 @@ class Census:
                 continue
             # `ordinal<TAB>N<TAB>ID` since #112; `ordinal<TAB>N` before it.
             if key == "ordinal" and len(parts) == 3:
+                self.ran_ids.add(parts[2])
                 parts = parts[:2]
             if len(parts) != 2:
                 self.errors.append(f"{self.path.name}:{number}: not `key<TAB>value`")
@@ -125,6 +137,9 @@ class Census:
                 self.ordinals.append(value)
             else:
                 self.errors.append(f"{self.path.name}:{number}: unknown key `{key}`")
+        for number, ident in self.seconds:
+            if ident not in self.ran_ids:
+                self.errors.append(f"{self.path.name}:{number}: seconds for {ident}, which this shard did not run")
         for key in SCALARS:
             if key not in self.scalars:
                 self.errors.append(f"{self.path.name}: no `{key}` line")

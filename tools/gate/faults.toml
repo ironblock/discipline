@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 155
+mechanics_assertions = 165
 unseedable_guards = 2
 migrated = 0
 
@@ -4376,6 +4376,22 @@ failure_class = "shard.fault-run-twice"
 legacy_signature = ""
 migrated = false
 [[fault]]
+id = "mech.a-whole-whose-shards-timed-every-fault-they-ran"
+kind = "mechanics"
+check = "parity"
+label = "a whole whose shards timed every fault they ran"
+failure_class = "shard.timed-whole"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.seconds-for-a-fault-the-shard-did-not-run-are-refused"
+kind = "mechanics"
+check = "parity"
+label = "seconds for a fault the shard did not run are refused"
+failure_class = "shard.seconds-not-run"
+legacy_signature = ""
+migrated = false
+[[fault]]
 id = "mech.no-shard-reporting-at-all-is-not-a-pass"
 kind = "mechanics"
 check = "parity"
@@ -4445,6 +4461,70 @@ kind = "mechanics"
 check = "parity"
 label = "a shard outside 1..N is a misuse"
 failure_class = "shard.out-of-range"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-s-faults-run-in-its-shard-the-others-by-the-hash-each-once"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan's faults run in its shard, the others by the hash, each once"
+failure_class = "shard-plan.followed"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-without-shard-is-a-misuse"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan without --shard is a misuse"
+failure_class = "shard-plan.without-shard"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-packed-for-another-n-is-refused"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan packed for another N is refused"
+failure_class = "shard-plan.wrong-n"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-assigning-outside-1-n-is-refused"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan assigning outside 1..N is refused"
+failure_class = "shard-plan.out-of-range"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-assigning-one-fault-twice-is-refused"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan assigning one fault twice is refused"
+failure_class = "shard-plan.assigned-twice"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-that-never-says-its-n-is-refused"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan that never says its N is refused"
+failure_class = "shard-plan.no-n"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-of-nothing-but-comments-is-refused"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan of nothing but comments is refused"
+failure_class = "shard-plan.empty"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-outside-selftest-is-a-misuse"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan outside --selftest is a misuse"
+failure_class = "shard-plan.outside-selftest"
 legacy_signature = ""
 migrated = false
 [[fault]]
