@@ -496,6 +496,7 @@ check_exercise() {
     pnpm() { npx --yes "$pinned" "$@"; }
     pnpm --version &&
       pnpm install --frozen-lockfile &&
+      pnpm gate &&
       pnpm typecheck &&
       pnpm lint &&
       pnpm exec playwright install chromium &&
@@ -3995,6 +3996,13 @@ inject_exercise_file_ref_dropped() {
 # so typecheck and lint pass it and the story is what fails.
 inject_exercise_prompt_not_docked() {
   edit_in_place "s|^              {approving.waiting && approving.decide ? <ApprovalPrompt |              {approving.waiting \&\& approving.decide ? void <ApprovalPrompt |" exercise/src/ui/SessionView.tsx
+}
+
+# A replayed call's segments drawn from its text, not the gate's judgement
+# (#389): the command split on `;` -- a second reader of the shell, which the
+# wasm gate exists to prevent. Typecheck and lint pass it.
+inject_exercise_segments_from_text() {
+  edit_in_place "s|^  const segments = judged.judgement.segments;$|  const segments = argv.join(' ').split(';').map((shape): Segment => ({ shape: shape.trim(), verdict: 'prompt' }));|" exercise/src/ui/GateSegments.tsx
 }
 
 # A placed core line diet's reader refuses (#300): an `ask` carrying a key
@@ -10766,6 +10774,8 @@ selftest() {
     'FAIL.*approval\.test\.ts.*replays the decision from the log alone'
   seeded_case "a waiting call with no prompt docked" exercise inject_exercise_prompt_not_docked \
     'FAIL.*Approval\.stories\.tsx.*a command waits on you; approved for the session'
+  seeded_case "a replayed call's segments drawn from its text" exercise inject_exercise_segments_from_text \
+    'FAIL.*Approval\.stories\.tsx.*the conformance corpus, each command drawn as the gate judged it'
   seeded_case "a placed core line diet's reader refuses" exercise inject_exercise_placed_line_refused \
     'diet check-log refuses the placed projection: .*`ask` carries no `asked_by`'
   seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \

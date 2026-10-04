@@ -52,7 +52,7 @@ describe('a call waiting on the operator, canned (#389)', () => {
     expect(ran?.approval?.decided_at).toBeGreaterThanOrEqual(lines.find((l) => l.kind === 'response')?.t ?? Infinity);
     expect(ran?.approval?.decided_at).toBeLessThanOrEqual(ran?.t ?? -1);
     // The denylist refuses without asking: the command it refused, its directory, and no policy words (#388 5982002587).
-    expect(refused).toEqual(expect.objectContaining({ id: 't/2', outcome: 'refused', reason: 'denylist', argv: ['sh', '-c', 'rm -rf node_modules/.vite'], cwd: T1_CWD }));
+    expect(refused).toEqual(expect.objectContaining({ id: 't/2', outcome: 'refused', reason: 'denylist', argv: ['sh', '-c', 'git status && git push origin main'], cwd: T1_CWD }));
     expect(refused).not.toHaveProperty('isolation');
     expect(refused).not.toHaveProperty('approval');
     expect(lines.at(-1)).toMatchObject({ kind: 'turn.settled', reason: 'final' });

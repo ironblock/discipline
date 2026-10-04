@@ -1,0 +1,10 @@
+# #389's replay segments (after #402): a call's segments re-derived by diet's own gate, built to wasm.
+
+[[fault]]
+id = "exercise.exercise_segments_from_text"
+kind = "seeded-gate"
+check = "exercise"
+label = "a replayed call's segments drawn from its text"
+failure_class = "exercise.approval"
+legacy_signature = "FAIL.*Approval\\.stories\\.tsx.*the conformance corpus, each command drawn as the gate judged it"
+migrated = false

@@ -281,7 +281,7 @@ describe('HttpTransport: a tool call’s file, by digest (#372)', () => {
 });
 
 describe('HttpTransport: a call waiting on the operator (#389, ruled 5982826097)', () => {
-  const waiting = { request: 3, id: 'call_1', command: 'npm install', cwd: '~/git/experiments/t1', reason: 'not_approved', segments: [{ text: 'npm install', program: 'npm', subcommand: 'install', verdict: 'prompt', why: 'not_approved' }] };
+  const waiting = { request: 3, id: 'call_1', command: 'npm install', cwd: '~/git/experiments/t1', reason: 'not_approved', segments: [{ shape: 'npm install', verdict: 'prompt', why: 'not_approved' }] };
   const watched = (transport: HttpTransport) => {
     const seen: unknown[] = [];
     transport.watchPrompt((prompt) => seen.push(prompt?.id));

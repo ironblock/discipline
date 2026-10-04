@@ -7,3 +7,5 @@ dist/
 # Vitest browser mode and Playwright leave these beside the run.
 test-results/
 .vitest/
+# The shell gate built for the page (scripts/build-gate.mjs): built every run, never committed.
+src/gate/wasm/

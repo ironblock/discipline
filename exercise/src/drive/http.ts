@@ -24,7 +24,7 @@
  * it waits; and `answered` `{request, id}`, when it is decided. The prompt is
  * also over on this page's own `/approve` ack, and on the call's `tool_call` line.
  *
- * The page reaches it same-origin: in development Vite proxies both routes
+ * The page reaches it same-origin: in development Vite proxies every route here
  * (`vite.config.ts`, `DIET_DRIVE`), and `diet` is started with
  * `--allow-origin` naming the page's origin, whose host it then accepts as
  * the `Host` a proxy forwards.

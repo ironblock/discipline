@@ -38,6 +38,18 @@ jobs:
         with:
           shared-key: exercise-${{ env.RUNNER_IMAGE }}
 
+      # The shell gate the replay judges with (#389): `diet/wasm` built to wasm32
+      # and bound by the `wasm-bindgen` CLI at the exact version that crate
+      # pins (exercise/scripts/build-gate.mjs), read from its Cargo.toml so
+      # the two cannot drift. Restored from the Cargo cache when warm.
+      - name: Add the wasm32 target and the pinned wasm-bindgen CLI
+        run: |
+          set -euo pipefail
+          rustup target add wasm32-unknown-unknown
+          pin="$(sed -n 's/^wasm-bindgen = { version = "=\([0-9.]*\)".*/\1/p' diet/wasm/Cargo.toml)"
+          test -n "$pin"
+          cargo install wasm-bindgen-cli --version "$pin" --locked
+
       - uses: pnpm/action-setup@v4
         with:
           package_json_file: exercise/package.json

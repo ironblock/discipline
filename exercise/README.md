@@ -12,6 +12,7 @@ workflow requirements this application expresses, not the other way round.
 
 ```
 npx --yes pnpm@11.20.0 -C exercise install
+npx --yes pnpm@11.20.0 -C exercise gate          # diet's shell gate built to wasm, for the replay (#389): needs the wasm32 target and diet/wasm's pinned wasm-bindgen CLI
 npx --yes pnpm@11.20.0 -C exercise dev           # the harness on the canned transport, http://localhost:5173 (?speed=4 to hurry it)
 npx --yes pnpm@11.20.0 -C exercise storybook     # the surface at every moment of the specimen, http://localhost:6006
 npx --yes pnpm@11.20.0 -C exercise verify        # typecheck, lint, unit tests, every story as a browser test

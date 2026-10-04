@@ -6,9 +6,8 @@
  * numbers below, so nothing about it has a provenance but this file. Its
  * timings are plausible, not measured.
  *
- * Placed, it carries log v4's `files` (#372 5983588781) in a log that
- * declares v3, so it is not among the sessions `projections.ts` hands to
- * `diet check-log` until the v4 courier lands.
+ * Placed, it is a v4 log (#372 5983588781, #417): its call carries its
+ * `cwd` and `files`, and `projections.ts` hands it to `diet check-log`.
  */
 
 import { png } from './png.ts';
@@ -47,6 +46,7 @@ export const SCREENSHOT: readonly Beat[] = [
         slots: 1,
         trunk_slot: 0,
         phase: 'build',
+        version: 4,
         system: { text: 'You are working in a Babylon.js project. Run commands with the bash tool.', tokens: 610 },
       },
     ],
@@ -66,7 +66,7 @@ export const SCREENSHOT: readonly Beat[] = [
         stop: 'tool',
         timings: timings(680, 0, 400, 36, 880),
       },
-      { kind: 'tool.begin', t: 1320, id: 't/1', turn: 1, after: 'q/1#response', tool: 'bash', args: { command: 'node shot.mjs --out shots/scene.png' } },
+      { kind: 'tool.begin', t: 1320, id: 't/1', turn: 1, after: 'q/1#response', tool: 'bash', args: { command: 'node shot.mjs --out shots/scene.png' }, cwd: '~/git/experiments/t1' },
       { kind: 'tool.end', t: 4100, id: 't/1', exit: 0, output: 'wrote shots/scene.png (160x96)\n', files: [SCENE] },
       { kind: 'request', t: 4120, id: 'q/2', lane: 'trunk', slot: 0, turn: 1 },
       {
