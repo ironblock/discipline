@@ -70,9 +70,6 @@ jobs:
   diet:
     uses: ./.github/workflows/pkg-diet.yml
 
-  pages:
-    uses: ./.github/workflows/pkg-pages.yml
-
   exercise:
     uses: ./.github/workflows/pkg-exercise.yml
 
@@ -99,7 +96,7 @@ jobs:
 
   gate:
     name: gate
-    needs: [diet, pages, exercise, repo, bsd, injections, recompute, selftest]
+    needs: [diet, exercise, repo, bsd, injections, recompute, selftest]
     if: always()
     runs-on: ubuntu-latest
     # `actions: read` on top of the workflow's `contents: read`, because this

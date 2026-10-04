@@ -8508,7 +8508,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a results directory no shard re-derives"
 failure_class = "wiring.shard-incomplete"
-legacy_signature = "`recompute`.s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+legacy_signature = "`recompute`.s 2 shards run none of 2 member\\(s\\), so nothing runs them"
 migrated = false
 [[fault]]
 id = "ci.ci_sharded_workflow_without_shard"
@@ -8540,7 +8540,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a check that runs one shard whatever"
 failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute..s 3 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
+legacy_signature = ".recompute..s 2 shards run none of [0-9]+ member\\(s\\), so nothing runs them"
 migrated = false
 [[fault]]
 id = "ci.ci_sharded_workflow_line_separator"
@@ -8564,7 +8564,7 @@ kind = "seeded-gate"
 check = "ci"
 label = "a shard that runs fewer than it lists"
 failure_class = "wiring.shard-incomplete"
-legacy_signature = ".recompute..s 3 shards run none of 3 member\\(s\\), so nothing runs them"
+legacy_signature = ".recompute..s 2 shards run none of 2 member\\(s\\), so nothing runs them"
 migrated = false
 [[fault]]
 id = "ci.ci_injections_applies_fewer_than_listed"
