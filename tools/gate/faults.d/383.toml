@@ -17,3 +17,12 @@ label = "a per-ticket file not named for its ticket"
 failure_class = "parity.ticket-file-misnamed"
 legacy_signature = "faults\\.d/notes\\.toml: a per-ticket file is named for its ticket"
 migrated = false
+
+[[fault]]
+id = "mech.a-sandbox-copy-with-a-file-under-the-wrong-name-is-refused"
+kind = "mechanics"
+check = "-"
+label = "a sandbox copy with a file under the wrong name is refused"
+failure_class = "selftest.sandbox-not-the-tree"
+expected_exit = "0"
+migrated = false

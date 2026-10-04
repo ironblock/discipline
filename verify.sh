@@ -997,13 +997,14 @@ sandbox() {
     echo "selftest: the sandbox tree could not be copied" >&2
     return 1
   }
-  # Read back, not trusted (#380): the box holds exactly as many files as the
-  # list it was given, counted on the tree before git touches it.
-  local copied
-  # NUL-counted: a path holding a newline is one file, not two lines.
-  copied="$(find "$dest" -type f -print0 | tr -dc '\0' | wc -c)"
-  if [ "${copied// /}" -ne "${#files[@]}" ]; then
-    echo "selftest: the sandbox holds ${copied// /} file(s) of the ${#files[@]} it was given" >&2
+  # Read back, not trusted (#380): the box holds exactly the files of the list
+  # it was given, BY NAME (#383, Track 1's note on #387: a count passes a copy
+  # that dropped one file and wrote another), read before git touches it.
+  # NUL-separated and C-sorted on both sides, so a newline in a path is one
+  # path and the order is the bytes'.
+  if ! cmp -s <(find "$dest" -type f -print0 | LC_ALL=C sort -z) \
+              <(printf '%s\0' "${files[@]/#/${dest}/}" | LC_ALL=C sort -z); then
+    echo "selftest: the sandbox does not hold exactly the ${#files[@]} file(s) it was given" >&2
     return 1
   fi
 
@@ -11722,6 +11723,20 @@ EOF
   # defines applies zero injections, and zero inert would read as a pass.
   expect_exit "an injection scope naming nothing defined is not a pass" 1 \
     bash "${ROOT}/verify.sh" --only injections --scope inject_this_repository_does_not_define
+  # The sandbox's read-back compares names, not a count (#383): a copier that
+  # writes as many files as it was given, one under the wrong name, is refused.
+  # A stand-in ROOT whose copy-tree.py does exactly that, driven through the
+  # real sandbox().
+  local wrongcopy; scratch; wrongcopy="$SCRATCH"
+  mkdir -p "${wrongcopy}/root/scripts" && printf 'a\n' > "${wrongcopy}/root/a" && printf 'b\n' > "${wrongcopy}/root/b"
+  printf 'import pathlib, sys\nsys.stdin.buffer.read()\nd = pathlib.Path(sys.argv[2]); d.mkdir(parents=True, exist_ok=True)\nfor n in ("a", "c", "scripts/copy-tree.py"):\n    (d / n).parent.mkdir(parents=True, exist_ok=True); (d / n).write_text("x")\n' \
+    > "${wrongcopy}/root/scripts/copy-tree.py"
+  git -C "${wrongcopy}/root" init --quiet && git -C "${wrongcopy}/root" add --all
+  expect_exit "a sandbox copy with a file under the wrong name is refused" 0 \
+    "$BASH" -c "$(declare -f sandbox)"'
+      ROOT="$1"; out="$(sandbox "$2" 2>&1)" && exit 9
+      grep -qF "does not hold exactly the 3 file(s)" <<<"$out"' \
+    _ "${wrongcopy}/root" "${wrongcopy}/box"
   expect_exit "a shard outside 1..N is a misuse" 2 \
     bash "${ROOT}/verify.sh" --selftest --shard 9/8
   # The shard plan's refusals (#319), each before any fault runs. Each greps
