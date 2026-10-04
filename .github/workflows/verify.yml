@@ -123,8 +123,8 @@ jobs:
   # unchanged, the nightly's drift opener files what it finds, and the release
   # path re-proves every fault before a release. A machinery pull request runs
   # the scoped selftest: the faults its change reaches, which for the
-  # selftest's own functions or files is every one. The expression spells the release branch because a job's `if:`
-  # reads no file; scripts/check-ci-coverage.py holds it to that row and
+  # selftest's own functions or files is every one. The expression spells
+  # the release branch because a job's `if:` reads no file; scripts/check-ci-coverage.py holds it to that row and
   # .github/branches.tsv, and check-job-results.py accepts it skipped only
   # where the row says so. The `if:` follows `uses:`: a call is a job whose
   # first line is its `uses:` (check-ci-coverage.py's CALLS).

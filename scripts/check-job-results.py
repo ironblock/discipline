@@ -24,8 +24,9 @@ accepted. No other job is ever accepted skipped.
 A pull request whose diff touches the selftest's machinery runs it (#398),
 where the row names `machinery`: the `scope` job's `machinery` output, read
 from `needs`, is `true`, and a skipped selftest is then refused. On a pull
-request that output must read `true` or `false`; anything else -- no `scope`
-job, no output -- is not off, so a skip is refused rather than guessed at.
+request that output must read `true` or `false` from a `scope` job that
+succeeded; anything else -- no `scope` job, no output, a failed one -- is not
+off, so a skip is refused rather than guessed at.
 
 Exit 0 if every job succeeded, 1 otherwise.
 """
@@ -47,9 +48,12 @@ SCOPE_JOB = "scope"
 
 
 def machinery_answer(needs: dict) -> str:
-    """The `scope` job's `machinery` output, or "" when there is none."""
+    """The `scope` job's `machinery` output, or "" when there is none or the
+    job did not succeed: a failed job's answer is no answer."""
     scope = needs.get(SCOPE_JOB)
-    outputs = scope.get("outputs") if isinstance(scope, dict) else None
+    if not isinstance(scope, dict) or scope.get("result") != SUCCESS:
+        return ""
+    outputs = scope.get("outputs")
     answer = outputs.get("machinery", "") if isinstance(outputs, dict) else ""
     return answer if isinstance(answer, str) else ""
 

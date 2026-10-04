@@ -6308,8 +6308,8 @@ EOF
 }
 
 # The scope job answering without `--machinery` (#398): pr-scope.py then
-# prints its lane report, which no `machinery=` line is in, so the output is
-# empty and every machinery pull request reads as none.
+# writes its lane report into $GITHUB_OUTPUT, which the runner refuses, so
+# every pull request's scope job fails -- the gate red for a wiring slip.
 inject_ci_scope_not_machinery() {
   python3 - <<'EOF'
 import pathlib
