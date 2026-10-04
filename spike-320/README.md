@@ -35,7 +35,7 @@ drive is the lane with the most faults: 214 in `diet/drive/gate.toml`, 212 of th
 - cargo-mutants 27.1.0, installed with `cargo install --locked`.
 - Run over `diet/src/drive/*.rs` and `diet/src/bin/drive.rs`, with the lane's own test filter (`-- drive --skip every_seeded_fault_still_names_source_that_is_there`).
 - `-j 3`, a 300 s timeout, on the Mac Pro (Xeon W-3235, 24 threads, shared with other seats' runs).
-- Tree cdb2581's parent, develop 8518de9.
+- The Rust tree at develop 8518de9: the spike changes no Rust.
 
 | run | mutants | caught | missed (survived) | unviable | wall clock |
 |---|---|---|---|---|---|
