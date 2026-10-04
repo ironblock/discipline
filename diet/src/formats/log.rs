@@ -1523,11 +1523,15 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     .copied()
                     .filter(|key| object.contains_key(*key))
                     .collect();
-                match pieces.as_slice() {
-                    ["text"] => Piece::Text(fields.string("text")?),
-                    ["reasoning"] => Piece::Reasoning(fields.string("reasoning")?),
-                    ["tool_call"] => fields.tool_call_piece("tool_call")?,
-                    [] => {
+                match (
+                    object.contains_key("text"),
+                    object.contains_key("reasoning"),
+                    object.contains_key("tool_call"),
+                ) {
+                    (true, false, false) => Piece::Text(fields.string("text")?),
+                    (false, true, false) => Piece::Reasoning(fields.string("reasoning")?),
+                    (false, false, true) => fields.tool_call_piece("tool_call")?,
+                    (false, false, false) => {
                         return Err(
                             "a delta carries none of `text`, `reasoning` and `tool_call`"
                                 .to_owned(),
@@ -4324,14 +4328,20 @@ mod tests {
             })
             .collect();
         let value_of = |key: &str| -> Value {
-            match key {
-                "argv" | "confined" => Value::Array(vec![Value::String("true".to_owned())]),
-                "isolation" => Value::String("sandbox".to_owned()),
-                "network" => Value::String("none".to_owned()),
-                "reason" => Value::String("not_allowed".to_owned()),
-                "policy" => Value::String(POLICY.to_owned()),
-                "stdout" | "stderr" => Value::String(String::new()),
-                _ => Value::Integer(0),
+            if key == "argv" || key == "confined" {
+                Value::Array(vec![Value::String("true".to_owned())])
+            } else if key == "isolation" {
+                Value::String("sandbox".to_owned())
+            } else if key == "network" {
+                Value::String("none".to_owned())
+            } else if key == "reason" {
+                Value::String("not_allowed".to_owned())
+            } else if key == "policy" {
+                Value::String(POLICY.to_owned())
+            } else if key == "stdout" || key == "stderr" {
+                Value::String(String::new())
+            } else {
+                Value::Integer(0)
             }
         };
         let partner = |key: &str| {
