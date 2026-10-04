@@ -37,6 +37,12 @@ import gatelib
 import sys
 import tempfile
 from pathlib import Path
+import importlib.util
+
+# scripts/copy-tree.py, by path: its name has a hyphen, as every script here does.
+_spec = importlib.util.spec_from_file_location("copy_tree", Path(__file__).resolve().parent / "copy-tree.py")
+COPY_TREE = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(COPY_TREE)
 
 FUNC = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{", re.M)
 FUNC_BODY = re.compile(r"^(inject_[a-z0-9_]+)\(\) \{\n(.*?)^\}\n", re.M | re.S)
@@ -303,21 +309,17 @@ def tracked_files(root: Path) -> list[str]:
 
 
 def populate(box: Path, root: Path, tracked: list[str]) -> None:
-    # One `cp`, not a thousand `shutil.copy2` calls. Measured: 0.70s the old
-    # way, 0.56s this way, for the same thousand files. A fifth, not an order
-    # of magnitude -- the copy itself is most of what a populate costs either
-    # way, which is why the caller now populates ONCE and restores.
+    # scripts/copy-tree.py's `copy_tree`, in-process (#380): it replaced
+    # `cp -L --parents --preserve=mode`, which BSD `cp` refuses. The copy is
+    # most of what a populate costs either way, which is why the caller
+    # populates ONCE and restores.
     #
-    # `--preserve=mode` and not `-p`: the executable bit is load-bearing (a
-    # results fixture's recompute.sh is run by name), and the modification
-    # times deliberately are not preserved -- a copy whose sources look older
-    # than some artifact is how a stale binary gets read as fresh, which is a
-    # mistake this repository has already paid for once.
-    subprocess.run(
-        ["cp", "-L", "--parents", "--preserve=mode", "-t", str(box), *tracked],
-        cwd=root,
-        check=True,
-    )
+    # The mode is kept and the modification time is not, as `--preserve=mode`
+    # without `-p` did. The executable bit is load-bearing (a results
+    # fixture's recompute.sh is run by name), and a copy whose sources look
+    # older than some artifact is how a stale binary gets read as fresh, which
+    # is a mistake this repository has already paid for once.
+    COPY_TREE.copy_tree(root, box, tracked)
     subprocess.run(
         ["git", "-C", str(box), "init", "--quiet"],
         check=True,

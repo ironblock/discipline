@@ -980,18 +980,19 @@ sandbox() {
     return 1
   fi
 
-  # `--parents` rebuilds each path's directories under dest, and -L matches
-  # the dereference the check above tests for. Still deliberately NOT `-p`:
-  # preserving mtimes would make a box's sources look older than artifacts
-  # left in the shared cargo target by the case before it, so cargo would
-  # declare them fresh and run the wrong binary.
+  # scripts/copy-tree.py rebuilds each path's directories under dest and
+  # follows links, which the check above tests for (#380: it replaced `cp
+  # -L --parents`, which BSD `cp` refuses, so a stock Mac failed here). Still
+  # deliberately NOT preserving mtimes: that would make a box's sources look
+  # older than artifacts left in the shared cargo target by the case before
+  # it, so cargo would declare them fresh and run the wrong binary. The mode
+  # is kept; a copied script is run by name.
   #
-  # The pipeline's status is `cp`'s: `set -o pipefail` is in force and xargs
-  # exits non-zero if any `cp` it spawns does. Nothing here reads a status
-  # through a filter -- the rule this script opens with is about `| grep` and
-  # `| tee` standing in for a command's own exit code.
-  ( cd "$ROOT" && printf '%s\0' "${files[@]}" |
-      xargs -0 cp -L --parents -t "$dest" ) || {
+  # The pipeline's status is the copy's: `set -o pipefail` is in force, and
+  # one process copies the list. Nothing here reads a status through a filter
+  # -- the rule this script opens with is about `| grep` and `| tee` standing
+  # in for a command's own exit code.
+  printf '%s\0' "${files[@]}" | python3 "${ROOT}/scripts/copy-tree.py" "$ROOT" "$dest" || {
     echo "selftest: the sandbox tree could not be copied" >&2
     return 1
   }
