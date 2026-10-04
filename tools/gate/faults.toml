@@ -4090,6 +4090,14 @@ failure_class = "gate.derive-accepts-a-fast-green"
 legacy_signature = "a scope naming another target selected something"
 migrated = false
 [[fault]]
+id = "derive.derive_drift_machinery_not_widened"
+kind = "seeded-gate"
+check = "derive"
+label = "a machinery change's drift refusal not widened"
+failure_class = "drift.machinery-not-widened"
+legacy_signature = "a verify\\.sh change under an open bsd issue found \\[\\]"
+migrated = false
+[[fault]]
 id = "ci.ci_pages_deploys_on_any_conclusion"
 kind = "seeded-gate"
 check = "ci"

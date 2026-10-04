@@ -76,6 +76,11 @@ jobs:
 
   repo:
     uses: ./.github/workflows/pkg-repo.yml
+    # `issues: read` for the drift issues a pull request is refused on, a
+    # step of the repo job since the selftest no longer runs on one (#369).
+    permissions:
+      contents: read
+      issues: read
 
   bsd:
     uses: ./.github/workflows/pkg-bsd.yml

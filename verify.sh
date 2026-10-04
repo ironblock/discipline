@@ -5996,6 +5996,22 @@ assert source.count(old) == 1
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
+# A pull request's drift refusal not widened for a machinery change (#369,
+# ruled (c) at 5976704493): a verify.sh change under an open drift issue on a
+# check pr-scope did not name would then pass, where the scope plan it
+# replaced re-proved -- and so refused on -- every check.
+inject_derive_drift_machinery_not_widened() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/selftest-drift.py")
+source = path.read_text(encoding="utf-8")
+old = "    if any(m in reason for m in MACHINERY_REASONS):\n"
+if source.count(old) != 1:
+    raise SystemExit("selftest-drift.py: no single machinery widening to remove")
+path.write_text(source.replace(old, "    if False:\n", 1), encoding="utf-8")
+EOF
+}
 # The scope derivation forgetting what a fault's injection touched (#112): a
 # PR editing exactly the file a fault seeds into would then inherit that
 # fault, at a commit where the file was something else. The fixture that
@@ -9263,6 +9279,8 @@ selftest() {
     'the wrecked target read as'
   seeded_case "a scope past its own failure accepted"  derive   inject_derive_accepts_a_fast_green \
     'a scope naming another target selected something'
+  seeded_case "a machinery change's drift refusal not widened" derive inject_derive_drift_machinery_not_widened \
+    'a verify\.sh change under an open bsd issue found \[\]'
   seeded_case "a scope that forgets what a fault touched" derive inject_scope_ignores_touched \
     'FAIL  a file the fault.s injection touched re-proves it'
   seeded_case "the wall-clock budget left undeclared"  ci       inject_gate_budget_undeclared \

@@ -18,7 +18,7 @@ Two long-lived branches, named once in `.github/branches.tsv` (#326):
 - **The release branch** (`main`) takes only release pull requests from the integration branch. Nothing is versioned: a release is a tag on the release branch, not a version bump.
 
 What runs where. Until the gate redesign, the selftest (every seeded fault proven red) runs on the nightly and the release path only: `.github/gate-budget.tsv`'s `selftest_events` (#369).
-- **A pull request into the integration branch** (or into any branch but the release branch) runs every package job -- the checks and fast checkers -- and no selftest. Its newer push supersedes its older run.
+- **A pull request into the integration branch** (or into any branch but the release branch) runs every package job -- the checks and fast checkers -- and no selftest. It is refused while a check it touches has an open drift issue (`check:<name>`), by the `repo` job: the checks `pr-scope.py` names for its diff, or every check when the diff is the selftest's machinery. Its newer push supersedes its older run.
 - **A push to the integration branch** runs the same package jobs and no selftest; the next push cancels it.
 - **A release pull request and the push to the release branch** run the full selftest on `max_shards` and are never cancelled, so the release branch is green by construction. A release pull request is refused while any drift issue (`check:<name>`) is open.
 - **The nightly** runs the full selftest on the integration branch on `max_shards`, and a fault it finds not red opens a drift issue. Its census is what the release path's selftest packs its shards by.
