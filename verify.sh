@@ -8,6 +8,7 @@
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
 #   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
 #   verify.sh --only recompute --scope DIR[,DIR]   re-derive those directories (selftest only, #318)
+#   verify.sh --only lanes --scope LANE[,LANE]     run those lanes' commands (selftest only, #360)
 #   verify.sh --only history --range A..B   scan an explicit range, to repro
 #   verify.sh --list          name the checks, in order
 #   verify.sh --site DIR      check a built site as Pages would serve it (#32): check_site
@@ -386,7 +387,17 @@ check_admission() {
 # inside a sandbox where one lane fault has been applied, is what proves that
 # fault still breaks the thing it says it breaks. Those cases are generated
 # from `apply-lane-faults.py --list`, below, rather than declared by hand.
-check_lanes() { python3 scripts/apply-lane-faults.py --verify; }
+#
+# VERIFY_LANES_SCOPE is `--scope` on this check (#360): the lanes to run,
+# comma-joined. A lane fault's generated case passes the lanes its catchers
+# run in, so it runs those and not all six; an ordinary run names none and
+# runs every lane. The resolution's own fixtures run first, so a resolution
+# that drops a lane fails here, before any lane does.
+VERIFY_LANES_SCOPE=""
+check_lanes() {
+  python3 scripts/apply-lane-faults.py --selftest &&
+    python3 scripts/apply-lane-faults.py --verify ${VERIFY_LANES_SCOPE:+--lanes "$VERIFY_LANES_SCOPE"}
+}
 
 # ...and the chore lane's classifier against its own cases (#276): a protocol
 # entry it stopped reading would let a template edit land as a chore.
@@ -1091,7 +1102,8 @@ run_seeded_case() {
 
   # A `test` case says which tests it needs; an `injections` or `bsd` case
   # MAY name the one injection it needs (#112); a `recompute` case MAY name
-  # the directories it mutated (#318); anything else says nothing, because
+  # the directories it mutated (#318); a generated `lanes` case names the
+  # lanes its catchers run in (#360); anything else says nothing, because
   # `--scope` narrows only those checks and verify.sh refuses it elsewhere. Both halves are reported here rather than left to become a
   # confusing exit 2 from inside the box, and scripts/check-fault-manifest.py
   # refuses the same two states before a run ever starts.
@@ -1111,13 +1123,22 @@ run_seeded_case() {
       return
     fi
     scoped=(--scope "$scope")
-  elif { [ "$check" = "injections" ] || [ "$check" = "bsd" ] || [ "$check" = "recompute" ]; } && [ -n "$scope" ]; then
+  elif [ "$check" = "lanes" ] && [ -z "$scope" ]; then
+    # A lanes case with no scope (#360): the generator left it empty because
+    # one of its catchers runs in no lane, so nothing would run it. WRONG at
+    # generation, before the box.
+    printf 'WRONG  %4ds verify.sh --only %-8s          %s  <-- A CATCHER NO LANE RUNS\n' \
+      "$(( SECONDS - started ))" "$check" "$label"
+    SELFTEST_BROKEN+=("${label}: a catcher no lane's filter selects, so no lane runs it")
+    not_red "$ident" "$check" "a catcher no lane's filter selects"
+    return
+  elif { [ "$check" = "injections" ] || [ "$check" = "bsd" ] || [ "$check" = "recompute" ] || [ "$check" = "lanes" ]; } && [ -n "$scope" ]; then
     scoped=(--scope "$scope")
   elif [ -n "$scope" ]; then
     printf 'BROKEN %4ds verify.sh --only %-8s          %s  <-- A SCOPE ON A CHECK THAT TAKES NONE\n' \
       "$(( SECONDS - started ))" "$check" "$label"
-    SELFTEST_BROKEN+=("${label}: only the test, injections, bsd and recompute checks take a scope")
-    not_red "$ident" "$check" "only the test, injections, bsd and recompute checks take a scope"
+    SELFTEST_BROKEN+=("${label}: only the test, injections, bsd, recompute and lanes checks take a scope")
+    not_red "$ident" "$check" "only the test, injections, bsd, recompute and lanes checks take a scope"
     return
   fi
   # One log per case, kept for the run, because the box itself is overwritten
@@ -1326,6 +1347,22 @@ EOF
 # -- so a relative path here means the script that mutates is the box's own
 # copy, mutating the box's own files. The absolute `$ROOT` this script
 # otherwise uses throughout would mutate the real checkout instead.
+# A catcher two lanes' filters select resolved to the first of them only
+# (#360, ruled (a)): the second lane would no longer run it, and a fault whose
+# only red is there would pass. The resolution's fixtures name the drop.
+inject_lanes_scope_drops_a_second_lane() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/apply-lane-faults.py")
+source = path.read_text(encoding="utf-8")
+old = "        scope |= lanes\n"
+if source.count(old) != 1:
+    raise SystemExit("apply-lane-faults.py: no single union of a catcher's lanes")
+path.write_text(source.replace(old, "        scope |= set(sorted(lanes)[:1])\n", 1), encoding="utf-8")
+EOF
+}
+
 inject_lane_fault() {
   local lane="${LANE_FAULT_LANE:-}" id="${LANE_FAULT_ID:-}"
   if [ -z "$lane" ] || [ -z "$id" ]; then
@@ -8490,6 +8527,13 @@ prove_mechanics() {
     python3 "${ROOT}/scripts/check-recompute.py" --root "${ROOT}/results" --only no-such-directory
   expect_exit "a recompute scope that is not a list of names is a misuse" 2 \
     bash "${ROOT}/verify.sh" --only recompute --scope '../results'
+  # A lane fault's case runs the lanes its catchers run in (#360). A scope
+  # naming a lane nothing registers would run nothing and pass, and one that
+  # is not a list of names is not a scope.
+  expect_exit "a lanes scope naming no registered lane is a misuse" 2 \
+    python3 "${ROOT}/scripts/apply-lane-faults.py" --verify --lanes no-such-lane
+  expect_exit "a lanes scope that is not a list of names is a misuse" 2 \
+    bash "${ROOT}/verify.sh" --only lanes --scope ',seam'
 
   # ...but an ordinary binary must not trip the loose heuristics. Over-strict
   # is a failure too: a gate that cries wolf on every binary gets switched off.
@@ -10646,10 +10690,15 @@ selftest() {
   # foreseen either. Indirecting the call word too removes it from both
   # counts equally, which is the only count this generator should ever be
   # in: zero.
+  # The lane resolution itself (#360): a hand-written case, so it carries the
+  # cheapest lane as its scope; its check fails on the fixtures first.
+  seeded_case "a two-lane catcher resolved to one lane" lanes inject_lanes_scope_drops_a_second_lane \
+    'resolved to \[.client.\], not \[.client., .drive.\]' seam
+
   sc_call="seeded_case"
   sc_inject="inject_lane_fault"
   local lane_faults=0 lane_catchers=0
-  while IFS=$'\t' read -r lane fault_id signature failure_class || [ -n "${lane:-}" ]; do
+  while IFS=$'\t' read -r lane fault_id signature failure_class lane_scope || [ -n "${lane:-}" ]; do
     [ -n "$lane" ] || continue
     signature="$(catcher_signatures "$signature")"
     lane_faults=$(( lane_faults + 1 ))
@@ -10663,10 +10712,12 @@ selftest() {
     # pass one: every generated case shares `lanes` and `inject_lane_fault`,
     # so the id seeded_case would otherwise derive names every one of them
     # `lanes.lane_fault` and the shard hash would put the whole lane corpus in
-    # one shard. The fifth word is the scope, which a `lanes` case
-    # never has; it is spelled empty rather than omitted because bash positions
-    # arguments and does not name them.
-    "$sc_call" "lane: ${fault_id}" lanes "$sc_inject" "$signature" "" "$fault_id"
+    # one shard. The fifth word is the scope (#360, ruled (a) at #360
+    # 5977576784): the lanes the fault's catchers run in, which
+    # apply-lane-faults.py derives from each lane's registered filter and
+    # `--list` carries. Passed through, never re-derived here; empty when a
+    # catcher runs in no lane, which seeded_case reports WRONG unrun.
+    "$sc_call" "lane: ${fault_id}" lanes "$sc_inject" "$signature" "${lane_scope:-}" "$fault_id"
   done < <(python3 "${ROOT}/scripts/apply-lane-faults.py" --list)
   printf 'lanes: %d lane fault(s), %d catcher(s) enforced -- every one each fault declares\n' \
     "$lane_faults" "$lane_catchers"
@@ -11764,7 +11815,7 @@ fi
 # be a misuse rather than silently no scope at all.
 if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
   if [ "$mode" = "selftest" ] || [ "${#selected[@]}" -ne 1 ]; then
-    echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections, --only bsd or --only recompute" >&2
+    echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections, --only bsd, --only recompute or --only lanes" >&2
     exit "$EXIT_MISUSE"
   fi
   case "${selected[0]}" in
@@ -11799,8 +11850,21 @@ if [ -n "$VERIFY_SCOPE_GIVEN" ]; then
         exit "$EXIT_MISUSE"
       }
       ;;
+    lanes)
+      # Registered lane names, comma-separated (#360). apply-lane-faults.py
+      # refuses a name no lane carries; this refuses a spelling that is not a
+      # list of names at all.
+      case "$VERIFY_SCOPE" in
+        ''|,*|*,|*,,*|*[!a-z0-9_,-]*|-*|*,-*) ;;
+        *) VERIFY_LANES_SCOPE="$VERIFY_SCOPE" ;;
+      esac
+      [ -n "$VERIFY_LANES_SCOPE" ] || {
+        echo "verify: --scope '$VERIFY_SCOPE': the lanes check takes registered lane names, comma-separated" >&2
+        exit "$EXIT_MISUSE"
+      }
+      ;;
     *)
-      echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections, --only bsd or --only recompute" >&2
+      echo "verify: --scope narrows one check, so it needs exactly --only test, --only injections, --only bsd, --only recompute or --only lanes" >&2
       exit "$EXIT_MISUSE"
       ;;
   esac
