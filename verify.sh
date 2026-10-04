@@ -4318,11 +4318,13 @@ EOF
 }
 
 inject_results_figures_undeclared() {
-  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  # Copied under a far-future date, so the directory is dated past
+  # FIGURES_LANDED however often that constant moves (ruled (c), #265).
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/2099-12-31-figures-undeclared
   python3 - <<'EOF'
 import pathlib
 
-path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+path = pathlib.Path("results/2099-12-31-figures-undeclared/README.md")
 source = path.read_text(encoding="utf-8")
 old = 'figures = "referenced"\n'
 if source.count(old) != 1:

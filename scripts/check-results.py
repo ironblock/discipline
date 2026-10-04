@@ -150,7 +150,10 @@ TEMPLATE_DIR = "_template"
 # `typed` until the data seat's pass writes the key on every directory; that
 # pass makes a missing key a refusal by deleting this allowance.
 FIGURES = ("referenced", "typed")
-FIGURES_LANDED = "2026-10-02"
+# Moved from 2026-10-02 to 2026-10-04 (ruled (c), #265 5977039806): a
+# dated directory that reached develop before this lint did reads as
+# `typed` like the ones before it, and moves the date again by the same rule.
+FIGURES_LANDED = "2026-10-04"
 
 # The sections that may carry no typed figure at all, and the ones that may
 # carry one only inside an `[uncited: <reason>]` marker, which declares it.
