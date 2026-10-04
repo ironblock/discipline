@@ -6220,14 +6220,6 @@ failure_class = "isolation.vm-falls-back-to-the-sandbox"
 migrated = false
 
 [[fault]]
-id = "isolation.macos-uses-the-linux-sandbox"
-kind = "lane-fault"
-check = "lanes"
-label = "isolation.macos-uses-the-linux-sandbox"
-failure_class = "isolation.macos-uses-the-linux-sandbox"
-migrated = false
-
-[[fault]]
 id = "isolation.default-is-unconfined"
 kind = "lane-fault"
 check = "lanes"

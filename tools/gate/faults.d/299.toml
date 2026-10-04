@@ -1,0 +1,282 @@
+# #299's seeded faults: the isolation lane's Seatbelt backend, its policy keys
+# and its census (lane faults declared in diet/isolation/gate.toml).
+
+[[fault]]
+id = "isolation.macos-without-seatbelt-runs-unconfined"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.macos-without-seatbelt-runs-unconfined"
+failure_class = "isolation.macos-without-seatbelt-runs-unconfined"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-writes-outside-the-tree"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-writes-outside-the-tree"
+failure_class = "isolation.seatbelt-writes-outside-the-tree"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-network-under-none"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-network-under-none"
+failure_class = "isolation.seatbelt-network-under-none"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-undeclared-loopback-port"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-undeclared-loopback-port"
+failure_class = "isolation.seatbelt-undeclared-loopback-port"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-worktree-not-canonical"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-worktree-not-canonical"
+failure_class = "isolation.seatbelt-worktree-not-canonical"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-profile-not-validated"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-profile-not-validated"
+failure_class = "isolation.seatbelt-profile-not-validated"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-policy-not-the-profile"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-policy-not-the-profile"
+failure_class = "isolation.seatbelt-policy-not-the-profile"
+migrated = false
+
+[[fault]]
+id = "isolation.bwrap-policy-covers-the-command"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.bwrap-policy-covers-the-command"
+failure_class = "isolation.bwrap-policy-covers-the-command"
+migrated = false
+
+[[fault]]
+id = "isolation.linux-loopback-runs-anyway"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.linux-loopback-runs-anyway"
+failure_class = "isolation.linux-loopback-runs-anyway"
+migrated = false
+
+[[fault]]
+id = "isolation.loopback-under-host-is-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.loopback-under-host-is-accepted"
+failure_class = "isolation.loopback-under-host-is-accepted"
+migrated = false
+
+[[fault]]
+id = "isolation.not-permitted-is-unambiguous"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.not-permitted-is-unambiguous"
+failure_class = "isolation.not-permitted-is-unambiguous"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-binds-an-undeclared-port"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-binds-an-undeclared-port"
+failure_class = "isolation.seatbelt-binds-an-undeclared-port"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-inbound-on-an-undeclared-port"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-inbound-on-an-undeclared-port"
+failure_class = "isolation.seatbelt-inbound-on-an-undeclared-port"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-declared-port-reaches-other-hosts"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-declared-port-reaches-other-hosts"
+failure_class = "isolation.seatbelt-declared-port-reaches-other-hosts"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-host-admits-unix-sockets"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-host-admits-unix-sockets"
+failure_class = "isolation.seatbelt-host-admits-unix-sockets"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-tty-writable"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-tty-writable"
+failure_class = "isolation.seatbelt-tty-writable"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-session-end-kills-nothing"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-session-end-kills-nothing"
+failure_class = "isolation.seatbelt-session-end-kills-nothing"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-secret-reads"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-secret-reads"
+failure_class = "isolation.seatbelt-secret-reads"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-writable-overrides-secret"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-writable-overrides-secret"
+failure_class = "isolation.seatbelt-writable-overrides-secret"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-env-files-readable"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-env-files-readable"
+failure_class = "isolation.seatbelt-env-files-readable"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-writes-an-undeclared-dir"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-writes-an-undeclared-dir"
+failure_class = "isolation.seatbelt-writes-an-undeclared-dir"
+migrated = false
+
+[[fault]]
+id = "isolation.environment-not-cleared"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.environment-not-cleared"
+failure_class = "isolation.environment-not-cleared"
+migrated = false
+
+[[fault]]
+id = "isolation.linux-reads-all-runs-anyway"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.linux-reads-all-runs-anyway"
+failure_class = "isolation.linux-reads-all-runs-anyway"
+migrated = false
+
+[[fault]]
+id = "isolation.tilde-expanded-from-the-wrong-place"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.tilde-expanded-from-the-wrong-place"
+failure_class = "isolation.tilde-expanded-from-the-wrong-place"
+migrated = false
+
+[[fault]]
+id = "isolation.secret-under-writable-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.secret-under-writable-accepted"
+failure_class = "isolation.secret-under-writable-accepted"
+migrated = false
+
+[[fault]]
+id = "isolation.secret-in-tree-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.secret-in-tree-accepted"
+failure_class = "isolation.secret-in-tree-accepted"
+migrated = false
+
+[[fault]]
+id = "isolation.env-file-declared-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.env-file-declared-accepted"
+failure_class = "isolation.env-file-declared-accepted"
+migrated = false
+
+[[fault]]
+id = "isolation.linux-secret-unmasked"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.linux-secret-unmasked"
+failure_class = "isolation.linux-secret-unmasked"
+migrated = false
+
+[[fault]]
+id = "isolation.env-scan-case-sensitive"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.env-scan-case-sensitive"
+failure_class = "isolation.env-scan-case-sensitive"
+migrated = false
+
+[[fault]]
+id = "isolation.declared-inside-secret-accepted"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.declared-inside-secret-accepted"
+failure_class = "isolation.declared-inside-secret-accepted"
+migrated = false
+
+[[fault]]
+id = "isolation.seatbelt-ended-groups-kept"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.seatbelt-ended-groups-kept"
+failure_class = "isolation.seatbelt-ended-groups-kept"
+migrated = false
+
+[[fault]]
+id = "isolation.secret-resolved-without-its-ancestor"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.secret-resolved-without-its-ancestor"
+failure_class = "isolation.secret-resolved-without-its-ancestor"
+migrated = false
+
+[[fault]]
+id = "isolation.drive-keeps-its-environment"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.drive-keeps-its-environment"
+failure_class = "isolation.drive-keeps-its-environment"
+migrated = false
+
+[[fault]]
+id = "isolation.key-file-not-a-secret"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.key-file-not-a-secret"
+failure_class = "isolation.key-file-not-a-secret"
+migrated = false
+
+[[fault]]
+id = "isolation.kill-looked-up-on-path"
+kind = "lane-fault"
+check = "lanes"
+label = "isolation.kill-looked-up-on-path"
+failure_class = "isolation.kill-looked-up-on-path"
+migrated = false

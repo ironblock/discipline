@@ -18,15 +18,24 @@
 //! for being subtly wrong -- and a sandbox that is subtly wrong is worse than
 //! none, because it is trusted.
 //!
+//! **`sandbox_secrets` is not enforced here, and that is stated rather than
+//! implied.** The namespace holds only what is bound -- `sandbox_readable`,
+//! the tree and `sandbox_writable` -- so a secret outside those is absent.
+//! A secret INSIDE a declared path (or a `.env` file there) is bound with
+//! it. `sandbox_reads = "all"` refuses to start on Linux for this reason.
+//!
 //! What this module owns is the **composition**: which paths are bound, in
 //! which order, with the root remounted read-only at the end. That is a pure
 //! function and it is asserted as one, so it can be checked on a host that
 //! has no runner at all.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use super::Unavailable;
-use super::policy::{Isolation, Network, Policy};
+use super::declared::masks;
+use super::policy::{Isolation, Network, Policy, home_expanded, resolved};
+use crate::digest::sha256_hex;
 
 /// The program this module composes for.
 pub const RUNNER: &str = "bwrap";
@@ -44,13 +53,22 @@ impl Bubblewrap {
     ///
     /// Returns [`Unavailable::NoRunner`] if it is not there. Never a fallback.
     pub fn found() -> Result<Self, Unavailable> {
-        let Some(path) = std::env::var_os("PATH") else {
+        Self::found_in(std::env::var_os("PATH").as_deref())
+    }
+
+    /// Find the runner on a `PATH` named rather than read.
+    ///
+    /// # Errors
+    ///
+    /// As [`Bubblewrap::found`].
+    pub fn found_in(path: Option<&OsStr>) -> Result<Self, Unavailable> {
+        let Some(path) = path else {
             return Err(Unavailable::NoRunner {
                 mechanism: Isolation::Sandbox,
                 looked_for: RUNNER.to_owned(),
             });
         };
-        std::env::split_paths(&path)
+        std::env::split_paths(path)
             .map(|dir| dir.join(RUNNER))
             .find(|candidate| candidate.is_file())
             .map(|runner| Self { runner })
@@ -102,7 +120,8 @@ impl Bubblewrap {
         push(&["--die-with-parent", "--new-session"]);
 
         for path in &policy.readable {
-            push(&["--ro-bind", path, path]);
+            let path = bound(path);
+            push(&["--ro-bind", &path, &path]);
         }
         for (name, target) in &policy.symlinks {
             push(&["--symlink", target, &format!("/{name}")]);
@@ -111,6 +130,26 @@ impl Bubblewrap {
 
         let tree = worktree.to_string_lossy().into_owned();
         push(&["--bind", &tree, &tree]);
+        // Each `sandbox_writable` dir the same way as the tree, after the
+        // read-only binds (so a dir inside one is still writable) and before
+        // the remounts (which do not reach a bind mount).
+        for dir in &policy.writable {
+            let dir = bound(dir);
+            push(&["--bind", &dir, &dir]);
+        }
+        // Each listed secret inside a declared path, masked after the binds
+        // that would expose it: `--tmpfs` over a directory, `/dev/null` over a
+        // file (#299, ruling 5982355781). A `.env` file cannot be masked by
+        // pattern, so a declared path holding one refused to start at open.
+        let declared: Vec<(String, PathBuf)> = policy
+            .readable
+            .iter()
+            .chain(&policy.writable)
+            .map(|path| (bound(path), resolved(path)))
+            .collect();
+        for mask in masks(policy, &declared) {
+            push(&mask.iter().map(String::as_str).collect::<Vec<_>>());
+        }
         // ONE REMOUNT PER MOUNT. `--remount-ro` does not recurse -- bwrap's own
         // help says so -- and `--dev` creates a separate tmpfs, with
         // `/dev/shm` a further one inside it. So a remount of `/` alone left
@@ -126,6 +165,16 @@ impl Bubblewrap {
 
         out.extend(argv.iter().cloned());
         out
+    }
+
+    /// The `policy` a run under this runner carries: the sha256 of the
+    /// composed argv up to (not including) `--`, NUL-joined. The bwrap policy
+    /// IS its argv -- runner path, binds, remounts and the tree -- and the
+    /// command after `--` is not part of it.
+    #[must_use]
+    pub fn policy_of(confined: &[String]) -> Option<String> {
+        let end = confined.iter().position(|arg| arg == "--")?;
+        Some(sha256_hex(confined[..end].join("\0").as_bytes()))
     }
 
     /// Whether `stderr` is the runner failing to build the sandbox rather
@@ -154,5 +203,19 @@ impl Bubblewrap {
         let first = stderr.lines().next().unwrap_or_default();
         let is_runner = first.starts_with("bwrap: ") && !first.starts_with("bwrap: execvp ");
         (exit == Some(1) && is_runner).then(|| first.to_owned())
+    }
+}
+
+/// A declared path as bound: a `~` path made the drive's `HOME` and resolved;
+/// an absolute one exactly as declared, as before.
+fn bound(path: &str) -> String {
+    if path.starts_with('~') {
+        let expanded = home_expanded(path);
+        std::fs::canonicalize(&expanded)
+            .unwrap_or(expanded)
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        path.to_owned()
     }
 }
