@@ -11541,6 +11541,7 @@ target = "diet/alpha/src.rs"
 anchor = "x = 1"
 becomes = "x = 2"
 expect_exit = 1
+failure_class = "alpha.synthetic"
 catches = [$1]
 EOF
   }
@@ -11559,6 +11560,14 @@ EOF
   expect_exit "a lane fault whose second catcher did not fail is not red" 1 lane_fault_red
   write_catchers_lane '"alpha::tests::first"'
   expect_exit "and with only the catcher that failed, it is" 0 lane_fault_red
+  # ...and a lane fault declaring no failure_class is refused by --list (#381
+  # added the refusal; this synthetic lane lacked the field, and the first
+  # develop nightly went red on these three mechanics, 37201593685).
+  expect_exit "a lane fault declaring no failure_class is refused by --list" 2 \
+    bash -c 'd="$(mktemp -d)" && trap "rm -rf \"\${d:?}\"" EXIT && cp -R "$1/." "$d" &&
+      grep -v "^failure_class" "$d/diet/alpha/gate.toml" > "$d/g" && mv "$d/g" "$d/diet/alpha/gate.toml" &&
+      { out="$(python3 "$2" --root "$d" --list 2>&1)" && exit 9; }; grep -qF "declares no failure_class" <<<"$out" && exit 2; exit 9' \
+    _ "${lanes_root}/catchers" "${ROOT}/scripts/apply-lane-faults.py"
 
   # --- nothing is read from a half-merged file ---
   #
