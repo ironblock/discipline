@@ -37,6 +37,54 @@ import tomllib
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 VERIFY = ROOT / "verify.sh"
 MANIFEST = ROOT / "tools" / "gate" / "faults.toml"
+# PER-TICKET FILES (#383, ruled (c) at #383 5978687199): a pull request that
+# adds seeded faults writes their rows to `faults.d/<ticket>.toml`, a file
+# only it creates, so two such pull requests touch no line in common. The
+# manifest is `faults.toml` plus every file here, read as one set; row order
+# never mattered, since every reader sorts. The files here are the permanent
+# home of their rows, never folded back into `faults.toml` at a release.
+FAULTS_D = ROOT / "tools" / "gate" / "faults.d"
+TICKET_FILE = re.compile(r"[0-9]+\.toml")
+
+
+def manifest_files() -> list[pathlib.Path]:
+    """`faults.toml`, then each per-ticket file in name order."""
+    extra = sorted(FAULTS_D.glob("*.toml")) if FAULTS_D.is_dir() else []
+    return [MANIFEST, *extra]
+
+
+def read_manifest() -> tuple[list[tuple[str, int, dict]], list[tuple[str, int, dict]], dict, list[str]]:
+    """(faults, unseedable guards, [meta], failures) across every manifest
+    file, each row tagged with its file and index. Exits 2 on a half-merged
+    file, as before; a file that is not TOML, or a per-ticket file that is
+    misnamed or carries `[meta]`, is a failure."""
+    faults: list[tuple[str, int, dict]] = []
+    guards: list[tuple[str, int, dict]] = []
+    meta: dict = {}
+    failures: list[str] = []
+    for path in manifest_files():
+        try:
+            text = path.read_bytes().decode("utf-8")
+        except (OSError, UnicodeDecodeError) as err:
+            failures.append(f"{path}: not TOML: {err}")
+            continue
+        refuse_conflicted(path, text)
+        try:
+            doc = tomllib.loads(text)
+        except ValueError as err:
+            failures.append(f"{path}: not TOML: {err}")
+            continue
+        name = path.name if path == MANIFEST else f"faults.d/{path.name}"
+        if path != MANIFEST:
+            if not TICKET_FILE.fullmatch(path.name):
+                failures.append(f"{name}: a per-ticket file is named for its ticket, `<number>.toml`")
+            if "meta" in doc:
+                failures.append(f"{name}: carries [meta]; it lives in faults.toml alone")
+        else:
+            meta = doc.get("meta") or {}
+        faults += [(name, i, e) for i, e in enumerate(doc.get("fault") or [])]
+        guards += [(name, i, e) for i, e in enumerate(doc.get("unseedable") or [])]
+    return faults, guards, meta, failures
 FIXTURES = ROOT / "tests" / "fixtures" / "results-bad"
 REGIMEN_INVALID = ROOT / "diet" / "formats" / "regimen" / "fixtures" / "invalid"
 APPLY_LANE_FAULTS = ROOT / "scripts" / "apply-lane-faults.py"
@@ -232,18 +280,11 @@ def main() -> int:
     # here. It is emitted from THIS script because the manifest has one reader
     # and a second one in the shell would be free to disagree with it.
     if listing_fixtures:
-        try:
-            text = MANIFEST.read_text(encoding="utf-8")
-        except OSError as err:
-            print(f"cannot read the manifest: {err}", file=sys.stderr)
+        all_faults, _guards, _meta, problems = read_manifest()
+        if problems or not all_faults:
+            print(f"cannot read the manifest: {problems[0] if problems else 'it declares no faults'}", file=sys.stderr)
             return 1
-        refuse_conflicted(MANIFEST, text)
-        try:
-            entries = tomllib.loads(text)["fault"]
-        except (ValueError, KeyError) as err:
-            print(f"cannot read the manifest: {err}", file=sys.stderr)
-            return 1
-        for entry in entries:
+        for _name, _index, entry in all_faults:
             if entry.get("kind") == "results-fixture":
                 print(f"{entry.get('label')}\t{entry.get('failure_class')}")
         return 0
@@ -273,34 +314,30 @@ def main() -> int:
     # that `merge-gate.py` can ask for a count while holding a conflicted
     # manifest it is about to rewrite. Refusing up there would break the one
     # caller this refusal is about.
-    try:
-        text = MANIFEST.read_bytes().decode("utf-8")
-    except UnicodeDecodeError as err:
-        print(f"{MANIFEST}: not TOML: {err}", file=sys.stderr)
+    entries, unseedable_rows, meta, problems = read_manifest()
+    if any("not TOML" in p for p in problems):
+        for message in problems:
+            print(message, file=sys.stderr)
         return 1
-    refuse_conflicted(MANIFEST, text)
-    try:
-        doc = tomllib.loads(text)
-    except ValueError as err:
-        print(f"{MANIFEST}: not TOML: {err}", file=sys.stderr)
-        return 1
-
-    entries = doc.get("fault") or []
+    failures += problems
     if not entries:
         print(f"{MANIFEST}: declares no faults, so it defines no parity", file=sys.stderr)
         return 1
 
     declared: dict[str, set[str]] = {}
-    for index, entry in enumerate(entries):
-        where = f"{MANIFEST.name}[{index}]"
+    # Where each id was first declared, so a duplicate across files names both.
+    first: dict[str, str] = {}
+    for name, index, entry in entries:
+        where = f"{name}[{index}]"
         for field in ("id", "kind", "check", "label", "failure_class"):
             if not isinstance(entry.get(field), str) or not entry[field].strip():
                 failures.append(f"{where}: `{field}` is missing or empty")
         kind, ident = entry.get("kind"), entry.get("id")
         if isinstance(kind, str) and isinstance(ident, str):
             if ident in declared.setdefault(kind, set()):
-                failures.append(f"{where}: duplicate id `{ident}`")
+                failures.append(f"{where}: duplicate id `{ident}`, first declared in {first[ident]}")
             declared[kind].add(ident)
+            first.setdefault(ident, name)
         # The id says the case exists; these say what it proves. Both were
         # unchecked prose until an adversarial review put fiction in them and
         # watched this script pass.
@@ -405,10 +442,10 @@ def main() -> int:
     # quietly dropped from the code -- the guard's own reasoning still
     # sitting above it, now unbound -- goes red exactly like a `claim:` whose
     # test disappeared.
-    unseedable = doc.get("unseedable") or []
+    unseedable = [entry for _name, _index, entry in unseedable_rows]
     declared_unseedable: set[str] = set()
-    for index, entry in enumerate(unseedable):
-        where = f"{MANIFEST.name}[unseedable][{index}]"
+    for name, index, entry in unseedable_rows:
+        where = f"{name}[unseedable][{index}]"
         for field in ("id", "file", "reason"):
             if not isinstance(entry.get(field), str) or not entry[field].strip():
                 failures.append(f"{where}: `{field}` is missing or empty")
@@ -440,12 +477,10 @@ def main() -> int:
     # 2026-09-24). It is printed below and answered by `--count-red`; a copy
     # typed into the manifest was only ever a second place for it to be wrong,
     # and a conflict between every two PRs that added a fault.
-    meta = doc.get("meta") or {}
-    if meta.get("mechanics_assertions") != len(seen["mechanics"]):
-        failures.append(
-            f"[meta] mechanics_assertions is {meta.get('mechanics_assertions')}, "
-            f"observed {len(seen['mechanics'])}"
-        )
+    # Nor `mechanics_assertions` (#383): it is counted, not kept. Each
+    # mechanics assertion already has a row of its own, matched by label to an
+    # `expect_exit`, so the hand-kept number carried nothing those rows did
+    # not, and every two pull requests that added one conflicted on it.
     if meta.get("unseedable_guards") != len(unseedable):
         failures.append(
             f"[meta] unseedable_guards is {meta.get('unseedable_guards')}, "
@@ -472,7 +507,7 @@ def main() -> int:
     # check_regimen rather than in the selftest.
     by_selftest = sum(len(seen[k]) for k in SELFTEST_KINDS)
     by_per_run = len(seen["subset-fixture"])
-    migrated = sum(1 for e in entries if e.get("migrated") is True)
+    migrated = sum(1 for _n, _i, e in entries if e.get("migrated") is True)
     print(
         f"check-fault-manifest: {len(entries)} fault(s) define parity = "
         f"{by_selftest} red in --selftest + {by_per_run} red per run (regimen) + "

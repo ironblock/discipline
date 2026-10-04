@@ -38,7 +38,6 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 178
 unseedable_guards = 2
 migrated = 0
 

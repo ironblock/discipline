@@ -5120,6 +5120,30 @@ inject_history_no_base() {
   # than quietly scan nothing.
 }
 
+# A fault's row declared twice, once in faults.toml and once in a per-ticket
+# file (#383): two places would each say what the fault proves, and the one a
+# reader took would depend on read order.
+inject_parity_duplicate_across_files() {
+  mkdir -p tools/gate/faults.d
+  python3 - <<'EOF'
+import pathlib, re
+
+text = pathlib.Path("tools/gate/faults.toml").read_text(encoding="utf-8")
+block = re.search(r'\[\[fault\]\]\nid = "parity\.parity"\n.*?(?=\n\[\[fault\]\]|\Z)', text, re.S)
+if block is None:
+    raise SystemExit("faults.toml: no parity.parity row to repeat")
+pathlib.Path("tools/gate/faults.d/9999.toml").write_text(block.group(0) + "\n", encoding="utf-8")
+EOF
+}
+
+# A per-ticket file not named for its ticket (#383): a name nothing reads as a
+# ticket is a file whose rows nobody can trace back to the pull request that
+# wrote them.
+inject_parity_ticket_file_misnamed() {
+  mkdir -p tools/gate/faults.d
+  printf '# a stray file\n' > tools/gate/faults.d/notes.toml
+}
+
 inject_parity() {
   # Prove a fault the manifest does not account for: parity would then be
   # declared over less than the gate actually covers.
@@ -10405,6 +10429,10 @@ selftest() {
     'is the only workflow naming the trunk'
   seeded_case "parity drifts from what is proven"     parity   inject_parity \
     'which verify\.sh does not prove'
+  seeded_case "a fault's row declared in two places"  parity   inject_parity_duplicate_across_files \
+    'faults\.d/9999\.toml\[0\]: duplicate id .parity\.parity., first declared in faults\.toml'
+  seeded_case "a per-ticket file not named for its ticket" parity inject_parity_ticket_file_misnamed \
+    'faults\.d/notes\.toml: a per-ticket file is named for its ticket'
   seeded_case "a signature its own scope line matches" parity  inject_parity_scope_signature \
     'matches the line naming its own scope'
   seeded_case "an unseedable guard's tag dropped"      parity   inject_unseedable_tag_dropped \
