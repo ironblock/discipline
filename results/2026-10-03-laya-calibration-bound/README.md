@@ -2,7 +2,8 @@
 hypothesis = "laya-typed-decisions as shipped, with this program's own temperature, agrees with the fresh Sonnet majority at or above the judges' own agreement, and is calibrated within the labels' noise, on both questions."
 result = "refuted"
 kind = "reproducible-by-config"
-product_sha256 = "e79ed1a6b689579d6fb98305397392d5133a56172acd758196d973d969d49fb3"
+figures = "referenced"
+product_sha256 = "74da539a97dcc0b97bfdd5d2e6f75735e6fc406d236af672d7cb4adb77b4c604"
 controls_run = ["seeded-judge-controls", "void-and-rejudge", "archive-same-version-replication", "fp32-parity-reference", "second-served-path", "abstention-band", "two-floor-constructions", "cross-fit"]
 known_defects = [
   "The hypothesis is planning's text (#165, 5975253990, (d)), the pre-registration having stated the bound and the three-way reading but no sentence. This record is the ZERO-SHOT BASELINE of #165's hypothesis, a model fine-tuned on this program's judged rows: laya-typed-decisions as shipped, which the fine-tune must clear. It does not test that hypothesis, and #165 stays open; the claim row's id says so.",
@@ -19,6 +20,7 @@ known_defects = [
   "The pass A daemon's first request to the 1,024 bucket returned 504 during warm-up, before the pass (cold compile past the daemon's 60 s request timeout); the load completed and every bucket then served under 0.5 s (sidekick/pass-a.record.txt). No pass request failed.",
   "The pooled cross-fit ECE is computed over all held-out items together, each scored under the temperature fitted on the other fold; each fold's own ECE is reported beside it (results.json, ece_top1_crossfit_by_fold). On pass A, for verdict the folds read 0.045 and 0.035 and the pool 0.011: the folds' calibration errors fall in different bins and partly cancel when pooled. Amendment 4 reports the pooled figure as the rule's; no reading changes on the fold figures (both sit under verdict's F2 interval's upper end and above its lower, and verdict reads inconclusive (fit at bound) either way; edit's folds, 0.073 and 0.073 on pass A and 0.062 and 0.079 on pass B, are above its interval).",
   "rejudge/judge/run-log.jsonl keeps two superseded rows voiding batches 03 and 07, written by a checker that compared a control's verdict ruled None; the fixed checker applies the archive's rule (a field ruled None is not keyed) and both batches are accepted on their first instance (#165, 5970840575). The superseded rows carry a note.",
+  "Migrated to referenced figures (#376): every figure in the body is a reference into results.json, rendered by scripts/check-results.py. A reference path cannot step into a key that opens with a digit or carries a date, so analyze.py now also writes a `report` block holding the per-record d under letter keys, the F2 floor at each held-out size under `n<size>` keys, the judges' own agreement (1 - d) and the pre-registered constants. Every value results.json held before is unchanged, which a comparison with the block removed confirms. The product's sha256 moved from e79ed1a6... to 74da539a..., and the record's digests moved with it. Some figures now print at the precision of their reference: the temperatures at two places, and the floors and bound intervals at four, in the calibration table and in the F2 floor-by-size sentence (which the typed text gave at three). The linter's round() and pct() round half-even, where the typed text rounded half-up, so two values on an exact half now render one unit lower. The archive's edit agreement, 0.9925, renders as 0.992 and 99.2% (typed 0.993 and 99.3%, as planning's ruling 5975253990 quotes it). Verdict's fold-B cross-fit ECE, 0.0345 on both paths, renders as 0.034 (typed 0.035). No value in results.json moved.",
   "The judge is hosted (claude-sonnet-5); its verdicts are committed and the record recomputes from them, as the Sonnet records before it. Re-firing the judges is a fresh draw of the same version, not a replay.",
 ]
 targets_checked = 134
@@ -48,7 +50,7 @@ question).
 
 ## Hypothesis
 
-Planning's text (5975253990): laya-typed-decisions as shipped, with this program's own temperature, agrees with
+Planning's text, ruled on #165: laya-typed-decisions as shipped, with this program's own temperature, agrees with
 the fresh Sonnet majority at or above the judges' own agreement, and is calibrated within the labels' noise, on
 both questions, the verdict (accepts, questions, declines, ignores) and the edit (yes, no).
 
@@ -58,76 +60,99 @@ the fine-tune must clear, and the bound it will be held to.
 
 ## Test
 
-Under pre-registration 5962826904 and amendments 1-6 (`pre-registration.md`):
+Under the pre-registration and its six amendments (`pre-registration.md`):
 
-- **The re-judge.** 400 items drawn from the 4,712 real items the three Sonnet records judged once, stratified by
-  record × original verdict (`rejudge/draw.py`, seed from its phrase; `plan.json`, `sample.json`, `layout.json`
-  rebuild from the archive). Three passes of 12 batches, each batch 33 or 34 sample items plus four rotating seeded
-  controls, fresh opaque ids, the key withheld; one fresh `claude-sonnet-5` instance per batch under prompt v2 and
-  launch Form 3, the model read off each transcript (`rejudge/judge/run-log.jsonl`). d is one minus the mean share
-  of agreeing judge pairs, with a 9,999-resample item bootstrap; e₃ = 3d² − 2d³ carries its interval.
-- **The laya passes.** 800 `/v1/classify` requests, 400 items × two questions, rendered by the translation table
-  (`laya/build_requests.py`), with no `calibration` field, so T = 1. Served by sidekickd 0.7.0 on the laptop's
-  M1 Max in two daemon runs, `cpu_and_ne` (pass A, the word) and `cpu_and_gpu` (pass B, beside); laya's fp32
-  PyTorch forward on the laptop's CPU is the reference (`laya/fp32.jsonl`). The Sidekick program built, started,
-  warmed and stopped each daemon and graded the served artifact (`sidekick/`, report `7cb25496...`: ANE C, GPU A,
-  0 graded flips).
-- **The fit and the reading.** A 2-fold cross-fit, stratified by the twelve strata: one temperature per question in
-  [0.05, 20] by golden-section NLL minimisation on one fold, applied to the other. Top-1 ECE with 15 equal-width
-  bins on the held-out items with a majority. The bound is e₃ plus the median ECE of a perfectly calibrated predictor
-  at the held-out n; below its interval reads `calibrated`, above reads `miscalibrated`, inside `inconclusive`.
+- **The re-judge.** {{product.judges.verdict.n_items}} items drawn from the real items the three Sonnet records judged once
+  ([uncited: plan.json's population, 4,712 items]), stratified by record × original verdict (`rejudge/draw.py`, seed
+  from its phrase; `plan.json`, `sample.json`, `layout.json` rebuild from the archive). Three passes of twelve
+  batches, each batch thirty-three or thirty-four sample items plus four rotating seeded controls, fresh opaque ids,
+  the key withheld; one fresh Sonnet instance per batch ([uncited: model claude-sonnet-5]) under prompt v2 and the
+  archive's launch form ([uncited: Form 3]), the model read off each transcript (`rejudge/judge/run-log.jsonl`). d is one minus the mean share of agreeing judge pairs, with a
+  {{product.report.design.boot}}-resample item bootstrap giving each interval
+  ([uncited: 95% intervals, the 2.5th and 97.5th percentiles]); e₃ = 3d² − 2d³ carries d's interval.
+- **The laya passes.** Two `/v1/classify` requests per item, one per question, rendered by the translation table
+  (`laya/build_requests.py`), with no `calibration` field, so the probabilities are the raw softmax. Served by
+  sidekickd v0.7.0 on the laptop's M1 Max in two daemon runs, `cpu_and_ne` (pass A, the word) and `cpu_and_gpu`
+  (pass B, beside); laya's fp32 PyTorch forward on the laptop's CPU is the reference (`laya/fp32.jsonl`). The
+  Sidekick program built, started, warmed and stopped each daemon and graded the served artifact (`sidekick/`,
+  report `7cb25496...`: ANE C, GPU A, no graded flips).
+- **The fit and the reading.** A two-fold cross-fit, stratified by the twelve strata: one temperature per question
+  in [{{product.report.design.T_low}}, {{product.report.design.T_high}}] by golden-section NLL minimisation on one fold, applied to the other. Top-one ECE ([uncited: top-1, the chosen label's confidence]) with
+  {{product.report.design.bins}} equal-width bins on the held-out items with a majority. The bound is e₃ plus the median ECE of a
+  perfectly calibrated predictor at the held-out n ({{product.report.design.floor_draws}} draws); below its interval reads `calibrated`,
+  above reads `miscalibrated`, inside `inconclusive`.
 
-`analyze.py` derives everything in `results.json`; `recompute.sh` re-derives it byte for byte.
+`analyze.py` derives everything in `results.json`; `recompute.sh` re-derives it byte for byte. Every figure below is
+a reference into `results.json`, rendered by `scripts/check-results.py`.
 
 ## Results
 
-**The judges** (three fresh judgments per item, 400 items).
+**The judges** (three fresh judgments per item, {{product.judges.verdict.n_items}} items).
 
-| question | d (95% CI) | e₃ (CI) | Fleiss κ | no majority | archive vs fresh majority |
+| question | d (interval) | e₃ (interval) | Fleiss κ | no majority | archive vs fresh majority |
 | --- | --- | --- | --- | --- | --- |
-| verdict | 0.0792 (0.0583–0.1017) | 0.0178 (0.0098–0.0289) | 0.886 | 3 | 0.940 |
-| edit | 0.0100 (0.0033–0.0183) | 0.0003 (0.0000–0.0010) | 0.969 | 0 | 0.993 |
+| verdict | {{round(product.judges.verdict.d, 4)}} ({{round(product.judges.verdict.d_ci95[0], 4)}}–{{round(product.judges.verdict.d_ci95[1], 4)}}) | {{round(product.judges.verdict.e3, 4)}} ({{round(product.judges.verdict.e3_ci95[0], 4)}}–{{round(product.judges.verdict.e3_ci95[1], 4)}}) | {{round(product.judges.verdict.fleiss_kappa, 3)}} | {{product.judges.verdict.no_majority}} | {{round(product.judges.verdict.archive_vs_fresh_majority.rate, 3)}} |
+| edit | {{round(product.judges.edit.d, 4)}} ({{round(product.judges.edit.d_ci95[0], 4)}}–{{round(product.judges.edit.d_ci95[1], 4)}}) | {{round(product.judges.edit.e3, 4)}} ({{round(product.judges.edit.e3_ci95[0], 4)}}–{{round(product.judges.edit.e3_ci95[1], 4)}}) | {{round(product.judges.edit.fleiss_kappa, 3)}} | {{product.judges.edit.no_majority}} | {{round(product.judges.edit.archive_vs_fresh_majority.rate, 3)}} |
 
 **laya against the fresh majority** (pass A; pass B within one decision everywhere).
 
-| question | n | agreement | the judges' own (1 − d) | majority-class rate | answered agreement / coverage | T (fit on A / on B / all) |
+| question | n | agreement | the judges' own agreement | majority-class rate | answered agreement / coverage | T (fit on A / on B / all) |
 | --- | --- | --- | --- | --- | --- | --- |
-| verdict | 397 | 0.267 | 0.921 | 0.443 | 0.268 / 0.970 | 20.0 / 20.0 / 20.0 |
-| edit | 400 | 0.635 | 0.990 | 0.795 | 0.649 / 0.955 | 1.65 / 2.53 / 2.00 |
+| verdict | {{product.laya.verdict.n_with_majority}} | {{round(product.laya.verdict.passes.A.agreement_with_fresh_majority.rate, 3)}} | {{round(product.report.judges.verdict.agreement, 3)}} | {{round(product.laya.verdict.majority_class_rate, 3)}} | {{round(product.laya.verdict.passes.A.agreement_with_fresh_majority.answered_rate, 3)}} / {{round(product.laya.verdict.passes.A.agreement_with_fresh_majority.coverage, 3)}} | {{round(product.laya.verdict.passes.A.T_fit_on_fold.A, 2)}} / {{round(product.laya.verdict.passes.A.T_fit_on_fold.B, 2)}} / {{round(product.laya.verdict.passes.A.T_deployed_all, 2)}} |
+| edit | {{product.laya.edit.n_with_majority}} | {{round(product.laya.edit.passes.A.agreement_with_fresh_majority.rate, 3)}} | {{round(product.report.judges.edit.agreement, 3)}} | {{round(product.laya.edit.majority_class_rate, 3)}} | {{round(product.laya.edit.passes.A.agreement_with_fresh_majority.answered_rate, 3)}} / {{round(product.laya.edit.passes.A.agreement_with_fresh_majority.coverage, 3)}} | {{round(product.laya.edit.passes.A.T_fit_on_fold.A, 2)}} / {{round(product.laya.edit.passes.A.T_fit_on_fold.B, 2)}} / {{round(product.laya.edit.passes.A.T_deployed_all, 2)}} |
 
-laya answers `questions` on 298 of 397 verdict items and `ignores` on 4, where the majority answers `ignores` on
-176; on edit it answers `yes` on 220 where the majority says `yes` on 82.
+laya answers `questions` on {{product.laya.verdict.passes.A.predicted_counts.questions}} of {{product.laya.verdict.n_with_majority}} verdict items and
+`ignores` on {{product.laya.verdict.passes.A.predicted_counts.ignores}}, where the majority answers `ignores` on {{product.judges.verdict.majority_counts.ignores}};
+on edit it answers `yes` on {{product.laya.edit.passes.A.predicted_counts.yes}} where the majority says `yes` on {{product.judges.edit.majority_counts.yes}}.
 
-**The calibration reading** (pass A's cross-fitted top-1 ECE against e₃ + floor at the held-out n; F2 the floor of
+**The calibration reading** (pass A's cross-fitted top-one ECE against e₃ + floor at the held-out n; F2 the floor of
 record, F1 beside).
 
-| question | ECE at T = 1 | cross-fit ECE | floor F2 (F1) | bound interval F2 (F1) | interval reading | recorded |
+| question | ECE, raw softmax | cross-fit ECE | floor F2 (F1) | bound interval F2 (F1) | interval reading | recorded |
 | --- | --- | --- | --- | --- | --- | --- |
-| verdict | 0.234 | 0.011 | 0.018 (0.020) | 0.027–0.047 (0.030–0.049) | calibrated | inconclusive (fit at bound) |
-| edit | 0.070 | 0.062 | 0.0125 (0.0424) | 0.0125–0.0135 (0.0424–0.0434) | miscalibrated | miscalibrated |
+| verdict | {{round(product.laya.verdict.passes.A.ece_top1_T1, 3)}} | {{round(product.laya.verdict.passes.A.ece_top1_crossfit, 3)}} | {{round(product.rule.verdict.F2_base_rate.floor, 4)}} ({{round(product.rule.verdict.F1_consistency.floor, 4)}}) | {{round(product.rule.verdict.F2_base_rate.bound_interval[0], 4)}}–{{round(product.rule.verdict.F2_base_rate.bound_interval[1], 4)}} ({{round(product.rule.verdict.F1_consistency.bound_interval[0], 4)}}–{{round(product.rule.verdict.F1_consistency.bound_interval[1], 4)}}) | {{product.rule.verdict.F2_base_rate.reading}} | inconclusive (fit at bound) |
+| edit | {{round(product.laya.edit.passes.A.ece_top1_T1, 3)}} | {{round(product.laya.edit.passes.A.ece_top1_crossfit, 3)}} | {{round(product.rule.edit.F2_base_rate.floor, 4)}} ({{round(product.rule.edit.F1_consistency.floor, 4)}}) | {{round(product.rule.edit.F2_base_rate.bound_interval[0], 4)}}–{{round(product.rule.edit.F2_base_rate.bound_interval[1], 4)}} ({{round(product.rule.edit.F1_consistency.bound_interval[0], 4)}}–{{round(product.rule.edit.F1_consistency.bound_interval[1], 4)}}) | {{product.rule.edit.F2_base_rate.reading}} | miscalibrated |
 
-**Beside the rule** (pass A where a path applies). Classwise ECE (amendment 2): verdict 0.191 at T = 1 and 0.103 cross-fitted, edit 0.346 and
-0.328. Per-record d: verdict 0.076, 0.084 and 0.077 for (b)-v2, 2026-09-27 and 2026-09-29; edit 0.005, 0.020 and 0.005.
-The F2 floor at n = 100, 200, 400, 800 and 1,600: verdict 0.033, 0.023, 0.017, 0.012 and 0.008; edit 0.025, 0.020,
-0.0125, 0.010 and 0.007. The cross-fit ECE per fold, pass A: verdict 0.045 and 0.035, edit 0.073 and 0.073 (pass B: 0.045 and 0.035, 0.062 and 0.079).
+**Beside the rule** (pass A where a path applies). Classwise ECE (amendment two): verdict
+{{round(product.laya.verdict.passes.A.ece_classwise_T1, 3)}} on the raw softmax and {{round(product.laya.verdict.passes.A.ece_classwise_crossfit, 3)}} cross-fitted,
+edit {{round(product.laya.edit.passes.A.ece_classwise_T1, 3)}} and {{round(product.laya.edit.passes.A.ece_classwise_crossfit, 3)}}. Per-record d, for (b)-v2, stage two
+and the second substrate: verdict {{round(product.report.judges.verdict.per_record_d.b_v2, 3)}}, {{round(product.report.judges.verdict.per_record_d.stage_2, 3)}} and
+{{round(product.report.judges.verdict.per_record_d.second_substrate, 3)}}; edit {{round(product.report.judges.edit.per_record_d.b_v2, 3)}}, {{round(product.report.judges.edit.per_record_d.stage_2, 3)}} and
+{{round(product.report.judges.edit.per_record_d.second_substrate, 3)}}. The F2 floor at the five pre-registered held-out sizes, smallest first: verdict
+{{round(product.report.floor_F2_by_n.verdict.n100, 4)}}, {{round(product.report.floor_F2_by_n.verdict.n200, 4)}}, {{round(product.report.floor_F2_by_n.verdict.n400, 4)}}, {{round(product.report.floor_F2_by_n.verdict.n800, 4)}}, {{round(product.report.floor_F2_by_n.verdict.n1600, 4)}}; edit {{round(product.report.floor_F2_by_n.edit.n100, 4)}}, {{round(product.report.floor_F2_by_n.edit.n200, 4)}}, {{round(product.report.floor_F2_by_n.edit.n400, 4)}}, {{round(product.report.floor_F2_by_n.edit.n800, 4)}}, {{round(product.report.floor_F2_by_n.edit.n1600, 4)}}. The cross-fit ECE per fold, pass A: verdict
+{{round(product.laya.verdict.passes.A.ece_top1_crossfit_by_fold.A, 3)}} and {{round(product.laya.verdict.passes.A.ece_top1_crossfit_by_fold.B, 3)}}, edit
+{{round(product.laya.edit.passes.A.ece_top1_crossfit_by_fold.A, 3)}} and {{round(product.laya.edit.passes.A.ece_top1_crossfit_by_fold.B, 3)}}; pass B: verdict
+{{round(product.laya.verdict.passes.B.ece_top1_crossfit_by_fold.A, 3)}} and {{round(product.laya.verdict.passes.B.ece_top1_crossfit_by_fold.B, 3)}}, edit
+{{round(product.laya.edit.passes.B.ece_top1_crossfit_by_fold.A, 3)}} and {{round(product.laya.edit.passes.B.ece_top1_crossfit_by_fold.B, 3)}}.
 
-**Path parity.** Over all 400 per question, A and B agree on 399 decisions, A and fp32 on 399, B and fp32 on 400;
-the two ANE changes sit at fp32 margins of 0.0117 and 0.0051 logits, under the 0.05 floor. The abstention band of
-0.05 logits takes 12 verdict and 18 edit items.
+**Path parity.** Over all {{product.judges.verdict.n_items}} items per question (verdict, then edit), A and B agree on
+{{product.laya.verdict.parity_400.A_vs_B_agree}} and {{product.laya.edit.parity_400.A_vs_B_agree}} decisions, A and fp32 on
+{{product.laya.verdict.parity_400.A_vs_fp32_agree}} and {{product.laya.edit.parity_400.A_vs_fp32_agree}}, B and fp32 on
+{{product.laya.verdict.parity_400.B_vs_fp32_agree}} and {{product.laya.edit.parity_400.B_vs_fp32_agree}}; the two ANE changes sit
+at fp32 margins of {{product.laya.verdict.parity_400.fp32_margins_of_changed.A[0]}} and
+{{product.laya.edit.parity_400.fp32_margins_of_changed.A[0]}} logits, under the {{product.report.design.band_floor}} floor. The abstention band
+of {{product.laya.verdict.abstention_band_logits}} logits takes {{product.laya.verdict.abstain_n}} verdict and
+{{product.laya.edit.abstain_n}} edit items.
 
 ## Conclusion
 
-**Refuted, on agreement alone.** laya-typed-decisions as shipped agrees with the fresh Sonnet majority on 26.7% of
-verdicts and 63.5% of edits, against the judges' own 92.1% and 99.0%, and below what always answering the majority
-class would score (44.3%, 79.5%). Calibration fails too, on edit (`miscalibrated` under both floors), and verdict's
-reading is `inconclusive (fit at bound)`. The served paths are faithful to the fp32 forward (399 or 400 of 400
-decisions per question), so it is the model, not the serving. This is what the checkpoint's own card predicts:
-near-chance zero-shot (26.7% four-way, where chance is 25%), the option prior it documents (`questions` on 298 of
-397 items, `ignores` on 4 where the majority says `ignores` on 176), and probabilities that must be refit. It is the
-baseline #165's fine-tune must clear; #165 stays open.
+**Refuted, on agreement alone.** laya-typed-decisions as shipped agrees with the fresh Sonnet majority on
+{{pct(product.laya.verdict.passes.A.agreement_with_fresh_majority.rate, 1)}} of verdicts and {{pct(product.laya.edit.passes.A.agreement_with_fresh_majority.rate, 1)}} of edits, against the judges' own
+{{pct(product.report.judges.verdict.agreement, 1)}} and {{pct(product.report.judges.edit.agreement, 1)}}, and below what always
+answering the majority class would score ({{pct(product.laya.verdict.majority_class_rate, 1)}},
+{{pct(product.laya.edit.majority_class_rate, 1)}}). Calibration fails too, on edit (`miscalibrated` under both floors), and
+verdict's reading is `inconclusive (fit at bound)`. The served paths are faithful to the fp32 forward (pass A agrees
+with it on {{product.laya.verdict.parity_400.A_vs_fp32_agree}} and {{product.laya.edit.parity_400.A_vs_fp32_agree}} of {{product.judges.verdict.n_items}}
+decisions, pass B on {{product.laya.verdict.parity_400.B_vs_fp32_agree}} and {{product.laya.edit.parity_400.B_vs_fp32_agree}}), so it is the model, not the serving. This is what the checkpoint's own card predicts: near-chance
+zero-shot ({{pct(product.laya.verdict.passes.A.agreement_with_fresh_majority.rate, 1)}} four-way, where chance is {{pct(product.report.design.chance_four_way, 0)}}), the
+option prior it documents (`questions` on {{product.laya.verdict.passes.A.predicted_counts.questions}} of {{product.laya.verdict.n_with_majority}} items,
+`ignores` on {{product.laya.verdict.passes.A.predicted_counts.ignores}} where the majority says `ignores` on {{product.judges.verdict.majority_counts.ignores}}),
+and probabilities that must be refit. It is the baseline {{front.claim_issue}}'s fine-tune must clear;
+{{front.claim_issue}} stays open.
 
 **Two findings for the program, larger than the word.** First, the Sonnet judge is reliable: a single judge
-disagrees with another on 7.9% of verdicts (κ 0.886) and 1.0% of edits (κ 0.969). Second, the archive's single-judge
-labels replicate: 94.0% and 99.3% agreement with a fresh majority across time, prompt form and instance. Every
-framing word in `results/` that rests on those labels, (b)-v2, (b′) both stages and #142, rests on labels now shown
-to hold.
+disagrees with another on {{pct(product.judges.verdict.d, 1)}} of verdicts (κ {{round(product.judges.verdict.fleiss_kappa, 3)}}) and
+{{pct(product.judges.edit.d, 1)}} of edits (κ {{round(product.judges.edit.fleiss_kappa, 3)}}). Second, the archive's single-judge labels replicate:
+{{pct(product.judges.verdict.archive_vs_fresh_majority.rate, 1)}} and {{pct(product.judges.edit.archive_vs_fresh_majority.rate, 1)}} agreement
+with a fresh majority across time, prompt form and instance. Every framing word in `results/` that rests on those
+labels, (b)-v2, (b′) both stages and the second-substrate re-fire, rests on labels now shown to hold.

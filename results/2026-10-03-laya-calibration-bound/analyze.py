@@ -274,7 +274,20 @@ def main(D, OUT, pool):
     tok["fp32_at_max_len"] = sum(r["at_max_len"] for r in fp32.values())
 
     for f in OPTS: laya[f].pop("_base")
-    res = {"seed": SEED, "judges": judges, "laya": laya, "floor": floor, "rule": rule, "tokens": tok,
+    # Letter-keyed views for the README's references (#376): a reference path cannot step into a key that opens with
+    # a digit or carries a date, so the per-record d and the floor at each n are restated here under such keys, and the
+    # pre-registered constants beside them. Nothing here is computed anew except the judges' own agreement, 1 - d.
+    rec_key = {"2026-09-21-false-nomination-framing-v2": "b_v2", "2026-09-27-false-nomination-edit-rate": "stage_2",
+               "2026-09-29-false-nomination-edit-rate-second-substrate": "second_substrate"}
+    report = {
+        "judges": {f: {"agreement": r4(1 - judges[f]["d"]),
+                       "per_record_d": {rec_key[k]: v["d"] for k, v in judges[f]["per_record_d"].items()}} for f in OPTS},
+        "floor_F2_by_n": {f: {f"n{n}": floor[f]["median_ece"][str(n)]["F2_base_rate"] for n in FLOOR_NS} for f in OPTS},
+        "design": {"boot": BOOT, "floor_draws": FLOOR_DRAWS, "bins": BINS, "T_low": T_RANGE[0], "T_high": T_RANGE[1],
+                   "band_floor": BAND_FLOOR, "flip_margin_measured": FLIP_MARGIN_MEASURED, "chance_four_way": 1 / len(OPTS["verdict"]),
+                   "options": {f: len(OPTS[f]) for f in OPTS}},
+    }
+    res = {"seed": SEED, "judges": judges, "laya": laya, "floor": floor, "rule": rule, "tokens": tok, "report": report,
            "folds": dict(sorted(collections.Counter(fold.values()).items())),
            "inputs": {p: sha(p) for p in ["rejudge/sample.json", "rejudge/judge/ids.json", "laya/requests.jsonl", "laya/fp32.jsonl",
                                            "laya/passA/responses-cpu_and_ne.jsonl", "laya/passB/responses-cpu_and_gpu.jsonl"]
