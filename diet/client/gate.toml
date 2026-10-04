@@ -27,7 +27,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 98
+faults = 99
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -1721,4 +1721,35 @@ becomes = '''
                 Step::FinishReason(_) => {}'''
 catches = [
     "client::stream::tests::a_canned_stream_finishes_with_the_reason_it_is_given",
+]
+
+# ---------------------------------------------------------------------------
+# #298's integration: the tool loop -- streamed calls, the gate, the
+# operator's approval, serve's worktree and the receipt. Each seen red alone.
+# ---------------------------------------------------------------------------
+
+[[fault]]
+id = "client.a-streamed-call-is-text"
+failure_class = "client.a-streamed-call-is-text"
+target = "diet/src/client/stream.rs"
+expect_exit = 101
+anchor = '''
+                on_delta(Piece::ToolCall {
+                    index,
+                    id: call.get("id").and_then(Value::as_str),
+                    name: call.pointer("/function/name").and_then(Value::as_str),
+                    arguments: call
+                        .pointer("/function/arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                });'''
+becomes = '''
+                let _ = index;
+                on_delta(Piece::Text(
+                    call.pointer("/function/arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                ));'''
+catches = [
+    "client::stream::tests::a_real_servers_streamed_call_is_its_fragments_and_never_text",
 ]

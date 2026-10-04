@@ -68,8 +68,14 @@ impl Drop for HeadFile {
 }
 
 fn start(endpoint: &str, extra: &[&str]) -> Served {
+    start_with(endpoint, extra, &[])
+}
+
+/// [`start`], with `env` set in the program's environment.
+fn start_with(endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
     let head = file_holding("head", HEAD);
     let mut child = Command::new(DRIVE)
+        .envs(env.iter().copied())
         .args([
             "serve",
             "--endpoint",
@@ -1452,4 +1458,549 @@ fn a_drive_usage_error_still_exits_2_and_a_flags_value_is_never_the_question() {
             "{args:?}: {stderr}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// the tool loop's half of serve (#298 point 8, T9)
+// ---------------------------------------------------------------------------
+
+/// I0's turn 1: a real llama-server streaming one `bash` call, `ls | wc -l`.
+const I0_CALL: &[u8] =
+    include_bytes!("../../substrates/measurements/2026-10-02-i0-tool-call-captures/turn1.http");
+
+/// The dev loop's regimen, made to run commands: `top` before it,
+/// `isolation` swapped for `isolation_line`, `tail` after it.
+fn commands_regimen(top: &str, isolation_line: &str, tail: &str) -> HeadFile {
+    let dev = std::fs::read_to_string(dev_loop()).expect("the dev loop's regimen");
+    assert!(
+        dev.contains("isolation = \"none\""),
+        "the dev loop is unconfined"
+    );
+    let dev = dev.replace("isolation = \"none\"", isolation_line);
+    file_holding("regimen", &format!("{top}{dev}\n{tail}"))
+}
+
+/// A directory of its own, removed when dropped.
+struct Dir(PathBuf);
+
+impl Dir {
+    fn new(what: &str) -> Self {
+        static MADE: AtomicUsize = AtomicUsize::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "diet-drive-serve-{what}-{}-{}",
+            std::process::id(),
+            MADE.fetch_add(1, Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a directory");
+        Self(dir)
+    }
+
+    fn path(&self) -> String {
+        self.0.to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for Dir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+#[test]
+fn a_drive_server_with_a_regimen_that_runs_commands_needs_an_absolute_worktree() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = commands_regimen(
+        "allowed_commands = []\n",
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("--worktree"), "{said}");
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &["--regimen", &path, "--worktree", "a/relative/tree"],
+    );
+    assert_eq!(
+        code,
+        Some(2),
+        "a relative worktree is a usage error: {said}"
+    );
+    assert!(stub.received().is_empty(), "no request reached the server");
+}
+
+#[test]
+fn a_drive_server_refuses_a_vm_regimen_with_commands_or_without_before_any_request() {
+    let tree = Dir::new("vm-tree");
+    for top in ["allowed_commands = [\"ls\"]\n", ""] {
+        let stub = Stub::serving(Vec::new()).expect("loopback");
+        let regimen = commands_regimen(top, "isolation = \"vm\"", "");
+        let path = regimen.0.to_string_lossy().into_owned();
+        let mut args = vec!["--regimen", path.as_str()];
+        let tree_path = tree.path();
+        if !top.is_empty() {
+            args.extend(["--worktree", tree_path.as_str()]);
+        }
+        let (code, said) = run_briefly(&stub.url(), &args);
+        assert_eq!(code, Some(2), "{top:?}: {said}");
+        assert!(said.contains("vm"), "{said}");
+        assert!(stub.received().is_empty(), "no request reached the server");
+    }
+}
+
+#[test]
+fn a_drive_server_refuses_unconfined_commands_with_no_step_bound() {
+    let tree = Dir::new("unbounded-tree");
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = commands_regimen("allowed_commands = []\n", "isolation = \"none\"", "");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &["--regimen", &path, "--worktree", &tree.path()],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("max_steps"), "{said}");
+    assert!(stub.received().is_empty(), "no request reached the server");
+}
+
+#[test]
+fn a_drive_server_opens_the_confinement_at_start_and_a_refusal_comes_before_any_request() {
+    // A writable dir inside a secret: no sandbox opens on it, on either
+    // backend, and the refusal is the confinement's own.
+    let tree = Dir::new("confined-tree");
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = commands_regimen(
+        "allowed_commands = []\nsandbox_writable = [\"~/.aws/inside\"]\n",
+        "isolation = \"sandbox\"",
+        "",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+        ],
+    );
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("lies inside the secret"), "{said}");
+    assert!(stub.received().is_empty(), "no request reached the server");
+}
+
+/// A session that runs commands needs a credential, and its file is a
+/// secret no command reads (#298 review round 1, finding 1): with none,
+/// serve does not start; with one in a path the regimen declares writable,
+/// it refuses, as it does the key file.
+#[test]
+fn a_drive_server_that_runs_commands_demands_a_credential_no_command_can_read() {
+    let tree = Dir::new("auth-tree");
+    let declared = Dir::new("auth-declared");
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let bounded = commands_regimen(
+        "allowed_commands = []\n",
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = bounded.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &["--regimen", &path, "--worktree", &tree.path()],
+    );
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("--auth-file"), "{said}");
+
+    let auth = declared.0.join("auth");
+    std::fs::write(&auth, "author:s3cret\n").expect("an auth file");
+    let writable = commands_regimen(
+        &format!(
+            "allowed_commands = []\nsandbox_writable = [\"{}\"]\n",
+            declared.path()
+        ),
+        "isolation = \"sandbox\"",
+        "",
+    );
+    let path = writable.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth.to_string_lossy(),
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("--auth-file") && said.contains("lies in"),
+        "{said}"
+    );
+    assert!(stub.received().is_empty(), "no request reached the server");
+}
+
+/// One `POST` to `path` with the session's credential.
+fn post_authed(address: &str, path: &str, json: &str) -> String {
+    exchange(
+        address,
+        &format!(
+            "POST {path} HTTP/1.1\r\nHost: {address}\r\n{AUTHOR}Content-Type: application/json\r\n\
+             Content-Length: {}\r\n\r\n{json}",
+            json.len()
+        ),
+        |_| false,
+    )
+}
+
+/// The `/events` stream, with the credential, until `done`.
+fn events_authed(address: &str, done: impl Fn(&str) -> bool) -> String {
+    exchange(
+        address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n{AUTHOR}\r\n"),
+        done,
+    )
+}
+
+/// A streamed reply making one `bash` call, `call-1`, of `command`.
+fn a_call(command: &str) -> Act {
+    let arguments = serde_json::json!({ "command": command }).to_string();
+    let call = serde_json::json!({"choices": [{"index": 0, "finish_reason": null, "delta": {
+        "tool_calls": [{"index": 0, "id": "call-1", "type": "function",
+            "function": {"name": "bash", "arguments": arguments}}]}}]});
+    let done =
+        serde_json::json!({"choices": [{"index": 0, "delta": {}, "finish_reason": "tool_calls"}]});
+    Act::Answer(format!("data: {call}\n\ndata: {done}\n\ndata: [DONE]\n\n"))
+}
+
+/// What one T1-shaped session ran, and what it left.
+struct Drove {
+    prompt: serde_json::Value,
+    call: serde_json::Value,
+    receipt: serde_json::Value,
+    log: PathBuf,
+    record: PathBuf,
+}
+
+/// T1's path through the binary: `serve` with a regimen that runs
+/// commands (`top` and `isolation_line` over the dev loop), `--worktree`,
+/// `--auth-file`, `--log` and `--record`; one ask, whose call waits and is
+/// answered `scope` by the operator; then `end`. Every request carries the
+/// credential.
+#[allow(clippy::too_many_lines)]
+fn drive_t1(
+    first: Act,
+    (top, isolation_line): (&str, &str),
+    (tree, state, auth): (&Dir, &Dir, &HeadFile),
+    scope: &str,
+    before_the_answer: impl FnOnce(&str),
+) -> Drove {
+    let stub = Stub::serving_with_props(
+        vec![first, Act::Raw(ANSWERED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let regimen = commands_regimen(top, isolation_line, "[limits]\nmax_steps = 4\n");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let log = file_holding("log", "");
+    let log_path = log.0.to_string_lossy().into_owned();
+    let record = file_holding("record", "");
+    let record_path = record.0.to_string_lossy().into_owned();
+    let state_path = state.path();
+    let served = start_with(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--log",
+            &log_path,
+            "--record",
+            &record_path,
+        ],
+        &[("XDG_STATE_HOME", &state_path)],
+    );
+    let address = served.listening.clone();
+    before_the_answer(&address);
+    let unauthed = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(
+        status(&unauthed),
+        401,
+        "every route asks for the credential"
+    );
+    let reply = post_authed(&address, "/commands", r#"{"kind":"ask","text":"go"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let read = events_authed(&address, |read| {
+        read.contains("event: waiting\ndata: ") && read.ends_with("\n\n")
+    });
+    let shown = read
+        .split("event: waiting\ndata: ")
+        .nth(1)
+        .and_then(|rest| rest.split('\n').next())
+        .unwrap_or_else(|| panic!("no prompt was shown: {read}"));
+    let prompt = log_line_object(shown);
+    let id = prompt["id"].as_str().expect("the call's id").to_owned();
+    let approve = format!(r#"{{"call":"{id}","scope":"{scope}"}}"#);
+    let reply = post_authed(&address, "/approve", &approve);
+    assert_eq!(status(&reply), 204, "{reply}");
+    events_authed(&address, |read| read.contains(r#""reason":"final""#));
+    let reply = post_authed(&address, "/commands", r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let recorded = log_line_object(
+        &served
+            .said
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the record's report"),
+    );
+    assert_eq!(recorded["record"], record_path.as_str(), "{recorded}");
+    let report = log_line_object(
+        &served
+            .said
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the receipt's report"),
+    );
+    let receipt_path = format!("{record_path}.receipt.json");
+    assert_eq!(report["receipt"], receipt_path.as_str(), "{report}");
+    let receipt = log_line_object(&std::fs::read_to_string(&receipt_path).expect("the receipt"));
+    let _ = std::fs::remove_file(&receipt_path);
+    // The log reads, and the record projected from it, tool turn and all.
+    for (check, file) in [("check-log", &log.0), ("check-record", &record.0)] {
+        let checked = Command::new(DIET)
+            .args([check])
+            .arg(file)
+            .output()
+            .expect("diet runs");
+        assert_eq!(
+            checked.status.code(),
+            Some(0),
+            "{check}: {}",
+            String::from_utf8_lossy(&checked.stdout)
+        );
+    }
+    let _ = std::fs::remove_file(format!("{record_path}.unspellable.json"));
+    let written = std::fs::read_to_string(&log.0).expect("the log");
+    let called: Vec<serde_json::Value> = written
+        .lines()
+        .map(log_line_object)
+        .filter(|line| line["kind"] == "tool_call")
+        .collect();
+    assert_eq!(called.len(), 1, "{written}");
+    Drove {
+        prompt,
+        call: called[0].clone(),
+        receipt,
+        log: log.0.clone(),
+        record: record.0.clone(),
+    }
+}
+
+/// A git checkout, as the regimen's reference is.
+fn a_reference(dir: &Dir) -> String {
+    let init = Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(&dir.0)
+        .status()
+        .expect("git runs");
+    assert!(init.success());
+    dir.path()
+}
+
+/// The `cwd` a line records for `tree`: under the drive's HOME a `~` path,
+/// never expanded; else as given.
+fn recorded_cwd(tree: &Dir) -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let path = tree.path();
+    match path.strip_prefix(&home) {
+        Some(rest) if !home.is_empty() && rest.starts_with('/') => format!("~{rest}"),
+        _ => path,
+    }
+}
+
+/// The receipt's fixed half: what every session writes whatever it ran.
+fn receipt_holds(receipt: &serde_json::Value, approvals: &serde_json::Value) {
+    assert_eq!(&receipt["approvals"], approvals, "{receipt}");
+    assert_eq!(
+        receipt["approval_policy"], "approve what stays in the worktree",
+        "{receipt}"
+    );
+    assert_eq!(receipt["lifecycle_scripts"], "unguarded");
+    assert_eq!(
+        receipt["denylist_sha256"].as_str(),
+        Some(diet::drive::shell_gate::denylist_digest().as_str())
+    );
+    assert_eq!(
+        receipt["env_passthrough"],
+        serde_json::json!(["PATH", "HOME", "LANG", "TERM", "TMPDIR", "XDG_STATE_HOME"]),
+        "the effective list"
+    );
+}
+
+/// T1's path end to end, unconfined: I0's real streamed call, approved for
+/// the session, recorded, and the receipt whole.
+#[test]
+fn a_drive_server_runs_an_approved_call_records_it_and_writes_its_receipt() {
+    let tree = Dir::new("loop-tree");
+    let state = Dir::new("loop-state");
+    let reference = Dir::new("loop-reference");
+    let reference_path = a_reference(&reference);
+    let top = format!(
+        "allowed_commands = []\nenv_passthrough = [\"XDG_STATE_HOME\"]\n\
+         approval_policy = \"approve what stays in the worktree\"\n\
+         sandbox_writable = [\"{reference_path}\"]\n"
+    );
+    let drove = drive_t1(
+        Act::Raw(I0_CALL.to_vec()),
+        (&top, "isolation = \"none\""),
+        (&tree, &state, &file_holding("auth", "author:s3cret\n")),
+        "session",
+        |_| {},
+    );
+    // The shape #400's surface reads (#389 5982826097 point 2).
+    assert_eq!(
+        drove.prompt,
+        serde_json::json!({
+            "request": drove.prompt["request"].as_u64().expect("a request"),
+            "id": "7GJeYs3ux1SaqFVPB5ee2AExFLbsukd7",
+            "command": "ls | wc -l",
+            "cwd": recorded_cwd(&tree),
+            "reason": "not_approved",
+            "segments": [
+                {"text": "ls", "program": "ls", "verdict": "prompt", "why": "not_approved"},
+                {"text": "wc -l", "program": "wc", "verdict": "prompt", "why": "not_approved"},
+            ],
+        })
+    );
+    assert_eq!(drove.call["outcome"], "ran");
+    assert_eq!(drove.call["approval"]["scope"], "session");
+    assert_eq!(drove.call["argv"][2], "ls | wc -l");
+    assert_eq!(drove.call["cwd"], recorded_cwd(&tree).as_str());
+    assert_eq!(drove.call["isolation"], "none");
+    assert_eq!(
+        drove.receipt["allow"],
+        serde_json::json!([
+            {"shape": "ls", "scope": "session", "origin": "operator"},
+            {"shape": "wc", "scope": "session", "origin": "operator"},
+        ]),
+        "{}",
+        drove.receipt
+    );
+    receipt_holds(
+        &drove.receipt,
+        &serde_json::json!({"once": 0, "session": 1, "workspace": 0, "preseeded": 0, "declined": 0}),
+    );
+    assert_eq!(
+        drove.receipt["reference_modified"],
+        serde_json::json!({ reference_path: "" }),
+        "the reference checkout, untouched"
+    );
+    assert!(
+        std::fs::read_dir(&tree.0)
+            .expect("the tree")
+            .next()
+            .is_none(),
+        "nothing of the drive's was written into the worktree"
+    );
+    let _ = (drove.log, drove.record);
+}
+
+/// T1's path under the Mac's real sandbox (#298 review round 1, findings
+/// 1 and 7): Seatbelt, `network = "host"`, `sandbox_reads = "all"`. The
+/// approved command cannot read the credential, and its own `POST
+/// /approve` to serve is refused `401`: no approval is forged from inside.
+/// It writes the reference checkout, which the receipt names. Runs where
+/// `DIET_REQUIRE_SANDBOX` is set on a Mac; elsewhere it says so and passes.
+#[test]
+fn a_drive_server_runs_t1s_path_under_seatbelt_and_no_command_forges_an_approval() {
+    if std::env::var_os("DIET_REQUIRE_SANDBOX").is_none() || !cfg!(target_os = "macos") {
+        eprintln!("not run: needs DIET_REQUIRE_SANDBOX on a Mac (Seatbelt)");
+        return;
+    }
+    let tree = Dir::new("seatbelt-tree");
+    let state = Dir::new("seatbelt-state");
+    let reference = Dir::new("seatbelt-reference");
+    let reference_path = a_reference(&reference);
+    let top = format!(
+        "allowed_commands = []\nenv_passthrough = [\"XDG_STATE_HOME\"]\n\
+         approval_policy = \"approve what stays in the worktree\"\n\
+         sandbox_writable = [\"{reference_path}\"]\nnetwork = \"host\"\n\
+         sandbox_reads = \"all\"\n"
+    );
+    let auth = file_holding("auth", "author:s3cret\n");
+    // What the model asks for: read the credential, answer its own prompt
+    // (serve's address is written into the tree before the answer), and
+    // touch the reference.
+    let command = format!(
+        "cat {} ; echo forged=$(curl -s -o /dev/null -w '%{{http_code}}' -X POST \
+         -H 'Content-Type: application/json' --data '{{\"call\":\"call-1\",\"scope\":\"session\"}}' \
+         http://$(cat address)/approve) ; echo x > {reference_path}/touched",
+        auth.0.display()
+    );
+    let tree_for_address = tree.0.clone();
+    let drove = drive_t1(
+        a_call(&command),
+        (&top, "isolation = \"sandbox\""),
+        (&tree, &state, &auth),
+        "once",
+        move |address| {
+            std::fs::write(tree_for_address.join("address"), address).expect("the address");
+        },
+    );
+    assert_eq!(
+        drove.prompt["segments"][1]["why"], "dynamic",
+        "{}",
+        drove.prompt
+    );
+    assert_eq!(drove.call["outcome"], "ran", "{}", drove.call);
+    assert_eq!(drove.call["isolation"], "sandbox");
+    assert_eq!(drove.call["network"], "host");
+    assert_eq!(drove.call["approval"]["scope"], "once");
+    assert_eq!(drove.call["cwd"], recorded_cwd(&tree).as_str());
+    assert!(
+        drove.call["confined"][0]
+            .as_str()
+            .is_some_and(|runner| runner.ends_with("sandbox-exec")),
+        "{}",
+        drove.call
+    );
+    let stdout = drove.call["stdout"].as_str().unwrap_or_default();
+    let stderr = drove.call["stderr"].as_str().unwrap_or_default();
+    assert!(
+        !stdout.contains("s3cret"),
+        "a confined command read the credential: {stdout}"
+    );
+    assert!(
+        stderr.contains("Operation not permitted"),
+        "the credential's read was refused: {stderr}"
+    );
+    assert!(
+        stdout.contains("forged=401"),
+        "a confined command's own approval was not refused: {stdout} {stderr}"
+    );
+    assert_eq!(
+        drove.receipt["allow"],
+        serde_json::json!([]),
+        "{}",
+        drove.receipt
+    );
+    receipt_holds(
+        &drove.receipt,
+        &serde_json::json!({"once": 1, "session": 0, "workspace": 0, "preseeded": 0, "declined": 0}),
+    );
+    assert_eq!(
+        drove.receipt["reference_modified"],
+        serde_json::json!({ reference_path: "?? touched\n" }),
+        "the reference checkout, as the command left it"
+    );
+    let _ = (drove.log, drove.record);
 }

@@ -35,7 +35,24 @@ vocabulary! {
         User => "user",
         /// What the substrate said last time.
         Assistant => "assistant",
+        /// A tool call's result, sent back to the model: `OpenAI`'s shape,
+        /// answering the call its `tool_call_id` names (#29 Q9).
+        Tool => "tool",
     }
+}
+
+/// A call the model made, as an assistant message carries it back to the
+/// server: `OpenAI`'s `tool_calls` entry (#29 Q9), its id, its function's
+/// name and the arguments text exactly as they streamed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    /// The call's id, as the server streamed it.
+    pub id: String,
+    /// The function's name.
+    pub name: String,
+    /// The arguments text, assembled from the streamed fragments, byte for
+    /// byte and never parsed here.
+    pub arguments: String,
 }
 
 /// One message of a request.
@@ -51,6 +68,12 @@ pub struct Message {
     /// (#117, Q10): re-sent, 400 of 420 prompt tokens stayed warm; dropped,
     /// the prompt diverged at the previous assistant turn.
     pub reasoning: Option<String>,
+    /// The calls an assistant message made, in the order streamed: empty on
+    /// every other message. An assistant message with calls and no text goes
+    /// out with `content: null`, as I0's capture of the shape has it.
+    pub tool_calls: Vec<ToolCall>,
+    /// The call a [`Role::Tool`] message answers; `None` on every other.
+    pub tool_call_id: Option<String>,
 }
 
 impl Message {
@@ -61,6 +84,17 @@ impl Message {
             role,
             content: content.into(),
             reasoning: None,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
+        }
+    }
+
+    /// A tool call's result, answering the call `id`.
+    #[must_use]
+    pub fn tool_result(id: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            tool_call_id: Some(id.into()),
+            ..Self::new(Role::Tool, content)
         }
     }
 }
@@ -436,7 +470,7 @@ mod tests {
     fn the_shapes_vocabularies_are_the_words_the_wire_carries() {
         assert_eq!(
             Role::ALL.iter().map(|role| role.tag()).collect::<Vec<_>>(),
-            ["system", "user", "assistant"]
+            ["system", "user", "assistant", "tool"]
         );
         assert_eq!(
             SamplerSetting::ALL

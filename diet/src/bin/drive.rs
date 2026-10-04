@@ -44,6 +44,7 @@ use diet::client::transport::{Endpoint, Http};
 use diet::drive::regimen::{SUBSTRATE_KEYS, regime_of};
 use diet::drive::serve::{Config, Credential, Server};
 use diet::drive::session::Session;
+use diet::drive::tool_loop::{self, Tools};
 use diet::drive::{Gym, Halt, canned, run};
 use diet::formats::record::Regime;
 use diet::formats::record::json::{self, Value};
@@ -77,7 +78,8 @@ fn serve_usage() -> String {
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
          \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
          \x20                       [--log FILE] [--record FILE]\n\
-         \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\n",
+         \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
+         \x20                       [--worktree DIR]\n\n",
     );
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
     out.push_str("--listen's address:\n");
@@ -104,6 +106,21 @@ fn serve_usage() -> String {
     out.push_str("to start. A canned substrate's literal is canned-<acts sha256>, which only\n");
     out.push_str("this crate's own canned server reports.\n");
     out.push_str("--help prints this to stdout and exits 0; a usage error exits 2.\n");
+    out.push_str("--worktree DIR, absolute, is where the model's commands run; a regimen\n");
+    out.push_str("that runs commands (it declares `allowed_commands`, the pre-seeded set) needs\n");
+    out.push_str("it. Each command runs under the regimen's confinement, opened at start;\n");
+    out.push_str("`isolation = \"vm\"` is refused, and `isolation = \"none\"` needs\n");
+    out.push_str("`[limits] max_steps`, and --auth-file is required: every route then asks for\n");
+    out.push_str("it, and the file joins the session's secrets: under a sandbox no command\n");
+    out.push_str("reads it, so none answers its own prompt. Under `isolation = \"none\"` a\n");
+    out.push_str("command can read it, and nothing stops that (#436). A command no approval\n");
+    out.push_str("covers waits on the operator:\n");
+    out.push_str("GET /events shows it as `event: waiting` {request, id, command, cwd,\n");
+    out.push_str("reason, segments}, then `event: answered` {request, id}; POST /approve\n");
+    out.push_str("answers it with {\"call\": ID, \"scope\": \"once\"|\"session\"|\"workspace\"|\n");
+    out.push_str("\"decline\"}: 204, or 409 {\"refused\": \"nothing-waiting\"|\"stale\"|...}.\n");
+    out.push_str("After the session the receipt is written beside the record (or the log),\n");
+    out.push_str("as FILE.receipt.json.\n");
     out
 }
 
@@ -128,6 +145,7 @@ struct ServeArgs {
     port: u16,
     allowed_origins: Vec<String>,
     max_output_tokens: u32,
+    worktree: Option<String>,
 }
 
 /// Whether `args` asks for the usage: `--help` or `-h` where a flag goes.
@@ -157,6 +175,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
     let mut max_output_tokens: u32 = SERVE_MAX_OUTPUT_TOKENS;
+    let mut worktree = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -196,6 +215,11 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
             value.parse().map(|given| port = given).is_ok()
         } else if flag == "--max-output-tokens" {
             value.parse().map(|given| max_output_tokens = given).is_ok()
+        } else if flag == "--worktree" {
+            // Absolute, as the gym's is resolved before anything runs: a
+            // relative one would be resolved again inside a sandbox.
+            worktree = Some(value.clone());
+            std::path::Path::new(value).is_absolute()
         } else {
             false
         };
@@ -216,6 +240,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         port,
         allowed_origins,
         max_output_tokens,
+        worktree,
     })
 }
 
@@ -226,6 +251,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
 /// credential, so nothing here binds a session that runs the model beyond the
 /// machine it is on for anyone who can reach it. A wildcard is refused: D17's
 /// `Host` check answers to the bound address, and a wildcard has none.
+#[allow(clippy::too_many_lines)]
 fn serve(args: &[String]) -> ExitCode {
     let Some(ServeArgs {
         endpoint,
@@ -240,6 +266,7 @@ fn serve(args: &[String]) -> ExitCode {
         port,
         allowed_origins,
         max_output_tokens,
+        worktree,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -261,6 +288,17 @@ fn serve(args: &[String]) -> ExitCode {
     if record_file.is_some() && regime.is_none() {
         return fail(EXIT_USAGE, RECORD_NEEDS_A_REGIMEN);
     }
+    // What the model's calls run under, opened now: a confinement that
+    // cannot open refuses before any request is made or anything binds
+    // (#298 point 8).
+    let tools = match serving_tools(
+        regimen_file.as_deref(),
+        worktree.as_deref(),
+        (key_file.as_deref(), auth_file.as_deref()),
+    ) {
+        Ok(tools) => tools,
+        Err((code, why)) => return fail(code, &why),
+    };
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
@@ -299,7 +337,7 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
-    let session = served_session(transport, shape);
+    let session = served_session(transport, shape, tools);
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
     let config = Config {
@@ -360,8 +398,49 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
             }
         }
     }
+    // The receipt (#298 point 9), beside the record, or the log: what the
+    // session's commands ran under and what was approved.
+    if let Some(receipt) = session.receipt()
+        && let Some(path) = &running.receipt
+    {
+        match written_receipt(&receipt, path) {
+            Ok(report) => {
+                let _ = std::io::Write::write_all(
+                    &mut std::io::stdout().lock(),
+                    format!("{report}\n").as_bytes(),
+                );
+            }
+            Err(why) => {
+                return fail(
+                    EXIT_OUTPUT,
+                    &format!("the receipt could not be written: {why}"),
+                );
+            }
+        }
+    }
+    session.end_commands();
     running.server.finish(std::time::Duration::from_secs(5));
     ExitCode::SUCCESS
+}
+
+/// Write `receipt` to `path`, and the line `serve` reports for it.
+fn written_receipt(receipt: &Value, path: &str) -> Result<String, String> {
+    let mut text = String::new();
+    json::render(receipt, &mut text);
+    text.push('\n');
+    std::fs::write(path, &text).map_err(|why| format!("{path}: {why}"))?;
+    let mut out = String::new();
+    json::render(
+        &Value::Object(BTreeMap::from([
+            ("receipt".to_owned(), Value::String(path.to_owned())),
+            (
+                "receipt_sha256".to_owned(),
+                Value::String(diet::digest::sha256_hex(text.as_bytes())),
+            ),
+        ])),
+        &mut out,
+    );
+    Ok(out)
 }
 
 /// The file at `path`, opened for writing (created if absent) but NOT yet
@@ -430,16 +509,175 @@ fn outputs(
 /// how many streams the server serves.
 fn served_session(
     transport: HttpStream,
-    shape: RequestShape,
+    mut shape: RequestShape,
+    tools: Option<Tools>,
 ) -> std::sync::Arc<Session<HttpStream>> {
-    std::sync::Arc::new(Session::open_serving(
+    // A session that runs commands declares the one tool they run through.
+    if tools.is_some() {
+        shape.tools = vec![tool_loop::bash_tool()];
+    }
+    std::sync::Arc::new(Session::open_with(
         transport,
         shape,
-        Serving {
+        Some(Serving {
             concurrency: Concurrency::Undeclared,
             dialect: Dialect::llama_cpp(),
-        },
+        }),
+        tools,
     ))
+}
+
+/// What `serve` runs the model's calls under, when the regimen at
+/// `regimen` runs commands -- it declares `allowed_commands`, the pre-seeded
+/// session set (#298 point 8). Everything is checked and opened before any
+/// request is made: `isolation = "vm"` is refused; a regimen that runs
+/// commands needs `--worktree`, and unconfined it needs `[limits]
+/// max_steps`; the drive's key file joins the policy's secrets
+/// (`declared::add_credential`, #299); the confinement is opened, and the
+/// workspace approvals store, outside every writable path. The operator
+/// answers prompts.
+#[allow(clippy::too_many_lines)]
+fn serving_tools(
+    regimen: Option<&str>,
+    worktree: Option<&str>,
+    (key_file, auth_file): (Option<&str>, Option<&str>),
+) -> Result<Option<Tools>, (u8, String)> {
+    let no_commands = |path: &str| {
+        Err((
+            EXIT_USAGE,
+            format!(
+                "--worktree names where a regimen's commands run, and {path} runs none (it declares no `{}`)",
+                tool_loop::ALLOWED_COMMANDS
+            ),
+        ))
+    };
+    let Some(path) = regimen else {
+        return match worktree {
+            Some(_) => no_commands("no --regimen"),
+            None => Ok(None),
+        };
+    };
+    let text = std::fs::read_to_string(path)
+        .map_err(|why| (EXIT_INPUT, format!("{path} cannot be read: {why}")))?;
+    let read = regimen::parse(&text)
+        .map_err(|why| (EXIT_INPUT, format!("{path} is not a regimen: {why:?}")))?;
+    let mut policy = IsolationPolicy::from_regimen(&read)
+        .map_err(|why| (EXIT_INPUT, format!("{path}: its isolation policy: {why}")))?;
+    if policy.isolation == isolation::Isolation::Vm {
+        return Err((
+            EXIT_HALT,
+            format!(
+                "{path} declares `isolation = \"vm\"`, which serve does not run: refusing to \
+                 start rather than running under something weaker than the record would say"
+            ),
+        ));
+    }
+    let Some(declared) =
+        tool_loop::declared(&read).map_err(|why| (EXIT_INPUT, format!("{path}: {why}")))?
+    else {
+        return match worktree {
+            Some(_) => no_commands(path),
+            None => Ok(None),
+        };
+    };
+    let Some(worktree) = worktree.map(std::path::PathBuf::from) else {
+        return Err((
+            EXIT_USAGE,
+            format!(
+                "{path} runs commands (it declares `{}`), and serve needs --worktree DIR, \
+                 absolute, for them to run in",
+                tool_loop::ALLOWED_COMMANDS
+            ),
+        ));
+    };
+    if !worktree.is_dir() {
+        return Err((
+            EXIT_INPUT,
+            format!(
+                "--worktree {} is not a directory that exists",
+                worktree.display()
+            ),
+        ));
+    }
+    if policy.isolation == isolation::Isolation::None && declared.max_steps.is_none() {
+        return Err((
+            EXIT_INPUT,
+            format!(
+                "{path} runs commands unconfined (`isolation = \"none\"`) with no `[{}] {}`: \
+                 nothing would bound the loop",
+                tool_loop::LIMITS,
+                tool_loop::MAX_STEPS
+            ),
+        ));
+    }
+    // A confined command reaches `serve` on loopback whenever its network
+    // does, and could answer its own prompts: so the session demands a
+    // credential on every route, and the credential is a secret no command
+    // reads (#298 review round 1, finding 1).
+    let Some(auth_file) = auth_file else {
+        return Err((
+            EXIT_USAGE,
+            format!(
+                "{path} runs commands, and serve needs --auth-file FILE for them: a command \
+                 can reach this server, and without a credential it could answer its own \
+                 prompts"
+            ),
+        ));
+    };
+    isolation::declared::add_credential(&mut policy, std::path::Path::new(auth_file)).map_err(
+        |path| {
+            (
+                EXIT_INPUT,
+                format!(
+                    "--auth-file {auth_file} lies in `{}`, which the regimen declares readable \
+                     or writable: a command could read the credential and answer its own prompts",
+                    path.display()
+                ),
+            )
+        },
+    )?;
+    if let Some(key_file) = key_file {
+        isolation::declared::add_credential(&mut policy, std::path::Path::new(key_file)).map_err(
+            |path| {
+                (
+                    EXIT_INPUT,
+                    format!(
+                        "--key-file {key_file} lies in `{}`, which the regimen declares readable \
+                         or writable: a command could read the key",
+                        path.display()
+                    ),
+                )
+            },
+        )?;
+    }
+    let confinement = isolation::open(&policy).map_err(|why| (EXIT_HALT, why.to_string()))?;
+    let state = tool_loop::state_home().ok_or_else(|| {
+        (
+            EXIT_HALT,
+            "no HOME and no XDG_STATE_HOME: nowhere outside the worktree to keep workspace \
+             approvals"
+                .to_owned(),
+        )
+    })?;
+    let (store, stored) =
+        tool_loop::Store::open(&state, &worktree, &policy).map_err(|why| (EXIT_HALT, why))?;
+    let gate = tool_loop::Gate::standard(&worktree).passing(&policy.environment);
+    let mut allowed = tool_loop::preseeded(&declared.allowed_commands, &gate)
+        .map_err(|why| (EXIT_INPUT, format!("{path}: {why}")))?;
+    allowed.extend(stored);
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    Ok(Some(Tools {
+        confinement,
+        policy,
+        cwd: tool_loop::cwd_label(&worktree, home.as_deref()),
+        worktree,
+        max_steps: declared.max_steps,
+        decider: tool_loop::Decider::Operator,
+        gate,
+        allowed,
+        store: Some(store),
+        approval_policy: declared.approval_policy,
+    }))
 }
 
 /// The writers, then the server. The writers start once the address is
@@ -463,8 +701,27 @@ fn started(
     )>,
 ) -> Result<Running, ExitCode> {
     let render = diet::drive::session::render;
-    let (log_held, record_kept, emptied) =
+    let receipt = record
+        .as_ref()
+        .map(|(((path, _), _), _)| path.clone())
+        .or_else(|| log.as_ref().map(|(path, _)| (*path).to_owned()))
+        .map(|path| format!("{path}.receipt.json"));
+    let (log_held, record_kept, mut emptied) =
         started_writers(&session, render, log, record).map_err(|why| fail(EXIT_OUTPUT, &why))?;
+    // An earlier session's receipt beside these files would read as this
+    // one's, as an earlier record would (#264's review).
+    if let Some(path) = receipt
+        .as_deref()
+        .filter(|path| std::path::Path::new(path).exists())
+    {
+        std::fs::remove_file(path).map_err(|why| {
+            fail(
+                EXIT_OUTPUT,
+                &emptied.named(format!("{path} cannot be removed: {why}")),
+            )
+        })?;
+        emptied.push(format!("the previous receipt at {path}"));
+    }
     let server = Server::start(listener, session, config, render).map_err(|why| {
         fail(
             EXIT_HALT,
@@ -477,6 +734,7 @@ fn started(
         log_held,
         record_held,
         record,
+        receipt,
     })
 }
 
@@ -548,6 +806,8 @@ struct Running {
     /// The record's regime and file, emptied, written once the session has
     /// ended.
     record: Option<(diet::formats::record::Regime, (String, std::fs::File))>,
+    /// Where the receipt goes: beside the record, else beside the log.
+    receipt: Option<String>,
 }
 
 /// Project the ended session, check the record reads back, and write it and

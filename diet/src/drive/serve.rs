@@ -11,6 +11,16 @@
 //!   another session's events as if they continued its own (D7).
 //! * `POST /commands` takes `{"kind": <command>, ...}`. A refusal is `409`
 //!   with its tag, and the session has logged it (D8).
+//! * `POST /approve` takes `{"call": <id>, "scope": once|session|workspace|
+//!   decline}`, the operator's answer to the prompt waiting on that call
+//!   (#298 point 8): `204`, or `409` with its tag (`nothing-waiting`,
+//!   `stale`; `not-standing`, `no-store` beside them), logging nothing.
+//!   Beside the log's lines `/events` carries two named events with no
+//!   `id:`, never logged (#389, ruled 5982826097, as #400's surface reads
+//!   them): `waiting` `{request, id, command, cwd, reason, segments}`, re-sent
+//!   after the history on every connect while it waits, and `answered`
+//!   `{request, id}` once the operator decides. The log (v4) records the
+//!   decision on the call's own `tool_call` line.
 //!
 //! # Who may drive it
 //!
@@ -49,6 +59,7 @@ use std::time::{Duration, Instant};
 use super::session::{
     CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session, Settlement,
 };
+use super::tool_loop::{Decision, Prompt};
 use crate::client::stream::Streaming;
 use crate::digest::sha256;
 use crate::formats::record::json::{self, Value};
@@ -390,10 +401,11 @@ enum Unread {
 type Handler<S> = fn(&Serving<S>, &mut TcpStream, &Request);
 
 /// Every route there is. Anything else, `OPTIONS` included, is `404`.
-fn routes<S: Streaming + 'static>() -> [(&'static str, &'static str, Handler<S>); 2] {
+fn routes<S: Streaming + 'static>() -> [(&'static str, &'static str, Handler<S>); 3] {
     [
         ("GET", "/events", Serving::<S>::events),
         ("POST", "/commands", Serving::<S>::command),
+        ("POST", "/approve", Serving::<S>::approve),
     ]
 }
 
@@ -507,6 +519,9 @@ impl<S: Streaming + 'static> Serving<S> {
             return;
         }
         let mut next = first;
+        // The prompt this stream last showed: a waiting prompt is shown once
+        // per stream, after the lines before it.
+        let mut shown: Option<Prompt> = None;
         while !self.stopping.load(Ordering::SeqCst) {
             // Once ended, nothing more is logged (#291): a stream past the
             // last line, `ended`, is done, and closes -- at once, not after
@@ -517,9 +532,24 @@ impl<S: Streaming + 'static> Serving<S> {
             {
                 return;
             }
-            let batch = self.session.wait_from(next, self.config.heartbeat);
+            let (batch, prompt, decided) =
+                self.session
+                    .wait_for(next, self.config.heartbeat, shown.as_ref());
+            let fresh = prompt.is_some() && prompt != shown;
+            // The prompt this stream showed is over: `answered` when the
+            // operator decided it (#389 5982826097 point 3), before the
+            // call's own line.
+            let answered = shown.as_ref().filter(|was| {
+                prompt.as_ref() != Some(*was)
+                    && decided
+                        .as_ref()
+                        .is_some_and(|(request, id)| *request == was.request && *id == was.id)
+            });
             let mut out = String::new();
-            if batch.is_empty() {
+            if let Some(was) = answered {
+                let _ = write!(out, "event: answered\ndata: {}\n\n", was.answered());
+            }
+            if batch.is_empty() && !fresh && answered.is_none() {
                 out.push_str(":\n\n");
             }
             for logged in &batch {
@@ -531,6 +561,10 @@ impl<S: Streaming + 'static> Serving<S> {
                 let _ = write!(out, "id: {}-{}\ndata: {data}\n\n", self.opened, logged.seq);
                 next = logged.seq + 1;
             }
+            if let Some(waiting) = prompt.as_ref().filter(|_| fresh) {
+                let _ = write!(out, "event: waiting\ndata: {}\n\n", waiting.render());
+            }
+            shown = prompt;
             if stream.write_all(out.as_bytes()).is_err() || stream.flush().is_err() {
                 return;
             }
@@ -539,35 +573,81 @@ impl<S: Streaming + 'static> Serving<S> {
 
     /// `POST /commands`: one command, answered with what the session did.
     fn command(&self, stream: &mut TcpStream, request: &Request) {
+        let Some(object) = self.posted(stream, request) else {
+            return;
+        };
+        let Some(command) = Command::from_object(&object) else {
+            return respond(stream, 400, &empty());
+        };
+        let (status, reply) = self.run(command);
+        respond(stream, status, &Value::Object(reply));
+    }
+
+    /// `POST /approve`: the operator's answer to the prompt waiting on a
+    /// call (#298 point 8). `200` when it answered it; `409` with the
+    /// refusal's tag when it did not, and nothing is logged.
+    fn approve(&self, stream: &mut TcpStream, request: &Request) {
+        let Some(object) = self.posted(stream, request) else {
+            return;
+        };
+        let (Some(Value::String(call)), Some(Value::String(scope)), 2) =
+            (object.get("call"), object.get("scope"), object.len())
+        else {
+            return respond(stream, 400, &empty());
+        };
+        let Some(decision) = Decision::ALL
+            .iter()
+            .copied()
+            .find(|decision| decision.tag() == scope)
+        else {
+            return respond(stream, 400, &empty());
+        };
+        match self.session.approve(call, decision) {
+            // 204, as ruled (#389 5982826097 point 4): nothing to say.
+            Ok(()) => respond_no_content(stream),
+            Err(refusal) => respond(
+                stream,
+                409,
+                &Value::Object(BTreeMap::from([(
+                    "refused".to_owned(),
+                    Value::String(refusal.tag().to_owned()),
+                )])),
+            ),
+        }
+    }
+
+    /// A post's JSON object, or `None` once its refusal is answered: `415`
+    /// for a body that is not `application/json`, `400` for a length that is
+    /// not one or a body that is not one object, `413` past the cap.
+    fn posted(&self, stream: &mut TcpStream, request: &Request) -> Option<BTreeMap<String, Value>> {
         let json_body = request.header("content-type").is_some_and(|kind| {
             kind.split(';')
                 .next()
                 .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("application/json"))
         });
         if !json_body {
-            return respond(stream, 415, &empty());
+            respond(stream, 415, &empty());
+            return None;
         }
         let Some(length) = request
             .header("content-length")
             .and_then(|length| length.trim().parse::<usize>().ok())
         else {
-            return respond(stream, 400, &empty());
+            respond(stream, 400, &empty());
+            return None;
         };
         if length > self.config.max_body {
-            return respond(stream, 413, &empty());
+            respond(stream, 413, &empty());
+            return None;
         }
-        let Some(body) = read_body(stream, &request.early_body, length, request.deadline) else {
-            return;
-        };
-        let Some(command) = std::str::from_utf8(&body)
+        let body = read_body(stream, &request.early_body, length, request.deadline)?;
+        let object = std::str::from_utf8(&body)
             .ok()
-            .and_then(|text| json::line(text.trim_end()).ok())
-            .and_then(|object| Command::from_object(&object))
-        else {
-            return respond(stream, 400, &empty());
-        };
-        let (status, reply) = self.run(command);
-        respond(stream, status, &Value::Object(reply));
+            .and_then(|text| json::line(text.trim_end()).ok());
+        if object.is_none() {
+            respond(stream, 400, &empty());
+        }
+        object
     }
 
     fn run(&self, command: Posted) -> (u16, BTreeMap<String, Value>) {
@@ -824,6 +904,13 @@ fn respond(stream: &mut TcpStream, status: u16, body: &Value) {
 }
 
 /// The same, with `headers` -- each line ending in CRLF -- added.
+/// `204 No Content`: a reply with no body at all.
+fn respond_no_content(stream: &mut TcpStream) {
+    let _ = stream.write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+    let _ = stream.flush();
+    let _ = stream.shutdown(Shutdown::Write);
+}
+
 fn respond_with(stream: &mut TcpStream, status: u16, headers: &str, body: &Value) {
     let reason = REASONS
         .iter()
@@ -1935,5 +2022,126 @@ mod tests {
         }
         let log = session.events_from(0);
         assert_eq!(log.len(), 1, "a malformed command was logged: {log:#?}");
+    }
+
+    /// Point 8 over HTTP: the loop's prompt is an `event: waiting` on
+    /// `/events`, not a log line; `POST /approve` answers it, and a refused
+    /// answer is `409` with its tag.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn a_waiting_prompt_is_shown_on_events_and_answered_by_post_approve() {
+        use crate::drive::session::tests::{bash, lines, looping, tools};
+        use crate::drive::tool_loop::Decider;
+        use crate::drive::tool_loop::tests::scratch;
+        use crate::isolation::Confinement;
+        let tree = scratch("serve-approve");
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let session = Arc::new(Session::open_looping(
+            Canned::new([vec![bash("call-1", "touch a")], deltas(&["ok"])]),
+            looping(),
+            None,
+            tools(Confinement::Unconfined, &tree, &[], None, Decider::Operator),
+        ));
+        let server = Server::start(listener, Arc::clone(&session), quick(), render)
+            .expect("the server starts");
+        let approve = |json: &str| {
+            Client::send(
+                &server,
+                &format!(
+                    "POST /approve HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\n\
+                     Content-Length: {}\r\n\r\n{json}",
+                    host(&server),
+                    json.len()
+                ),
+            )
+            .reply()
+        };
+        assert_eq!(
+            body(&approve(r#"{"call":"call-1","scope":"once"}"#)),
+            r#"{"refused":"nothing-waiting"}"#
+        );
+        let mut reader = Client::send(&server, &events_request(&server, "", ""));
+        assert_eq!(
+            status(&post(&server, r#"{"kind":"ask","text":"go"}"#, "")),
+            200
+        );
+        assert!(
+            reader.read_until(Duration::from_secs(10), |read| read
+                .contains("event: waiting")),
+            "no prompt was shown: {}",
+            reader.read
+        );
+        let shown = reader
+            .read
+            .split("event: waiting\ndata: ")
+            .nth(1)
+            .and_then(|rest| rest.split('\n').next())
+            .expect("the prompt's data line");
+        // The wire shape #400's surface reads (`exercise/src/drive/http.ts`,
+        // `#waiting`; ruled at #389 5982826097 point 2): exactly these keys.
+        let prompt: serde_json::Value = serde_json::from_str(shown).expect("JSON");
+        assert_eq!(
+            prompt,
+            serde_json::json!({
+                "request": prompt["request"].as_u64().expect("a request number"),
+                "id": "call-1",
+                "command": "touch a",
+                "cwd": "~/git/a-worktree",
+                "reason": "not_approved",
+                "segments": [{
+                    "text": "touch a",
+                    "program": "touch",
+                    "verdict": "prompt",
+                    "why": "not_approved",
+                }],
+            })
+        );
+        let logged = session.events_from(0).len();
+        assert_eq!(
+            reader.data().len(),
+            logged + 1,
+            "every log line, and the prompt beside them"
+        );
+
+        assert_eq!(
+            status(&approve(r#"{"call":"call-1","scope":"always"}"#)),
+            400
+        );
+        assert_eq!(status(&approve(r#"{"call":"call-1"}"#)), 400);
+        let other = approve(r#"{"call":"call-2","scope":"once"}"#);
+        assert_eq!(
+            (status(&other), body(&other)),
+            (409, r#"{"refused":"stale"}"#)
+        );
+        let taken = approve(r#"{"call":"call-1","scope":"once"}"#);
+        assert_eq!((status(&taken), body(&taken)), (204, ""), "{taken}");
+        // `answered {request, id}` once decided, before the call's line.
+        assert!(
+            reader.read_until(Duration::from_secs(10), |read| read
+                .contains("\"kind\":\"tool_call\"")
+                || read.contains("ToolCalled")),
+            "{}",
+            reader.read
+        );
+        let answered = reader
+            .read
+            .split("event: answered\ndata: ")
+            .nth(1)
+            .and_then(|rest| rest.split('\n').next())
+            .expect("the answered event");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(answered).expect("JSON"),
+            serde_json::json!({"request": prompt["request"], "id": "call-1"})
+        );
+        let (before, after) = reader.read.split_once("event: answered").expect("answered");
+        assert!(!before.contains("ToolCalled") && after.contains("ToolCalled"));
+        let log = wait_until(&session, "the turn to settle", settled);
+        let [line] = lines(&log).try_into().expect("one line");
+        assert_eq!(
+            line.approval.map(|a| a.scope),
+            Some(crate::formats::log::ApprovalScope::Once)
+        );
+        assert!(tree.join("a").exists());
+        let _ = std::fs::remove_dir_all(&tree);
     }
 }

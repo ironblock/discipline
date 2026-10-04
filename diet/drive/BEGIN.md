@@ -54,6 +54,15 @@ If a file already holds something, naming it empties it. The first stdout line s
 - with `--record`, `record` and `record_truncated`;
 - with `--regimen`, also `substrate`, `registry_sha256`, `engine_build` and `engine_identity`.
 
+## The model's commands
+
+A regimen that declares `allowed_commands` runs the model's `bash` calls (#298); the list is the pre-seeded session set, and `[]` pre-seeds nothing.
+
+- **`--worktree DIR`** is required with it, absolute: where the commands run. Each runs under the regimen's confinement, opened before anything binds. `isolation = "vm"` is refused, and `isolation = "none"` needs `[limits] max_steps`.
+- **A command no approval covers waits on you**, with no timeout. `GET /events` shows it as an `event: waiting` (`request`, `id`, `command`, `cwd`, `reason`, `segments`), and `event: answered` (`request`, `id`) once decided; answer with `POST /approve` and `{"call": ID, "scope": "once"|"session"|"workspace"|"decline"}` (204, or 409 with `nothing-waiting` or `stale`). The surface (`?drive`) draws and answers it. A `cancel` or an `end` while it waits settles the call `cancelled`.
+- **Workspace approvals** are kept under `$XDG_STATE_HOME`, else `~/.local/state`, in `discipline/approvals/`, never in the worktree.
+- **The receipt** is written when the session ends, beside the record (or the log) as `FILE.receipt.json`: the final allow set, the denylist's digest, the decisions by scope, `approval_policy`, `lifecycle_scripts`, `env_passthrough`, and `reference_modified` for each writable git checkout.
+
 ## 2. Start the surface
 
 From the repository root, once per checkout, install the surface's dependencies, then start it. Both run `pnpm` pinned through `npx`, because a `pnpm` at another version switches itself to the pinned one, and on an Intel Mac that switch fails (#194):

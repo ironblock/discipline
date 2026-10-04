@@ -1262,17 +1262,81 @@ fn shape_of(program: &str, rest: &[Word]) -> Result<Shape, String> {
     }
 }
 
+/// The options with which a git read runs a program its repository's
+/// config names -- `diff.external`, a textconv driver, `gpg.program` -- or
+/// reads outside the worktree (`--no-index`), so the read is not free
+/// (#298 5983544366 (e), "so a free read is a read"; review rounds 1 and 2).
+const GIT_RUNS_A_PROGRAM: &[&str] = &["--ext-diff", "--textconv", "--show-signature", "--no-index"];
+
+/// The option prefixes that reach into submodules, whose own configuration
+/// and attributes a free read cannot vouch for: not free in any form.
+const GIT_SUBMODULES: &[&str] = &["--submodule", "--ignore-submodules", "--recurse-submodules"];
+
+/// The pretty formats git builds in: a `--pretty`/`--format` value that is
+/// none of these, and is no `format:`/`tformat:` string, names a `pretty.*`
+/// alias from the repository's config.
+const GIT_PRETTY: &[&str] = &[
+    "oneline",
+    "short",
+    "medium",
+    "full",
+    "fuller",
+    "reference",
+    "email",
+    "mboxrd",
+    "raw",
+];
+
+/// Whether a `--pretty=`/`--format=` word is one a free read may carry:
+/// a built-in format or a format string, with no signature placeholder
+/// (`%G…` in any case, `%(signature…)`), which runs `gpg.program` (review
+/// round 2, finding 1(b)). Any other word is not a format option.
+fn plain_format(text: &str) -> bool {
+    if text == "--format" {
+        // `--format` takes its value with `=`: alone, git refuses it.
+        return false;
+    }
+    let Some(value) = text
+        .strip_prefix("--pretty=")
+        .or_else(|| text.strip_prefix("--format="))
+    else {
+        return true;
+    };
+    let lowered = value.to_ascii_lowercase();
+    !lowered.contains("%g")
+        && !lowered.contains("signature")
+        && (GIT_PRETTY.contains(&value)
+            || value.starts_with("format:")
+            || value.starts_with("tformat:")
+            || value.contains('%'))
+}
+
+/// Whether a `git status` option makes it run a diff, which runs the
+/// repository's textconv and diff drivers: `-v`, `--verbose`, and any
+/// bundle of short options holding a `v` (review round 2, finding 1(c)).
+fn status_shows_a_diff(text: &str) -> bool {
+    text == "--verbose" || (text.starts_with('-') && !text.starts_with("--") && text.contains('v'))
+}
+
 /// git's free reads (point 4): `status`, `diff`, `log`, `show`, and `branch`
-/// in its listing forms. `--output` writes a file, so it prompts.
+/// in its listing forms. `--output` writes a file, so it prompts; and so do
+/// [`GIT_RUNS_A_PROGRAM`]'s options, a submodule option, a format naming a
+/// signature or an alias, and `status -v`, which run one or reach past
+/// what the read can vouch for.
 #[must_use]
 pub fn git_is_free(subcommand: &str, args: &[Word]) -> bool {
-    let output = args
-        .iter()
-        .any(|w| w.text == "--output" || w.text.starts_with("--output="));
+    let output = args.iter().any(|w| {
+        w.text == "--output"
+            || w.text.starts_with("--output=")
+            || GIT_RUNS_A_PROGRAM.contains(&w.text.as_str())
+            || GIT_SUBMODULES.iter().any(|p| w.text.starts_with(p))
+            || !plain_format(&w.text)
+            || (subcommand == "status" && status_shows_a_diff(&w.text))
+    });
     if GIT_READS.contains(&subcommand) {
         !output
     } else if subcommand == "branch" {
-        branch_lists(args)
+        !output && branch_lists(args)
     } else {
         false
     }
