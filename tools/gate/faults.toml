@@ -4432,6 +4432,22 @@ failure_class = "admission.engine-fingerprint-changed"
 legacy_signature = "ada48-llamacpp-qwen38flashnext-q20: engine_fingerprint changed"
 migrated = false
 [[fault]]
+id = "admission.admission_engine_component_drifted"
+kind = "seeded-gate"
+check = "admission"
+label = "an engine component drifted under a held identity"
+failure_class = "admission.engine-fingerprint-changed"
+legacy_signature = "ada48-tabbyapi-exl3-qwen38flashnext-2p05: engine_identity changed"
+migrated = false
+[[fault]]
+id = "admission.admission_engine_components_sorted"
+kind = "seeded-gate"
+check = "admission"
+label = "the component recipe made order-insensitive"
+failure_class = "admission.rule-broken"
+legacy_signature = "FAIL  engine: the declared order, not a sort, is what the identity hashes"
+migrated = false
+[[fault]]
 id = "admission.admission_engine_recipe_exe_only"
 kind = "seeded-gate"
 check = "admission"

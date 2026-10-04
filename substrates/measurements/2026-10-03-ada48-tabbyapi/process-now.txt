@@ -1,0 +1,5 @@
+# Read 2026-10-03T16:33Z (inference seat): the serving process and the GPU, after the switch.
+tabby_process pid=665174 started=2026-10-03T16:22:15Z ppid=1 cmdline="<venv>/bin/python main.py" (cwd: the TabbyAPI checkout)
+health_now {"status":"healthy","issues":[]}
+llama_server_processes 0
+vram_mib_now 44362
