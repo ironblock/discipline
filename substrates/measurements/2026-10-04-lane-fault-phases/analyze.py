@@ -11,8 +11,10 @@ The first row is the warm-up and is dropped. Phases, in seconds of wall clock:
               (compile and link of the mutated crate and its test targets)
     link        of which: the linker's wall clock, summed (links run in parallel,
                 so this can exceed its share of build)
-  test run    each invocation's wall clock minus its Finished time: the test
-              binaries running
+  after build each cargo invocation's wall clock minus its Finished time: the
+              test binaries running, the library's doctests, cargo's start-up
+              before its build timer, the no-op fingerprint pass, and the
+              timing shim's own stamps -- all of it gone with the invocation
   other       the check's wall clock minus every cargo invocation's: verify.sh,
               hermetic.sh and the lane runner's own Python
   verdict     the signature match
@@ -38,7 +40,7 @@ def phases(r):
         "inject": r["inject"],
         "build": build,
         "link (within build)": sum(r["link"]),
-        "test run": run,
+        "after build (test binaries)": run,
         "other": r["check"] - sum(c["wall"] for c in cargo),
         "verdict": r["verdict"],
     }
@@ -51,7 +53,7 @@ def phases(r):
         if cargo and cargo[0] in others:
             removable -= cargo[0]["finished"] or 0
         d["other lanes (removable)"] = removable
-        d["own lane's test run"] = sum(c["wall"] - (c["finished"] or 0) for c in mine)
+        d["own lane's after build"] = sum(c["wall"] - (c["finished"] or 0) for c in mine)
     return d
 
 for kind in ("lane", "test"):

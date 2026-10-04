@@ -25,3 +25,13 @@ saved = sum(n * (whole - med[l]) for l, n in counts.items())
 total = sum(counts.values())
 print(f"\nall six lanes' test runs, sum of medians: {whole:.1f} s; a per-lane scope would remove "
       f"~{saved:.0f} s over the {total} lane faults, {saved / total:.1f} s per fault (estimated from these medians)")
+# The share that saving is of a lane fault, weighted the same way: each lane's
+# sampled faults' mean total, weighted by the lane's fault count. The sample
+# itself is two faults per lane, so its unweighted median is not this.
+totals: dict[str, list[float]] = {}
+for r in rows:
+    if r["lane"]:
+        totals.setdefault(r["lane"], []).append(r["copy"] + r["state_before"] + r["state_after"] + r["inject"] + r["check"] + r["verdict"])
+mean_total = sum(n * statistics.mean(totals[l]) for l, n in counts.items()) / total
+print(f"lane-weighted mean lane fault: {mean_total:.1f} s; the per-lane scope's saving is "
+      f"{100 * saved / total / mean_total:.0f}% of it")
