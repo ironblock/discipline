@@ -320,6 +320,16 @@ def populate(box: Path, root: Path, tracked: list[str]) -> None:
     # older than some artifact is how a stale binary gets read as fresh, which
     # is a mistake this repository has already paid for once.
     COPY_TREE.copy_tree(root, box, tracked)
+    # READ BACK, NOT TRUSTED (#380): the box is what every injection below is
+    # applied to, so a copy that left a tracked file out would make some
+    # injection inert or wrong for a reason that is the copy's. The box is
+    # read as a tree and compared with the list before anything runs in it.
+    copied = {p.relative_to(box).as_posix() for p in box.rglob("*") if p.is_file() and ".git" not in p.relative_to(box).parts}
+    missing = sorted(set(tracked) - copied)
+    if missing:
+        print(f"check-injections: the box is missing {len(missing)} tracked path(s) the copy was given, "
+              f"first {missing[0]}; a box that is not the tree proves nothing about it", file=sys.stderr)
+        sys.exit(1)
     subprocess.run(
         ["git", "-C", str(box), "init", "--quiet"],
         check=True,

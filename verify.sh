@@ -996,6 +996,14 @@ sandbox() {
     echo "selftest: the sandbox tree could not be copied" >&2
     return 1
   }
+  # Read back, not trusted (#380): the box holds exactly as many files as the
+  # list it was given, counted on the tree before git touches it.
+  local copied
+  copied="$(find "$dest" -type f | wc -l)"
+  if [ "${copied// /}" -ne "${#files[@]}" ]; then
+    echo "selftest: the sandbox holds ${copied// /} file(s) of the ${#files[@]} it was given" >&2
+    return 1
+  fi
 
   git -C "$dest" init --quiet
   git -C "$dest" add --all
@@ -5071,6 +5079,22 @@ old = "                .map(|item| value_of(key, &item))\n"
 new = "                .map(|item| Ok(Value::String(item.as_str().to_owned())))\n"
 assert old in source
 path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# The tree copy leaving the last path out (#380): every box the gate builds is
+# then not the tree it claims to be, and an injection applied there proves
+# nothing about the tree. Caught by check-injections.py reading its box back.
+inject_injections_copy_drops_a_file() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("scripts/copy-tree.py")
+source = path.read_text(encoding="utf-8")
+old = "    for path in paths:\n"
+if source.count(old) != 1:
+    raise SystemExit("copy-tree.py: no single loop over the paths")
+path.write_text(source.replace(old, "    for path in paths[:-1]:\n", 1), encoding="utf-8")
 EOF
 }
 
@@ -10138,6 +10162,8 @@ selftest() {
     'formats::regimen::tests::a_table_may_hold_one_table_and_no_more \.\.\. FAILED' 'lib/formats::regimen::tests'
   seeded_case "an array read by a second reader"      test     inject_regimen_array_second_reader \
     'formats::regimen::tests::an_array_holds_scalars_read_by_the_same_reader \.\.\. FAILED' 'lib/formats::regimen::tests'
+  seeded_case "a tree copy that drops a file"        injections inject_injections_copy_drops_a_file \
+    'the box is missing 1 tracked path' inject_ci_trunk_typo
   seeded_case "a merged field an injection cannot see" injections inject_injections_struct_grew \
     'builds a Provenance without cohort'
   seeded_case "a literal the scan cannot place"       injections inject_injections_literal_unplaceable \

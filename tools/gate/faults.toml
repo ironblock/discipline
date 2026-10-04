@@ -668,6 +668,15 @@ legacy_signature = "inject_that_changes_nothing  exit="
 migrated = false
 
 [[fault]]
+id = "injections.injections_copy_drops_a_file"
+kind = "seeded-gate"
+check = "injections"
+label = "a tree copy that drops a file"
+failure_class = "gate.box-not-the-tree"
+legacy_signature = "the box is missing 1 tracked path"
+migrated = false
+
+[[fault]]
 id = "bsd.bsd_edit_in_place_gnu_only"
 kind = "seeded-gate"
 check = "bsd"
