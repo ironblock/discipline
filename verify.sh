@@ -5182,8 +5182,8 @@ import pathlib
 
 path = pathlib.Path("diet/src/drive/shell_gate.rs")
 source = path.read_text(encoding="utf-8")
-old = '                Ok(inner) => self.read_words(inner, simple, depth),'
-new = "                Ok(_inner) => vec![ordinary(program, rest)],"
+old = '                    self.read_words(inner, simple, depth, prefixed || assigned)'
+new = "                    { let _ = (inner, prefixed, assigned); vec![ordinary(program, rest)] }"
 if source.count(old) != 1:
     raise SystemExit(f"the anchor appears {source.count(old)} times")
 path.write_text(source.replace(old, new, 1), encoding="utf-8")

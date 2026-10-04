@@ -1,6 +1,7 @@
 //! Which of a `bash` call's commands may run: the denylist, the operator's
 //! prompt and the approvals that answer it, read from the command line
-//! (#298, ruled at 5981578399 points 1-5 and 5982466351; the amendment to #29).
+//! (#298, ruled at 5981578399 points 1-5, 5982466351 and 5983544366; the
+//! amendment to #29).
 //!
 //! This module decides; it runs nothing, stores nothing and asks no one.
 //! `serve`'s wait, the approval store and the log line are #298's, which call
@@ -24,7 +25,13 @@
 //! * `eval`, `source`, `.` and `exec`, and a shell running a file or stdin;
 //! * a control-flow keyword in the program position, because the grammar
 //!   reads control flow as ordinary words and `if x; then sudo id; fi` would
-//!   otherwise yield a command called `then` ([`CONTROL_WORDS`]).
+//!   otherwise yield a command called `then` ([`CONTROL_WORDS`]);
+//! * an assignment prefix naming a variable that changes what runs or what it
+//!   loads ([`LOADER_VARIABLES`]), on the line or in `env NAME=value`;
+//! * `git` with `-c` or any environment prefix, a git subcommand that is not
+//!   one of git's own commands (an alias), and an option before a
+//!   subcommanded program's subcommand;
+//! * an option a wrapper, a shell or `git` does not read.
 //!
 //! A prompt of that kind has no [`Shape`]: only a `once` approval of the exact
 //! line answers it, never a session or workspace one, because a standing
@@ -104,16 +111,7 @@ pub const EVALUATORS: &[&str] = &["eval", "source", ".", "exec"];
 /// Shells, read through when given `-c '…'`.
 const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh"];
 /// A shell's own flags that take no value.
-const SHELL_FLAGS: &[&str] = &[
-    "-e",
-    "-u",
-    "-x",
-    "-o",
-    "--norc",
-    "--noprofile",
-    "-l",
-    "--login",
-];
+const SHELL_FLAGS: &[&str] = &["-e", "-u", "-x", "--norc", "--noprofile", "-l", "--login"];
 
 /// Literal wrappers: what follows their own options is the command they run.
 const WRAPPERS: &[&str] = &[
@@ -607,7 +605,7 @@ pub fn judge_argv(argv: &[String], denylist: &Denylist) -> Judgement {
         .collect();
     let gate = Gate { denylist };
     Judgement {
-        segments: gate.read_words(&words, &Simple::default(), 0),
+        segments: gate.read_words(&words, &Simple::default(), 0, false),
     }
 }
 
@@ -801,7 +799,7 @@ impl Gate<'_> {
             .redirections
             .iter()
             .any(|r| matches!(r.op, RedirOp::Heredoc | RedirOp::HeredocStrip));
-        let mut segments = self.read_words(&simple.words, simple, depth);
+        let mut segments = self.read_words(&simple.words, simple, depth, false);
         if segments.iter().any(is_refused) {
             return segments;
         }
@@ -826,8 +824,15 @@ impl Gate<'_> {
 
     /// Read `words` as a command: the program, through any wrapper, to a
     /// verdict. `simple` is the command they came from, for its assignments
-    /// and redirections.
-    fn read_words(&self, words: &[Word], simple: &Simple, depth: usize) -> Vec<Segment> {
+    /// and redirections; `prefixed` is whether a wrapper above set an
+    /// environment variable (`env NAME=value …`).
+    fn read_words(
+        &self,
+        words: &[Word],
+        simple: &Simple,
+        depth: usize,
+        prefixed: bool,
+    ) -> Vec<Segment> {
         let Some(first) = words.first() else {
             // Assignments alone run no program.
             return vec![Segment {
@@ -852,13 +857,23 @@ impl Gate<'_> {
         }
         let rest = &words[1..];
         if program == "git" {
-            vec![self.read_git(rest, simple)]
+            vec![self.read_git(rest, simple, prefixed)]
         } else if SHELLS.contains(&program) {
             self.read_shell(program, rest, depth)
         } else if WRAPPERS.contains(&program) {
             match unwrap(program, rest) {
                 Ok([]) => vec![dynamic(format!("`{program}` with no command"))],
-                Ok(inner) => self.read_words(inner, simple, depth),
+                // `env NAME=value …` is an environment prefix on what it
+                // runs, as `NAME=value …` is: carried down to `read_git`,
+                // which tests it after the denylist (5983544366 (c); #402's
+                // round-2 review, B1).
+                Ok(inner) => {
+                    let assigned = program == "env"
+                        && rest[..rest.len() - inner.len()]
+                            .iter()
+                            .any(|w| !w.text.starts_with('-') && w.text.contains('='));
+                    self.read_words(inner, simple, depth, prefixed || assigned)
+                }
                 Err(why) => vec![dynamic(why)],
             }
         } else if program == "npx" {
@@ -922,7 +937,7 @@ impl Gate<'_> {
                 "`{wrapper}` runs a command this cannot read"
             ))];
         };
-        let found = self.read_words(words, simple, depth);
+        let found = self.read_words(words, simple, depth, false);
         if let Some(refusal) = found.into_iter().find(is_refused) {
             return vec![refusal];
         }
@@ -958,6 +973,9 @@ impl Gate<'_> {
             }
             if SHELL_FLAGS.contains(&text) {
                 i += 1;
+            } else if text == "-o" || text == "+o" {
+                // `-o pipefail`: an option name follows.
+                i += 2;
             } else if text.starts_with('-') {
                 return vec![dynamic(format!(
                     "`{program}` with an option this does not read: `{text}`"
@@ -979,7 +997,7 @@ impl Gate<'_> {
 
     /// `git`: its global options, then its subcommand. Every word must be
     /// literal, because a `$F` could be `--hard`.
-    fn read_git(&self, rest: &[Word], simple: &Simple) -> Segment {
+    fn read_git(&self, rest: &[Word], simple: &Simple, prefixed: bool) -> Segment {
         if rest.iter().any(|w| !w.literal) {
             return dynamic("a `git` call with a word that is not literal");
         }
@@ -1026,11 +1044,12 @@ impl Gate<'_> {
             subcommand: Some(subcommand.to_owned()),
         };
         // `-c` can name a pager, an external diff or an ssh command, and an
-        // assignment prefix a `GIT_PAGER` or `GIT_EXTERNAL_DIFF`: either makes
-        // the call run a program its shape does not name. So the call is
-        // dynamic -- never free, and no standing approval of
-        // `git <subcommand>` reaches it.
-        if configured || !simple.assignments.is_empty() {
+        // environment prefix can do the same through a name `LOADER_VARIABLES`
+        // does not list (`PAGER`, `EDITOR`): either makes the call run a
+        // program its shape does not name, so it is dynamic -- never free, and
+        // no standing approval of `git <subcommand>` reaches it (5983544366
+        // (c)).
+        if configured || prefixed || !simple.assignments.is_empty() {
             return dynamic(
                 "`git` with `-c` or an environment prefix, which can name a program to run",
             );
@@ -1355,6 +1374,9 @@ mod tests {
             ("git reset --hard", "git reset --hard"),
             ("git reset --hard HEAD~1", "git reset --hard"),
             ("git -C x reset --hard", "git reset --hard"),
+            ("env FOO=1 git push", "git push"),
+            ("env FOO=1 git reset --hard", "git reset --hard"),
+            ("env FOO=1 nice git push", "git push"),
         ] {
             assert_eq!(refused_by(line).as_deref(), Some(entry), "{line:?}");
         }
@@ -1786,5 +1808,39 @@ mod tests {
             assert_eq!(outcome(line), Outcome::Refused, "{line:?}");
         }
         assert_ne!(outcome("coproc sudo id"), Outcome::Run);
+    }
+
+    #[test]
+    fn the_shapes_ruled_as_built_hold() {
+        // (a) `|&` is the pipe it abbreviates: `2>&1 |`.
+        let piped = judge("ls |& grep x", &[]);
+        let shapes: Vec<_> = piped
+            .segments
+            .iter()
+            .map(|s| s.shape.as_ref().map(ToString::to_string))
+            .collect();
+        assert_eq!(shapes, vec![Some("ls".to_owned()), Some("grep".to_owned())]);
+        assert_eq!(outcome("git log |& cat"), Outcome::Prompt);
+        // (d) Assignments alone run nothing.
+        assert_eq!(outcome("FOO=1"), Outcome::Run);
+        assert_eq!(outcome("FOO=1 BAR=2"), Outcome::Run);
+        // (c) Any environment prefix on git, on the line or through `env`.
+        for line in [
+            "FOO=1 git status",
+            "PAGER=cat git log",
+            "env FOO=1 git status",
+            "env PAGER=cat git log",
+            "env FOO=1 nice git status",
+            "env FOO=1 timeout 5 git log",
+        ] {
+            let judged = judge(line, &[]);
+            assert_eq!(judged.segments[0].shape, None, "{line:?} kept a shape");
+            assert_eq!(judged.outcome(), Outcome::Prompt, "{line:?}");
+        }
+        // A shell option with a value is read past.
+        assert_eq!(
+            refused_by("bash -o pipefail -c 'sudo id'").as_deref(),
+            Some("sudo")
+        );
     }
 }
