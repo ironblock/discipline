@@ -1,0 +1,67 @@
+{
+ "seed_phrase": "discipline #165 re-judge sample, 2026-10-02",
+ "seed": 7325542256462664817,
+ "population": 4712,
+ "sample_size": 400,
+ "strata": {
+  "2026-09-21-false-nomination-framing-v2 | accepts": {
+   "population": 327,
+   "drawn": 28
+  },
+  "2026-09-21-false-nomination-framing-v2 | declines": {
+   "population": 236,
+   "drawn": 20
+  },
+  "2026-09-21-false-nomination-framing-v2 | ignores": {
+   "population": 699,
+   "drawn": 59
+  },
+  "2026-09-21-false-nomination-framing-v2 | questions": {
+   "population": 282,
+   "drawn": 24
+  },
+  "2026-09-27-false-nomination-edit-rate | accepts": {
+   "population": 328,
+   "drawn": 28
+  },
+  "2026-09-27-false-nomination-edit-rate | declines": {
+   "population": 256,
+   "drawn": 22
+  },
+  "2026-09-27-false-nomination-edit-rate | ignores": {
+   "population": 730,
+   "drawn": 62
+  },
+  "2026-09-27-false-nomination-edit-rate | questions": {
+   "population": 276,
+   "drawn": 23
+  },
+  "2026-09-29-false-nomination-edit-rate-second-substrate | accepts": {
+   "population": 391,
+   "drawn": 33
+  },
+  "2026-09-29-false-nomination-edit-rate-second-substrate | declines": {
+   "population": 175,
+   "drawn": 15
+  },
+  "2026-09-29-false-nomination-edit-rate-second-substrate | ignores": {
+   "population": 755,
+   "drawn": 64
+  },
+  "2026-09-29-false-nomination-edit-rate-second-substrate | questions": {
+   "population": 257,
+   "drawn": 22
+  }
+ },
+ "passes": 3,
+ "batches_per_pass": [
+  12,
+  12,
+  12
+ ],
+ "items_per_batch": "the sample split evenly over ceil(400/36) = 12 batches (34 or 33 items) + 4 controls",
+ "excluded": {
+  "states judged more than once": 123,
+  "controls": 14
+ }
+}

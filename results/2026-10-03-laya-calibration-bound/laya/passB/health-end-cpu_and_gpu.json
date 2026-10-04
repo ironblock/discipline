@@ -1,0 +1,195 @@
+{
+ "chat": {
+  "availability": {
+   "state": "available"
+  },
+  "context_limit": 4096,
+  "fm_sdk": "27.0",
+  "model": "apple-fm",
+  "model_capabilities": [
+   "guided_generation",
+   "tool_calling",
+   "vision"
+  ],
+  "variant": "AFM 3 Core",
+  "variant_id": "core3"
+ },
+ "chunked_models": {},
+ "classifiers": {
+  "models": [
+   "laya-typed-decisions"
+  ],
+  "resident": 1,
+  "supported": true
+ },
+ "compute_plans": {
+  "live": true,
+  "models": {
+   "laya-typed-decisions": {
+    "1024": {
+     "ane": 0,
+     "cpu": 0,
+     "gpu": 2079,
+     "off_ane_ops": {
+      "add": 178,
+      "cast": 4,
+      "concat": 86,
+      "equal": 2,
+      "erf": 29,
+      "exp": 30,
+      "expand_dims": 6,
+      "fill_like": 30,
+      "gather": 1,
+      "greater_equal": 2,
+      "layer_norm": 62,
+      "linear": 123,
+      "matmul": 61,
+      "maximum": 210,
+      "mul": 288,
+      "real_div": 30,
+      "reduce_max": 240,
+      "relu": 2,
+      "reshape": 65,
+      "select": 4,
+      "slice_by_index": 330,
+      "split": 114,
+      "squeeze": 85,
+      "sub": 32,
+      "tile": 1,
+      "transpose": 64
+     },
+     "source": "live",
+     "state": "ready",
+     "unassigned": 2602
+    },
+    "128": {
+     "ane": 0,
+     "cpu": 0,
+     "gpu": 1419,
+     "off_ane_ops": {
+      "add": 178,
+      "cast": 4,
+      "concat": 86,
+      "equal": 2,
+      "erf": 29,
+      "exp": 30,
+      "expand_dims": 6,
+      "fill_like": 30,
+      "gather": 1,
+      "greater_equal": 2,
+      "layer_norm": 62,
+      "linear": 123,
+      "matmul": 61,
+      "mul": 288,
+      "real_div": 30,
+      "reduce_max": 30,
+      "relu": 2,
+      "reshape": 65,
+      "select": 4,
+      "slice_by_index": 90,
+      "split": 114,
+      "squeeze": 85,
+      "sub": 32,
+      "tile": 1,
+      "transpose": 64
+     },
+     "source": "live",
+     "state": "ready",
+     "unassigned": 1462
+    },
+    "256": {
+     "ane": 0,
+     "cpu": 0,
+     "gpu": 1539,
+     "off_ane_ops": {
+      "add": 178,
+      "cast": 4,
+      "concat": 86,
+      "equal": 2,
+      "erf": 29,
+      "exp": 30,
+      "expand_dims": 6,
+      "fill_like": 30,
+      "gather": 1,
+      "greater_equal": 2,
+      "layer_norm": 62,
+      "linear": 123,
+      "matmul": 61,
+      "maximum": 30,
+      "mul": 288,
+      "real_div": 30,
+      "reduce_max": 60,
+      "relu": 2,
+      "reshape": 65,
+      "select": 4,
+      "slice_by_index": 150,
+      "split": 114,
+      "squeeze": 85,
+      "sub": 32,
+      "tile": 1,
+      "transpose": 64
+     },
+     "source": "live",
+     "state": "ready",
+     "unassigned": 1702
+    },
+    "512": {
+     "ane": 0,
+     "cpu": 0,
+     "gpu": 1719,
+     "off_ane_ops": {
+      "add": 178,
+      "cast": 4,
+      "concat": 86,
+      "equal": 2,
+      "erf": 29,
+      "exp": 30,
+      "expand_dims": 6,
+      "fill_like": 30,
+      "gather": 1,
+      "greater_equal": 2,
+      "layer_norm": 62,
+      "linear": 123,
+      "matmul": 61,
+      "maximum": 90,
+      "mul": 288,
+      "real_div": 30,
+      "reduce_max": 120,
+      "relu": 2,
+      "reshape": 65,
+      "select": 4,
+      "slice_by_index": 210,
+      "split": 114,
+      "squeeze": 85,
+      "sub": 32,
+      "tile": 1,
+      "transpose": 64
+     },
+     "source": "live",
+     "state": "ready",
+     "unassigned": 2002
+    }
+   }
+  }
+ },
+ "compute_unit_overrides": {
+  "applied": {
+   "laya-typed-decisions": "cpu_and_gpu"
+  },
+  "unmatched": []
+ },
+ "embeddings": {
+  "models": [
+   "bge-small-en-v1.5",
+   "embeddinggemma-300m",
+   "f2llm-v2-160m",
+   "lfm2.5-embedding-350m",
+   "static-floor"
+  ],
+  "resident": 0
+ },
+ "seq_caps": {},
+ "skipped_models": [],
+ "status": "ok",
+ "uptime_secs": 121
+}

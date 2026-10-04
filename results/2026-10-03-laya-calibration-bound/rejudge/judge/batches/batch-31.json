@@ -1,0 +1,227 @@
+{
+ "batch": 31,
+ "items": [
+  {
+   "id": "f9996061b0b0",
+   "entry": "The `load` method's dual-scoring heuristic using `f_keep` (preservation of cached prompt) and `sim` (similarity to new prompt) with a 0.25 threshold — this is the eviction/selection policy for picking the best cached KV state (`server-task.cpp`, lines ~1676–1700)",
+   "reasoning": "",
+   "prose": "I need to verify the dual-scoring heuristic claim in `server-task.cpp` around lines 1676-1700. Let me check the actual code.\n\n"
+  },
+  {
+   "id": "f149cbf5ce05",
+   "entry": "NONE — The shell environment is simply empty. There's no Babylon Lite codebase checked out here, so I can't search for or examine the Minecraft clone scene.",
+   "reasoning": "",
+   "prose": "The shell environment is indeed empty — there's no Babylon Lite codebase checked out here. The compacted working record references files that were examined in a prior session, but the actual repository isn't present in this shell.\n\nLet me verify this:\n\n"
+  },
+  {
+   "id": "febe76b0227b",
+   "entry": "The PBR features in Babylon Lite are covered in Lite to parity with Babylon.js.",
+   "reasoning": "Let me look at the architecture docs and the lab directory to understand more about the scene-based approach.",
+   "prose": ""
+  },
+  {
+   "id": "635c2c4a397e",
+   "entry": "`oaicompat_chat_params_parse` parses the OpenAI-compatible JSON body — this is where request validation and parameter extraction happens. (server-context.cpp, within `post_chat_completions` lambda)",
+   "prose": "I need to correct that record entry before continuing. Let me first verify the actual location of `oaicompat_chat_params_parse`.\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "6c1ee9a55783",
+   "entry": "The `grammar_lazy` flag logic — when `tool_choice == AUTO`, grammar constraints are deferred until a tool call prefix is detected. This matters for understanding when constrained decoding actually activates during tool-calling conversations. (`common/chat.cpp:1030`, `common/chat.cpp:1191`, `common/chat.cpp:1322`)",
+   "prose": "Let me first read the current content of the file, then explore the relevant source files to understand caching/checkpointing differences between upstream and the beellama fork.\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "9a5d083c272f",
+   "entry": "Tree-shakable loader modules (separate exports for glTF, HDR, KTX2, Basis, splat loading) - pay only for what you use",
+   "prose": "",
+   "reasoning": "The user wants me to update a working record entry. The entry \"Tree-shakable loader modules (separate exports for glTF, HDR, KTX2, Basis, splat loading) - pay only for what you use\" is superseded by this step. I need to state the correction in my reply.\n\nLooking at the mesh directory, I see `thin-instance.ts`, `thin-instance-gpu.ts`, `thin-instance-gpu-culling.ts`, `thin-instance-cull-binding.ts`, `hierarchy-instance-pool.ts`. This suggests that Babylon Lite uses thin instances and hierarchy instances rather than the classic `InstancedMesh` API from Babylon.js.\n\nLet me check the `mesh.ts` file to see the mesh interface."
+  },
+  {
+   "id": "3b19a0275cd4",
+   "entry": "`common_prompt_checkpoint` struct in `server-context.cpp:177` — defines the checkpoint data structure used for speculative decoding rollback; may reveal checkpoint granularity and what state is captured",
+   "reasoning": "Now I have some key differences. Let me look more specifically at the checkpointing differences. I see:\n\n1. Upstream has `common_prompt_checkpoint` with `data_spec` for speculative decoding state\n2. Beellama has `server_prompt_checkpoint` with `ring_data` for DFlash ring buffer state — this is a different structure with a DFlash-specific ring buffer\n\nLet me look at the full checkpoint structures in both.",
+   "prose": ""
+  },
+  {
+   "id": "7add064d1af8",
+   "entry": "`backend_sampling` boolean — gates whether token selection happens on the backend (e.g., GPU) vs. CPU-side llama.cpp sampling; matters for understanding where sampling physically occurs (`server-schema.cpp:170`)",
+   "reasoning": "Now let me look at the omitted section of the code around line 5490-5540 to see the full checkpoint logic with `n_before_user`.",
+   "prose": ""
+  },
+  {
+   "id": "e7fd72f54114",
+   "entry": "Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting",
+   "prose": "",
+   "reasoning": "Let me now look at the prompt cache size limits and eviction policies."
+  },
+  {
+   "id": "544b39408eb1",
+   "entry": "`dry_base` has a custom handler that clamps values `< 1.0` back to `params_base.sampling.dry_base` — a special validation rule at line ~139 (server-schema.cpp)",
+   "reasoning": "",
+   "prose": "Good, I found the source. Let me now search for where chat templates are applied and where tool/function definitions are rendered in the chat completion flow.\n\n"
+  },
+  {
+   "id": "c789ad3ea7f6",
+   "entry": "Read the full `handle_slots_save` implementation at line 4841+ in server-context.cpp to understand the save flow, file format, and what data is serialized.",
+   "reasoning": "",
+   "prose": "That note is still valid — I've been reading those exact functions. Let me now look at the HTTP endpoint handlers and the prompt_save/prompt_cache mechanism.\n\n"
+  },
+  {
+   "id": "d4f0cde525fb",
+   "entry": "`server_prompt_cache::load()` removes the best-matching entry from the cache after loading it (`states.erase(it_best)`) — IMPLICATION: Each cache entry is single-use; once a cached prompt state is loaded into a slot, it's consumed and gone, which fundamentally limits cache effectiveness for repeated prompts",
+   "reasoning": "",
+   "prose": "Let me verify the current code to confirm the correction:\n\n"
+  },
+  {
+   "id": "dc6c394cc4a6",
+   "entry": "The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)",
+   "reasoning": "",
+   "prose": "The entry #199 about `alloc()`'s LCP-based deduplication needs a correction. Let me verify the actual implementation:\n\n"
+  },
+  {
+   "id": "77fd967ef036",
+   "entry": "The slot-side usage of `slot_prompt_similarity` in `server-context.cpp` (lines ~1600-1636) hasn't been read — this is where slots actually decide whether to reuse a cached prompt during scheduling",
+   "prose": "I'll update the working record first, then find the correct path to the codebase.\n\nThe working record entry about `slot_prompt_similarity` in `server-context.cpp` (~1600-1636) is superseded. The prompt cache matching/scheduling logic actually lives in `server-task.cpp` in the `get_available_slot` function, where `get_common_prefix` and `slot_prompt_similarity` are used to find the best cached prompt match. The `server-context.cpp` file handles the inference loop (`update_slots`, `pre_decode`, `decode`, `post_decode`) but not the cache-aware slot selection.\n\nLet me find the correct path to the beellama codebase:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "575d2ba5ebcc",
+   "entry": "How does the KV cache reuse actually work in `server-context.cpp` around line 2839 — need to see the full chunk-based cache reuse mechanism",
+   "prose": "Now let me search more specifically for `n_before_user`:",
+   "reasoning": ""
+  },
+  {
+   "id": "a18453d020cb",
+   "entry": "`oaicompat_chat_params_parse` parses the OpenAI-compatible JSON body — this is where request validation and parameter extraction happens. (server-context.cpp, within `post_chat_completions` lambda)",
+   "prose": "Now let me look at the actual `send_partial_response` and `send_final_response` implementations:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "4e8e485e65eb",
+   "entry": "The `alloc()` method's LCP-based deduplication — it removes obsolete cached prompts fully contained in the new prompt and skips saving if the prompt already exists. This matters for understanding cache bloat and eviction behavior. (server-task.cpp, lines 1620+)",
+   "prose": "Now let me check the upstream llama.cpp tools/server directory for comparison. Let me also check the CMakeLists.txt and tests:\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "f8f49035bde2",
+   "entry": "What is `render_message_to_json` and how does it format messages for the Jinja context?",
+   "reasoning": "Let me look at the actual `common_chat_template_direct_apply_impl` function to see how tools are rendered into the Jinja template.",
+   "prose": ""
+  },
+  {
+   "id": "e0c846f944f8",
+   "entry": "How does the engine.ts implementation differ from standard Babylon.js (WebGPU-specific details)?",
+   "prose": "",
+   "reasoning": "The user wants me to look at the `engine.ts` file to see how it differs from standard Babylon.js, specifically focusing on WebGPU-specific details. I should read the `engine.ts` file to understand the implementation."
+  },
+  {
+   "id": "83081e6c915c",
+   "entry": "Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)",
+   "prose": "Correction: The entry \"Metrics endpoint (`/metrics`) for Prometheus-style monitoring (`server.cpp`)\" should be updated to reflect that `/metrics` is indeed registered in `server.cpp` at line 207 as `ctx_http.get(\"/metrics\", ex_wrapper(routes.get_metrics))`, and it's a GET endpoint for Prometheus-style monitoring. The original entry was accurate, but I'll refine it for clarity:\n\n**Updated entry:** Metrics endpoint (`GET /metrics`) for Prometheus-style monitoring, registered in `server.cpp` line 207 via `routes.get_metrics`.\n\nNow continuing with the investigation:",
+   "reasoning": ""
+  },
+  {
+   "id": "71621a7a4a54",
+   "entry": "How does beellama's CMakeLists.txt wire in the new files (`server-adaptive-dm.h`, `server-loop-guard.cpp/h`) and what upstream files (`server-schema.cpp/h`, `server-stream.cpp/h`) were removed or replaced?",
+   "reasoning": "The user is asking me to update the working record entry about how beellama's CMakeLists.txt wires in the new files and what upstream files were removed/replaced. Let me state the correction based on what I've found:\n\n**Correction:**\n- Upstream `server-schema.cpp/h` and `server-stream.cpp/h` are **not** present in beellama's CMakeLists.txt. They were removed entirely, not just not compiled.\n- Beellama added `server-loop-guard.cpp/h` to the CMakeLists.txt (inside the `server-context` static library target).\n- `server-adaptive-dm.h` is a header-only file that is NOT listed in CMakeLists.txt — it's included via `#include` from server-context.cpp (header-only, no compilation needed).\n- The `server-stream.cpp/h` functionality (stream_session, conversation replay) was removed entirely — beellama does not have the stream session/replay system.\n- The `server-schema.cpp/h` functionality (JSON schema validation of request parameters) was also removed — beellama does not use the schema validation approach.\n\nSo the correction is:\n- `server-adaptive-dm.h` is a header-only addition included via `#include` from server-context.cpp, not listed in CMakeLists.txt as a compiled file.\n- `server-loop-guard.cpp/h` are added to the `server-context` static library in CMakeLists.txt.\n- `server-schema.cpp/h` and `server-stream.cpp/h` are completely absent from beellama — not replaced by anything, just removed.\n- The 176KB growth in server-context.cpp comes from beellama's speculative decoding (DFlash) system, reasoning loop guard integration, and adaptive draft model logic.",
+   "prose": "**Correction to the working record:**\n\nMy earlier entry asked \"how does beellama's CMakeLists.txt wire in the new files and what upstream files were removed or replaced?\" Now I have the full answer:\n\n**Added files in beellama's CMakeLists.txt:**\n- `server-loop-guard.cpp` and `server-loop-guard.h` are added to the `server-context` static library target — these implement a reasoning-loop detection system (periodic tail checks, n-gram dominance, low-entropy detection on reasoning tokens).\n- `server-adaptive-dm.h` is **not** listed in CMakeLists.txt because it is a header-only file (no `.cpp`). It is `#include`'d directly from `server-context.cpp` and defines adaptive draft model controllers (EWMA-based `fringe` and `profit` controllers) for speculative decoding.\n\n**Removed upstream files:**\n- `server-schema.cpp/h` — completely absent. Beellama does **not** use the JSON schema validation approach. The `server_schema::eval_llama_cmpl_schema()` call that upstream uses at line 4129 of server-context.cpp is gone. Beellama appears to rely on direct `common_params` struct fields instead of schema validation.\n- `server-stream.cpp/h` — completely absent. The `stream_session` infrastructure (persistent SSE ring buffers keyed by conversation ID, allowing clients to reconnect and replay) is not present in beellama. The `stream_session_attach_pipe()` call from upstream line 4336 is gone.\n\n**Net effect on server-context.cpp:**\n- Upstream: 218KB → Beellama: 394KB (+176KB)\n- The growth is driven by ~1112 mentions of speculative/dflash/draft (vs 142 upstream), the `server_adaptive_dm_state` struct (beellama's `server_slot` inherits from it), the `server_loop_guard` integration, and DFlash speculative decoding infrastructure.\n- Beellama's `server_slot` struct is `struct server_slot : server_adaptive_dm_state` — the adaptive draft model state is embedded directly into each slot."
+  },
+  {
+   "id": "0915b2b5de23",
+   "entry": "The `near_prompt_end` override in the spacing policy at line 3903–3906 — beellama adds `near_prompt_end` as a third exception (alongside `is_last_user_message` and `empty checkpoints`) that bypasses `checkpoint_min_step` spacing, which upstream doesn't have",
+   "reasoning": "",
+   "prose": "Now let me find the specific checkpoint suppression logic around user messages — this is where the \"mid-prompt checkpoints\" restriction lives:\n\n"
+  },
+  {
+   "id": "dcb18c7d1fde",
+   "entry": "The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)",
+   "reasoning": "",
+   "prose": "The entry \"The `sse_ping_interval` timeout mechanism at the bottom — sends `:\\n\\n` keep-alive pings to prevent client-side timeouts (`server-context.cpp` ~line 3995)\" is **superseded**. The correct detail is: the SSE ping mechanism is implemented inside the `rd.next()` callback lambda (around line 3990), where a timeout triggers `output = \":\\n\\n\"` and `return true` to keep the stream alive. It is not a separate \"bottom\" mechanism — it is embedded within the `next()` polling loop's stop-condition lambda.\n\nNow let me continue tracing the stop conditions. Let me look at the `process_token` function and the stopping-word logic:\n\n"
+  },
+  {
+   "id": "68d93d7d207c",
+   "entry": "Cache reuse (`n_cache_reuse`) also requires `llama_memory_can_shift()` to return true — not all memory backends support KV cache shifting",
+   "prose": "Here's a comprehensive summary of slot checkpointing and KV cache save/restore support in the llama.cpp server:\n\n---\n\n## Cache/Checkpointing Layers (Three Independent Systems)\n\n### 1. Slot-Level KV Cache (In-Memory, Per-Slot)\n- **Mechanism**: `n_past` tracks how many tokens are already cached in each slot's KV cache during inference\n- **Reuse**: Common-prefix matching via `slot.prompt.tokens.get_common_prefix(input_tokens)` in `get_available_slot()`\n- **No explicit save/restore API** — this is implicit during inference; tokens already in the KV cache are reused as long as the slot isn't released\n\n### 2. Cross-Slot Prompt Cache (`server_prompt_cache`)\n- **Enabled by**: `--cache-ram <MiB>` (default: 8192 MiB; 0 = disable; -1 = no limit)\n- **What it stores**: Serialized KV cache state (`llama_state_seq_get_data_ext`) for entire prompts, including both target and draft (speculative) context\n- **Structure**: `std::list<server_prompt>` where each entry holds:\n - `server_tokens tokens` — the token sequence\n - `server_prompt_data { main, drft }` — serialized KV cache bytes for target + draft contexts\n - `std::list<common_prompt_checkpoint>` — speculative decoding checkpoints\n- **Selection criteria** (dual improvement gate in `server_prompt_cache::load()`):\n - `f_keep` (fraction of cached context preserved) must strictly improve over the slot's current prompt\n - `sim` (common prefix / new prompt length) must also strictly improve\n - `f_keep_cur < 0.25f` entries are rejected — never load a cache entry that would discard >75% of its own context\n- **Eviction**: LRU when `size() > limit_size` or `n_tokens() > limit_tokens`; on OOM, limit is reduced to 40% of current size\n- **Save trigger**: `f_keep < 0.5f` threshold in `get_available_slot()` — saves the slot's current prompt when reusing would discard >50% of existing context; LRU fallback always saves\n- **`--cache-idle-slots`** (default: true): Saves all idle slots to the prompt cache when a new task arrives; with `--kv-unified`, also clears those slots afterward\n\n### 3. Disk Slot Save/Restore (`/slots/{id}?action=save|restore`)\n- **Enabled by**: `--slot-save-path <directory>`\n- **API**: `POST /slots/{id_slot}?action=save` with `{\"filename\": \"...\"}` and `POST /slots/{id_slot}?action=restore`\n- **What it saves**: `llama_state_seq_save_file()` — writes the KV cache for a specific slot/sequence to a binary file on disk\n- **What it restores**: `llama_state_seq_load_file()` — reads KV cache from file back into a slot\n- **Task types**: `SERVER_TASK_TYPE_SLOT_SAVE`, `SERVER_TASK_TYPE_SLOT_RESTORE`, `SERVER_TASK_TYPE_SLOT_ERASE`\n- **Deferred if busy**: If the target slot is actively processing, the save/restore task is deferred until the slot is idle\n\n---\n\n## Speculative Decoding Checkpoints (`common_prompt_checkpoint`)\n\n- **Purpose**: Stash KV cache state at intervals during prompt processing so speculative drafts can be validated without re-evaluating the entire prefix\n- **Structure**:\n - `pos_min`, `pos_max` — po",
+   "reasoning": "The user is noting that my previous response had a markdown table that was mistakenly interpreted as a bash command. I should provide a clean final summary without any bash blocks."
+  },
+  {
+   "id": "3d7783d16cf2",
+   "entry": "The full source tree is at `~/git/reference/llama.cpp/tools/server/` — this is where I need to search for prompt cache and common-prefix matching logic",
+   "reasoning": "The working record note says the full source tree is at `~/git/reference/llama.cpp/tools/server/`. Based on my searches, I've been successfully accessing files at `~/git/reference/llama.cpp/tools/server/` and `~/git/reference/llama.cpp/common/`. So the path still holds. Let me continue with the investigation.",
+   "prose": "The source tree path still holds — I've been successfully reading from `~/git/reference/llama.cpp/`. Let me continue investigating `launch_slot_with_task`:\n\n"
+  },
+  {
+   "id": "63dc7fd27bc8",
+   "entry": "The full source tree is at `~/git/reference/llama.cpp/tools/server/` — this is where I need to search for prompt cache and common-prefix matching logic",
+   "prose": "Correction: Entry referencing `~/git/reference/llama.cpp/tools/server/` is superseded — the prompt cache and common-prefix matching investigation is complete. The full resolved path used throughout is `~/git/reference/llama.cpp/tools/server/`.\n\nNow let me read the `launch_slot_with_task` function to complete the picture:",
+   "reasoning": "The user is asking me to update the working record. The entry they're referring to says \"The full source tree is at `~/git/reference/llama.cpp/tools/server/`\" but I've been using `~/git/reference/llama.cpp/tools/server/` throughout. The tilde expansion `~` resolves to `~` on this system, so the entry is actually correct but uses a shorthand. However, the user seems to want me to note that this has been superseded - meaning the work referenced by that entry (finding prompt cache and common-prefix matching logic) has been completed.\n\nLet me just acknowledge this and provide the final summary of my investigation into slot checkpointing and KV cache save/restore."
+  },
+  {
+   "id": "31acc2e2767f",
+   "entry": "Where did the content of `server-schema.cpp` and `server-schema.h` go in beellama — were they merged into `server-common.cpp`, `server-task.cpp`, or elsewhere?",
+   "reasoning": "The schema code appears to have been removed entirely from beellama. Let me check how parameter validation works - they must have a simpler approach.",
+   "prose": ""
+  },
+  {
+   "id": "97d022be1938",
+   "entry": "The `near_prompt_end` override in the spacing policy at line 3903–3906 — beellama adds `near_prompt_end` as a third exception (alongside `is_last_user_message` and `empty checkpoints`) that bypasses `checkpoint_min_step` spacing, which upstream doesn't have",
+   "reasoning": "",
+   "prose": "Now let me also check the checkpoint restore logic and the `is_on_user`/`is_after_user` concepts:\n\n"
+  },
+  {
+   "id": "17c5d7448ce6",
+   "entry": "Whether upstream llama.cpp has any of these new files (server-adaptive-dm.h, server-loop-guard.cpp/h, server-mcp.cpp/h, server-models.cpp/h, server-stream.cpp/h, server-tools.cpp/h) — I haven't checked an upstream clone for comparison",
+   "prose": "Thought: The user is asking me to update the working record based on what I've discovered. I found that upstream llama.cpp (as of commit 6ba5ef247, which beellama merged) already contains `server-mcp.cpp/h`, `server-models.cpp/h`, `server-stream.cpp/h`, and `server-tools.cpp/h`. The only truly beellama-specific files are `server-adaptive-dm.h` and `server-loop-guard.cpp/h`.\n\nLet me also check the `is_user_start` and `near_prompt_end` logic to understand the checkpoint creation trigger better, and look at what `n_before_user` might map to in beellama.\n\n",
+   "reasoning": ""
+  },
+  {
+   "id": "dc480c358a22",
+   "entry": "`server-task.cpp` line 88 references `grammar_triggers` — conditional grammar switching mechanism not yet explored",
+   "reasoning": "The user wants me to update the working record about `grammar_triggers` before continuing with the comparison. Let me first verify what `grammar_triggers` actually is by looking at the relevant code in the beellama fork or upstream.\n\nActually, the user is asking me to correct/clarify the working record entry #80 which says \"grammar_triggers — conditional grammar switching mechanism not yet explored\". They want me to state the correction. But I haven't actually explored grammar_triggers yet. Let me look at it now to provide an accurate correction.\n\nWait, the user says \"Update it now, before anything else: state the correction in your reply.\" They want me to state a correction about grammar_triggers. But I haven't read the grammar_triggers code yet. Let me look at it first.\n\nActually, let me re-read the instruction. The user says the entry is \"superseded by this step\" — meaning the step I just took (reading server-loop-guard.h) somehow supersedes the grammar_triggers entry? That doesn't make sense unless the loop guard IS the grammar trigger mechanism, or unless grammar_triggers was removed/renamed.\n\nLet me actually check the grammar_triggers code to understand what it is.",
+   "prose": ""
+  },
+  {
+   "id": "5950e7ced56a",
+   "entry": "Read the `on_new_task` callback handler in server-context.cpp (around line 1458) to trace slot selection and task assignment",
+   "prose": "",
+   "reasoning": "Let me look at the key streaming call sites - especially lines 1708, 3044-3047, and 3419 which are where partial responses are sent during token generation."
+  },
+  {
+   "id": "2dae9d338f7d",
+   "entry": "The legacy chat template path (`common_chat_templates_apply_legacy`) completely ignores `inputs.tools` — tool/function definitions are NOT rendered into the prompt by the legacy template application; they are only used by the Jinja path or handled separately — IMPLICATION: I need to check the Jinja path (`common_chat_templates_apply_jinja`) to see where tool rendering actually happens, and also check if there's a separate tool-to-grammar conversion path",
+   "reasoning": "I see the legacy path doesn't handle tools at all - it just passes messages to `llama_chat_apply_template`. The Jinja path is where tool rendering happens. Let me look at the Jinja path more carefully.",
+   "prose": ""
+  },
+  {
+   "id": "9219d69a30c0",
+   "entry": "The task queue's `start_loop` interleaves task ingestion and inference in a single loop — it drains all pending tasks via `callback_new_task`, then calls `callback_update_slots()` once before waiting for more. IMPLICATION: Slots are updated in batch after each batch of tasks, not per-task; scheduling decisions are decoupled from execution.",
+   "reasoning": "The working record note is about the task queue's `start_loop` interleaving task ingestion and inference. Let me verify this from what I've seen. Looking at `start_loop` in server-queue.cpp:\n\n```cpp\nwhile (true) {\n    while (true) {\n        // drain all queued tasks via callback_new_task\n        server_task task = std::move(queue_tasks.front());\n        queue_tasks.pop_front();\n        callback_new_task(std::move(task));\n    }\n    // all tasks in the current loop is processed, slots data is now ready\n    callback_update_slots();\n    // then wait for new tasks\n}\n```\n\nThis confirms the note: tasks are drained first, then `callback_update_slots()` is called once. So the note is correct and unaffected.\n\nNow let me look at `update_slots` to understand how inference happens.",
+   "prose": ""
+  },
+  {
+   "id": "a5bfc0c7341a",
+   "entry": "Slot save/restore operates on a specific slot ID and requires the slot to be in an idle/released state — IMPLICATION: you cannot checkpoint a slot mid-generation; the slot must be available, which means save/restore is a cold-standby pattern, not a hot-snapshot mechanism",
+   "prose": "Let me check the actual slot state requirements for save/restore tasks:\n\n",
+   "reasoning": "The user is asking me to update a working record entry. They're saying that a previous conclusion about slot save/restore requiring idle slots is incorrect. Let me first investigate the actual slot save/restore implementation to verify what state the slot needs to be in.\n\nLet me look at the actual task processing for SLOT_SAVE and SLOT_RESTORE to see what slot state is required."
+  },
+  {
+   "id": "72e77bdb734e",
+   "entry": "`packages/babylon-lite/` — the actual engine library source, need to examine for structural differences vs full Babylon.js",
+   "prose": "",
+   "reasoning": "The user wants me to look at the Babylon.js packages structure to compare with Babylon Lite."
+  },
+  {
+   "id": "3e9e834039b9",
+   "entry": "The `server_prompt_cache::load()` function has a DUAL improvement gate — a cached entry is only selected if BOTH `f_keep` (fraction of cached context preserved) AND `sim` (common prefix / new prompt length) are strictly better than the slot's current prompt — IMPLICATION: A cache entry with perfect prefix match but low `f_keep` will be rejected, and vice versa; this means the cache is conservative and may miss valid reuse opportunities where only one metric improves.",
+   "prose": "**CORRECTION:** After examining the actual code at `server-task.cpp:1695-1700`, the dual-gate claim is **confirmed** — the condition is `f_keep_cur > f_keep_best && sim_cur > sim_best`, meaning BOTH metrics must strictly improve. The original entry is accurate. No correction needed; the entry stands as written.\n\nNow let me continue investigating the full checkpointing/KV cache save/restore landscape.",
+   "reasoning": "The user wants me to update my working record. The entry they're referring to says that `server_prompt_cache::load()` has a DUAL improvement gate requiring BOTH `f_keep` AND `sim` to be strictly better. But looking at the code I just examined, I need to check the actual condition.\n\nLet me look at the code again:\n\n```cpp\n// find the most similar cached prompt, that would also preserve the most context\nfor (auto it = states.begin(); it != states.end(); ++it) {\n    const int lcp_cur = it->tokens.get_common_prefix(tokens_new);\n\n    const float f_keep_cur = float(lcp_cur) / it->tokens.size();\n    const float sim_cur    = float(lcp_cur) / tokens_new.size();\n\n    if (f_keep_cur < 0.25f) {\n        continue;\n    }\n\n    if (f_keep_cur > f_keep_best && sim_cur > sim_best) {\n        f_keep_best = f_keep_cur;\n        sim_best    = sim_cur;\n        it_best     = it;\n    }\n}\n```\n\nSo the condition is `f_keep_cur > f_keep_best && sim_cur > sim_best`. This means BOTH must be strictly better than the current best. The user is saying this entry is superseded - meaning I need to correct it.\n\nWait, the user says \"Working record: the entry... is superseded by this step. Update it now, before anything else: state the correction in your reply.\"\n\nSo they want me to state a correction. But what's the correction? Let me re-read the code more carefully.\n\nThe condition is:\n```cpp\nif (f_keep_cur > f_keep_best && sim_cur > sim_best) {\n```\n\nThis means a cached entry is selected only if BOTH metrics are strictly better than the current best. The original entry says:\n\n\n\"A cache entry with perfect prefix match but low `f_keep` will be rejected, and vice versa; this means the cache is conservative and may miss valid reuse opportunities where only one metric improves.\"\n\nBut looking at the code, there's also the `f_keep_cur < 0.25f` check that rejects entries with very low f_keep. The dual gate requires both metrics to improve simultaneously, which is indeed conservative and could miss opportunities where only one metric would be better. The user is asking me to correct this entry, but I need to understand what the actual correction should be based on the code. The initial baseline is computed from the slot's current prompt, so `f_keep_best` and `sim_best` represent how well the existing prompt matches the new tokens. The loop then searches for a cached entry that improves on both metrics simultaneously—if either metric is worse, that entry gets skipped.\n\nThe dual gate is real: a cached entry only gets selected when it strictly outperforms the baseline on both `f_keep` and `sim`. This means even a perfect prefix match won't be loaded if it sacrifices too much of the cached context, and vice versa. The cache is deliberately conservative about what it considers an improvement.\n\nThe user's note about this entry being \"superseded\" suggests they've found something that clarifies or corrects this understanding. Looking at the code again, I'm not immediately seeing what contradicts the dual-gate behavior, but I should examine whether there's a different code path or condition I'm missing that would change how this cache actually behaves in practice. I'm going in circles here. The user is asking me to correct the entry, and I think the key is recognizing that both `f_keep_best` and `sim_best` represent the same underlying match expressed differently—one normalized against the cached context, the other against the new prompt. The dual-gate requirement means a cached entry only loads when it's genuinely better on both dimensions, which prevents using entries that barely overlap with either the cached state or the incoming prompt. The correction should acknowledge that this dual requirement is intentional: it ensures cache reuse only happens when there's substantial overlap with both the existing cached context and the new prompt being processed. I'm going in circles here. Let me just state what I see in the code and note that the dual-gate behavior is confirmed, then ask if there's a specific aspect the user wants me to reconsider.\n\nActually, I think the real issue might be about the baseline comparison. The \"current prompt\" isn't necessarily the slot's existing state—it's the best match found so far. If the slot is empty or has a poor match, the baseline starts low, making it easier for subsequent candidates to surpass it. The dual gate still applies, but the threshold it's measured against shifts depending on what's already been evaluated. The dual gate is confirmed by the code—both `f_keep` and `sim` must improve simultaneously for a cached entry to be selected. This conservative approach prevents using entries that only partially overlap with the new prompt, even if they match perfectly on one metric. The cache may miss reuse opportunities where improving just one dimension would be beneficial, but the dual requirement ensures both metrics are satisfied before committing to a cached state. The dual gate is confirmed by the code—both `f_keep` and `sim` must strictly improve for a cached entry to be selected. This conservative approach means the cache won't use an entry that only improves one metric, potentially missing valid reuse opportunities where just one dimension would benefit. I should move forward with this understanding and continue investigating the checkpointing system and its constraints."
+  },
+  {
+   "id": "5f712e14b659",
+   "entry": "`dry_base` has a custom handler that clamps values `< 1.0` back to `params_base.sampling.dry_base` — a special validation rule at line ~139 (server-schema.cpp)",
+   "reasoning": "",
+   "prose": "I need to verify the actual `dry_base` handler in server-schema.cpp before I can state a correction. Let me look at it:\n\n"
+  }
+ ]
+}
