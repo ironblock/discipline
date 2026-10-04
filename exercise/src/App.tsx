@@ -7,7 +7,8 @@ import { ReplayTransport } from './drive/recorded.ts';
 import { SESSIONS } from './drive/sessions.ts';
 import type { SessionName } from './drive/sessions.ts';
 import { SPECIMEN } from './drive/specimen.ts';
-import type { Command, DriveTransport, Link } from './drive/transport.ts';
+import type { Beat } from './drive/specimen.ts';
+import type { Command, Decision, DriveTransport, Link, Prompt } from './drive/transport.ts';
 import { useIdleGap } from './session/useIdleGap.ts';
 import { useSession } from './session/useSession.ts';
 import { SessionView } from './ui/SessionView.tsx';
@@ -25,22 +26,25 @@ const EXPECTS: Readonly<Record<string, string>> = {
  * The harness: driving `diet`'s session over HTTP (`drive`, #117 I5), or on
  * the canned transport, or replaying a recorded session, which plays and
  * takes no commands. `web` stands in for the browser's own `EventSource` and
- * `fetch` while driving, so a story can serve the page a log (#288).
+ * `fetch` while driving, so a story can serve the page a log (#288); `script`
+ * is what the canned transport plays, the specimen unless a story says.
  */
 export function App({
   speed = 1,
   recording,
   drive = false,
   web,
+  script = SPECIMEN,
 }: {
   readonly speed?: number;
   readonly recording?: SessionName;
   readonly drive?: boolean;
   readonly web?: Web;
+  readonly script?: readonly Beat[];
 }) {
   const transport = useMemo(
-    () => (drive ? new HttpTransport('', web) : recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(SPECIMEN, { speed })),
-    [speed, recording, drive, web],
+    () => (drive ? new HttpTransport('', web) : recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(script, { speed })),
+    [speed, recording, drive, web, script],
   );
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);
@@ -49,6 +53,8 @@ export function App({
   // refused because work was in flight blocks the person from there.
   const gap = useIdleGap(session);
   const dispatch = async (command: Command) => {
+    // An answer to a prompt comes mid-turn: no gap is open, and it ends none.
+    if (command.kind === 'approve') return transport.dispatch(command);
     // A command's kind is the word for what it ends the gap with (the format's `GapEnd`): ask, seam, cancel, end.
     const idleGap = gap.carry(command.kind);
     const ack = await transport.dispatch(command, idleGap ? { idle_gap: idleGap } : undefined);
@@ -56,6 +62,9 @@ export function App({
     else if (ack.refused === 'in-flight' || ack.refused === 'busy') gap.refused();
     return ack;
   };
+  const [waiting, setWaiting] = useState<Prompt | undefined>(undefined);
+  useEffect(() => (transport as DriveTransport).watchPrompt?.(setWaiting), [transport]);
+  const decide = (call: string, scope: Decision) => transport.dispatch({ kind: 'approve', call, scope });
   const [link, setLink] = useState<{ readonly link: Link; readonly why?: string }>({ link: 'live' });
   useEffect(() => (transport as DriveTransport).watchLink?.((next, why) => setLink(why === undefined ? { link: next } : { link: next, why })), [transport]);
   const [surface, setSurface] = useState<Surface>({ curtain: true, gaps: false });
@@ -68,6 +77,7 @@ export function App({
       surface={surface}
       onSurface={setSurface}
       follow
+      approving={{ waiting, decide }}
       composer={{
         phases: PHASES,
         dispatch,

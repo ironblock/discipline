@@ -11,9 +11,10 @@
  * the log. A session run against `diet` never passes through here.
  */
 
-import type { Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool } from './log.ts';
+import type { Approval, Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolRefusal } from './log.ts';
+import type { Segment } from './transport.ts';
 
-export type { Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool } from './log.ts';
+export type { Approval, Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolRefusal } from './log.ts';
 export type { Need, Open } from './log.ts';
 import type { Open } from './log.ts';
 
@@ -122,6 +123,21 @@ export interface ToolBegin extends At {
   readonly tool: Tool;
   /** The call's arguments as the model gave them; `bash` takes `{ command }`. */
   readonly args: Readonly<Record<string, unknown>>;
+  /** A bash call's working directory, where the script says one (log v4's `cwd`, #388): placed beside its `argv`. */
+  readonly cwd?: string;
+  /** The call waits on the operator before it runs (#389): the canned transport holds the rest of the beat on it. */
+  readonly prompt?: ScriptedPrompt;
+}
+
+/**
+ * What the gate said of a call it held for the operator -- `serve`'s waiting event, less what the call already
+ * says (#389, ruled 5982826097) -- and the session's way on if the operator declines: the events after the
+ * refusal, `t` relative to it. An approval plays the beat on as written.
+ */
+export interface ScriptedPrompt {
+  readonly reason: string;
+  readonly segments: readonly Segment[];
+  readonly declined: readonly Unplaced[];
 }
 
 export interface ToolEnd extends At {
@@ -133,6 +149,10 @@ export interface ToolEnd extends At {
   readonly truncated?: boolean;
   /** The turn was cancelled before the call's outcome: its exit and output are not placed. */
   readonly cancelled?: true;
+  /** The drive refused the call, and why: it did not run, and its exit and output are not placed. */
+  readonly refused?: ToolRefusal;
+  /** The decision it ran under (log v4, #388): a pre-seed a script declares, or the operator's, which the canned transport adds. */
+  readonly approval?: Approval;
 }
 
 export interface TurnSettled extends At {

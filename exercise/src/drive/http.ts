@@ -10,6 +10,16 @@
  *                             `{"kind": "cancel", "turn"}`, `{"kind":
  *                             "declare-seam"}`, `{"kind": "end"}`. A refusal is
  *                             409 `{"refused": <tag>}`, and logged.
+ *   POST /approve             the operator's answer to the call waiting on them,
+ *                             `{"call": <id>, "scope": "once" | "session" |
+ *                             "workspace" | "decline"}`: 204, or 409
+ *                             `{"refused": "nothing-waiting" | "stale"}`.
+ *
+ * Beside the log's lines `/events` carries two named events, never logged and
+ * with no `id:` (ruled on #389, 5982826097): `waiting`, the call that waits on
+ * the operator (`Prompt`), sent again after the history on every connect while
+ * it waits; and `answered` `{request, id}`, when it is decided. The prompt is
+ * also over on this page's own `/approve` ack, and on the call's `tool_call` line.
  *
  * The page reaches it same-origin: in development Vite proxies both routes
  * (`vite.config.ts`, `DIET_DRIVE`), and `diet` is started with
@@ -26,7 +36,7 @@
 
 import type { IdleGapBody } from '../session/gap.ts';
 import type { LogLine } from './log.ts';
-import type { Ack, Command, DriveTransport, Link } from './transport.ts';
+import type { Ack, Command, DriveTransport, Link, Prompt } from './transport.ts';
 
 /** What the transport needs from the browser: injectable, so a test can stand in for the server. */
 export interface Web {
@@ -40,6 +50,8 @@ export interface EventSourceLike {
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent<string>) => void) | null;
   onerror: ((event: Event) => void) | null;
+  /** A named event's listener: `waiting` and `answered` (#389). */
+  addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void;
   close(): void;
 }
 
@@ -73,6 +85,8 @@ export class HttpTransport implements DriveTransport {
   readonly #log: LogLine[] = [];
   readonly #listeners = new Set<(line: LogLine) => void>();
   readonly #watchers = new Set<(link: Link, why?: string) => void>();
+  readonly #prompts = new Set<(prompt: Prompt | undefined) => void>();
+  #prompt: Prompt | undefined;
   #source: EventSourceLike | undefined;
   /** The last event id seen, `<opened>-<seq>`: what a resume names. */
   #lastId: string | undefined;
@@ -97,6 +111,12 @@ export class HttpTransport implements DriveTransport {
     return () => this.#listeners.delete(listener);
   }
 
+  watchPrompt(listener: (prompt: Prompt | undefined) => void): () => void {
+    listener(this.#prompt);
+    this.#prompts.add(listener);
+    return () => this.#prompts.delete(listener);
+  }
+
   watchLink(listener: (link: Link, why?: string) => void): () => void {
     listener(this.#link, this.#why);
     this.#watchers.add(listener);
@@ -111,6 +131,11 @@ export class HttpTransport implements DriveTransport {
    * a measurement never costs a person their ask.
    */
   async dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack> {
+    if (command.kind === 'approve') {
+      const { ack } = await this.#post({ call: command.call, scope: command.scope }, '/approve');
+      if (ack.ok && this.#prompt?.id === command.call) this.#setPrompt(undefined);
+      return ack;
+    }
     const plain = this.#body(command);
     if (typeof plain['refused'] === 'string') return { ok: false, refused: plain['refused'] };
     const gap = extras?.idle_gap;
@@ -119,10 +144,10 @@ export class HttpTransport implements DriveTransport {
   }
 
   /** One post, and what it came to: its status (0 when nothing answered), and the ack. */
-  async #post(body: Readonly<Record<string, unknown>>): Promise<{ readonly status: number; readonly ack: Ack }> {
+  async #post(body: Readonly<Record<string, unknown>>, route = '/commands'): Promise<{ readonly status: number; readonly ack: Ack }> {
     let reply: Response;
     try {
-      reply = await this.#web.fetch(`${this.#base}/commands`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      reply = await this.#web.fetch(`${this.#base}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     } catch {
       return { status: 0, ack: { ok: false, refused: 'unreachable' } };
     }
@@ -142,7 +167,7 @@ export class HttpTransport implements DriveTransport {
   }
 
   /** A command as `serve.rs` takes it; one the log cannot place yet is refused here. */
-  #body(command: Command): Readonly<Record<string, unknown>> {
+  #body(command: Exclude<Command, { kind: 'approve' }>): Readonly<Record<string, unknown>> {
     switch (command.kind) {
       case 'ask':
         return { kind: 'ask', text: command.text };
@@ -167,6 +192,14 @@ export class HttpTransport implements DriveTransport {
     source.onmessage = (event) => {
       if (source === this.#source) this.#receive(event);
     };
+    source.addEventListener('waiting', (event) => {
+      if (source === this.#source) this.#waiting(event);
+    });
+    source.addEventListener('answered', (event) => {
+      if (source !== this.#source) return;
+      const said = parse(event.data);
+      if (said && said['id'] === this.#prompt?.id && said['request'] === this.#prompt?.request) this.#setPrompt(undefined);
+    });
     source.onerror = () => {
       if (source !== this.#source) return;
       // Still trying: the browser retries a dropped stream itself, resuming from the last id.
@@ -192,14 +225,38 @@ export class HttpTransport implements DriveTransport {
     if (line.kind === 'session.start') this.#opened = line.opened;
     this.#lastId = event.lastEventId || this.#lastId;
     this.#retries = 0;
+    // The call's outcome is known: whatever it waited on is decided.
+    if (line.kind === 'tool_call' && line.id === this.#prompt?.id && line.request === this.#prompt?.request) this.#setPrompt(undefined);
     this.#log.push(line);
     for (const listener of this.#listeners) listener(line);
+  }
+
+  /** A call waits on the operator: the page shows it until it is decided. One that does not read as a prompt is not shown. */
+  #waiting(event: MessageEvent<string>): void {
+    const said = parse(event.data);
+    if (!said || typeof said['request'] !== 'number' || typeof said['id'] !== 'string' || typeof said['command'] !== 'string' || !Array.isArray(said['segments'])) return;
+    const prompt: Prompt = {
+      request: said['request'],
+      id: said['id'],
+      command: said['command'],
+      cwd: typeof said['cwd'] === 'string' ? said['cwd'] : '',
+      reason: typeof said['reason'] === 'string' ? said['reason'] : '',
+      segments: said['segments'] as Prompt['segments'],
+    };
+    this.#setPrompt(prompt);
+  }
+
+  #setPrompt(prompt: Prompt | undefined): void {
+    if (prompt === this.#prompt) return;
+    this.#prompt = prompt;
+    for (const listener of this.#prompts) listener(prompt);
   }
 
   /** Another session: drop this log and read the new one from its first line. */
   #restart(): void {
     this.#source?.close();
     this.#source = undefined;
+    this.#setPrompt(undefined);
     this.#log.length = 0;
     this.#lastId = undefined;
     this.#opened = undefined;
@@ -245,5 +302,15 @@ export class HttpTransport implements DriveTransport {
     this.#link = link;
     this.#why = why;
     for (const watcher of this.#watchers) watcher(link, why);
+  }
+}
+
+/** A named event's data as an object, or undefined. */
+function parse(data: string): Readonly<Record<string, unknown>> | undefined {
+  try {
+    const value: unknown = JSON.parse(data);
+    return typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
   }
 }

@@ -16,8 +16,16 @@ class FakeSource implements EventSourceLike {
   onopen: ((event: Event) => void) | null = null;
   onmessage: ((event: MessageEvent<string>) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
+  readonly named = new Map<string, ((event: MessageEvent<string>) => void)[]>();
   closed = false;
   constructor(readonly url: string) {}
+  addEventListener(type: string, listener: (event: MessageEvent<string>) => void): void {
+    this.named.set(type, [...(this.named.get(type) ?? []), listener]);
+  }
+  /** A named event (`waiting`, `answered`): no `id:`, as serve sends them (#389). */
+  emit(type: string, data: Record<string, unknown>): void {
+    for (const listener of this.named.get(type) ?? []) listener(new MessageEvent(type, { data: JSON.stringify(data) }));
+  }
   open(): void {
     this.readyState = 1;
     this.onopen?.(new Event('open'));
@@ -238,5 +246,58 @@ describe('HttpTransport: the idle gap a command ends (Q4, #146)', () => {
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"in-flight"}', { status: 409 })) });
     await expect(transport.dispatch({ kind: 'ask', text: 'hi' }, { idle_gap: gap })).resolves.toEqual({ ok: false, refused: 'in-flight' });
     expect(posted).toHaveLength(1);
+  });
+});
+
+describe('HttpTransport: a call waiting on the operator (#389, ruled 5982826097)', () => {
+  const waiting = { request: 3, id: 'call_1', command: 'npm install', cwd: '~/git/experiments/t1', reason: 'not_approved', segments: [{ text: 'npm install', program: 'npm', subcommand: 'install', verdict: 'prompt', why: 'not_approved' }] };
+  const watched = (transport: HttpTransport) => {
+    const seen: unknown[] = [];
+    transport.watchPrompt((prompt) => seen.push(prompt?.id));
+    return seen;
+  };
+
+  it('shows the waiting event, and clears it on answered', () => {
+    const { transport, last } = stand();
+    const seen = watched(transport);
+    last().emit('waiting', waiting);
+    last().emit('answered', { request: 3, id: 'call_1' });
+    expect(seen).toEqual([undefined, 'call_1', undefined]);
+  });
+
+  it('clears it on the call’s tool_call line, found by request and id', () => {
+    const { transport, last } = stand();
+    const seen = watched(transport);
+    last().send(start);
+    last().emit('waiting', waiting);
+    last().send({ seq: 1, t: 9, kind: 'tool_call', request: 2, turn: 1, id: 'call_1', name: 'bash', arguments: '{}', outcome: 'refused', reason: 'declined', argv: ['npm', 'install'] });
+    expect(seen).toEqual([undefined, 'call_1']);
+    last().send({ seq: 2, t: 9, kind: 'tool_call', request: 3, turn: 1, id: 'call_1', name: 'bash', arguments: '{}', outcome: 'refused', reason: 'declined', argv: ['npm', 'install'] });
+    expect(seen).toEqual([undefined, 'call_1', undefined]);
+  });
+
+  it('posts an answer to /approve as {call, scope}, and clears the prompt on its ack', async () => {
+    const posted: { url: string; body: Record<string, unknown> }[] = [];
+    const { transport, last, fetched } = stand({ commands: (body) => (posted.push({ url: fetched.at(-1)!.url, body }), new Response(null, { status: 204 })) });
+    const seen = watched(transport);
+    last().emit('waiting', waiting);
+    await expect(transport.dispatch({ kind: 'approve', call: 'call_1', scope: 'session' })).resolves.toEqual({ ok: true });
+    expect(posted).toEqual([{ url: '/approve', body: { call: 'call_1', scope: 'session' } }]);
+    expect(seen).toEqual([undefined, 'call_1', undefined]);
+  });
+
+  it('keeps the prompt when the answer is refused, and carries the refusal by its tag', async () => {
+    const { transport, last } = stand({ commands: () => new Response('{"refused":"stale"}', { status: 409 }) });
+    const seen = watched(transport);
+    last().emit('waiting', waiting);
+    await expect(transport.dispatch({ kind: 'approve', call: 'call_1', scope: 'decline' })).resolves.toEqual({ ok: false, refused: 'stale' });
+    expect(seen).toEqual([undefined, 'call_1']);
+  });
+
+  it('does not show a waiting event that does not read as a prompt', () => {
+    const { transport, last } = stand();
+    const seen = watched(transport);
+    last().emit('waiting', { id: 'call_1' });
+    expect(seen).toEqual([undefined]);
   });
 });

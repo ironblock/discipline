@@ -28,6 +28,8 @@ import { laneStyle } from './sets.ts';
 import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from './surface.tsx';
 import type { Room, Surface } from './surface.tsx';
 import { ToolBlock } from './ToolCall.tsx';
+import { ApprovalContext, ApprovalPrompt } from './Approval.tsx';
+import type { Approving } from './Approval.tsx';
 import './session.css';
 
 export interface SessionViewProps {
@@ -41,6 +43,8 @@ export interface SessionViewProps {
   readonly composer: Omit<ComposerProps, 'state' | 'phase'>;
   /** Keep the newest content in view while it arrives, unless the person scrolled away. */
   readonly follow?: boolean;
+  /** The call waiting on the operator, and how to answer it (#389). Absent: nothing waits. */
+  readonly approving?: Approving;
 }
 
 /** Vertical space between two branches stacked in one slot: whole, and condensed to bars. */
@@ -64,7 +68,9 @@ interface Placement extends Placed {
  * an earlier branch in the same slot is still in the way it stacks below
  * and its cable bends to reach it. The trunk never moves for a branch.
  */
-export function SessionView({ session, link = 'live', linkWhy, surface, onSurface, composer, follow = false }: SessionViewProps) {
+const NOTHING_WAITS: Approving = { waiting: undefined };
+
+export function SessionView({ session, link = 'live', linkWhy, surface, onSurface, composer, follow = false, approving = NOTHING_WAITS }: SessionViewProps) {
   // What the row has room for beside the trunk (measured below): whole side calls, bars, or neither. With
   // less room than the curtain asks for, side calls condense to bars; with none, the curtain draws closed.
   // Either way a side call that cannot open in its lane opens under the message it came from (`inline`).
@@ -441,6 +447,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
 
   return (
     <SurfaceContext.Provider value={surface}>
+    <ApprovalContext.Provider value={approving}>
       <ClockContext.Provider value={now}>
       <TargetContext.Provider value={target}>
       <HotEntriesContext.Provider value={hot.entries}>
@@ -591,7 +598,8 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
               ))}
             </div>
             {/* The composer: its own width from the trunk's left edge, whatever the lanes (--composer-width). */}
-            <div className="ex-session__composer">
+            <div className="ex-session__composer" data-waiting={approving.waiting ? '' : undefined}>
+              {approving.waiting && approving.decide ? <ApprovalPrompt key={`${approving.waiting.request}/${approving.waiting.id}`} prompt={approving.waiting} decide={approving.decide} /> : null}
               <Composer key={session.phase} state={session.state} link={link} phase={session.phase} {...composer} />
             </div>
           </div>
@@ -618,6 +626,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
       </HotEntriesContext.Provider>
       </TargetContext.Provider>
       </ClockContext.Provider>
+    </ApprovalContext.Provider>
     </SurfaceContext.Provider>
   );
 }

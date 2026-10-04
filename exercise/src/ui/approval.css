@@ -1,0 +1,102 @@
+/*
+ * A command waiting on the operator (Approval.tsx): docked over the
+ * composer, in the warn ink, so it is the one thing on the page that asks.
+ */
+.ex-approval {
+  display: grid;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--warn);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--warn) 22%, transparent);
+}
+
+.ex-approval__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  align-items: baseline;
+}
+
+.ex-approval__title {
+  font-weight: 600;
+  color: var(--warn);
+}
+
+.ex-approval__reason,
+.ex-approval__cwd,
+.ex-approval__shape,
+.ex-approval__verdict {
+  font: var(--size-stats) / 1.4 var(--font-stats);
+  color: var(--ink-faint);
+}
+
+.ex-approval__command {
+  margin: 0;
+  max-height: 10rem;
+  overflow: auto;
+  font: var(--size-tool) / 1.5 var(--font-tool);
+  color: var(--ink-tool);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ex-approval__segments {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.ex-approval__segment {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.6rem;
+  align-items: baseline;
+}
+
+.ex-approval__segment[data-verdict='prompt'] .ex-approval__verdict {
+  color: var(--warn);
+}
+
+.ex-approval__answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.ex-approval__answer {
+  min-height: 2.25rem;
+  padding: 0.3rem 0.85rem;
+  border: 1px solid var(--warn);
+  border-radius: 0.4rem;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.ex-approval__answer[data-scope='decline'] {
+  margin-left: auto;
+  border-color: var(--ink-faint);
+}
+
+.ex-approval__answer:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.ex-approval__answer[aria-pressed='true'] {
+  opacity: 1;
+  background: color-mix(in oklab, var(--warn) 18%, transparent);
+}
+
+.ex-approval__refused {
+  color: var(--bad);
+}
+
+/* The decision on a call that ran under one, and the directory it ran in: said quietly. */
+.ex-approval-chip[data-level='ok'] { color: var(--ok); }
+.ex-tool__cwd,
+.ex-tool__held { color: var(--ink-faint); }

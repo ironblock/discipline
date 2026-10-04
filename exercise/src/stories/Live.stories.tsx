@@ -68,6 +68,7 @@ function serving(log: string): Web {
     onopen: ((event: Event) => void) | null = null;
     onmessage: ((event: MessageEvent<string>) => void) | null = null;
     onerror: ((event: Event) => void) | null = null;
+    addEventListener(): void {}
     constructor(readonly url: string) {
       setTimeout(() => {
         if (this.readyState === 2) return;

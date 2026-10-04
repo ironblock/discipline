@@ -12,10 +12,10 @@
 import { frames } from './progress.ts';
 import type { LogLine } from './log.ts';
 import { place as placeAll, Placer } from './place.ts';
-import type { Response, Unplaced } from './script.ts';
+import type { Response, ScriptedPrompt, Unplaced } from './script.ts';
 import type { Beat, Trigger } from './specimen.ts';
 import type { IdleGapBody } from '../session/gap.ts';
-import type { Ack, Command, DriveTransport } from './transport.ts';
+import type { Ack, Command, Decision, DriveTransport, Prompt } from './transport.ts';
 
 /** The gap a snapshot assumes between beats: a person reading, then typing. */
 export const READING_GAP_MS = 20_000;
@@ -39,7 +39,9 @@ export function expand(beat: Beat, start: number, ask?: string): Unplaced[] {
     const t = start + event.t;
     if (event.kind === 'request') requestAt.set(event.id, t);
     if (event.kind === 'response') out.push(...deltas(event, requestAt.get(event.to_request) ?? t, t), ...frames(event, requestAt.get(event.to_request) ?? t, t));
-    out.push(event.kind === 'ask' && ask !== undefined ? { ...event, t, text: ask } : { ...event, t });
+    // A decision a script declares is on the beat's clock, as its time is.
+    const decided = event.kind === 'tool.end' && event.approval?.decided_at !== undefined ? { approval: { ...event.approval, decided_at: start + event.approval.decided_at } } : {};
+    out.push(event.kind === 'ask' && ask !== undefined ? { ...event, t, text: ask } : { ...event, t, ...decided });
   }
   return out.sort((a, b) => a.t - b.t);
 }
@@ -100,8 +102,22 @@ export interface CannedOptions {
   readonly speed?: number;
 }
 
-/** Which command ends a gap with which `ended_by`. */
-const ENDS = { ask: 'ask', seam: 'seam', cancel: 'cancel', end: 'end' } as const satisfies Record<Command['kind'], IdleGapBody['ended_by']>;
+/** Which command ends a gap with which `ended_by`. An answer to a prompt ends none: a turn is in flight. */
+const ENDS = { ask: 'ask', seam: 'seam', cancel: 'cancel', end: 'end', approve: undefined } as const satisfies Record<Command['kind'], IdleGapBody['ended_by'] | undefined>;
+
+/** An event the script will play, and what follows it: what a timer holds, and what a prompt holds back. */
+interface Scheduled {
+  readonly event: Unplaced;
+  readonly ahead: readonly Unplaced[];
+}
+
+/** A call waiting on the operator (#389): what was shown, and the rest of its beat, held from when it began. */
+interface Waiting {
+  readonly prompt: Prompt;
+  readonly scripted: ScriptedPrompt;
+  readonly t: number;
+  readonly held: readonly Scheduled[];
+}
 
 export class CannedTransport implements DriveTransport {
   readonly #beats: readonly Beat[];
@@ -115,7 +131,12 @@ export class CannedTransport implements DriveTransport {
   /** An admitted command's gap, logged before the next line it pushes. */
   #gap: IdleGapBody | undefined;
   readonly #listeners = new Set<(line: LogLine) => void>();
-  readonly #timers = new Set<ReturnType<typeof setTimeout>>();
+  readonly #prompts = new Set<(prompt: Prompt | undefined) => void>();
+  /** Each timer, and the event it will play: what a prompt holds back. */
+  readonly #timers = new Map<ReturnType<typeof setTimeout>, Scheduled>();
+  #waiting: Waiting | undefined;
+  /** The operator's decision on each call, by its label: added to its `tool_call` line. */
+  readonly #decided = new Map<string, NonNullable<Extract<Unplaced, { kind: 'tool.end' }>['approval']>>();
   readonly #opened = performance.now();
   #next = 0;
 
@@ -131,7 +152,13 @@ export class CannedTransport implements DriveTransport {
   }
 
   get busy(): boolean {
-    return this.#timers.size > 0;
+    return this.#timers.size > 0 || this.#waiting !== undefined;
+  }
+
+  watchPrompt(listener: (prompt: Prompt | undefined) => void): () => void {
+    listener(this.#waiting?.prompt);
+    this.#prompts.add(listener);
+    return () => this.#prompts.delete(listener);
   }
 
   subscribe(listener: (line: LogLine) => void): () => void {
@@ -145,6 +172,7 @@ export class CannedTransport implements DriveTransport {
     // just before the first line it pushes -- and must be the open gap, ended by this kind of command. `diet`
     // turns a bad one away with the command (400), and `HttpTransport` sends the command again without it; here
     // the two are one step: the command goes ahead, its gap unlogged.
+    if (command.kind === 'approve') return Promise.resolve(this.#approve(command.call, command.scope));
     const gap = extras?.idle_gap;
     const opened = this.#openGap;
     this.#gap = gap && gap.ended_by === ENDS[command.kind] && gap.opened_by === opened ? gap : undefined;
@@ -172,10 +200,36 @@ export class CannedTransport implements DriveTransport {
     return { ok: true };
   }
 
+  /**
+   * The operator's answer (`serve`'s `POST /approve`, ruled on #389): a scope plays the rest of the beat on from
+   * now, the call carrying the decision; `decline` refuses the call and plays the script's way on instead.
+   */
+  #approve(call: string, scope: Decision): Ack {
+    const waiting = this.#waiting;
+    if (!waiting) return { ok: false, refused: 'nothing-waiting' };
+    if (waiting.prompt.id !== call) return { ok: false, refused: 'stale' };
+    this.#setWaiting(undefined);
+    const now = this.#now();
+    if (scope === 'decline') {
+      this.#emit({ kind: 'tool.end', t: now, id: call, exit: 0, output: '', refused: 'declined' });
+      this.#schedule(waiting.scripted.declined.map((e) => ({ ...e, t: now + e.t })), now);
+      return { ok: true };
+    }
+    this.#decided.set(call, { scope, decided_at: now, why: waiting.prompt.reason });
+    const shift = now - waiting.t;
+    this.#schedule(
+      waiting.held.map((h): Unplaced => ({ ...h.event, t: h.event.t + shift })),
+      now,
+    );
+    return { ok: true };
+  }
+
   #cancel(): Ack {
     if (!this.busy) return { ok: false, refused: 'nothing-to-cancel' };
-    for (const timer of this.#timers) clearTimeout(timer);
+    for (const timer of this.#timers.keys()) clearTimeout(timer);
     this.#timers.clear();
+    // A call waiting on the operator is cut off like one running: its line says `cancelled` (#298 point 8).
+    this.#setWaiting(undefined);
     const now = this.#now();
     const open = openWork(this.#played);
     for (const request of open.requests) {
@@ -201,7 +255,7 @@ export class CannedTransport implements DriveTransport {
 
   /** Stop every timer. The log stays. */
   close(): void {
-    for (const timer of this.#timers) clearTimeout(timer);
+    for (const timer of this.#timers.keys()) clearTimeout(timer);
     this.#timers.clear();
   }
 
@@ -212,21 +266,50 @@ export class CannedTransport implements DriveTransport {
     if (beat.trigger !== trigger) return { ok: false, refused: 'off-script' };
     this.#next += 1;
     const start = this.#now();
-    const events = expand(beat, start, ask);
+    this.#schedule(expand(beat, start, ask), start);
+    return { ok: true };
+  }
+
+  /** Play EVENTS (session time) from START: now if due, else on a timer. A prompted call holds back whatever follows it. */
+  #schedule(events: readonly Unplaced[], start: number): void {
     for (const [i, event] of events.entries()) {
       const ahead = events.slice(i + 1);
       const delay = (event.t - start) / this.#speed;
       if (delay <= 0) {
-        this.#emit(event, ahead);
+        if (this.#play(event, ahead)) return;
         continue;
       }
       const timer = setTimeout(() => {
         this.#timers.delete(timer);
-        this.#emit(event, ahead);
+        this.#play(event, ahead);
       }, delay);
-      this.#timers.add(timer);
+      this.#timers.set(timer, { event, ahead });
     }
-    return { ok: true };
+  }
+
+  /** Play one event. True when it is a call that waits on the operator: everything scheduled after it is held. */
+  #play(event: Unplaced, ahead: readonly Unplaced[]): boolean {
+    this.#emit(event, ahead);
+    if (event.kind !== 'tool.begin' || !event.prompt) return false;
+    const held = [...this.#timers.values()].sort((a, b) => a.event.t - b.event.t);
+    for (const timer of this.#timers.keys()) clearTimeout(timer);
+    this.#timers.clear();
+    // What is due now and not yet played is held too: `ahead` from this event on.
+    const due = ahead.filter((e) => !held.some((h) => h.event === e));
+    const request = this.#placer.seqOf(event.after) ?? -1;
+    const command = typeof event.args['command'] === 'string' ? event.args['command'] : JSON.stringify(event.args);
+    this.#setWaiting({
+      prompt: { request, id: event.id, command, cwd: event.cwd ?? '', reason: event.prompt.reason, segments: event.prompt.segments },
+      scripted: event.prompt,
+      t: event.t,
+      held: [...due.map((e, i) => ({ event: e, ahead: due.slice(i + 1) })), ...held].sort((a, b) => a.event.t - b.event.t),
+    });
+    return true;
+  }
+
+  #setWaiting(waiting: Waiting | undefined): void {
+    this.#waiting = waiting;
+    for (const listener of this.#prompts) listener(waiting?.prompt);
   }
 
   #now(): number {
@@ -241,7 +324,10 @@ export class CannedTransport implements DriveTransport {
       this.#push(this.#placer.line({ kind: 'idle.gap', t: event.t, ...gap }));
     }
     this.#played.push(event);
-    for (const line of this.#placer.place(event, ahead)) this.#push(line);
+    // A call that ran on the operator's decision carries it (log v4's `approval`, #388).
+    const decided = event.kind === 'tool.end' ? this.#decided.get(event.id) : undefined;
+    const placed = decided && event.kind === 'tool.end' && !event.refused && !event.approval ? { ...event, approval: decided } : event;
+    for (const line of this.#placer.place(placed, ahead)) this.#push(line);
   }
 
   #push(line: LogLine): void {
