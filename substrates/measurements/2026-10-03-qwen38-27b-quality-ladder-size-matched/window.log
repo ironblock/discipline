@@ -1,0 +1,11 @@
+2026-10-03T22:35:37Z base files verified: code 471fe3d21ee07cc5 prose 1cc5037cb35395a9
+2026-10-03T22:35:42Z floor pid=86206; slots: [False, False]
+2026-10-03T22:35:43Z DOWNTIME START floor stopped vram=21 mem_avail=29G
+2026-10-03T22:37:58Z exl3 2.50bpw rc=0 [exl3-2.50bpw] loaded in 25s; VRAM used 11.3 GiB|RESULT exl3-2.50bpw base-code.kld: PPL(Q) 1.730780 PPL(base) 1.648707 Mean KLD 0.097276 ± 0.002495 99.9% KLD 5.305439 Median KLD 0.001772 Same top 93.869 ± 0.153 % n=24564|RESULT exl3-2.50bpw base-prose.kld: PPL(Q) 6.412758 PPL(base) 6.331690 Mean KLD 0.105689 ± 0.003363 99.9% KLD 7.022473 Median KLD 0.033716 Same top 87.934 ± 0.208 % n=24564|
+2026-10-03T22:40:04Z exl3 3.00bpw rc=0 [exl3-3.00bpw] loaded in 14s; VRAM used 12.7 GiB|RESULT exl3-3.00bpw base-code.kld: PPL(Q) 1.687608 PPL(base) 1.648707 Mean KLD 0.052164 ± 0.001584 99.9% KLD 3.437370 Median KLD 0.000850 Same top 95.766 ± 0.128 % n=24564|RESULT exl3-3.00bpw base-prose.kld: PPL(Q) 6.117660 PPL(base) 6.331690 Mean KLD 0.073055 ± 0.003738 99.9% KLD 6.868673 Median KLD 0.016195 Same top 91.048 ± 0.182 % n=24564|
+2026-10-03T22:42:17Z exl3 SC_3.00bpw_H4 rc=0 [exl3-SC_3.00bpw_H4] loaded in 21s; VRAM used 12.4 GiB|RESULT exl3-SC_3.00bpw_H4 base-code.kld: PPL(Q) 1.693440 PPL(base) 1.648707 Mean KLD 0.059097 ± 0.001709 99.9% KLD 3.700806 Median KLD 0.001009 Same top 95.208 ± 0.136 % n=24564|RESULT exl3-SC_3.00bpw_H4 base-prose.kld: PPL(Q) 6.267763 PPL(base) 6.331690 Mean KLD 0.073799 ± 0.003499 99.9% KLD 5.431699 Median KLD 0.021560 Same top 90.193 ± 0.190 % n=24564|
+2026-10-03T22:42:17Z arms done
+2026-10-03T22:42:17Z restore: begin
+2026-10-03T22:42:36Z provision-diet rc=0
+2026-10-03T22:42:36Z restored: pid=111934 exe=980845d60ae7a820 vram=23066
+2026-10-03T22:42:36Z END
