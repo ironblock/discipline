@@ -295,6 +295,10 @@ REF_CALL = re.compile(r"(count|round|pct)\(\s*([^,()]+?)\s*(?:,\s*(\d+)\s*)?\)")
 # file here, so a digest a section needs is written as one of these
 # (#63, ruled 2026-10-02).
 FRONT_DIGESTS = (("product_sha256",), ("pre_registration_sha256",))
+# The one front-matter number a directory may cite about itself (#350): its
+# own `claim_issue`, which #32's lint holds to digits with no leading zero.
+# It renders as `#<n>`, the way an issue is written, in every section.
+FRONT_ISSUE = ("claim_issue",)
 REF_STEP = re.compile(r"\.([A-Za-z_][A-Za-z0-9_-]*)|\[(\d+)\]")
 
 
@@ -1116,26 +1120,34 @@ def resolve_reference(text: str, scopes: dict[str, object]) -> tuple[str | None,
     found, value = resolve(scope, steps)
     if not found:
         return None, f"`{{{{{text}}}}}` names `{target}`, which {path.group(1)} does not carry"
-    # `front` is a date, or one of the three `[regime]` keys checked against
-    # the record's start row -- nothing else, counted or not (#265's reviews:
+    # `front` is a date, one of the three `[regime]` keys checked against the
+    # record's start row, a checked digest, or `claim_issue` (#350) -- nothing
+    # else, counted or not (#265's reviews:
     # a front string, and then any other `[regime]` key, which only the
     # author's own regimen.toml backs, carried a figure past the lint).
     # A date only: `datetime.datetime` is a `datetime.date` too, and its time
     # part is digits an author chose (#265's third review).
     if path.group(1) == "front" and type(value) is not datetime.date \
             and not (len(steps) >= 2 and steps[0] == "regime" and steps[1] in REQUIRED_REGIME_KEYS) \
-            and steps not in FRONT_DIGESTS:
+            and steps not in FRONT_DIGESTS and steps != FRONT_ISSUE:
         return None, (
             f"`{{{{{text}}}}}` names `{target}`; a front-matter reference is a date, "
-            f"`regime.arm`, `regime.substrates` or `regime.dogma_version`, or a digest this "
-            f"linter checks (`product_sha256`, `pre_registration_sha256`) -- the values "
-            f"something backs; reference the summary row or the product"
+            f"`regime.arm`, `regime.substrates` or `regime.dogma_version`, a digest this "
+            f"linter checks (`product_sha256`, `pre_registration_sha256`), or `claim_issue` "
+            f"-- the values something backs; reference the summary row or the product"
         )
+    if path.group(1) == "front" and steps == FRONT_ISSUE:
+        if function or not (isinstance(value, str) and DIGIT_ID.fullmatch(value)):
+            return None, (
+                f"`{{{{{text}}}}}` names `claim_issue`, which renders only as itself, "
+                f"`#<n>`, from digits with no leading zero"
+            )
+        return f"#{value}", None
     if function == "count":
         if isinstance(value, (list, dict)):
             return str(len(value)), None
         return None, f"`{{{{{text}}}}}` counts `{target}`, which is not a list or a table"
-    # `front` is a date or a `[regime]` value, nothing else (#265's review): a
+    # `front` is one of the values above, nothing else (#265's review): a
     # front-matter string is checked against nothing, so a figure in one is a
     # typed figure in a costume, and a front-matter number re-spells through
     # TOML -- `summary` holds the same number as written.

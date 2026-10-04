@@ -9,7 +9,8 @@ controls_run = []
 known_defects = []
 turns = 2
 prefill_tokens_total = 2048
-absent = { claim_issue = "a constructed fixture, no claim", supersedes = "a constructed fixture, nothing superseded", rule_ratified = "a constructed fixture, no decision rule", window_start = "a constructed fixture, no window" }
+claim_issue = "63"
+absent = { supersedes = "a constructed fixture, nothing superseded", rule_ratified = "a constructed fixture, no decision rule", window_start = "a constructed fixture, no window" }
 
 [regime]
 arm = "baseline"
@@ -50,4 +51,5 @@ the first was {{product.null_steps[0]}}.
 
 ## Conclusion
 
+The claim is {{front.claim_issue}}'s.
 Supported on {{front.fired}}: the figures above are the product's own.

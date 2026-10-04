@@ -4711,6 +4711,26 @@ path.write_text(source.replace(old, '## Results\n\nOf every #1000 steps, #142 de
 EOF
 }
 
+# A front-matter value other than `claim_issue` referenced in Conclusion
+# (#350): only a directory's own issue is admitted, so `{{front.issue}}`
+# stays a typed figure in a costume. A string, so that no other check
+# (a front number unbound in the summary) catches it first.
+inject_results_front_reference_other_key() {
+  cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("results/2026-10-03-figures-referenced/README.md")
+source = path.read_text(encoding="utf-8")
+for old, new in (('claim_issue = "63"\n', 'claim_issue = "63"\nissue = "63"\n'),
+                 ("the product's own.", "the product's own, as {{front.issue}} asked.")):
+    if source.count(old) != 1:
+        raise SystemExit(f"the anchor appears {source.count(old)} times")
+    source = source.replace(old, new, 1)
+path.write_text(source, encoding="utf-8")
+EOF
+}
+
 # Braces split by an HTML comment (#265's fifth review): a reader sees `{{`.
 inject_results_braces_split_by_markup() {
   cp -R tests/fixtures/results-referenced/2026-10-03-figures-referenced results/
@@ -10053,6 +10073,8 @@ selftest() {
     "the Conclusion section types the figure\(s\) '142', '1000'.*\[results\.figure-typed\]"
   seeded_case "integers after a hash in Results" results inject_results_hash_integers_in_results \
     "the Results section types the figure\(s\) '1000', '142'.*\[results\.figure-typed\]"
+  seeded_case "a front reference to a key other than claim_issue" results inject_results_front_reference_other_key \
+    "\{\{front\.issue\}\}. names .front\.issue.; a front-matter reference is a date.*\[results\.reference-unresolved\]"
   seeded_case "a figure typed in Test, uncited"       results  inject_results_figure_typed_in_test \
     "the Test section types the figure\\(s\\) '3'.*\\[results\\.figure-typed\\]"
   seeded_case "an uncited figure in Conclusion"       results  inject_results_figure_uncited_in_conclusion \
@@ -10895,7 +10917,7 @@ prove_selftest_mechanics() {
     bash -c "cd '${ROOT}' && cargo build --quiet -p discipline-diet --bin diet \
       && python3 scripts/check-results.py tests/fixtures/results-referenced/2026-10-03-figures-referenced \
       && out=\$(python3 scripts/check-results.py --render tests/fixtures/results-referenced/2026-10-03-figures-referenced 2>/dev/null) \
-      && grep -qF '14.2% at one place' <<<\"\$out\" && ! grep -q '{{' <<<\"\$out\""
+      && grep -qF '14.2% at one place' <<<\"\$out\" && grep -qF 'The claim is #63' <<<\"\$out\" && ! grep -q '{{' <<<\"\$out\""
   expect_exit "and the template passes as referenced" 0 \
     bash -c "cd '${ROOT}' && python3 scripts/check-results.py results/_template"
 
