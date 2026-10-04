@@ -5857,7 +5857,7 @@ path = pathlib.Path('.github/workflows/verify.yml')
 source = path.read_text(encoding="utf-8")
 edits = [
     ("  recompute:\n    uses: ./.github/workflows/pkg-recompute.yml\n\n", ""),
-    ("injections, recompute, selftest]", "injections, selftest]"),
+    ("injections, recompute, scope, selftest]", "injections, scope, selftest]"),
     ("          NEEDS: ${{ toJSON(needs) }}\n",
      "          NEEDS: ${{ toJSON(needs) }}\n          CALLED_ELSEWHERE: |\n            uses: ./.github/workflows/pkg-recompute.yml\n"),
 ]
