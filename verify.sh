@@ -4815,10 +4815,10 @@ import pathlib
 
 path = pathlib.Path('.github/workflows/pkg-injections.yml')
 source = path.read_text(encoding="utf-8")
-old = '          VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n'
+old = '          VERIFY_CHECK_SHARD: ${{ matrix.shard }}/${{ strategy.job-total }}\n'
 if source.count(old) != 1:
     raise SystemExit(f"the anchor appears {source.count(old)} times")
-path.write_text(source.replace(old, '          SHARD_IGNORED: ${{ matrix.shard }}/${{ needs.plan.outputs.count }}\n', 1), encoding="utf-8")
+path.write_text(source.replace(old, '          SHARD_IGNORED: ${{ matrix.shard }}/${{ strategy.job-total }}\n', 1), encoding="utf-8")
 EOF
 }
 
@@ -4843,7 +4843,7 @@ import pathlib
 
 path = pathlib.Path('.github/workflows/pkg-recompute.yml')
 source = path.read_text(encoding="utf-8")
-old = 'shard: ${{ fromJSON(needs.plan.outputs.shards) }}'
+old = 'shard: [1, 2, 3]'
 if source.count(old) != 1:
     raise SystemExit(f"the anchor appears {source.count(old)} times")
 path.write_text(source.replace(old, 'shard: [1]', 1), encoding="utf-8")
