@@ -675,6 +675,56 @@
    }
   }
  },
+ "report": {
+  "design": {
+   "T_high": 20.0,
+   "T_low": 0.05,
+   "band_floor": 0.05,
+   "bins": 15,
+   "boot": 9999,
+   "chance_four_way": 0.25,
+   "flip_margin_measured": 0.0242,
+   "floor_draws": 10000,
+   "options": {
+    "edit": 2,
+    "verdict": 4
+   }
+  },
+  "floor_F2_by_n": {
+   "edit": {
+    "n100": 0.025,
+    "n1600": 0.0069,
+    "n200": 0.02,
+    "n400": 0.0125,
+    "n800": 0.01
+   },
+   "verdict": {
+    "n100": 0.0333,
+    "n1600": 0.0083,
+    "n200": 0.0233,
+    "n400": 0.0167,
+    "n800": 0.0121
+   }
+  },
+  "judges": {
+   "edit": {
+    "agreement": 0.99,
+    "per_record_d": {
+     "b_v2": 0.0051,
+     "second_substrate": 0.005,
+     "stage_2": 0.0198
+    }
+   },
+   "verdict": {
+    "agreement": 0.9208,
+    "per_record_d": {
+     "b_v2": 0.0763,
+     "second_substrate": 0.0771,
+     "stage_2": 0.084
+    }
+   }
+  }
+ },
  "rule": {
   "edit": {
    "F1_consistency": {
