@@ -2,7 +2,8 @@
 # them.
 #
 # Ruling 1 on PR #59: a lane writes its own faults here and track one wires
-# them into `verify.sh` and `tools/gate/faults.toml`; nothing crosses the
+# them into `verify.sh` and `tools/gate/faults.toml` (a new row goes in
+# `tools/gate/faults.d/`, #383); nothing crosses the
 # boundary as an edit. The shape is what #46's orchestrator wants, so this
 # file is its input rather than a description for a person to retype.
 #
