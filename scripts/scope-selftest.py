@@ -137,7 +137,7 @@ CHECK_INPUTS = {
     # ...and what three more read beside the script their function names
     # (#280's review): the manifest, the lane registry, and the scanner's
     # own tables and helpers.
-    "parity": {"tools/gate/faults.toml"},
+    "parity": {"tools/gate/faults.toml", "tools/gate/faults.d/"},
     "lanes": {"tools/gate/lanes.toml"},
     "hygiene": {
         "scripts/hygiene-patterns.tsv", "scripts/hygiene-exceptions.tsv",

@@ -2,7 +2,8 @@
 # them.
 #
 # Ruling 1 on PR #59: a lane writes its own faults here and track one wires
-# them into `verify.sh` and `tools/gate/faults.toml`; nothing crosses the
+# them into `verify.sh` and `tools/gate/faults.toml` (a new row goes in
+# `tools/gate/faults.d/`, #383); nothing crosses the
 # boundary as an edit. This file is that input. **It is not yet wired**, and
 # the PR that adds it says so rather than letting an unrun manifest read as a
 # gate.

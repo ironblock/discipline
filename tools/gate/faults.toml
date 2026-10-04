@@ -1,5 +1,9 @@
 # The fault-migration manifest: what parity means.
 #
+# A NEW FAULT'S ROW DOES NOT GO HERE (#383): it goes in
+# tools/gate/faults.d/<ticket>.toml, read with this file as one set. See
+# tools/gate/README.md. This file keeps the rows that predate that, and [meta].
+#
 # `verify.sh` proves every fault below red and asserts every mechanic below.
 # The counts live in `[meta]`, where check-fault-manifest.py compares them
 # against what verify.sh actually does; a count restated in prose is a count
@@ -38,7 +42,6 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 178
 unseedable_guards = 2
 migrated = 0
 

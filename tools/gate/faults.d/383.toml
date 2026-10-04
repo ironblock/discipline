@@ -1,0 +1,28 @@
+# #383's seeded faults: the per-ticket files themselves.
+
+[[fault]]
+id = "parity.parity_duplicate_across_files"
+kind = "seeded-gate"
+check = "parity"
+label = "a fault's row declared in two places"
+failure_class = "parity.duplicate-across-files"
+legacy_signature = "faults\\.d/9999\\.toml\\[0\\]: duplicate id .parity\\.parity., first declared in faults\\.toml"
+migrated = false
+
+[[fault]]
+id = "parity.parity_ticket_file_misnamed"
+kind = "seeded-gate"
+check = "parity"
+label = "a per-ticket file not named for its ticket"
+failure_class = "parity.ticket-file-misnamed"
+legacy_signature = "faults\\.d/notes\\.toml: a per-ticket file is named for its ticket"
+migrated = false
+
+[[fault]]
+id = "mech.a-sandbox-copy-with-a-file-under-the-wrong-name-is-refused"
+kind = "mechanics"
+check = "-"
+label = "a sandbox copy with a file under the wrong name is refused"
+failure_class = "selftest.sandbox-not-the-tree"
+expected_exit = "0"
+migrated = false

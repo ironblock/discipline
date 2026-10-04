@@ -75,7 +75,7 @@
       listed under *Known defects* with the reason it is deferred.
 - [ ] **The acceptance table above cites the issue's own rows**, with the
       command and the exit code it produced here. Re-executed, not re-read.
-- [ ] **If this PR touched `verify.sh` or `tools/gate/faults.toml`:**
+- [ ] **If this PR touched `verify.sh`, `tools/gate/faults.toml` or `tools/gate/faults.d/`:**
       `./verify.sh --only injections` exits 0. A merge resolved line by line
       splices injection bodies into each other and empties them silently; the
       resolution is by NAME, and that check is what proves the result.

@@ -15,8 +15,18 @@
 - An injection's input is invalid to every future version of both readers, not to the current subset: This is the failure the fingerprint CANNOT see. Growing a format retires the fault while the injection still writes a file, so the pre-flight passes and only the gate's verdict changes. *Specimen: `inject_regimen` wrote `arm = 1.5` to make a regimen.toml not a regimen; four days later the grammar grew floats, the document parsed, and the seeded case reported "the gate did not fire" -- on CI, seven minutes after a push whose local `verify.sh` was green.*
 - Resolve the gate files by name, and let the pre-flight choose between two versions of one name: `verify.sh` and `faults.toml` are lists of named blocks, and a conflict hunk is an artifact of where two texts diverged -- git aligns two DIFFERENT injections on the identical boilerplate that opens their heredocs. `scripts/merge-gate.py` rebuilds each file from both sides by name, restores any body that is in neither parent, and where the two parents disagree runs the pre-flight to see which still bites. The red count is DERIVED, never kept (#108): `check-fault-manifest.py` counts it from the assembled list, because base-plus-deltas double-counts whatever both branches inherited by two routes, which a stack of lanes built on each other produces routinely. *Specimen: six of eight lanes carried one body that was in neither parent; a seventh kept an injection whose anchor the other side had moved.*
 
-## `faults.toml`
+## `faults.toml` and `faults.d/`
 Extracted from the gate, gated in both directions (it can neither omit a proven fault nor claim an unproven one), every fault carrying a `failure_class`, relocated fixtures carrying `migrated_to` with their redness re-proven in the new home.
+
+**Where a new fault's row goes (#383).** A pull request that adds seeded faults or mechanics assertions writes their rows to `tools/gate/faults.d/<ticket>.toml`, named for its ticket's number, a file no other pull request touches. It does not append to `faults.toml`, which every fault-adding pull request used to conflict on. Rules:
+- **One set:** `check-fault-manifest.py` and every reader of the table read `faults.toml` and every `faults.d/*.toml` as one set. Row order carries no meaning there.
+- **Ids are unique:** an id declared in two places is refused, naming both files.
+- **A ticket's second pull request,** while its first is still open, writes `faults.d/<ticket>-<slug>.toml`.
+- **Unseedable guards stay in `faults.toml`,** whose `[meta]` still counts them.
+- **`[meta]` lives in `faults.toml` alone,** and declares no count that is derived.
+- **Permanent:** a per-ticket file is its rows' permanent home, never folded back into `faults.toml` at a release.
+- **No hand-kept counts:** `mechanics_assertions` is counted, not kept, and the red count is derived the same way (#108).
+- **In `verify.sh`:** put a new case's `inject_*` function and its `seeded_case` or `expect_exit` line beside its own check's cases, not at the end of a list. Two pull requests appending at the same place conflict there.
 
 ## The selftest on a pull request, on a push, and nightly
 Until the gate redesign the selftest runs on the nightly and the release path only, the events `.github/gate-budget.tsv`'s `selftest_events` names (#369); a pull request into the integration branch and a push to it run the package checks and no selftest. Where it runs, it proves every fault: the nightly, a release pull request and a push to the release branch are all `full` runs (`scripts/scope-selftest.py --kind`, #326). A `scoped` run, re-proving only the faults a pull request's diff can reach (#112), is what a pull request into any other branch would get, and since #369 none runs one. Nothing here is harvested or hand-kept.
