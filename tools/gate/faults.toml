@@ -38,7 +38,7 @@
 
 [meta]
 source = "verify.sh"
-mechanics_assertions = 163
+mechanics_assertions = 165
 unseedable_guards = 2
 migrated = 0
 
@@ -4509,6 +4509,22 @@ kind = "mechanics"
 check = "parity"
 label = "a shard plan that never says its N is refused"
 failure_class = "shard-plan.no-n"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-of-nothing-but-comments-is-refused"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan of nothing but comments is refused"
+failure_class = "shard-plan.empty"
+legacy_signature = ""
+migrated = false
+[[fault]]
+id = "mech.a-shard-plan-outside-selftest-is-a-misuse"
+kind = "mechanics"
+check = "parity"
+label = "a shard plan outside --selftest is a misuse"
+failure_class = "shard-plan.outside-selftest"
 legacy_signature = ""
 migrated = false
 [[fault]]

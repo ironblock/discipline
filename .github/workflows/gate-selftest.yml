@@ -19,9 +19,10 @@ name: gate-selftest
 # .github/gate-budget.tsv's `max_shards`; a push to the integration branch,
 # which the next push supersedes, gets `develop_shards`; and a pull request
 # re-proving a fraction of the faults gets that fraction of `max_shards`,
-# never fewer than one (#112). The harvested plan that balanced shards by measured cost retired
-# with that ruling; what packs them now is re-measured by every full run's
-# census (#319), and the budget is a number every run prints, not a gate.
+# never fewer than one (#112). The harvested plan that balanced shards by
+# measured cost retired with that ruling; what packs them now is re-measured
+# by every full run's census (#319), and the budget is a number every run
+# prints, not a gate.
 #
 # N is `strategy.job-total`, the size of the matrix the plan produced, so the
 # flag follows the derivation with nothing restating it.
@@ -92,14 +93,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "${{ runner.temp }}/base-census"
+          # An API that fails here is a census nobody read: the run falls back
+          # to the hash and says so, never fails on it (#319's constraint).
           branch="${{ github.base_ref }}"
           if [ "${{ steps.kind.outputs.kind }}" != "scoped" ] || [ -z "$branch" ]; then
-            branch="$(gh repo view "${{ github.repository }}" --json defaultBranchRef --jq .defaultBranchRef.name)"
+            branch="${{ github.event.repository.default_branch }}"
+            [ -n "$branch" ] || branch="$(gh repo view "${{ github.repository }}" --json defaultBranchRef --jq .defaultBranchRef.name)" || branch=""
           fi
-          run_id="$(gh run list --repo "${{ github.repository }}" --workflow verify.yml \
-            --branch "$branch" --status success --limit 50 \
-            --json databaseId,event \
-            --jq '[.[] | select(.event == "push" or .event == "schedule")][0].databaseId // empty')"
+          run_id=""
+          if [ -n "$branch" ]; then
+            run_id="$(gh run list --repo "${{ github.repository }}" --workflow verify.yml \
+              --branch "$branch" --status success --limit 50 \
+              --json databaseId,event \
+              --jq '[.[] | select(.event == "push" or .event == "schedule")][0].databaseId // empty')" \
+              || { echo "::warning::the runs on ${branch} could not be listed; every fault runs, by the hash"; run_id=""; }
+          else
+            echo "::warning::the default branch could not be read; every fault runs, by the hash"
+          fi
           if [ -n "$run_id" ]; then
             echo "the census is verify run ${run_id}, the newest successful push or nightly on ${branch}"
             gh run download "$run_id" --repo "${{ github.repository }}" \

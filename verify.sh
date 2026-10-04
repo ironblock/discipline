@@ -862,7 +862,9 @@ load_shard_plan() {
       echo "selftest: ${path}: not a \`shards<TAB>N\` row followed by \`assign<TAB>ID<TAB>K\` rows: ${key} ${ident:-} ${k:-}" >&2
       exit "$EXIT_MISUSE"
     fi
-    case "${k:-}" in ''|*[!0-9]*|0*) k=0 ;; esac
+    # Ten digits or more is past any shard count and past what `[ -lt ]`
+    # compares without erroring, which an `if` would read as in range.
+    case "${k:-}" in ''|*[!0-9]*|0*|??????????*) k=0 ;; esac
     if [ "$k" -lt 1 ] || [ "$k" -gt "$SELFTEST_SHARDS" ]; then
       echo "selftest: ${path}: '${ident}' is assigned outside shards 1..${SELFTEST_SHARDS}" >&2
       exit "$EXIT_MISUSE"
@@ -1040,8 +1042,7 @@ log_carries_every() {
 catcher_signatures() { printf '%s' "${1//$'\x1f'/$'\n'}"; }
 
 seeded_case() {
-  local label="$1" check="$2" inject="$3" expect="$4" scope="${5-}" ident="${6-}"
-  local box="$SELFTEST_BOX"
+  local check="$2" inject="$3" ident="${6-}"
   local started="$SECONDS"
   [ -n "$ident" ] || ident="${check}.${inject#inject_}"
   # Recorded before the shard is consulted. This list answers "has every check
@@ -10350,13 +10351,14 @@ EOF
   printf 'shards\t2\nassign\tx.a\t3\n' > "${plans}/outside"
   printf 'shards\t2\nassign\tx.a\t1\nassign\tx.a\t2\n' > "${plans}/twice"
   printf 'assign\tx.a\t1\n' > "${plans}/headless"
+  printf '# a plan of comments\n' > "${plans}/silent"
   # AND THE PLAN IS FOLLOWED: the real in_shard and load_shard_plan, run for
   # every shard of three over five faults. The plan moves each of its three
   # off the shard the hash gives it (x.a and x.c hash to 2, x.b to 1); the two
   # it does not name keep the hash; every fault runs in exactly one shard.
   printf 'shards\t3\nassign\tx.a\t3\nassign\tx.b\t3\nassign\tx.c\t1\n' > "${plans}/packed"
   expect_exit "a shard plan's faults run in its shard, the others by the hash, each once" 0 \
-    bash -c "$(declare -f in_shard claim_fault load_shard_plan)"'
+    "$BASH" -c "$(declare -f in_shard claim_fault load_shard_plan)"'
       EXIT_MISUSE=2 SELFTEST_SHARDS=3 SELFTEST_SHARD_PLAN="$1"
       declare -A SCOPE_INHERIT=() SHARD_PLAN=(); SELFTEST_RAN=(); SELFTEST_RAN_IDS=()
       load_shard_plan
@@ -10365,20 +10367,28 @@ EOF
       [ "$out" = "$(printf "1 fresh.two\n1 x.c\n2 fresh.one\n3 x.a\n3 x.b")" ]' \
     _ "${plans}/packed"
   expect_exit "a shard plan without --shard is a misuse" 0 \
-    bash -c 'rc=0; out="$(bash "$1" --selftest --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "needs --shard K/N" <<<"$out"' \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "needs --shard K/N" <<<"$out"' \
     _ "${ROOT}/verify.sh" "${plans}/three"
   expect_exit "a shard plan packed for another N is refused" 0 \
-    bash -c 'rc=0; out="$(bash "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "packed for 3 shard(s), and this run has 2" <<<"$out"' \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "packed for 3 shard(s), and this run has 2" <<<"$out"' \
     _ "${ROOT}/verify.sh" "${plans}/three"
   expect_exit "a shard plan assigning outside 1..N is refused" 0 \
-    bash -c 'rc=0; out="$(bash "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "assigned outside shards 1..2" <<<"$out"' \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "assigned outside shards 1..2" <<<"$out"' \
     _ "${ROOT}/verify.sh" "${plans}/outside"
   expect_exit "a shard plan assigning one fault twice is refused" 0 \
-    bash -c 'rc=0; out="$(bash "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "is assigned twice" <<<"$out"' \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "is assigned twice" <<<"$out"' \
     _ "${ROOT}/verify.sh" "${plans}/twice"
   expect_exit "a shard plan that never says its N is refused" 0 \
-    bash -c 'rc=0; out="$(bash "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "row followed by" <<<"$out"' \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "row followed by" <<<"$out"' \
     _ "${ROOT}/verify.sh" "${plans}/headless"
+  expect_exit "a shard plan of nothing but comments is refused" 0 \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --selftest --shard 1/2 --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "says nothing about how many shards it was packed for" <<<"$out"' \
+    _ "${ROOT}/verify.sh" "${plans}/silent"
+  # Its message is the one --shard, --census and --scope-plan share outside a
+  # selftest, and the flag is named in it.
+  expect_exit "a shard plan outside --selftest is a misuse" 0 \
+    "$BASH" -c 'rc=0; out="$("$BASH" "$1" --only hygiene --shard-plan "$2" 2>&1)" || rc=$?; [ "$rc" -eq 2 ] && grep -qF "and --shard-plan are for --selftest" <<<"$out"' \
+    _ "${ROOT}/verify.sh" "${plans}/three"
   # --site checks a site and nothing else, in either order, and names a
   # directory that is not there (#32 I3).
   expect_exit "--site beside --selftest is a misuse" 2 \

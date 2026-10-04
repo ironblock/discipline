@@ -1201,7 +1201,7 @@ def _seconds():
         path = pathlib.Path(box) / "shard-1" / "census.tsv"
         path.parent.mkdir()
         path.write_text(
-            "shard\t1\nordinal\t1\ttest.a\tseconds\nseconds\ttest.a\t12\n"
+            "shard\t1\nordinal\t1\ttest.a\nseconds\ttest.a\t12\n"
             "seconds\tlanes.b\tx\nseconds\tlanes.c\t3\t4\nseconds\tlanes.d\t0\n",
             encoding="utf-8",
         )
@@ -1348,8 +1348,13 @@ def main(argv: list[str]) -> int:
             if args.pack_out:
                 runs = listed - set(inherited_ids)
                 census = pathlib.Path(args.census) if args.census else None
+                seconds = {}
                 if census is not None and census.is_dir():
-                    seconds = read_seconds(census)
+                    try:
+                        seconds = read_seconds(census)
+                    except (OSError, UnicodeDecodeError) as err:
+                        print(f"scope-selftest: the trunk census could not be read ({err}): "
+                              "every fault takes the hash", file=sys.stderr)
                 else:
                     seconds = {}
                     print(f"scope-selftest: no trunk census at {args.census or '(none given)'}: "
