@@ -15,20 +15,31 @@ import type { LogLine } from './log.ts';
  * the projection may never hide what the format can check.
  */
 export const STRIPPED = {
-  /** Kinds the format does not have yet (R4-R6). */
-  kinds: ['fork', 'fork.settled', 'patch', 'seam'],
+  /** Kinds the format does not have yet (R6). */
+  kinds: ['seam'],
   /** Keys the format does not have yet, by the kind they ride on. */
   keys: {
     'session.start': ['arm', 'slots', 'trunk_slot', 'phase', 'system_tokens'],
-    request: ['slot', 'fork'],
+    request: ['slot'],
     response: ['calls_from'],
   },
   /** Lanes the format does not have yet (R4): a request on one goes, with every line that names it. */
-  lanes: ['interview', 'ratify', 'extraction'],
+  lanes: ['ratify', 'extraction'],
+  /**
+   * The surface's own older shapes of a kind the format now has: a line of the kind carrying any of these keys was
+   * placed in the shape the surface drew before the format said it (#374), and goes whole, with every line that
+   * names it -- not trimmed to the format's keys, which would pass off the old fork as a v5 one. Its re-recording
+   * in v5's form is #427.
+   */
+  shapes: {
+    fork: ['slot', 'prefix_tokens'],
+    patch: ['authority'],
+  },
 } as const satisfies {
   readonly kinds: readonly string[];
   readonly keys: Readonly<Record<string, readonly string[]>>;
   readonly lanes: readonly string[];
+  readonly shapes: Readonly<Record<string, readonly string[]>>;
 };
 
 /**
@@ -40,11 +51,13 @@ export const STRIPPED = {
  */
 type Lacks<Name extends string, In> = [Extract<Name, In>] extends [never] ? true : false;
 type Keyed = typeof STRIPPED.keys;
+type Shaped = typeof STRIPPED.shapes;
 const STRIP_ONLY_WHAT_THE_FORMAT_LACKS: {
   readonly kinds: Lacks<(typeof STRIPPED.kinds)[number], Format.Kind>;
   readonly lanes: Lacks<(typeof STRIPPED.lanes)[number], Format.Lane>;
   readonly keys: { readonly [K in keyof Keyed]: Lacks<Keyed[K][number], keyof Extract<Format.LogLine, { kind: K }>> };
-} = { kinds: true, lanes: true, keys: { 'session.start': true, request: true, response: true } };
+  readonly shapes: { readonly [K in keyof Shaped]: Lacks<Shaped[K][number], keyof Extract<Format.LogLine, { kind: K }>> };
+} = { kinds: true, lanes: true, keys: { 'session.start': true, request: true, response: true }, shapes: { fork: true, patch: true } };
 void STRIP_ONLY_WHAT_THE_FORMAT_LACKS;
 
 /** The keys that name another line by its `seq`, by kind: renumbered with the lines they name. */
@@ -56,6 +69,10 @@ const REFERENCES: Readonly<Record<string, readonly string[]>> = {
   'request.failed': ['request'],
   tool_call: ['request'],
   'idle.gap': ['opened_by'],
+  request: ['fork'],
+  fork: ['at'],
+  'fork.settled': ['fork'],
+  patch: ['fork'],
 };
 
 /**
@@ -67,12 +84,22 @@ const REFERENCES: Readonly<Record<string, readonly string[]>> = {
 export function projection(log: readonly LogLine[], carried: readonly string[] = []): Record<string, unknown>[] {
   const kinds = new Set<string>([...STRIPPED.kinds, ...carried]);
   const lanes = new Set<string>(STRIPPED.lanes);
-  const sideRequests = new Set(log.filter((l) => l.kind === 'request' && lanes.has(l.lane)).map((l) => l.seq));
-  const kept = log.filter((l) => {
-    if (kinds.has(l.kind) || sideRequests.has(l.seq)) return false;
-    const named = (REFERENCES[l.kind] ?? []).map((key) => (l as unknown as Record<string, unknown>)[key]);
-    return !named.some((seq) => typeof seq === 'number' && sideRequests.has(seq));
-  });
+  const shapes = STRIPPED.shapes as Readonly<Record<string, readonly string[]>>;
+  // What goes, in log order: a stripped kind, a request on a stripped lane, a line in an old shape -- and every
+  // line that names one that went (a reference names an earlier line, so one pass sees it gone first).
+  const gone = new Set<number>();
+  for (const l of log) {
+    const line = l as unknown as Record<string, unknown>;
+    const named = (REFERENCES[l.kind] ?? []).map((key) => line[key]);
+    if (
+      kinds.has(l.kind) ||
+      (l.kind === 'request' && lanes.has(l.lane)) ||
+      (shapes[l.kind] ?? []).some((key) => key in line) ||
+      named.some((seq) => typeof seq === 'number' && gone.has(seq))
+    )
+      gone.add(l.seq);
+  }
+  const kept = log.filter((l) => !gone.has(l.seq));
   const renumbered = new Map(kept.map((l, i) => [l.seq, i] as const));
   return kept.map((l, i) => {
     const line: Record<string, unknown> = { ...l, seq: i };
