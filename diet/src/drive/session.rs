@@ -57,13 +57,19 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use crate::client::CAPPED_FINISH_REASONS;
-use crate::client::shape::{Concurrency, Message, RequestShape, Role, Serving};
+use crate::client::shape::{Concurrency, Message, RequestShape, Role, Serving, ToolCall};
 use crate::client::stream::{
     Cancel, Ended as StreamEnded, Piece, Progress, Rejection, Streaming, Timings,
 };
 use crate::client::transport::TransportFailure;
 use crate::client::vocabulary;
 use crate::formats::log;
+use crate::formats::record::json::Value;
+
+use super::shell_gate::{Outcome as GateOutcome, Scope};
+use super::tool_loop::{
+    self, BASH, Call, Calls, Counts, Decider, Decision, Entry, Judged, Prompt, Tools,
+};
 
 vocabulary! {
     /// What the session is doing.
@@ -366,6 +372,118 @@ pub enum Event {
     /// A person's idle gap, logged immediately before the outcome of the
     /// command that ended it, admitted or refused.
     IdleGap(IdleGap),
+    /// A fragment of a call the model is making, as the server streamed it:
+    /// log v3's `delta` with a `tool_call` piece (#298 T11).
+    ToolCallPiece {
+        /// The sequence number of the [`Event::Requested`] it answers.
+        request: u64,
+        /// Which call of the response it belongs to.
+        index: u64,
+        /// The call's id, where the fragment carried one.
+        id: Option<String>,
+        /// The function's name, where the fragment carried one.
+        name: Option<String>,
+        /// This fragment of the arguments.
+        arguments: String,
+    },
+    /// A step's response that made calls: the request is over and the loop
+    /// goes on (#29 D11, a step is a request). Not the turn's answer, so
+    /// nothing goes on the trunk here; written as a `response`.
+    Called {
+        /// The sequence number of the [`Event::Requested`] it answers.
+        request: u64,
+        /// The text streamed beside the calls, which may be none.
+        text: String,
+        /// Why the server stopped, as it spelled it.
+        finish_reason: Option<String>,
+        /// The reasoning streamed before the calls.
+        reasoning: Option<String>,
+        /// What the server measured of the call.
+        timings: Option<Timings>,
+    },
+    /// What became of one call the model made: its `tool_call` line, one per
+    /// call (log v3, v4).
+    ToolCalled(Box<ToolLine>),
+}
+
+/// One call's `tool_call` line, in the log's own words (v4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolLine {
+    /// The request whose response carried the call.
+    pub request: u64,
+    /// The turn.
+    pub turn: u32,
+    /// The call's id.
+    pub id: String,
+    /// The function's name.
+    pub name: String,
+    /// The arguments text, as streamed.
+    pub arguments: String,
+    /// What became of it.
+    pub outcome: log::ToolOutcome,
+    /// The command as the drive asked for it: the model's own.
+    pub argv: Option<Vec<String>>,
+    /// Its working directory, as the regimen's worktree is named.
+    pub cwd: Option<String>,
+    /// What actually ran, runner and all.
+    pub confined: Option<Vec<String>>,
+    /// The confinement.
+    pub isolation: Option<log::Isolation>,
+    /// The network.
+    pub network: Option<log::Network>,
+    /// Its exit status.
+    pub exit: Option<u64>,
+    /// Why it was refused.
+    pub reason: Option<log::ToolRefusal>,
+    /// The sha256 of the policy it failed under.
+    pub policy: Option<String>,
+    /// What it printed.
+    pub stdout: Option<log::Output>,
+    /// What it printed on standard error.
+    pub stderr: Option<log::Output>,
+    /// The decision it ran under.
+    pub approval: Option<log::Approval>,
+}
+
+impl ToolLine {
+    /// A line for `call` of `request` with only its outcome set.
+    fn of(request: u64, turn: u32, call: &Call, outcome: log::ToolOutcome) -> Self {
+        Self {
+            request,
+            turn,
+            id: call.id.clone(),
+            name: call.name.clone(),
+            arguments: call.arguments.clone(),
+            outcome,
+            argv: None,
+            cwd: None,
+            confined: None,
+            isolation: None,
+            network: None,
+            exit: None,
+            reason: None,
+            policy: None,
+            stdout: None,
+            stderr: None,
+            approval: None,
+        }
+    }
+}
+
+vocabulary! {
+    /// Why `POST /approve` did not answer a prompt.
+    ApproveRefusal {
+        /// No prompt is waiting.
+        NothingWaiting => "nothing-waiting",
+        /// The prompt waiting is another call's, or already answered: the
+        /// word #389 ruled (5982826097 point 4).
+        Stale => "stale",
+        /// A standing scope for a prompt only `once` can answer: a dynamic
+        /// segment, an alias, or an `npm run` whose script cannot be named.
+        NotStanding => "not-standing",
+        /// `workspace` in a session that keeps no store.
+        NoStore => "no-store",
+    }
 }
 
 /// An ask the session admitted.
@@ -430,6 +548,26 @@ struct State {
     /// Where each event is written as it is appended (see
     /// [`Session::write_through`]).
     sink: Option<Sink>,
+    /// The standing approvals in force: pre-seeds, the store's, and every
+    /// standing decision so far (#298 point 5).
+    allowed: Vec<Entry>,
+    /// The decisions made, by scope.
+    counts: Counts,
+    /// The prompt waiting on the operator, and their answer once given.
+    waiting: Option<Waiting>,
+    /// An `end` was admitted while a prompt waited: once the turn settles,
+    /// the session ends.
+    ending: bool,
+    /// The latest prompt the operator decided, by its request and call id:
+    /// what `serve`'s `answered` event names.
+    answered: Option<(u64, String)>,
+}
+
+/// A prompt waiting on the operator, and the answer when one arrives.
+struct Waiting {
+    prompt: Prompt,
+    /// The decision and when it was made, on the log's clock.
+    answer: Option<(Decision, u64)>,
 }
 
 /// What is handed each logged event, on the appending thread, under the
@@ -508,6 +646,21 @@ impl State {
         Ok(())
     }
 
+    /// Now, on the log's clock: milliseconds since the session opened.
+    fn now(&self) -> u64 {
+        u64::try_from(self.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// The turn is over: back to `awaiting`, and on to `ended` when an
+    /// `end` was admitted while it waited on a prompt.
+    fn after_the_turn(&mut self) {
+        self.move_to(Settlement::Awaiting);
+        if self.ending {
+            self.ending = false;
+            self.move_to(Settlement::Ended);
+        }
+    }
+
     fn move_to(&mut self, to: Settlement) {
         let from = self.settlement;
         self.settlement = to;
@@ -541,6 +694,8 @@ struct Shared<S> {
     template: RequestShape,
     state: Mutex<State>,
     changed: Condvar,
+    /// What a call runs under, when the session runs commands.
+    tools: Option<Tools>,
 }
 
 impl<S> Shared<S> {
@@ -579,9 +734,15 @@ impl<S: Streaming + 'static> Session<S> {
     ///
     /// `template` is every request's shape; its `messages` are the head the
     /// trunk starts from, and its `limits.call` bounds each turn's call.
+    ///
+    /// # Panics
+    ///
+    /// On a head holding a [`Role::Tool`] message, here and in every other
+    /// `open`: a tool result answers a call made in a turn, and a head comes
+    /// before any.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
-        Self::opened_as(transport, template, None)
+        Self::opened_as(transport, template, None, None)
     }
 
     /// [`Session::open`], declaring what serves it -- the dialect it speaks
@@ -589,10 +750,45 @@ impl<S: Streaming + 'static> Session<S> {
     /// `session.start` carries (#292).
     #[must_use]
     pub fn open_serving(transport: S, template: RequestShape, serving: Serving) -> Self {
-        Self::opened_as(transport, template, Some(serving))
+        Self::opened_as(transport, template, Some(serving), None)
     }
 
-    fn opened_as(transport: S, template: RequestShape, serving: Option<Serving>) -> Self {
+    /// A session that runs the model's calls (#298): `template` declares the
+    /// tools, `tools` says what a call runs under and who answers a prompt.
+    #[must_use]
+    pub fn open_looping(
+        transport: S,
+        template: RequestShape,
+        serving: Option<Serving>,
+        tools: Tools,
+    ) -> Self {
+        Self::opened_as(transport, template, serving, Some(tools))
+    }
+
+    /// [`Session::open_serving`] or [`Session::open_looping`], by whether it
+    /// runs commands: `serve`'s one way in.
+    #[must_use]
+    pub fn open_with(
+        transport: S,
+        template: RequestShape,
+        serving: Option<Serving>,
+        tools: Option<Tools>,
+    ) -> Self {
+        Self::opened_as(transport, template, serving, tools)
+    }
+
+    fn opened_as(
+        transport: S,
+        template: RequestShape,
+        serving: Option<Serving>,
+        tools: Option<Tools>,
+    ) -> Self {
+        // A head is the trunk before any turn; a tool result answers a call
+        // made in one, and the log's head has no word for it (`role_of`).
+        assert!(
+            template.messages.iter().all(|m| m.role != Role::Tool),
+            "a session's head holds no tool result"
+        );
         let trunk = template.messages.clone();
         let opened = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -610,6 +806,22 @@ impl<S: Streaming + 'static> Session<S> {
             carried: None,
             pending_gap: None,
             sink: None,
+            allowed: tools
+                .as_ref()
+                .map(|t| t.allowed.clone())
+                .unwrap_or_default(),
+            counts: Counts {
+                preseeded: tools.as_ref().map_or(0, |t| {
+                    t.allowed
+                        .iter()
+                        .filter(|e| e.scope == Scope::Preseeded)
+                        .count() as u64
+                }),
+                ..Counts::default()
+            },
+            waiting: None,
+            ending: false,
+            answered: None,
         };
         state.push(Event::Started {
             opened,
@@ -623,6 +835,7 @@ impl<S: Streaming + 'static> Session<S> {
                 template,
                 state: Mutex::new(state),
                 changed: Condvar::new(),
+                tools,
             }),
         }
     }
@@ -791,8 +1004,17 @@ impl<S: Streaming + 'static> Session<S> {
     pub fn end(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
         state.carry(gap, CommandKind::End);
+        let waiting = state.waiting.as_ref().is_some_and(|w| w.answer.is_none());
+        let mut stop = None;
         let outcome = match state.settlement {
             Settlement::Awaiting => state.admit().map(|()| state.move_to(Settlement::Ended)),
+            // A prompt waits with no timeout, so `end` is how a session that
+            // will not answer it ends: the call settles `cancelled`, then the
+            // session ends (#298 point 8).
+            Settlement::Turn if waiting => state.admit().map(|()| {
+                state.ending = true;
+                stop = state.flight.as_ref().map(|flight| flight.cancel.clone());
+            }),
             Settlement::Turn | Settlement::Capture => Err(Rejected::Refused(
                 state.refuse(CommandKind::End, Refusal::InFlight),
             )),
@@ -802,7 +1024,119 @@ impl<S: Streaming + 'static> Session<S> {
         };
         drop(state);
         self.shared.changed.notify_all();
+        if let Some(stop) = stop {
+            stop.ask();
+        }
         outcome
+    }
+
+    /// Answer the prompt waiting on call `call` (#298 point 8): `decline`
+    /// refuses it `declined`; `once`, `session` or `workspace` runs it,
+    /// the last two growing the allow set by its shapes.
+    ///
+    /// # Errors
+    ///
+    /// [`ApproveRefusal`]: nothing waits, another call's prompt does, a
+    /// standing scope for a prompt only `once` can answer, or `workspace` in
+    /// a session with no store. Nothing is logged for a refusal.
+    pub fn approve(&self, call: &str, decision: Decision) -> Result<(), ApproveRefusal> {
+        let mut state = self.shared.lock();
+        let now = state.now();
+        let store = self
+            .shared
+            .tools
+            .as_ref()
+            .is_some_and(|tools| tools.store.is_some());
+        let Some(waiting) = state.waiting.as_mut() else {
+            return Err(ApproveRefusal::NothingWaiting);
+        };
+        if waiting.prompt.id != call || waiting.answer.is_some() {
+            return Err(ApproveRefusal::Stale);
+        }
+        let standing = matches!(decision, Decision::Session | Decision::Workspace);
+        if standing && !waiting.prompt.standing {
+            return Err(ApproveRefusal::NotStanding);
+        }
+        if decision == Decision::Workspace && !store {
+            return Err(ApproveRefusal::NoStore);
+        }
+        waiting.answer = Some((decision, now));
+        let decided = (waiting.prompt.request, waiting.prompt.id.clone());
+        state.answered = Some(decided);
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// The prompt waiting on the operator, if one is.
+    #[must_use]
+    pub fn waiting(&self) -> Option<Prompt> {
+        let state = self.shared.lock();
+        state
+            .waiting
+            .as_ref()
+            .filter(|waiting| waiting.answer.is_none())
+            .map(|waiting| waiting.prompt.clone())
+    }
+
+    /// [`Session::wait_from`], also returning when the prompt waiting is no
+    /// longer `shown`: the events from `first` on, the prompt waiting now,
+    /// and the latest prompt decided (its request and call id).
+    #[must_use]
+    pub fn wait_for(
+        &self,
+        first: u64,
+        patience: Duration,
+        shown: Option<&Prompt>,
+    ) -> (Vec<Logged>, Option<Prompt>, Option<(u64, String)>) {
+        let until = Instant::now() + patience;
+        let mut state = self.shared.lock();
+        loop {
+            let found = from(&state.log, first);
+            let prompt = state
+                .waiting
+                .as_ref()
+                .filter(|waiting| waiting.answer.is_none())
+                .map(|waiting| waiting.prompt.clone());
+            let now = Instant::now();
+            if !found.is_empty() || prompt.as_ref() != shown || now >= until {
+                return (found, prompt, state.answered.clone());
+            }
+            state = self
+                .shared
+                .changed
+                .wait_timeout(state, until - now)
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
+        }
+    }
+
+    /// The session's receipt (#298 point 9), when it runs commands: the
+    /// allow set it ends with, the decisions, and the rest of
+    /// [`tool_loop::receipt`]. `reference_modified` is read now.
+    #[must_use]
+    pub fn receipt(&self) -> Option<Value> {
+        let tools = self.shared.tools.as_ref()?;
+        let (allowed, counts) = {
+            let state = self.shared.lock();
+            (state.allowed.clone(), state.counts)
+        };
+        let reference = tool_loop::reference_modified(&tools.policy);
+        Some(tool_loop::receipt(
+            &allowed,
+            counts,
+            tools.approval_policy.as_deref(),
+            &tools.policy,
+            &reference,
+        ))
+    }
+
+    /// End what the session's commands left running: every process group a
+    /// command led, under Seatbelt. Called once, at the end.
+    pub fn end_commands(&self) {
+        if let Some(tools) = &self.shared.tools {
+            tools.confinement.end_session();
+        }
     }
 
     /// When the session opened, as its first event says: milliseconds since
@@ -972,7 +1306,16 @@ pub fn line_of(logged: &Logged) -> log::Line {
             piece: log::Piece::Text(text.clone()),
         },
         Event::StopAsked { turn } => log::Event::StopAsked { turn: *turn },
+        // A step's response that made calls is a `response` too: the
+        // request is over, and its calls are the `tool_call` lines after it.
         Event::Answered {
+            request,
+            text,
+            finish_reason,
+            reasoning,
+            timings,
+        }
+        | Event::Called {
             request,
             text,
             finish_reason,
@@ -1052,6 +1395,62 @@ pub fn line_of(logged: &Logged) -> log::Line {
             partial: arrived(partial),
         },
         Event::IdleGap(gap) => gap_line(gap),
+        Event::ToolCallPiece {
+            request,
+            index,
+            id,
+            name,
+            arguments,
+        } => log::Event::Delta {
+            request: *request,
+            piece: log::Piece::ToolCall {
+                index: *index,
+                id: id.clone(),
+                name: name.clone(),
+                arguments: arguments.clone(),
+            },
+        },
+        Event::ToolCalled(line) => {
+            let ToolLine {
+                request,
+                turn,
+                id,
+                name,
+                arguments,
+                outcome,
+                argv,
+                cwd,
+                confined,
+                isolation,
+                network,
+                exit,
+                reason,
+                policy,
+                stdout,
+                stderr,
+                approval,
+            } = line.as_ref().clone();
+            log::Event::ToolCall {
+                request,
+                turn,
+                id,
+                name,
+                arguments,
+                outcome,
+                argv,
+                cwd,
+                confined,
+                isolation,
+                network,
+                exit,
+                reason,
+                policy,
+                stdout,
+                stderr,
+                approval,
+                files: None,
+            }
+        }
         Event::TurnSettled { turn, reason } => log::Event::TurnSettled {
             turn: *turn,
             reason: settle_reason_in_the_log(*reason),
@@ -1126,8 +1525,12 @@ fn gap_line(gap: &IdleGap) -> log::Event {
     }
 }
 
+/// A head message's role. A head is the trunk's opening, before any turn,
+/// and a tool message answers a call made in a turn, so none is in one: the
+/// session opens only on a head its log can write.
 fn role_of(role: Role) -> log::Role {
     match role {
+        Role::Tool => unreachable!("a head holds no tool result: `open` asserts it"),
         Role::System => log::Role::System,
         Role::User => log::Role::User,
         Role::Assistant => log::Role::Assistant,
@@ -1172,8 +1575,8 @@ fn state_of(settlement: Settlement) -> log::State {
     }
 }
 
-/// One turn's call, on its own thread: stream the answer into the log, then
-/// settle.
+/// One turn, on its own thread: a step per request, until the trunk answers
+/// or the loop ends (#29 D11: a step is a request).
 fn call<S: Streaming>(
     shared: &Shared<S>,
     shape: &RequestShape,
@@ -1182,9 +1585,44 @@ fn call<S: Streaming>(
     turn: u32,
     request: u64,
 ) {
+    let mut shape = shape.clone();
+    let mut request = request;
+    let mut steps = 1;
+    // The turn's exchange so far: its ask, then each step's calls and their
+    // results. It joins the trunk when the turn settles `final` or
+    // `max_steps` (Q12), and never otherwise (D13).
+    let mut exchange = vec![Message::new(Role::User, ask)];
+    while let Some(next) = step(
+        shared,
+        &mut shape,
+        cancel,
+        &mut exchange,
+        (turn, request, steps),
+    ) {
+        request = next;
+        steps += 1;
+    }
+}
+
+/// Whether `finish_reason` is a cap's.
+fn capped(finish_reason: Option<&str>) -> bool {
+    finish_reason.is_some_and(|reason| CAPPED_FINISH_REASONS.contains(&reason))
+}
+
+/// One step's request: stream it into the log, then settle the turn, or run
+/// the calls it made and return the next request's sequence number.
+#[allow(clippy::too_many_lines)]
+fn step<S: Streaming>(
+    shared: &Shared<S>,
+    shape: &mut RequestShape,
+    cancel: &Cancel,
+    exchange: &mut Vec<Message>,
+    (turn, request, steps): (u32, u64, u32),
+) -> Option<u64> {
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
     let mut reasoning = String::new();
+    let mut calls = Calls::default();
     let result = shared
         .transport
         .stream(shape, deadline, cancel, &mut |piece: Piece<'_>| {
@@ -1204,6 +1642,23 @@ fn call<S: Streaming>(
                     }
                 }
                 Piece::Progress(progress) => Event::Progress { request, progress },
+                // Each fragment as the server sent it, and assembled beside
+                // the log: never answer text (#298 T11).
+                Piece::ToolCall {
+                    index,
+                    id,
+                    name,
+                    arguments,
+                } => {
+                    calls.piece(index, id, name, arguments);
+                    Event::ToolCallPiece {
+                        request,
+                        index,
+                        id: id.map(str::to_owned),
+                        name: name.map(str::to_owned),
+                        arguments: arguments.to_owned(),
+                    }
+                }
             };
             shared.lock().push(event);
             shared.changed.notify_all();
@@ -1215,13 +1670,54 @@ fn call<S: Streaming>(
         Ok(StreamEnded::Finished {
             finish_reason,
             timings,
-        }) => settle_finished(
+        }) if calls.is_empty() || capped(finish_reason.as_deref()) => settle_finished(
             &mut state,
-            ask,
+            std::mem::take(exchange),
             (request, turn),
             (partial, reasoning),
             (finish_reason, timings),
         ),
+        Ok(StreamEnded::Finished {
+            finish_reason,
+            timings,
+        }) => {
+            // Still the turn's call: a cancel reaches it between steps and
+            // while a prompt waits.
+            state.flight = Some(Flight {
+                turn,
+                request,
+                cancel: cancel.clone(),
+            });
+            let calls = calls.into_calls();
+            let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
+            let mut said = Message::new(Role::Assistant, partial.clone());
+            said.reasoning.clone_from(&reasoning);
+            said.tool_calls = calls
+                .iter()
+                .map(|call| ToolCall {
+                    id: call.id.clone(),
+                    name: call.name.clone(),
+                    arguments: call.arguments.clone(),
+                })
+                .collect();
+            state.push(Event::Called {
+                request,
+                text: partial,
+                finish_reason,
+                reasoning,
+                timings,
+            });
+            drop(state);
+            shared.changed.notify_all();
+            return run_calls(
+                shared,
+                (shape, exchange),
+                cancel,
+                said,
+                &calls,
+                (turn, request, steps),
+            );
+        }
         Ok(StreamEnded::Cancelled) => {
             state.push(Event::Cancelled { request, partial });
             state.push(Event::TurnSettled {
@@ -1261,6 +1757,355 @@ fn call<S: Streaming>(
     }
     drop(state);
     shared.changed.notify_all();
+    None
+}
+
+/// A step's calls, each to its one line, in the order they were made; then
+/// the turn goes on with their results, or settles: `cancelled` if a stop
+/// reached it, `failed` if a call named a tool the session did not declare
+/// (T13), `max_steps` if this was the last step (T8, Q12: the calls that ran
+/// stay on the trunk).
+fn run_calls<S: Streaming>(
+    shared: &Shared<S>,
+    (shape, exchange): (&mut RequestShape, &mut Vec<Message>),
+    cancel: &Cancel,
+    said: Message,
+    calls: &[Call],
+    (turn, request, steps): (u32, u64, u32),
+) -> Option<u64> {
+    let last = shared
+        .tools
+        .as_ref()
+        .and_then(|tools| tools.max_steps)
+        .is_some_and(|max| steps >= max);
+    let mut results = Vec::new();
+    let mut unknown = false;
+    let mut stopped = false;
+    for call in calls {
+        let (line, shown) = if stopped || cancel.is_asked() {
+            (cancelled_line(shared, (turn, request), call), None)
+        } else {
+            one_call(shared, cancel, (turn, request), call, last)
+        };
+        unknown |= line.reason == Some(log::ToolRefusal::UnknownTool);
+        stopped |= line.outcome == log::ToolOutcome::Cancelled;
+        if let Some(shown) = shown {
+            results.push(Message::tool_result(call.id.clone(), shown));
+        }
+        shared.lock().push(Event::ToolCalled(Box::new(line)));
+        shared.changed.notify_all();
+    }
+    let mut state = shared.lock();
+    let settled = if stopped || cancel.is_asked() {
+        Some(SettleReason::Cancelled)
+    } else if unknown {
+        Some(SettleReason::Failed)
+    } else if last {
+        Some(SettleReason::MaxSteps)
+    } else {
+        None
+    };
+    if let Some(reason) = settled {
+        state.flight = None;
+        if reason == SettleReason::MaxSteps {
+            let ran = std::mem::take(exchange);
+            state.trunk.extend(ran);
+        }
+        state.push(Event::TurnSettled { turn, reason });
+        state.after_the_turn();
+        drop(state);
+        shared.changed.notify_all();
+        return None;
+    }
+    exchange.push(said.clone());
+    exchange.extend(results.iter().cloned());
+    shape.messages.push(said);
+    shape.messages.extend(results);
+    let next = state.push(Event::Requested {
+        turn,
+        lane: Lane::Trunk,
+        head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
+    });
+    if let Some(flight) = state.flight.as_mut() {
+        flight.request = next;
+    }
+    drop(state);
+    shared.changed.notify_all();
+    Some(next)
+}
+
+/// The log's word for a confinement's mechanism.
+fn isolation_word(isolation: crate::isolation::Isolation) -> log::Isolation {
+    match isolation {
+        crate::isolation::Isolation::None => log::Isolation::None,
+        crate::isolation::Isolation::Sandbox => log::Isolation::Sandbox,
+        crate::isolation::Isolation::Vm => log::Isolation::Vm,
+    }
+}
+
+/// The log's word for a network.
+fn network_word(network: crate::isolation::Network) -> log::Network {
+    match network {
+        crate::isolation::Network::None => log::Network::None,
+        crate::isolation::Network::Host => log::Network::Host,
+    }
+}
+
+/// A call left unanswered by a stop: `cancelled`, with its confinement and,
+/// where its command parsed, its argv.
+fn cancelled_line<S: Streaming>(
+    shared: &Shared<S>,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> ToolLine {
+    let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Cancelled);
+    if let Some(tools) = shared.tools.as_ref().filter(|_| call.name == BASH) {
+        line.isolation = Some(isolation_word(tools.confinement.isolation()));
+        line.network = Some(network_word(tools.policy.network));
+        if let Some(command) = tool_loop::command_of(&call.arguments) {
+            line.argv = Some(tool_loop::argv_of(&command));
+            line.cwd = Some(tools.cwd.clone());
+        }
+    }
+    line
+}
+
+/// Wait for the operator's answer to `prompt`, with no timeout: the decision
+/// and when it was made, or `None` when a stop reached the turn first.
+fn decided<S: Streaming>(
+    shared: &Shared<S>,
+    cancel: &Cancel,
+    prompt: Prompt,
+) -> Option<(Decision, u64)> {
+    let mut state = shared.lock();
+    state.waiting = Some(Waiting {
+        prompt,
+        answer: None,
+    });
+    shared.changed.notify_all();
+    loop {
+        if cancel.is_asked() {
+            state.waiting = None;
+            return None;
+        }
+        if let Some(answer) = state.waiting.as_mut().and_then(|w| w.answer.take()) {
+            state.waiting = None;
+            return Some(answer);
+        }
+        // Woken by an answer, a stop, or the session ending; the stop is
+        // asked after its notify, so the flag is read again on a short beat.
+        state = shared
+            .changed
+            .wait_timeout(state, Duration::from_millis(50))
+            .unwrap_or_else(PoisonError::into_inner)
+            .0;
+    }
+}
+
+/// The approval a call that runs records: the decision made for it, or the
+/// entry that covered its first approved segment.
+fn approval_of(judged: &Judged, allowed: &[Entry]) -> Option<log::Approval> {
+    let entry = judged
+        .covered_by
+        .iter()
+        .flatten()
+        .next()
+        .and_then(|at| allowed.get(*at))?;
+    Some(log::Approval {
+        scope: tool_loop::scope_tag(entry.scope),
+        decided_at: entry.decided_at,
+        why: entry.why.clone(),
+    })
+}
+
+/// One call, to its line and what the model is shown of it (`None` when
+/// nothing goes back: an undeclared tool, the step limit, a stop).
+#[allow(clippy::too_many_lines)]
+fn one_call<S: Streaming>(
+    shared: &Shared<S>,
+    cancel: &Cancel,
+    (turn, request): (u32, u64),
+    call: &Call,
+    last: bool,
+) -> (ToolLine, Option<String>) {
+    let refused = |reason: log::ToolRefusal| {
+        let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Refused);
+        line.reason = Some(reason);
+        line
+    };
+    let declared = shared
+        .template
+        .tools
+        .iter()
+        .any(|tool| tool.name == call.name);
+    let Some(tools) = shared
+        .tools
+        .as_ref()
+        .filter(|_| declared && call.name == BASH)
+    else {
+        return (refused(log::ToolRefusal::UnknownTool), None);
+    };
+    let Some(command) = tool_loop::command_of(&call.arguments) else {
+        return (
+            refused(log::ToolRefusal::Unparsable),
+            Some(tool_loop::refusal_text(log::ToolRefusal::Unparsable, "")),
+        );
+    };
+    let parsed = |mut line: ToolLine| {
+        line.argv = Some(tool_loop::argv_of(&command));
+        line.cwd = Some(tools.cwd.clone());
+        line
+    };
+    if last {
+        return (parsed(refused(log::ToolRefusal::MaxSteps)), None);
+    }
+    let mut allowed = shared.lock().allowed.clone();
+    let mut judged = tools.gate.judge(&command, &allowed);
+    let mut approval = None;
+    match judged.outcome() {
+        GateOutcome::Refused => {
+            let entry = judged.judgement.refused_by().unwrap_or_default().to_owned();
+            return (
+                parsed(refused(log::ToolRefusal::Denylist)),
+                Some(tool_loop::refusal_text(log::ToolRefusal::Denylist, &entry)),
+            );
+        }
+        GateOutcome::Prompt => {
+            let why = judged.why().unwrap_or("not_approved").to_owned();
+            let answer = match tools.decider {
+                Decider::Decline => Some((Decision::Decline, 0)),
+                Decider::Operator => decided(
+                    shared,
+                    cancel,
+                    tool_loop::prompt_of(&judged, request, turn, &call.id, &tools.cwd),
+                ),
+            };
+            let Some((decision, at)) = answer else {
+                return (cancelled_line(shared, (turn, request), call), None);
+            };
+            let mut state = shared.lock();
+            let scope = match decision {
+                Decision::Decline => {
+                    state.counts.declined += 1;
+                    return (
+                        parsed(refused(log::ToolRefusal::Declined)),
+                        Some(tool_loop::refusal_text(log::ToolRefusal::Declined, "")),
+                    );
+                }
+                Decision::Once => {
+                    state.counts.once += 1;
+                    judged.approve_once();
+                    Scope::Once
+                }
+                Decision::Session | Decision::Workspace => {
+                    let mut scope = if decision == Decision::Workspace {
+                        Scope::Workspace
+                    } else {
+                        Scope::Session
+                    };
+                    let mut granted = judged.grants(scope, at);
+                    if scope == Scope::Workspace
+                        && let Some(store) = &tools.store
+                    {
+                        let wall = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0));
+                        for entry in &mut granted {
+                            entry.approved_unix_ms = Some(wall);
+                        }
+                        let mut kept: Vec<Entry> = state
+                            .allowed
+                            .iter()
+                            .filter(|e| e.scope == Scope::Workspace)
+                            .cloned()
+                            .collect();
+                        kept.extend(granted.iter().cloned());
+                        // An approval the store cannot keep is not a
+                        // workspace one, and is not recorded as one.
+                        if store.write(&kept, wall).is_err() {
+                            scope = Scope::Session;
+                            for entry in &mut granted {
+                                entry.scope = Scope::Session;
+                                entry.approved_unix_ms = None;
+                            }
+                        }
+                    }
+                    if scope == Scope::Workspace {
+                        state.counts.workspace += 1;
+                    } else {
+                        state.counts.session += 1;
+                    }
+                    state.allowed.extend(granted);
+                    allowed.clone_from(&state.allowed);
+                    judged = tools.gate.judge(&command, &allowed);
+                    scope
+                }
+            };
+            drop(state);
+            if judged.outcome() != GateOutcome::Run {
+                // The operator approved this call: whatever no entry covers,
+                // the decision does.
+                judged.approve_once();
+            }
+            approval = Some(log::Approval {
+                scope: tool_loop::scope_tag(scope),
+                decided_at: Some(at),
+                why: Some(why),
+            });
+        }
+        GateOutcome::Run => {}
+    }
+    let approval = approval.or_else(|| approval_of(&judged, &allowed));
+    let mut line = parsed(ToolLine::of(request, turn, call, log::ToolOutcome::Ran));
+    line.approval = approval;
+    let profiled = tools.confinement.isolation() != crate::isolation::Isolation::None;
+    match tools
+        .confinement
+        .run(&tools.policy, &tools.worktree, &judged.run)
+    {
+        Ok(ran) => {
+            let denied = ran.denials().iter().any(|d| d.kind.is_unambiguous());
+            if profiled && ran.exit != Some(0) && denied {
+                line.outcome = log::ToolOutcome::CommandFailed;
+                line.policy.clone_from(&ran.policy);
+            }
+            line.confined = Some(ran.confined.clone());
+            line.isolation = Some(isolation_word(ran.isolation));
+            line.network = Some(network_word(ran.network));
+            line.exit = ran.exit.and_then(|code| u64::try_from(code).ok());
+            line.stdout = Some(log::Output {
+                text: ran.stdout.clone(),
+                bytes: ran.stdout_bytes,
+            });
+            line.stderr = Some(log::Output {
+                text: ran.stderr.clone(),
+                bytes: ran.stderr_bytes,
+            });
+            (line, Some(ran.as_the_model_sees_it()))
+        }
+        Err(not_run) => {
+            // It never ran: what would have run, and why it did not, as the
+            // command's own failure under its confinement.
+            let said = not_run.to_string();
+            let confined = tools
+                .confinement
+                .compose(&tools.policy, &tools.worktree, &judged.run);
+            line.outcome = log::ToolOutcome::CommandFailed;
+            line.policy = tools.confinement.policy_of(&confined);
+            line.confined = Some(confined);
+            line.isolation = Some(isolation_word(tools.confinement.isolation()));
+            line.network = Some(network_word(tools.policy.network));
+            line.stdout = Some(log::Output {
+                text: String::new(),
+                bytes: 0,
+            });
+            line.stderr = Some(log::Output {
+                text: said.clone(),
+                bytes: said.len() as u64,
+            });
+            (line, Some(said))
+        }
+    }
 }
 
 /// A call that finished. One its output cap ended is not an answer: off the
@@ -1271,7 +2116,7 @@ fn call<S: Streaming>(
 /// turn's answer.
 fn settle_finished(
     state: &mut State,
-    ask: String,
+    exchange: Vec<Message>,
     (request, turn): (u64, u32),
     (partial, reasoning): (String, String),
     (finish_reason, timings): (Option<String>, Option<Timings>),
@@ -1294,7 +2139,7 @@ fn settle_finished(
         state.move_to(Settlement::Awaiting);
         return;
     }
-    state.trunk.push(Message::new(Role::User, ask));
+    state.trunk.extend(exchange);
     // The reasoning goes back with the answer, byte for byte and
     // untrimmed: measured on e7051ef (#117, Q10), dropping it
     // diverges the next prompt at this turn, and a stray newline
@@ -1318,7 +2163,7 @@ fn settle_finished(
     state.move_to(Settlement::Capture);
     // R4's interviews run here. Until they exist there is nothing to
     // capture, and the log says the session passed through.
-    state.move_to(Settlement::Awaiting);
+    state.after_the_turn();
 }
 
 /// How a failed call settles its turn: a call that ran out of time is a
@@ -2514,6 +3359,49 @@ pub(in crate::drive) mod tests {
                 blocked: 50,
                 ended_by: GapEnd::Ask,
             }),
+            Event::ToolCallPiece {
+                request: 3,
+                index: 0,
+                id: Some("call-a".to_owned()),
+                name: Some("bash".to_owned()),
+                arguments: "{\"command\":".to_owned(),
+            },
+            Event::Called {
+                request: 3,
+                text: String::new(),
+                finish_reason: Some("tool_calls".to_owned()),
+                reasoning: None,
+                timings: None,
+            },
+            Event::ToolCalled(Box::new(ToolLine {
+                request: 3,
+                turn: 1,
+                id: "call-a".to_owned(),
+                name: "bash".to_owned(),
+                arguments: "{\"command\":\"ls\"}".to_owned(),
+                outcome: log::ToolOutcome::Ran,
+                argv: Some(tool_loop::argv_of("ls")),
+                cwd: Some("~/git/x".to_owned()),
+                confined: Some(tool_loop::argv_of("ls")),
+                isolation: Some(log::Isolation::None),
+                network: Some(log::Network::Host),
+                exit: Some(0),
+                reason: None,
+                policy: None,
+                stdout: Some(log::Output {
+                    text: "a\n".to_owned(),
+                    bytes: 2,
+                }),
+                stderr: Some(log::Output {
+                    text: String::new(),
+                    bytes: 0,
+                }),
+                approval: Some(log::Approval {
+                    scope: log::ApprovalScope::Session,
+                    decided_at: Some(4),
+                    why: Some("not_approved".to_owned()),
+                }),
+            })),
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -2535,9 +3423,12 @@ pub(in crate::drive) mod tests {
                 Event::IdleGap(_) => 14,
                 Event::Progress { .. } => 15,
                 Event::Capped { .. } => 16,
+                Event::ToolCallPiece { .. } => 17,
+                Event::Called { .. } => 18,
+                Event::ToolCalled(_) => 19,
             });
         }
-        assert_eq!(kinds.len(), 17, "a variant has no sample");
+        assert_eq!(kinds.len(), 20, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -2680,6 +3571,54 @@ pub(in crate::drive) mod tests {
                 away: 0,
                 blocked: 50,
                 ended_by: log::GapEnd::Ask,
+            },
+            log::Event::Delta {
+                request: 3,
+                piece: log::Piece::ToolCall {
+                    index: 0,
+                    id: Some("call-a".to_owned()),
+                    name: Some("bash".to_owned()),
+                    arguments: "{\"command\":".to_owned(),
+                },
+            },
+            log::Event::Response {
+                to_request: 3,
+                text: String::new(),
+                finish_reason: Some("tool_calls".to_owned()),
+                reasoning: None,
+                timings: None,
+                usage: None,
+                capped: None,
+            },
+            log::Event::ToolCall {
+                request: 3,
+                turn: 1,
+                id: "call-a".to_owned(),
+                name: "bash".to_owned(),
+                arguments: "{\"command\":\"ls\"}".to_owned(),
+                outcome: log::ToolOutcome::Ran,
+                argv: Some(tool_loop::argv_of("ls")),
+                cwd: Some("~/git/x".to_owned()),
+                confined: Some(tool_loop::argv_of("ls")),
+                isolation: Some(log::Isolation::None),
+                network: Some(log::Network::Host),
+                exit: Some(0),
+                reason: None,
+                policy: None,
+                stdout: Some(log::Output {
+                    text: "a\n".to_owned(),
+                    bytes: 2,
+                }),
+                stderr: Some(log::Output {
+                    text: String::new(),
+                    bytes: 0,
+                }),
+                approval: Some(log::Approval {
+                    scope: log::ApprovalScope::Session,
+                    decided_at: Some(4),
+                    why: Some("not_approved".to_owned()),
+                }),
+                files: None,
             },
         ]
     }
@@ -3158,5 +4097,734 @@ pub(in crate::drive) mod tests {
             tags(&Lane::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "trunk"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // the tool loop (#298)
+    // -----------------------------------------------------------------------
+
+    use crate::isolation::bwrap::Bubblewrap;
+    use crate::isolation::{Backend, Confinement, Policy as IsolationPolicy};
+    use std::path::{Path, PathBuf};
+
+    use super::super::tool_loop::tests::{no_aliases, scratch};
+
+    /// A runner that drops everything up to `--` and runs `then`: the
+    /// sandbox's ARM, so what a line records of a confined run is checked
+    /// against a run that happened, on a host with no sandbox. It confines
+    /// nothing, and nothing here says it does.
+    pub(in crate::drive) fn stand_in(dir: &Path, then: &str) -> Confinement {
+        use std::os::unix::fs::PermissionsExt as _;
+        let at = dir.join("stand-in-runner");
+        std::fs::write(
+            &at,
+            format!("#!/bin/sh\nwhile [ \"$1\" != \"--\" ]; do shift; done\nshift\n{then}\n"),
+        )
+        .expect("a stand-in runner");
+        std::fs::set_permissions(&at, std::fs::Permissions::from_mode(0o755))
+            .expect("it is executable");
+        Confinement::Sandbox(Backend::Bubblewrap(Bubblewrap::at(at)))
+    }
+
+    /// The loop's parts over `worktree`, its allow set pre-seeded with
+    /// `preseed`.
+    pub(in crate::drive) fn tools(
+        confinement: Confinement,
+        worktree: &Path,
+        preseed: &[&str],
+        max_steps: Option<u32>,
+        decider: Decider,
+    ) -> Tools {
+        let gate = tool_loop::Gate {
+            aliases: no_aliases,
+            ..tool_loop::Gate::standard(worktree)
+        };
+        let commands: Vec<String> = preseed.iter().map(|c| (*c).to_owned()).collect();
+        let allowed = tool_loop::preseeded(&commands, &gate).expect("a pre-seed");
+        Tools {
+            confinement,
+            policy: IsolationPolicy::unconfined(),
+            worktree: worktree.to_path_buf(),
+            cwd: "~/git/a-worktree".to_owned(),
+            max_steps,
+            decider,
+            gate,
+            allowed,
+            store: None,
+            approval_policy: None,
+        }
+    }
+
+    pub(in crate::drive) fn looping() -> RequestShape {
+        RequestShape {
+            tools: vec![tool_loop::bash_tool()],
+            ..template()
+        }
+    }
+
+    pub(in crate::drive) fn bash(id: &str, command: &str) -> Step {
+        Step::call(
+            0,
+            id,
+            "bash",
+            &format!("{{\"command\":{}}}", serde_json::Value::from(command)),
+        )
+    }
+
+    pub(in crate::drive) fn lines(log: &[Logged]) -> Vec<ToolLine> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::ToolCalled(line) => Some(line.as_ref().clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn requested(log: &[Logged]) -> usize {
+        log.iter()
+            .filter(|logged| matches!(logged.event, Event::Requested { turn: 1, .. }))
+            .count()
+    }
+
+    fn settled_as(log: &[Logged]) -> Option<SettleReason> {
+        log.iter().rev().find_map(|logged| match logged.event {
+            Event::TurnSettled { reason, .. } => Some(reason),
+            _ => None,
+        })
+    }
+
+    fn call_message(id: &str, command: &str) -> Message {
+        let mut said = assistant("");
+        said.tool_calls = vec![ToolCall {
+            id: id.to_owned(),
+            name: "bash".to_owned(),
+            arguments: format!("{{\"command\":{}}}", serde_json::Value::from(command)),
+        }];
+        said
+    }
+
+    /// The log a session wrote, read back whole by the format's own reader.
+    fn reads_whole<S: Streaming>(session: &Session<S>) {
+        let text: String = session
+            .events_from(0)
+            .iter()
+            .map(|logged| render(logged) + "\n")
+            .collect();
+        if let Err(why) = log::parse(&text) {
+            panic!("the log does not read: {why}\n{text}");
+        }
+    }
+
+    fn tidy(dirs: &[&PathBuf]) {
+        for dir in dirs {
+            let _ = std::fs::remove_dir_all(dir);
+        }
+    }
+
+    /// T6: a listed command runs through the confinement, its line says what
+    /// ran it, and the call and its result go back to the model and onto the
+    /// trunk.
+    #[test]
+    fn a_listed_call_runs_confined_goes_back_as_openais_shape_and_settles_final() {
+        for confined in [true, false] {
+            let tree = scratch(&format!("t6-tree-{confined}"));
+            let runner = scratch(&format!("t6-runner-{confined}"));
+            let confinement = if confined {
+                stand_in(&runner, "exec \"$@\"")
+            } else {
+                Confinement::Unconfined
+            };
+            let session = Session::open_looping(
+                Canned::new([vec![bash("call-1", "touch marker")], deltas(&["done"])]),
+                looping(),
+                None,
+                tools(
+                    confinement.clone(),
+                    &tree,
+                    &["touch"],
+                    None,
+                    Decider::Decline,
+                ),
+            );
+            session.ask("make a marker", None).expect("accepted");
+            let log = wait_until(&session, "the turn to settle", settled);
+            reads_whole(&session);
+            let argv = tool_loop::argv_of("touch marker");
+            let [line] = lines(&log).try_into().expect("one call, one line");
+            assert_eq!(line.outcome, log::ToolOutcome::Ran);
+            assert_eq!(line.argv, Some(argv.clone()));
+            assert_eq!(line.cwd.as_deref(), Some("~/git/a-worktree"));
+            let composed = confinement.compose(&IsolationPolicy::unconfined(), &tree, &argv);
+            assert_eq!(line.confined, Some(composed.clone()));
+            if confined {
+                assert_ne!(composed, argv, "the runner is in what ran");
+                assert_eq!(line.isolation, Some(log::Isolation::Sandbox));
+            } else {
+                assert_eq!(composed, argv, "unconfined, what ran is the argv");
+                assert_eq!(line.isolation, Some(log::Isolation::None));
+            }
+            assert_eq!(
+                line.approval,
+                Some(log::Approval {
+                    scope: log::ApprovalScope::Preseeded,
+                    decided_at: None,
+                    why: None,
+                })
+            );
+            assert!(tree.join("marker").exists(), "the command ran");
+            assert_eq!(requested(&log), 2, "a step is a request");
+            assert_eq!(settled_as(&log), Some(SettleReason::Final));
+
+            let sent = session.shared.transport.sent();
+            assert_eq!(sent.len(), 2);
+            let result = Message::tool_result("call-1", "");
+            assert_eq!(
+                sent[1].messages,
+                [
+                    Message::new(Role::System, HEAD),
+                    user("make a marker"),
+                    call_message("call-1", "touch marker"),
+                    result.clone(),
+                ]
+            );
+            assert_eq!(
+                session.trunk()[1..],
+                [
+                    user("make a marker"),
+                    call_message("call-1", "touch marker"),
+                    result,
+                    assistant("done"),
+                ]
+            );
+            tidy(&[&tree, &runner]);
+        }
+    }
+
+    /// T7, restated by the amendment: a denylisted segment in a chain is
+    /// refused, nothing of the line runs, the model is told, and the turn
+    /// goes on.
+    #[test]
+    fn a_denylisted_segment_refuses_the_line_and_the_model_is_told_and_the_turn_goes_on() {
+        let tree = scratch("t7");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch marker; sudo id")],
+                deltas(&["understood"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let [line] = lines(&log).try_into().expect("one line");
+        assert_eq!(line.outcome, log::ToolOutcome::Refused);
+        assert_eq!(line.reason, Some(log::ToolRefusal::Denylist));
+        assert_eq!(line.argv, Some(tool_loop::argv_of("touch marker; sudo id")));
+        assert!(
+            !tree.join("marker").exists(),
+            "no segment of a refused line ran"
+        );
+        let sent = session.shared.transport.sent();
+        let shown = &sent[1].messages.last().expect("a result").content;
+        assert_eq!(
+            shown,
+            &tool_loop::refusal_text(log::ToolRefusal::Denylist, "sudo"),
+            "the model sees the refusal"
+        );
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        tidy(&[&tree]);
+    }
+
+    /// T8 and Q12: the `max_steps`-th request's call is received and not
+    /// run; the turn settles `max_steps`, and the calls that ran stay on the
+    /// trunk.
+    #[test]
+    fn the_last_steps_call_is_refused_max_steps_and_the_ran_calls_stay_on_the_trunk() {
+        let tree = scratch("t8");
+        let max = 3;
+        let replies: Vec<Vec<Step>> = (0..=max)
+            .map(|n| vec![bash(&format!("call-{n}"), &format!("touch m{n}"))])
+            .collect();
+        let session = Session::open_looping(
+            Canned::new(replies),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                Some(max),
+                Decider::Decline,
+            ),
+        );
+        session.ask("loop", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        assert_eq!(session.shared.transport.sent().len(), max as usize);
+        assert_eq!(settled_as(&log), Some(SettleReason::MaxSteps));
+        let written = lines(&log);
+        assert_eq!(written.len(), max as usize);
+        assert_eq!(written[2].reason, Some(log::ToolRefusal::MaxSteps));
+        assert!(
+            written[..2]
+                .iter()
+                .all(|l| l.outcome == log::ToolOutcome::Ran)
+        );
+        assert!(!tree.join("m2").exists(), "the last call was not run");
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
+        assert_eq!(trunk[1], user("loop"));
+        assert_eq!(trunk[4], call_message("call-1", "touch m1"));
+        tidy(&[&tree]);
+    }
+
+    /// T13: a call to a tool the session never declared runs nothing, is not
+    /// answered, and fails the turn naming the call.
+    #[test]
+    fn an_undeclared_call_runs_nothing_and_fails_the_turn() {
+        // With no loop at all, and with one whose request declares no tool:
+        // a `touch` the pre-seed would run, had the call been declared.
+        for looped in [false, true] {
+            let tree = scratch(&format!("t13-{looped}"));
+            let canned = Canned::new([vec![bash("call-1", "touch marker")], deltas(&["never"])]);
+            let session = if looped {
+                Session::open_looping(
+                    canned,
+                    template(),
+                    None,
+                    tools(
+                        Confinement::Unconfined,
+                        &tree,
+                        &["touch"],
+                        None,
+                        Decider::Decline,
+                    ),
+                )
+            } else {
+                Session::open(canned, template())
+            };
+            session.ask("go", None).expect("accepted");
+            let log = wait_until(&session, "the turn to settle", settled);
+            reads_whole(&session);
+            assert_eq!(session.shared.transport.sent().len(), 1);
+            assert_eq!(settled_as(&log), Some(SettleReason::Failed));
+            let [line] = lines(&log).try_into().expect("one line");
+            assert_eq!(line.reason, Some(log::ToolRefusal::UnknownTool));
+            assert_eq!(line.name, "bash", "the line names the undeclared call");
+            assert_eq!(line.argv, None, "an undeclared call was never parsed");
+            assert!(!tree.join("marker").exists(), "an undeclared call ran");
+            assert_eq!(session.trunk().len(), 1, "nothing joined the trunk");
+            tidy(&[&tree]);
+        }
+    }
+
+    #[test]
+    fn arguments_that_are_not_the_tools_json_are_refused_unparsable_and_the_model_is_told() {
+        let tree = scratch("unparsable");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![Step::call(0, "call-1", "bash", "{\"cmd\":\"ls\"}")],
+                deltas(&["ok"]),
+            ]),
+            looping(),
+            None,
+            tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline),
+        );
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let [line] = lines(&log).try_into().expect("one line");
+        assert_eq!(line.reason, Some(log::ToolRefusal::Unparsable));
+        assert_eq!(line.argv, None);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        tidy(&[&tree]);
+    }
+
+    /// The gym declines every prompt: a command no pre-seed covers is
+    /// refused `declined`, and the turn goes on.
+    #[test]
+    fn the_gym_declines_every_prompt_and_the_turn_goes_on() {
+        let tree = scratch("gym");
+        let session = Session::open_looping(
+            Canned::new([vec![bash("call-1", "touch marker")], deltas(&["ok"])]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["ls"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let [line] = lines(&log).try_into().expect("one line");
+        assert_eq!(line.reason, Some(log::ToolRefusal::Declined));
+        assert!(line.approval.is_none());
+        assert!(!tree.join("marker").exists());
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        tidy(&[&tree]);
+    }
+
+    /// (e): a free read runs as git with its configured programs off, and
+    /// its line keeps the model's own argv.
+    #[test]
+    fn a_free_git_read_runs_with_its_overrides_and_records_the_models_argv() {
+        let tree = scratch("free-read");
+        let init = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&tree)
+            .status()
+            .expect("git runs");
+        assert!(init.success());
+        let session = Session::open_looping(
+            Canned::new([vec![bash("call-1", "git status")], deltas(&["clean"])]),
+            looping(),
+            None,
+            tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline),
+        );
+        session.ask("status?", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let [line] = lines(&log).try_into().expect("one line");
+        assert_eq!(line.outcome, log::ToolOutcome::Ran, "{line:?}");
+        assert_eq!(line.argv, Some(tool_loop::argv_of("git status")));
+        assert_eq!(
+            line.confined,
+            Some(super::super::tool_loop::tests::free_read_of(&[
+                "status",
+                "--ignore-submodules=all"
+            ]))
+        );
+        assert_eq!(line.approval, None, "a free read ran under no decision");
+        tidy(&[&tree]);
+    }
+
+    /// A step's request the server refuses with a 500 is the existing
+    /// `request.failed` shape, reason `server`, and it is not sent again
+    /// (#298's line from #406).
+    #[test]
+    fn a_steps_500_is_a_typed_failure_and_never_a_silent_retry() {
+        let tree = scratch("five-hundred");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch marker")],
+                vec![Step::Reject(
+                    500,
+                    "{\"error\":{\"message\":\"busy\"}}".to_owned(),
+                )],
+                deltas(&["never sent"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        assert_eq!(session.shared.transport.sent().len(), 2, "no retry");
+        assert!(log.iter().any(|logged| matches!(
+            line_of(logged).event,
+            log::Event::RequestFailed {
+                reason: log::FailReason::Server,
+                status: Some(500),
+                ..
+            }
+        )));
+        assert_eq!(settled_as(&log), Some(SettleReason::Failed));
+        tidy(&[&tree]);
+    }
+
+    fn waiting_on<S: Streaming>(session: &Session<S>) -> Prompt {
+        let give_up = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(prompt) = session.waiting() {
+                return prompt;
+            }
+            assert!(Instant::now() < give_up, "no prompt came to wait");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    /// Point 8: the loop waits on the operator; a session approval runs the
+    /// call and covers the next of its shape with no prompt; the line says
+    /// when it was decided and why it prompted.
+    #[test]
+    fn an_operators_session_approval_runs_the_call_and_covers_the_next_of_its_shape() {
+        let tree = scratch("approve");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![bash("call-2", "touch b")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(Confinement::Unconfined, &tree, &[], None, Decider::Operator),
+        );
+        session.ask("go", None).expect("accepted");
+        let prompt = waiting_on(&session);
+        assert_eq!(prompt.id, "call-1");
+        assert_eq!(prompt.command, "touch a");
+        assert_eq!(prompt.cwd, "~/git/a-worktree");
+        assert_eq!(prompt.reason, "not_approved");
+        assert!(prompt.standing);
+        assert_eq!(
+            session.approve("call-9", Decision::Session),
+            Err(ApproveRefusal::Stale)
+        );
+        assert_eq!(
+            session.approve("call-1", Decision::Workspace),
+            Err(ApproveRefusal::NoStore)
+        );
+        assert_eq!(session.approve("call-1", Decision::Session), Ok(()));
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written.len(), 2);
+        assert!(written.iter().all(|l| l.outcome == log::ToolOutcome::Ran));
+        let first = written[0].approval.clone().expect("an approval");
+        assert_eq!(first.scope, log::ApprovalScope::Session);
+        assert_eq!(first.why.as_deref(), Some("not_approved"));
+        assert_eq!(
+            written[1].approval,
+            Some(first),
+            "the second ran under the first decision, unprompted"
+        );
+        assert!(tree.join("a").exists() && tree.join("b").exists());
+        assert_eq!(
+            session.approve("call-1", Decision::Once),
+            Err(ApproveRefusal::NothingWaiting)
+        );
+        tidy(&[&tree]);
+    }
+
+    #[test]
+    fn a_declined_prompt_is_refused_declined_and_a_once_runs_once() {
+        let tree = scratch("decline");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![bash("call-2", "touch b")],
+                vec![bash("call-3", "touch c")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(Confinement::Unconfined, &tree, &[], None, Decider::Operator),
+        );
+        session.ask("go", None).expect("accepted");
+        assert_eq!(waiting_on(&session).id, "call-1");
+        session
+            .approve("call-1", Decision::Decline)
+            .expect("answered");
+        assert_eq!(waiting_on(&session).id, "call-2");
+        session.approve("call-2", Decision::Once).expect("answered");
+        assert_eq!(
+            waiting_on(&session).id,
+            "call-3",
+            "once covered nothing after"
+        );
+        session
+            .approve("call-3", Decision::Decline)
+            .expect("answered");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written[0].reason, Some(log::ToolRefusal::Declined));
+        assert_eq!(
+            written[1].approval.as_ref().map(|a| a.scope),
+            Some(log::ApprovalScope::Once)
+        );
+        assert!(!tree.join("a").exists() && tree.join("b").exists());
+        tidy(&[&tree]);
+    }
+
+    /// A prompt unanswered at a cancel, or at the session's end, is
+    /// `cancelled`; there is no timeout.
+    #[test]
+    fn a_prompt_unanswered_at_cancel_or_end_settles_cancelled() {
+        for end in [false, true] {
+            let tree = scratch(&format!("unanswered-{end}"));
+            let session = Session::open_looping(
+                Canned::new([vec![bash("call-1", "touch a")], deltas(&["never"])]),
+                looping(),
+                None,
+                tools(Confinement::Unconfined, &tree, &[], None, Decider::Operator),
+            );
+            let turn = session.ask("go", None).expect("accepted").turn;
+            waiting_on(&session);
+            if end {
+                session
+                    .end(None)
+                    .expect("an end is admitted while a prompt waits");
+            } else {
+                session
+                    .cancel(turn, None)
+                    .expect("a cancel reaches the prompt");
+            }
+            let log = wait_until(&session, "the turn to settle", |log| {
+                log.iter()
+                    .any(|l| matches!(l.event, Event::TurnSettled { .. }))
+                    && matches!(
+                        log.last().map(|l| &l.event),
+                        Some(Event::Settled {
+                            to: Settlement::Awaiting | Settlement::Ended,
+                            ..
+                        })
+                    )
+            });
+            reads_whole(&session);
+            let [line] = lines(&log).try_into().expect("one line");
+            assert_eq!(line.outcome, log::ToolOutcome::Cancelled);
+            assert_eq!(line.isolation, Some(log::Isolation::None));
+            assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+            assert!(!tree.join("a").exists());
+            let expected = if end {
+                Settlement::Ended
+            } else {
+                Settlement::Awaiting
+            };
+            assert_eq!(session.settlement(), expected);
+            assert_eq!(session.shared.transport.sent().len(), 1);
+            tidy(&[&tree]);
+        }
+    }
+
+    /// Point 5: a workspace approval is kept under the state directory and
+    /// nothing is written into the worktree.
+    #[test]
+    fn a_workspace_approval_is_kept_outside_the_worktree_and_counted() {
+        let tree = scratch("workspace-tree");
+        let state = scratch("workspace-state");
+        let mut held = tools(Confinement::Unconfined, &tree, &[], None, Decider::Operator);
+        let (store, _) =
+            tool_loop::Store::open(&state, &tree, &IsolationPolicy::unconfined()).expect("opens");
+        let path = store.path().to_path_buf();
+        held.store = Some(store);
+        let session = Session::open_looping(
+            Canned::new([vec![bash("call-1", "date")], deltas(&["ok"])]),
+            looping(),
+            None,
+            held,
+        );
+        session.ask("go", None).expect("accepted");
+        waiting_on(&session);
+        session
+            .approve("call-1", Decision::Workspace)
+            .expect("answered");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let [line] = lines(&log).try_into().expect("one line");
+        assert_eq!(
+            line.approval.map(|a| a.scope),
+            Some(log::ApprovalScope::Workspace)
+        );
+        assert!(path.starts_with(&state) && path.exists());
+        assert_eq!(std::fs::read_dir(&tree).expect("tree").count(), 0);
+        let receipt = session.receipt().expect("a receipt");
+        let mut text = String::new();
+        crate::formats::record::json::render(&receipt, &mut text);
+        assert!(text.contains("\"workspace\":1"), "{text}");
+        assert!(text.contains("\"shape\":\"date\""), "{text}");
+        assert!(
+            text.contains("\"lifecycle_scripts\":\"unguarded\""),
+            "{text}"
+        );
+        tidy(&[&tree, &state]);
+    }
+
+    /// I0's turn 2, `openai` shape (#29 I0).
+    const I0: &str = "../../../substrates/measurements/2026-10-02-i0-tool-call-captures";
+
+    /// T12: after the round trip over HTTP, the second request is I0's
+    /// `openai`-shape turn 2, byte for byte.
+    #[test]
+    fn the_second_request_is_i0s_openai_shape_byte_for_byte() {
+        use crate::client::shape::{Pin, SamplerSetting};
+        use crate::client::stream::HttpStream;
+        use crate::client::stub::{Act, Stub};
+        use crate::client::transport::Endpoint;
+        const TURN1: &[u8] = include_bytes!(
+            "../../../substrates/measurements/2026-10-02-i0-tool-call-captures/turn1.http"
+        );
+        const TURN2: &[u8] = include_bytes!(
+            "../../../substrates/measurements/2026-10-02-i0-tool-call-captures/turn2-openai.http"
+        );
+        const SENT: &str = include_str!(
+            "../../../substrates/measurements/2026-10-02-i0-tool-call-captures/turn2-openai.request.json"
+        );
+        let output = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("src/drive")
+            .join(I0)
+            .join("tool-output.txt");
+        let tree = scratch("t12-tree");
+        let runner = scratch("t12-runner");
+        // The command's output is I0's, whatever this host's `wc` pads.
+        let confinement = stand_in(&runner, &format!("cat '{}'", output.display()));
+        let stub = Stub::serving(vec![Act::Raw(TURN1.to_vec()), Act::Raw(TURN2.to_vec())])
+            .expect("loopback");
+        let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's endpoint"));
+        let shape = RequestShape {
+            model: "qwen3.8-flash-next".to_owned(),
+            tools: vec![tool_loop::bash_tool()],
+            messages: vec![Message::new(
+                Role::System,
+                "You are working in a git repository. Use the bash tool to run commands.",
+            )],
+            sampler: SamplerCard::empty()
+                .with_decimal(SamplerSetting::Temperature, "0.6")
+                .expect("a decimal")
+                .with_decimal(SamplerSetting::TopP, "0.95")
+                .expect("a decimal")
+                .with(SamplerSetting::Seed, Pin::Integer(7)),
+            limits: Limits {
+                attempt: Duration::from_secs(10),
+                call: Duration::from_secs(10),
+                max_output_tokens: 512,
+                retries: 0,
+            },
+            grammar: None,
+            template_kwargs: std::collections::BTreeMap::from([(
+                "enable_thinking".to_owned(),
+                Value::Boolean(false),
+            )]),
+        };
+        let session = Session::open_looping(
+            transport,
+            shape,
+            None,
+            tools(confinement, &tree, &["ls", "wc -l"], None, Decider::Decline),
+        );
+        session
+            .ask(
+                "[be135a0c73102528] How many files are in the current directory? Run `ls | wc -l` \
+                 with the bash tool and tell me the number.",
+                None,
+            )
+            .expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final), "{log:#?}");
+        drop(session);
+        let received = stub.received();
+        assert_eq!(received.len(), 2);
+        assert_eq!(received[1], SENT, "the second request is not I0's");
+        tidy(&[&tree, &runner]);
     }
 }

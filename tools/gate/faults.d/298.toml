@@ -39,3 +39,246 @@ label = "a session approval covers another program"
 failure_class = "shell-gate.approval-covers-another"
 legacy_signature = "drive::shell_gate::tests::a_session_approval_covers_its_shape_and_no_other \\.\\.\\. FAILED"
 migrated = false
+
+# #298's integration (the tool loop): lane faults declared in diet/drive/gate.toml
+# and diet/client/gate.toml.
+
+[[fault]]
+id = "drive.a-refusal-is-a-halt"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-refusal-is-a-halt"
+failure_class = "drive.a-refusal-is-a-halt"
+migrated = false
+
+[[fault]]
+id = "drive.the-loop-spawns-its-own-bash"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-loop-spawns-its-own-bash"
+failure_class = "drive.the-loop-spawns-its-own-bash"
+migrated = false
+
+[[fault]]
+id = "drive.serve-opens-no-confinement"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-opens-no-confinement"
+failure_class = "drive.serve-opens-no-confinement"
+migrated = false
+
+[[fault]]
+id = "drive.serve-loops-without-a-bound"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-loops-without-a-bound"
+failure_class = "drive.serve-loops-without-a-bound"
+migrated = false
+
+[[fault]]
+id = "drive.max-steps-settles-as-final"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.max-steps-settles-as-final"
+failure_class = "drive.max-steps-settles-as-final"
+migrated = false
+
+[[fault]]
+id = "drive.an-undeclared-call-is-run"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.an-undeclared-call-is-run"
+failure_class = "drive.an-undeclared-call-is-run"
+migrated = false
+
+[[fault]]
+id = "client.the-call-is-not-re-sent"
+kind = "lane-fault"
+check = "lanes"
+label = "client.the-call-is-not-re-sent"
+failure_class = "client.the-call-is-not-re-sent"
+migrated = false
+
+[[fault]]
+id = "client.a-streamed-call-is-text"
+kind = "lane-fault"
+check = "lanes"
+label = "client.a-streamed-call-is-text"
+failure_class = "client.a-streamed-call-is-text"
+migrated = false
+
+[[fault]]
+id = "drive.integration-a-later-segment-escapes"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.integration-a-later-segment-escapes"
+failure_class = "drive.integration-a-later-segment-escapes"
+migrated = false
+
+[[fault]]
+id = "drive.workspace-approval-written-into-the-worktree"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.workspace-approval-written-into-the-worktree"
+failure_class = "drive.workspace-approval-written-into-the-worktree"
+migrated = false
+
+[[fault]]
+id = "drive.integration-session-approval-covers-another-program"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.integration-session-approval-covers-another-program"
+failure_class = "drive.integration-session-approval-covers-another-program"
+migrated = false
+
+[[fault]]
+id = "drive.npm-run-stale-digest-approves"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.npm-run-stale-digest-approves"
+failure_class = "drive.npm-run-stale-digest-approves"
+migrated = false
+
+[[fault]]
+id = "drive.free-git-read-runs-without-overrides"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.free-git-read-runs-without-overrides"
+failure_class = "drive.free-git-read-runs-without-overrides"
+migrated = false
+
+[[fault]]
+id = "drive.shell-alias-judged-by-its-name"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.shell-alias-judged-by-its-name"
+failure_class = "drive.shell-alias-judged-by-its-name"
+migrated = false
+
+[[fault]]
+id = "drive.serve-auth-file-left-out-of-the-secrets"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-auth-file-left-out-of-the-secrets"
+failure_class = "drive.serve-auth-file-left-out-of-the-secrets"
+migrated = false
+
+[[fault]]
+id = "drive.git-read-running-a-configured-program-is-free"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.git-read-running-a-configured-program-is-free"
+failure_class = "drive.git-read-running-a-configured-program-is-free"
+migrated = false
+
+[[fault]]
+id = "drive.free-git-read-checks-signatures"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.free-git-read-checks-signatures"
+failure_class = "drive.free-git-read-checks-signatures"
+migrated = false
+
+[[fault]]
+id = "drive.free-git-read-fetches-lazily"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.free-git-read-fetches-lazily"
+failure_class = "drive.free-git-read-fetches-lazily"
+migrated = false
+
+[[fault]]
+id = "drive.npm-elsewhere-ignored"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.npm-elsewhere-ignored"
+failure_class = "drive.npm-elsewhere-ignored"
+migrated = false
+
+[[fault]]
+id = "drive.npm-named-script-unbound"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.npm-named-script-unbound"
+failure_class = "drive.npm-named-script-unbound"
+migrated = false
+
+[[fault]]
+id = "drive.free-git-read-reads-the-trees-attributes"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.free-git-read-reads-the-trees-attributes"
+failure_class = "drive.free-git-read-reads-the-trees-attributes"
+migrated = false
+
+[[fault]]
+id = "drive.free-git-read-ignores-info-attributes"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.free-git-read-ignores-info-attributes"
+failure_class = "drive.free-git-read-ignores-info-attributes"
+migrated = false
+
+[[fault]]
+id = "drive.free-git-read-ignores-signing-config"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.free-git-read-ignores-signing-config"
+failure_class = "drive.free-git-read-ignores-signing-config"
+migrated = false
+
+[[fault]]
+id = "drive.git-signature-format-is-free"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.git-signature-format-is-free"
+failure_class = "drive.git-signature-format-is-free"
+migrated = false
+
+[[fault]]
+id = "drive.git-status-verbose-is-free"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.git-status-verbose-is-free"
+failure_class = "drive.git-status-verbose-is-free"
+migrated = false
+
+[[fault]]
+id = "drive.npm-digest-ignores-npmrc"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.npm-digest-ignores-npmrc"
+failure_class = "drive.npm-digest-ignores-npmrc"
+migrated = false
+
+[[fault]]
+id = "drive.npm-config-env-ignored"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.npm-config-env-ignored"
+failure_class = "drive.npm-config-env-ignored"
+migrated = false
+
+[[fault]]
+id = "drive.npm-abbreviation-is-standing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.npm-abbreviation-is-standing"
+failure_class = "drive.npm-abbreviation-is-standing"
+migrated = false
+
+[[fault]]
+id = "drive.free-git-read-runs-hooks"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.free-git-read-runs-hooks"
+failure_class = "drive.free-git-read-runs-hooks"
+migrated = false
+
+[[fault]]
+id = "drive.npm-env-prefix-is-standing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.npm-env-prefix-is-standing"
+failure_class = "drive.npm-env-prefix-is-standing"
+migrated = false

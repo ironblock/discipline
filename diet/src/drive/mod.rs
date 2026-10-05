@@ -103,6 +103,7 @@ pub mod script;
 pub mod serve;
 pub mod session;
 pub mod shell_gate;
+pub mod tool_loop;
 
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -566,6 +567,8 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
             role: Role::User,
             content: ask.text.clone(),
             reasoning: None,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
         }];
         // Immediately before the call, like `Heads::about_to_call`: what a
         // cache lifetime is compared against is the gap between two
@@ -857,6 +860,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             role: Role::User,
             content: KWARG_CONTROL_ASK.to_owned(),
             reasoning: None,
+            tool_calls: Vec::new(),
+            tool_call_id: None,
         }];
         asking
             .template_kwargs
@@ -924,11 +929,15 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 role: Role::System,
                 content: controller.prefix().to_owned(),
                 reasoning: None,
+                tool_calls: Vec::new(),
+                tool_call_id: None,
             },
             Message {
                 role: Role::User,
                 content: turn.ask.clone(),
                 reasoning: None,
+                tool_calls: Vec::new(),
+                tool_call_id: None,
             },
         ];
         // THE LINT, before the call. The main lane is the one whose head
@@ -1000,6 +1009,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 role: Role::User,
                 content: question.clone(),
                 reasoning: None,
+                tool_calls: Vec::new(),
+                tool_call_id: None,
             }];
             linted_head(&asking, index, INTERVIEW)?;
             heads.about_to_call(INTERVIEW);
@@ -1928,6 +1939,35 @@ mod tests {
             matches!(&forked, Halt::NoAnswer { turn: 1, lane, .. } if lane == super::INTERVIEW),
             "{forked:?}"
         );
+    }
+
+    /// A side call (the gym's fork) the server refuses with a 500 is a
+    /// typed refusal, and it is not sent again, whatever retries the shape
+    /// allows (#298, the line kept from #406).
+    #[test]
+    fn a_forks_500_is_a_typed_refusal_and_never_a_silent_retry() {
+        let ground = Ground::make("fork-500");
+        assert!(shape().limits.retries > 0, "a retry was allowed");
+        let (forked, sent) = served(
+            &three_turns(),
+            vec![
+                Act::Answer(canned::reply("turn one")),
+                Act::Status(500, "{\"error\":{\"message\":\"busy\"}}".to_owned()),
+            ],
+            &ground,
+            shape(),
+        );
+        let halt = forked.expect_err("a refused fork is not a fork that captured nothing");
+        assert!(
+            matches!(
+                &halt,
+                Halt::NoAnswer { turn: 1, lane, outcome }
+                    if lane == super::INTERVIEW
+                        && matches!(**outcome, crate::client::Outcome::Refused { status: 500, .. })
+            ),
+            "{halt:?}"
+        );
+        assert_eq!(sent.len(), 2, "the fork was sent once: {sent:?}");
     }
 
     #[test]
@@ -2927,6 +2967,9 @@ mod tests {
                 // The interactive session and its HTTP surface (#117 R2).
                 include_str!("serve.rs"),
                 include_str!("session.rs"),
+                // The tool loop's parts and the gate it reads (#298).
+                include_str!("tool_loop.rs"),
+                include_str!("shell_gate.rs"),
                 // The binary's own tests, which live outside `src/` and are the
                 // only thing that runs the program. A `catches` naming one of
                 // them has to be checkable here too, or the half of this lane

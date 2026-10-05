@@ -299,6 +299,19 @@ pub enum Piece<'a> {
     Reasoning(&'a str),
     /// The server's prefill progress: not answer text, and never sent back.
     Progress(Progress),
+    /// One fragment of a call the model is making: `delta.tool_calls[i]`,
+    /// exactly as the server sent it (#298 T11). Never answer text: the
+    /// arguments are the call's, and they go back as the call.
+    ToolCall {
+        /// Which call of the response it belongs to.
+        index: u64,
+        /// The call's id, where the server sent one (its first fragment).
+        id: Option<&'a str>,
+        /// The function's name, where the server sent one.
+        name: Option<&'a str>,
+        /// This fragment of the arguments text; empty where it sent none.
+        arguments: &'a str,
+    },
 }
 
 /// A transport that delivers an answer as it arrives.
@@ -775,6 +788,31 @@ impl Reading {
                 self.finish_reason = Some(reason.to_owned());
             }
         }
+        // A call's fragments (#298 T11), measured on I0's capture: the
+        // first carries `index`, `id`, `type` and `function.name` with the
+        // first piece of `function.arguments`; each later one `index` and
+        // a piece of the arguments only. Delivered one by one, as sent.
+        if let Some(calls) = value
+            .pointer("/choices/0/delta/tool_calls")
+            .and_then(Value::as_array)
+        {
+            for call in calls {
+                let Some(index) = call.get("index").and_then(Value::as_u64) else {
+                    return Err(TransportFailure::Framing(format!(
+                        "a streamed tool call carries no `index`: {data}"
+                    )));
+                };
+                on_delta(Piece::ToolCall {
+                    index,
+                    id: call.get("id").and_then(Value::as_str),
+                    name: call.pointer("/function/name").and_then(Value::as_str),
+                    arguments: call
+                        .pointer("/function/arguments")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default(),
+                });
+            }
+        }
         Ok(None)
     }
 
@@ -997,6 +1035,32 @@ pub enum Step {
     /// Finish with this `finish_reason` rather than `stop` -- `length` is a
     /// call its output cap ended (#290).
     FinishReason(String),
+    /// One fragment of a streamed tool call, delivered as
+    /// [`Piece::ToolCall`].
+    ToolCall {
+        /// Which call of the response it belongs to.
+        index: u64,
+        /// The call's id, on the fragment that carries it.
+        id: Option<String>,
+        /// The function's name, on the fragment that carries it.
+        name: Option<String>,
+        /// This fragment of the arguments.
+        arguments: String,
+    },
+}
+
+impl Step {
+    /// A whole call in one fragment: what a test means by "the model called
+    /// `name` with `arguments`".
+    #[must_use]
+    pub fn call(index: u64, id: &str, name: &str, arguments: &str) -> Self {
+        Self::ToolCall {
+            index,
+            id: Some(id.to_owned()),
+            name: Some(name.to_owned()),
+            arguments: arguments.to_owned(),
+        }
+    }
 }
 
 /// Scripted streams, one per call, in call order; and every request it was
@@ -1081,6 +1145,17 @@ impl Streaming for Canned {
                 Step::Progress(progress) => on_delta(Piece::Progress(progress)),
                 Step::Timings(measured) => timings = Some(measured),
                 Step::FinishReason(reason) => finish_reason = reason,
+                Step::ToolCall {
+                    index,
+                    id,
+                    name,
+                    arguments,
+                } => on_delta(Piece::ToolCall {
+                    index,
+                    id: id.as_deref(),
+                    name: name.as_deref(),
+                    arguments: &arguments,
+                }),
             }
         }
         if cancel.is_asked() {
@@ -1226,6 +1301,9 @@ mod tests {
                 Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
                 Piece::Text(text) => (false, text.to_owned()),
                 Piece::Progress(progress) => panic!("progress where none was sent: {progress:?}"),
+                Piece::ToolCall { arguments, .. } => {
+                    panic!("a call where none was sent: {arguments:?}")
+                }
             });
         });
         assert!(ended.is_ok(), "{ended:?}");
@@ -1342,6 +1420,9 @@ mod tests {
                 panic!("reasoning where only text was sent: {reasoning:?}")
             }
             Piece::Progress(progress) => panic!("progress where only text was sent: {progress:?}"),
+            Piece::ToolCall { arguments, .. } => {
+                panic!("a tool call where only text was sent: {arguments:?}")
+            }
         }
     }
 
@@ -1370,6 +1451,9 @@ mod tests {
                     Piece::Text(text) => (false, text.to_owned()),
                     Piece::Progress(progress) => {
                         panic!("progress where none was sent: {progress:?}")
+                    }
+                    Piece::ToolCall { arguments, .. } => {
+                        panic!("a call where none was sent: {arguments:?}")
                     }
                 });
             },
@@ -1670,7 +1754,7 @@ mod tests {
                     frame_after_answer |= answer_seen;
                     frames.push(*progress);
                 }
-                Piece::Text(_) | Piece::Reasoning(_) => answer_seen = true,
+                Piece::Text(_) | Piece::Reasoning(_) | Piece::ToolCall { .. } => answer_seen = true,
             }
         }
         (frames, frame_after_answer)
@@ -1721,6 +1805,7 @@ mod tests {
                     Piece::Text(text) => (0, text.to_owned(), None),
                     Piece::Reasoning(text) => (1, text.to_owned(), None),
                     Piece::Progress(progress) => (2, String::new(), Some(progress)),
+                    Piece::ToolCall { arguments, .. } => (3, arguments.to_owned(), None),
                 });
             },
         );
@@ -1803,6 +1888,7 @@ mod tests {
                     Piece::Progress(progress) => format!("progress {}", progress.processed),
                     Piece::Text(text) => format!("text {text}"),
                     Piece::Reasoning(text) => format!("reasoning {text}"),
+                    Piece::ToolCall { arguments, .. } => format!("tool_call {arguments}"),
                 });
             })
             .expect("a well-formed stream");
@@ -1905,7 +1991,11 @@ mod tests {
         let ended = canned.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
             seen.push(match piece {
                 Piece::Progress(progress) => format!("{progress:?}"),
-                Piece::Text(text) | Piece::Reasoning(text) => text.to_owned(),
+                Piece::Text(text)
+                | Piece::Reasoning(text)
+                | Piece::ToolCall {
+                    arguments: text, ..
+                } => text.to_owned(),
             });
         });
         assert!(ended.is_ok(), "{ended:?}");
@@ -1942,6 +2032,103 @@ mod tests {
             "the request did not ask to stream with usage: {}",
             sent[0]
         );
+    }
+
+    /// I0's turn 1 (#29, 2026-10-02): a real llama-server streaming one
+    /// `bash` call, captured off a raw socket. Read in place, from the
+    /// measurement it belongs to, so the fixture has one source.
+    const I0_CALL: &[u8] = include_bytes!(
+        "../../../substrates/measurements/2026-10-02-i0-tool-call-captures/turn1.http"
+    );
+
+    /// One fragment as the stream delivered it.
+    type Fragment = (u64, Option<String>, Option<String>, String);
+
+    /// Every piece a transport delivers for `reply`: the call fragments, and
+    /// any text, kept apart.
+    fn fragments_of(reply: &[u8]) -> (Vec<Fragment>, Vec<String>, Result<Ended, TransportFailure>) {
+        let stub = Stub::serving(vec![Act::Raw(reply.to_vec())]).expect("loopback");
+        let transport = HttpStream::new(endpoint(&stub));
+        let mut calls = Vec::new();
+        let mut texts = Vec::new();
+        let ended = transport.stream(
+            &shape(),
+            deadline(),
+            &Cancel::new(),
+            &mut |piece| match piece {
+                Piece::ToolCall {
+                    index,
+                    id,
+                    name,
+                    arguments,
+                } => calls.push((
+                    index,
+                    id.map(str::to_owned),
+                    name.map(str::to_owned),
+                    arguments.to_owned(),
+                )),
+                Piece::Text(text) | Piece::Reasoning(text) => texts.push(text.to_owned()),
+                Piece::Progress(_) => {}
+            },
+        );
+        (calls, texts, ended)
+    }
+
+    /// T11 (#298): a real server's streamed call arrives as the fragments it
+    /// sent, the first naming the call and every one a piece of its
+    /// arguments, and none of it as answer text.
+    #[test]
+    fn a_real_servers_streamed_call_is_its_fragments_and_never_text() {
+        let (calls, texts, ended) = fragments_of(I0_CALL);
+        assert_eq!(
+            ended,
+            Ok(Ended::Finished {
+                finish_reason: Some("tool_calls".to_owned()),
+                timings: ended.as_ref().ok().and_then(|ended| match ended {
+                    Ended::Finished { timings, .. } => timings.clone(),
+                    _ => None,
+                }),
+            })
+        );
+        assert!(
+            texts.is_empty(),
+            "no answer text came from a call: {texts:?}"
+        );
+        let id = "7GJeYs3ux1SaqFVPB5ee2AExFLbsukd7";
+        let expected: Vec<Fragment> = [
+            "{",
+            "\"command\":\"",
+            "ls",
+            " |",
+            " wc",
+            " -",
+            "l",
+            "\"",
+            "}",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(at, piece)| {
+            let first = at == 0;
+            (
+                0,
+                first.then(|| id.to_owned()),
+                first.then(|| "bash".to_owned()),
+                (*piece).to_owned(),
+            )
+        })
+        .collect();
+        assert_eq!(calls, expected, "each fragment as the server sent it");
+        let assembled: String = calls
+            .iter()
+            .map(|(_, _, _, piece)| piece.as_str())
+            .collect();
+        assert_eq!(assembled, "{\"command\":\"ls | wc -l\"}");
+
+        // And a reply with no call yields none.
+        let (calls, texts, _) = fragments_of(CAPTURED);
+        assert!(calls.is_empty(), "{calls:?}");
+        assert!(!texts.is_empty());
     }
 
     #[test]

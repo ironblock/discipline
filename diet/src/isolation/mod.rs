@@ -518,6 +518,11 @@ pub struct Ran {
     pub stdout: String,
     /// What it printed on standard error.
     pub stderr: String,
+    /// How many bytes it printed: the count of the output itself, which a
+    /// lossy decoding into `stdout` may not keep (log v3's `stdout_bytes`).
+    pub stdout_bytes: u64,
+    /// The same, of standard error.
+    pub stderr_bytes: u64,
 }
 
 impl Ran {
@@ -787,6 +792,8 @@ impl Confinement {
             exit: output.status.code(),
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr,
+            stdout_bytes: u64::try_from(output.stdout.len()).unwrap_or(u64::MAX),
+            stderr_bytes: u64::try_from(output.stderr.len()).unwrap_or(u64::MAX),
         })
     }
 }
@@ -3658,6 +3665,8 @@ mod tests {
             exit: Some(1),
             stdout: String::new(),
             stderr: stderr.to_owned(),
+            stdout_bytes: 0,
+            stderr_bytes: stderr.len() as u64,
         }
     }
 

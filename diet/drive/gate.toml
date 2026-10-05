@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 215
+faults = 244
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3459,4 +3459,456 @@ becomes = '''
                 isolation: isolation.map(|_| log::Isolation::Sandbox),'''
 catches = [
     "drive::projection::tests::a_tool_calls_row_carries_its_confinement_from_its_line",
+]
+
+# ---------------------------------------------------------------------------
+# #298's integration: the tool loop -- streamed calls, the gate, the
+# operator's approval, serve's worktree and the receipt. Each seen red alone.
+# ---------------------------------------------------------------------------
+
+[[fault]]
+id = "drive.a-refusal-is-a-halt"
+failure_class = "drive.a-refusal-is-a-halt"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        unknown |= line.reason == Some(log::ToolRefusal::UnknownTool);'''
+becomes = '''
+        unknown |= line.reason.is_some();'''
+catches = [
+    "drive::session::tests::a_declined_prompt_is_refused_declined_and_a_once_runs_once",
+    "drive::session::tests::a_denylisted_segment_refuses_the_line_and_the_model_is_told_and_the_turn_goes_on",
+    "drive::session::tests::arguments_that_are_not_the_tools_json_are_refused_unparsable_and_the_model_is_told",
+    "drive::session::tests::the_gym_declines_every_prompt_and_the_turn_goes_on",
+    "drive::session::tests::the_last_steps_call_is_refused_max_steps_and_the_ran_calls_stay_on_the_trunk",
+]
+
+[[fault]]
+id = "drive.the-loop-spawns-its-own-bash"
+failure_class = "drive.the-loop-spawns-its-own-bash"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    match tools
+        .confinement
+        .run(&tools.policy, &tools.worktree, &judged.run)'''
+becomes = '''
+    match crate::isolation::Confinement::Unconfined
+        .run(&tools.policy, &tools.worktree, &judged.run)'''
+catches = [
+    "drive::session::tests::a_listed_call_runs_confined_goes_back_as_openais_shape_and_settles_final",
+    "drive::session::tests::the_second_request_is_i0s_openai_shape_byte_for_byte",
+]
+
+[[fault]]
+id = "drive.serve-opens-no-confinement"
+failure_class = "drive.serve-opens-no-confinement"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    let confinement = isolation::open(&policy).map_err(|why| (EXIT_HALT, why.to_string()))?;'''
+becomes = '''
+    let confinement = isolation::Confinement::Unconfined;'''
+catches = [
+    "a_drive_server_opens_the_confinement_at_start_and_a_refusal_comes_before_any_request",
+]
+
+[[fault]]
+id = "drive.serve-loops-without-a-bound"
+failure_class = "drive.serve-loops-without-a-bound"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    if policy.isolation == isolation::Isolation::None && declared.max_steps.is_none() {'''
+becomes = '''
+    if false && policy.isolation == isolation::Isolation::None && declared.max_steps.is_none() {'''
+catches = [
+    "a_drive_server_refuses_unconfined_commands_with_no_step_bound",
+]
+
+[[fault]]
+id = "drive.max-steps-settles-as-final"
+failure_class = "drive.max-steps-settles-as-final"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    } else if last {
+        Some(SettleReason::MaxSteps)'''
+becomes = '''
+    } else if last {
+        Some(SettleReason::Final)'''
+catches = [
+    "drive::session::tests::the_last_steps_call_is_refused_max_steps_and_the_ran_calls_stay_on_the_trunk",
+]
+
+[[fault]]
+id = "drive.an-undeclared-call-is-run"
+failure_class = "drive.an-undeclared-call-is-run"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+        .filter(|_| declared && call.name == BASH)'''
+becomes = '''
+        .filter(|_| call.name == BASH)'''
+catches = [
+    "drive::session::tests::an_undeclared_call_runs_nothing_and_fails_the_turn",
+]
+
+[[fault]]
+id = "client.the-call-is-not-re-sent"
+failure_class = "client.the-call-is-not-re-sent"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+    if !message.tool_calls.is_empty() {'''
+becomes = '''
+    if false {'''
+catches = [
+    "drive::session::tests::the_second_request_is_i0s_openai_shape_byte_for_byte",
+]
+
+[[fault]]
+id = "drive.integration-a-later-segment-escapes"
+failure_class = "drive.integration-a-later-segment-escapes"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+        self.judgement.outcome()'''
+becomes = '''
+        shell_gate::Judgement {
+            segments: self.judgement.segments.iter().take(1).cloned().collect(),
+        }
+        .outcome()'''
+catches = [
+    "drive::session::tests::a_denylisted_segment_refuses_the_line_and_the_model_is_told_and_the_turn_goes_on",
+    "drive::tool_loop::tests::a_denylisted_segment_anywhere_in_the_line_refuses_it_whatever_is_approved",
+]
+
+[[fault]]
+id = "drive.workspace-approval-written-into-the-worktree"
+failure_class = "drive.workspace-approval-written-into-the-worktree"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+        state_home
+            .join("discipline")'''
+becomes = '''
+        worktree
+            .join("discipline")'''
+catches = [
+    "drive::session::tests::a_workspace_approval_is_kept_outside_the_worktree_and_counted",
+    "drive::tool_loop::tests::the_store_lives_under_the_state_dir_and_refuses_to_open_inside_a_writable_path",
+]
+
+[[fault]]
+id = "drive.integration-session-approval-covers-another-program"
+failure_class = "drive.integration-session-approval-covers-another-program"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+            .covers(&line, segment)'''
+becomes = '''
+            .covers(&line, segment)
+                || entry.scope == Scope::Session'''
+catches = [
+    "drive::tool_loop::tests::a_session_approval_covers_its_programs_shape_and_never_another_program",
+]
+
+[[fault]]
+id = "drive.npm-run-stale-digest-approves"
+failure_class = "drive.npm-run-stale-digest-approves"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+        let all_held = wanted.iter().all(|digest| {
+            allowed
+                .iter()
+                .any(|entry| covering(entry) && entry.digest == *digest)
+        });
+        if !all_held {
+            continue;
+        }
+        let Some(first) = allowed
+            .iter()
+            .position(|entry| covering(entry) && wanted.contains(&entry.digest))'''
+becomes = '''
+        let all_held = true;
+        if !all_held {
+            continue;
+        }
+        let Some(first) = allowed.iter().position(|entry| covering(entry))'''
+catches = [
+    "drive::tool_loop::tests::an_npm_install_approval_binds_to_the_workspaces_own_lifecycle_scripts",
+    "drive::tool_loop::tests::an_npm_run_approval_binds_to_its_scripts_text_and_lapses_when_it_changes",
+    "drive::tool_loop::tests::an_npmrc_or_an_npm_config_variable_lapses_every_npm_approval",
+    "drive::tool_loop::tests::npm_start_and_restart_bind_to_the_server_js_npm_runs_without_a_start_script",
+    "drive::tool_loop::tests::npm_test_start_stop_and_restart_bind_to_the_scripts_they_run",
+]
+
+[[fault]]
+id = "drive.free-git-read-runs-without-overrides"
+failure_class = "drive.free-git-read-runs-without-overrides"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+            run = free_read(words);'''
+becomes = '''
+            run = argv.clone();'''
+catches = [
+    "drive::session::tests::a_free_git_read_runs_with_its_overrides_and_records_the_models_argv",
+    "drive::tool_loop::tests::a_free_git_read_runs_with_gits_programs_off_and_keeps_the_models_argv",
+    "drive::tool_loop::tests::a_free_read_in_a_partial_clone_fetches_nothing",
+    "drive::tool_loop::tests::a_free_read_never_recurses_into_a_submodule",
+    "drive::tool_loop::tests::a_free_read_runs_no_hook_the_repository_holds",
+    "drive::tool_loop::tests::a_free_read_runs_no_program_the_repositorys_config_names",
+    "drive::tool_loop::tests::a_git_alias_is_judged_by_its_expansion_and_no_standing_approval_covers_it",
+]
+
+[[fault]]
+id = "drive.shell-alias-judged-by-its-name"
+failure_class = "drive.shell-alias-judged-by-its-name"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+                if inner.refused_by().is_some() {'''
+becomes = '''
+                if false && inner.refused_by().is_some() {'''
+catches = [
+    "drive::tool_loop::tests::a_git_alias_is_judged_by_its_expansion_and_no_standing_approval_covers_it",
+]
+
+[[fault]]
+id = "drive.serve-auth-file-left-out-of-the-secrets"
+failure_class = "drive.serve-auth-file-left-out-of-the-secrets"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    isolation::declared::add_credential(&mut policy, std::path::Path::new(auth_file)).map_err('''
+becomes = '''
+    Ok::<(), std::path::PathBuf>(()).map_err('''
+catches = [
+    "a_drive_server_that_runs_commands_demands_a_credential_no_command_can_read",
+]
+
+[[fault]]
+id = "drive.git-read-running-a-configured-program-is-free"
+failure_class = "drive.git-read-running-a-configured-program-is-free"
+target = "diet/src/drive/shell_gate.rs"
+expect_exit = 101
+anchor = '''
+            || GIT_RUNS_A_PROGRAM.contains(&w.text.as_str())'''
+becomes = '''
+            || false'''
+catches = [
+    "drive::tool_loop::tests::a_git_read_that_would_run_a_configured_program_is_not_free",
+    "drive::tool_loop::tests::a_git_read_whose_options_reach_a_program_or_a_signature_prompts",
+]
+
+[[fault]]
+id = "drive.free-git-read-checks-signatures"
+failure_class = "drive.free-git-read-checks-signatures"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+    "core.hooksPath=/dev/null",
+    "-c",
+    "log.showSignature=false",
+'''
+becomes = '''
+    "core.hooksPath=/dev/null",
+'''
+catches = [
+    "drive::session::tests::a_free_git_read_runs_with_its_overrides_and_records_the_models_argv",
+    "drive::tool_loop::tests::a_free_git_read_runs_with_gits_programs_off_and_keeps_the_models_argv",
+    "drive::tool_loop::tests::a_git_alias_is_judged_by_its_expansion_and_no_standing_approval_covers_it",
+]
+
+[[fault]]
+id = "drive.free-git-read-fetches-lazily"
+failure_class = "drive.free-git-read-fetches-lazily"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+    run.extend(GIT_FREE_ENV.iter().map(|w| (*w).to_owned()));'''
+becomes = '''
+    let _ = GIT_FREE_ENV;'''
+catches = [
+    "drive::session::tests::a_free_git_read_runs_with_its_overrides_and_records_the_models_argv",
+    "drive::tool_loop::tests::a_free_git_read_runs_with_gits_programs_off_and_keeps_the_models_argv",
+    "drive::tool_loop::tests::a_free_read_in_a_partial_clone_fetches_nothing",
+    "drive::tool_loop::tests::a_free_read_runs_no_program_the_repositorys_config_names",
+    "drive::tool_loop::tests::a_git_alias_is_judged_by_its_expansion_and_no_standing_approval_covers_it",
+]
+
+[[fault]]
+id = "drive.npm-elsewhere-ignored"
+failure_class = "drive.npm-elsewhere-ignored"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+        if words.iter().any(|w| !w.literal || w.text.starts_with('-')) {'''
+becomes = '''
+        if words.iter().any(|w| !w.literal) {'''
+catches = [
+    "drive::tool_loop::tests::a_standing_npm_approval_covers_only_the_exact_forms_and_no_option",
+    "drive::tool_loop::tests::an_npm_command_told_to_read_another_package_json_always_prompts",
+]
+
+[[fault]]
+id = "drive.npm-named-script-unbound"
+failure_class = "drive.npm-named-script-unbound"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+    if subcommand == NPM_RUN || NPM_NAMED.iter().any(|(name, _)| *name == subcommand) {'''
+becomes = '''
+    if subcommand == NPM_RUN {'''
+catches = [
+    "drive::tool_loop::tests::a_standing_npm_approval_covers_only_the_exact_forms_and_no_option",
+    "drive::tool_loop::tests::npm_start_and_restart_bind_to_the_server_js_npm_runs_without_a_start_script",
+    "drive::tool_loop::tests::npm_test_start_stop_and_restart_bind_to_the_scripts_they_run",
+]
+
+[[fault]]
+id = "drive.free-git-read-reads-the-trees-attributes"
+failure_class = "drive.free-git-read-reads-the-trees-attributes"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+    "GIT_ATTR_SOURCE=4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+    "GIT_ATTR_NOSYSTEM=1",'''
+becomes = '''
+    "GIT_ATTR_NOSYSTEM=1",'''
+catches = [
+    "drive::session::tests::a_free_git_read_runs_with_its_overrides_and_records_the_models_argv",
+    "drive::tool_loop::tests::a_free_git_read_runs_with_gits_programs_off_and_keeps_the_models_argv",
+    "drive::tool_loop::tests::a_free_read_runs_no_program_the_repositorys_config_names",
+    "drive::tool_loop::tests::a_git_alias_is_judged_by_its_expansion_and_no_standing_approval_covers_it",
+]
+
+[[fault]]
+id = "drive.free-git-read-ignores-info-attributes"
+failure_class = "drive.free-git-read-ignores-info-attributes"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+        let blocked = repository.info_attributes || (prints_commits && repository.signing);'''
+becomes = '''
+        let blocked = prints_commits && repository.signing;'''
+catches = [
+    "drive::tool_loop::tests::a_free_read_runs_no_program_the_repositorys_config_names",
+]
+
+[[fault]]
+id = "drive.free-git-read-ignores-signing-config"
+failure_class = "drive.free-git-read-ignores-signing-config"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+        .any(|key| key != "format.pretty" && key != GIT_BRANCH_SORT);'''
+becomes = '''
+        .any(|_| false);'''
+catches = [
+    "drive::tool_loop::tests::a_configured_branch_sort_makes_git_branch_prompt_where_a_signature_is_checked",
+    "drive::tool_loop::tests::a_free_read_runs_no_program_the_repositorys_config_names",
+]
+
+[[fault]]
+id = "drive.git-signature-format-is-free"
+failure_class = "drive.git-signature-format-is-free"
+target = "diet/src/drive/shell_gate.rs"
+expect_exit = 101
+anchor = '''
+            || !plain_format(&w.text)'''
+becomes = '''
+            || false'''
+catches = [
+    "drive::tool_loop::tests::a_git_read_whose_options_reach_a_program_or_a_signature_prompts",
+]
+
+[[fault]]
+id = "drive.git-status-verbose-is-free"
+failure_class = "drive.git-status-verbose-is-free"
+target = "diet/src/drive/shell_gate.rs"
+expect_exit = 101
+anchor = '''
+            || (subcommand == "status" && status_shows_a_diff(&w.text))'''
+becomes = '''
+            || false'''
+catches = [
+    "drive::tool_loop::tests::a_git_read_whose_options_reach_a_program_or_a_signature_prompts",
+]
+
+[[fault]]
+id = "drive.npm-digest-ignores-npmrc"
+failure_class = "drive.npm-digest-ignores-npmrc"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+    for name in [".npmrc", "binding.gyp"] {'''
+becomes = '''
+    for name in ["binding.gyp"] {'''
+catches = [
+    "drive::tool_loop::tests::an_npmrc_or_an_npm_config_variable_lapses_every_npm_approval",
+]
+
+[[fault]]
+id = "drive.npm-config-env-ignored"
+failure_class = "drive.npm-config-env-ignored"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+        let read = npm_commands(command).filter(|_| !npm_env);'''
+becomes = '''
+        let read = npm_commands(command).filter(|_| npm_env || true);'''
+catches = [
+    "drive::tool_loop::tests::an_npmrc_or_an_npm_config_variable_lapses_every_npm_approval",
+]
+
+[[fault]]
+id = "drive.npm-abbreviation-is-standing"
+failure_class = "drive.npm-abbreviation-is-standing"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+            None if shape.program == "npm" => None,'''
+becomes = '''
+            None if false => None,'''
+catches = [
+    "drive::tool_loop::tests::a_standing_npm_approval_covers_only_the_exact_forms_and_no_option",
+]
+
+[[fault]]
+id = "drive.free-git-read-runs-hooks"
+failure_class = "drive.free-git-read-runs-hooks"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+    "core.pager=cat",
+    "-c",
+    "core.hooksPath=/dev/null",'''
+becomes = '''
+    "core.pager=cat",'''
+catches = [
+    "drive::session::tests::a_free_git_read_runs_with_its_overrides_and_records_the_models_argv",
+    "drive::tool_loop::tests::a_free_git_read_runs_with_gits_programs_off_and_keeps_the_models_argv",
+    "drive::tool_loop::tests::a_free_read_runs_no_hook_the_repository_holds",
+    "drive::tool_loop::tests::a_git_alias_is_judged_by_its_expansion_and_no_standing_approval_covers_it",
+]
+
+[[fault]]
+id = "drive.npm-env-prefix-is-standing"
+failure_class = "drive.npm-env-prefix-is-standing"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+        if !simple.assignments.is_empty() {
+            return None;
+        }'''
+becomes = '''
+        if false && !simple.assignments.is_empty() {
+            return None;
+        }'''
+catches = [
+    "drive::tool_loop::tests::an_environment_prefix_on_an_npm_command_is_never_standing",
 ]

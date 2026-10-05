@@ -277,14 +277,44 @@ pub fn head(shape: &RequestShape) -> String {
 }
 
 /// Append one message as the wire carries it.
+///
+/// A tool call goes back in `OpenAI`'s shape (#29 Q9, ruled): the assistant
+/// message that made it carries `tool_calls`, with `content: null` when it
+/// said nothing else, and the result is a `tool` message naming the call by
+/// `tool_call_id` before its `content` -- the key order I0's capture sent
+/// (`turn2-openai.request.json`), which T12 holds byte for byte.
 fn message(message: &super::shape::Message, out: &mut String) {
     out.push_str("{\"role\":");
     string(message.role.tag(), out);
+    if let Some(id) = &message.tool_call_id {
+        out.push_str(",\"tool_call_id\":");
+        string(id, out);
+    }
     out.push_str(",\"content\":");
-    string(&message.content, out);
+    if message.content.is_empty() && !message.tool_calls.is_empty() {
+        out.push_str("null");
+    } else {
+        string(&message.content, out);
+    }
     if let Some(reasoning) = &message.reasoning {
         out.push_str(",\"reasoning_content\":");
         string(reasoning, out);
+    }
+    if !message.tool_calls.is_empty() {
+        out.push_str(",\"tool_calls\":[");
+        for (index, call) in message.tool_calls.iter().enumerate() {
+            if index > 0 {
+                out.push(',');
+            }
+            out.push_str("{\"id\":");
+            string(&call.id, out);
+            out.push_str(",\"type\":\"function\",\"function\":{\"name\":");
+            string(&call.name, out);
+            out.push_str(",\"arguments\":");
+            string(&call.arguments, out);
+            out.push_str("}}");
+        }
+        out.push(']');
     }
     out.push('}');
 }
