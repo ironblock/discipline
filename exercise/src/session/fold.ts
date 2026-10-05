@@ -53,6 +53,8 @@ export interface UserNode extends Provenance {
    * `turn.settled`, and this is its word. A capped turn is `failed` (#290, ruled 5969941559).
    */
   readonly outOfContext?: OffTrunk;
+  /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
+  readonly files?: readonly FileRef[];
   /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
   readonly scoping?: true;
 }
@@ -657,6 +659,7 @@ export function fold(lines: readonly LogLine[]): Session {
             endedAt: ask.t,
             ...(timings ? { prefill: { fresh: timings.prompt_n, cached: timings.cache_n } } : {}),
             ...(offTrunk.has(slot.turn) ? { outOfContext: offTrunk.get(slot.turn)! } : {}),
+            ...(ask.files && ask.files.length > 0 ? { files: ask.files } : {}),
             ...(ask.scoping === true ? { scoping: true as const } : {}),
             ...provenance(ask, first?.response),
           });
