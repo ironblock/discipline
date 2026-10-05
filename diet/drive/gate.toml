@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 253
+faults = 255
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -4048,4 +4048,30 @@ becomes = '''
         let Some(files) = self.ask_files.get(&turn).filter(|_| false) else {'''
 catches = [
     "drive::serve::tests::a_head_the_operators_image_rode_in_is_rebuilt_from_the_recording",
+]
+
+[[fault]]
+id = "drive.projection-rebuilds-a-head-without-its-tools"
+failure_class = "drive.projection-rebuilds-a-head-without-its-tools"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+            tools: self.tools.clone().unwrap_or_default(),'''
+becomes = '''
+            tools: Vec::new(),'''
+catches = [
+    "drive::session::tests::a_tool_turns_heads_and_the_trunk_after_it_are_rebuilt_and_verified",
+]
+
+[[fault]]
+id = "drive.projection-rebuilds-a-head-without-its-steps"
+failure_class = "drive.projection-rebuilds-a-head-without-its-steps"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+        for step in self.steps.get(&turn).into_iter().flatten() {'''
+becomes = '''
+        for step in self.steps.get(&turn).into_iter().flatten().filter(|_| false) {'''
+catches = [
+    "drive::session::tests::a_tool_turns_heads_and_the_trunk_after_it_are_rebuilt_and_verified",
 ]

@@ -32,7 +32,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::client::head::Head;
-use crate::client::shape::{Limits, Message, RequestShape, Role, SamplerCard};
+use crate::client::shape::{
+    Limits, Message, RequestShape, Role, SamplerCard, ToolCall, ToolDefinition,
+};
 use crate::formats::log::{self, Event as Line, Lane};
 use crate::formats::record::json::Decimal;
 use crate::formats::record::{self, Count, Event, Execution, PrefixReason, Regime, Source};
@@ -283,7 +285,9 @@ pub fn project_in(
     recording: Option<&std::path::Path>,
 ) -> Result<Projection, String> {
     let Some(log::Line {
-        event: Line::SessionStart { model, head, .. },
+        event: Line::SessionStart {
+            model, head, tools, ..
+        },
         ..
     }) = lines.first()
     else {
@@ -296,6 +300,7 @@ pub fn project_in(
         .ok_or("the regime declares no substrate")?;
     let mut walk = Walk::over(lines, substrate, engine);
     walk.recording = recording.map(std::path::Path::to_path_buf);
+    walk.tools = tools_of(tools.as_deref().unwrap_or_default());
     walk.model.clone_from(model);
     walk.trunk = head
         .iter()
@@ -351,16 +356,77 @@ struct Walk<'a> {
     recording: Option<std::path::PathBuf>,
     /// Each turn's attached files, from its `ask` line.
     ask_files: BTreeMap<u32, Vec<log::RecordedFile>>,
+    /// The tools the session's requests declared, rebuilt from
+    /// `session.start`'s names (#472), or why they cannot be.
+    tools: Result<Vec<ToolDefinition>, String>,
+    /// The trunk requests that were tool steps: a `tool_call` line cites
+    /// them.
+    stepped: BTreeSet<u64>,
+    /// Each turn's tool steps so far, in order: what the session sent after
+    /// the ask, and what it put back on the trunk.
+    steps: BTreeMap<u32, Vec<Step>>,
+    /// Why the trunk stopped being rebuildable, from the first turn whose
+    /// attachment could not be read back: every later head names it (#471's
+    /// review, NB3).
+    trunk_unrebuilt: Option<String>,
     /// Each lane but the trunk's last logged head digest (v5, #374): a live
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
     side_heads: BTreeMap<Lane, String>,
 }
 
+/// One tool step of a turn (#472): what the model said, its calls, and what
+/// each was given back -- the messages the session sent after it.
+struct Step {
+    /// The step's request, by `seq`.
+    request: u64,
+    /// The step's response: its text and reasoning.
+    said: Message,
+    /// Its calls, in order, each with what it was shown, when it was shown
+    /// anything.
+    calls: Vec<(ToolCall, Option<String>)>,
+}
+
+impl Step {
+    /// The messages the session sent after this step: the assistant's call
+    /// message, then a result for each call that was shown one.
+    fn messages(&self) -> Vec<Message> {
+        let mut said = self.said.clone();
+        said.tool_calls = self.calls.iter().map(|(call, _)| call.clone()).collect();
+        let mut messages = vec![said];
+        messages.extend(self.calls.iter().filter_map(|(call, shown)| {
+            shown
+                .as_ref()
+                .map(|shown| Message::tool_result(call.id.clone(), shown.clone()))
+        }));
+        messages
+    }
+}
+
+/// The tools `session.start` names, as the session declared them (#472):
+/// each name to the definition its requests carried. The head's digest is
+/// the check: a definition that differs from what was sent leaves the head
+/// unverified, never wrongly verified.
+fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
+    names
+        .iter()
+        .map(|name| {
+            if name == super::tool_loop::BASH {
+                Ok(super::tool_loop::bash_tool())
+            } else {
+                Err(format!(
+                    "the session declared `{name}`, a tool with no definition here"
+                ))
+            }
+        })
+        .collect()
+}
+
 impl<'a> Walk<'a> {
     fn over(lines: &'a [log::Line], substrate: String, engine: Option<Engine>) -> Self {
         let mut outcome = BTreeMap::new();
         let mut trunk_of = BTreeMap::new();
+        let mut stepped = BTreeSet::new();
         for line in lines {
             match &line.event {
                 Line::Request {
@@ -372,6 +438,9 @@ impl<'a> Walk<'a> {
                 }
                 Line::Response { to_request, .. } => {
                     outcome.insert(*to_request, &line.event);
+                }
+                Line::ToolCall { request, .. } => {
+                    stepped.insert(*request);
                 }
                 Line::Cancelled { request, .. } | Line::RequestFailed { request, .. } => {
                     outcome.insert(*request, &line.event);
@@ -397,6 +466,10 @@ impl<'a> Walk<'a> {
             captures: BTreeMap::new(),
             recording: None,
             ask_files: BTreeMap::new(),
+            tools: Ok(Vec::new()),
+            stepped,
+            steps: BTreeMap::new(),
+            trunk_unrebuilt: None,
             side_heads: BTreeMap::new(),
         }
     }
@@ -478,20 +551,7 @@ impl<'a> Walk<'a> {
             // The record's fork row carries no outcome: a fork that settled
             // `value` is carried by its capture row, and any other outcome is
             // named with its word.
-            Line::ForkSettled { fork, outcome } => {
-                if *outcome != log::ForkOutcome::Value {
-                    self.name(
-                        line.seq,
-                        "fork.settled",
-                        format!(
-                            "fork f/{fork} settled `{}`: the record's fork row carries no \
-                             outcome, and only a fork settled `value` captures",
-                            outcome.tag()
-                        ),
-                        None,
-                    );
-                }
-            }
+            Line::ForkSettled { fork, outcome } => self.fork_settled(line.seq, *fork, *outcome),
             // Facts the record has no row for at all, named once per kind.
             Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
                 let kind = match &line.event {
@@ -511,7 +571,11 @@ impl<'a> Walk<'a> {
             }
             // A tool call (v3, #302): its row carries how it ran under the
             // log's own words, so the record says what confined it.
-            Line::ToolCall { .. } => self.tool_call_line(line.seq, &line.event),
+            Line::ToolCall { .. }
+            | Line::TurnSettled {
+                reason: log::SettleReason::MaxSteps,
+                ..
+            } => self.stepping(line),
             // Carried by the rows above: a delta by its response's text, a
             // settlement and a settled turn by the turn and response rows.
             Line::Delta { .. }
@@ -784,8 +848,16 @@ impl<'a> Walk<'a> {
     fn head_change(&mut self, seq: u64, turn: u32, logged: &str) {
         let mut messages = self.trunk.clone();
         let asked = self.user_message(turn);
-        let unrebuilt = asked.as_ref().err().cloned();
+        let unrebuilt = asked
+            .as_ref()
+            .err()
+            .map(|why| format!("turn {turn}'s attachment: {why}"))
+            .or_else(|| self.tools.as_ref().err().cloned())
+            .or_else(|| self.trunk_unrebuilt.clone());
         messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
+        for step in self.steps.get(&turn).into_iter().flatten() {
+            messages.extend(step.messages());
+        }
         let rebuilt = Head::of(&RequestShape {
             model: self.model.clone(),
             messages,
@@ -799,7 +871,8 @@ impl<'a> Walk<'a> {
             grammar: None,
             // ASSERTED by the digest check below: `serve`'s trunk sends none.
             template_kwargs: BTreeMap::new(),
-            tools: Vec::new(),
+            // The session's declared tools, from `session.start` (#472).
+            tools: self.tools.clone().unwrap_or_default(),
         });
         let verified = (rebuilt.digest() == logged).then_some(rebuilt);
         // A head whose attachment could not be read back is never verified,
@@ -810,8 +883,8 @@ impl<'a> Walk<'a> {
                 seq,
                 "request",
                 format!(
-                    "its head could not be rebuilt from the log: turn {turn}'s attachment: {why}; \
-                     a change at it is unattributed"
+                    "its head could not be rebuilt from the log: {why}; a change at it is \
+                     unattributed"
                 ),
                 None,
             );
@@ -900,16 +973,103 @@ impl<'a> Walk<'a> {
             return;
         };
         let turn = *turn;
-        let asked = self.user_message(turn).unwrap_or_else(|_| {
+        // A tool step: the session goes on with it, and puts it on the
+        // trunk only when the turn settles (#472).
+        if self.stepped.contains(&to_request) {
+            let mut said = Message::new(Role::Assistant, text.to_owned());
+            said.reasoning = reasoning.cloned();
+            self.steps.entry(turn).or_default().push(Step {
+                request: to_request,
+                said,
+                calls: Vec::new(),
+            });
+            return;
+        }
+        self.onto_the_trunk(turn, usize::MAX);
+        let mut answer = Message::new(Role::Assistant, text.to_owned());
+        answer.reasoning = reasoning.cloned();
+        self.trunk.push(answer);
+    }
+
+    /// Turn `turn`'s exchange onto the trunk, as the session puts it there:
+    /// the user message, then its first `steps` tool steps (#472). A final
+    /// answer keeps every step; a `max_steps` settle keeps all but the last.
+    fn onto_the_trunk(&mut self, turn: u32, steps: usize) {
+        let asked = self.user_message(turn).unwrap_or_else(|why| {
+            self.trunk_unrebuilt.get_or_insert_with(|| {
+                format!("the trunk carries turn {turn}'s attachment: {why}")
+            });
             Message::new(
                 Role::User,
                 self.asks.get(&turn).cloned().unwrap_or_default(),
             )
         });
         self.trunk.push(asked);
-        let mut answer = Message::new(Role::Assistant, text.to_owned());
-        answer.reasoning = reasoning.cloned();
-        self.trunk.push(answer);
+        let taken = self.steps.remove(&turn).unwrap_or_default();
+        for step in taken.iter().take(steps) {
+            self.trunk.extend(step.messages());
+        }
+    }
+
+    /// A fork's settling: the record's fork row carries no outcome, so a
+    /// fork settled `value` is carried by its capture row and any other
+    /// outcome is named with its word.
+    fn fork_settled(&mut self, seq: u64, fork: u64, outcome: log::ForkOutcome) {
+        if outcome != log::ForkOutcome::Value {
+            self.name(
+                seq,
+                "fork.settled",
+                format!(
+                    "fork f/{fork} settled `{}`: the record's fork row carries no outcome, and \
+                     only a fork settled `value` captures",
+                    outcome.tag()
+                ),
+                None,
+            );
+        }
+    }
+
+    /// A tool step's lines (#472): a `tool_call` -- onto its step, and its
+    /// row -- or a `max_steps` settle, which puts the steps that ran on the
+    /// trunk but not the last.
+    fn stepping(&mut self, line: &log::Line) {
+        if let Line::TurnSettled { turn, .. } = &line.event {
+            let ran = self.steps.get(turn).map_or(0, Vec::len).saturating_sub(1);
+            self.onto_the_trunk(*turn, ran);
+            return;
+        }
+        self.step_call(&line.event);
+        self.tool_call_line(line.seq, &line.event);
+    }
+
+    /// A `tool_call` line's call, onto its step (#472).
+    fn step_call(&mut self, line: &Line) {
+        let Line::ToolCall {
+            request,
+            turn,
+            id,
+            name,
+            arguments,
+            shown,
+            ..
+        } = line
+        else {
+            return;
+        };
+        if let Some(step) = self
+            .steps
+            .get_mut(turn)
+            .and_then(|steps| steps.iter_mut().rfind(|step| step.request == *request))
+        {
+            step.calls.push((
+                ToolCall {
+                    id: id.clone(),
+                    name: name.clone(),
+                    arguments: arguments.clone(),
+                },
+                shown.clone(),
+            ));
+        }
     }
 
     fn response(
@@ -980,6 +1140,7 @@ mod tests {
             serving: None,
             claim: None,
             provenance: None,
+            tools: None,
         }
     }
 
@@ -1569,6 +1730,7 @@ mod tests {
                 cwd: isolation.map(|_| "/work".to_owned()),
                 approval: None,
                 files: None,
+                shown: None,
             }
         };
         let mut events = vec![start()];
@@ -1653,6 +1815,7 @@ mod tests {
                 cwd: None,
                 approval: None,
                 files: None,
+                shown: None,
             },
         );
         events.extend(turn);
@@ -1852,6 +2015,7 @@ mod tests {
                 cwd: Some("/work".to_owned()),
                 approval: None,
                 files: Some(vec![file.clone()]),
+                shown: None,
             },
         );
         events.extend(turn);
