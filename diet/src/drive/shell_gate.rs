@@ -137,9 +137,12 @@ const RUNNER_SUBCOMMANDS: &[(&str, &[&str])] = &[
 const RUNNER_FLAGS: &[&str] = &["-y", "--yes", "--no", "--no-install", "-q", "--quiet"];
 
 /// The packages a runner's call is judged as directly (#484's ruling):
-/// `npx pnpm@11.20.0 install` and `npm exec pnpm install` are `pnpm
-/// install`, shaped by the package as written -- `pnpm@11.20.0 install`,
-/// `pnpm install` -- so another pinned version is another approval.
+/// `npx pnpm@11.20.0 install` and `npm exec pnpm@11.20.0 install` are
+/// `pnpm install`, shaped by the package as written -- `pnpm@11.20.0
+/// install` -- so another pinned version is another approval, and a plain
+/// `pnpm` approval covers no runner form. A bare `npx pnpm` resolves
+/// whichever pnpm it finds: never standing, its words still read for the
+/// denylist (#484's review round 2, N4(b)).
 const RUN_THROUGH: &[&str] = &["pnpm"];
 
 /// The runner flags a call [`through`] a runner may carry and still be
@@ -160,7 +163,7 @@ pub struct Through<'a> {
     pub words: &'a [Word],
     /// Whether the call can be shaped as the package's own: the runner by
     /// its name, not a path; no runner flag but [`RUN_THROUGH_FLAGS`]; the
-    /// package bare or pinned to an exact `x.y.z`.
+    /// package pinned to an exact `x.y.z`, never bare.
     pub plain: bool,
 }
 
@@ -219,7 +222,7 @@ pub fn through(words: &[Word]) -> Option<Through<'_>> {
         None => (spec.text.as_str(), None),
     };
     let package = RUN_THROUGH.iter().find(|p| **p == name)?;
-    plain &= version.is_none_or(exact_version);
+    plain &= version.is_some_and(exact_version);
     Some(Through {
         package,
         spec: &spec.text,

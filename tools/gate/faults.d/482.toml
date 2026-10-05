@@ -2,7 +2,9 @@
 # `pnpm_config_store_dir` excused beside the cache, and pnpm run through
 # npx, `npm exec` or corepack judged as pnpm (#484's rulings); a pnpm
 # manifest other than package.json, or a pnpmfile named by config, makes
-# no pnpm command standing (#484's review round 1, findings 1 and 2).
+# no pnpm command standing (#484's review round 1, findings 1 and 2); a
+# bare runner's pnpm is never standing and a plain pnpm approval covers no
+# runner form (#484's review round 2, N4(b)).
 # Lane faults declared in diet/drive/gate.toml.
 
 [[fault]]
@@ -43,4 +45,12 @@ kind = "lane-fault"
 check = "lanes"
 label = "drive.pnpm-config-named-pnpmfile-ignored"
 failure_class = "drive.pnpm-config-named-pnpmfile-ignored"
+migrated = false
+
+[[fault]]
+id = "drive.pnpm-bare-runner-shares-plain-pnpms-shape"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.pnpm-bare-runner-shares-plain-pnpms-shape"
+failure_class = "drive.pnpm-bare-runner-shares-plain-pnpms-shape"
 migrated = false

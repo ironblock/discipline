@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 261
+faults = 262
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3991,6 +3991,19 @@ becomes = '''
     unbound: &[],'''
 catches = [
     "drive::tool_loop::tests::a_pnpmfile_named_by_config_makes_no_pnpm_command_standing",
+]
+
+[[fault]]
+id = "drive.pnpm-bare-runner-shares-plain-pnpms-shape"
+failure_class = "drive.pnpm-bare-runner-shares-plain-pnpms-shape"
+target = "diet/src/drive/shell_gate.rs"
+expect_exit = 101
+anchor = '''
+    plain &= version.is_some_and(exact_version);'''
+becomes = '''
+    plain &= version.is_none_or(exact_version);'''
+catches = [
+    "drive::tool_loop::tests::a_plain_pnpm_approval_covers_no_bare_runner_pnpm",
 ]
 [[fault]]
 id = "drive.serve-logs-no-substrate-claim"

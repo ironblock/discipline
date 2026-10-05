@@ -3399,7 +3399,6 @@ pub(in crate::drive) mod tests {
             "npx pnpm@11.20.0",
             "npx --yes pnpm@11.20.0",
             "npx -y pnpm@11.20.0",
-            "npx pnpm",
         ] {
             a_run_through_binds_to_its_script(prefix);
         }
@@ -3409,7 +3408,7 @@ pub(in crate::drive) mod tests {
     /// cover `npx pnpm@11.20.0 exec sudo id`, which the denylist refuses.
     #[test]
     fn an_install_through_npx_covers_no_exec_and_meets_the_denylist() {
-        for prefix in ["npx pnpm@11.20.0", "npx --yes pnpm@11.20.0", "npx pnpm"] {
+        for prefix in ["npx pnpm@11.20.0", "npx --yes pnpm@11.20.0"] {
             an_install_through_covers_no_exec(prefix);
         }
     }
@@ -3432,10 +3431,8 @@ pub(in crate::drive) mod tests {
     /// judged as `pnpm <args>`, as `npx pnpm` is.
     #[test]
     fn pnpm_through_corepack_is_judged_as_pnpm() {
-        for prefix in ["corepack pnpm@11.20.0", "corepack pnpm"] {
-            a_run_through_binds_to_its_script(prefix);
-            an_install_through_covers_no_exec(prefix);
-        }
+        a_run_through_binds_to_its_script("corepack pnpm@11.20.0");
+        an_install_through_covers_no_exec("corepack pnpm@11.20.0");
     }
 
     /// Review round 1 of #484, finding 1: with no `package.json`, pnpm reads
@@ -3518,6 +3515,67 @@ pub(in crate::drive) mod tests {
             );
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// #484's review round 2, N4(b): a runner's bare `pnpm` (`npx pnpm`,
+    /// `corepack pnpm`, `npm exec pnpm`, no version) resolves whichever
+    /// pnpm it finds, so it is never standing, and a plain `pnpm` approval
+    /// never covers it; the denylist still reads through it.
+    #[test]
+    fn a_plain_pnpm_approval_covers_no_bare_runner_pnpm() {
+        let dir = scratch("pnpm-bare-runner");
+        let gate = gate_in(&dir);
+        dev_script(&dir, "vite");
+        let granted: Vec<Entry> = ["pnpm run dev", "pnpm install"]
+            .iter()
+            .flat_map(|line| gate.judge(line, &[]).grants(Scope::Session, 1))
+            .collect();
+        for line in [
+            "npx pnpm run dev",
+            "npx -y pnpm run dev",
+            "corepack pnpm run dev",
+            "npm exec pnpm run dev",
+            "npm x pnpm run dev",
+            "npx pnpm install",
+            "corepack pnpm install",
+            "npm exec pnpm install",
+        ] {
+            let judged = gate.judge(line, &granted);
+            assert_eq!(
+                judged.outcome(),
+                shell_gate::Outcome::Prompt,
+                "a plain pnpm approval covered `{line}`"
+            );
+            assert!(!judged.standing(), "`{line}` could be approved standing");
+        }
+        for line in [
+            "npx pnpm exec sudo id",
+            "corepack pnpm exec sudo id",
+            "npm exec pnpm dlx docker ps",
+        ] {
+            assert_eq!(
+                gate.judge(line, &granted).outcome(),
+                shell_gate::Outcome::Refused,
+                "{line}"
+            );
+        }
+        let pinned = gate
+            .judge("npx pnpm@11.20.0 run dev", &[])
+            .grants(Scope::Session, 1);
+        assert_eq!(
+            pinned
+                .iter()
+                .map(|e| e.shape.to_string())
+                .collect::<Vec<_>>(),
+            ["pnpm@11.20.0 run"],
+            "a pinned pnpm keeps its own shape"
+        );
+        assert_eq!(
+            gate.judge("npx pnpm@11.20.0 run dev", &granted).outcome(),
+            shell_gate::Outcome::Prompt,
+            "a plain pnpm approval covered a pinned runner form"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #484: through a runner, the shape is the package as written, so
