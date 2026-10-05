@@ -4034,6 +4034,5 @@ anchor = '''
 becomes = '''
             std::fs::read(file).map_err(|why| (Check::Unreadable, why.to_string()))?'''
 catches = [
-    "drive::attach::tests::a_path_swapped_for_a_link_to_a_secret_never_attaches_the_secret",
     "drive::attach::tests::the_confined_read_refuses_a_link_the_path_check_never_saw",
 ]

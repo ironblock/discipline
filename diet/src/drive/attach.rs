@@ -533,7 +533,7 @@ pub(in crate::drive) mod tests {
     use std::path::{Path, PathBuf};
 
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::time::{Duration, Instant};
 
     use super::{
@@ -945,16 +945,19 @@ pub(in crate::drive) mod tests {
     /// The secret's bytes are never attached nor copied, whichever side of
     /// the path check each swap lands on.
     ///
-    /// Each side is HELD for the same [`HOLD`] and both are prepared before
-    /// they are renamed in, so the swap spends as long on the PNG as on the
-    /// link. An unbalanced swap -- the PNG written while the link sat on the
-    /// path -- met only the link on a fast Linux runner: every ask refused,
-    /// the race never ran (#461, CI run 37293445573). And it asks until both
-    /// sides have been met, past [`AT_LEAST`] and up to [`ASKS`].
+    /// Liveness never rests on the scheduler. That the sandbox attaches the
+    /// PNG at this path is shown deterministically, by an attach with nothing
+    /// racing it, before the race and after it. That a link to the secret
+    /// is refused is shown deterministically by
+    /// `the_confined_read_refuses_a_link_the_path_check_never_saw`. The race
+    /// asserts only what must hold on every interleaving: the secret is never
+    /// attached and never copied, and the swapper really ran while the asks
+    /// did. An earlier version required both sides to be met inside the
+    /// race, and on a CI runner that met only the link (#461 run
+    /// 37293445573, then #471 run 37302234290: "attached 0, refused 2000").
     #[test]
     fn a_path_swapped_for_a_link_to_a_secret_never_attaches_the_secret() {
-        const AT_LEAST: usize = 100;
-        const ASKS: usize = 2_000;
+        const ASKS: usize = 200;
         const HOLD: std::time::Duration = std::time::Duration::from_micros(500);
         let fixture = Fixture::new("swapped");
         let (policy, key, secret) = fixture.with_a_secret();
@@ -964,10 +967,30 @@ pub(in crate::drive) mod tests {
         }
         let benign = png("benign");
         let shot = fixture.tree.join("shot.png");
-        write(&shot, &benign);
+        let attaches_the_png = |when: &str| {
+            write(&shot, &benign);
+            let Attached { message, .. } =
+                attached("see shot.png", &attaching).unwrap_or_else(|refused| {
+                    panic!("{when}, with nothing racing, the PNG was refused: {refused:?}")
+                });
+            assert_eq!(
+                message
+                    .images
+                    .iter()
+                    .map(crate::client::shape::Image::data_uri)
+                    .collect::<Vec<_>>(),
+                [format!(
+                    "data:image/png;base64,{}",
+                    crate::drive::serve::base64(&benign)
+                )],
+                "{when}"
+            );
+        };
+        attaches_the_png("before the race");
         let stop = Arc::new(AtomicBool::new(false));
+        let swaps = Arc::new(AtomicUsize::new(0));
         let swapper = {
-            let stop = Arc::clone(&stop);
+            let (stop, swaps) = (Arc::clone(&stop), Arc::clone(&swaps));
             let (tree, benign) = (fixture.tree.clone(), benign.clone());
             std::thread::spawn(move || {
                 let (link, file, shot) = (tree.join(".l"), tree.join(".f"), tree.join("shot.png"));
@@ -979,6 +1002,7 @@ pub(in crate::drive) mod tests {
                     std::thread::sleep(HOLD);
                     let _ = std::fs::rename(&file, &shot);
                     std::thread::sleep(HOLD);
+                    swaps.fetch_add(1, Ordering::Relaxed);
                 }
             })
         };
@@ -986,12 +1010,10 @@ pub(in crate::drive) mod tests {
             "data:image/png;base64,{}",
             crate::drive::serve::base64(&secret)
         );
-        let (mut sent, mut refused) = (0, 0);
-        for asked in 0..ASKS {
-            if asked >= AT_LEAST && sent > 0 && refused > 0 {
-                break;
-            }
-            match attached("see shot.png", &attaching) {
+        let before = swaps.load(Ordering::Relaxed);
+        let mut outcomes = std::collections::BTreeMap::<String, usize>::new();
+        for _ in 0..ASKS {
+            let outcome = match attached("see shot.png", &attaching) {
                 Ok(Attached { message, .. }) => {
                     assert!(
                         message
@@ -1000,22 +1022,23 @@ pub(in crate::drive) mod tests {
                             .all(|image| image.data_uri() != secret_uri),
                         "the secret was attached"
                     );
-                    sent += 1;
+                    "attached".to_owned()
                 }
-                Err(_) => refused += 1,
-            }
+                Err(refused) => format!("{:?}", refused.check),
+            };
+            *outcomes.entry(outcome).or_default() += 1;
         }
+        let during = swaps.load(Ordering::Relaxed) - before;
         stop.store(true, Ordering::Relaxed);
         swapper.join().expect("the swapper");
+        // What the race met, for a reader of a failure; never a verdict.
+        eprintln!("swaps during the asks: {during}; outcomes: {outcomes:?}");
         assert!(
             !digests(&fixture).contains(&crate::digest::sha256_hex(&secret)),
             "the secret was copied"
         );
-        // Both sides of the swap were met, or the race never ran.
-        assert!(
-            sent > 0 && refused > 0,
-            "attached {sent}, refused {refused}"
-        );
+        assert!(during > 0, "the swapper never swapped while the asks ran");
+        attaches_the_png("after the race");
     }
 
     /// A file past [`MAX_BYTES`] is refused and not copied; one at it attaches
