@@ -56,4 +56,20 @@ ssh-user-at-host	(git|hg)@(github\.com|gitlab\.com|bitbucket\.org|codeberg\.org|
 # -- still fires. The scanner hands this file grep's `path:line:content`, so the pattern anchors on that prefix (path,
 # line number) and the package name follows it directly, and the history check scans patches, so a leading `+` or `-` is allowed there. (A line that is nothing but `name==10.x.x.x` is exempt whatever the name says; that is the cost of
 # reading lines, not files.)
-private-ipv4	^[^:]+:[0-9]+:[+-]?[A-Za-z0-9][A-Za-z0-9._-]*==10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$
+#
+# AND A LLAMA.CPP LOG LINE'S ELAPSED-TIME PREFIX (#335, ruled 5984747931). llama.cpp opens every log line with the time
+# since start as minutes, seconds, milliseconds and microseconds, dotted, then a space, a level letter and the source
+# that logged it. From minute 10 on, that prefix reads to `private-ipv4` as a private address (a server log of #335's
+# arm C, past ten minutes). The exempt form is that prefix and its suffix only, at the start of the scanned line:
+# `10`, then exactly 2, 3 and 3 digits, a space, a level letter (I, W, E or D), a space, and one listed source
+# (`slot`, `srv`, `Final`, `kl_divergence`, `perplexity`) followed by a space or a colon. The list is the sources the
+# committed llama.cpp logs under substrates/ print after loading, by a literal grep (#419's review): `srv` as late as
+# minute 27, `Final` (the perplexity and KLD tools' last line) 21, `slot` 14, `kl_divergence` and `perplexity` 3.
+# Every other source in those logs prints only in minute 0 or 1, while loading, and is not listed.
+# Only the prefix is removed, so an address anywhere else on the line still fires, and so does one at the start of a
+# line without that suffix. The cost, disclosed: an address whose last three parts are exactly 2, 3 and 3 digits,
+# at the start of a line, followed by exactly that suffix, would pass; no server writes that. hygiene.sh reads one
+# row per label, so this form is a second alternative of the requirements-pin row, which is kept verbatim before it.
+# (Minutes 172 and 192 would read as the other private ranges; no committed log runs that long, and this row does
+# not cover them.)
+private-ipv4	^[^:]+:[0-9]+:[+-]?[A-Za-z0-9][A-Za-z0-9._-]*==10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$|^[^:]+:[0-9]+:[+-]?10\.[0-9]{2}\.[0-9]{3}\.[0-9]{3} [IWED] (slot|srv|Final|kl_divergence|perplexity)[ :]
