@@ -263,6 +263,25 @@ pub fn project(
     regime: &Regime,
     engine: Option<Engine>,
 ) -> Result<Projection, String> {
+    project_in(lines, regime, engine, None)
+}
+
+/// [`project`], reading each `ask`'s attached files back from `recording`,
+/// the directory their `path`s are relative to (#372): a head the
+/// operator's image rode in is rebuilt with it, through the one
+/// [`crate::client::attach`] the loop sent it with. With no `recording`, or
+/// a copy that is missing or not its digest, that head is named
+/// unattributed with the reason.
+///
+/// # Errors
+///
+/// As [`project`].
+pub fn project_in(
+    lines: &[log::Line],
+    regime: &Regime,
+    engine: Option<Engine>,
+    recording: Option<&std::path::Path>,
+) -> Result<Projection, String> {
     let Some(log::Line {
         event: Line::SessionStart { model, head, .. },
         ..
@@ -276,6 +295,7 @@ pub fn project(
         .map(|substrate| substrate.id.clone())
         .ok_or("the regime declares no substrate")?;
     let mut walk = Walk::over(lines, substrate, engine);
+    walk.recording = recording.map(std::path::Path::to_path_buf);
     walk.model.clone_from(model);
     walk.trunk = head
         .iter()
@@ -327,6 +347,10 @@ struct Walk<'a> {
     forks: BTreeSet<u64>,
     /// Each fork's capture row, by the fork's `seq`: its place in `events`.
     captures: BTreeMap<u64, usize>,
+    /// The directory an `ask`'s attached files are read back from (#372).
+    recording: Option<std::path::PathBuf>,
+    /// Each turn's attached files, from its `ask` line.
+    ask_files: BTreeMap<u32, Vec<log::RecordedFile>>,
     /// Each lane but the trunk's last logged head digest (v5, #374): a live
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
@@ -371,6 +395,8 @@ impl<'a> Walk<'a> {
             last_head: None,
             forks: BTreeSet::new(),
             captures: BTreeMap::new(),
+            recording: None,
+            ask_files: BTreeMap::new(),
             side_heads: BTreeMap::new(),
         }
     }
@@ -652,6 +678,9 @@ impl<'a> Walk<'a> {
     }
 
     fn ask(&mut self, seq: u64, turn: u32, files: Option<&Vec<log::RecordedFile>>) {
+        if let Some(files) = files {
+            self.ask_files.insert(turn, files.clone());
+        }
         let trunk_timings =
             self.trunk_of
                 .get(&turn)
@@ -754,10 +783,9 @@ impl<'a> Walk<'a> {
     /// request when the head moved.
     fn head_change(&mut self, seq: u64, turn: u32, logged: &str) {
         let mut messages = self.trunk.clone();
-        messages.push(Message::new(
-            Role::User,
-            self.asks.get(&turn).cloned().unwrap_or_default(),
-        ));
+        let asked = self.user_message(turn);
+        let unrebuilt = asked.as_ref().err().cloned();
+        messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
         let rebuilt = Head::of(&RequestShape {
             model: self.model.clone(),
             messages,
@@ -774,7 +802,20 @@ impl<'a> Walk<'a> {
             tools: Vec::new(),
         });
         let verified = (rebuilt.digest() == logged).then_some(rebuilt);
-        if verified.is_none() {
+        // A head whose attachment could not be read back is never verified,
+        // whatever the digest of what the rebuild could reach.
+        let verified = verified.filter(|_| unrebuilt.is_none());
+        if let Some(why) = unrebuilt {
+            self.name(
+                seq,
+                "request",
+                format!(
+                    "its head could not be rebuilt from the log: turn {turn}'s attachment: {why}; \
+                     a change at it is unattributed"
+                ),
+                None,
+            );
+        } else if verified.is_none() {
             self.name(
                 seq,
                 "request",
@@ -829,14 +870,43 @@ impl<'a> Walk<'a> {
         });
     }
 
+    /// Turn `turn`'s user message as the session sent it: the ask's words,
+    /// and each attached file read back from the recording and attached
+    /// through [`crate::client::attach`], in the line's order (#372).
+    fn user_message(&self, turn: u32) -> Result<Message, String> {
+        let mut message = Message::new(
+            Role::User,
+            self.asks.get(&turn).cloned().unwrap_or_default(),
+        );
+        let Some(files) = self.ask_files.get(&turn) else {
+            return Ok(message);
+        };
+        let Some(recording) = &self.recording else {
+            return Err("no recording directory to read it back from".to_owned());
+        };
+        for file in files {
+            let bytes = std::fs::read(recording.join(&file.path))
+                .map_err(|why| format!("{}: {why}", file.path))?;
+            message = crate::client::attach(message, file, &bytes)
+                .map_err(|why| format!("{}: {why}", file.path))?;
+        }
+        Ok(message)
+    }
+
     /// The trunk after an answered trunk request: its ask and its answer,
     /// appended as the session appends them.
     fn answered(&mut self, to_request: u64, text: &str, reasoning: Option<&String>) {
         let Some(turn) = self.turn_of.get(&to_request) else {
             return;
         };
-        let ask = self.asks.get(turn).cloned().unwrap_or_default();
-        self.trunk.push(Message::new(Role::User, ask));
+        let turn = *turn;
+        let asked = self.user_message(turn).unwrap_or_else(|_| {
+            Message::new(
+                Role::User,
+                self.asks.get(&turn).cloned().unwrap_or_default(),
+            )
+        });
+        self.trunk.push(asked);
         let mut answer = Message::new(Role::Assistant, text.to_owned());
         answer.reasoning = reasoning.cloned();
         self.trunk.push(answer);

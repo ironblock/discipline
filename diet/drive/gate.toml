@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 252
+faults = 253
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -4035,4 +4035,17 @@ becomes = '''
             std::fs::read(file).map_err(|why| (Check::Unreadable, why.to_string()))?'''
 catches = [
     "drive::attach::tests::the_confined_read_refuses_a_link_the_path_check_never_saw",
+]
+
+[[fault]]
+id = "drive.projection-rebuilds-an-image-turn-without-its-image"
+failure_class = "drive.projection-rebuilds-an-image-turn-without-its-image"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+        let Some(files) = self.ask_files.get(&turn) else {'''
+becomes = '''
+        let Some(files) = self.ask_files.get(&turn).filter(|_| false) else {'''
+catches = [
+    "drive::serve::tests::a_head_the_operators_image_rode_in_is_rebuilt_from_the_recording",
 ]

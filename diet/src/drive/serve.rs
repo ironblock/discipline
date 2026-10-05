@@ -2526,6 +2526,74 @@ mod tests {
         let _ = std::fs::remove_dir_all(&recording);
     }
 
+    /// The record of a session the operator's image rode in (#372, the head
+    /// rebuild; #458's review NB2): projected with the recording's directory,
+    /// every trunk head -- the one the image was sent in and the one after,
+    /// which still carries it -- is rebuilt and verified; projected without,
+    /// the image turn's head is named unattributed with the reason, never
+    /// silently wrong.
+    #[test]
+    fn a_head_the_operators_image_rode_in_is_rebuilt_from_the_recording() {
+        use crate::drive::attach::{
+            Attaching,
+            tests::{confinement_for, png},
+        };
+        use crate::drive::projection;
+        use crate::drive::tool_loop::tests::scratch;
+
+        let tree = scratch("rebuild-serve-tree");
+        let recording = scratch("rebuild-serve-recording");
+        std::fs::write(tree.join("shot.png"), png("the operator's screenshot"))
+            .expect("the screenshot");
+        let log_path = recording.join("session.jsonl");
+        let (session, server, _stub) = serve_attaching(
+            2,
+            Attaching {
+                policy: Some(crate::isolation::Policy::merged_usr()),
+                worktree: Some(tree.clone()),
+                confinement: confinement_for(&crate::isolation::Policy::merged_usr()),
+                recording: Some(recording.clone()),
+            },
+            Some(&log_path),
+        );
+        for (turn, asked) in [(1, "what is wrong in `shot.png`?"), (2, "and then?")] {
+            let reply = post(&server, &ask_json(asked), "");
+            assert_eq!(status(&reply), 200, "{reply}");
+            turns_settled(&session, turn);
+        }
+        let lines: Vec<_> = session
+            .events_from(0)
+            .iter()
+            .map(crate::drive::session::line_of)
+            .collect();
+        drop(server);
+        drop(session);
+        let regime = crate::drive::session::tests::regime();
+        let unrebuilt = |projected: &projection::Projection| -> Vec<String> {
+            projected
+                .unspellable
+                .iter()
+                .filter(|u| u.kind == "request" && u.why.contains("could not be rebuilt"))
+                .map(|u| u.why.clone())
+                .collect()
+        };
+
+        let with =
+            projection::project_in(&lines, &regime, None, Some(&recording)).expect("projected");
+        assert_eq!(unrebuilt(&with), Vec::<String>::new());
+
+        let without = projection::project(&lines, &regime, None).expect("projected");
+        let named = unrebuilt(&without);
+        assert_eq!(named.len(), 2, "{named:?}");
+        assert!(
+            named[0].contains("turn 1's attachment: no recording directory"),
+            "{named:?}"
+        );
+
+        let _ = std::fs::remove_dir_all(&tree);
+        let _ = std::fs::remove_dir_all(&recording);
+    }
+
     /// With no `--log` or `--record`, the PNG is attached and sent, nothing
     /// is copied, and the `ask` line names no file.
     #[test]
