@@ -10,7 +10,9 @@
 //!   resumes against a restarted process is told `410` instead of being fed
 //!   another session's events as if they continued its own (D7).
 //! * `POST /commands` takes `{"kind": <command>, ...}`. A refusal is `409`
-//!   with its tag, and the session has logged it (D8).
+//!   with its tag, and the session has logged it (D8). An ask may carry
+//!   `"scoping": true`, the operator's mark that warrants the capture gap's
+//!   fork (#374); its `ask` line carries it.
 //! * `POST /approve` takes `{"call": <id>, "scope": once|session|workspace|
 //!   decline}`, the operator's answer to the prompt waiting on that call
 //!   (#298 point 8): `204`, or `409` with its tag (`nothing-waiting`,
@@ -660,7 +662,11 @@ impl<S: Streaming + 'static> Serving<S> {
                 )]),
             )
         };
-        let Posted { command, gap } = command;
+        let Posted {
+            command,
+            gap,
+            scoping,
+        } = command;
         let rejected = |rejection: Rejected| match rejection {
             Rejected::Refused(because) => refused(because),
             // Not a command the session could refuse, or a gap it could not
@@ -668,7 +674,7 @@ impl<S: Streaming + 'static> Serving<S> {
             Rejected::NoSuchTurn(_) | Rejected::BadGap(_) => (400, BTreeMap::new()),
         };
         match command {
-            Command::Ask(text) => match self.session.ask(&text, gap) {
+            Command::Ask(text) => match self.session.ask_marked(&text, gap, scoping) {
                 Ok(admitted) => (
                     200,
                     BTreeMap::from([
@@ -694,10 +700,13 @@ impl<S: Streaming + 'static> Serving<S> {
     }
 }
 
-/// A command as posted, and the idle gap it ended, if the surface sent one.
+/// A command as posted, the idle gap it ended, if the surface sent one, and
+/// for an ask whether the operator marked it a scoping question (#374):
+/// `"scoping": true` on the post.
 struct Posted {
     command: Command,
     gap: Option<IdleGap>,
+    scoping: bool,
 }
 
 /// A command.
@@ -721,7 +730,7 @@ impl Command {
             .find(|candidate| candidate.tag() == kind)?;
         // Any command may carry the idle gap it ended (#117, D13 (c)).
         let takes: &[&str] = match kind {
-            CommandKind::Ask => &["kind", "text", "idle_gap"],
+            CommandKind::Ask => &["kind", "text", "idle_gap", "scoping"],
             CommandKind::Cancel => &["kind", "turn", "idle_gap"],
             CommandKind::DeclareSeam | CommandKind::End => &["kind", "idle_gap"],
         };
@@ -731,6 +740,13 @@ impl Command {
         let gap = match object.get("idle_gap") {
             None => None,
             Some(gap) => Some(idle_gap(gap)?),
+        };
+        // Only an ask takes the operator's mark (`takes`, above), and only as
+        // a boolean.
+        let scoping = match object.get("scoping") {
+            None => false,
+            Some(Value::Boolean(mark)) => *mark,
+            Some(_) => return None,
         };
         let command = match kind {
             CommandKind::Ask => match object.get("text") {
@@ -744,7 +760,11 @@ impl Command {
             CommandKind::DeclareSeam => Some(Self::DeclareSeam),
             CommandKind::End => Some(Self::End),
         }?;
-        Some(Posted { command, gap })
+        Some(Posted {
+            command,
+            gap,
+            scoping,
+        })
     }
 }
 
@@ -2143,5 +2163,154 @@ mod tests {
         );
         assert!(tree.join("a").exists());
         let _ = std::fs::remove_dir_all(&tree);
+    }
+
+    // -----------------------------------------------------------------------
+    // the capture gap's fork, served (#374)
+    // -----------------------------------------------------------------------
+
+    /// A trunk answer that reports the warm turn-2 capture's counts
+    /// (`e7051ef`), so the projection can write its turn row.
+    fn timed(text: &str) -> Vec<Step> {
+        vec![
+            Step::Delta(text.to_owned()),
+            Step::Timings(crate::client::stream::Timings {
+                prompt_n: Some(18),
+                cache_n: Some(160),
+                predicted_n: Some(66),
+                ..crate::client::stream::Timings::default()
+            }),
+        ]
+    }
+
+    /// The record a served log projects to, validated: its fork rows off
+    /// turn 1, and each capture row's entries.
+    fn projected(lines: &[crate::formats::log::Line]) -> (usize, Vec<u32>) {
+        use crate::drive::projection::{self, Engine};
+        use crate::drive::session::tests::regime;
+        use crate::formats::record::{self, Event as Row, Record};
+
+        let projected = projection::project(lines, &regime(), Some(Engine::Commit("e7051ef")))
+            .expect("projected");
+        let rendered = record::render(&Record {
+            events: projected.events.clone(),
+        });
+        record::parse(&rendered).unwrap_or_else(|why| panic!("{why:?}\n{rendered}"));
+        let fork_rows = projected
+            .events
+            .iter()
+            .filter(|row| matches!(row, Row::Fork { of_turn: 1, .. }))
+            .count();
+        let captures: Vec<u32> = projected
+            .events
+            .iter()
+            .filter_map(|row| match row {
+                Row::Capture { entries, .. } => Some(*entries),
+                _ => None,
+            })
+            .collect();
+        (fork_rows, captures)
+    }
+
+    /// #374's definition of done, against a stub engine that answers the
+    /// interview with three decisions: an ask posted `"scoping": true` fires
+    /// one fork in its gap and a plain ask after it fires none; `/events`
+    /// carries the fork, its call, its settling and its three `patch` lines
+    /// as log lines; the served log is one `diet check-log` accepts; the
+    /// projection writes one fork row and one capture of three entries; and
+    /// side calls per ask -- the receipt's count of `fork` lines -- is 1 for
+    /// the scoping turn.
+    #[test]
+    fn a_scoping_ask_over_http_fires_one_fork_whose_three_patches_project_to_one_capture() {
+        use crate::drive::session::tests::{DECIDED, SCOPED, interviewing};
+        use crate::formats::log::{self, Event as Line};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("loopback");
+        let session = Arc::new(Session::open_with(
+            Canned::new([timed(SCOPED), deltas(&[DECIDED]), timed("Sure.")]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        ));
+        let server = Server::start(
+            listener,
+            Arc::clone(&session),
+            quick(),
+            crate::drive::session::render,
+        )
+        .expect("the server starts");
+        let mut reader = Client::send(&server, &events_request(&server, "?from=0", ""));
+        let reply = post(
+            &server,
+            r#"{"kind":"ask","text":"what are we building?","scoping":true}"#,
+            "",
+        );
+        assert_eq!(status(&reply), 200, "{reply}");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .any(|logged| matches!(logged.event, Event::ForkSettled { .. }))
+        });
+        let reply = post(&server, r#"{"kind":"ask","text":"thanks"}"#, "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        let whole = wait_until(&session, "turn 2 to settle", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .any(|logged| matches!(logged.event, Event::TurnSettled { turn: 2, .. }))
+        });
+        assert!(
+            reader.read_until(Duration::from_secs(10), |read| {
+                read.lines()
+                    .filter(|line| line.starts_with("data: "))
+                    .count()
+                    >= whole.len()
+            }),
+            "the stream fell short of the log: {:?}",
+            reader.read
+        );
+        let document: String = reader
+            .data()
+            .iter()
+            .map(|data| data.clone() + "\n")
+            .collect();
+        // `diet check-log`'s own reader.
+        log::project(&document).unwrap_or_else(|why| panic!("{why}\n{document}"));
+        let lines = log::parse(&document).expect("the served log reads");
+        let forks: Vec<u32> = lines
+            .iter()
+            .filter_map(|line| match &line.event {
+                Line::Fork { of_turn, .. } => Some(*of_turn),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(forks, [1], "one fork, after the scoping turn: {document}");
+        let patched = lines
+            .iter()
+            .filter(|line| matches!(line.event, Line::Patch { .. }))
+            .count();
+        assert_eq!(patched, 3, "{document}");
+        let asks = lines
+            .iter()
+            .filter(|line| matches!(line.event, Line::Ask { .. }))
+            .count();
+        assert_eq!(asks, 2);
+
+        let (fork_rows, captures) = projected(&lines);
+        assert_eq!(fork_rows, 1);
+        assert_eq!(captures, [3]);
+
+        // The mark is an ask's, and a boolean: anything else is 400, logged
+        // nowhere.
+        for malformed in [
+            r#"{"kind":"ask","text":"x","scoping":"yes"}"#,
+            r#"{"kind":"end","scoping":true}"#,
+        ] {
+            assert_eq!(status(&post(&server, malformed, "")), 400, "{malformed}");
+        }
+        assert_eq!(session.events_from(0).len(), whole.len());
     }
 }

@@ -43,7 +43,7 @@ use diet::client::stub::Stub;
 use diet::client::transport::{Endpoint, Http};
 use diet::drive::regimen::{SUBSTRATE_KEYS, regime_of};
 use diet::drive::serve::{Config, Credential, Server};
-use diet::drive::session::Session;
+use diet::drive::session::{self, Interview, Session};
 use diet::drive::tool_loop::{self, Tools};
 use diet::drive::{Gym, Halt, canned, run};
 use diet::formats::record::Regime;
@@ -288,6 +288,12 @@ fn serve(args: &[String]) -> ExitCode {
     if record_file.is_some() && regime.is_none() {
         return fail(EXIT_USAGE, RECORD_NEEDS_A_REGIMEN);
     }
+    // What the capture gap forks under (#374), when the regimen warrants
+    // forks: its rules, and a working object under its regime.
+    let interview = match serving_interview(regimen_file.as_deref(), regime.as_ref()) {
+        Ok(interview) => interview,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
     // What the model's calls run under, opened now: a confinement that
     // cannot open refuses before any request is made or anything binds
     // (#298 point 8).
@@ -344,7 +350,7 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
-    let session = served_session(transport, shape, tools, claim);
+    let session = served_session(transport, shape, tools, (claim, interview));
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
     let config = Config {
@@ -518,7 +524,10 @@ fn served_session(
     transport: HttpStream,
     mut shape: RequestShape,
     tools: Option<Tools>,
-    claim: Option<diet::formats::log::SubstrateClaim>,
+    (claim, interview): (
+        Option<diet::formats::log::SubstrateClaim>,
+        Option<Interview>,
+    ),
 ) -> std::sync::Arc<Session<HttpStream>> {
     // A session that runs commands declares the one tool they run through.
     if tools.is_some() {
@@ -533,7 +542,29 @@ fn served_session(
         }),
         tools,
         claim,
+        interview,
     ))
+}
+
+/// What `serve`'s capture gap forks under (#374): the rules the regimen at
+/// `regimen` lists under `interview_warrant`, and a working object under
+/// `regime`. `None` when it lists none, or there is no regimen: then no fork
+/// ever fires.
+fn serving_interview(
+    regimen: Option<&str>,
+    regime: Option<&Regime>,
+) -> Result<Option<Interview>, String> {
+    let (Some(path), Some(regime)) = (regimen, regime) else {
+        return Ok(None);
+    };
+    let text =
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
+    let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
+    Ok((!rules.is_empty()).then(|| Interview {
+        rules,
+        object: diet::object::WorkingObject::open(regime.clone()),
+    }))
 }
 
 /// What `serve` runs the model's calls under, when the regimen at

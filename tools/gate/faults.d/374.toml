@@ -68,3 +68,28 @@ check = "lanes"
 label = "drive.a-forks-capture-counts-one-patch"
 failure_class = "drive.a-forks-capture-counts-one-patch"
 migrated = false
+
+# Layer 2: serve fires the interview fork in the capture gap.
+[[fault]]
+id = "drive.a-scoping-gap-fires-no-fork"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-scoping-gap-fires-no-fork"
+failure_class = "drive.a-scoping-gap-fires-no-fork"
+migrated = false
+
+[[fault]]
+id = "drive.a-plain-gap-fires-a-fork"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-plain-gap-fires-a-fork"
+failure_class = "drive.a-plain-gap-fires-a-fork"
+migrated = false
+
+[[fault]]
+id = "drive.a-forks-patch-lines-dropped"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-forks-patch-lines-dropped"
+failure_class = "drive.a-forks-patch-lines-dropped"
+migrated = false
