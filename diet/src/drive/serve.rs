@@ -129,7 +129,7 @@ impl Emptied {
 }
 
 /// How a server behaves at its edges.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Config {
     /// How long a stream may be silent before a comment line is sent. The
     /// write is also how a reader that left is noticed.
@@ -2420,7 +2420,10 @@ mod tests {
     /// log records -- still carries the image.
     #[test]
     fn an_operators_png_is_sent_as_an_image_part_logged_by_reference_and_copied() {
-        use crate::drive::attach::{Attaching, tests::png};
+        use crate::drive::attach::{
+            Attaching,
+            tests::{confinement_for, png},
+        };
         use crate::drive::tool_loop::tests::scratch;
         use crate::formats::log::{self, Event as Line, RecordedFile};
 
@@ -2436,6 +2439,7 @@ mod tests {
             Attaching {
                 policy: Some(crate::isolation::Policy::merged_usr()),
                 worktree: Some(tree.clone()),
+                confinement: confinement_for(&crate::isolation::Policy::merged_usr()),
                 recording: Some(recording.clone()),
             },
             Some(&log_path),
@@ -2526,7 +2530,10 @@ mod tests {
     /// is copied, and the `ask` line names no file.
     #[test]
     fn with_no_recording_an_operators_png_is_sent_and_nothing_is_copied() {
-        use crate::drive::attach::{Attaching, tests::png};
+        use crate::drive::attach::{
+            Attaching,
+            tests::{confinement_for, png},
+        };
         use crate::drive::tool_loop::tests::scratch;
 
         let tree = scratch("attach-serve-unrecorded");
@@ -2537,6 +2544,7 @@ mod tests {
             Attaching {
                 policy: Some(crate::isolation::Policy::merged_usr()),
                 worktree: Some(tree.clone()),
+                confinement: confinement_for(&crate::isolation::Policy::merged_usr()),
                 recording: None,
             },
             None,
@@ -2578,7 +2586,10 @@ mod tests {
     /// copied or sent.
     #[test]
     fn an_ask_naming_a_png_that_fails_a_check_is_400_and_nothing_is_logged_or_sent() {
-        use crate::drive::attach::{Attaching, tests::png};
+        use crate::drive::attach::{
+            Attaching,
+            tests::{confinement_for, png},
+        };
         use crate::drive::tool_loop::tests::scratch;
 
         let tree = scratch("attach-serve-refused-tree");
@@ -2594,9 +2605,15 @@ mod tests {
         std::fs::write(outside.join("away.png"), png("away")).expect("written");
         std::fs::write(secret.join("key.png"), png("key")).expect("written");
         std::fs::write(tree.join("text.png"), b"plain text").expect("written");
+        // Links in the tree, each judged where it leads (#461 F1, F5).
+        std::os::unix::fs::symlink(secret.join("key.png"), tree.join("to-key.png"))
+            .expect("a link");
+        std::os::unix::fs::symlink(outside.join("away.png"), tree.join("to-away.png"))
+            .expect("a link");
         let (session, server, stub) = serve_attaching(
             1,
             Attaching {
+                confinement: confinement_for(&policy),
                 policy: Some(policy),
                 worktree: Some(tree.clone()),
                 recording: Some(recording.clone()),
@@ -2611,6 +2628,8 @@ mod tests {
             (secret.join("key.png").display().to_string(), "secret"),
             ("gone.png".to_owned(), "missing"),
             ("text.png".to_owned(), "not-png"),
+            ("to-key.png".to_owned(), "secret"),
+            ("to-away.png".to_owned(), "outside-read-scope"),
         ] {
             let reply = post(&server, &ask_json(&format!("look at {path}")), "");
             assert_eq!(status(&reply), 400, "{path}: {reply}");

@@ -63,3 +63,11 @@ check = "lanes"
 label = "drive.an-attached-file-is-not-copied"
 failure_class = "drive.an-attached-file-is-not-copied"
 migrated = false
+
+[[fault]]
+id = "drive.an-attachment-is-read-outside-the-confinement"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.an-attachment-is-read-outside-the-confinement"
+failure_class = "drive.an-attachment-is-read-outside-the-confinement"
+migrated = false

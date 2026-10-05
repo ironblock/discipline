@@ -735,8 +735,10 @@ fn serving_tools(
 }
 
 /// What `serve` checks an ask's named PNGs against, and copies them to
-/// (#372): the policy and worktree the model's commands run under, when the
-/// regimen runs commands; otherwise the regimen's own policy, with the
+/// (#372): the policy, worktree and confinement the model's commands run
+/// under, when the regimen runs commands -- the confinement then reads each
+/// file, so the kernel judges the open; otherwise the regimen's own policy,
+/// read directly (no command runs to swap a path), with the
 /// drive's key and auth files among its secrets, and no worktree; with no
 /// regimen, no read scope, so nothing attaches. The copies go beside
 /// `recorded_at`, the log (or, with none, the record).
@@ -759,6 +761,7 @@ fn attaching(
         return Ok(Attaching {
             policy: Some(tools.policy.clone()),
             worktree: Some(tools.worktree.clone()),
+            confinement: Some(tools.confinement.clone()),
             recording,
         });
     }
@@ -789,6 +792,7 @@ fn attaching(
     Ok(Attaching {
         policy: Some(policy),
         worktree: None,
+        confinement: None,
         recording,
     })
 }
