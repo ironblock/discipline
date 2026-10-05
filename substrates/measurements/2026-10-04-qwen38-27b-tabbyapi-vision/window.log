@@ -1,0 +1,14 @@
+2026-10-04T22:45:21Z preflight ok; floor pid=375353
+2026-10-04T22:45:22Z DOWNTIME START floor stopped vram=21
+2026-10-04T22:45:22Z overlay ready: preprocessor 86a37a5848a26759 size={'longest_edge': 16777216, 'shortest_edge': 1048576}
+2026-10-04T22:45:37Z tabby loaded at pool 196608
+2026-10-04T22:45:37Z tabby up after ~18s vram=22662 model=Qwen3.8-27B-exl3-3.00bpw-img1024 196608 8,8 None None
+2026-10-04T22:45:40Z vision cell rc=0 r1 200 1188 bytes r2 200 1207 bytes r3 200 1186 bytes 
+2026-10-04T22:45:41Z vision derive: {"per_request": ["accepted", "accepted", "accepted"], "word": "accepted"}
+2026-10-04T22:47:16Z tabby text rc=0 [(6000, 0, 104.48979591836735), (6000, 1, 104.48979591836735), (300000, 0, 66.49350649350649), (300000, 1, 66.49350649350649)]
+tabby vram trace: samples 438 min 22662 peak 23816 free_at_peak 760
+2026-10-04T22:47:22Z phases done
+2026-10-04T22:47:22Z restore: begin
+2026-10-04T22:47:41Z provision-diet rc=0
+2026-10-04T22:47:42Z restored: pid=387285 exe=980845d60ae7a820 vram=23066
+2026-10-04T22:47:42Z END

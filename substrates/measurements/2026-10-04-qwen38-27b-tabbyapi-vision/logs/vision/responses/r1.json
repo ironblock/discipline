@@ -1,0 +1,15 @@
+{
+ "n": 1,
+ "started": "2026-10-04T22:45:37.801973Z",
+ "ended": "2026-10-04T22:45:39.675265Z",
+ "status": 200,
+ "headers": {
+  "date": "Sun, 04 Oct 2026 22:45:37 GMT",
+  "server": "uvicorn",
+  "content-length": "1188",
+  "content-type": "application/json",
+  "vary": "Origin",
+  "connection": "close"
+ },
+ "body": "{\"id\":\"cmpl-99f36301fcde4b37bf4f11d6b6b38a99\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"eos_reason\":\"stop_token\",\"stop_str\":\"<|im_end|>\",\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\nNPC7\",\"reasoning_content\":\"The user wants the exact text from the image. The image shows pixelated dark blue text on a white background. Reading the characters: \\\"NPC7\\\". I should provide only the text as instructed.\\n\",\"tool_calls\":null,\"tool_call_id\":null},\"logprobs\":null}],\"created\":1791153939,\"model\":\"Qwen3.8-27B-exl3-3.00bpw-img1024\",\"object\":\"chat.completion\",\"usage\":{\"prompt_tokens\":1099,\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_time\":1.06,\"prompt_tokens_per_sec\":1036.79,\"completion_tokens\":46,\"completion_tokens_details\":{\"accepted_prediction_tokens\":32,\"rejected_prediction_tokens\":66},\"completion_time\":0.53,\"completion_tokens_per_sec\":86.45,\"total_tokens\":1145,\"total_time\":1.6},\"timings\":{\"cache_n\":0,\"prompt_n\":1099,\"prompt_ms\":1060.0,\"prompt_per_token_ms\":0.9645131938125568,\"prompt_per_second\":1036.7924528301887,\"predicted_n\":46,\"predicted_ms\":530.0,\"predicted_per_token_ms\":11.521739130434783,\"predicted_per_second\":86.79245283018868,\"draft_n\":98,\"draft_n_accepted\":32}}"
+}

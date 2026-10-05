@@ -1,0 +1,3 @@
+vision-start 22:45:37.740
+vision-end 22:45:40.988
+text-start 22:45:41.025
