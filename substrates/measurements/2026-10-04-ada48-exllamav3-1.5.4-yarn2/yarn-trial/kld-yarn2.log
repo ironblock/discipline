@@ -1,0 +1,32 @@
+ -- Loading $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw-yarn2
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+[exl3-205-v154-yarn2] loaded in 17s; VRAM used 33.9 GiB
+[exl3-205-v154-yarn2] base-code.kld chunk 1/12 running KLD 0.14268 PPL 1.7595 (2s)
+[exl3-205-v154-yarn2] base-code.kld chunk 2/12 running KLD 0.13734 PPL 1.8122 (4s)
+[exl3-205-v154-yarn2] base-code.kld chunk 3/12 running KLD 0.12857 PPL 1.6860 (6s)
+[exl3-205-v154-yarn2] base-code.kld chunk 4/12 running KLD 0.10752 PPL 1.5472 (9s)
+[exl3-205-v154-yarn2] base-code.kld chunk 5/12 running KLD 0.10111 PPL 1.4516 (11s)
+[exl3-205-v154-yarn2] base-code.kld chunk 6/12 running KLD 0.09545 PPL 1.4198 (13s)
+[exl3-205-v154-yarn2] base-code.kld chunk 7/12 running KLD 0.09719 PPL 1.4191 (15s)
+[exl3-205-v154-yarn2] base-code.kld chunk 8/12 running KLD 0.09712 PPL 1.4024 (17s)
+[exl3-205-v154-yarn2] base-code.kld chunk 9/12 running KLD 0.09407 PPL 1.3890 (19s)
+[exl3-205-v154-yarn2] base-code.kld chunk 10/12 running KLD 0.09210 PPL 1.3876 (22s)
+[exl3-205-v154-yarn2] base-code.kld chunk 11/12 running KLD 0.09083 PPL 1.3794 (24s)
+[exl3-205-v154-yarn2] base-code.kld chunk 12/12 running KLD 0.08805 PPL 1.3691 (26s)
+RESULT exl3-205-v154-yarn2 base-code.kld: PPL(Q) 1.369052 PPL(base) 1.346347 Mean KLD 0.088046 ± 0.002492 99.9% KLD 4.677012 Median KLD 0.000342 Same top 95.534 ± 0.132 % n=24564
+[exl3-205-v154-yarn2] base-prose.kld chunk 1/12 running KLD 0.24902 PPL 1.3938 (2s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 2/12 running KLD 0.32381 PPL 2.2135 (5s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 3/12 running KLD 0.29221 PPL 2.1190 (7s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 4/12 running KLD 0.28778 PPL 2.2833 (10s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 5/12 running KLD 0.28034 PPL 2.6684 (12s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 6/12 running KLD 0.25936 PPL 2.9950 (14s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 7/12 running KLD 0.26420 PPL 3.2300 (17s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 8/12 running KLD 0.25883 PPL 3.4528 (19s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 9/12 running KLD 0.25115 PPL 3.5946 (21s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 10/12 running KLD 0.23935 PPL 3.4961 (24s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 11/12 running KLD 0.23519 PPL 3.3463 (26s)
+[exl3-205-v154-yarn2] base-prose.kld chunk 12/12 running KLD 0.23170 PPL 3.2020 (28s)
+RESULT exl3-205-v154-yarn2 base-prose.kld: PPL(Q) 3.201989 PPL(base) 2.950894 Mean KLD 0.231699 ± 0.003294 99.9% KLD 5.379480 Median KLD 0.052710 Same top 84.856 ± 0.229 % n=24564

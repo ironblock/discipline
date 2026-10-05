@@ -1,0 +1,23 @@
+# rtx6000ada-host production (2026-10-03): TabbyAPI + EXL3 2.05bpw Flash-Next. Rollback: the saved llama.cpp launch file (llama.cpp e7051ef).
+network:
+  host: 127.0.0.1
+  port: <port>
+  disable_auth: false
+logging:
+  log_prompt: false
+  log_generation_params: false
+  log_requests: false
+model:
+  model_dir: $HOME/models
+  model_name: qwen3.8-flash-next
+  backend: exllamav3
+  max_seq_len: 524288
+  cache_size: 606208
+  cache_mode: "8,8"
+  ngram_ram: true
+  max_batch_size: 4
+  chunk_size: 2048
+  reasoning: true
+draft_model:
+  draft_mode: mtp
+  draft_num_tokens: 3

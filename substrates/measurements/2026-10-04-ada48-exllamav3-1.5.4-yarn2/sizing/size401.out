@@ -1,0 +1,6 @@
+2026-10-04T21:30:43Z load 262144 used_mib 41238
+2026-10-04T21:31:13Z load 524288 used_mib 46078
+2026-10-04T21:31:13Z kv_mib_per_token 0.01846 (18.9 KiB)
+2026-10-04T21:31:37Z load failed at 638976
+2026-10-04T21:35:34Z fill {"cache_size": 606208, "per_request": 150528, "requests": [{"prompt_tokens": 150438, "wall_s": 196.0}, {"prompt_tokens": 150438, "wall_s": 199.5}, {"prompt_tokens": 150438, "wall_s": 199.5}, {"prompt_tokens": 150438, "wall_s": 199.5}], "peak_mib": 48162, "free_at_peak_mib": 978, "load_used_mib": 47598}
+2026-10-04T21:35:34Z CHOSEN 606208

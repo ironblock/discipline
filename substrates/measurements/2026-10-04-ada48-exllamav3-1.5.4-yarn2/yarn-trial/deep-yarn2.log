@@ -1,0 +1,6 @@
+{"tag": "yarn2", "depth": 10000, "conc": 1, "rep": 0, "wall_s": 5.6, "per_req": [119.07], "agg_wall": 45.7, "pn": [10082], "pp": [2948], "a": 0.479, "errors": []}
+{"tag": "yarn2", "depth": 10000, "conc": 1, "rep": 1, "wall_s": 2.2, "per_req": [122.49], "agg_wall": 114.2, "pn": [98], "pp": [980], "a": 0.487, "errors": []}
+{"tag": "yarn2", "depth": 10000, "conc": 1, "rep": 2, "wall_s": 2.2, "per_req": [122.49], "agg_wall": 114.4, "pn": [98], "pp": [980], "a": 0.487, "errors": []}
+{"tag": "yarn2", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 33.5, "per_req": [123.67], "agg_wall": 7.6, "pn": [91680], "pp": [2940], "a": 0.503, "errors": []}
+{"tag": "yarn2", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 2.4, "per_req": [121.33], "agg_wall": 106.0, "pn": [32], "pp": [457], "a": 0.487, "errors": []}
+{"tag": "yarn2", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 2.4, "per_req": [121.33], "agg_wall": 105.8, "pn": [32], "pp": [457], "a": 0.487, "errors": []}

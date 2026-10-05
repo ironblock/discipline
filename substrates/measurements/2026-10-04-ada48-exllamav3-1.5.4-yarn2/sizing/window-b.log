@@ -1,0 +1,7 @@
+2026-10-04T21:30:12Z DOWNTIME START (sizing + switch) vram=2
+2026-10-04T21:35:34Z size401 rc=0 2026-10-04T21:35:34Z CHOSEN 606208
+2026-10-04T21:35:34Z config: cache_size=606208 (max_seq_len unchanged: 262144); live config sha 64d7ca5684298282
+2026-10-04T21:36:17Z prod contcheck rc=0
+2026-10-04T21:36:18Z SWITCHED: pid=708610 venv=$HOME/venvs/tabby154/bin/python exllamav3=1.5.4 vram=48198
+2026-10-04T21:36:18Z prod-tabby.sh now starts the 1.5.4 venv
+2026-10-04T21:36:18Z END

@@ -1,0 +1,5 @@
+2026-10-04T22:45:39Z DOWNTIME START vram=2
+2026-10-04T22:45:39Z symlink -> Qwen3.8-Flash-Next-exl3-2.05bpw-yarn2; config b5db18d510fe3848; diff: 14c14 <   max_seq_len: 262144 --- >   max_seq_len: 524288 
+2026-10-04T22:46:00Z up: pid=716622 vram=47598 model=Qwen3.8-Flash-Next-exl3-2.05bpw-yarn2 524288 606208 8,8
+2026-10-04T22:46:21Z contcheck rc=0
+2026-10-04T22:46:21Z DOWNTIME END: production on YaRN x2
