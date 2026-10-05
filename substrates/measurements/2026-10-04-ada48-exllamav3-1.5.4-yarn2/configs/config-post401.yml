@@ -1,4 +1,4 @@
-# rtx6000ada-host production (2026-10-03): TabbyAPI + EXL3 2.05bpw Flash-Next. Rollback: ~/setup/prod-cmdline.txt (llama.cpp e7051ef).
+# rtx6000ada-host production (2026-10-03): TabbyAPI + EXL3 2.05bpw Flash-Next. Rollback: the saved llama.cpp launch file (llama.cpp e7051ef).
 network:
   host: 127.0.0.1
   port: <port>

@@ -843,7 +843,7 @@ equipment = "rtx6000ada-host"
 description = "Qwen3.8-Flash-Next as EXL3 at 2.05 bpw (turboderp/Qwen3.8-Flash-Next-exl3, branch 2.05bpw_h4_ng4) with its 2-bit MTP head, served by TabbyAPI + ExLlamaV3 (1.5.2 from 2026-10-03T16:22Z, 1.5.4 from 2026-10-04T21:36Z, with YaRN x2 from 2026-10-04T22:46Z) on the 48 GiB accelerator; the interactive drive's endpoint; a new substrate, not admitted (#143: admission is the three results)"
 pinned = true
 engine_name = "TabbyAPI + ExLlamaV3 (Python, torch)"
-engine_identity = "32e77855e0f8de1676e9b76fbc10b7a4f769291f1d2db370c10c3d90e3fcd171"
+engine_identity = "9d3b1761d85a40e0ee9958320991c1ad28905bd005df7f9174e0f812b9629652"
 engine_identity_is = "the composite over engine_components in the python-torch-exllamav3 form's order (#337, ruled 5975255706): a Python/torch engine has no executable and no library directory to hash, so its identity is its serving code's commit, its kernel library's wheel and compiled extension, the torch, CUDA runtime, driver and interpreter versions, the frozen package set and the redacted config with its redaction diff"
 engine_component_form = "python-torch-exllamav3"
 engine_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
@@ -876,22 +876,22 @@ python = "3.12.14"
 python_is = "the serving venv's interpreter version (versions.txt); it changes the numerics and is not in the frozen set"
 package_set_sha256 = "b5ad92d13e847b3cbe01adc4102839b4ed83dc4ab458d63a95086c6d554dc802"
 package_set_sha256_is = "sha256 of the 1.5.4 serving venv's frozen package set, 90 packages, a copy of the 1.5.2 venv with only exllamav3 replaced (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/configs/tabby154-freeze.txt)"
-config_redacted_sha256 = "513705f02f976363f2b92bba546225aa378a5c6b6835d3f731123a7006ffa18c"
-config_redacted_sha256_is = "sha256 of the live config.yml of the YaRN x2 switch with the port and the home prefix redacted (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/configs/config-post-yarn.yml; the live file is b5db18d5...); max_seq_len 524288, cache_size 606208, and the served name now resolves to the YaRN overlay directory (config.json 47807d66..., configs/yarn2-config.json)"
-config_redaction_diff_sha256 = "f651007461da92c470041a1fe6becb1597dda30c1883e3192d61fd6b5b58ece3"
-config_redaction_diff_sha256_is = "sha256 of the note on what the redacted configs differ in, the port and the home prefix and nothing else (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/configs/config-redaction.diff)"
+config_redacted_sha256 = "fe3f9b8c73f56072d67ceaa404ea37d364ffceebaa4fc5df93de596e372bddea"
+config_redacted_sha256_is = "sha256 of the live config.yml of the YaRN x2 switch with the rollback comment's path, the port and the home prefix redacted (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/configs/config-post-yarn.yml; the live file is b5db18d5...); max_seq_len 524288, cache_size 606208, and the served name now resolves to the YaRN overlay directory (config.json 47807d66..., configs/yarn2-config.json)"
+config_redaction_diff_sha256 = "d22c1524da9056bdf25d9b399d0866872f6334f70e76bc5f11eb6836f2a5a76d"
+config_redaction_diff_sha256_is = "sha256 of the note on what the redacted configs differ in, a reconstructed note: the rollback comment's path, the port and the home prefix (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/configs/config-redaction.diff)"
 
 [[substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05.instance]]
 id = "2026-10-03"
-exllamav3_wheel_sha256 = "c810dc4ad13e105cc62da2354405ae3d967c143359d683f323149a45c25fc702"
-exllamav3_extension_sha256 = "9157a0af8dc1135ffccdf99c86fc981f55fbbfe7f9ee659d93deced887f8a89d"
+exllamav3_wheel_sha256 = "aeb8bbd84248e4d88391024c14e33532e790d07aac8c9340da17800de918cfed"
+exllamav3_extension_sha256 = "0b2d43c21bb23225cd17637e2b971f8dd19bb8f5ed6ec5c02fee663c34527b4a"
 python = "3.12.14"
 accelerator_driver_read = "615.71.09"
 process_started = "2026-10-03T16:22:15Z"
 process_started_is = "the serving process, from its elapsed time read at 16:33Z (substrates/measurements/2026-10-03-ada48-tabbyapi/process-now.txt); health first answered at 16:22:36Z, 23 s after the llama.cpp line stopped at 16:22:13Z (substrates/measurements/2026-10-03-ada48-tabbyapi/switch.txt)"
 pinned_by = "the inference seat's switch on 2026-10-03 and its receipts (substrates/measurements/2026-10-03-ada48-tabbyapi/; #143 5971103350 and 5971127133)"
 current = false
-current_note = "retired as the serving line 2026-10-04T21:36:18Z, when production moved to ExLlamaV3 1.5.4 (instance 2026-10-04a); results taken on 1.5.2 keep citing this instance (#401)"
+current_note = "retired as the serving line when production moved to ExLlamaV3 1.5.4 (down from 2026-10-04T21:30:12Z, up on 1.5.4 at 21:36:18Z) (instance 2026-10-04a); results taken on 1.5.2 keep citing this instance (#401)"
 
 [[substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05.instance]]
 id = "2026-10-04a"
@@ -899,12 +899,12 @@ exllamav3_wheel_sha256 = "c810dc4ad13e105cc62da2354405ae3d967c143359d683f323149a
 exllamav3_extension_sha256 = "9157a0af8dc1135ffccdf99c86fc981f55fbbfe7f9ee659d93deced887f8a89d"
 python = "3.12.14"
 accelerator_driver_read = "615.71.09"
-config_redacted_sha256 = "a706fe100304220d91ca9931321fe96d4b9698ebd26b24e573f6fd77c23c3918"
-process_started = "2026-10-04T21:36:18Z"
-process_started_is = "the 1.5.4 production start after the sizing window, the endpoint down 21:30:12-21:36:18Z (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/sizing/)"
+config_redacted_sha256 = "e5eb94b21ea6771179d2c07e956049d63dda05593a404ebee51cf8e9fd984077"
+serving_from = "2026-10-04T21:36:18Z"
+serving_from_is = "the switch log's SWITCHED line, not the process start; production restored on 1.5.4 after the sizing window, the endpoint down 21:30:12-21:36:18Z (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/sizing/)"
 pinned_by = "the inference seat's window and switch on 2026-10-04 and its receipts (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/; #401 5984372939, 5984591312, 5984646282)"
 current = false
-current_note = "retired as the serving line 2026-10-04T22:46:21Z, when production moved to YaRN x2 (instance 2026-10-04b); ExLlamaV3 1.5.4, native RoPE, cache_size 606,208, max_seq_len 262,144; the same package set and the same engine commit as 2026-10-04b (#401 5985333953)"
+current_note = "retired as the serving line 2026-10-04T22:46:21Z, when production moved to YaRN x2 (instance 2026-10-04b); ExLlamaV3 1.5.4, native RoPE, cache_size 606,208, max_seq_len 262,144; the same package set and engine commit as 2026-10-04b, a different config (#401 5985333953)"
 
 [[substrate.ada48-tabbyapi-exl3-qwen38flashnext-2p05.instance]]
 id = "2026-10-04b"
@@ -912,9 +912,9 @@ exllamav3_wheel_sha256 = "c810dc4ad13e105cc62da2354405ae3d967c143359d683f323149a
 exllamav3_extension_sha256 = "9157a0af8dc1135ffccdf99c86fc981f55fbbfe7f9ee659d93deced887f8a89d"
 python = "3.12.14"
 accelerator_driver_read = "615.71.09"
-config_redacted_sha256 = "513705f02f976363f2b92bba546225aa378a5c6b6835d3f731123a7006ffa18c"
-process_started = "2026-10-04T22:46:21Z"
-process_started_is = "the YaRN x2 production start, the endpoint down 22:45:39-22:46:21Z (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/yarn-prod/); /v1/model reports max_seq_len 524288 and the model id of the overlay directory"
+config_redacted_sha256 = "fe3f9b8c73f56072d67ceaa404ea37d364ffceebaa4fc5df93de596e372bddea"
+serving_from = "2026-10-04T22:46:21Z"
+serving_from_is = "the end of the downtime window, not the process start (health answered at 22:46:00Z); the YaRN x2 production, the endpoint down 22:45:39-22:46:21Z (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/yarn-prod/); /v1/model reports max_seq_len 524288 and the model id of the overlay directory"
 pinned_by = "the inference seat's YaRN trial and switch on 2026-10-04 and its receipts (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/; #401 5984938409, 5985333953)"
 current = true
 

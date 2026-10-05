@@ -66,4 +66,4 @@ All of these stay on the host.
 | `configs/` | the three live configs, the overlay's `config.json`, the frozen package set |
 | `scripts/` | every script that ran |
 
-**Redaction:** `$HOME`, `<user>`, `<host>`, `<port>` (the serving port), `<side-port>` and `<api-key>`. The scripts read the key from the server's token file at run time; no key appears here. The configs' digests above are of the live files. The copies here differ only in the redacted port, so they don't reproduce those digests. `SHA256SUMS` covers every file.
+**Redaction:** `$HOME`, `<user>`, `<host>`, `<port>` (the serving port), `<side-port>` and `<api-key>`. The scripts read the key from the server's token file at run time; no key appears here. The configs' digests above are of the live files. The copies here differ in the redacted port, the home prefix and the rollback comment on line 1 (the data seat edited that last one; see configs/config-redaction.diff), so they do not reproduce those digests; the registry cites the copies' digests. `SHA256SUMS` covers every file.
