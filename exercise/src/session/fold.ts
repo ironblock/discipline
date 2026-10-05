@@ -53,6 +53,8 @@ export interface UserNode extends Provenance {
    * `turn.settled`, and this is its word. A capped turn is `failed` (#290, ruled 5969941559).
    */
   readonly outOfContext?: OffTrunk;
+  /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
+  readonly scoping?: true;
 }
 
 export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled' | 'failed';
@@ -655,6 +657,7 @@ export function fold(lines: readonly LogLine[]): Session {
             endedAt: ask.t,
             ...(timings ? { prefill: { fresh: timings.prompt_n, cached: timings.cache_n } } : {}),
             ...(offTrunk.has(slot.turn) ? { outOfContext: offTrunk.get(slot.turn)! } : {}),
+            ...(ask.scoping === true ? { scoping: true as const } : {}),
             ...provenance(ask, first?.response),
           });
         }

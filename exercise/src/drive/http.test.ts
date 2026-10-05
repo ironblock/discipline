@@ -241,6 +241,13 @@ describe('HttpTransport: the idle gap a command ends (Q4, #146)', () => {
     expect(posted).toEqual([{ kind: 'ask', text: 'hi', idle_gap: gap }, { kind: 'ask', text: 'hi' }]);
   });
 
+  it('keeps the operator’s scope mark on the ask it sends again without the gap (#453)', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 'idle_gap' in body ? 400 : 200 })) });
+    await expect(transport.dispatch({ kind: 'ask', text: 'a web app', scoping: true }, { idle_gap: gap })).resolves.toEqual({ ok: true });
+    expect(posted).toEqual([{ kind: 'ask', text: 'a web app', scoping: true, idle_gap: gap }, { kind: 'ask', text: 'a web app', scoping: true }]);
+  });
+
   it('does not resend a refusal: a refused command drops its gap, and diet logs none', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"in-flight"}', { status: 409 })) });
@@ -330,5 +337,22 @@ describe('HttpTransport: a call waiting on the operator (#389, ruled 5982826097)
     const seen = watched(transport);
     last().emit('waiting', { id: 'call_1' });
     expect(seen).toEqual([undefined]);
+  });
+});
+
+describe('HttpTransport: the operator’s scope mark (#453)', () => {
+  it('posts `scoping: true` on the ask the operator marked, as serve takes it', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });
+    await expect(transport.dispatch({ kind: 'ask', text: 'a web app', scoping: true })).resolves.toEqual({ ok: true });
+    expect(posted).toEqual([{ kind: 'ask', text: 'a web app', scoping: true }]);
+  });
+
+  it('posts no `scoping` at all on an unmarked ask', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });
+    await transport.dispatch({ kind: 'ask', text: 'hi' });
+    expect(posted).toEqual([{ kind: 'ask', text: 'hi' }]);
+    expect('scoping' in posted[0]!).toBe(false);
   });
 });

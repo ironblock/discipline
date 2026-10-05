@@ -49,6 +49,8 @@ export interface Ask extends At {
   readonly kind: 'ask';
   readonly turn: number;
   readonly text: string;
+  /** The operator marked it the scope answer (#453): placed on its `ask` line, as serve logs it (log v5). */
+  readonly scoping?: true;
 }
 
 export interface Request extends At {

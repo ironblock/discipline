@@ -52,9 +52,13 @@
   .ex-composer__spacer {
     display: none;
   }
+  .ex-composer__scope,
   .ex-composer__send,
   .ex-composer__cancel {
     margin-left: auto;
+  }
+  .ex-composer__scope + .ex-composer__send {
+    margin-left: 0;
   }
 }
 
@@ -106,6 +110,13 @@
 .ex-composer__send:not(:disabled) {
   border-color: var(--ink-user);
   color: var(--ink-user);
+}
+
+/* The operator's scope mark (#453): pressed, it is in the interview's ink, and so is the send it changes. */
+.ex-composer__scope[aria-pressed='true'],
+.ex-composer__scope[aria-pressed='true'] + .ex-composer__send:not(:disabled) {
+  border-color: var(--ink-interview);
+  color: var(--ink-interview);
 }
 
 .ex-composer__cancel:not(:disabled) {

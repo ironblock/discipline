@@ -20,7 +20,15 @@ import type { LogLine, Open } from './log.ts';
  */
 export type Command =
   /** A person's ask, for the trunk. */
-  | { readonly kind: 'ask'; readonly text: string }
+  | {
+      readonly kind: 'ask';
+      readonly text: string;
+      /**
+       * The operator marked it the scope answer (#453): the ask whose settled turn warrants T1's interview fork
+       * (#374). Sent as `"scoping": true` on that ask only; absent, it is unmarked.
+       */
+      readonly scoping?: true;
+    }
   /** Stop whatever is in flight, the trunk's call or a fork's. */
   | { readonly kind: 'cancel' }
   /** Declare a phase transition: ratify, render, refill. */

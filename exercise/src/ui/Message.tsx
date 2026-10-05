@@ -79,7 +79,10 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
             ),
           }
         : {})}
-      stats={[node.outOfContext && outOfContext(node.outOfContext)]}
+      stats={[
+        node.scoping && { value: <span className="ex-scope-answer">scope answer</span>, title: 'the operator marked this the scope answer: its turn warrants the interview fork (#374)' },
+        node.outOfContext && outOfContext(node.outOfContext),
+      ]}
       provenance={node}
       id={node.id}
       actions={<Copy text={node.text} />}

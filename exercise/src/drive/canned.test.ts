@@ -115,3 +115,25 @@ describe('the canned transport, cancelled mid-call (#300)', () => {
     expect(tools.some((n) => n.kind === 'tool' && n.running)).toBe(false);
   }, 15_000);
 });
+
+describe('the operator’s scope mark, canned (#453)', () => {
+  it('places `scoping: true` on the marked ask’s line, and the fold draws its turn’s ask as the scope answer', async () => {
+    const transport = new CannedTransport(SPECIMEN, { speed: 1_000_000 });
+    const lines: LogLine[] = [];
+    transport.subscribe((line) => lines.push(line));
+    await transport.dispatch({ kind: 'ask', text: 'a json flag', scoping: true });
+    transport.close();
+    expect(lines.find((l) => l.kind === 'ask')).toMatchObject({ text: 'a json flag', scoping: true });
+    const asked = fold(lines).eras.flatMap((e) => e.nodes).find((n) => n.kind === 'user');
+    expect(asked?.kind === 'user' && asked.scoping).toBe(true);
+  });
+
+  it('places no `scoping` on an unmarked ask', async () => {
+    const transport = new CannedTransport(SPECIMEN, { speed: 1_000_000 });
+    const lines: LogLine[] = [];
+    transport.subscribe((line) => lines.push(line));
+    await transport.dispatch({ kind: 'ask', text: 'a json flag' });
+    transport.close();
+    expect(lines.find((l) => l.kind === 'ask')).not.toHaveProperty('scoping');
+  });
+});
