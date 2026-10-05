@@ -1150,6 +1150,7 @@ mod tests {
             args: Some(args),
             exit: Some(0),
             output: None,
+            exec: None,
         }
     }
 
@@ -1476,6 +1477,7 @@ mod tests {
             args: None,
             exit: None,
             output: None,
+            exec: None,
         });
         assert_eq!(decisions[0].class, Class::Unknown);
         assert_eq!(router.census().unclassified, 2);

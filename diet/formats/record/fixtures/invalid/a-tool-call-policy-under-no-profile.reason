@@ -1,0 +1,1 @@
+a `bash` call carries `policy` only under `isolation` `sandbox` or `vm` (#299, 5976386318 point 6)

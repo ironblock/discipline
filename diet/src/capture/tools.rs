@@ -1288,6 +1288,7 @@ mod tests {
             ),
             exit: Some(0),
             output: None,
+            exec: None,
         }
     }
 
@@ -1677,6 +1678,7 @@ mod tests {
             args: None,
             exit: Some(0),
             output: None,
+            exec: None,
         };
         assert!(matches!(
             apply(&ledger, 0, saw()),
@@ -2108,6 +2110,7 @@ mod tests {
             args: None,
             exit: Some(0),
             output: Some(output.to_owned()),
+            exec: None,
         }
     }
 
@@ -2138,6 +2141,7 @@ mod tests {
             args,
             exit,
             output: Some(output.to_owned()),
+            exec: None,
         }
     }
 

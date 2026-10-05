@@ -791,6 +791,7 @@ impl Run {
             args,
             exit: None,
             output: None,
+            exec: None,
         });
         Ok(())
     }

@@ -1,0 +1,1 @@
+a `tool_call` carries `reason`, `argv`, `confined`, `isolation`, `network` or `policy` only with the `outcome` they describe
