@@ -1,0 +1,61 @@
+# #374's seeded faults: log v5, the fork, its settling and its patches (layer 1).
+
+[[fault]]
+id = "test.log_second_fork_in_a_gap_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a second fork in one gap read"
+failure_class = "log.second-fork-in-a-gap-read"
+legacy_signature = "log/fixtures/invalid/a-second-fork-in-one-gap\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_fork_before_its_turn_settled_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a fork before its turn settled read"
+failure_class = "log.fork-outside-its-gap-read"
+legacy_signature = "log/fixtures/invalid/a-fork-before-its-turn-settled\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_fork_at_another_turns_request_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a fork at another turn's request read"
+failure_class = "log.fork-at-another-turns-request-read"
+legacy_signature = "log/fixtures/invalid/a-fork-at-an-earlier-turns-request\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_interview_request_fork_unrequired"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "an interview request without its fork read"
+failure_class = "log.interview-request-fork-unrequired"
+legacy_signature = "log/fixtures/invalid/an-interview-request-without-its-fork\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_patch_of_a_declined_fork_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a patch of a fork not settled value read"
+failure_class = "log.patch-of-a-declined-fork-read"
+legacy_signature = "log/fixtures/invalid/a-patch-of-a-declined-fork\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "test.log_fork_read_in_a_v4_log"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::log"
+label = "a fork read in a log that declares v4"
+failure_class = "log.fork-read-in-a-v4-log"
+legacy_signature = "log/fixtures/invalid/a-fork-in-a-v4-log\\.jsonl"
+migrated = false

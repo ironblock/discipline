@@ -375,7 +375,7 @@ impl<'a> Walk<'a> {
 
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
-            Line::Ask { turn, text } => {
+            Line::Ask { turn, text, .. } => {
                 self.asks.insert(*turn, text.clone());
                 self.ask(line.seq, *turn);
             }
@@ -383,6 +383,7 @@ impl<'a> Walk<'a> {
                 turn,
                 lane,
                 head_sha256,
+                ..
             } => self.request(line.seq, *turn, *lane, head_sha256.as_deref())?,
             // A capped call is not an answer (#290, ruled 5969297103): no
             // row, its text named, and nothing put on the rebuilt trunk.
@@ -432,11 +433,20 @@ impl<'a> Walk<'a> {
                 ),
                 Some(message.clone()),
             ),
-            // Facts the record has no row for at all, named once per kind.
-            Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
+            // Facts the record has no row for at all, named once per kind. A
+            // fork's rows arrive with #374's projection layer.
+            Line::IdleGap { .. }
+            | Line::Refused { .. }
+            | Line::Progress { .. }
+            | Line::Fork { .. }
+            | Line::ForkSettled { .. }
+            | Line::Patch { .. } => {
                 let kind = match &line.event {
                     Line::IdleGap { .. } => log::Kind::IdleGap,
                     Line::Refused { .. } => log::Kind::Refused,
+                    Line::Fork { .. } => log::Kind::Fork,
+                    Line::ForkSettled { .. } => log::Kind::ForkSettled,
+                    Line::Patch { .. } => log::Kind::Patch,
                     _ => log::Kind::Progress,
                 }
                 .tag();
@@ -805,6 +815,7 @@ mod tests {
             Line::Ask {
                 turn,
                 text: "say hello".to_owned(),
+                scoping: None,
             },
             Line::Settlement {
                 from: State::Awaiting,
@@ -814,6 +825,7 @@ mod tests {
                 turn,
                 lane: Lane::Trunk,
                 head_sha256: Some(head()),
+                fork: None,
             },
             Line::Delta {
                 request,
@@ -991,6 +1003,7 @@ mod tests {
                 Line::Ask {
                     turn,
                     text: "say hello".to_owned(),
+                    scoping: None,
                 },
                 Line::Settlement {
                     from: State::Awaiting,
@@ -1000,6 +1013,7 @@ mod tests {
                     turn,
                     lane: Lane::Trunk,
                     head_sha256: Some(head()),
+                    fork: None,
                 },
                 outcome,
             ]);
@@ -1008,6 +1022,7 @@ mod tests {
             turn: 2,
             lane: Lane::Trunk,
             head_sha256: Some(head()),
+            fork: None,
         });
         let events_len = events.len();
         let projection = project(
@@ -1056,6 +1071,7 @@ mod tests {
             turn: 1,
             lane: Lane::Trunk,
             head_sha256: None,
+            fork: None,
         };
         events.extend(turn);
         let refused = project(

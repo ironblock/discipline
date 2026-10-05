@@ -2884,6 +2884,90 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+inject_log_second_fork_in_a_gap_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if self.of_turn.values().any(|turn| *turn == of_turn) {'
+new = '        if false && self.of_turn.values().any(|turn| *turn == of_turn) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_fork_before_its_turn_settled_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if of_turn != turns || !self.finals.contains(&of_turn) {'
+new = '        if of_turn != turns {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_fork_at_another_turns_request_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if trunk.get(&of_turn) != Some(&at) || !self.answered.contains(&at) {'
+new = '        if !self.answered.contains(&at) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_interview_request_fork_unrequired() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            if lane == Lane::Interview {'
+new = '            if false {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_patch_of_a_declined_fork_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '            Some(outcome) if *outcome != ForkOutcome::Value => Err(format!('
+new = '            Some(outcome) if false && *outcome != ForkOutcome::Value => Err(format!('
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+inject_log_fork_read_in_a_v4_log() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/log.rs")
+source = path.read_text(encoding="utf-8")
+old = '        (since > declared).then(|| {'
+new = '        (since > declared && since < 5).then(|| {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 # #79: the check that a `prefix.changed` is a change at all. Disabled, a row
 # over two requests that hash the same is accepted -- and a cache census reads
 # a mutation the file itself denies.
@@ -10446,6 +10530,18 @@ selftest() {
     'log/fixtures/invalid/a-once-approval-without-its-why\.jsonl' 'test:conformance/formats::log'
   seeded_case "a tool_call file with its content inlined read" test inject_log_tool_call_file_content_read \
     'log/fixtures/invalid/a-tool-call-file-with-its-content-inlined\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a second fork in one gap read" test inject_log_second_fork_in_a_gap_read \
+    'log/fixtures/invalid/a-second-fork-in-one-gap\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a fork before its turn settled read" test inject_log_fork_before_its_turn_settled_read \
+    'log/fixtures/invalid/a-fork-before-its-turn-settled\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a fork at another turn's request read" test inject_log_fork_at_another_turns_request_read \
+    'log/fixtures/invalid/a-fork-at-an-earlier-turns-request\.jsonl' 'test:conformance/formats::log'
+  seeded_case "an interview request without its fork read" test inject_log_interview_request_fork_unrequired \
+    'log/fixtures/invalid/an-interview-request-without-its-fork\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a patch of a fork not settled value read" test inject_log_patch_of_a_declined_fork_read \
+    'log/fixtures/invalid/a-patch-of-a-declined-fork\.jsonl' 'test:conformance/formats::log'
+  seeded_case "a fork read in a log that declares v4" test inject_log_fork_read_in_a_v4_log \
+    'log/fixtures/invalid/a-fork-in-a-v4-log\.jsonl' 'test:conformance/formats::log'
   seeded_case "a head change that is not a change"    test     inject_record_prefix_change_not_a_change \
     'record/fixtures/invalid/prefix-change-that-is-not-a-change\.jsonl' 'test:conformance/formats::record'
   seeded_case "the miss classes reordered"           test     inject_record_prefix_precedence_reordered \
