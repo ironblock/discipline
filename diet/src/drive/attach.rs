@@ -951,13 +951,14 @@ pub(in crate::drive) mod tests {
     /// is refused is shown deterministically by
     /// `the_confined_read_refuses_a_link_the_path_check_never_saw`. The race
     /// asserts only what must hold on every interleaving: the secret is never
-    /// attached and never copied, and the swapper really ran while the asks
-    /// did. An earlier version required both sides to be met inside the
+    /// attached and never copied, and the swapper swapped between every
+    /// two asks. An earlier version required both sides to be met inside the
     /// race, and on a CI runner that met only the link (#461 run
     /// 37293445573, then #471 run 37302234290: "attached 0, refused 2000").
     #[test]
     fn a_path_swapped_for_a_link_to_a_secret_never_attaches_the_secret() {
         const ASKS: usize = 200;
+        const RACE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(60);
         const HOLD: std::time::Duration = std::time::Duration::from_micros(500);
         let fixture = Fixture::new("swapped");
         let (policy, key, secret) = fixture.with_a_secret();
@@ -1012,7 +1013,24 @@ pub(in crate::drive) mod tests {
         );
         let before = swaps.load(Ordering::Relaxed);
         let mut outcomes = std::collections::BTreeMap::<String, usize>::new();
-        for _ in 0..ASKS {
+        // Each ask waits for a swap the previous one did not see, so the
+        // swapper provably runs between asks. An ask refused at the path
+        // check returns in microseconds, and 200 of them fit inside one
+        // hold: a starved swapper never swapped while they ran (#478's CI).
+        // The deadline is generous; past it the race could not be run, and
+        // that is a failure, never a pass.
+        let deadline = std::time::Instant::now() + RACE_DEADLINE;
+        let mut seen = before;
+        for asked in 0..ASKS {
+            while swaps.load(Ordering::Relaxed) == seen {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "could not race: the swapper made no swap before ask {asked} \
+                     within {RACE_DEADLINE:?}"
+                );
+                std::thread::yield_now();
+            }
+            seen = swaps.load(Ordering::Relaxed);
             let outcome = match attached("see shot.png", &attaching) {
                 Ok(Attached { message, .. }) => {
                     assert!(
