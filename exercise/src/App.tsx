@@ -77,6 +77,7 @@ export function App({
       surface={surface}
       onSurface={setSurface}
       follow
+      {...(transport.file ? { files: transport.file } : {})}
       approving={{ waiting, decide }}
       composer={{
         phases: PHASES,

@@ -217,6 +217,8 @@ export class Placer {
                   stdout: e.output,
                   // A stream's text and its byte count come together (the format's rule): the count is of its UTF-8.
                   stdout_bytes: new TextEncoder().encode(e.output).length,
+                  // The files its result is, by reference (log v4, #372): never their bytes.
+                  ...(e.files && e.files.length > 0 ? { files: e.files.map((f) => ({ path: f.path, sha256: f.sha256, media_type: f.media_type, bytes: f.bytes.length })) } : {}),
                   // A script kept one output, the terminal's: it is placed whole as stdout, and stderr as empty.
                   stderr: '',
                   stderr_bytes: 0,

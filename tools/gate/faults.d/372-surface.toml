@@ -1,0 +1,19 @@
+# #372's surface half's seeded faults: a tool call's file, read by digest.
+
+[[fault]]
+id = "exercise.exercise_file_bytes_unchecked"
+kind = "seeded-gate"
+check = "exercise"
+label = "a tool call's file drawn without its digest checked"
+failure_class = "exercise.file-digest"
+legacy_signature = "FAIL.*files\\.test\\.ts.*refuses bytes that do not"
+migrated = false
+
+[[fault]]
+id = "exercise.exercise_file_ref_dropped"
+kind = "seeded-gate"
+check = "exercise"
+label = "a tool call's file reference dropped by the fold"
+failure_class = "exercise.file-digest"
+legacy_signature = "FAIL.*files\\.test\\.ts.*places the reference"
+migrated = false

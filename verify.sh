@@ -3976,6 +3976,19 @@ inject_exercise_decision_dropped() {
   edit_in_place "s|^                  ...(line.approval ? { approval: line.approval } : {}),$|                  ...({}),|" exercise/src/session/fold.ts
 }
 
+# A tool call's file drawn without its digest checked (#372): whatever bytes
+# a source answers are shown, so a path or a stale file passes for the one the
+# log pins. Typecheck and lint pass it.
+inject_exercise_file_bytes_unchecked() {
+  edit_in_place "s|^  return got === ref.sha256.toLowerCase() ? { kind: 'shown', bytes: answer.bytes } : { kind: 'mismatch', got };$|  return answer.bytes.length >= 0 ? { kind: 'shown', bytes: answer.bytes } : { kind: 'mismatch', got };|" exercise/src/drive/files.ts
+}
+
+# A tool call's file reference dropped by the fold (#372): the line carries
+# `files` (log v4), and the call is drawn as if its result were text alone.
+inject_exercise_file_ref_dropped() {
+  edit_in_place "s|^                  ...(line.files && line.files.length > 0 ? { files: line.files } : {}),$|                  ...({}),|" exercise/src/session/fold.ts
+}
+
 # A call waiting on the operator with no prompt to answer it (#389): the
 # dock built and thrown away (`void`), never drawn, so the session waits on
 # an answer nobody can give. The condition and its narrowing are untouched,
@@ -10745,6 +10758,10 @@ selftest() {
     'FAIL.*capped\.test\.ts.*is not read from the settle word alone'
   seeded_case "a refused tool call drawn as ran" exercise inject_exercise_refused_call_drawn_as_ran \
     'FAIL.*served\.test\.ts.*folds a ran, a refused and a policy-failed call'
+  seeded_case "a tool call's file drawn without its digest checked" exercise inject_exercise_file_bytes_unchecked \
+    'FAIL.*files\.test\.ts.*refuses bytes that do not'
+  seeded_case "a tool call's file reference dropped by the fold" exercise inject_exercise_file_ref_dropped \
+    'FAIL.*files\.test\.ts.*places the reference'
   seeded_case "a call's decision dropped by the fold" exercise inject_exercise_decision_dropped \
     'FAIL.*approval\.test\.ts.*replays the decision from the log alone'
   seeded_case "a waiting call with no prompt docked" exercise inject_exercise_prompt_not_docked \

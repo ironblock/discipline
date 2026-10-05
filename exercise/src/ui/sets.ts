@@ -79,6 +79,8 @@ export const callOutcomeOf = registry<ToolOutcome>({
   refused: { label: 'refused', level: 'warn' },
   command_failed: { label: 'failed under policy', level: 'bad' },
   cancelled: { label: 'cancelled', level: 'quiet' },
+  // A result over the cap (#94): a file too large to carry is this outcome too, its sibling (#372 5983588781).
+  output_too_large: { label: 'output too large', level: 'warn' },
 });
 
 /** Why the drive refused a call (v3, #297 Q2). */

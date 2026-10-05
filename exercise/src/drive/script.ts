@@ -153,6 +153,16 @@ export interface ToolEnd extends At {
   readonly refused?: ToolRefusal;
   /** The decision it ran under (log v4, #388): a pre-seed a script declares, or the operator's, which the canned transport adds. */
   readonly approval?: Approval;
+  /** The files its result is (#372): placed as references, their bytes served by digest. */
+  readonly files?: readonly ScriptedFile[];
+}
+
+/** A file a call left: what the log references (`FileRef`), and the bytes a source answers its digest with. */
+export interface ScriptedFile {
+  readonly path: string;
+  readonly media_type: string;
+  readonly sha256: string;
+  readonly bytes: Uint8Array;
 }
 
 export interface TurnSettled extends At {

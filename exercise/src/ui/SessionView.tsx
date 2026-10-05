@@ -30,6 +30,8 @@ import type { Room, Surface } from './surface.tsx';
 import { ToolBlock } from './ToolCall.tsx';
 import { ApprovalContext, ApprovalPrompt } from './Approval.tsx';
 import type { Approving } from './Approval.tsx';
+import { FilesContext } from './Files.tsx';
+import type { FileSource } from '../drive/files.ts';
 import './session.css';
 
 export interface SessionViewProps {
@@ -45,6 +47,8 @@ export interface SessionViewProps {
   readonly follow?: boolean;
   /** The call waiting on the operator, and how to answer it (#389). Absent: nothing waits. */
   readonly approving?: Approving;
+  /** Where a tool call's files are read from, by digest (#372). Absent: none can be, and each says so. */
+  readonly files?: FileSource;
 }
 
 /** Vertical space between two branches stacked in one slot: whole, and condensed to bars. */
@@ -70,7 +74,7 @@ interface Placement extends Placed {
  */
 const NOTHING_WAITS: Approving = { waiting: undefined };
 
-export function SessionView({ session, link = 'live', linkWhy, surface, onSurface, composer, follow = false, approving = NOTHING_WAITS }: SessionViewProps) {
+export function SessionView({ session, link = 'live', linkWhy, surface, onSurface, composer, follow = false, approving = NOTHING_WAITS, files }: SessionViewProps) {
   // What the row has room for beside the trunk (measured below): whole side calls, bars, or neither. With
   // less room than the curtain asks for, side calls condense to bars; with none, the curtain draws closed.
   // Either way a side call that cannot open in its lane opens under the message it came from (`inline`).
@@ -448,6 +452,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
   return (
     <SurfaceContext.Provider value={surface}>
     <ApprovalContext.Provider value={approving}>
+    <FilesContext.Provider value={files}>
       <ClockContext.Provider value={now}>
       <TargetContext.Provider value={target}>
       <HotEntriesContext.Provider value={hot.entries}>
@@ -626,6 +631,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
       </HotEntriesContext.Provider>
       </TargetContext.Provider>
       </ClockContext.Provider>
+    </FilesContext.Provider>
     </ApprovalContext.Provider>
     </SurfaceContext.Provider>
   );

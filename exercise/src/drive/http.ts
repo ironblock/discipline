@@ -10,6 +10,9 @@
  *                             `{"kind": "cancel", "turn"}`, `{"kind":
  *                             "declare-seam"}`, `{"kind": "end"}`. A refusal is
  *                             409 `{"refused": <tag>}`, and logged.
+ *   GET  /files/<sha256>      a tool call's file, its bytes, from the worktree;
+ *                             404 naming the digest when it has none (#372,
+ *                             5976915436). The page checks the bytes (`files.ts`).
  *   POST /approve             the operator's answer to the call waiting on them,
  *                             `{"call": <id>, "scope": "once" | "session" |
  *                             "workspace" | "decline"}`: 204, or 409
@@ -37,6 +40,7 @@
 import type { IdleGapBody } from '../session/gap.ts';
 import type { LogLine } from './log.ts';
 import type { Ack, Command, DriveTransport, Link, Prompt } from './transport.ts';
+import type { FileAnswer } from './files.ts';
 
 /** What the transport needs from the browser: injectable, so a test can stand in for the server. */
 export interface Web {
@@ -110,6 +114,20 @@ export class HttpTransport implements DriveTransport {
     if (!this.#source) this.#connect();
     return () => this.#listeners.delete(listener);
   }
+
+  /** A tool call's file by its digest: unchecked bytes, or why there are none. */
+  readonly file = async (sha256: string): Promise<FileAnswer> => {
+    if (!/^[0-9a-f]{64}$/.test(sha256)) return { kind: 'not-found' };
+    let reply: Response;
+    try {
+      reply = await this.#web.fetch(`${this.#base}/files/${sha256}`);
+    } catch {
+      return { kind: 'unreachable', why: whyClosed(undefined) };
+    }
+    if (reply.status === 404) return { kind: 'not-found' };
+    if (!reply.ok) return { kind: 'unreachable', why: whyClosed(reply.status) };
+    return { kind: 'bytes', bytes: new Uint8Array(await reply.arrayBuffer()) };
+  };
 
   watchPrompt(listener: (prompt: Prompt | undefined) => void): () => void {
     listener(this.#prompt);

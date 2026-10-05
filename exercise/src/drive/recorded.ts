@@ -12,6 +12,7 @@
  * shows the answer mid-stream.
  */
 
+import type { FileSource } from './files.ts';
 import { deltas } from './canned.ts';
 import { frames } from './progress.ts';
 import type { LogLine } from './log.ts';
@@ -120,9 +121,13 @@ export class ReplayTransport implements DriveTransport {
   readonly #listeners = new Set<(line: LogLine) => void>();
   #timer: ReturnType<typeof setTimeout> | undefined;
 
-  constructor(recording: Recording, { speed = 1 }: { readonly speed?: number } = {}) {
+  /** The recording's files by digest (#372): its published assets, which the replay page reads with `import()`. */
+  readonly file?: FileSource;
+
+  constructor(recording: Recording, { speed = 1, files }: { readonly speed?: number; readonly files?: FileSource } = {}) {
     this.#log = placed(recording);
     this.#speed = speed;
+    if (files) this.file = files;
   }
 
   subscribe(listener: (line: LogLine) => void): () => void {

@@ -8,6 +8,7 @@ import { alarmOf, approvalOf, callOf, callOutcomeOf, callRefusalOf } from './set
 import { usePromptOf } from './Approval.tsx';
 import { writingOf, writtenApart } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
+import { FileResults } from './Files.tsx';
 import { elapsed, useNow } from './surface.tsx';
 import './tool.css';
 
@@ -144,6 +145,7 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       </pre>
       {printed.length > 0 ? <pre className="ex-tool__output">{open ? output : printed.slice(0, PEEK).join('\n')}</pre> : null}
       {node.stderr ? <pre className="ex-tool__output ex-tool__stderr">{node.stderr}</pre> : null}
+      {node.files ? <FileResults files={node.files} /> : null}
       {hidden > 0 ? (
         <button type="button" className="ex-more" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? 'less' : `${count(hidden)} more ${hidden === 1 ? 'line' : 'lines'}`}
