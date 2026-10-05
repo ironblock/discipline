@@ -13,7 +13,8 @@ Every claim declares which rungs it fires on. A word that changes between rungs 
 | rung | substrate | state | section |
 |---|---|---|---|
 | top, intermittent | `ada48-tabbyapi-exl3-qwen38flashnext-2p05` | serving since 2026-10-03; **unadmitted** | [Top rung](#top-rung) |
-| middle, the floor for new claims | `accel24-llamacpp-qwen38-27b-iq3s` | admitted ([5939594798](https://github.com/ironblock/discipline/issues/143#issuecomment-5939594798)); ruled the floor ([5954674262](https://github.com/ironblock/discipline/issues/143#issuecomment-5954674262)); launched per window, not yet the machine's serving line | [Middle rung](#middle-rung) |
+| middle, ratified baseline | TabbyAPI + ExLlamaV3, EXL3 plain `3.00bpw` + DFlash2 with the BF16 vision tower (its registry id comes with its admission) | ratified ([5985589548](https://github.com/ironblock/discipline/issues/393#issuecomment-5985589548)); **unadmitted** until its window runs (#393) | [Engine lines](#engine-lines) |
+| middle, admitted candidate | `accel24-llamacpp-qwen38-27b-iq3s` | admitted ([5939594798](https://github.com/ironblock/discipline/issues/143#issuecomment-5939594798)). Planning ruled it the floor ([5954674262](https://github.com/ironblock/discipline/issues/143#issuecomment-5954674262)), but that was not ratified; the maintainer ratified the EXL3 line instead. Launched per window, never the machine's serving line | [Middle rung](#middle-rung) |
 | archived substrate of record | `accel24-beellama-qwen27b-q4kxl` | admitted at `7c254834cc2c`; still `linux-pc`'s serving line | [Middle rung](#middle-rung) |
 | bottom | none admitted | `cpu-beellama-qwen3-1p7b-q4km` is registered and serves as the parity fire's seat B, independent of its own admission | [Bottom rung](#bottom-rung) |
 
@@ -33,7 +34,7 @@ Cell words: `pass`, `fail`, `n/a (reason)`, `unreported`, `unadjudicated`, and `
 
 Two admission records sit on `linux-pc`'s 24 GiB accelerator. Each one's word is derived by `admission/derive_admission.py` (#183) from the three results it cites. Each result is pinned by the sha256 of its file manifest, and `verify.sh --only admission` re-derives every word and refuses a record whose word or digests differ.
 
-**`accel24-llamacpp-qwen38-27b-iq3s`, the floor for new claims: admitted at `9d84a552fc94`.**
+**`accel24-llamacpp-qwen38-27b-iq3s`, the admitted candidate: admitted at `9d84a552fc94`.** Planning's ruling that it is the floor (5954674262) was never ratified. The maintainer ratified the EXL3 line instead (#393 5985589548).
 
 | result | directory | manifest sha256 | word |
 |---|---|---|---|
@@ -42,7 +43,7 @@ Two admission records sit on `linux-pc`'s 24 GiB accelerator. Each one's word is
 | parity fire | `results/2026-10-01-extraction-acceptance-parity-candidate/` | `3d4ac379368f04cc…` | `supported` |
 
 - **The fingerprint:** `9d84a552fc940b7f…`, over engine, weights, template, serving line and reasoning state.
-- **Registry lag:** the registry entry's `admission` text still reads "not admitted", from before the depth probe and the parity fire landed. The record's derived word is `admitted`; #393 carries the fix.
+- **Registry lag:** the registry entry's `admission` text still reads "not admitted", from before the depth probe and the parity fire landed. The record's derived word is `admitted`; the correction is a registry row of its own.
 - **Characterization beside it,** which admits nothing:
   - the quant ladder: `measurements/2026-10-03-qwen38-27b-quality-ladder/`, SHA256SUMS `ab0aa80e876752ed…`;
   - its size-matched addendum: `…-quality-ladder-size-matched/`, `ea6c20cc6f0a901b…`.
@@ -77,7 +78,7 @@ This is a new instance ([#401 5985333953](https://github.com/ironblock/disciplin
   - KLD identical: 0.0860 / 0.2297.
   - The four-way concurrency check is clean.
   - VRAM after load: 41,238 MiB against 43,762, at the same pool.
-  - Identical greedy repeats are deterministic on 1.5.4 and drift on 1.5.2.
+  - Identical greedy repeats give identical acceptance and speed on 1.5.4, and drift on 1.5.2.
   - Decode is 2–5% slower at 10k.
 - **Pool sizing:** the KV costs 18.9 KiB/token. 638,976 does not load. At 606,208, a full four-request fill leaves 978 MiB free.
 
@@ -87,11 +88,11 @@ This is a new instance; the data seat writes its row.
 
 | prerequisite | status |
 |---|---|
-| quantized KV at full context | served at 262,144 with `cache_mode 8,8`, and the four-way concurrency check is clean with it; the cache's effect on quality is **unmeasured**, since the KLD scorer runs without a cache (`measurements/2026-10-03-characterization/` §5) |
+| quantized KV at full context | served at a 606,208-token pool (`max_seq_len` 524,288 since YaRN ×2) with `cache_mode 8,8`, and the four-way concurrency check is clean with it; the cache's effect on quality is **unmeasured**, since the KLD scorer runs without a cache (`measurements/2026-10-03-characterization/` §5) |
 | a real server with reasoning and timing fields | met: TabbyAPI serves `reasoning_content` and llama-style `timings` including draft counts (§5) |
 | a back-to-back A/B in one window | met: ABAB against llama.cpp on 2026-10-03 (§2) |
 
-Its depth probe runs at the served 262,144 once the cache is measured.
+Its depth probe runs at the served `max_seq_len` (524,288) once the cache is measured.
 
 **The previous line was never admitted either.** `ada48-llamacpp-qwen38flashnext-q20` carried one claim by ruling, #142's, whose rule never depends on token identity. Whether the host admits claims generally (Q13) was never answered. Its last instance, `2026-10-03` on `b7-e7051ef`, is retired, and every result that cites it keeps citing it.
 
@@ -128,7 +129,7 @@ What each engine is in the ladder, and what was measured about it. Characterizat
 | beellama `preview-v0.3.2` (exe `980845d6…`) | `linux-pc` | the archived floor's engine; also seat B's CPU server |
 | llama.cpp mainline `4ceb171` | `linux-pc`, in a build container | the middle rung's engine |
 | llama.cpp, ironblock's fork `e7051ef` (`q8-sparse-fa`) | `rtx6000ada-host` | the top rung's previous engine, kept for rollback |
-| TabbyAPI + ExLlamaV3 1.5.2 | `rtx6000ada-host` | the top rung's engine since 2026-10-03 |
+| TabbyAPI + ExLlamaV3 1.5.4 (1.5.2 until 2026-10-04) | `rtx6000ada-host` | the top rung's engine since 2026-10-03 |
 
 **Mainline and beellama are equivalent on the 27B's weights.** KLD against Q8_0 agrees within 0.0002 on code and 0.0014 on prose for every GSQ-RCO quant (`measurements/2026-10-03-qwen38-27b-quality-ladder/`). The engine choice between them carries no measurable quality cost.
 
@@ -137,7 +138,7 @@ What each engine is in the ladder, and what was measured about it. Characterizat
 **Quant format matters more than bits per weight, and the winner depends on the model.**
 - On Flash-Next, EXL3 2.05 bpw is smaller than GSQ-RCO Q2_0 and has about half its KLD (table above). Planning's reading: Q2_0's advantage was a format whose unpack is cheap on llama.cpp's CUDA path, and EXL3's trellis format is built for its own kernels ([5966413123](https://github.com/ironblock/discipline/issues/143#issuecomment-5966413123)).
 - On the 27B, at matched size, GSQ-RCO IQ3_S beats EXL3. EXL3 2.50 bpw is 1.5% larger than IQ3_S with 1.8× its code KLD; EXL3 3.00 bpw roughly ties it for 11–14% more bytes (`measurements/2026-10-03-qwen38-27b-quality-ladder-size-matched/`).
-- Prose costs more than code at every rung of both ladders: 1.3–1.6× on the 27B, 2.4–2.7× on Flash-Next.
+- Prose costs more than code on every quant measured: 1.1–1.6× on the 27B, and 2.4–2.7× at Flash-Next's full-expert rungs (4.3× for the pruned Coder).
 
 **The middle rung's speed at depth** (`linux-pc`, the candidate's registered line; the profile window of 2026-09-29, [5883986293](https://github.com/ironblock/discipline/issues/143#issuecomment-5883986293); greedy, 256 tokens, single samples):
 
@@ -151,7 +152,7 @@ What each engine is in the ladder, and what was measured about it. Characterizat
 
 Draft acceptance rises to 0.92–0.97 at 126k and beyond on this prompt, so the deep MTP rows flatter typical use, and spec-off is the clean reading at depth. MTP n=3 adds nothing over n=2 for 300 MiB more. The 3.6 floor's first matched depth reading is in the #335 table below.
 
-**DFlash2 against MTP, EXL3 against GSQ-RCO, and the 3.6 floor at depth** (`linux-pc`, 2026-10-04, #335; four windows, every arm recorded in `measurements/2026-10-04-qwen38-27b-dflash2-exl3/` once it is committed). Measurement only: none of this is a floor decision. The bench is the profile's; decode tok/s is the mean of two warm repeats, and two-stream figures are totals.
+**DFlash2 against MTP, EXL3 against GSQ-RCO, and the 3.6 floor at depth** (`linux-pc`, 2026-10-04, #335; six windows with every arm recorded in `measurements/2026-10-04-qwen38-27b-dflash2-exl3/`, and a seventh, the vision fix-up, in `measurements/2026-10-04-qwen38-27b-tabbyapi-vision/` once it is committed). Measurement only: none of this is a floor decision. The bench is the profile's; decode tok/s is the mean of two warm repeats, and two-stream figures are totals.
 
 | line | KV | pool | 2k | ~100k | deep | 2 streams | free at peak |
 |---|---|---|---|---|---|---|---|
@@ -175,7 +176,7 @@ Draft acceptance rises to 0.92–0.97 at 126k and beyond on this prompt, so the 
   | EXL3 `SC_3.00bpw_H4` | 13.45 GB | 0.0591 / 0.0738 |
   | EXL3 plain `3.00bpw` (#334 addendum) | 13.82 GB | 0.0522 / 0.0731 |
   | EXL3 `3.50bpw` | 15.34 GB | 0.0382 / 0.0421 |
-- **Not run:** EXL3 + MTP (dropped at the maintainer's direction; DFlash2 led everywhere it ran); EXL3 `3.50bpw` with the drafter, which did not load at 163,840 or more on 1.5.1. The README records every probe.
+- **Not run:** EXL3 + MTP (dropped at the maintainer's direction); EXL3 `3.50bpw` with the drafter, which did not load at 163,840 or more on 1.5.1. The README records every probe.
 - **Vision.** No speed arm above loaded a vision tower. Both EXL3 3.00 quants carry the full BF16 tower.
   - TabbyAPI can keep the tower's weights in system RAM (`vision_offload`). The encode still runs on the GPU; ExLlamaV3 has no CPU path for it.
   - **First attempt** (TabbyAPI defaults): it loaded only at 172,032, read #373's image 1 of 3 at about 250 visual tokens, and ran out of memory on the next request.
@@ -197,7 +198,7 @@ Draft acceptance rises to 0.92–0.97 at 126k and beyond on this prompt, so the 
 |---|---|---|
 | Strata (single-stream tiered-placement engine for Flash-Next) | **parked** by the maintainer: not a rung on `linux-pc` (32 GB of RAM forces a floor-displacing low-RAM mode, and its speeds are the author's estimates) and not on `mac-pro-2019` (no CUDA). Its regime facts stand if un-parked: single-stream, its calibration fingerprinted, its speed projection (an output-altering control vector) off | [5962681150](https://github.com/ironblock/discipline/issues/143#issuecomment-5962681150), [5963393133](https://github.com/ironblock/discipline/issues/143#issuecomment-5963393133) |
 | GSQ-RCO Coder build of Flash-Next | **not a candidate** for any rung: code KLD at parity, prose KLD +84% and top-1 −7.7 points against Q8_0, and an agent's reasoning is prose | [5922544337](https://github.com/ironblock/discipline/issues/143#issuecomment-5922544337) |
-| a laptop rung (Splash, oMLX, or AFM 3 Core through sidekick) | **candidates, not rungs.** Whether a laptop rung is wanted at all is the maintainer's question, unanswered | [5960078036](https://github.com/ironblock/discipline/issues/143#issuecomment-5960078036), [5879482684](https://github.com/ironblock/discipline/issues/143#issuecomment-5879482684), [5971097635](https://github.com/ironblock/discipline/issues/143#issuecomment-5971097635) |
+| a laptop rung (Splash) | **candidates, not rungs.** Whether a laptop rung is wanted at all is the maintainer's question, unanswered | [5960078036](https://github.com/ironblock/discipline/issues/143#issuecomment-5960078036), [5971097635](https://github.com/ironblock/discipline/issues/143#issuecomment-5971097635) |
 
 ## Decision log
 
@@ -231,13 +232,14 @@ One line per ruling, oldest first. M is the maintainer; P is planning; D is Disp
 | 2026-10-03 | P | On a laptop that serves a model, a helper runs on the Neural Engine or it evicts the served model | [5971097635](https://github.com/ironblock/discipline/issues/143#issuecomment-5971097635) |
 | 2026-10-04 | D | Distil #143 into this page, re-home its open definition of done, then close it (approved by the maintainer) | [5982627646](https://github.com/ironblock/discipline/issues/143#issuecomment-5982627646) |
 | 2026-10-04 | M | The headroom bar for v0.1.0 is 300 MiB free at peak fill, or no OOM at the registered pool under the bench; the 1,208 MiB rule is withdrawn | [5984376546](https://github.com/ironblock/discipline/issues/143#issuecomment-5984376546) |
-| 2026-10-04 | M | The top rung moves to ExLlamaV3 1.5.4 with a pool sized to that bar (606,208) | [#401 5984646282](https://github.com/ironblock/discipline/issues/401#issuecomment-5984646282) |
+| 2026-10-04 | M | The top rung moves to ExLlamaV3 1.5.4 with a pool sized to that bar (606,208) | [#401 5984591312](https://github.com/ironblock/discipline/issues/401#issuecomment-5984591312) |
 | 2026-10-04 | M | The top rung serves YaRN ×2 (`max_seq_len` 524,288) | [#401 5985333953](https://github.com/ironblock/discipline/issues/401#issuecomment-5985333953) |
-| 2026-10-04 | M | Ratified: TabbyAPI + ExLlamaV3 1.5.4 serving EXL3 plain `3.00bpw` + DFlash2 with the offloaded BF16 vision tower becomes `linux-pc`'s baseline, pending admission (an earlier ratification that day, of the llama.cpp DFlash2 line, was retracted) | [5985589548](https://github.com/ironblock/discipline/issues/393#issuecomment-5985589548) |
+| 2026-10-04 | M | Ratified: TabbyAPI + ExLlamaV3 1.5.4 serving EXL3 plain `3.00bpw` + DFlash2 with the offloaded BF16 vision tower becomes `linux-pc`'s baseline, pending admission. An earlier relay that evening, ratifying the llama.cpp DFlash2 line, was retracted and deleted at the maintainer's instruction | [5985589548](https://github.com/ironblock/discipline/issues/393#issuecomment-5985589548) |
+| 2026-10-04 | M | The new line's four engine-specific cells: checkpoint restore `n/a (no slot-cache report on this engine)`; output invariance `n/a` under the hazard line; the parity fire's routing check replaced by the instance identity plus `/v1/model`'s id, under a fresh pre-registration; template digest and rendered effort read from the model directory | [#393 5986337117](https://github.com/ironblock/discipline/issues/393#issuecomment-5986337117) |
 
 ## Open questions
 
-- **The floor's admission and switch.** On 2026-10-04 the maintainer ratified a different line from the one planning ruled on 2026-10-02: TabbyAPI + ExLlamaV3 serving EXL3 `3.00bpw` + DFlash2 with the BF16 vision tower ([5985589548](https://github.com/ironblock/discipline/issues/393#issuecomment-5985589548); § Engine lines). An earlier ratification that day, of the llama.cpp DFlash2 line, was retracted before this one. The line is unadmitted until its window runs (cells, depth probe, parity, vision cell); the instruments need TabbyAPI forms and four cells need planning's word. `linux-pc` serves the 3.6 until then. #393.
+- **The floor's admission and switch.** On 2026-10-04 the maintainer ratified a different line from the one planning ruled on 2026-10-02: TabbyAPI + ExLlamaV3 serving EXL3 `3.00bpw` + DFlash2 with the BF16 vision tower ([5985589548](https://github.com/ironblock/discipline/issues/393#issuecomment-5985589548); § Engine lines). An earlier relay that evening, ratifying the llama.cpp DFlash2 line, was retracted at the maintainer's instruction. The line is unadmitted until its window runs (cells, depth probe, parity, vision cell). The data seat is building the instruments' TabbyAPI forms, against the four cell rulings at [5986337117](https://github.com/ironblock/discipline/issues/393#issuecomment-5986337117). `linux-pc` serves the 3.6 until then. #393.
 - **The three-rung re-fire.** One existing claim, the maintainer's pick, re-fired on all three rungs under a pre-registered rule. Blocked on a bottom rung and an admitted top rung. #394.
 - **The record gate.** `check-record` refusing a claim record whose declared rung has no admission directory. #395.
 - **The top rung's admission** on the TabbyAPI + EXL3 line, beginning with the cache's quality. #396.
