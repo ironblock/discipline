@@ -1,0 +1,10 @@
+# #292's seeded fault: serve's log carries the substrate claim it announced.
+# A lane fault declared in diet/drive/gate.toml.
+
+[[fault]]
+id = "drive.serve-logs-no-substrate-claim"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.serve-logs-no-substrate-claim"
+failure_class = "drive.serve-logs-no-substrate-claim"
+migrated = false

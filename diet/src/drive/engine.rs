@@ -32,6 +32,7 @@ use crate::client::stream::HttpStream;
 use crate::client::transport::{HttpReply, TransportFailure};
 
 use super::registry::{self, Identity};
+use crate::formats::log;
 use crate::formats::record::Weights;
 
 /// How long the check waits for `/props`.
@@ -110,6 +111,16 @@ impl EngineIdentity {
             Self::Unreported => "unreported (literal matched)",
         }
     }
+
+    /// The log's word for it, on `session.start`'s claim (v3, #292): the
+    /// same comparison, in the format's vocabulary (ruled on #297 Q4).
+    #[must_use]
+    pub fn logged(self) -> log::EngineIdentity {
+        match self {
+            Self::Checked => log::EngineIdentity::CheckedCommit,
+            Self::Unreported => log::EngineIdentity::LiteralMatched,
+        }
+    }
 }
 
 /// A check that passed: the `build_info` as the server reported it, and how
@@ -120,6 +131,22 @@ pub struct Passed {
     pub build_info: String,
     /// Which comparison passed.
     pub identity: EngineIdentity,
+}
+
+impl Passed {
+    /// The substrate claim a served log's `session.start` carries (#292):
+    /// substrate `id`, read from the registry whose text hashes to
+    /// `registry_sha256`, served by the engine this check passed. Built from
+    /// the values the announcement prints, so the two cannot disagree.
+    #[must_use]
+    pub fn claim(&self, id: &str, registry_sha256: &str) -> log::SubstrateClaim {
+        log::SubstrateClaim {
+            substrate: id.to_owned(),
+            registry_sha256: registry_sha256.to_owned(),
+            engine_build: self.build_info.clone(),
+            engine_identity: self.identity.logged(),
+        }
+    }
 }
 
 /// How much of a refusing `/props` body a refusal echoes: enough to read,
