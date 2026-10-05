@@ -2528,10 +2528,10 @@ mod tests {
 
     /// The record of a session the operator's image rode in (#372, the head
     /// rebuild; #458's review NB2): projected with the recording's directory,
-    /// every trunk head -- the one the image was sent in and the one after,
-    /// which still carries it -- is rebuilt and verified; projected without,
-    /// the image turn's head is named unattributed with the reason, never
-    /// silently wrong.
+    /// every trunk head is rebuilt and verified -- the image enters a head
+    /// from the next trunk request on, the image turn's own head hashing every
+    /// message but the last (#471's review, NB2); projected without, each
+    /// head is named unattributed with the reason, never silently wrong.
     #[test]
     fn a_head_the_operators_image_rode_in_is_rebuilt_from_the_recording() {
         use crate::drive::attach::{

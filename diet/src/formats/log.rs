@@ -543,6 +543,10 @@ pub enum Event {
         claim: Option<SubstrateClaim>,
         /// Who wrote the log, when a session did not write it as it ran (v3).
         provenance: Option<Provenance>,
+        /// The tools the session declared to the model, by name, in the
+        /// order its requests carry them (v5, #472): what a head is rebuilt
+        /// with.
+        tools: Option<Vec<String>>,
     },
     /// An ask was admitted.
     Ask {
@@ -738,6 +742,10 @@ pub enum Event {
         approval: Option<Approval>,
         /// The files it left, by reference (v4).
         files: Option<Vec<RecordedFile>>,
+        /// Exactly what the model was given as this call's result, when it
+        /// was given one (v5, #472): what the next step's head is rebuilt
+        /// with.
+        shown: Option<String>,
     },
     /// A side call off the trunk's warm tail (v5, #374).
     Fork {
@@ -1823,6 +1831,16 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     None
                 },
                 provenance: fields.optional_tag("provenance", Provenance::from_tag)?,
+                tools: match fields.optional_strings("tools")? {
+                    Some(tools) if tools.is_empty() => {
+                        return Err(
+                            "`tools` is empty: a session that declared no tool carries no \
+                                    `tools`"
+                                .to_owned(),
+                        );
+                    }
+                    tools => tools,
+                },
             }
         }
         Kind::Ask => Event::Ask {
@@ -1985,6 +2003,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 stderr: fields.output("stderr", "stderr_bytes")?,
                 approval,
                 files: fields.optional_files("files")?,
+                shown: fields.optional_string("shown")?,
             }
         }
         Kind::Fork => Event::Fork {
@@ -2810,6 +2829,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v3("engine_build", Text),
                 may_v3("engine_identity", Tag(Tags::EngineIdentity)),
                 may_v3("provenance", Tag(Tags::Provenance)),
+                may_v5("tools", Holds::Strings),
             ];
             F
         }
@@ -2934,6 +2954,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v3("stderr_bytes", Count),
                 may_v4("approval", Holds::Approval),
                 may_v4("files", Holds::Files),
+                may_v5("shown", Text),
             ];
             F
         }
@@ -3217,6 +3238,7 @@ fn to_value(line: &Line) -> Value {
             serving,
             claim,
             provenance,
+            tools,
         } => {
             put("version", Value::Integer(*version));
             put("opened", count(*opened));
@@ -3249,6 +3271,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(provenance) = provenance {
                 put("provenance", text(provenance.tag()));
+            }
+            if let Some(tools) = tools {
+                put(
+                    "tools",
+                    Value::Array(tools.iter().map(|tool| text(tool)).collect()),
+                );
             }
             Kind::SessionStart
         }
@@ -3450,6 +3478,7 @@ fn to_value(line: &Line) -> Value {
             stderr,
             approval,
             files,
+            shown,
         } => {
             put("request", count(*request));
             put("turn", count(u64::from(*turn)));
@@ -3501,6 +3530,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(files) = files {
                 put("files", files_value(files));
+            }
+            if let Some(shown) = shown {
+                put("shown", text(shown));
             }
             Kind::ToolCall
         }
@@ -3988,6 +4020,7 @@ mod tests {
                     role: Role::System,
                     content: "you are the trunk".to_owned(),
                 }],
+                tools: None,
             },
         }
     }
@@ -4197,6 +4230,7 @@ mod tests {
                     why: Some("not_approved".to_owned()),
                 }),
                 files: None,
+                shown: None,
             },
         ];
         // v5 (#374): a scoping turn answered and settled `final`, then the

@@ -215,6 +215,7 @@ export type SessionStartLine = {
   head: HeadMessage[];
   serving?: Serving;
   provenance?: Provenance;
+  tools?: string[];
 } & ({ substrate: string; registry_sha256: string; engine_build: string; engine_identity: EngineIdentity } | { substrate?: never; registry_sha256?: never; engine_build?: never; engine_identity?: never });
 
 export type AskLine = {
@@ -355,6 +356,7 @@ export type ToolCallLine = {
   stderr_bytes?: number;
   approval?: Approval;
   files?: RecordedFile[];
+  shown?: string;
 };
 
 export type ForkLine = {

@@ -229,6 +229,9 @@ pub enum Event {
         /// What it claims serves it: log v3's substrate claim (#292), when
         /// `serve` started it against a regimen whose engine check passed.
         claim: Option<log::SubstrateClaim>,
+        /// The tools its requests declare, by name, in order (#472): empty
+        /// when they declare none.
+        tools: Vec<String>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -499,6 +502,9 @@ pub struct ToolLine {
     pub stderr: Option<log::Output>,
     /// The decision it ran under.
     pub approval: Option<log::Approval>,
+    /// Exactly what the model was given as the call's result, when it was
+    /// given one (#472).
+    pub shown: Option<String>,
 }
 
 impl ToolLine {
@@ -522,6 +528,7 @@ impl ToolLine {
             stdout: None,
             stderr: None,
             approval: None,
+            shown: None,
         }
     }
 }
@@ -1020,6 +1027,11 @@ impl<S: Streaming + 'static> Session<S> {
             head: template.messages.clone(),
             serving,
             claim,
+            tools: template
+                .tools
+                .iter()
+                .map(|tool| tool.name.clone())
+                .collect(),
         });
         Self {
             shared: Arc::new(Shared {
@@ -1482,6 +1494,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             head,
             serving,
             claim,
+            tools,
         } => log::Event::SessionStart {
             version: log::VERSION,
             opened: *opened,
@@ -1505,6 +1518,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             claim: claim.clone(),
             // A session writing as it runs carries no provenance word.
             provenance: None,
+            // The declared tools, by name (#472): none written when there are none.
+            tools: Some(tools.clone()).filter(|tools| !tools.is_empty()),
         },
         Event::Asked {
             turn,
@@ -1679,6 +1694,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 stdout,
                 stderr,
                 approval,
+                shown,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -1699,6 +1715,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 stderr,
                 approval,
                 files: None,
+                shown,
             }
         }
         Event::TurnSettled { turn, reason } => log::Event::TurnSettled {
@@ -2067,11 +2084,13 @@ fn run_calls<S: Streaming>(
     let mut unknown = false;
     let mut stopped = false;
     for call in calls {
-        let (line, shown) = if stopped || cancel.is_asked() {
+        let (mut line, shown) = if stopped || cancel.is_asked() {
             (cancelled_line(shared, (turn, request), call), None)
         } else {
             one_call(shared, cancel, (turn, request), call, last)
         };
+        // The one string the result message carries, logged as given.
+        line.shown.clone_from(&shown);
         unknown |= line.reason == Some(log::ToolRefusal::UnknownTool);
         stopped |= line.outcome == log::ToolOutcome::Cancelled;
         if let Some(shown) = shown {
@@ -3777,6 +3796,7 @@ pub(in crate::drive) mod tests {
             head,
             serving: None,
             claim: None,
+            tools: _,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -3860,6 +3880,7 @@ pub(in crate::drive) mod tests {
                     dialect: crate::client::shape::Dialect::llama_cpp(),
                 }),
                 claim: Some(claimed()),
+                tools: Vec::new(),
             },
             Event::Asked {
                 turn: 1,
@@ -4007,6 +4028,7 @@ pub(in crate::drive) mod tests {
                     decided_at: Some(4),
                     why: Some("not_approved".to_owned()),
                 }),
+                shown: None,
             })),
             Event::Forked {
                 of_turn: 1,
@@ -4094,6 +4116,7 @@ pub(in crate::drive) mod tests {
                 }],
                 claim: Some(claimed()),
                 provenance: None,
+                tools: None,
             },
             log::Event::Ask {
                 turn: 1,
@@ -4255,6 +4278,7 @@ pub(in crate::drive) mod tests {
                     why: Some("not_approved".to_owned()),
                 }),
                 files: None,
+                shown: None,
             },
             log::Event::Fork {
                 lane: log::Lane::Interview,
@@ -4887,6 +4911,67 @@ pub(in crate::drive) mod tests {
     /// T6: a listed command runs through the confinement, its line says what
     /// ran it, and the call and its result go back to the model and onto the
     /// trunk.
+    /// A session that runs commands, projected (#472): its requests carry
+    /// the bash tool and a tool turn's whole exchange stays on the trunk, and
+    /// the projection rebuilds both -- every trunk head of a two-step tool
+    /// turn and of the plain turn after it is verified, none named.
+    #[test]
+    fn a_tool_turns_heads_and_the_trunk_after_it_are_rebuilt_and_verified() {
+        let tree = scratch("t472-tree");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![bash("call-2", "touch b")],
+                deltas(&["done"]),
+                deltas(&["ok"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("make two markers", None).expect("accepted");
+        wait_until(&session, "the tool turn to settle", settled);
+        session.ask("and now?", None).expect("accepted");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let named: Vec<String> = projected
+            .unspellable
+            .iter()
+            .filter(|u| u.kind == "request")
+            .map(|u| u.why.clone())
+            .collect();
+        assert_eq!(named, Vec::<String>::new());
+        let trunk_requests = lines
+            .iter()
+            .filter(|line| {
+                matches!(
+                    line.event,
+                    log::Event::Request {
+                        lane: log::Lane::Trunk,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(trunk_requests, 4, "three steps of turn 1, one of turn 2");
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
     #[test]
     fn a_listed_call_runs_confined_goes_back_as_openais_shape_and_settles_final() {
         for confined in [true, false] {
