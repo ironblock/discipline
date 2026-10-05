@@ -118,8 +118,128 @@ const WRAPPERS: &[&str] = &[
     "env", "timeout", "nice", "nohup", "time", "command", "builtin",
 ];
 
+/// The runners: programs that run the program their first word names --
+/// `npx X`, pnpm's `pnpx X` and `pnx X`, each `pnpm dlx X` (pnpm 11.21.0's
+/// `package.json` `bin`), and `corepack X`, which runs the package manager
+/// X names (#484's review round 1, finding 7).
+const RUNNERS: &[&str] = &["npx", "pnpx", "pnx", "corepack"];
+
+/// Programs that are a runner under these subcommands: `npm exec X` (and
+/// `x`), `pnpm exec X` and `pnpm dlx X`, and the same under `pn`, pnpm
+/// 11.21.0's own alias of `pnpm`.
+const RUNNER_SUBCOMMANDS: &[(&str, &[&str])] = &[
+    ("npm", &["exec", "x"]),
+    ("pnpm", &["exec", "dlx"]),
+    ("pn", &["exec", "dlx"]),
+];
+
 /// `npx`'s and `npm exec`'s flags that take no value.
 const RUNNER_FLAGS: &[&str] = &["-y", "--yes", "--no", "--no-install", "-q", "--quiet"];
+
+/// The packages a runner's call is judged as directly (#484's ruling):
+/// `npx pnpm@11.20.0 install` and `npm exec pnpm@11.20.0 install` are
+/// `pnpm install`, shaped by the package as written -- `pnpm@11.20.0
+/// install` -- so another pinned version is another approval, and a plain
+/// `pnpm` approval covers no runner form. A bare `npx pnpm` resolves
+/// whichever pnpm it finds: never standing, its words still read for the
+/// denylist (#484's review round 2, N4(b)).
+const RUN_THROUGH: &[&str] = &["pnpm"];
+
+/// The runner flags a call [`through`] a runner may carry and still be
+/// shaped: npx's `--yes` and `-y`, which answer its install prompt and
+/// choose nothing that runs. Any other ([`RUNNER_FLAGS`], `--`) leaves the
+/// call never standing, its inner command still read for the denylist.
+const RUN_THROUGH_FLAGS: &[&str] = &["-y", "--yes"];
+
+/// A call through a runner to a [`RUN_THROUGH`] package: `npx [-y] pnpm@v
+/// …`, `npm exec pnpm …`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Through<'a> {
+    /// The package's own name: `pnpm`.
+    pub package: &'static str,
+    /// The package as written: `pnpm@11.20.0`, or `pnpm`.
+    pub spec: &'a str,
+    /// The package's words, from the spec on: `pnpm@11.20.0 install`.
+    pub words: &'a [Word],
+    /// Whether the call can be shaped as the package's own: the runner by
+    /// its name, not a path; no runner flag but [`RUN_THROUGH_FLAGS`]; the
+    /// package pinned to an exact `x.y.z`, never bare.
+    pub plain: bool,
+}
+
+/// Whether `version` is an exact `x.y.z`: a range or a tag (`11`, `^11.0.0`,
+/// `latest`) picks whichever release is newest when it runs.
+fn exact_version(version: &str) -> bool {
+    let parts: Vec<&str> = version.split('.').collect();
+    parts.len() == 3
+        && parts
+            .iter()
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// The words a runner runs, after the runner and its subcommand: `X …` for
+/// `npx X …` ([`RUNNERS`]) and `npm exec X …` ([`RUNNER_SUBCOMMANDS`]).
+/// `None` for any other program.
+fn runner_inner<'a>(program: &str, rest: &'a [Word]) -> Option<&'a [Word]> {
+    if RUNNERS.contains(&program) {
+        Some(rest)
+    } else if RUNNER_SUBCOMMANDS.iter().any(|(runner, subcommands)| {
+        *runner == program
+            && rest
+                .first()
+                .is_some_and(|w| subcommands.contains(&w.text.as_str()))
+    }) {
+        Some(&rest[1..])
+    } else {
+        None
+    }
+}
+
+/// `words`, a simple command's, as a call through a runner to a
+/// [`RUN_THROUGH`] package, if it is one.
+#[must_use]
+pub fn through(words: &[Word]) -> Option<Through<'_>> {
+    let first = words.first().filter(|w| w.literal)?;
+    let program = basename(&first.text);
+    let inner = runner_inner(program, &words[1..])?;
+    let mut plain = program == first.text;
+    let mut i = 0;
+    while let Some(word) = inner.get(i).filter(|w| w.literal) {
+        if RUNNER_FLAGS.contains(&word.text.as_str()) {
+            plain &= RUN_THROUGH_FLAGS.contains(&word.text.as_str());
+            i += 1;
+        } else {
+            if word.text == "--" {
+                plain = false;
+                i += 1;
+            }
+            break;
+        }
+    }
+    let spec = inner.get(i).filter(|w| w.literal)?;
+    let (name, version) = match spec.text.split_once('@') {
+        Some((name, version)) => (name, Some(version)),
+        None => (spec.text.as_str(), None),
+    };
+    let package = RUN_THROUGH.iter().find(|p| **p == name)?;
+    plain &= version.is_some_and(exact_version);
+    Some(Through {
+        package,
+        spec: &spec.text,
+        words: &inner[i..],
+        plain,
+    })
+}
+
+/// The package a shape's program names: `pnpm` for `pnpm@11.20.0`, which a
+/// call [`through`] a runner is shaped as; `program` itself otherwise.
+#[must_use]
+pub fn package_of(program: &str) -> &str {
+    match program.split_once('@') {
+        Some((name, version)) if RUN_THROUGH.contains(&name) && exact_version(version) => name,
+        _ => program,
+    }
+}
 
 /// `xargs`'s flags without a value, then with one.
 const XARGS_FLAGS: &[&str] = &[
@@ -318,7 +438,9 @@ const GIT_COMMANDS: &[&str] = &[
 const GIT_READS: &[&str] = &["status", "log", "diff", "show"];
 
 /// The programs whose subcommand is part of an approval's shape (point 5).
-const SUBCOMMANDED: &[&str] = &["git", "npm", "npx", "pnpm", "yarn", "cargo", "pip", "pip3"];
+const SUBCOMMANDED: &[&str] = &[
+    "git", "npm", "npx", "pnpm", "pn", "pnpx", "pnx", "yarn", "cargo", "pip", "pip3",
+];
 
 /// How deep `sh -c '…'` and `$( … )` are read before the call prompts instead.
 const MAX_DEPTH: usize = 4;
@@ -876,16 +998,14 @@ impl Gate<'_> {
                 }
                 Err(why) => vec![dynamic(why)],
             }
-        } else if program == "npx" {
+        } else if let Some(through) = through(words) {
+            // `npx pnpm@v …` is `pnpm …` (#484's ruling).
+            self.read_through(&through, simple, depth, prefixed)
+        } else if let Some(inner) = runner_inner(program, rest) {
             // `npx X` and `npm exec X` run the program X names (point 2): it
             // meets the denylist, and the call is otherwise shaped as written.
-            self.runner(program, rest, rest)
-        } else if program == "npm"
-            && rest
-                .first()
-                .is_some_and(|w| w.text == "exec" || w.text == "x")
-        {
-            self.runner(program, &rest[1..], rest)
+            // pnpm's runners are read the same way (#482).
+            self.runner(program, inner, rest)
         } else if program == "xargs" {
             self.named_inner(program, xargs_inner(rest), simple, depth)
         } else if program == "find" && find_inner(rest).is_some() {
@@ -895,9 +1015,44 @@ impl Gate<'_> {
         }
     }
 
-    /// `npx …` or `npm exec …`: the program it runs is the first word past its
-    /// flags that take no value (and past `--`). A denylisted one is refused;
-    /// otherwise the call is shaped from `shaped`, the words after the program.
+    /// A call [`through`] a runner, read as the package's own words: a
+    /// refusal among them refuses it; a plain one is shaped as the package
+    /// as written, any other is dynamic.
+    fn read_through(
+        &self,
+        through: &Through<'_>,
+        simple: &Simple,
+        depth: usize,
+        prefixed: bool,
+    ) -> Vec<Segment> {
+        let mut words = through.words.to_vec();
+        through.package.clone_into(&mut words[0].text);
+        let mut segments = self.read_words(&words, simple, depth, prefixed);
+        if let Some(refusal) = segments.iter().find(|s| is_refused(s)) {
+            return vec![refusal.clone()];
+        }
+        if !through.plain {
+            return vec![dynamic(format!(
+                "`{}` through a runner with a flag, a path or a version that is not exact",
+                through.spec
+            ))];
+        }
+        for segment in &mut segments {
+            if let Some(shape) = segment
+                .shape
+                .as_mut()
+                .filter(|s| s.program == through.package)
+            {
+                through.spec.clone_into(&mut shape.program);
+            }
+        }
+        segments
+    }
+
+    /// `npx …` or `npm exec …` ([`RUNNERS`], [`RUNNER_SUBCOMMANDS`]): the
+    /// program it runs is the first word past its flags that take no value
+    /// (and past `--`). A denylisted one is refused; otherwise the call is
+    /// shaped from `shaped`, the words after the program.
     fn runner(&self, program: &str, inner: &[Word], shaped: &[Word]) -> Vec<Segment> {
         let mut i = 0;
         while let Some(word) = inner.get(i) {
@@ -1555,6 +1710,28 @@ mod tests {
         }
     }
 
+    /// #482: pnpm's runners -- `pnpm dlx`, `pnpm exec`, `pnpx` and `pnx`
+    /// (pnpm 11.21.0's alias of `pnpm dlx`), and `pn` (its alias of `pnpm`)
+    /// -- run the program their first word names, so it meets the denylist
+    /// as it does under `npx` and `npm exec`.
+    #[test]
+    fn pnpms_runners_do_not_hide_a_denylisted_program() {
+        for line in [
+            "pnpx docker ps",
+            "pnpx -y docker ps",
+            "pnpx -- kubectl get pods",
+            "pnx sudo id",
+            "pnpm dlx docker ps",
+            "pnpm dlx -- sudo id",
+            "pnpm exec docker ps",
+            "pnpm exec -- sudo id",
+            "pn dlx crontab -l",
+            "pn exec sudo id",
+        ] {
+            assert_eq!(outcome(line), Outcome::Refused, "{line:?}");
+        }
+    }
+
     #[test]
     fn dynamic_syntax_prompts_and_is_never_read_as_allowed() {
         for line in [
@@ -1743,6 +1920,13 @@ mod tests {
         assert_eq!(shape("npm --prefix x install"), None);
         assert_eq!(shape("npx prisma generate").as_deref(), Some("npx prisma"));
         assert_eq!(shape("npm exec prisma").as_deref(), Some("npm exec"));
+        assert_eq!(
+            shape("pnpx prisma generate").as_deref(),
+            Some("pnpx prisma")
+        );
+        assert_eq!(shape("pnx prisma generate").as_deref(), Some("pnx prisma"));
+        assert_eq!(shape("pnpm dlx prisma").as_deref(), Some("pnpm dlx"));
+        assert_eq!(shape("pnpm exec prisma").as_deref(), Some("pnpm exec"));
         assert_eq!(shape("npm $SUB"), None);
     }
 

@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 256
+faults = 262
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3871,7 +3871,7 @@ failure_class = "drive.npm-abbreviation-is-standing"
 target = "diet/src/drive/tool_loop.rs"
 expect_exit = 101
 anchor = '''
-            None if shape.program == "npm" => None,'''
+            None if manages(&shape.program) => None,'''
 becomes = '''
             None if false => None,'''
 catches = [
@@ -3913,6 +3913,98 @@ catches = [
     "drive::tool_loop::tests::an_environment_prefix_on_an_npm_command_is_never_standing",
 ]
 
+
+[[fault]]
+id = "drive.pnpm-run-stale-digest-approves"
+failure_class = "drive.pnpm-run-stale-digest-approves"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+const MANAGERS: &[Manager] = &[NPM, PNPM];'''
+becomes = '''
+const MANAGERS: &[Manager] = &[NPM];
+const _: &Manager = &PNPM;'''
+catches = [
+    "drive::tool_loop::tests::a_pnpm_install_approval_binds_to_the_lifecycle_the_pnpmfile_and_the_settings",
+    "drive::tool_loop::tests::a_pnpm_run_approval_binds_to_its_scripts_text_and_lapses_when_it_changes",
+    "drive::tool_loop::tests::a_pnpm_script_binds_the_install_pnpm_may_run_before_it",
+    "drive::tool_loop::tests::a_standing_pnpm_approval_covers_only_the_exact_forms_and_no_option",
+    "drive::tool_loop::tests::an_unreadable_package_json_makes_no_pnpm_command_standing",
+    "drive::tool_loop::tests::pnpm_config_store_dir_keeps_npm_and_pnpm_standing_as_the_cache_does",
+    "drive::tool_loop::tests::pnpm_test_start_stop_and_restart_bind_to_the_scripts_they_run",
+]
+
+[[fault]]
+id = "drive.pnpm-config-store-dir-not-excused"
+failure_class = "drive.pnpm-config-store-dir-not-excused"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+    "NPM_CONFIG_CACHE",
+    "pnpm_config_store_dir",
+    "PNPM_CONFIG_STORE_DIR",'''
+becomes = '''
+    "NPM_CONFIG_CACHE",'''
+catches = [
+    "drive::tool_loop::tests::pnpm_config_store_dir_keeps_npm_and_pnpm_standing_as_the_cache_does",
+]
+
+[[fault]]
+id = "drive.pnpm-through-npx-judged-as-npx"
+failure_class = "drive.pnpm-through-npx-judged-as-npx"
+target = "diet/src/drive/shell_gate.rs"
+expect_exit = 101
+anchor = '''
+        } else if let Some(through) = through(words) {'''
+becomes = '''
+        } else if let Some(through) = through(words).filter(|_| false) {'''
+catches = [
+    "drive::tool_loop::tests::an_install_through_npx_covers_no_exec_and_meets_the_denylist",
+    "drive::tool_loop::tests::pnpm_run_through_npx_binds_to_its_scripts_text",
+    "drive::tool_loop::tests::pnpm_through_a_runner_is_standing_only_pinned_exactly_and_with_yes_alone",
+    "drive::tool_loop::tests::pnpm_through_corepack_is_judged_as_pnpm",
+    "drive::tool_loop::tests::pnpm_through_npm_exec_is_judged_as_pnpm",
+]
+
+
+[[fault]]
+id = "drive.pnpm-other-manifest-ignored"
+failure_class = "drive.pnpm-other-manifest-ignored"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+    manifests: &["package.json5", "package.yaml"],'''
+becomes = '''
+    manifests: &[],'''
+catches = [
+    "drive::tool_loop::tests::a_pnpm_manifest_other_than_package_json_makes_no_pnpm_command_standing",
+]
+
+[[fault]]
+id = "drive.pnpm-config-named-pnpmfile-ignored"
+failure_class = "drive.pnpm-config-named-pnpmfile-ignored"
+target = "diet/src/drive/tool_loop.rs"
+expect_exit = 101
+anchor = '''
+    unbound: &["pnpmfile", "configdependencies"],'''
+becomes = '''
+    unbound: &[],'''
+catches = [
+    "drive::tool_loop::tests::a_pnpmfile_named_by_config_makes_no_pnpm_command_standing",
+]
+
+[[fault]]
+id = "drive.pnpm-bare-runner-shares-plain-pnpms-shape"
+failure_class = "drive.pnpm-bare-runner-shares-plain-pnpms-shape"
+target = "diet/src/drive/shell_gate.rs"
+expect_exit = 101
+anchor = '''
+    plain &= version.is_some_and(exact_version);'''
+becomes = '''
+    plain &= version.is_none_or(exact_version);'''
+catches = [
+    "drive::tool_loop::tests::a_plain_pnpm_approval_covers_no_bare_runner_pnpm",
+]
 [[fault]]
 id = "drive.serve-logs-no-substrate-claim"
 failure_class = "drive.serve-logs-no-substrate-claim"
