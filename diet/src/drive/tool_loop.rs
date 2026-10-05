@@ -27,7 +27,7 @@ use crate::digest::sha256_hex;
 use crate::formats::log;
 use crate::formats::record::json::{self, Value};
 use crate::formats::regimen::{self, Regimen};
-use crate::formats::shell;
+use crate::formats::shell::{self, Word};
 use crate::isolation::{Confinement, Policy};
 
 use super::shell_gate::{self, Approval, Denylist, Judgement, Scope, Segment, Shape, Verdict, Why};
@@ -361,6 +361,15 @@ struct Manager {
     /// Whether a script it runs may install first: then a script's digest
     /// also holds what the install runs.
     installs_before_run: bool,
+    /// The manifests it reads in place of an absent `package.json`, which
+    /// no digest reads: while one is there, none of its commands is standing.
+    manifests: &'static [&'static str],
+    /// The config files searched for [`Manager::unbound`].
+    config: &'static [&'static str],
+    /// Words that, in a [`Manager::config`] file or a [`Manager::fields`]
+    /// value, name code it loads that no digest holds: while one is there,
+    /// none of its commands is standing. Lower-case, matched in any case.
+    unbound: &'static [&'static str],
 }
 
 /// npm: `install` bare or with plain package names, `ci` bare.
@@ -374,9 +383,18 @@ const NPM: Manager = Manager {
     files: &[],
     fields: &[],
     installs_before_run: false,
+    manifests: &[],
+    config: &[],
+    unbound: &[],
 };
 
 /// pnpm 11.21.0: `install` and `i` bare (pnpm adds a package with `add`),
+/// its manifest `package.json`, else `package.json5`, else `package.yaml`
+/// (`MANIFEST_BASE_NAMES`); a pnpmfile a setting names (`pnpmfile`,
+/// `globalPnpmfile`) or a `configDependencies` plugin brings is loaded for
+/// every command (`installConfigDepsAndLoadHooks`), and is in no digest
+/// (#484's review round 1, findings 1 and 2: fail closed).
+///
 /// `add` with plain package names. A hook in `.pnpmfile.mjs`, or else
 /// `.pnpmfile.cjs`, runs JS; `pnpm-workspace.yaml` holds pnpm's settings
 /// (`allowBuilds`, `onlyBuiltDependencies`, `scriptShell`,
@@ -395,6 +413,9 @@ const PNPM: Manager = Manager {
     files: &[".pnpmfile.cjs", ".pnpmfile.mjs", "pnpm-workspace.yaml"],
     fields: &["packageManager", "devEngines", "pnpm"],
     installs_before_run: true,
+    manifests: &["package.json5", "package.yaml"],
+    config: &["pnpm-workspace.yaml", ".npmrc"],
+    unbound: &["pnpmfile", "configdependencies"],
 };
 
 /// The package managers whose approvals bind to digests.
@@ -404,8 +425,24 @@ const MANAGERS: &[Manager] = &[NPM, PNPM];
 /// `pn`, pnpm 11.21.0's alias of `pnpm`.
 const MANAGER_ALIASES: &[&str] = &["pn"];
 
+/// The manager a shape's program names: the program, or a pnpm a runner
+/// pinned (`pnpm@11.20.0`, [`shell_gate::package_of`]).
 fn manager(program: &str) -> Option<&'static Manager> {
+    let program = shell_gate::package_of(program);
     MANAGERS.iter().find(|manager| manager.program == program)
+}
+
+/// A simple command's manager and its words from the program on: the
+/// program exactly as written, or a pnpm run through a runner that can be
+/// shaped as its own ([`shell_gate::through`], #484's ruling).
+fn manager_words(words: &[Word]) -> Option<(&'static Manager, &[Word])> {
+    // `npm exec pnpm …` is pnpm's, not npm's.
+    if let Some(through) = shell_gate::through(words) {
+        return Some((manager(through.package)?, through.words)).filter(|_| through.plain);
+    }
+    let first = words.first().filter(|w| w.literal)?;
+    let manager = MANAGERS.iter().find(|m| m.program == first.text)?;
+    Some((manager, words))
 }
 
 /// Whether `program` is a package manager: then a command of it that is
@@ -483,6 +520,40 @@ fn npm_files(worktree: &Path) -> String {
     text
 }
 
+/// The worktree's `package.json` as `manager` reads it: `None` when it
+/// cannot be read ([`package_json`]), when `package.json` is absent and one
+/// of the manager's other [`Manager::manifests`] is there, or when a
+/// [`Manager::config`] file or a [`Manager::fields`] value mentions an
+/// [`Manager::unbound`] word -- or a config file cannot be read.
+fn manager_package(manager: &Manager, worktree: &Path) -> Option<Package> {
+    let package = package_json(worktree)?;
+    let absent = |name: &str| {
+        std::fs::symlink_metadata(worktree.join(name))
+            .is_err_and(|why| why.kind() == std::io::ErrorKind::NotFound)
+    };
+    if absent("package.json") && manager.manifests.iter().any(|name| !absent(name)) {
+        return None;
+    }
+    let mentions = |text: &str| {
+        let text = text.to_ascii_lowercase();
+        manager.unbound.iter().any(|word| text.contains(word))
+    };
+    for name in manager.config {
+        match std::fs::read(worktree.join(name)) {
+            Ok(bytes) if mentions(&String::from_utf8_lossy(&bytes)) => return None,
+            Err(why) if why.kind() != std::io::ErrorKind::NotFound => return None,
+            _ => {}
+        }
+    }
+    let unbound_field = manager.fields.iter().any(|field| {
+        package
+            .whole
+            .get(*field)
+            .is_some_and(|value| mentions(&value.to_string()))
+    });
+    (!unbound_field).then_some(package)
+}
+
 /// The lines every digest of `manager` opens with: [`npm_files`] (pnpm
 /// reads `.npmrc` too), then its own [`Manager::files`], then its
 /// [`Manager::fields`], each `name=json` or `name` alone where absent.
@@ -529,7 +600,7 @@ fn script_lines<'a>(
 /// and, for a manager that may install first, followed by its lifecycle
 /// scripts. `None` when the `package.json` cannot be read.
 fn manager_scripts_digest(manager: &Manager, worktree: &Path, names: &[&str]) -> Option<String> {
-    let package = package_json(worktree)?;
+    let package = manager_package(manager, worktree)?;
     let mut text = manager_files(manager, worktree, &package);
     let (start, server) = NPM_DEFAULT_START;
     if names.contains(&start) {
@@ -558,7 +629,7 @@ fn manager_scripts_digest(manager: &Manager, worktree: &Path, names: &[&str]) ->
 /// scripts are not in it: the receipt says they are [`LIFECYCLE_SCRIPTS`].
 /// `None` when the `package.json` cannot be read.
 fn manager_lifecycle_digest(manager: &Manager, worktree: &Path) -> Option<String> {
-    let package = package_json(worktree)?;
+    let package = manager_package(manager, worktree)?;
     let mut text = manager_files(manager, worktree, &package);
     script_lines(
         &mut text,
@@ -623,9 +694,7 @@ fn npm_commands(command: &str) -> Option<ManagerCommands> {
     let mut scripts = Vec::new();
     let mut installs = Vec::new();
     for simple in list.simple_commands() {
-        let words = &simple.words;
-        let Some(first) = words.first() else { continue };
-        let Some(manager) = manager(&first.text).filter(|_| first.literal) else {
+        let Some((manager, words)) = manager_words(&simple.words) else {
             continue;
         };
         if !simple.assignments.is_empty() {
@@ -736,18 +805,19 @@ impl Digests {
 /// `env.js`). Case-insensitive.
 const CONFIG_PREFIXES: &[&str] = &["npm_config_", "pnpm_config_"];
 
-/// The `npm_config_*` names a session may pass and keep npm and pnpm
-/// standing: the cache directory, which stores tarballs, and the store
-/// directory (#301, 5996135654), which names pnpm's store; neither chooses
-/// anything that runs. T1's regimen passes them by ruling (#301, 5981651636:
-/// the default five plus `npm_config_cache`; 5996135654: plus
+/// The config variables a session may pass and keep npm and pnpm standing:
+/// npm's cache directory, which stores tarballs, and pnpm's store
+/// directory, which stores packages; neither chooses anything that runs.
+/// T1's regimen passes them by ruling (#301, 5981651636: the default five
+/// plus `npm_config_cache`; #484: plus `pnpm_config_store_dir`, which pnpm
+/// 11.21.0 reads, lower- or upper-case, where it ignores
 /// `npm_config_store_dir`). Exactly these spellings; every other config
 /// variable makes npm and pnpm non-standing.
 pub const NPM_CONFIG_EXCUSED: &[&str] = &[
     "npm_config_cache",
     "NPM_CONFIG_CACHE",
-    "npm_config_store_dir",
-    "NPM_CONFIG_STORE_DIR",
+    "pnpm_config_store_dir",
+    "PNPM_CONFIG_STORE_DIR",
 ];
 
 /// The free reads that print commits, whose output a `gpg.*`, `format.pretty`
@@ -3192,31 +3262,29 @@ pub(in crate::drive) mod tests {
         }
     }
 
-    /// #301 (5996135654): `npm_config_store_dir` names pnpm's store and
-    /// picks no program, so a session passing it keeps an approved npm or
-    /// pnpm call standing, as `npm_config_cache` does. Every other
-    /// `npm_config_*` still lapses both.
+    /// #484's ruling: `pnpm_config_store_dir` names pnpm's store and picks
+    /// no program (pnpm 11.21.0 reads it, and its upper-case spelling, as
+    /// `store-dir`), so a session passing it keeps an approved npm or pnpm
+    /// call standing, as `npm_config_cache` does. `npm_config_store_dir`,
+    /// which pnpm 11 does not read, lapses both like every other config
+    /// variable.
     #[test]
-    fn npm_config_store_dir_keeps_npm_and_pnpm_standing_as_the_cache_does() {
-        let dir = scratch("npm-store-dir");
+    fn pnpm_config_store_dir_keeps_npm_and_pnpm_standing_as_the_cache_does() {
+        let dir = scratch("pnpm-store-dir");
         let gate = gate_in(&dir);
         package(&dir, "vite build");
-        let mut granted = Vec::new();
-        for line in [
+        let lines = [
             "npm run build",
             "npm install",
             "pnpm run build",
             "pnpm install",
-        ] {
-            granted.extend(gate.judge(line, &[]).grants(Scope::Session, 1));
-        }
-        for store in ["npm_config_store_dir", "NPM_CONFIG_STORE_DIR"] {
-            for line in [
-                "npm run build",
-                "npm install",
-                "pnpm run build",
-                "pnpm install",
-            ] {
+        ];
+        let granted: Vec<Entry> = lines
+            .iter()
+            .flat_map(|line| gate.judge(line, &[]).grants(Scope::Session, 1))
+            .collect();
+        for store in ["pnpm_config_store_dir", "PNPM_CONFIG_STORE_DIR"] {
+            for line in lines {
                 let judged =
                     passing_in(&dir, &["PATH", "npm_config_cache", store]).judge(line, &granted);
                 assert_eq!(
@@ -3228,14 +3296,17 @@ pub(in crate::drive) mod tests {
             }
         }
         for other in [
+            "npm_config_store_dir",
+            "NPM_CONFIG_STORE_DIR",
             "npm_config_script_shell",
-            "npm_config_store",
-            "npm_config_store_dir_x",
+            "pnpm_config_store",
+            "pnpm_config_store_dir_x",
+            "Pnpm_Config_Store_Dir",
             "pnpm_config_script_shell",
             "PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN",
         ] {
-            for line in ["npm run build", "pnpm run build", "pnpm install"] {
-                let judged = passing_in(&dir, &["PATH", "npm_config_store_dir", other])
+            for line in lines {
+                let judged = passing_in(&dir, &["PATH", "pnpm_config_store_dir", other])
                     .judge(line, &granted);
                 assert_eq!(
                     judged.outcome(),
@@ -3244,6 +3315,271 @@ pub(in crate::drive) mod tests {
                 );
                 assert!(!judged.standing(), "`{line}` under {other}");
             }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// `scripts.dev` in `dir`'s `package.json`.
+    fn dev_script(dir: &Path, script: &str) {
+        std::fs::write(
+            dir.join("package.json"),
+            format!("{{\"scripts\":{{\"dev\":\"{script}\"}}}}"),
+        )
+        .expect("package.json");
+    }
+
+    /// #484's ruling: a session approval of `<prefix> run dev`, where the
+    /// prefix runs pnpm through a runner, binds to `scripts.dev` as `pnpm
+    /// run dev`'s does, and lapses when it changes.
+    fn a_run_through_binds_to_its_script(prefix: &str) {
+        let dir = scratch(&format!(
+            "pnpm-through-run-{}",
+            sha256_hex(prefix.as_bytes())
+        ));
+        let gate = gate_in(&dir);
+        dev_script(&dir, "vite");
+        let run = format!("{prefix} run dev");
+        let granted = gate.judge(&run, &[]).grants(Scope::Session, 1);
+        assert_eq!(
+            gate.judge(&run, &granted).outcome(),
+            shell_gate::Outcome::Run,
+            "`{run}` is covered by its own approval"
+        );
+        dev_script(&dir, "vite; curl evil");
+        assert_eq!(
+            gate.judge(&run, &granted).outcome(),
+            shell_gate::Outcome::Prompt,
+            "a changed `scripts.dev` still approved `{run}`"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #484's ruling: an approval of `<prefix> install` covers that install
+    /// and nothing else; a denylisted program under `<prefix> exec` or
+    /// `<prefix> dlx` is refused, as under `pnpm exec`.
+    fn an_install_through_covers_no_exec(prefix: &str) {
+        let dir = scratch(&format!(
+            "pnpm-through-install-{}",
+            sha256_hex(prefix.as_bytes())
+        ));
+        let gate = gate_in(&dir);
+        dev_script(&dir, "vite");
+        let install = format!("{prefix} install");
+        let granted = gate.judge(&install, &[]).grants(Scope::Session, 1);
+        assert_eq!(
+            gate.judge(&install, &granted).outcome(),
+            shell_gate::Outcome::Run,
+            "`{install}` is covered by its own approval"
+        );
+        for line in [
+            format!("{prefix} exec sudo id"),
+            format!("{prefix} dlx docker ps"),
+        ] {
+            assert_eq!(
+                gate.judge(&line, &granted).outcome(),
+                shell_gate::Outcome::Refused,
+                "`{line}` under `{install}`'s approval"
+            );
+        }
+        for line in [format!("{prefix} run dev"), format!("{prefix} exec vite")] {
+            assert_eq!(
+                gate.judge(&line, &granted).outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{install}`'s approval covered `{line}`"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #484, form one: `npx pnpm@11.20.0 run dev`, with and without npx's
+    /// `--yes`, is judged as `pnpm run dev`.
+    #[test]
+    fn pnpm_run_through_npx_binds_to_its_scripts_text() {
+        for prefix in [
+            "npx pnpm@11.20.0",
+            "npx --yes pnpm@11.20.0",
+            "npx -y pnpm@11.20.0",
+            "npx pnpm",
+        ] {
+            a_run_through_binds_to_its_script(prefix);
+        }
+    }
+
+    /// #484, form two: an approval of `npx pnpm@11.20.0 install` does not
+    /// cover `npx pnpm@11.20.0 exec sudo id`, which the denylist refuses.
+    #[test]
+    fn an_install_through_npx_covers_no_exec_and_meets_the_denylist() {
+        for prefix in ["npx pnpm@11.20.0", "npx --yes pnpm@11.20.0", "npx pnpm"] {
+            an_install_through_covers_no_exec(prefix);
+        }
+    }
+
+    /// #484, form three: `npm exec pnpm …` (and `npm x`) is judged the same
+    /// way.
+    #[test]
+    fn pnpm_through_npm_exec_is_judged_as_pnpm() {
+        for prefix in [
+            "npm exec pnpm@11.20.0",
+            "npm exec --yes pnpm@11.20.0",
+            "npm x pnpm@11.20.0",
+        ] {
+            a_run_through_binds_to_its_script(prefix);
+            an_install_through_covers_no_exec(prefix);
+        }
+    }
+
+    /// Review round 1 of #484, finding 7: `corepack pnpm[@v] <args>` is
+    /// judged as `pnpm <args>`, as `npx pnpm` is.
+    #[test]
+    fn pnpm_through_corepack_is_judged_as_pnpm() {
+        for prefix in ["corepack pnpm@11.20.0", "corepack pnpm"] {
+            a_run_through_binds_to_its_script(prefix);
+            an_install_through_covers_no_exec(prefix);
+        }
+    }
+
+    /// Review round 1 of #484, finding 1: with no `package.json`, pnpm reads
+    /// `package.json5` or `package.yaml` (pnpm 11.21.0's
+    /// `MANIFEST_BASE_NAMES`), which no digest reads. No pnpm command is
+    /// standing then. npm reads only `package.json`, so npm is unaffected.
+    #[test]
+    fn a_pnpm_manifest_other_than_package_json_makes_no_pnpm_command_standing() {
+        for (file, text) in [
+            ("package.yaml", "scripts:\n  dev: vite\n  postinstall: x\n"),
+            ("package.json5", "{scripts:{dev:'vite',postinstall:'x'}}"),
+        ] {
+            let dir = scratch(&format!("pnpm-manifest-{file}"));
+            let gate = gate_in(&dir);
+            std::fs::write(dir.join(file), text).expect("manifest");
+            for line in [
+                "pnpm install",
+                "pnpm i",
+                "pnpm run dev",
+                "pnpm add left-pad",
+            ] {
+                assert!(
+                    !gate.judge(line, &[]).standing(),
+                    "`{line}` could be approved standing beside a `{file}`"
+                );
+            }
+            assert!(
+                gate.judge("npm run dev", &[]).standing(),
+                "control: npm reads no `{file}`"
+            );
+            dev_script(&dir, "vite");
+            assert!(
+                gate.judge("pnpm run dev", &[]).standing(),
+                "control: pnpm reads `package.json` first"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// Review round 1 of #484, finding 2: a pnpmfile named by config
+    /// (`pnpmfile`, `globalPnpmfile`) or brought by `configDependencies` is
+    /// loaded for every pnpm command, and its bytes are in no digest. A pnpm
+    /// command is not standing while `pnpm-workspace.yaml`, `.npmrc` or
+    /// `package.json`'s `pnpm` field mentions one.
+    #[test]
+    fn a_pnpmfile_named_by_config_makes_no_pnpm_command_standing() {
+        for (file, text) in [
+            ("pnpm-workspace.yaml", "pnpmfile: hooks.cjs\n"),
+            ("pnpm-workspace.yaml", "pnpmfile:\n  - hooks.cjs\n"),
+            ("pnpm-workspace.yaml", "globalPnpmfile: hooks.cjs\n"),
+            (
+                "pnpm-workspace.yaml",
+                "configDependencies:\n  pnpm-plugin-x: 1.0.0+sha512-AAAA\n",
+            ),
+            (".npmrc", "pnpmfile=hooks.cjs\n"),
+            (".npmrc", "global-pnpmfile=hooks.cjs\n"),
+            (
+                "package.json",
+                "{\"scripts\":{\"dev\":\"vite\"},\"pnpm\":{\"configDependencies\":{\"x\":\"1\"}}}",
+            ),
+            (
+                "package.json",
+                "{\"scripts\":{\"dev\":\"vite\"},\"pnpm\":{\"pnpmfile\":\"hooks.cjs\"}}",
+            ),
+        ] {
+            let dir = scratch("pnpm-pnpmfile-config");
+            let gate = gate_in(&dir);
+            dev_script(&dir, "vite");
+            std::fs::write(dir.join("hooks.cjs"), "module.exports = {}\n").expect("hooks");
+            std::fs::write(dir.join(file), text).expect("config");
+            for line in ["pnpm install", "pnpm i", "pnpm run dev", "pnpm test"] {
+                assert!(
+                    !gate.judge(line, &[]).standing(),
+                    "`{line}` could be approved standing under `{file}`: {text}"
+                );
+            }
+            assert!(
+                gate.judge("npm run dev", &[]).standing(),
+                "control: npm loads no pnpmfile (`{file}`: {text})"
+            );
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// #484: through a runner, the shape is the package as written, so
+    /// another pinned version is another approval; any runner flag but
+    /// `--yes`/`-y`, a version that is not exact, an option or an
+    /// environment prefix, or a path to the runner leaves the call never
+    /// standing, its inner command still read for the denylist.
+    #[test]
+    fn pnpm_through_a_runner_is_standing_only_pinned_exactly_and_with_yes_alone() {
+        let dir = scratch("pnpm-through-exact");
+        let gate = gate_in(&dir);
+        dev_script(&dir, "vite");
+        let granted = gate
+            .judge("npx pnpm@11.20.0 run dev", &[])
+            .grants(Scope::Session, 1);
+        assert_eq!(
+            granted
+                .iter()
+                .map(|e| e.shape.to_string())
+                .collect::<Vec<_>>(),
+            ["pnpm@11.20.0 run"]
+        );
+        assert_eq!(
+            gate.judge("npx pnpm@11.21.0 run dev", &granted).outcome(),
+            shell_gate::Outcome::Prompt,
+            "another pinned pnpm is another program"
+        );
+        for line in [
+            "npx -- pnpm@11.20.0 run dev",
+            "npx -q pnpm@11.20.0 run dev",
+            "npx --no-install pnpm@11.20.0 run dev",
+            "npx --package pnpm@11.20.0 pnpm run dev",
+            "npx -p pnpm@11.20.0 pnpm run dev",
+            "npx pnpm@latest run dev",
+            "npx pnpm@11 run dev",
+            "npx pnpm@^11.20.0 run dev",
+            "npx --yes pnpm@11.20.0 -C exercise install",
+            "npx pnpm@11.20.0 dev",
+            "npx pnpm@11.20.0 exec vite",
+            "/usr/local/bin/npx pnpm@11.20.0 run dev",
+            "FOO=1 npx pnpm@11.20.0 run dev",
+            "env npx pnpm@11.20.0 run dev",
+        ] {
+            let judged = gate.judge(line, &granted);
+            assert_eq!(
+                judged.outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{line}` was covered"
+            );
+            assert!(!judged.standing(), "`{line}` could be approved standing");
+        }
+        for line in [
+            "npx -- pnpm@11.20.0 exec sudo id",
+            "npx -q pnpm@11.20.0 dlx docker ps",
+            "npx pnpm@latest exec sudo id",
+            "npm exec -- pnpm exec crontab -l",
+        ] {
+            assert_eq!(
+                gate.judge(line, &[]).outcome(),
+                shell_gate::Outcome::Refused,
+                "{line}"
+            );
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
