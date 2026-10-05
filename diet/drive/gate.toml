@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 246
+faults = 249
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3939,4 +3939,55 @@ becomes = '''
                 *entries = 1;'''
 catches = [
     "drive::projection::tests::a_forks_row_and_its_patches_capture_and_a_declined_fork_is_named",
+]
+
+# #374 layer 2: serve fires the interview fork in the capture gap.
+[[fault]]
+id = "drive.a-scoping-gap-fires-no-fork"
+failure_class = "drive.a-scoping-gap-fires-no-fork"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    if scoping && rules.contains(&log::Warrant::Scoping) {'''
+becomes = '''
+    if scoping && rules.contains(&log::Warrant::Read) {'''
+catches = [
+    "drive::serve::tests::a_scoping_ask_over_http_fires_one_fork_whose_three_patches_project_to_one_capture",
+    "drive::session::tests::a_cancel_or_end_during_the_fork_settles_it_cancelled",
+    "drive::session::tests::a_forks_500_settles_it_failed_and_is_never_retried",
+    "drive::session::tests::a_scoping_gap_fires_one_fork_whose_patches_carry_its_decisions",
+]
+
+[[fault]]
+id = "drive.a-plain-gap-fires-a-fork"
+failure_class = "drive.a-plain-gap-fires-a-fork"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    if scoping && rules.contains(&log::Warrant::Scoping) {'''
+becomes = '''
+    if rules.contains(&log::Warrant::Scoping) {'''
+catches = [
+    "drive::serve::tests::a_scoping_ask_over_http_fires_one_fork_whose_three_patches_project_to_one_capture",
+    "drive::session::tests::a_forks_500_settles_it_failed_and_is_never_retried",
+    "drive::session::tests::a_plain_gap_fires_no_fork_and_no_warrant_fires_none",
+]
+
+[[fault]]
+id = "drive.a-forks-patch-lines-dropped"
+failure_class = "drive.a-forks-patch-lines-dropped"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+    for patch in patches {
+        state.push(patch);
+    }'''
+becomes = '''
+    for patch in patches {
+        drop(patch);
+    }'''
+catches = [
+    "drive::serve::tests::a_scoping_ask_over_http_fires_one_fork_whose_three_patches_project_to_one_capture",
+    "drive::session::tests::a_scoping_gap_fires_one_fork_whose_patches_carry_its_decisions",
+    "drive::session::tests::a_turn_that_read_a_document_fires_a_read_fork",
 ]
