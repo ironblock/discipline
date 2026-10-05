@@ -74,6 +74,103 @@ pub struct Message {
     pub tool_calls: Vec<ToolCall>,
     /// The call a [`Role::Tool`] message answers; `None` on every other.
     pub tool_call_id: Option<String>,
+    /// The images the operator attached to this message, in the order they
+    /// were attached: empty on every other message (#372, ruled at
+    /// 5989411005). Only [`attach`] adds one, and only after the bytes are
+    /// checked against the file the log names, so an image here is always
+    /// the bytes its reference describes.
+    pub images: Vec<Image>,
+}
+
+/// One image a message carries, as the wire sends it: its media type and
+/// its bytes in standard base64, padded (RFC 4648 section 4). Built only by
+/// [`attach`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Image {
+    media_type: String,
+    base64: String,
+}
+
+impl Image {
+    /// The `data:` URI the wire carries it as:
+    /// `data:<media_type>;base64,<bytes>`.
+    #[must_use]
+    pub fn data_uri(&self) -> String {
+        format!("data:{};base64,{}", self.media_type, self.base64)
+    }
+}
+
+/// Why [`attach`] refused bytes: they are not the file the log names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Mismatch {
+    /// The bytes hash to `got`, and the file names `want`.
+    Digest {
+        /// The logged sha256.
+        want: String,
+        /// The sha256 of the bytes given.
+        got: String,
+    },
+    /// The bytes are `got` long, and the file says `want`.
+    Length {
+        /// The logged byte count.
+        want: u64,
+        /// The byte count given.
+        got: u64,
+    },
+}
+
+impl fmt::Display for Mismatch {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Digest { want, got } => {
+                write!(f, "the bytes hash to {got}, not the logged {want}")
+            }
+            Self::Length { want, got } => {
+                write!(f, "the bytes are {got} long, not the logged {want}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Mismatch {}
+
+/// `message` with `bytes` attached as one more image, after checking that
+/// they are the bytes `file` names: its sha256 and its byte count (#372, the
+/// contract with track one). The image's media type is `file`'s.
+///
+/// One way in, for the loop that attaches the operator's PNG and for the
+/// projection that rebuilds the message from the log's reference, so the
+/// two cannot attach differently.
+///
+/// # Errors
+///
+/// [`Mismatch`] when the bytes hash to another digest, or are another
+/// length, than `file` says; then nothing is attached.
+pub(crate) fn attach(
+    message: Message,
+    file: &crate::formats::log::RecordedFile,
+    bytes: &[u8],
+) -> Result<Message, Mismatch> {
+    let got = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
+    if got != file.bytes {
+        return Err(Mismatch::Length {
+            want: file.bytes,
+            got,
+        });
+    }
+    let got = crate::digest::sha256_hex(bytes);
+    if got != file.sha256 {
+        return Err(Mismatch::Digest {
+            want: file.sha256.clone(),
+            got,
+        });
+    }
+    let mut message = message;
+    message.images.push(Image {
+        media_type: file.media_type.clone(),
+        base64: crate::drive::serve::base64(bytes),
+    });
+    Ok(message)
 }
 
 impl Message {
@@ -86,6 +183,7 @@ impl Message {
             reasoning: None,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            images: Vec::new(),
         }
     }
 
@@ -571,6 +669,78 @@ mod tests {
         assert!(
             !wire::head(&base).contains("turn one"),
             "the turn itself is not part of the head it is appended to"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // attach (#372, the loop half)
+    // -----------------------------------------------------------------------
+
+    fn recorded(bytes: &[u8]) -> crate::formats::log::RecordedFile {
+        let sha256 = crate::digest::sha256_hex(bytes);
+        crate::formats::log::RecordedFile {
+            path: format!("files/{sha256}"),
+            sha256,
+            media_type: "image/png".to_owned(),
+            bytes: bytes.len() as u64,
+        }
+    }
+
+    #[test]
+    fn attach_adds_one_image_per_call_in_order_and_leaves_the_words_alone() {
+        let first = b"\x89PNG\r\n\x1a\nfirst";
+        let second = b"\x89PNG\r\n\x1a\nsecond";
+        let message = super::attach(Message::new(Role::User, "look"), &recorded(first), first)
+            .and_then(|message| super::attach(message, &recorded(second), second))
+            .expect("the bytes are the files'");
+        assert_eq!(message.content, "look");
+        assert_eq!(
+            message
+                .images
+                .iter()
+                .map(super::Image::data_uri)
+                .collect::<Vec<_>>(),
+            [
+                "data:image/png;base64,iVBORw0KGgpmaXJzdA==",
+                "data:image/png;base64,iVBORw0KGgpzZWNvbmQ=",
+            ]
+        );
+        assert!(Message::new(Role::User, "look").images.is_empty());
+    }
+
+    #[test]
+    fn attach_refuses_bytes_that_hash_to_another_digest_and_says_both() {
+        let logged = b"\x89PNG\r\n\x1a\nlogged";
+        let sent = b"\x89PNG\r\n\x1a\nswap!!";
+        assert_eq!(logged.len(), sent.len(), "only the digest differs");
+        let refused = super::attach(Message::new(Role::User, "look"), &recorded(logged), sent)
+            .expect_err("other bytes are refused");
+        let want = crate::digest::sha256_hex(logged);
+        let got = crate::digest::sha256_hex(sent);
+        assert_eq!(
+            refused,
+            super::Mismatch::Digest {
+                want: want.clone(),
+                got: got.clone()
+            }
+        );
+        assert_eq!(
+            refused.to_string(),
+            format!("the bytes hash to {got}, not the logged {want}")
+        );
+    }
+
+    #[test]
+    fn attach_refuses_bytes_of_another_length_and_says_both() {
+        let bytes = b"\x89PNG\r\n\x1a\n";
+        let mut file = recorded(bytes);
+        file.bytes = 9;
+        let refused = super::attach(Message::new(Role::User, "look"), &file, bytes)
+            .expect_err("a length other than the logged one is refused");
+        assert_eq!(refused, super::Mismatch::Length { want: 9, got: 8 });
+        assert_eq!(
+            refused.to_string(),
+            "the bytes are 8 long, not the logged 9"
         );
     }
 }

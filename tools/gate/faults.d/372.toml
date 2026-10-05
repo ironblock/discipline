@@ -27,3 +27,39 @@ label = "an asset admitted declared-clean with no declaration"
 failure_class = "exercise.admission-asset-declared"
 legacy_signature = "FAIL: test_an_asset_with_no_declaration_is_admitted_undeclared"
 migrated = false
+
+# #372's loop half's seeded faults: the operator's PNG attached to the ask,
+# logged by reference and copied into the recording. Lane faults declared in
+# diet/client/gate.toml and diet/drive/gate.toml.
+
+[[fault]]
+id = "client.an-attached-image-is-dropped"
+kind = "lane-fault"
+check = "lanes"
+label = "client.an-attached-image-is-dropped"
+failure_class = "client.an-attached-image-is-dropped"
+migrated = false
+
+[[fault]]
+id = "client.attach-accepts-another-digest"
+kind = "lane-fault"
+check = "lanes"
+label = "client.attach-accepts-another-digest"
+failure_class = "client.attach-accepts-another-digest"
+migrated = false
+
+[[fault]]
+id = "drive.an-attached-file-is-inlined"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.an-attached-file-is-inlined"
+failure_class = "drive.an-attached-file-is-inlined"
+migrated = false
+
+[[fault]]
+id = "drive.an-attached-file-is-not-copied"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.an-attached-file-is-not-copied"
+failure_class = "drive.an-attached-file-is-not-copied"
+migrated = false

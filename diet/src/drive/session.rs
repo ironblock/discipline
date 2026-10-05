@@ -239,6 +239,11 @@ pub enum Event {
         /// Whether the operator marked it a scoping question (#374, ruled
         /// 5985110649): the warrant's rule (b).
         scoping: bool,
+        /// The files the operator attached to it, by reference, in the order
+        /// they were attached (#372, ruled 5989411005): the copies in the
+        /// recording's directory. Empty when nothing was attached, and when
+        /// something was but no recording keeps a copy.
+        files: Vec<log::RecordedFile>,
     },
     /// A call was made to the model. Every event the call produces names
     /// this event by its sequence number.
@@ -1060,6 +1065,24 @@ impl<S: Streaming + 'static> Session<S> {
         gap: Option<IdleGap>,
         scoping: bool,
     ) -> Result<Admitted, Rejected> {
+        self.ask_attached(super::attach::Attached::plain(text), gap, scoping)
+    }
+
+    /// [`Session::ask_marked`], with what the operator attached (#372):
+    /// `attached`'s message is the turn's user message -- the ask's words
+    /// and its images -- sent and kept on the trunk, and its files are the
+    /// `ask` line's `files`.
+    ///
+    /// # Errors
+    ///
+    /// As [`Session::ask_marked`].
+    pub fn ask_attached(
+        &self,
+        attached: super::attach::Attached,
+        gap: Option<IdleGap>,
+        scoping: bool,
+    ) -> Result<Admitted, Rejected> {
+        let super::attach::Attached { message, files } = attached;
         let mut state = self.shared.lock();
         state.carry(gap, CommandKind::Ask);
         match state.settlement {
@@ -1080,13 +1103,14 @@ impl<S: Streaming + 'static> Session<S> {
         let turn = state.turns;
         let seq = state.push(Event::Asked {
             turn,
-            text: text.to_owned(),
+            text: message.content.clone(),
             scoping,
+            files,
         });
         state.move_to(Settlement::Turn);
         let mut shape = self.shared.template.clone();
         shape.messages.clone_from(&state.trunk);
-        shape.messages.push(Message::new(Role::User, text));
+        shape.messages.push(message.clone());
         // Pushed here, under the lock that admits the ask, and never on the
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
@@ -1107,7 +1131,7 @@ impl<S: Streaming + 'static> Session<S> {
         self.shared.changed.notify_all();
 
         let shared = Arc::clone(&self.shared);
-        let ask = text.to_owned();
+        let ask = message;
         let spawned = std::thread::Builder::new()
             .name("diet-turn".to_owned())
             .spawn(move || {
@@ -1486,13 +1510,15 @@ pub fn line_of(logged: &Logged) -> log::Line {
             turn,
             text,
             scoping,
+            files,
         } => log::Event::Ask {
             turn: *turn,
             text: text.clone(),
             // Only the operator's mark is written (#374): `true`, or nothing.
             scoping: scoping.then_some(true),
-            // The operator's attachment arrives with #372's loop half.
-            files: None,
+            // By reference, never inlined (#372): nothing when nothing was
+            // kept, as the format reads an empty list as no list.
+            files: (!files.is_empty()).then(|| files.clone()),
         },
         Event::Requested {
             turn,
@@ -1832,7 +1858,7 @@ fn call<S: Streaming>(
     shared: &Shared<S>,
     shape: &RequestShape,
     cancel: &Cancel,
-    ask: String,
+    ask: Message,
     turn: u32,
     request: u64,
 ) {
@@ -1842,7 +1868,7 @@ fn call<S: Streaming>(
     // The turn's exchange so far: its ask, then each step's calls and their
     // results. It joins the trunk when the turn settles `final` or
     // `max_steps` (Q12), and never otherwise (D13).
-    let mut exchange = vec![Message::new(Role::User, ask)];
+    let mut exchange = vec![ask];
     while let Some(next) = step(
         shared,
         &mut shape,
@@ -2872,6 +2898,7 @@ pub(in crate::drive) mod tests {
                     turn: 1,
                     text: "say hello".to_owned(),
                     scoping: false,
+                    files: Vec::new(),
                 },
                 Event::Settled {
                     from: Settlement::Awaiting,
@@ -3808,6 +3835,16 @@ pub(in crate::drive) mod tests {
         }
     }
 
+    /// A PNG the operator attached, as the `ask` line names it (#372).
+    fn attached_file() -> log::RecordedFile {
+        log::RecordedFile {
+            path: format!("files/{}", "0".repeat(64)),
+            sha256: "0".repeat(64),
+            media_type: "image/png".to_owned(),
+            bytes: 8,
+        }
+    }
+
     /// One of every event, and a match with no wildcard that names each
     /// variant: an event added to [`Event`] fails to compile here until it
     /// has a sample, and so a line. One entry per variant is its length.
@@ -3828,6 +3865,7 @@ pub(in crate::drive) mod tests {
                 turn: 1,
                 text: "say \"hi\"\n".to_owned(),
                 scoping: true,
+                files: vec![attached_file()],
             },
             Event::Settled {
                 from: Settlement::Awaiting,
@@ -4061,7 +4099,7 @@ pub(in crate::drive) mod tests {
                 turn: 1,
                 text: "say \"hi\"\n".to_owned(),
                 scoping: Some(true),
-                files: None,
+                files: Some(vec![attached_file()]),
             },
             log::Event::Settlement {
                 from: log::State::Awaiting,

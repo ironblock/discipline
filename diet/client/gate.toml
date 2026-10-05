@@ -27,7 +27,7 @@
 name = "diet-client"
 check = "test"
 command = "cargo test -p discipline-diet -- client --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 99
+faults = 101
 
 [[fault]]
 id = "client.mismatch-ignored"
@@ -1752,4 +1752,37 @@ becomes = '''
                 ));'''
 catches = [
     "client::stream::tests::a_real_servers_streamed_call_is_its_fragments_and_never_text",
+]
+
+# ---------------------------------------------------------------------------
+# #372's loop half: the operator's PNG, attached to the ask. Each seen red
+# alone.
+# ---------------------------------------------------------------------------
+
+[[fault]]
+id = "client.an-attached-image-is-dropped"
+failure_class = "client.an-attached-image-is-dropped"
+target = "diet/src/client/wire.rs"
+expect_exit = 101
+anchor = '''
+    } else if message.images.is_empty() {'''
+becomes = '''
+    } else if true {'''
+catches = [
+    "client::wire::tests::an_attached_image_goes_out_as_an_image_part_then_the_text_byte_for_byte",
+    "client::wire::tests::an_attached_image_in_the_trunk_is_part_of_the_head",
+    "client::wire::tests::an_attached_message_is_the_one_373s_vision_cell_sent",
+]
+
+[[fault]]
+id = "client.attach-accepts-another-digest"
+failure_class = "client.attach-accepts-another-digest"
+target = "diet/src/client/shape.rs"
+expect_exit = 101
+anchor = '''
+    if got != file.sha256 {'''
+becomes = '''
+    if false && got != file.sha256 {'''
+catches = [
+    "client::shape::tests::attach_refuses_bytes_that_hash_to_another_digest_and_says_both",
 ]
