@@ -1526,7 +1526,7 @@ edits = [
      '        /// The session\'s totals.\n        Summary => "summary",\n'
      '        /// Seeded: wired everywhere, fixtured nowhere.\n        Spurious => "spurious",'),
     ("        Kind::Summary => Event::Summary {",
-     "        Kind::Spurious => Event::Turn { index: 1, prefill_tokens: Count::default() },\n"
+     "        Kind::Spurious => Event::Turn { index: 1, prefill_tokens: Count::default(), files: None },\n"
      "        Kind::Summary => Event::Summary {"),
 ]
 for old, new in edits:
@@ -3067,6 +3067,20 @@ path.write_text(source.replace(old, new, 1), encoding="utf-8")
 EOF
 }
 
+inject_record_file_content_read() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("diet/src/formats/record/mod.rs")
+source = path.read_text(encoding="utf-8")
+old = '        if let Some(extra) = entry.keys().next() {'
+new = '        if let Some(extra) = entry.keys().next().filter(|_| false) {'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
 inject_record_substrate_optional() {
   python3 - <<'EOF'
 import pathlib
@@ -4029,6 +4043,39 @@ inject_exercise_snapshot_orphaned() {
 # test is what says `admit` broke its promise.
 inject_exercise_admit_keeps_orphans() {
   edit_in_place '/^    prune()$/d' exercise/scripts/admission.py
+}
+
+# An asset taken on its name (#372): the digest check dropped, so bytes that are
+# not the digest they are committed under are admitted -- the recording pins one
+# file and publishes another.
+inject_exercise_admit_trusts_an_assets_name() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("exercise/scripts/admission.py")
+source = path.read_text(encoding="utf-8")
+old = '        if sha256(data) != digest:'
+new = '        if False and sha256(data) != digest:'
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
+}
+
+# Every asset admitted clean (#372, 5977059903): the author's declaration no
+# longer read, so an image nobody looked at publishes as if someone had.
+inject_exercise_admit_declares_every_asset_clean() {
+  python3 - <<'EOF'
+import pathlib
+
+path = pathlib.Path("exercise/scripts/admission.py")
+source = path.read_text(encoding="utf-8")
+old = "            'scrub': 'declared-clean' if digest in declared else 'undeclared',"
+new = "            'scrub': 'declared-clean',"
+if source.count(old) != 1:
+    raise SystemExit(f"the rule appears {source.count(old)} times")
+path.write_text(source.replace(old, new, 1), encoding="utf-8")
+EOF
 }
 
 # An authored example replayed without its label (#272): the condition turned
@@ -10384,6 +10431,8 @@ selftest() {
     'formats::record::tests::every_event_kind_appears_in_the_committed_corpus \.\.\. FAILED' 'lib/formats::record::tests'
   seeded_case "a refused tool call read with its confined" test inject_record_tool_call_forbidden_keys_read \
     'record/fixtures/invalid/a-refused-tool-call-carrying-confined\.jsonl' 'test:conformance/formats::record'
+  seeded_case "a record turn's attached file with its content inlined read" test inject_record_file_content_read \
+    'record/fixtures/invalid/a-turn-file-with-its-content-inlined\.jsonl' 'test:conformance/formats::record'
   seeded_case "record substrate made optional"        test     inject_record_substrate_optional \
     'record/fixtures/invalid/regime-missing-substrate\.jsonl' 'test:conformance/formats::record'
   seeded_case "a comparison's word left open"        test     inject_record_comparison_word_open \
@@ -10932,6 +10981,10 @@ selftest() {
     'admission: scripts/hygiene-admitted-000000000000-patterns\.tsv: a snapshot no admission names'
   seeded_case "admit no longer removing what no admission names" exercise inject_exercise_admit_keeps_orphans \
     'FAIL: test_admit_removes_a_snapshot_no_admission_names_and_says_so'
+  seeded_case "an asset admitted whose bytes are not its digest" exercise inject_exercise_admit_trusts_an_assets_name \
+    'FAIL: test_an_asset_whose_bytes_are_not_its_digest_is_refused'
+  seeded_case "an asset admitted declared-clean with no declaration" exercise inject_exercise_admit_declares_every_asset_clean \
+    'FAIL: test_an_asset_with_no_declaration_is_admitted_undeclared'
   seeded_case "an authored example replayed without its label" exercise inject_exercise_example_replayed_without_label \
     'FAIL.*Replay\.stories\.tsx > an authored example, under its label for the whole replay'
   seeded_case "an example's label scrolling away" exercise inject_exercise_example_label_scrolls_away \

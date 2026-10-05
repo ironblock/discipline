@@ -210,13 +210,82 @@ def snapshot_of_live() -> tuple[str, dict]:
     return ident, paths
 
 
-def scan(name: str, data: bytes, table: dict) -> int:
-    """The genesis snapshot over exactly the bytes being admitted."""
+DECLARED = re.compile(r'Declared-clean: ([0-9a-f]{64}) by (\S.*\S) on (\d{4}-\d{2}-\d{2})')
+
+
+def assets_of(name: str, kind: dict, recording: dict, header: list[str]) -> tuple[list[dict], dict[str, bytes], list[str]]:
+    """
+    The files NAME's log names (#372's record half): each `files` entry of an
+    `ask` line -- the operator's attachment, T1's path (5989411005) -- or of a
+    `tool_call` line, committed beside the recording at
+    `<dir>/<name>/files/<sha256>` with bytes that hash to that name. Returned
+    as the admission's rows -- `scrub` is `declared-clean` only where the
+    header carries `Declared-clean: <sha256> by <author> on <date>` for that
+    digest, and `undeclared` otherwise (5977059903) -- the bytes to scan, and
+    every problem: an asset missing or not its digest, a file there that no
+    line names, a declaration of a digest no line names.
+    """
+    named: dict[str, dict] = {}
+    for event in recording.get('events', []):
+        if isinstance(event, dict) and event.get('kind') in ('ask', 'tool_call') and isinstance(event.get('files'), list):
+            for entry in event['files']:
+                if isinstance(entry, dict) and isinstance(entry.get('sha256'), str):
+                    named.setdefault(entry['sha256'], entry)
+    directory = kind['dir'] / name / 'files'
+    rel = directory.relative_to(ROOT).as_posix()
+    problems, found = [], {}
+    for digest, entry in sorted(named.items()):
+        asset = directory / digest
+        if not asset.is_file() or asset.is_symlink():
+            problems.append(f'admission: {rel}/{digest}: named by a line\'s files and not committed beside the recording')
+            continue
+        data = asset.read_bytes()
+        if sha256(data) != digest:
+            problems.append(f'admission: {rel}/{digest}: its bytes hash to {sha256(data)}, not the digest it is named by')
+            continue
+        found[digest] = data
+    if directory.is_dir():
+        for extra in sorted(f.name for f in directory.iterdir() if f.name not in named):
+            problems.append(f'admission: {rel}/{extra}: no line\'s files names it')
+    declared: dict[str, str] = {}
+    for line in header:
+        if not line.startswith('Declared-clean:'):
+            continue
+        match = DECLARED.fullmatch(line)
+        if not match:
+            problems.append(f'admission: {name}: "{line}" is not "Declared-clean: <sha256> by <author> on <date>"')
+        elif match.group(1) not in named:
+            problems.append(f'admission: {name}: "{line}" declares a digest no line\'s files names')
+        else:
+            declared[match.group(1)] = line
+    rows = [
+        {
+            'sha256': digest,
+            'path': entry.get('path'),
+            'media_type': entry.get('media_type'),
+            'bytes': entry.get('bytes'),
+            'scrub': 'declared-clean' if digest in declared else 'undeclared',
+            **({'declared': declared[digest]} if digest in declared else {}),
+        }
+        for digest, entry in sorted(named.items())
+    ]
+    return rows, found, problems
+
+
+def scan(name: str, data: bytes, table: dict, assets: dict[str, bytes] | None = None) -> int:
+    """The genesis snapshot over exactly the bytes being admitted: the recording, and its assets as bytes."""
     with tempfile.TemporaryDirectory() as box:
         (pathlib.Path(box) / f'{name}.json').write_bytes(data)
+        for digest, body in (assets or {}).items():
+            (pathlib.Path(box) / 'files').mkdir(exist_ok=True)
+            (pathlib.Path(box) / 'files' / digest).write_bytes(body)
         return subprocess.run(
             ['bash', str(ROOT / 'scripts/hygiene.sh'), '--patterns', str(ROOT / table['patterns']), '--hashes', str(ROOT / table['hashes']), '--tree', box],
             cwd=ROOT,
+            # The C locale, so a binary asset is read as bytes: Python's locale coercion would hand hygiene.sh a
+            # UTF-8 LC_CTYPE, under which BSD `tr` stops at the first invalid byte and the scan sees nothing (#464's
+            # review, NB1).
+            env={**os.environ, 'LC_ALL': 'C'},
         ).returncode
 
 
@@ -239,8 +308,14 @@ def admit(name: str) -> int:
     if kind['key'] == 'example' and (declared != [f'Authored: {example_label()}'] or other):
         print(f'admission: {rel}: an example\'s header says it was authored in exactly one line, "Authored: " and the maintainer\'s sentence (EXAMPLE_LABEL), and carries no "Scrubbed:" line, or it is not admitted', file=sys.stderr)
         return 1
+    rows, assets, problems = assets_of(name, kind, json.loads(data), header)
+    if problems:
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        print(f'admission: {rel}: not admitted; its assets do not check', file=sys.stderr)
+        return 1
     ident, table = snapshot_of_live()
-    status = scan(name, data, table)
+    status = scan(name, data, table, assets)
     if status != 0:
         print(f'admission: {rel}: not admitted; the genesis table finds something in it (exit {status})', file=sys.stderr)
         prune()  # the snapshot this run wrote, if nothing else names it
@@ -252,6 +327,7 @@ def admit(name: str) -> int:
         'taken_from': digests(LIVE),
         'cites': f'the snapshot (table): the rule this {kind["key"]} was admitted under. At admission it was the live genesis table (taken_from), byte for byte; the live table may move on, and this {kind["key"]} stays under its snapshot until it is admitted again.',
         kind['field']: declared[0],
+        **({'files': rows} if rows else {}),
     }
     out = kind['dir'] / f'{name}.admission.json'
     out.write_text(json.dumps(admission, indent=2) + '\n', encoding='utf-8')

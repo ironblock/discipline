@@ -1,0 +1,22 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"kind\":\"live\"}}\n{\"index\":1,\"prefill_tokens\":900,\"record\":\"turn\"}\n{\"head_sha256\":\"6b36f1a89e10d530391191fa18488cbce11eec142c28669624d30286b949327d\",\"id\":\"q1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"local\",\"text\":\"List the files, then touch the hosts file.\"}\n{\"id\":\"a1\",\"output_tokens\":40,\"record\":\"response\",\"text\":\"Done.\",\"to_request\":\"q1\"}\n{\"args\":{\"command\":\"screenshot shot.png\"},\"argv\":[\"sh\",\"-c\",\"screenshot shot.png\"],\"at_turn\":1,\"confined\":[\"sandbox-exec\",\"-f\",\"/work/policy.sb\",\"sh\",\"-c\",\"screenshot shot.png\"],\"cwd\":\"/work\",\"exit\":0,\"files\":[{\"bytes\":48213,\"media_type\":\"image/png\",\"path\":\"files/shot.png\",\"sha256\":\"3f1a8e0c5b2d4f6a7e9c1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d2f4a\"}],\"id\":\"t1\",\"isolation\":\"sandbox\",\"network\":\"none\",\"outcome\":\"ran\",\"output\":\"\",\"record\":\"tool_call\",\"tool\":\"bash\"}\n{\"kind\":\"drive\",\"prefill_tokens_total\":900,\"product_sha256\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"record\":\"summary\",\"turns\":1}\n",
+  "kinds": [
+    "start",
+    "turn",
+    "request",
+    "response",
+    "tool_call",
+    "summary"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
+  },
+  "source": {
+    "kind": "live"
+  }
+}

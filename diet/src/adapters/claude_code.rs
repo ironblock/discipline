@@ -544,6 +544,7 @@ impl Run {
         self.events.push(Event::Turn {
             index: self.turn,
             prefill_tokens: prefill,
+            files: None,
         });
         self.events.push(Event::Request {
             id: format!("u/{}", self.turn),

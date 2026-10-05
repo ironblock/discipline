@@ -45,7 +45,7 @@ class Admission(unittest.TestCase):
         return {p.relative_to(self.box).as_posix() for p in (self.box / 'scripts').rglob('hygiene-admitted-*')}
 
     def run_admission(self, *args):
-        return subprocess.run([sys.executable, str(self.box / 'exercise/scripts/admission.py'), *args], cwd=self.box, capture_output=True, text=True)
+        return subprocess.run([sys.executable, str(self.box / 'exercise/scripts/admission.py'), *args], cwd=self.box, capture_output=True, text=True, errors='replace')
 
     def plant(self, *names):
         """Copies of a cited patterns table under names no admission gives."""
@@ -196,6 +196,80 @@ class Admission(unittest.TestCase):
                 admission['table'][part]['path'] = './' + admission['table'][part]['path']
             copy.write_text(json.dumps(admission, indent=2) + '\n', encoding='utf-8')
         self.unread("where admit writes 'scripts/hygiene-admitted-", ('admit', 'fixture'), ('verify', data), ('tables', data))
+
+
+    # ---- #372's record half: the assets a recording's tool calls left ----
+
+    SHOT = b'\x89PNG\r\n\x1a\n a canvas, nothing in it'
+
+    def with_asset(self, *, header=(), body=None, extra=None, commit=True, kind='ask'):
+        """The fixture recording with one line naming a PNG -- the operator's ask by default, T1's path -- the asset committed beside it under its digest."""
+        import hashlib
+        digest = hashlib.sha256(self.SHOT).hexdigest()
+        recording = dict(FIXTURE, migration=[*FIXTURE['migration'], *(line.format(digest=digest) for line in header)])
+        recording['events'] = [{'kind': kind, 'seq': 1, 't': 5, 'files': [{'path': 'files/shot.png', 'sha256': digest, 'media_type': 'image/png', 'bytes': len(self.SHOT)}]}]
+        self.recording.write_text(json.dumps(recording), encoding='utf-8')
+        files = self.recording.parent / 'fixture/files'
+        files.mkdir(parents=True, exist_ok=True)
+        if commit:
+            (files / digest).write_bytes(self.SHOT if body is None else body)
+        if extra:
+            (files / extra).write_bytes(b'stray')
+        return digest
+
+    def admitted_files(self):
+        return json.loads(self.recording.with_name('fixture.admission.json').read_text(encoding='utf-8')).get('files')
+
+    def test_an_asset_declared_clean_is_admitted_declared_clean(self):
+        digest = self.with_asset(header=['Declared-clean: {digest} by the maintainer on 2026-10-04'])
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual(self.admitted_files(), [{'sha256': digest, 'path': 'files/shot.png', 'media_type': 'image/png', 'bytes': len(self.SHOT), 'scrub': 'declared-clean', 'declared': f'Declared-clean: {digest} by the maintainer on 2026-10-04'}])
+
+    def test_a_credential_shape_inside_a_binary_asset_is_refused(self):
+        # Spelled in two halves so this file carries no key shape of its own. Run as admit runs, with the default
+        # environment: the scan must read the asset as bytes whatever the locale (#464's review, NB1).
+        self.SHOT = b'\x89PNG\r\n\x1a\n\x00\x00 ' + b'AKIA' + b'ABCDEFGHIJKLMNOP' + b' \x00\xff'
+        self.with_asset(header=['Declared-clean: {digest} by the maintainer on 2026-10-04'])
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 1, run.stdout + run.stderr)
+        self.assertIn('not admitted; the genesis table finds something in it', run.stderr)
+
+    def test_a_tool_calls_asset_is_admitted_as_an_asks_is(self):
+        digest = self.with_asset(kind='tool_call', header=['Declared-clean: {digest} by the maintainer on 2026-10-04'])
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual([(row['sha256'], row['scrub']) for row in self.admitted_files()], [(digest, 'declared-clean')])
+
+    def test_an_asset_with_no_declaration_is_admitted_undeclared(self):
+        digest = self.with_asset()
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertEqual([(row['sha256'], row['scrub']) for row in self.admitted_files()], [(digest, 'undeclared')])
+
+    def test_an_asset_whose_bytes_are_not_its_digest_is_refused(self):
+        digest = self.with_asset(body=b'other bytes')
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 1)
+        self.assertIn(f'fixture/files/{digest}: its bytes hash to', run.stderr)
+
+    def test_an_asset_not_committed_beside_the_recording_is_refused(self):
+        digest = self.with_asset(commit=False)
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 1)
+        self.assertIn(f'fixture/files/{digest}: named by a line\'s files and not committed beside the recording', run.stderr)
+
+    def test_a_file_beside_the_recording_that_no_line_names_is_refused(self):
+        self.with_asset(extra='stray.bin')
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('fixture/files/stray.bin: no line\'s files names it', run.stderr)
+
+    def test_a_declaration_of_a_digest_no_line_names_is_refused(self):
+        self.with_asset(header=['Declared-clean: ' + '0' * 64 + ' by the maintainer on 2026-10-04'])
+        run = self.run_admission('admit', 'fixture')
+        self.assertEqual(run.returncode, 1)
+        self.assertIn('declares a digest no line\'s files names', run.stderr)
 
 
 if __name__ == '__main__':
