@@ -1068,6 +1068,106 @@ fn a_drive_server_starts_a_canned_regimen_only_on_the_canned_server() {
     );
 }
 
+/// The first line of the log at `path`, once its writer has put one there.
+fn first_logged_line(path: &std::path::Path) -> serde_json::Value {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let written = std::fs::read_to_string(path).unwrap_or_default();
+        if let Some(first) = written.lines().next() {
+            return log_line_object(first);
+        }
+        assert!(Instant::now() < deadline, "nothing was logged within 10 s");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_drive_servers_log_carries_the_substrate_claim_it_announced() {
+    // #292: the claim reached stdout only, so a log read later could not say
+    // which substrate the session claimed. Both paths of the engine check,
+    // so a swapped identity word is seen: the commit path, and the canned
+    // regimen's literal.
+    let id = "accel24-llamacpp-qwen38-27b-iq3s";
+    let commit = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("registered")
+        .engine_commit
+        .expect("an engine_commit");
+    let regimen = regimen_registered(id);
+    let committed = regimen.0.to_string_lossy().into_owned();
+    let build = format!("b1-{}", &commit[..7]);
+    let canned = diet::drive::canned::build_info();
+    for (stub, regimen, announced_as, logged_as) in [
+        (
+            Stub::serving(vec![props_saying(&build)]).expect("loopback"),
+            committed,
+            "checked (commit)",
+            "checked_commit",
+        ),
+        (
+            Stub::serving_with_props(Vec::new(), &canned).expect("loopback"),
+            dev_loop(),
+            "unreported (literal matched)",
+            "literal_matched",
+        ),
+    ] {
+        let log_file = file_holding("log", "");
+        let path = log_file.0.to_string_lossy().into_owned();
+        let served = start(&stub.url(), &["--regimen", &regimen, "--log", &path]);
+        assert_eq!(served.engine_identity.as_deref(), Some(announced_as));
+        let start_line = first_logged_line(&log_file.0);
+        assert_eq!(start_line["kind"], "session.start", "{start_line}");
+        let claimed = |key: &str| start_line[key].as_str().map(str::to_owned);
+        assert_eq!(
+            (
+                claimed("substrate"),
+                claimed("registry_sha256"),
+                claimed("engine_build"),
+                claimed("engine_identity"),
+            ),
+            (
+                served.substrate.clone(),
+                served.registry_sha256.clone(),
+                served.engine_build.clone(),
+                Some(logged_as.to_owned()),
+            ),
+            "the log claims what stdout announced: {start_line}"
+        );
+        assert!(served.substrate.is_some() && served.engine_build.is_some());
+        drop(served);
+
+        // And the reader takes it: the claim is the format's, whole.
+        let checked = Command::new(DIET)
+            .arg("check-log")
+            .arg(&log_file.0)
+            .output()
+            .expect("diet runs");
+        let said = String::from_utf8_lossy(&checked.stdout);
+        assert_eq!(checked.status.code(), Some(0), "{said}");
+        let read = log_line_object(&said);
+        assert_eq!(
+            read["value"]["events"][0]["engine_identity"].as_str(),
+            Some(logged_as),
+            "{said}"
+        );
+    }
+
+    // Without a regimen, nothing is claimed.
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let log_file = file_holding("log", "");
+    let path = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--log", &path]);
+    let start_line = first_logged_line(&log_file.0);
+    drop(served);
+    for key in [
+        "substrate",
+        "registry_sha256",
+        "engine_build",
+        "engine_identity",
+    ] {
+        assert!(start_line.get(key).is_none(), "{start_line}");
+    }
+}
+
 #[test]
 fn a_drive_server_refuses_a_canned_regimen_against_a_live_server() {
     // A live llama.cpp under the dev loop's regimen once started and

@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 244
+faults = 245
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -2416,7 +2416,7 @@ failure_class = "drive.serve-bin-announces-no-registry-digest"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-            Value::String(diet::drive::registry::registry_sha256()),'''
+            Value::String(registry_sha256.to_owned()),'''
 becomes = '''
             Value::String(String::new()),'''
 catches = [
@@ -3911,4 +3911,19 @@ becomes = '''
         }'''
 catches = [
     "drive::tool_loop::tests::an_environment_prefix_on_an_npm_command_is_never_standing",
+]
+
+[[fault]]
+id = "drive.serve-logs-no-substrate-claim"
+failure_class = "drive.serve-logs-no-substrate-claim"
+target = "diet/src/drive/session.rs"
+expect_exit = 101
+anchor = '''
+            // v3's substrate claim, as `serve` announced it (#292).
+            claim: claim.clone(),'''
+becomes = '''
+            // v3's substrate claim, as `serve` announced it (#292).
+            claim: None,'''
+catches = [
+    "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
 ]

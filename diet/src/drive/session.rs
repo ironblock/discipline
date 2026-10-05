@@ -216,6 +216,9 @@ pub enum Event {
         /// What serves the session, as its caller declared it: log v2's
         /// `serving` (#292). `None` when nothing was declared.
         serving: Option<Serving>,
+        /// What it claims serves it: log v3's substrate claim (#292), when
+        /// `serve` started it against a regimen whose engine check passed.
+        claim: Option<log::SubstrateClaim>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -742,7 +745,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// before any.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
-        Self::opened_as(transport, template, None, None)
+        Self::opened_as(transport, template, None, None, None)
     }
 
     /// [`Session::open`], declaring what serves it -- the dialect it speaks
@@ -750,7 +753,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// `session.start` carries (#292).
     #[must_use]
     pub fn open_serving(transport: S, template: RequestShape, serving: Serving) -> Self {
-        Self::opened_as(transport, template, Some(serving), None)
+        Self::opened_as(transport, template, Some(serving), None, None)
     }
 
     /// A session that runs the model's calls (#298): `template` declares the
@@ -762,19 +765,21 @@ impl<S: Streaming + 'static> Session<S> {
         serving: Option<Serving>,
         tools: Tools,
     ) -> Self {
-        Self::opened_as(transport, template, serving, Some(tools))
+        Self::opened_as(transport, template, serving, Some(tools), None)
     }
 
     /// [`Session::open_serving`] or [`Session::open_looping`], by whether it
-    /// runs commands: `serve`'s one way in.
+    /// runs commands: `serve`'s one way in. `claim` is the substrate claim
+    /// its `session.start` carries (#292), when it has one.
     #[must_use]
     pub fn open_with(
         transport: S,
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
+        claim: Option<log::SubstrateClaim>,
     ) -> Self {
-        Self::opened_as(transport, template, serving, tools)
+        Self::opened_as(transport, template, serving, tools, claim)
     }
 
     fn opened_as(
@@ -782,6 +787,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
+        claim: Option<log::SubstrateClaim>,
     ) -> Self {
         // A head is the trunk before any turn; a tool result answers a call
         // made in one, and the log's head has no word for it (`role_of`).
@@ -828,6 +834,7 @@ impl<S: Streaming + 'static> Session<S> {
             model: template.model.clone(),
             head: template.messages.clone(),
             serving,
+            claim,
         });
         Self {
             shared: Arc::new(Shared {
@@ -1241,6 +1248,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             model,
             head,
             serving,
+            claim,
         } => log::Event::SessionStart {
             version: log::VERSION,
             opened: *opened,
@@ -1260,9 +1268,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
                     Concurrency::Undeclared => None,
                 },
             }),
-            // v3's substrate claim, written once the session carries one
-            // (#292's v3 half, track three's own PR).
-            claim: None,
+            // v3's substrate claim, as `serve` announced it (#292).
+            claim: claim.clone(),
             // A session writing as it runs carries no provenance word.
             provenance: None,
         },
@@ -3195,6 +3202,7 @@ pub(in crate::drive) mod tests {
             model,
             head,
             serving: None,
+            claim: None,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -3243,6 +3251,16 @@ pub(in crate::drive) mod tests {
         );
     }
 
+    /// A substrate claim, as `serve` passes one in (#292).
+    fn claimed() -> log::SubstrateClaim {
+        log::SubstrateClaim {
+            substrate: "a-substrate".to_owned(),
+            registry_sha256: "ab".repeat(32),
+            engine_build: "b1-0123abc".to_owned(),
+            engine_identity: log::EngineIdentity::CheckedCommit,
+        }
+    }
+
     /// One of every event, and a match with no wildcard that names each
     /// variant: an event added to [`Event`] fails to compile here until it
     /// has a sample, and so a line. One entry per variant is its length.
@@ -3257,6 +3275,7 @@ pub(in crate::drive) mod tests {
                     concurrency: Concurrency::Declared(2),
                     dialect: crate::client::shape::Dialect::llama_cpp(),
                 }),
+                claim: Some(claimed()),
             },
             Event::Asked {
                 turn: 1,
@@ -3457,7 +3476,7 @@ pub(in crate::drive) mod tests {
                     role: log::Role::System,
                     content: HEAD.to_owned(),
                 }],
-                claim: None,
+                claim: Some(claimed()),
                 provenance: None,
             },
             log::Event::Ask {

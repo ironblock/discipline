@@ -328,6 +328,13 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(build) => build,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // What the announcement prints and the log's `session.start` claims,
+    // built once from the same values (#292): the substrate, the registry's
+    // digest, and the engine the check passed.
+    let registry_sha256 = diet::drive::registry::registry_sha256();
+    let claim = substrate
+        .zip(engine.as_ref())
+        .map(|(id, passed)| passed.claim(id, &registry_sha256));
     let log_path = log_file;
     let (log_file, record) = match outputs(log_path.as_deref(), record_file.as_deref()) {
         Ok(opened) => opened,
@@ -337,7 +344,7 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
-    let session = served_session(transport, shape, tools);
+    let session = served_session(transport, shape, tools, claim);
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
     let config = Config {
@@ -360,7 +367,7 @@ fn serve(args: &[String]) -> ExitCode {
         announcement(
             &running.server.addr().to_string(),
             opened,
-            substrate,
+            substrate.map(|id| (id, registry_sha256.as_str())),
             engine.as_ref(),
             log_path.as_deref().zip(running.log_held),
             record_file.as_deref().zip(running.record_held),
@@ -511,6 +518,7 @@ fn served_session(
     transport: HttpStream,
     mut shape: RequestShape,
     tools: Option<Tools>,
+    claim: Option<diet::formats::log::SubstrateClaim>,
 ) -> std::sync::Arc<Session<HttpStream>> {
     // A session that runs commands declares the one tool they run through.
     if tools.is_some() {
@@ -524,6 +532,7 @@ fn served_session(
             dialect: Dialect::llama_cpp(),
         }),
         tools,
+        claim,
     ))
 }
 
@@ -922,7 +931,7 @@ fn listener(listen: IpAddr, port: u16) -> Result<std::net::TcpListener, ExitCode
 fn announcement(
     listening: &str,
     opened: u64,
-    substrate: Option<&str>,
+    substrate: Option<(&str, &str)>,
     engine: Option<&diet::drive::engine::Passed>,
     log: Option<(&str, bool)>,
     record: Option<(&str, bool)>,
@@ -934,13 +943,13 @@ fn announcement(
             Value::Integer(i64::try_from(opened).unwrap_or(i64::MAX)),
         ),
     ]);
-    if let Some(substrate) = substrate {
+    if let Some((substrate, registry_sha256)) = substrate {
         fields.insert("substrate".to_owned(), Value::String(substrate.to_owned()));
         // Which registry answered (#204): its text's digest, for a reader
         // who has this line and not the binary.
         fields.insert(
             "registry_sha256".to_owned(),
-            Value::String(diet::drive::registry::registry_sha256()),
+            Value::String(registry_sha256.to_owned()),
         );
     }
     // The `build_info` the engine check passed, as the server reported it,
