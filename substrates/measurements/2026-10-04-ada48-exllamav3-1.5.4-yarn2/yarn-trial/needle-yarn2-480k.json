@@ -1,0 +1,27 @@
+{
+ "tag": "yarn2-480k",
+ "target": 480000,
+ "prompt_tokens": 480125,
+ "wall_s": 173.2,
+ "found": {
+  "red": true,
+  "green": true,
+  "blue": true
+ },
+ "score": 3,
+ "content": "\n\nred=417093, green=862514, blue=305768",
+ "timings": {
+  "cache_n": 0,
+  "prompt_n": 480125,
+  "prompt_ms": 170880.0,
+  "prompt_per_token_ms": 0.35590731580317625,
+  "prompt_per_second": 2809.7202715355807,
+  "predicted_n": 202,
+  "predicted_ms": 1140.0,
+  "predicted_per_token_ms": 5.643564356435643,
+  "predicted_per_second": 177.19298245614033,
+  "draft_n": 159,
+  "draft_n_accepted": 149
+ },
+ "error": null
+}

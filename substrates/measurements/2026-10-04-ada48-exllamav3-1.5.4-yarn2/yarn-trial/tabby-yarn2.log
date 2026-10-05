@@ -1,0 +1,89 @@
+14:55:53.418 INFO:     Using config file
+                       config-402-Qwen3.8-Flash-Next-exl3-2.05bpw-yarn2.yml
+14:55:54.825 WARNING:  No sampler overrides are configured
+                       (sampling.override_preset or inline overrides in the
+                       sampling section), so sampling parameters have no
+                       fallback values. Requests that omit them run untruncated:
+                       temperature 1.0, top_k 0, top_p 1.0, min_p 0. Set
+                       override_preset to safe_defaults unless this is
+                       intentional.
+14:55:54.833 INFO:     exllamav3 version: 1.5.4
+14:55:57.045 INFO:     Loading n-gram embeddings into system RAM (ngram_ram).
+14:55:57.046 INFO:     The provided model has vision capabilities, vision is
+                       disabled in config.
+14:55:57.058 INFO:     Using main model MTP component for drafting
+14:55:57.058 INFO:     Disabling GPU split because one GPU is in use.
+14:55:57.059 INFO:     Context: max_seq_len 524,288 tokens (configured),
+                       cache_size 606,208 tokens
+14:55:57.144 INFO:     Using template "chat_template" for chat completions.
+14:55:57.144 INFO:     Response parsing: tool format qwen3_coder (template,
+                       tokenizer, architecture), reasoning tags <think> </think>
+                       (template)
+14:55:57.902 INFO:     Loading model
+                       $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+                       -yarn2 (manual GPU split)
+Loading draft modules ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 3/3   0:00:00
+Loading model modules ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 53/53 0:00:00
+14:56:12.342 INFO:     Model loaded in 15.2 s
+
+14:56:12.342 WARNING:  Disabling authentication makes your instance vulnerable.
+                       Set the `disable_auth` flag to False in config.yml if you
+                       want to share this instance with others.
+14:56:12.343 WARNING:  With authentication disabled and `allowed_origins` left
+                       at ["*"], any website open in a browser on this machine
+                       can send requests to this instance and read the
+                       responses, including admin endpoints. Set
+                       `network.allowed_origins` to your own frontends (or [])
+                       unless you use a browser-based frontend that needs it.
+14:56:12.344 INFO:     Serving OAI API on http://127.0.0.1:<side-port> (docs at
+                       http://127.0.0.1:<side-port>/redoc)
+14:56:15.654 INFO:     #5 chat/completions: 251,858 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 4096 (req)
+14:57:46.542 INFO:     #5 chat/completions: 329 tokens generated at 139.4 T/s ·
+                       prompt 251,858 tokens, none cached, 251,858 new in 88.5 s
+                       (2,846 T/s) · first token 88.5 s, total 90.9 s · draft
+                       227/306 accepted (74%)
+14:57:50.279 INFO:     #9 chat/completions: 480,125 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 4096 (req)
+15:00:42.363 INFO:     #9 chat/completions: 202 tokens generated at 176.8 T/s ·
+                       prompt 480,125 tokens, none cached, 480,125 new in 170.9
+                       s (2,810 T/s) · first token 170.9 s, total 172.0 s ·
+                       draft 149/159 accepted (94%)
+15:00:42.468 INFO:     #11 chat/completions: 10,082 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+15:00:48.050 INFO:     #11 chat/completions: 256 tokens generated at 119.2 T/s ·
+                       prompt 10,082 tokens, none cached, 10,082 new in 3.42 s
+                       (2,948 T/s) · first token 3.43 s, total 5.57 s · draft
+                       151/315 accepted (48%) · max_tokens reached
+15:00:48.074 INFO:     #12 chat/completions: 10,082 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+15:00:50.293 INFO:     #12 chat/completions: 256 tokens generated at 122.3 T/s ·
+                       prompt 10,082 tokens, 99% cached, 98 new in 0.10 s ·
+                       first token 0.12 s, total 2.21 s · draft 152/312 accepted
+                       (49%) · max_tokens reached
+15:00:50.316 INFO:     #13 chat/completions: 10,082 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+15:00:52.531 INFO:     #13 chat/completions: 256 tokens generated at 122.5 T/s ·
+                       prompt 10,082 tokens, 99% cached, 98 new in 0.10 s ·
+                       first token 0.12 s, total 2.21 s · draft 152/312 accepted
+                       (49%) · max_tokens reached
+15:00:52.736 INFO:     #14 chat/completions: 101,664 prompt tokens ·
+                       temperature: 0, greedy (req), max_tokens: 256 (req)
+15:01:26.031 INFO:     #14 chat/completions: 256 tokens generated at 123.7 T/s ·
+                       prompt 101,664 tokens, 10% cached, 91,680 new in 31.2 s
+                       (2,940 T/s) · first token 31.2 s, total 33.3 s · draft
+                       154/306 accepted (50%) · max_tokens reached
+15:01:26.233 INFO:     #15 chat/completions: 101,664 prompt tokens ·
+                       temperature: 0, greedy (req), max_tokens: 256 (req)
+15:01:28.447 INFO:     #15 chat/completions: 256 tokens generated at 121.5 T/s ·
+                       prompt 101,664 tokens, 100% cached, 32 new in 0.07 s ·
+                       first token 0.09 s, total 2.19 s · draft 152/312 accepted
+                       (49%) · max_tokens reached
+15:01:28.653 INFO:     #16 chat/completions: 101,664 prompt tokens ·
+                       temperature: 0, greedy (req), max_tokens: 256 (req)
+15:01:30.867 INFO:     #16 chat/completions: 256 tokens generated at 121.5 T/s ·
+                       prompt 101,664 tokens, 100% cached, 32 new in 0.07 s ·
+                       first token 0.09 s, total 2.20 s · draft 152/312 accepted
+                       (49%) · max_tokens reached
+15:01:31.068 WARNING:  Shutdown signal called. Exiting gracefully.
+15:01:33.842 INFO:     Model unloaded.

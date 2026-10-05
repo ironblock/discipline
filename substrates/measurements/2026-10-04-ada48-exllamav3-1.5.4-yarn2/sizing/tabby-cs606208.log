@@ -1,0 +1,64 @@
+14:31:41.091 INFO:     Using config file config-401-cs606208.yml
+14:31:42.533 WARNING:  No sampler overrides are configured
+                       (sampling.override_preset or inline overrides in the
+                       sampling section), so sampling parameters have no
+                       fallback values. Requests that omit them run untruncated:
+                       temperature 1.0, top_k 0, top_p 1.0, min_p 0. Set
+                       override_preset to safe_defaults unless this is
+                       intentional.
+14:31:42.536 INFO:     exllamav3 version: 1.5.4
+14:31:44.720 INFO:     Loading n-gram embeddings into system RAM (ngram_ram).
+14:31:44.720 INFO:     The provided model has vision capabilities, vision is
+                       disabled in config.
+14:31:44.733 INFO:     Using main model MTP component for drafting
+14:31:44.733 INFO:     Disabling GPU split because one GPU is in use.
+14:31:44.733 INFO:     Context: max_seq_len 262,144 tokens (configured),
+                       cache_size 606,208 tokens
+14:31:44.819 INFO:     Using template "chat_template" for chat completions.
+14:31:44.819 INFO:     Response parsing: tool format qwen3_coder (template,
+                       tokenizer, architecture), reasoning tags <think> </think>
+                       (template)
+14:31:45.562 INFO:     Loading model
+                       $HOME/models/Qwen3.8-Flash-Next-exl3-2.05bpw
+                       (manual GPU split)
+Loading draft modules ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 3/3   0:00:00
+Loading model modules ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 53/53 0:00:00
+14:31:59.745 INFO:     Model loaded in 14.9 s
+
+14:31:59.746 WARNING:  Disabling authentication makes your instance vulnerable.
+                       Set the `disable_auth` flag to False in config.yml if you
+                       want to share this instance with others.
+14:31:59.746 WARNING:  With authentication disabled and `allowed_origins` left
+                       at ["*"], any website open in a browser on this machine
+                       can send requests to this instance and read the
+                       responses, including admin endpoints. Set
+                       `network.allowed_origins` to your own frontends (or [])
+                       unless you use a browser-based frontend that needs it.
+14:31:59.747 INFO:     Serving OAI API on http://127.0.0.1:<side-port> (docs at
+                       http://127.0.0.1:<side-port>/redoc)
+14:32:06.236 INFO:     #7 completions: 150,438 prompt tokens · temperature: 0,
+                       greedy (req), max_tokens: 16 (req)
+14:32:08.831 INFO:     #8 completions: 150,438 prompt tokens · temperature: 0,
+                       greedy (req), max_tokens: 16 (req)
+14:32:10.196 INFO:     #9 completions: 150,438 prompt tokens · temperature: 0,
+                       greedy (req), max_tokens: 16 (req)
+14:32:12.178 INFO:     #10 completions: 150,438 prompt tokens · temperature: 0,
+                       greedy (req), max_tokens: 16 (req)
+14:35:24.877 INFO:     #7 completions: 1 tokens generated at 6.3 T/s · prompt
+                       150,438 tokens, none cached, 150,438 new in 191.3 s (786
+                       T/s) · first token 191.3 s, total 191.5 s · draft 0/3
+                       accepted (0%)
+14:35:25.480 INFO:     #8 completions: 1 tokens generated at 37.4 T/s · prompt
+                       150,438 tokens, none cached, 150,438 new in 195.4 s (770
+                       T/s) · queued 0.58 s, first token 196.0 s, total 196.0 s
+                       · draft 0/3 accepted (0%)
+14:35:25.482 INFO:     #9 completions: 1 tokens generated at 49.0 T/s · prompt
+                       150,438 tokens, none cached, 150,438 new in 193.9 s (776
+                       T/s) · queued 1.19 s, first token 195.1 s, total 195.1 s
+                       · draft 0/3 accepted (0%)
+14:35:25.482 INFO:     #10 completions: 1 tokens generated at 49.2 T/s · prompt
+                       150,438 tokens, none cached, 150,438 new in 191.5 s (786
+                       T/s) · queued 1.79 s, first token 193.3 s, total 193.3 s
+                       · draft 0/3 accepted (0%)
+14:35:27.903 WARNING:  Shutdown signal called. Exiting gracefully.
+14:35:30.832 INFO:     Model unloaded.

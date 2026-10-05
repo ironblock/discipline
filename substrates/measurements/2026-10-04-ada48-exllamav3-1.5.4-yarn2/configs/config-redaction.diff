@@ -1,0 +1,5 @@
+The three live configs (post401 = instance A, live sha256 64d7ca56...; post-yarn = instance B, live sha256 b5db18d5...; pre401 = the 1.5.2 line, live sha256 e52b13bb...) differ from the copies beside this file
+in exactly the values that are not to be published; no setting that affects serving was changed:
+  network.port: replaced by <port>
+  model.model_dir: the home-directory prefix replaced by $HOME
+The copies and the live files are otherwise byte-identical (the inference seat's redaction, as README.md states: $HOME, <port>).

@@ -1,0 +1,14 @@
+2026-10-04T21:52:38Z yarn dir ready: config 47807d665e9aa57b rope={'mrope_interleaved': True, 'mrope_section': [11, 11, 10], 'partial_rotary_factor': 0.25, 'rope_theta': 10000000, 'rope_type': 'yarn', 'factor': 2.0, 'original_max_position_embeddings': 262144}
+2026-10-04T21:52:38Z preflight ok; prod pid=708610
+2026-10-04T21:52:43Z DOWNTIME START vram=2
+2026-10-04T21:53:57Z kld yarn2 rc=0 RESULT exl3-205-v154-yarn2 base-code.kld: PPL(Q) 1.369052 PPL(base) 1.346347 Mean KLD 0.088046 ± 0.002492 99.9% KLD 4.677012 Median KLD 0.000342 Same top 95.534 ± 0.132 % n=24564|RESULT exl3-205-v154-yarn2 base-prose.kld: PPL(Q) 3.201989 PPL(base) 2.950894 Mean KLD 0.231699 ± 0.003294 99.9% KLD 5.379480 Median KLD 0.052710 Same top 84.856 ± 0.229 % n=24564|
+2026-10-04T21:54:18Z native up vram=47598
+{"tag": "native-250k", "target": 250000, "prompt_tokens": 251858, "score": 3, "found": {"red": true, "green": true, "blue": true}, "wall_s": 89.0, "error": null}
+2026-10-04T21:56:14Z yarn2 up vram=47598 max_seq_len=524288
+{"tag": "yarn2-250k", "target": 250000, "prompt_tokens": 251858, "score": 3, "found": {"red": true, "green": true, "blue": true}, "wall_s": 91.4, "error": null}
+{"tag": "yarn2-480k", "target": 480000, "prompt_tokens": 480125, "score": 3, "found": {"red": true, "green": true, "blue": true}, "wall_s": 173.2, "error": null}
+2026-10-04T22:01:30Z yarn2 deep rc=0
+2026-10-04T22:01:35Z phases done
+2026-10-04T22:01:35Z restore: begin
+2026-10-04T22:01:56Z restored: pid=714436 venv=$HOME/venvs/tabby154/bin/python cache_size=606208 config=64d7ca5684298282 vram=47598
+2026-10-04T22:01:56Z END

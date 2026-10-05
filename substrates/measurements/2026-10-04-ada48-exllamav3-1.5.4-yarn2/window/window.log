@@ -1,0 +1,23 @@
+2026-10-04T21:05:24Z preflight ok; prod pid=682233; side config 7696dd6d57946275 (port <side-port>, no auth; otherwise the live config)
+2026-10-04T21:05:28Z DOWNTIME START vram=2
+2026-10-04T21:07:29Z kld v154 rc=0 RESULT exl3-205-v154 base-code.kld: PPL(Q) 1.367284 PPL(base) 1.346347 Mean KLD 0.085968 ± 0.002445 99.9% KLD 4.603146 Median KLD 0.000331 Same top 95.607 ± 0.131 % n=24564|RESULT exl3-205-v154 base-prose.kld: PPL(Q) 3.199949 PPL(base) 2.950894 Mean KLD 0.229681 ± 0.003262 99.9% KLD 5.275523 Median KLD 0.052135 Same top 84.856 ± 0.229 % n=24564|
+2026-10-04T21:08:01Z v152a up after ~33s vram=43762 exllamav3=1.5.2
+2026-10-04T21:08:22Z v152a contcheck rc=0 conc 2 a=0.41 'o explanation was given for his departure. In early 2014, the band announced that they had signed with Cleopatra Records, a label known for its divers'|conc 3 a=0.45 'The proliferation of ironclad battleship designs came to an end in the 1890s as navies reached a consensus on the domi
+2026-10-04T21:09:39Z v152a deep rc=0
+2026-10-04T21:09:44Z v152a stopped vram=2
+2026-10-04T21:10:10Z v154a up after ~27s vram=41238 exllamav3=1.5.4
+2026-10-04T21:10:36Z v154a contcheck rc=0 conc 2 a=0.39 'o explanation was given for his departure. In early 2014, the band announced that they had signed with Cleopatra Records, a label known for its divers'|conc 3 a=0.38 'Lott design, which synthesized the conflicting demands of heavy armament, substantial armor protection, and high speed
+2026-10-04T21:11:56Z v154a deep rc=0
+2026-10-04T21:12:00Z v154a stopped vram=2
+2026-10-04T21:12:23Z v152b up after ~24s vram=43762 exllamav3=1.5.2
+2026-10-04T21:12:44Z v152b contcheck rc=0 conc 2 a=0.42 'o explanation was given for his departure. In early 2014, the band announced that they had signed with Cleopatra Records, a label known for its divers'|conc 3 a=0.48 'The proliferation of ironclad battleship designs came to an end in the 1890s as navies reached a consensus on the domi
+2026-10-04T21:14:01Z v152b deep rc=0
+2026-10-04T21:14:06Z v152b stopped vram=2
+2026-10-04T21:14:29Z v154b up after ~24s vram=41238 exllamav3=1.5.4
+2026-10-04T21:14:50Z v154b contcheck rc=0 conc 2 a=0.39 'o explanation was given for his departure. In early 2014, the band announced that they had signed with Cleopatra Records, a label known for its divers'|conc 3 a=0.38 'Lott design, which synthesized the conflicting demands of heavy armament, substantial armor protection, and high speed
+2026-10-04T21:16:09Z v154b deep rc=0
+2026-10-04T21:16:14Z v154b stopped vram=2
+2026-10-04T21:16:14Z arms done
+2026-10-04T21:16:14Z restore: begin
+2026-10-04T21:16:38Z restored: pid=701173 venv=$HOME/venvs/tabby/bin/python health={"status":"healthy","issues":[]} vram=43762
+2026-10-04T21:16:38Z END

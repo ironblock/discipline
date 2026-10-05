@@ -1,0 +1,12 @@
+prod_pid 682233 started Sat Oct  3 09:58:18 2026
+prod_cmd $HOME/venvs/tabby/bin/python main.py 
+tabby_commit be74bf0a00bcb3a518e6feb7606f150c189be637 dirty=0
+venv $HOME/venvs/tabby/bin/python: torch 2.11.0+cu130 exllamav3 1.5.2
+  ext 0b2d43c21bb23225cd17637e2b971f8dd19bb8f5ed6ec5c02fee663c34527b4a
+venv $HOME/venvs/tabby154/bin/python: torch 2.11.0+cu130 exllamav3 1.5.4
+  ext 9157a0af8dc1135ffccdf99c86fc981f55fbbfe7f9ee659d93deced887f8a89d
+wheel154 c810dc4ad13e105cc62da2354405ae3d967c143359d683f323149a45c25fc702
+config_live e52b13bbceecdc9896925d299fb497b6350905e34632ee971a7c71ec44e50518
+exl3kld 713251c1c831809336f8c87fb779e224890c29a3fe140876e79690116a85bf31
+contcheck b61dda50597fae2c2ca7ffc57ee28674aa4248ccdc7cb4a7c949c014c243f0a1 deep2 87022391b9bb55ca7faadcc151db71b9dcba70f6912211e170a454eccd31546a
+smi NVIDIA RTX 6000 Ada Generation, 615.71.09, 49140 MiB
