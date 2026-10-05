@@ -64,6 +64,13 @@ Two admission records sit on `linux-pc`'s 24 GiB accelerator. Each one's word is
 
 **Line:** `ada48-tabbyapi-exl3-qwen38flashnext-2p05`. Qwen3.8-Flash-Next as EXL3 2.05 bpw with its MTP head, served by TabbyAPI + ExLlamaV3: one paged KV pool shared by four concurrent requests, `cache_mode 8,8`, MTP with 3 draft tokens. It took over from `ada48-llamacpp-qwen38flashnext-q20` at 2026-10-03T16:22Z after 23 s of downtime, on the maintainer's go ([5971023545](https://github.com/ironblock/discipline/issues/143#issuecomment-5971023545), `measurements/2026-10-03-ada48-tabbyapi/`). The llama.cpp launch file stays on the host for rollback.
 
+**YaRN ×2, 2026-10-04 (#401, on the maintainer's decision):** production serves the card's YaRN form at factor 2, so `max_seq_len` is 524,288 inside the 606,208 pool.
+- **Short-text cost:** KLD 0.0880 / 0.2317 against native's 0.0860 / 0.2297.
+- **Retrieval:** three needles found at ~252k and at 480,125 tokens.
+- **Decode:** 2–8% slower.
+
+This is a new instance ([#401 5985333953](https://github.com/ironblock/discipline/issues/401#issuecomment-5985333953)).
+
 **Engine upgrade, 2026-10-04 (#401, on the maintainer's decision):** ExLlamaV3 1.5.2 → **1.5.4**, and the pool 262,144 → **606,208 tokens**. `max_seq_len` stays 262,144 per request.
 - **Why:** 1.5.3–1.5.4 fix the quantized cache (an off-by-one for unaligned geometries) and MTP prefix-cache hashing, both on this line's paths.
 - **Measured in the window ([#401](https://github.com/ironblock/discipline/issues/401)):**
@@ -155,6 +162,7 @@ Draft acceptance rises to 0.92–0.97 at 126k and beyond on this prompt, so the 
 | EXL3 `SC_3.00bpw_H4`, ExLlamaV3 1.5.4, DFlash2 (EXL3 drafter) | `5,4` | 229,376 | 100.5 | 52.5 | 45.1 (226k) | 55.2 | 3,406 |
 | EXL3 `SC_3.00bpw_H4`, the same | `8,8` | 196,608 | 111.1 | 57.9 | 60.6 (194k)\* | 59.0 | 874 |
 | EXL3 `SC_2.20bpw_H3`, the same | `8,8` | 229,376 | 142.7 | 60.6 | 35.5 (226k) | 51.7 | 1,778 |
+| **EXL3 plain `3.00bpw`, the same** | `8,8` | 196,608 | **120.6** | **64.1** | 43.4 (194k) | **60.0** | 488 |
 
 \* That depth's prompt ends on easier text (draft acceptance 0.53, against 0.33–0.40 elsewhere). Deep rows compare only at matched depths.
 
@@ -165,9 +173,14 @@ Draft acceptance rises to 0.92–0.97 at 126k and beyond on this prompt, so the 
   | EXL3 `SC_2.20bpw_H3` | 10.80 GB | 0.1226 / 0.1697 |
   | GSQ-RCO IQ3_S | 12.12 GB | 0.0542 / 0.0860 |
   | EXL3 `SC_3.00bpw_H4` | 13.45 GB | 0.0591 / 0.0738 |
+  | EXL3 plain `3.00bpw` (#334 addendum) | 13.82 GB | 0.0522 / 0.0731 |
   | EXL3 `3.50bpw` | 15.34 GB | 0.0382 / 0.0421 |
 - **Not run:** EXL3 + MTP (dropped at the maintainer's direction; DFlash2 led everywhere it ran); EXL3 `3.50bpw` with the drafter, which did not load at 163,840 or more on 1.5.1. The README records every probe.
-- **No arm loaded a vision tower.**
+- **Vision.** No speed arm above loaded a vision tower. Both EXL3 3.00 quants carry the full BF16 tower.
+  - TabbyAPI can keep the tower's weights in system RAM (`vision_offload`). The encode still runs on the GPU; ExLlamaV3 has no CPU path for it.
+  - **First attempt** (TabbyAPI defaults): it loaded only at 172,032, read #373's image 1 of 3 at about 250 visual tokens, and ran out of memory on the next request.
+  - **With two fixes** — `draft_cache_mode "8,8"`, and an image minimum of 1,024 visual tokens (`size.shortest_edge` 1,048,576, matching the 3.6's `--image-min-tokens 1024`) — it loads at 196,608, reads the image `accepted` ×3, and serves text afterwards at 104.5 tok/s (1.7k) and 66.5 (77k), with 760 MiB free at peak.
+  - That is the line the maintainer ratified (`measurements/2026-10-04-qwen38-27b-tabbyapi-vision/` once committed).
 - **Headroom:** under the v0.1.0 bar (300 MiB free at peak fill, [5984376546](https://github.com/ironblock/discipline/issues/143#issuecomment-5984376546)), every row passes at the pool it ran.
 - **The floor refuses a request that doesn't fit its shared pool, rather than evicting the other slot's resident prompt:** HTTP 500 "Context size has been exceeded". #406.
 
@@ -219,10 +232,12 @@ One line per ruling, oldest first. M is the maintainer; P is planning; D is Disp
 | 2026-10-04 | D | Distil #143 into this page, re-home its open definition of done, then close it (approved by the maintainer) | [5982627646](https://github.com/ironblock/discipline/issues/143#issuecomment-5982627646) |
 | 2026-10-04 | M | The headroom bar for v0.1.0 is 300 MiB free at peak fill, or no OOM at the registered pool under the bench; the 1,208 MiB rule is withdrawn | [5984376546](https://github.com/ironblock/discipline/issues/143#issuecomment-5984376546) |
 | 2026-10-04 | M | The top rung moves to ExLlamaV3 1.5.4 with a pool sized to that bar (606,208) | [#401 5984646282](https://github.com/ironblock/discipline/issues/401#issuecomment-5984646282) |
+| 2026-10-04 | M | The top rung serves YaRN ×2 (`max_seq_len` 524,288) | [#401 5985333953](https://github.com/ironblock/discipline/issues/401#issuecomment-5985333953) |
+| 2026-10-04 | M | Ratified: TabbyAPI + ExLlamaV3 1.5.4 serving EXL3 plain `3.00bpw` + DFlash2 with the offloaded BF16 vision tower becomes `linux-pc`'s baseline, pending admission (an earlier ratification that day, of the llama.cpp DFlash2 line, was retracted) | [5985589548](https://github.com/ironblock/discipline/issues/393#issuecomment-5985589548) |
 
 ## Open questions
 
-- **The floor's ratification and switch.** Planning ruled the candidate the floor on 2026-10-02. The maintainer has not ratified a floor: a ratification posted on 2026-10-04 was retracted the same evening, and #393 is halted while the EXL3 and llama.cpp lines are compared (§ Engine lines). `linux-pc` still serves the 3.6. #393.
+- **The floor's admission and switch.** On 2026-10-04 the maintainer ratified a different line from the one planning ruled on 2026-10-02: TabbyAPI + ExLlamaV3 serving EXL3 `3.00bpw` + DFlash2 with the BF16 vision tower ([5985589548](https://github.com/ironblock/discipline/issues/393#issuecomment-5985589548); § Engine lines). An earlier ratification that day, of the llama.cpp DFlash2 line, was retracted before this one. The line is unadmitted until its window runs (cells, depth probe, parity, vision cell); the instruments need TabbyAPI forms and four cells need planning's word. `linux-pc` serves the 3.6 until then. #393.
 - **The three-rung re-fire.** One existing claim, the maintainer's pick, re-fired on all three rungs under a pre-registered rule. Blocked on a bottom rung and an admitted top rung. #394.
 - **The record gate.** `check-record` refusing a claim record whose declared rung has no admission directory. #395.
 - **The top rung's admission** on the TabbyAPI + EXL3 line, beginning with the cache's quality. #396.
