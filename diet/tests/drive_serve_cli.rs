@@ -2104,3 +2104,177 @@ fn a_drive_server_runs_t1s_path_under_seatbelt_and_no_command_forges_an_approval
     );
     let _ = (drove.log, drove.record);
 }
+
+// ---------------------------------------------------------------------------
+// the regimen's sampler, pinned on the wire (#486)
+// ---------------------------------------------------------------------------
+
+/// The sampler settings the client can pin, as the wire names them: every
+/// other key of a request is not a sampler field.
+fn sampler_fields(body: &str) -> serde_json::Map<String, serde_json::Value> {
+    let tags: Vec<&str> = diet::client::shape::SamplerSetting::ALL
+        .iter()
+        .map(|setting| setting.tag())
+        .collect();
+    log_line_object(body)
+        .as_object()
+        .expect("a request is an object")
+        .iter()
+        .filter(|(key, _)| tags.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
+}
+
+/// The dev loop's regimen with its `[sampler]` table replaced by `sampler`,
+/// and `top` added at the top level: one source for the substrate, the
+/// engine check and the confinement, so only the sampler differs.
+fn dev_loop_sampling(top: &str, sampler: &str) -> HeadFile {
+    let whole = std::fs::read_to_string(dev_loop()).expect("the dev loop's regimen");
+    let (before, _) = whole
+        .split_once("\n[sampler]\n")
+        .expect("the dev loop declares a sampler table last");
+    file_holding("regimen", &format!("{before}\n{top}\n[sampler]\n{sampler}"))
+}
+
+#[test]
+fn a_drive_server_pins_the_regimens_sampler_on_the_trunk_and_the_fork_as_its_record_claims() {
+    let stub = Stub::serving_with_props(
+        vec![Act::Raw(ANSWERED.to_vec()), Act::Raw(ANSWERED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\n",
+        "temperature = 0.6\ntop_k = 20\ntop_p = 1.0\nmin_p = 0.0\n",
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let served = start(
+        &stub.url(),
+        &["--regimen", &regimen_path, "--record", &path],
+    );
+    let address = served.listening.clone();
+    let reply = post(
+        &address,
+        &address,
+        r#"{"kind":"ask","text":"what are we building?","scoping":true}"#,
+    );
+    assert_eq!(status(&reply), 200, "{reply}");
+    let read = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains("fork.settled") && read.contains(r#""to":"awaiting""#),
+    );
+    assert!(read.contains("fork.settled"), "the fork settled: {read}");
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _report = served
+        .said
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the record's report");
+
+    // The wire: the trunk's request and the fork's, each carrying exactly the
+    // four settings the regimen wrote, as the digits it wrote them in.
+    let bodies = stub.received();
+    let [trunk, fork] = bodies.as_slice() else {
+        panic!("one trunk request and one fork request: {bodies:#?}");
+    };
+    // The fork is the trunk's messages, the answer, and the interview's own
+    // question: a request the trunk never sent.
+    let messages = |body: &str| log_line_object(body)["messages"].as_array().cloned();
+    let (trunk_messages, fork_messages) = (
+        messages(trunk).expect("messages"),
+        messages(fork).expect("messages"),
+    );
+    assert_eq!(
+        trunk_messages.last().map(|m| m["content"].clone()),
+        Some(serde_json::json!("what are we building?")),
+        "{trunk}"
+    );
+    assert_eq!(fork_messages.len(), trunk_messages.len() + 2, "{fork}");
+    assert_eq!(
+        fork_messages[..trunk_messages.len()],
+        trunk_messages[..],
+        "{fork}"
+    );
+    assert_eq!(
+        fork_messages.last().map(|m| m["role"].clone()),
+        Some(serde_json::json!("user"))
+    );
+    let pinned = serde_json::json!({
+        "temperature": 0.6, "top_k": 20, "top_p": 1.0, "min_p": 0.0,
+    });
+    for (lane, body) in [("trunk", trunk), ("fork", fork)] {
+        assert_eq!(
+            serde_json::Value::Object(sampler_fields(body)),
+            pinned,
+            "the {lane}'s sampler fields: {body}"
+        );
+        for written in [
+            r#""temperature":0.6,"#,
+            r#""top_k":20,"#,
+            r#""top_p":1.0,"#,
+            r#""min_p":0.0,"#,
+        ] {
+            assert!(body.contains(written), "the {lane} sends {written}: {body}");
+        }
+    }
+
+    // The record: its `sampler_card` is the same four, in the same digits.
+    let written = std::fs::read_to_string(&record.0).expect("the record");
+    let start_row = written.lines().next().expect("a start row");
+    let card = &log_line_object(start_row)["regime"]["substrates"][0]["sampler_card"];
+    assert_eq!(card, &pinned, "{start_row}");
+    for digits in [
+        r#""temperature":0.6"#,
+        r#""top_k":20"#,
+        r#""top_p":1.0"#,
+        r#""min_p":0.0"#,
+    ] {
+        assert!(
+            start_row.contains(digits),
+            "the record holds {digits}: {start_row}"
+        );
+    }
+    let _ = std::fs::remove_file(format!("{path}.unspellable.json"));
+}
+
+#[test]
+fn a_drive_server_refuses_a_sampler_key_it_cannot_pin_before_it_listens() {
+    // No acts and no `/props`: a server that got as far as the engine check
+    // would be refused with exit 1, and one that listened would not exit.
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = dev_loop_sampling("", "temperature = 0.6\nmirostat = 2\n");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(2), "{said}");
+    assert!(said.contains("`mirostat`"), "the key is named: {said}");
+    for tag in diet::client::shape::SamplerSetting::ALL
+        .iter()
+        .map(|s| s.tag())
+    {
+        assert!(said.contains(tag), "the accepted set names {tag}: {said}");
+    }
+    assert!(stub.received().is_empty(), "nothing was asked");
+}
+
+#[test]
+fn a_drive_server_without_a_regimen_pins_no_sampler_setting() {
+    let stub = Stub::serving(vec![Act::Raw(ANSWERED.to_vec())]).expect("loopback");
+    let served = start(&stub.url(), &[]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains(r#""to":"awaiting""#),
+    );
+    drop(served);
+    let bodies = stub.received();
+    let [body] = bodies.as_slice() else {
+        panic!("one request: {bodies:#?}");
+    };
+    assert!(sampler_fields(body).is_empty(), "{body}");
+}

@@ -13,8 +13,9 @@ substrate_reasoning = "on"
 # The registry's hardware_fingerprint for equipment `linux-pc`, which must agree.
 substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"
 
-# Declared, not sent: the server's own launch settings decide sampling, so
-# write what the server actually runs.
+# Sent on every request, trunk and fork (#486), and recorded as the
+# substrate's `sampler_card`: one value, so the wire carries what the record
+# claims. A setting not written here is the server's launch default.
 [sampler]
 temperature = 0.6
 top_p = 0.95

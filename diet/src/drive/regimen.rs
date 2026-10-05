@@ -6,6 +6,9 @@
 //! rather than a copy per binary. A second reader of the same rule is the
 //! defect class this repository keeps finding in itself.
 
+use std::collections::BTreeMap;
+
+use crate::client::shape::{Pin, SamplerCard, SamplerSetting};
 use crate::formats::record::json::Value;
 use crate::formats::record::{CacheTtl, Count, Engine, Reasoning, Regime, Substrate, Weights};
 use crate::formats::regimen::{self, Regimen};
@@ -206,6 +209,57 @@ pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, St
     Ok(regime)
 }
 
+/// The pins a request sends for `card`, a regime's `sampler_card`: one per
+/// setting, each the very value the record holds (#486).
+///
+/// DERIVED FROM THE RECORD'S CARD, never read from the regimen a second
+/// time, so the sampler a record claims and the sampler the wire carries are
+/// one value and cannot disagree. A decimal crosses as the [`Decimal`] the
+/// regimen's reader kept -- the digits as written, `0.6` and never an `f64`'s
+/// `0.59999` -- and a whole number as itself.
+///
+/// [`Decimal`]: crate::formats::record::json::Decimal
+///
+/// # Errors
+///
+/// The complaint, naming the key, when a key is not a setting the client can
+/// pin ([`SamplerSetting`]'s closed vocabulary, which it lists) or its value
+/// is not a number. A setting the record claims and the wire cannot carry is
+/// the disagreement this function exists to rule out, so it is refused rather
+/// than dropped.
+pub fn sampler_pins(card: &BTreeMap<String, Value>) -> Result<SamplerCard, String> {
+    let accepted = || {
+        SamplerSetting::ALL
+            .iter()
+            .map(|setting| setting.tag())
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    card.iter()
+        .try_fold(SamplerCard::empty(), |pins, (key, value)| {
+            let Some(setting) = SamplerSetting::ALL
+                .iter()
+                .copied()
+                .find(|setting| setting.tag() == key)
+            else {
+                return Err(format!(
+                    "`[sampler]` names `{key}`, which is not a setting the request can pin and \
+                 the echo can check; the record would claim a sampler the wire never \
+                 carried. The settings it can pin: {}",
+                    accepted()
+                ));
+            };
+            match value {
+                Value::Decimal(decimal) => Ok(pins.with(setting, Pin::Decimal(decimal.clone()))),
+                Value::Integer(whole) => Ok(pins.with(setting, Pin::Integer(*whole))),
+                _ => Err(format!(
+                    "`[sampler] {key}` is not a number, and a pin is one: the wire would \
+                 carry something other than what the record claims"
+                )),
+            }
+        })
+}
+
 /// The regimen's word for a path that caches nothing.
 ///
 /// The same word `budget_tokens = "none"` uses one table over, because it is
@@ -377,6 +431,60 @@ mod tests {
                 .expect_err("unregistered");
         assert!(
             refused.contains("`nowhere-at-all` is not a substrate"),
+            "{refused}"
+        );
+    }
+
+    /// #486: the pins are the record's card, setting for setting, and a
+    /// decimal goes onto the wire as the digits the regimen wrote.
+    #[test]
+    fn the_wires_pins_are_the_records_sampler_card_in_the_digits_written() {
+        use crate::client::shape::{Pin, SamplerSetting};
+        let text = format!(
+            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"canned\"\n\
+             substrate_reasoning = \"off\"\nsubstrate_hardware = \"{}\"\n\
+             [sampler]\ntemperature = 0.6\ntop_p = 1.0\nmin_p = 0.0\ntop_k = 20\nseed = 7\n",
+            "a".repeat(64)
+        );
+        let regime =
+            regime_of(&regimen::parse(&text).expect("a regimen"), false).expect("a regime");
+        let card = &regime.substrates[0].sampler_card;
+        let pins = super::sampler_pins(card).expect("every key is pinnable");
+        assert_eq!(pins.len(), card.len());
+        let spelled: Vec<(&str, String)> = pins
+            .iter()
+            .map(|(setting, pin)| (setting.tag(), pin.to_string()))
+            .collect();
+        assert_eq!(
+            spelled,
+            [
+                ("temperature", "0.6".to_owned()),
+                ("top_p", "1.0".to_owned()),
+                ("top_k", "20".to_owned()),
+                ("min_p", "0.0".to_owned()),
+                ("seed", "7".to_owned()),
+            ]
+        );
+        assert_eq!(pins.get(SamplerSetting::Seed), Some(&Pin::Integer(7)));
+    }
+
+    #[test]
+    fn a_sampler_key_the_wire_cannot_pin_is_refused_by_name() {
+        use crate::formats::record::json::Value;
+        let card = std::collections::BTreeMap::from([
+            ("temperature".to_owned(), Value::Integer(1)),
+            ("max_tokens".to_owned(), Value::Integer(4096)),
+        ]);
+        let refused = super::sampler_pins(&card).expect_err("not a sampler setting");
+        assert!(refused.contains("`max_tokens`"), "{refused}");
+        assert!(
+            refused.contains("temperature, top_p, top_k, min_p, repeat_penalty, seed"),
+            "{refused}"
+        );
+        let card = std::collections::BTreeMap::from([("seed".to_owned(), Value::Boolean(true))]);
+        let refused = super::sampler_pins(&card).expect_err("not a number");
+        assert!(
+            refused.contains("`[sampler] seed` is not a number"),
             "{refused}"
         );
     }
