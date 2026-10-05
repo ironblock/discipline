@@ -1,0 +1,83 @@
+15:45:23.010 INFO:     Using config file config-w335h.yml
+15:45:23.016 INFO:     The 'config.yml' file cannot be found
+15:45:24.988 WARNING:  No sampler overrides are configured
+                       (sampling.override_preset or inline overrides in the
+                       sampling section), so sampling parameters have no
+                       fallback values. Requests that omit them run untruncated:
+                       temperature 1.0, top_k 0, top_p 1.0, min_p 0. Set
+                       override_preset to safe_defaults unless this is
+                       intentional.
+15:45:24.991 INFO:     exllamav3 version: 1.5.4
+15:45:25.858 INFO:     Keeping vision model weights in system RAM
+                       (vision_offload).
+15:45:25.860 INFO:     Using draft model:
+                       $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-i
+                       gor255
+15:45:25.861 INFO:     Disabling GPU split because one GPU is in use.
+15:45:25.861 INFO:     Context: max_seq_len 196,608 tokens (configured),
+                       cache_size 196,608 tokens
+15:45:25.887 INFO:     Using template "chat_template" for chat completions.
+15:45:25.888 INFO:     Response parsing: tool format qwen3_coder (template,
+                       tokenizer, architecture), reasoning tags <think> </think>
+                       (template)
+15:45:30.328 INFO:     Loading model
+                       $HOME/Models/Qwen3.8-27B-exl3-3.00bpw-img1024
+                       (manual GPU split)
+Loading vision modules ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 30/30 0:00:00
+Loading draft modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 8/8   0:00:00
+Loading model modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 67/67 0:00:00
+15:45:36.225 INFO:     Model loaded in 10.3 s
+
+15:45:36.226 WARNING:  Disabling authentication makes your instance vulnerable.
+                       Set the `disable_auth` flag to False in config.yml if you
+                       want to share this instance with others.
+15:45:36.226 WARNING:  With authentication disabled and `allowed_origins` left
+                       at ["*"], any website open in a browser on this machine
+                       can send requests to this instance and read the
+                       responses, including admin endpoints. Set
+                       `network.allowed_origins` to your own frontends (or [])
+                       unless you use a browser-based frontend that needs it.
+15:45:36.227 INFO:     Serving OAI API on http://127.0.0.1:8083 (docs at
+                       http://127.0.0.1:8083/redoc)
+15:45:38.072 INFO:     #4 chat/completions: 1,099 prompt tokens · temperature:
+                       0.6 (req), top_k: 20 (req), max_tokens: 8192 (req)
+15:45:39.675 INFO:     #4 chat/completions: 46 tokens generated at 86.5 T/s ·
+                       prompt 1,099 tokens, none cached, 1,099 new in 1.06 s
+                       (1,037 T/s) · first token 1.07 s, total 1.60 s · draft
+                       32/98 accepted (33%)
+15:45:39.678 INFO:     #5 chat/completions: 1,099 prompt tokens · temperature:
+                       0.6 (req), top_k: 20 (req), max_tokens: 8192 (req)
+15:45:40.276 INFO:     #5 chat/completions: 57 tokens generated at 127.0 T/s ·
+                       prompt 1,099 tokens, 93% cached, 75 new in 0.13 s · first
+                       token 0.15 s, total 0.60 s · draft 44/91 accepted (48%)
+15:45:40.279 INFO:     #6 chat/completions: 1,099 prompt tokens · temperature:
+                       0.6 (req), top_k: 20 (req), max_tokens: 8192 (req)
+15:45:40.976 INFO:     #6 chat/completions: 49 tokens generated at 89.2 T/s ·
+                       prompt 1,099 tokens, 93% cached, 75 new in 0.13 s · first
+                       token 0.15 s, total 0.70 s · draft 33/112 accepted (29%)
+15:45:41.149 INFO:     #7 chat/completions: 1,739 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+15:45:45.158 INFO:     #7 chat/completions: 256 tokens generated at 104.6 T/s ·
+                       prompt 1,739 tokens, none cached, 1,739 new in 1.56 s
+                       (1,115 T/s) · first token 1.56 s, total 4.01 s · draft
+                       185/497 accepted (37%) · max_tokens reached
+15:45:45.164 INFO:     #8 chat/completions: 1,739 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+15:45:47.934 INFO:     #8 chat/completions: 256 tokens generated at 104.4 T/s ·
+                       prompt 1,739 tokens, 88% cached, 203 new in 0.30 s ·
+                       first token 0.32 s, total 2.77 s · draft 185/497 accepted
+                       (37%) · max_tokens reached
+15:45:48.063 INFO:     #9 chat/completions: 76,828 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+15:47:12.728 INFO:     #9 chat/completions: 256 tokens generated at 66.5 T/s ·
+                       prompt 76,828 tokens, 2% cached, 75,292 new in 80.8 s
+                       (932 T/s) · first token 80.8 s, total 84.7 s · draft
+                       181/525 accepted (34%) · max_tokens reached
+15:47:12.846 INFO:     #10 chat/completions: 76,828 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+15:47:16.904 INFO:     #10 chat/completions: 256 tokens generated at 66.4 T/s ·
+                       prompt 76,828 tokens, 100% cached, 28 new in 0.18 s ·
+                       first token 0.20 s, total 4.05 s · draft 181/525 accepted
+                       (34%) · max_tokens reached
+15:47:17.150 WARNING:  Shutdown signal called. Exiting gracefully.
+15:47:18.110 INFO:     Model unloaded.

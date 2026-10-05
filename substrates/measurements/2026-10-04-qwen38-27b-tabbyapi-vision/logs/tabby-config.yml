@@ -1,0 +1,25 @@
+network:
+  host: 127.0.0.1
+  port: 8083
+  disable_auth: true
+logging:
+  log_prompt: false
+  log_generation_params: false
+  log_requests: false
+model:
+  model_dir: $HOME/Models
+  model_name: Qwen3.8-27B-exl3-3.00bpw-img1024
+  backend: exllamav3
+  max_seq_len: 196608
+  cache_size: 196608
+  cache_mode: "8,8"
+  max_batch_size: 2
+  chunk_size: 2048
+  reasoning: true
+  vision: true
+  vision_offload: true
+draft_model:
+  draft_mode: model
+  draft_model_dir: $HOME/Models
+  draft_model_name: Qwen3.8-27B-DFlash2-EXL3-4.00bpw-igor255
+  draft_cache_mode: "8,8"
