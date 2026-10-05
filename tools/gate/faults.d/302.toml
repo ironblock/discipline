@@ -1,0 +1,19 @@
+# #302's seeded fault: the record's tool_call row held to the log's outcome rule.
+
+[[fault]]
+id = "test.record_tool_call_forbidden_keys_read"
+kind = "seeded-gate"
+check = "test"
+target = "test:conformance/formats::record"
+label = "a refused tool call read with its confined"
+failure_class = "record.tool-call-outcome-keys"
+legacy_signature = "record/fixtures/invalid/a-refused-tool-call-carrying-confined\\.jsonl"
+migrated = false
+
+[[fault]]
+id = "drive.the-projected-record-is-a-constant"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.the-projected-record-is-a-constant"
+failure_class = "drive.the-projected-record-is-a-constant"
+migrated = false

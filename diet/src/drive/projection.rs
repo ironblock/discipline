@@ -35,7 +35,7 @@ use crate::client::head::Head;
 use crate::client::shape::{Limits, Message, RequestShape, Role, SamplerCard};
 use crate::formats::log::{self, Event as Line, Lane};
 use crate::formats::record::json::Decimal;
-use crate::formats::record::{self, Count, Event, PrefixReason, Regime, Source};
+use crate::formats::record::{self, Count, Event, Execution, PrefixReason, Regime, Source};
 
 use super::registry::Identity;
 
@@ -449,14 +449,9 @@ impl<'a> Walk<'a> {
                     );
                 }
             }
-            // A tool call (v3): the record's tool rows are not projected
-            // from the log yet, so each is named rather than dropped.
-            Line::ToolCall { .. } => self.name(
-                line.seq,
-                "tool_call",
-                "a tool call: this projection does not carry it into the record yet".to_owned(),
-                None,
-            ),
+            // A tool call (v3, #302): its row carries how it ran under the
+            // log's own words, so the record says what confined it.
+            Line::ToolCall { .. } => self.tool_call_line(line.seq, &line.event),
             // Carried by the rows above: a delta by its response's text, a
             // settlement and a settled turn by the turn and response rows.
             Line::Delta { .. }
@@ -466,6 +461,106 @@ impl<'a> Walk<'a> {
             | Line::SessionStart { .. } => {}
         }
         Ok(())
+    }
+
+    /// [`Self::tool_call`], from a `tool_call` line.
+    fn tool_call_line(&mut self, seq: u64, line: &Line) {
+        let Line::ToolCall {
+            turn,
+            name,
+            arguments,
+            outcome,
+            argv,
+            confined,
+            isolation,
+            network,
+            exit,
+            reason,
+            policy,
+            stdout,
+            cwd,
+            approval,
+            ..
+        } = line
+        else {
+            return;
+        };
+        self.tool_call(
+            seq,
+            *turn,
+            name,
+            arguments,
+            Execution {
+                outcome: *outcome,
+                reason: *reason,
+                argv: argv.clone(),
+                confined: confined.clone(),
+                isolation: *isolation,
+                network: *network,
+                policy: policy.clone(),
+                cwd: cwd.clone(),
+                approval: approval.clone(),
+            },
+            *exit,
+            stdout.as_ref().map(|out| out.text.clone()),
+        );
+    }
+
+    /// A tool call's row, `t/<seq>`, under the turn that made it. Named
+    /// rather than written when that turn has no row (the record ties a call
+    /// to its turn) or its exit does not fit a row's; its arguments are named
+    /// beside the row when they are not a JSON object, which `args` holds.
+    #[allow(clippy::too_many_arguments)] // one row's fields, as the line holds them
+    fn tool_call(
+        &mut self,
+        seq: u64,
+        turn: u32,
+        name: &str,
+        arguments: &str,
+        exec: Execution,
+        exit: Option<u64>,
+        output: Option<String>,
+    ) {
+        let turned = self
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Turn { index, .. } if *index == turn));
+        if !turned {
+            self.name(
+                seq,
+                "tool_call",
+                format!("a tool call of turn {turn}, which has no row"),
+                None,
+            );
+            return;
+        }
+        let args = record::json::line(arguments).ok();
+        if args.is_none() {
+            self.name(
+                seq,
+                "tool_call",
+                "a tool call's arguments that are not a JSON object: its row carries no `args`"
+                    .to_owned(),
+                Some(arguments.to_owned()),
+            );
+        }
+        let exit = match exit.map(i64::try_from) {
+            Some(Err(_)) => {
+                self.name(seq, "tool_call", "an exit status past i64".to_owned(), None);
+                return;
+            }
+            Some(Ok(code)) => Some(code),
+            None => None,
+        };
+        self.events.push(Event::ToolCall {
+            id: format!("t/{seq}"),
+            at_turn: turn,
+            tool: name.to_owned(),
+            args,
+            exit,
+            output,
+            exec: Some(exec),
+        });
     }
 
     fn ask(&mut self, seq: u64, turn: u32) {
@@ -1222,5 +1317,154 @@ mod tests {
         identity.engine_commit = Some("e7051efc8002847f7269c5606318431179b5904e".to_owned());
         identity.engine_build_info = Some("b9-somethingelse".to_owned());
         assert_eq!(cited(&identity), None);
+    }
+
+    /// A tool call's row carries how it ran from its own line (#302): the
+    /// isolation, network, argv and policy each line says, never one value
+    /// for every row -- the projection's mirror of the isolation lane's
+    /// `the-record-is-a-constant`.
+    #[test]
+    fn a_tool_calls_row_carries_its_confinement_from_its_line() {
+        type Row = (
+            Option<log::Isolation>,
+            Option<log::ToolOutcome>,
+            Option<i64>,
+            Option<String>,
+        );
+        let call = |id: &str, outcome: log::ToolOutcome, isolation: Option<log::Isolation>| {
+            Line::ToolCall {
+                request: 3,
+                turn: 1,
+                id: id.to_owned(),
+                name: "bash".to_owned(),
+                arguments: r#"{"command":"ls"}"#.to_owned(),
+                outcome,
+                argv: Some(vec!["sh".to_owned(), "-c".to_owned(), "ls".to_owned()]),
+                confined: isolation
+                    .map(|_| vec!["sh".to_owned(), "-c".to_owned(), "ls".to_owned()]),
+                isolation,
+                network: isolation.map(|_| log::Network::None),
+                exit: (outcome == log::ToolOutcome::Ran).then_some(0),
+                reason: (outcome == log::ToolOutcome::Refused)
+                    .then_some(log::ToolRefusal::NotAllowed),
+                policy: None,
+                stdout: (outcome == log::ToolOutcome::Ran).then(|| log::Output {
+                    text: "a.txt\n".to_owned(),
+                    bytes: 6,
+                }),
+                stderr: (outcome == log::ToolOutcome::Ran).then(|| log::Output {
+                    text: String::new(),
+                    bytes: 0,
+                }),
+                cwd: isolation.map(|_| "/work".to_owned()),
+                approval: None,
+                files: None,
+            }
+        };
+        let mut events = vec![start()];
+        let mut turn = answered(1, 3, Some(warm()), None);
+        let settled = turn.len() - 2;
+        turn.splice(
+            settled..settled,
+            [
+                call("c1", log::ToolOutcome::Ran, Some(log::Isolation::Sandbox)),
+                call("c2", log::ToolOutcome::Ran, Some(log::Isolation::None)),
+                call("c3", log::ToolOutcome::Refused, None),
+            ],
+        );
+        events.extend(turn);
+        let lines = numbered(events);
+        let projection =
+            project(&lines, &regime(), Some(Engine::Commit("e7051ef"))).expect("projected");
+        validates(&projection);
+        let rows: Vec<Row> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::ToolCall {
+                    exec, exit, output, ..
+                } => Some((
+                    exec.as_ref().and_then(|e| e.isolation),
+                    exec.as_ref().map(|e| e.outcome),
+                    *exit,
+                    output.clone(),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                (
+                    Some(log::Isolation::Sandbox),
+                    Some(log::ToolOutcome::Ran),
+                    Some(0),
+                    Some("a.txt\n".to_owned())
+                ),
+                (
+                    Some(log::Isolation::None),
+                    Some(log::ToolOutcome::Ran),
+                    Some(0),
+                    Some("a.txt\n".to_owned())
+                ),
+                (None, Some(log::ToolOutcome::Refused), None, None),
+            ]
+        );
+        assert!(
+            projection.unspellable.iter().all(|u| u.kind != "tool_call"),
+            "{:?}",
+            projection.unspellable
+        );
+    }
+
+    #[test]
+    fn a_tool_calls_arguments_that_are_not_json_are_named_beside_its_row() {
+        let mut events = vec![start()];
+        let mut turn = answered(1, 3, Some(warm()), None);
+        let settled = turn.len() - 2;
+        turn.insert(
+            settled,
+            Line::ToolCall {
+                request: 3,
+                turn: 1,
+                id: "c1".to_owned(),
+                name: "bash".to_owned(),
+                arguments: "ls -la (".to_owned(),
+                outcome: log::ToolOutcome::Refused,
+                argv: None,
+                confined: None,
+                isolation: None,
+                network: None,
+                exit: None,
+                reason: Some(log::ToolRefusal::Unparsable),
+                policy: None,
+                stdout: None,
+                stderr: None,
+                cwd: None,
+                approval: None,
+                files: None,
+            },
+        );
+        events.extend(turn);
+        let lines = numbered(events);
+        let projection =
+            project(&lines, &regime(), Some(Engine::Commit("e7051ef"))).expect("projected");
+        validates(&projection);
+        let args: Vec<bool> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::ToolCall { args, .. } => Some(args.is_some()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(args, vec![false]);
+        let named: Vec<Option<&str>> = projection
+            .unspellable
+            .iter()
+            .filter(|u| u.kind == "tool_call")
+            .map(|u| u.text.as_deref())
+            .collect();
+        assert_eq!(named, vec![Some("ls -la (")]);
     }
 }

@@ -821,6 +821,7 @@ impl Lane {
                 args,
                 exit,
                 output,
+                exec: _,
             } => self.tool_call(id, *at_turn, tool, args.as_ref(), *exit, output.as_deref()),
             Event::Start { .. }
             | Event::Turn { .. }
@@ -1832,6 +1833,7 @@ mod tests {
             ),
             exit,
             output: output.map(str::to_owned),
+            exec: None,
         }
     }
 
@@ -3591,6 +3593,7 @@ mod tests {
             ])),
             exit: None,
             output: None,
+            exec: None,
         };
         let lane = lane_after(&[event]);
         assert!(
