@@ -282,7 +282,9 @@ pub fn head(shape: &RequestShape) -> String {
 /// message that made it carries `tool_calls`, with `content: null` when it
 /// said nothing else, and the result is a `tool` message naming the call by
 /// `tool_call_id` before its `content` -- the key order I0's capture sent
-/// (`turn2-openai.request.json`), which T12 holds byte for byte.
+/// (`turn2-openai.request.json`), which T12 holds byte for byte. A message
+/// with images sends `content` as an array of parts, images first; one with
+/// none sends the plain string it always did, so no head moves.
 fn message(message: &super::shape::Message, out: &mut String) {
     out.push_str("{\"role\":");
     string(message.role.tag(), out);
@@ -293,8 +295,21 @@ fn message(message: &super::shape::Message, out: &mut String) {
     out.push_str(",\"content\":");
     if message.content.is_empty() && !message.tool_calls.is_empty() {
         out.push_str("null");
-    } else {
+    } else if message.images.is_empty() {
         string(&message.content, out);
+    } else {
+        // The operator's attachments (#372): each image as an `image_url`
+        // part with its data URI, in order, then the words as a `text` part
+        // -- the shape #373's vision cell sent and the engine accepted.
+        out.push('[');
+        for image in &message.images {
+            out.push_str("{\"type\":\"image_url\",\"image_url\":{\"url\":");
+            string(&image.data_uri(), out);
+            out.push_str("}},");
+        }
+        out.push_str("{\"type\":\"text\",\"text\":");
+        string(&message.content, out);
+        out.push_str("}]");
     }
     if let Some(reasoning) = &message.reasoning {
         out.push_str(",\"reasoning_content\":");
@@ -803,5 +818,120 @@ mod tests {
         // capture-replay tests cannot notice a dropped flag, because what
         // they replay does not depend on what was asked.
         assert_eq!(parsed["return_progress"], serde_json::Value::Bool(true));
+    }
+
+    // -----------------------------------------------------------------------
+    // the operator's attached image (#372, the loop half)
+    // -----------------------------------------------------------------------
+
+    /// The eight bytes every PNG begins with: enough for a test image, and
+    /// generated here rather than committed.
+    const PNG_MAGIC: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+    fn png_file(bytes: &[u8]) -> crate::formats::log::RecordedFile {
+        let sha256 = crate::digest::sha256_hex(bytes);
+        crate::formats::log::RecordedFile {
+            path: format!("files/{sha256}"),
+            sha256,
+            media_type: "image/png".to_owned(),
+            bytes: bytes.len() as u64,
+        }
+    }
+
+    fn attached(text: &str, bytes: &[u8]) -> Message {
+        crate::client::attach(Message::new(Role::User, text), &png_file(bytes), bytes)
+            .expect("the bytes are the file's")
+    }
+
+    /// One image, exactly: `content` becomes an array, the image part first
+    /// and the text part after it -- #373's accepted `[image_url, text]` --
+    /// and nothing else in the body moves.
+    #[test]
+    fn an_attached_image_goes_out_as_an_image_part_then_the_text_byte_for_byte() {
+        let rendered = body(&RequestShape {
+            messages: vec![
+                Message::new(Role::System, "sys"),
+                attached("look", PNG_MAGIC),
+            ],
+            ..shape(SamplerCard::empty())
+        });
+        assert_eq!(
+            rendered,
+            concat!(
+                r#"{"model":"a-model","messages":[{"role":"system","content":"sys"},"#,
+                r#"{"role":"user","content":[{"type":"image_url","image_url":"#,
+                r#"{"url":"data:image/png;base64,iVBORw0KGgo="}},"#,
+                r#"{"type":"text","text":"look"}]}],"max_tokens":64}"#,
+            )
+        );
+    }
+
+    /// The head and the body go through one renderer: an attached image in
+    /// the frozen part of the trunk is in the head, and so in
+    /// `request.head_sha256`.
+    #[test]
+    fn an_attached_image_in_the_trunk_is_part_of_the_head() {
+        let shape = RequestShape {
+            messages: vec![
+                Message::new(Role::System, "sys"),
+                attached("look", PNG_MAGIC),
+                Message::new(Role::Assistant, "a header"),
+                Message::new(Role::User, "and?"),
+            ],
+            ..shape(SamplerCard::empty())
+        };
+        let head = super::head(&shape);
+        assert!(body(&shape).starts_with(&head));
+        assert!(
+            head.contains("data:image/png;base64,iVBORw0KGgo="),
+            "the image is not in the head: {head}"
+        );
+    }
+
+    /// With no image, nothing changes: the bytes are what this renderer sent
+    /// before images existed, pinned here, so every existing head digest
+    /// still holds.
+    #[test]
+    fn a_message_with_no_image_renders_its_content_as_the_plain_string_it_always_was() {
+        let rendered = body(&RequestShape {
+            messages: vec![
+                Message::new(Role::System, "sys"),
+                Message::new(Role::User, "look"),
+            ],
+            ..shape(SamplerCard::empty())
+        });
+        assert_eq!(
+            rendered,
+            r#"{"model":"a-model","messages":[{"role":"system","content":"sys"},{"role":"user","content":"look"}],"max_tokens":64}"#
+        );
+    }
+
+    /// The message #373's vision cell sent, and the engine accepted three
+    /// times on the `TabbyAPI` line, is the message this renderer sends for
+    /// the same image and the same words: byte for byte, as a substring of
+    /// the request that went out.
+    #[test]
+    fn an_attached_message_is_the_one_373s_vision_cell_sent() {
+        const IMAGE: &[u8] = include_bytes!(
+            "../../../substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/vision/image.png"
+        );
+        const SENT: &str = include_str!(
+            "../../../substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/vision/request.json"
+        );
+        let rendered = body(&RequestShape {
+            messages: vec![attached(
+                "What text appears in this image? Answer with the text only.",
+                IMAGE,
+            )],
+            ..shape(SamplerCard::empty())
+        });
+        let message = rendered
+            .strip_prefix(r#"{"model":"a-model","messages":["#)
+            .and_then(|rest| rest.strip_suffix(r#"],"max_tokens":64}"#))
+            .expect("one message");
+        assert!(
+            SENT.contains(&format!(r#""messages":[{message}]"#)),
+            "not #373's message: {message}"
+        );
     }
 }

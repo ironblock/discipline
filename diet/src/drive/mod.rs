@@ -94,6 +94,7 @@
 //! pair (design point 3) is not built: there is no rendered side to pair
 //! with.
 
+pub mod attach;
 pub mod canned;
 pub mod engine;
 pub mod projection;
@@ -569,6 +570,7 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
             reasoning: None,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            images: Vec::new(),
         }];
         // Immediately before the call, like `Heads::about_to_call`: what a
         // cache lifetime is compared against is the gap between two
@@ -862,6 +864,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             reasoning: None,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            images: Vec::new(),
         }];
         asking
             .template_kwargs
@@ -931,6 +934,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 reasoning: None,
                 tool_calls: Vec::new(),
                 tool_call_id: None,
+                images: Vec::new(),
             },
             Message {
                 role: Role::User,
@@ -938,6 +942,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 reasoning: None,
                 tool_calls: Vec::new(),
                 tool_call_id: None,
+                images: Vec::new(),
             },
         ];
         // THE LINT, before the call. The main lane is the one whose head
@@ -1012,6 +1017,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 reasoning: None,
                 tool_calls: Vec::new(),
                 tool_call_id: None,
+                images: Vec::new(),
             }];
             linted_head(&asking, index, INTERVIEW)?;
             heads.about_to_call(INTERVIEW);
@@ -2971,6 +2977,8 @@ mod tests {
                 // The tool loop's parts and the gate it reads (#298).
                 include_str!("tool_loop.rs"),
                 include_str!("shell_gate.rs"),
+                // The operator's attachment (#372).
+                include_str!("attach.rs"),
                 // The binary's own tests, which live outside `src/` and are the
                 // only thing that runs the program. A `catches` naming one of
                 // them has to be checkable here too, or the half of this lane

@@ -139,6 +139,8 @@ macro_rules! vocabulary {
 
 pub(crate) use vocabulary;
 
+pub(crate) use shape::attach;
+
 /// The finish reasons that mean the answer was cut off rather than finished.
 ///
 /// Written out because they are the servers' words, not this program's. A

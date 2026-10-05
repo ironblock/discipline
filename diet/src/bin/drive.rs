@@ -41,6 +41,7 @@ use diet::client::shape::{
 use diet::client::stream::{Bearer, HttpStream};
 use diet::client::stub::Stub;
 use diet::client::transport::{Endpoint, Http};
+use diet::drive::attach::Attaching;
 use diet::drive::regimen::{SUBSTRATE_KEYS, regime_of};
 use diet::drive::serve::{Config, Credential, Server};
 use diet::drive::session::{self, Interview, Session};
@@ -305,6 +306,18 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(tools) => tools,
         Err((code, why)) => return fail(code, &why),
     };
+    // What an ask's named PNGs are checked against and copied to (#372):
+    // the policy the commands run under, or the regimen's when it runs
+    // none, and the recording's directory.
+    let attaching = match attaching(
+        regimen_file.as_deref(),
+        tools.as_ref(),
+        (key_file.as_deref(), auth_file.as_deref()),
+        log_file.as_deref().or(record_file.as_deref()),
+    ) {
+        Ok(attaching) => attaching,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
@@ -354,6 +367,7 @@ fn serve(args: &[String]) -> ExitCode {
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
     let config = Config {
+        attaching,
         allowed_origins,
         credential,
         ..Config::default()
@@ -718,6 +732,69 @@ fn serving_tools(
         store: Some(store),
         approval_policy: declared.approval_policy,
     }))
+}
+
+/// What `serve` checks an ask's named PNGs against, and copies them to
+/// (#372): the policy, worktree and confinement the model's commands run
+/// under, when the regimen runs commands -- the confinement then reads each
+/// file, so the kernel judges the open; otherwise the regimen's own policy,
+/// read directly (no command runs to swap a path), with the
+/// drive's key and auth files among its secrets, and no worktree; with no
+/// regimen, no read scope, so nothing attaches. The copies go beside
+/// `recorded_at`, the log (or, with none, the record).
+fn attaching(
+    regimen: Option<&str>,
+    tools: Option<&Tools>,
+    credentials: (Option<&str>, Option<&str>),
+    recorded_at: Option<&str>,
+) -> Result<Attaching, String> {
+    let recording = recorded_at.map(|path| {
+        std::path::Path::new(path)
+            .parent()
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .map_or_else(
+                || std::path::PathBuf::from("."),
+                std::path::Path::to_path_buf,
+            )
+    });
+    if let Some(tools) = tools {
+        return Ok(Attaching {
+            policy: Some(tools.policy.clone()),
+            worktree: Some(tools.worktree.clone()),
+            confinement: Some(tools.confinement.clone()),
+            recording,
+        });
+    }
+    let Some(path) = regimen else {
+        return Ok(Attaching {
+            recording,
+            ..Attaching::default()
+        });
+    };
+    let text =
+        std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
+    let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
+    let mut policy = IsolationPolicy::from_regimen(&read)
+        .map_err(|why| format!("{path}: its isolation policy: {why}"))?;
+    let (key_file, auth_file) = credentials;
+    for file in [key_file, auth_file].into_iter().flatten() {
+        let file = std::path::Path::new(file);
+        // A regimen that runs no commands may declare the file's directory
+        // readable; it is still never attached.
+        if isolation::declared::add_credential(&mut policy, file).is_err() {
+            policy.secrets.push(
+                isolation::policy::canonical_prefix(file)
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+        }
+    }
+    Ok(Attaching {
+        policy: Some(policy),
+        worktree: None,
+        confinement: None,
+        recording,
+    })
 }
 
 /// The writers, then the server. The writers start once the address is

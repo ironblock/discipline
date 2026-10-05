@@ -58,6 +58,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use super::attach::{self, Attaching, Unattachable};
 use super::session::{
     CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session, Settlement,
 };
@@ -128,7 +129,7 @@ impl Emptied {
 }
 
 /// How a server behaves at its edges.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Config {
     /// How long a stream may be silent before a comment line is sent. The
     /// write is also how a reader that left is noticed.
@@ -152,6 +153,9 @@ pub struct Config {
     /// The Basic credential every request must present. `None` asks for
     /// none, which the binary allows on loopback only.
     pub credential: Option<Credential>,
+    /// What an ask's named PNGs are checked against and copied to (#372).
+    /// The default has no read scope, and attaches nothing.
+    pub attaching: Attaching,
 }
 
 /// A Basic credential, `user:password` (D10). Only a digest of what a client
@@ -197,9 +201,11 @@ impl fmt::Debug for Credential {
     }
 }
 
-/// Base64, standard alphabet, padded (RFC 4648 section 4): what a browser
-/// sends a Basic credential as.
-fn base64(bytes: &[u8]) -> String {
+/// Base64, standard alphabet, padded, no line breaks (RFC 4648 section 4):
+/// what a browser sends a Basic credential as, and what an attached image's
+/// `data:` URI carries (`client::wire`, #372). One encoder, here, where its
+/// seeded fault and its RFC vectors already are.
+pub(crate) fn base64(bytes: &[u8]) -> String {
     const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
     for chunk in bytes.chunks(3) {
@@ -227,6 +233,7 @@ impl Default for Config {
             max_body: 1024 * 1024,
             allowed_origins: Vec::new(),
             credential: None,
+            attaching: Attaching::default(),
         }
     }
 }
@@ -674,15 +681,18 @@ impl<S: Streaming + 'static> Serving<S> {
             Rejected::NoSuchTurn(_) | Rejected::BadGap(_) => (400, BTreeMap::new()),
         };
         match command {
-            Command::Ask(text) => match self.session.ask_marked(&text, gap, scoping) {
-                Ok(admitted) => (
-                    200,
-                    BTreeMap::from([
-                        ("seq".to_owned(), integer(admitted.seq)),
-                        ("turn".to_owned(), integer(u64::from(admitted.turn))),
-                    ]),
-                ),
-                Err(rejection) => rejected(rejection),
+            Command::Ask(text) => match attach::attached(&text, &self.config.attaching) {
+                Err(unattachable) => (400, unattached(&unattachable)),
+                Ok(attached) => match self.session.ask_attached(attached, gap, scoping) {
+                    Ok(admitted) => (
+                        200,
+                        BTreeMap::from([
+                            ("seq".to_owned(), integer(admitted.seq)),
+                            ("turn".to_owned(), integer(u64::from(admitted.turn))),
+                        ]),
+                    ),
+                    Err(rejection) => rejected(rejection),
+                },
             },
             Command::Cancel(turn) => match self.session.cancel(turn, gap) {
                 Ok(()) => (200, BTreeMap::new()),
@@ -804,6 +814,24 @@ fn idle_gap(value: &Value) -> Option<IdleGap> {
         blocked: count("blocked")?,
         ended_by,
     })
+}
+
+/// A `400`'s body for an ask whose named PNG cannot be attached (#372):
+/// `{"unattachable": {"path", "check", "reason"}}` -- the path as named, the
+/// check it failed, one of [`attach::Check`]'s words, and a sentence. Nothing
+/// was logged, copied or sent.
+fn unattached(unattachable: &Unattachable) -> BTreeMap<String, Value> {
+    BTreeMap::from([(
+        "unattachable".to_owned(),
+        Value::Object(BTreeMap::from([
+            ("path".to_owned(), Value::String(unattachable.path.clone())),
+            (
+                "check".to_owned(),
+                Value::String(unattachable.check.tag().to_owned()),
+            ),
+            ("reason".to_owned(), Value::String(unattachable.to_string())),
+        ])),
+    )])
 }
 
 fn empty() -> Value {
@@ -2312,5 +2340,319 @@ mod tests {
             assert_eq!(status(&post(&server, malformed, "")), 400, "{malformed}");
         }
         assert_eq!(session.events_from(0).len(), whole.len());
+    }
+
+    // -----------------------------------------------------------------------
+    // the operator's PNG (#372, the loop half)
+    // -----------------------------------------------------------------------
+
+    /// A stub engine's reply, captured off a live server: what each turn of
+    /// the attachment tests is answered with.
+    const REPLY: &[u8] =
+        include_bytes!("../../client/fixtures/llama-server-e7051ef-reasoning-stream.http");
+
+    /// A session on a stub engine serving `replies` copies of [`REPLY`],
+    /// served with `attaching`, its log written through to `log` when one is
+    /// named.
+    fn serve_attaching(
+        replies: usize,
+        attaching: crate::drive::attach::Attaching,
+        log: Option<&std::path::Path>,
+    ) -> (
+        Arc<Session<crate::client::stream::HttpStream>>,
+        Server,
+        crate::client::stub::Stub,
+    ) {
+        use crate::client::stream::HttpStream;
+        use crate::client::stub::{Act, Stub};
+        use crate::client::transport::Endpoint;
+
+        let stub = Stub::serving(vec![Act::Raw(REPLY.to_vec()); replies]).expect("loopback");
+        let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's URL"));
+        let session = Arc::new(Session::open(transport, template()));
+        if let Some(log) = log {
+            let file = std::fs::File::create(log).expect("the log");
+            write_through(&session, crate::drive::session::render, file, |why| {
+                panic!("the log could not be written: {why}")
+            });
+        }
+        let server = Server::start(
+            TcpListener::bind("127.0.0.1:0").expect("loopback"),
+            Arc::clone(&session),
+            Config {
+                attaching,
+                ..quick()
+            },
+            crate::drive::session::render,
+        )
+        .expect("the server starts");
+        (session, server, stub)
+    }
+
+    fn ask_json(text: &str) -> String {
+        let mut out = String::new();
+        json::render(
+            &Value::Object(BTreeMap::from([
+                ("kind".to_owned(), Value::String("ask".to_owned())),
+                ("text".to_owned(), Value::String(text.to_owned())),
+            ])),
+            &mut out,
+        );
+        out
+    }
+
+    fn turns_settled<S: Streaming + 'static>(session: &Session<S>, turns: usize) {
+        wait_until(session, "the turns to settle", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == turns
+        });
+    }
+
+    /// #372's loop half, end to end against a stub engine: the operator
+    /// names a PNG in the worktree; the engine receives the ask as
+    /// `[image_url, text]` with the file's data URI; the `ask` line names the
+    /// copy by reference; the copy is the file's bytes; `diet check-log`'s
+    /// reader takes the log; and the next request's head -- the digest the
+    /// log records -- still carries the image.
+    #[test]
+    fn an_operators_png_is_sent_as_an_image_part_logged_by_reference_and_copied() {
+        use crate::drive::attach::{
+            Attaching,
+            tests::{confinement_for, png},
+        };
+        use crate::drive::tool_loop::tests::scratch;
+        use crate::formats::log::{self, Event as Line, RecordedFile};
+
+        let tree = scratch("attach-serve-tree");
+        let recording = scratch("attach-serve-recording");
+        let bytes = png("the operator's screenshot");
+        std::fs::write(tree.join("shot.png"), &bytes).expect("the screenshot");
+        let sha256 = crate::digest::sha256_hex(&bytes);
+        let data_uri = format!("data:image/png;base64,{}", base64(&bytes));
+        let log_path = recording.join("session.jsonl");
+        let (session, server, stub) = serve_attaching(
+            2,
+            Attaching {
+                policy: Some(crate::isolation::Policy::merged_usr()),
+                worktree: Some(tree.clone()),
+                confinement: confinement_for(&crate::isolation::Policy::merged_usr()),
+                recording: Some(recording.clone()),
+            },
+            Some(&log_path),
+        );
+
+        let asked = "what is wrong in `shot.png`?";
+        let reply = post(&server, &ask_json(asked), "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        turns_settled(&session, 1);
+        let reply = post(&server, &ask_json("and then?"), "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        turns_settled(&session, 2);
+        let heads: Vec<String> = session
+            .events_from(0)
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Requested { head_sha256, .. } => Some(head_sha256.clone()),
+                _ => None,
+            })
+            .collect();
+        drop(server);
+        drop(session);
+
+        // What the engine received.
+        let received = stub.received();
+        assert_eq!(received.len(), 2);
+        let first: serde_json::Value = serde_json::from_str(&received[0]).expect("JSON");
+        assert_eq!(
+            first["messages"][1]["content"],
+            serde_json::json!([
+                {"type": "image_url", "image_url": {"url": data_uri}},
+                {"type": "text", "text": asked},
+            ]),
+            "{}",
+            received[0]
+        );
+
+        // The log: the reference, never the bytes, on the ask that named it.
+        let document = std::fs::read_to_string(&log_path).expect("the log");
+        log::project(&document).unwrap_or_else(|why| panic!("{why}\n{document}"));
+        assert!(!document.contains(&base64(&bytes)), "inlined: {document}");
+        let asks: Vec<Option<Vec<RecordedFile>>> = log::parse(&document)
+            .expect("the log reads")
+            .into_iter()
+            .filter_map(|line| match line.event {
+                Line::Ask { files, .. } => Some(files),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            asks,
+            [
+                Some(vec![RecordedFile {
+                    path: format!("files/{sha256}"),
+                    sha256: sha256.clone(),
+                    media_type: "image/png".to_owned(),
+                    bytes: bytes.len() as u64,
+                }]),
+                None,
+            ]
+        );
+
+        // The copy, where the reference says, relative to the log.
+        assert_eq!(
+            std::fs::read(recording.join("files").join(&sha256)).expect("the copy"),
+            bytes
+        );
+
+        // The image stays on the trunk: the second request's head -- the
+        // opening of what went out, before the new ask -- carries it, and is
+        // what the log recorded.
+        let second = &received[1];
+        let tail = second
+            .find(r#",{"role":"user","content":"and then?"}"#)
+            .expect("the second ask is the last message");
+        let head = &second[..tail];
+        assert!(
+            head.contains(&data_uri),
+            "the image left the trunk: {second}"
+        );
+        assert_eq!(heads[1], crate::digest::sha256_hex(head.as_bytes()));
+
+        let _ = std::fs::remove_dir_all(&tree);
+        let _ = std::fs::remove_dir_all(&recording);
+    }
+
+    /// With no `--log` or `--record`, the PNG is attached and sent, nothing
+    /// is copied, and the `ask` line names no file.
+    #[test]
+    fn with_no_recording_an_operators_png_is_sent_and_nothing_is_copied() {
+        use crate::drive::attach::{
+            Attaching,
+            tests::{confinement_for, png},
+        };
+        use crate::drive::tool_loop::tests::scratch;
+
+        let tree = scratch("attach-serve-unrecorded");
+        let bytes = png("unrecorded");
+        std::fs::write(tree.join("shot.png"), &bytes).expect("the screenshot");
+        let (session, server, stub) = serve_attaching(
+            1,
+            Attaching {
+                policy: Some(crate::isolation::Policy::merged_usr()),
+                worktree: Some(tree.clone()),
+                confinement: confinement_for(&crate::isolation::Policy::merged_usr()),
+                recording: None,
+            },
+            None,
+        );
+        let reply = post(&server, &ask_json("see shot.png"), "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        turns_settled(&session, 1);
+        let lines: Vec<_> = session
+            .events_from(0)
+            .iter()
+            .map(crate::drive::session::line_of)
+            .collect();
+        drop(server);
+        drop(session);
+        let received = stub.received();
+        assert_eq!(received.len(), 1);
+        assert!(
+            received[0].contains(&format!("data:image/png;base64,{}", base64(&bytes))),
+            "{}",
+            received[0]
+        );
+        assert!(
+            lines.iter().any(|line| matches!(
+                line.event,
+                crate::formats::log::Event::Ask { files: None, .. }
+            )),
+            "{lines:?}"
+        );
+        let held: Vec<_> = std::fs::read_dir(&tree)
+            .expect("the tree")
+            .map(|entry| entry.expect("an entry").file_name())
+            .collect();
+        assert_eq!(held, ["shot.png"], "something was copied into the tree");
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
+    /// A named `.png` outside the read scope, inside a secret, missing, or
+    /// not a PNG: `400` naming the path and the check, and nothing logged,
+    /// copied or sent.
+    #[test]
+    fn an_ask_naming_a_png_that_fails_a_check_is_400_and_nothing_is_logged_or_sent() {
+        use crate::drive::attach::{
+            Attaching,
+            tests::{confinement_for, png},
+        };
+        use crate::drive::tool_loop::tests::scratch;
+
+        let tree = scratch("attach-serve-refused-tree");
+        let outside = scratch("attach-serve-refused-outside");
+        let recording = scratch("attach-serve-refused-recording");
+        let secret = outside.join("readable/keys");
+        let mut policy = crate::isolation::Policy::merged_usr();
+        policy
+            .readable
+            .push(outside.join("readable").to_string_lossy().into_owned());
+        policy.secrets.push(secret.to_string_lossy().into_owned());
+        std::fs::create_dir_all(&secret).expect("the secret's directory");
+        std::fs::write(outside.join("away.png"), png("away")).expect("written");
+        std::fs::write(secret.join("key.png"), png("key")).expect("written");
+        std::fs::write(tree.join("text.png"), b"plain text").expect("written");
+        // Links in the tree, each judged where it leads (#461 F1, F5).
+        std::os::unix::fs::symlink(secret.join("key.png"), tree.join("to-key.png"))
+            .expect("a link");
+        std::os::unix::fs::symlink(outside.join("away.png"), tree.join("to-away.png"))
+            .expect("a link");
+        let (session, server, stub) = serve_attaching(
+            1,
+            Attaching {
+                confinement: confinement_for(&policy),
+                policy: Some(policy),
+                worktree: Some(tree.clone()),
+                recording: Some(recording.clone()),
+            },
+            None,
+        );
+        for (path, check) in [
+            (
+                outside.join("away.png").display().to_string(),
+                "outside-read-scope",
+            ),
+            (secret.join("key.png").display().to_string(), "secret"),
+            ("gone.png".to_owned(), "missing"),
+            ("text.png".to_owned(), "not-png"),
+            ("to-key.png".to_owned(), "secret"),
+            ("to-away.png".to_owned(), "outside-read-scope"),
+        ] {
+            let reply = post(&server, &ask_json(&format!("look at {path}")), "");
+            assert_eq!(status(&reply), 400, "{path}: {reply}");
+            let refused = json::line(body(&reply)).expect("a JSON object");
+            let Some(Value::Object(unattachable)) = refused.get("unattachable") else {
+                panic!("{path}: {reply}");
+            };
+            assert_eq!(
+                (unattachable.get("path"), unattachable.get("check")),
+                (
+                    Some(&Value::String(path.clone())),
+                    Some(&Value::String(check.to_owned()))
+                ),
+                "{reply}"
+            );
+        }
+        assert_eq!(session.events_from(0).len(), 1, "something was logged");
+        assert!(!recording.join("files").exists(), "something was copied");
+        drop(server);
+        drop(session);
+        assert!(stub.received().is_empty(), "something was sent");
+        for dir in [&tree, &outside, &recording] {
+            let _ = std::fs::remove_dir_all(dir);
+        }
     }
 }

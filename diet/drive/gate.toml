@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 249
+faults = 252
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3990,4 +3990,50 @@ catches = [
     "drive::serve::tests::a_scoping_ask_over_http_fires_one_fork_whose_three_patches_project_to_one_capture",
     "drive::session::tests::a_scoping_gap_fires_one_fork_whose_patches_carry_its_decisions",
     "drive::session::tests::a_turn_that_read_a_document_fires_a_read_fork",
+]
+
+# #372's loop half: the operator's PNG, logged by reference and copied.
+[[fault]]
+id = "drive.an-attached-file-is-inlined"
+failure_class = "drive.an-attached-file-is-inlined"
+target = "diet/src/drive/attach.rs"
+expect_exit = 101
+anchor = '''
+        path: format!("{FILES}/{sha256}"),'''
+becomes = '''
+        path: format!("data:{MEDIA_TYPE};base64,{}", crate::drive::serve::base64(&bytes)),'''
+catches = [
+    "drive::attach::tests::a_named_png_that_fails_a_check_refuses_the_ask_and_copies_nothing",
+    "drive::attach::tests::a_png_in_the_worktree_is_attached_copied_by_digest_and_named_by_reference",
+    "drive::serve::tests::an_operators_png_is_sent_as_an_image_part_logged_by_reference_and_copied",
+]
+
+[[fault]]
+id = "drive.an-attached-file-is-not-copied"
+failure_class = "drive.an-attached-file-is-not-copied"
+target = "diet/src/drive/attach.rs"
+expect_exit = 101
+anchor = '''
+            kept(recording, file, bytes).map_err(|(check, why)| Unattachable {'''
+becomes = '''
+            Ok::<(), (Check, String)>(()).map_err(|(check, why)| Unattachable {'''
+catches = [
+    "drive::attach::tests::a_png_in_the_worktree_is_attached_copied_by_digest_and_named_by_reference",
+    "drive::serve::tests::an_operators_png_is_sent_as_an_image_part_logged_by_reference_and_copied",
+]
+
+# #461 F1: the attachment is read through the session's confinement, so a
+# path swapped for a link to a secret after the check is not read.
+[[fault]]
+id = "drive.an-attachment-is-read-outside-the-confinement"
+failure_class = "drive.an-attachment-is-read-outside-the-confinement"
+target = "diet/src/drive/attach.rs"
+expect_exit = 101
+anchor = '''
+            confined(confinement, policy, tree, file, patience)?'''
+becomes = '''
+            std::fs::read(file).map_err(|why| (Check::Unreadable, why.to_string()))?'''
+catches = [
+    "drive::attach::tests::a_path_swapped_for_a_link_to_a_secret_never_attaches_the_secret",
+    "drive::attach::tests::the_confined_read_refuses_a_link_the_path_check_never_saw",
 ]
