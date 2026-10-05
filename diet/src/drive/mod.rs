@@ -967,6 +967,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         events.push(Event::Turn {
             index,
             prefill_tokens: prefill,
+            files: None,
         });
         prefill_total = prefill_total.saturating_add(prefill);
         archive(

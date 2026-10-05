@@ -1139,6 +1139,7 @@ mod tests {
         Event::Turn {
             index,
             prefill_tokens: record::Count::default(),
+            files: None,
         }
     }
 

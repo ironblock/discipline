@@ -1,0 +1,1 @@
+`files[0]` carries `content`: a file is recorded by reference, never inlined (#372, the log's own rule for a file)

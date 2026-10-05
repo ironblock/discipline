@@ -1,0 +1,1 @@
+`files` is empty: a call that left no file carries no `files` (#372, the log's own rule for a file)

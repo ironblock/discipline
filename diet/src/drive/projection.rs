@@ -386,9 +386,11 @@ impl<'a> Walk<'a> {
 
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
-            Line::Ask { turn, text, .. } => {
+            Line::Ask {
+                turn, text, files, ..
+            } => {
                 self.asks.insert(*turn, text.clone());
-                self.ask(line.seq, *turn);
+                self.ask(line.seq, *turn, files.as_ref());
             }
             Line::Request {
                 turn,
@@ -512,6 +514,7 @@ impl<'a> Walk<'a> {
             stdout,
             cwd,
             approval,
+            files,
             ..
         } = line
         else {
@@ -532,6 +535,7 @@ impl<'a> Walk<'a> {
                 policy: policy.clone(),
                 cwd: cwd.clone(),
                 approval: approval.clone(),
+                files: files.clone(),
             },
             *exit,
             stdout.as_ref().map(|out| out.text.clone()),
@@ -647,7 +651,7 @@ impl<'a> Walk<'a> {
         });
     }
 
-    fn ask(&mut self, seq: u64, turn: u32) {
+    fn ask(&mut self, seq: u64, turn: u32, files: Option<&Vec<log::RecordedFile>>) {
         let trunk_timings =
             self.trunk_of
                 .get(&turn)
@@ -661,10 +665,14 @@ impl<'a> Walk<'a> {
             self.turns_broken,
             prefill_tokens(trunk_timings, self.engine),
         ) {
-            (false, Ok(prefill_tokens)) => self.events.push(Event::Turn {
-                index: turn,
-                prefill_tokens,
-            }),
+            (false, Ok(prefill_tokens)) => {
+                self.events.push(Event::Turn {
+                    index: turn,
+                    prefill_tokens,
+                    files: files.cloned(),
+                });
+                return;
+            }
             (false, Err(why)) => {
                 self.turns_broken = true;
                 self.name(
@@ -683,6 +691,23 @@ impl<'a> Walk<'a> {
                 ),
                 None,
             ),
+        }
+        // Not written on a row: the files the operator attached are named,
+        // so a reference the record could not hold is not lost.
+        if let Some(files) = files {
+            let named: Vec<String> = files
+                .iter()
+                .map(|file| format!("{} sha256 {}", file.path, file.sha256))
+                .collect();
+            self.name(
+                seq,
+                "ask",
+                format!(
+                    "turn {turn}'s attached files ({}), which have no turn row to ride on",
+                    named.join(", ")
+                ),
+                None,
+            );
         }
     }
 
@@ -984,6 +1009,7 @@ mod tests {
                 Event::Turn {
                     index,
                     prefill_tokens,
+                    ..
                 } => Some((*index, prefill_tokens.get())),
                 _ => None,
             })
@@ -1336,6 +1362,7 @@ mod tests {
                 Event::Turn {
                     index,
                     prefill_tokens,
+                    ..
                 } => Some((*index, prefill_tokens.get())),
                 _ => None,
             })
@@ -1709,5 +1736,98 @@ mod tests {
             })
             .collect();
         assert_eq!(moves, vec![("q/30", PrefixReason::Unattributed)]);
+    }
+
+    /// A call's files (#372): the line's `files` on the row, by reference,
+    /// as the log wrote them.
+    #[test]
+    fn a_tool_calls_files_are_carried_onto_its_row() {
+        let file = log::RecordedFile {
+            path: "files/shot.png".to_owned(),
+            sha256: "3f1a8e0c5b2d4f6a7e9c1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d2f4a".to_owned(),
+            media_type: "image/png".to_owned(),
+            bytes: 48_213,
+        };
+        let mut events = vec![start()];
+        let mut turn = answered(1, 3, Some(warm()), None);
+        let settled = turn.len() - 2;
+        turn.insert(
+            settled,
+            Line::ToolCall {
+                request: 3,
+                turn: 1,
+                id: "c1".to_owned(),
+                name: "bash".to_owned(),
+                arguments: r#"{"command":"screenshot shot.png"}"#.to_owned(),
+                outcome: log::ToolOutcome::Ran,
+                argv: Some(vec![
+                    "sh".to_owned(),
+                    "-c".to_owned(),
+                    "screenshot shot.png".to_owned(),
+                ]),
+                confined: Some(vec!["sh".to_owned()]),
+                isolation: Some(log::Isolation::None),
+                network: Some(log::Network::Host),
+                exit: Some(0),
+                reason: None,
+                policy: None,
+                stdout: Some(log::Output {
+                    text: String::new(),
+                    bytes: 0,
+                }),
+                stderr: Some(log::Output {
+                    text: String::new(),
+                    bytes: 0,
+                }),
+                cwd: Some("/work".to_owned()),
+                approval: None,
+                files: Some(vec![file.clone()]),
+            },
+        );
+        events.extend(turn);
+        let lines = numbered(events);
+        let projection =
+            project(&lines, &regime(), Some(Engine::Commit("e7051ef"))).expect("projected");
+        validates(&projection);
+        let files: Vec<Option<Vec<log::RecordedFile>>> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::ToolCall { exec, .. } => Some(exec.as_ref().and_then(|e| e.files.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(files, vec![Some(vec![file])]);
+    }
+
+    /// The operator's attachment (#372, 5989411005): the ask's `files` on its
+    /// turn's row, by reference, as the log wrote them.
+    #[test]
+    fn an_asks_attached_files_are_carried_onto_its_turn_row() {
+        let file = log::RecordedFile {
+            path: "files/screenshot.png".to_owned(),
+            sha256: "3f1a8e0c5b2d4f6a7e9c1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d2f4a".to_owned(),
+            media_type: "image/png".to_owned(),
+            bytes: 48_213,
+        };
+        let mut turn = answered(1, 3, Some(warm()), None);
+        if let Line::Ask { files, .. } = &mut turn[0] {
+            *files = Some(vec![file.clone()]);
+        }
+        let mut events = vec![start()];
+        events.extend(turn);
+        let lines = numbered(events);
+        let projection =
+            project(&lines, &regime(), Some(Engine::Commit("e7051ef"))).expect("projected");
+        validates(&projection);
+        let files: Vec<Option<Vec<log::RecordedFile>>> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Turn { files, .. } => Some(files.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(files, vec![Some(vec![file])]);
     }
 }

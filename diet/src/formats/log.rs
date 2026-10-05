@@ -2231,7 +2231,7 @@ fn is_a_working_directory(text: &str) -> bool {
 /// expanded to a user, which this reader takes as no leading `~` at all, a
 /// home not being the recording's directory (the spelling is this
 /// reader's judgement call).
-fn is_a_recorded_path(text: &str) -> bool {
+pub(crate) fn is_a_recorded_path(text: &str) -> bool {
     !text.starts_with('~')
         && !text.contains('\\')
         && text
@@ -2241,7 +2241,7 @@ fn is_a_recorded_path(text: &str) -> bool {
 
 /// Whether `text` is a media type as this reader spells one: `type/subtype`,
 /// each side non-empty, one `/`, no whitespace.
-fn is_a_media_type(text: &str) -> bool {
+pub(crate) fn is_a_media_type(text: &str) -> bool {
     text.split_once('/').is_some_and(|(kind, subtype)| {
         !kind.is_empty() && !subtype.is_empty() && !subtype.contains('/')
     }) && !text.chars().any(char::is_whitespace)

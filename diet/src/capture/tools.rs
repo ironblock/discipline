@@ -1662,6 +1662,7 @@ mod tests {
         let turn = Event::Turn {
             index: 1,
             prefill_tokens: Count::new(10).expect("a small count"),
+            files: None,
         };
         assert!(matches!(
             apply(&turn, 0, saw()),
@@ -2118,6 +2119,7 @@ mod tests {
         Event::Turn {
             index,
             prefill_tokens: Count::new(1).expect("a small count"),
+            files: None,
         }
     }
 

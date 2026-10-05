@@ -1,0 +1,1 @@
+`files[0]`'s `path` is `/work/shot.png`, which is not relative to the recording's directory (#372, the log's own rule for a file)

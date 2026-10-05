@@ -1148,6 +1148,9 @@ pub enum Event {
         index: u32,
         /// How many tokens the prompt carried.
         prefill_tokens: Count,
+        /// The files the operator attached to the turn's ask, by reference:
+        /// the log's `ask.files`, never inlined (#372, 5989411005).
+        files: Option<Vec<log::RecordedFile>>,
     },
     /// A request went to the substrate.
     Request {
@@ -2373,6 +2376,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
             prefill_tokens: take_u64(&mut members, of, "prefill_tokens")?,
+            files: take_files(&mut members, of)?,
         },
         Kind::Request => Event::Request {
             id: take_string(&mut members, of, "id")?,
@@ -3449,6 +3453,9 @@ pub struct Execution {
     pub cwd: Option<String>,
     /// The decision it ran under, when it ran under one (v4).
     pub approval: Option<log::Approval>,
+    /// The files it left, by reference: the log's `files`, never inlined
+    /// (#372's record half).
+    pub files: Option<Vec<log::RecordedFile>>,
 }
 
 /// The keys an [`Execution`] is written under, beside `outcome`.
@@ -3461,7 +3468,111 @@ const EXECUTION_KEYS: &[&str] = &[
     "policy",
     "cwd",
     "approval",
+    "files",
 ];
+
+/// A row's `files` as the record writes them: each of the log's four keys,
+/// and nothing inlined.
+fn files_value(files: &[log::RecordedFile]) -> Value {
+    Value::Array(
+        files
+            .iter()
+            .map(|file| {
+                Value::Object(BTreeMap::from([
+                    ("path".to_owned(), Value::String(file.path.clone())),
+                    ("sha256".to_owned(), Value::String(file.sha256.clone())),
+                    (
+                        "media_type".to_owned(),
+                        Value::String(file.media_type.clone()),
+                    ),
+                    (
+                        "bytes".to_owned(),
+                        Value::Integer(i64::try_from(file.bytes).unwrap_or(i64::MAX)),
+                    ),
+                ]))
+            })
+            .collect(),
+    )
+}
+
+/// A row's `files` (#372): a non-empty list, each entry exactly the log's
+/// four keys ([`log::RECORDED_FILE`]) -- a path relative to the recording's
+/// directory, its sha256, a `type/subtype` and a byte count -- and nothing
+/// else: no `content`, `data` or any other inlining of the file.
+fn take_files(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<Vec<log::RecordedFile>>, ParseError> {
+    let bad = |why: String| ParseError::from(SchemaError::Inconsistent { of, why });
+    let entries = match members.remove("files") {
+        None => return Ok(None),
+        Some(Value::Array(entries)) => entries,
+        Some(_) => {
+            return Err(SchemaError::WrongType {
+                of,
+                field: "files".to_owned(),
+                want: "a list of files",
+            }
+            .into());
+        }
+    };
+    if entries.is_empty() {
+        return Err(bad(
+            "`files` is empty: a call that left no file carries no `files`".to_owned(),
+        ));
+    }
+    let mut files = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.into_iter().enumerate() {
+        let Value::Object(mut entry) = entry else {
+            return Err(bad(format!("`files[{index}]` is not an object")));
+        };
+        let path = take_string(&mut entry, of, "path")?;
+        if !log::is_a_recorded_path(&path) {
+            return Err(bad(format!(
+                "`files[{index}]`'s `path` is `{path}`, which is not relative to the \
+                 recording's directory"
+            )));
+        }
+        let Some(sha256) = take_optional_digest(&mut entry, of, "sha256")? else {
+            return Err(SchemaError::MissingField {
+                of,
+                field: "sha256",
+            }
+            .into());
+        };
+        let media_type = take_string(&mut entry, of, "media_type")?;
+        if !log::is_a_media_type(&media_type) {
+            return Err(bad(format!(
+                "`files[{index}]`'s `media_type` is `{media_type}`, which is not a \
+                 `type/subtype`"
+            )));
+        }
+        let bytes = match entry.remove("bytes") {
+            Some(Value::Integer(n)) if n >= 0 => n.unsigned_abs(),
+            _ => {
+                return Err(SchemaError::WrongType {
+                    of,
+                    field: "bytes".to_owned(),
+                    want: "a count of bytes",
+                }
+                .into());
+            }
+        };
+        if let Some(extra) = entry.keys().next() {
+            return Err(bad(format!(
+                "`files[{index}]` carries `{extra}`: a file is recorded by reference, never \
+                 inlined"
+            )));
+        }
+        files.push(log::RecordedFile {
+            path,
+            sha256,
+            media_type,
+            bytes,
+        });
+    }
+    Ok(Some(files))
+}
 
 /// A row's `approval`: `{scope, decided_at?, why?}` in the log's words, with
 /// `decided_at` forbidden for `preseeded` and required of every other scope
@@ -3610,6 +3721,7 @@ fn take_execution(
         policy: take_optional_digest(members, of, "policy")?,
         cwd: take_optional_string(members, of, "cwd")?,
         approval: take_approval(members, of)?,
+        files: take_files(members, of)?,
     };
     execution_fits(&exec, tool, exit)
         .map_err(|why| ParseError::from(SchemaError::Inconsistent { of, why }))?;
@@ -3631,6 +3743,7 @@ fn execution_fits(exec: &Execution, tool: &str, exit: Option<i64>) -> Result<(),
         ("policy", exec.policy.is_some()),
         ("cwd", exec.cwd.is_some()),
         ("approval", exec.approval.is_some()),
+        ("files", exec.files.is_some()),
         ("exit", exit.is_some()),
     ];
     let has = |key: &str| present.iter().any(|(k, held)| *k == key && *held);
@@ -3993,6 +4106,7 @@ impl<'a> Seen<'a> {
             Event::Turn {
                 index,
                 prefill_tokens,
+                ..
             } => {
                 if *index != self.next_turn {
                     return Err(StructureError::TurnOutOfOrder {
@@ -4577,9 +4691,13 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
         Event::Turn {
             index,
             prefill_tokens,
+            files,
         } => {
             members.put_u32("index", *index);
             members.put_count("prefill_tokens", *prefill_tokens);
+            if let Some(files) = files {
+                members.put_optional("files", Some(files_value(files)));
+            }
         }
         Event::Request {
             lane,
@@ -4713,6 +4831,9 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
                         fields.insert("why".to_owned(), Value::String(why.clone()));
                     }
                     members.put_optional("approval", Some(Value::Object(fields)));
+                }
+                if let Some(files) = &exec.files {
+                    members.put_optional("files", Some(files_value(files)));
                 }
             }
         }
