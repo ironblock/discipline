@@ -35,6 +35,8 @@ const CONFIRM_AFTER_MS = 500;
 
 export function Composer({ state, link = 'live', phase, phases, dispatch, hint }: ComposerProps) {
   const [draft, setDraft] = useState('');
+  // The operator's mark on the next ask: the scope answer (#453). It rides on that ask only, and clears once taken.
+  const [scoping, setScoping] = useState(false);
   const [refusal, setRefusal] = useState<string | undefined>();
   const next = phases[phases.indexOf(phase) + 1] ?? phases.find((p) => p !== phase) ?? phase;
   const [to, setTo] = useState(next);
@@ -69,9 +71,12 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
     if (!dispatch || !idle || draft.trim() === '') return;
-    const ack = await dispatch({ kind: 'ask', text: draft.trim() });
+    const ack = await dispatch({ kind: 'ask', text: draft.trim(), ...(scoping ? { scoping: true as const } : {}) });
     answer(ack);
-    if (ack.ok) setDraft('');
+    if (ack.ok) {
+      setDraft('');
+      setScoping(false);
+    }
   };
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -90,7 +95,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKey}
-        placeholder={idle ? 'Ask…' : ''}
+        placeholder={idle ? (scoping ? 'The scope answer…' : 'Ask…') : ''}
         disabled={state === 'ended' || state === 'connecting'}
         rows={2}
         aria-label="your ask"
@@ -138,9 +143,22 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
             cancel
           </button>
         ) : (
-          <button type="submit" className="ex-composer__send" disabled={!idle || !dispatch || draft.trim() === ''}>
-            send
-          </button>
+          <>
+            {/* The operator's mark (#453): this ask is the scope answer, whose settled turn warrants the interview fork. */}
+            <button
+              type="button"
+              className="ex-composer__scope"
+              aria-pressed={scoping}
+              disabled={!idle || !dispatch}
+              title="mark this ask the scope answer: its turn warrants the interview fork"
+              onClick={() => setScoping(!scoping)}
+            >
+              scope answer
+            </button>
+            <button type="submit" className="ex-composer__send" disabled={!idle || !dispatch || draft.trim() === ''}>
+              {scoping ? 'send as scope answer' : 'send'}
+            </button>
+          </>
         )}
       </div>
       {hint ? <p className="ex-composer__hint">{hint}</p> : null}

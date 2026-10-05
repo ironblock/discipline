@@ -33,7 +33,7 @@ export interface Cursor {
  * the deltas it would have streamed: reasoning first, then text, spread from
  * the end of prefill to the response.
  */
-export function expand(beat: Beat, start: number, ask?: string): Unplaced[] {
+export function expand(beat: Beat, start: number, ask?: string, scoping?: true): Unplaced[] {
   const out: Unplaced[] = [];
   const requestAt = new Map<string, number>();
   for (const event of beat.events) {
@@ -42,7 +42,7 @@ export function expand(beat: Beat, start: number, ask?: string): Unplaced[] {
     if (event.kind === 'response') out.push(...deltas(event, requestAt.get(event.to_request) ?? t, t), ...frames(event, requestAt.get(event.to_request) ?? t, t));
     // A decision a script declares is on the beat's clock, as its time is.
     const decided = event.kind === 'tool.end' && event.approval?.decided_at !== undefined ? { approval: { ...event.approval, decided_at: start + event.approval.decided_at } } : {};
-    out.push(event.kind === 'ask' && ask !== undefined ? { ...event, t, text: ask } : { ...event, t, ...decided });
+    out.push(event.kind === 'ask' && ask !== undefined ? { ...event, t, text: ask, ...(scoping ? { scoping } : {}) } : { ...event, t, ...decided });
   }
   return out.sort((a, b) => a.t - b.t);
 }
@@ -184,7 +184,7 @@ export class CannedTransport implements DriveTransport {
     const opened = this.#openGap;
     this.#gap = gap && gap.ended_by === ENDS[command.kind] && gap.opened_by === opened ? gap : undefined;
     const ack =
-      command.kind === 'ask' ? this.#fire('send', command.text) : command.kind === 'seam' ? this.#seam(command.to) : command.kind === 'end' ? this.#end() : this.#cancel();
+      command.kind === 'ask' ? this.#fire('send', command.text, command.scoping) : command.kind === 'seam' ? this.#seam(command.to) : command.kind === 'end' ? this.#end() : this.#cancel();
     // Refused, it is dropped. Admitted, the gap that was open closes, carried or not -- unless the command settled a
     // turn and opened the next one itself, as a cancel does (`diet` closes it at admission, before the command runs).
     this.#gap = undefined;
@@ -266,14 +266,14 @@ export class CannedTransport implements DriveTransport {
     this.#timers.clear();
   }
 
-  #fire(trigger: Trigger, ask?: string): Ack {
+  #fire(trigger: Trigger, ask?: string, scoping?: true): Ack {
     if (this.busy) return { ok: false, refused: 'busy' };
     const beat = this.#beats[this.#next];
     if (!beat) return { ok: false, refused: 'ended' };
     if (beat.trigger !== trigger) return { ok: false, refused: 'off-script' };
     this.#next += 1;
     const start = this.#now();
-    this.#schedule(expand(beat, start, ask), start);
+    this.#schedule(expand(beat, start, ask, scoping), start);
     return { ok: true };
   }
 

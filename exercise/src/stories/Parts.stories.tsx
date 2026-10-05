@@ -11,6 +11,7 @@ import { Cable } from '../ui/Cable.tsx';
 import { Copy } from '../ui/Copy.tsx';
 import { Flowing } from '../ui/Flowing.tsx';
 import { Composer } from '../ui/Composer.tsx';
+import type { Command } from '../drive/transport.ts';
 import type { ComposerProps } from '../ui/Composer.tsx';
 import { Preferred, Settings } from '../ui/Prefs.tsx';
 import { Memory } from '../ui/Memory.tsx';
@@ -958,6 +959,46 @@ export const ComposerEnded: Story = {
   render: () => composer('ended', 'build'),
   play: async ({ canvasElement }) => {
     await expect(composerSays(canvasElement)).toEqual({ state: 'the session has ended', typing: false, refill: false, cancel: false });
+  },
+};
+
+/**
+ * The operator's scope mark (#453): pressed, the next ask goes as the scope
+ * answer, `scoping: true`, and the mark clears once it is taken -- the ask
+ * after it goes unmarked.
+ */
+export const ComposerScopeAnswer: Story = {
+  name: 'Composer · the scope answer: marked on that ask only',
+  render: () => {
+    const sent: Command[] = [];
+    return (
+      <div data-sent="">
+        <Composer
+          state="awaiting"
+          phase="spec"
+          phases={PHASES}
+          dispatch={async (command) => {
+            sent.push(command);
+            document.querySelector('[data-sent]')?.setAttribute('data-sent', JSON.stringify(sent));
+            return { ok: true };
+          }}
+        />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const sent = () => JSON.parse(canvasElement.querySelector('[data-sent]')?.getAttribute('data-sent') || '[]') as unknown[];
+    const mark = canvasElement.querySelector('.ex-composer__scope') as HTMLButtonElement;
+    const input = canvasElement.querySelector('textarea') as HTMLTextAreaElement;
+    await expect(mark.getAttribute('aria-pressed')).toBe('false');
+    await userEvent.click(mark);
+    await expect(mark.getAttribute('aria-pressed')).toBe('true');
+    await expect(canvasElement.querySelector('.ex-composer__send')?.textContent).toBe('send as scope answer');
+    await userEvent.type(input, 'a web app with a login{Enter}');
+    await waitFor(async () => expect(sent()).toEqual([{ kind: 'ask', text: 'a web app with a login', scoping: true }]));
+    await waitFor(async () => expect(mark.getAttribute('aria-pressed')).toBe('false'));
+    await userEvent.type(input, 'and a dark mode{Enter}');
+    await waitFor(async () => expect(sent()).toEqual([{ kind: 'ask', text: 'a web app with a login', scoping: true }, { kind: 'ask', text: 'and a dark mode' }]));
   },
 };
 

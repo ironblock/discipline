@@ -188,7 +188,8 @@ export class HttpTransport implements DriveTransport {
   #body(command: Exclude<Command, { kind: 'approve' }>): Readonly<Record<string, unknown>> {
     switch (command.kind) {
       case 'ask':
-        return { kind: 'ask', text: command.text };
+        // The operator's mark rides on the ask it marks, and on no other (#453): serve refuses it anywhere else.
+        return { kind: 'ask', text: command.text, ...(command.scoping ? { scoping: true } : {}) };
       case 'cancel': {
         // A stop names the turn it is for: the latest asked.
         const turn = this.#log.findLast((l) => l.kind === 'ask');

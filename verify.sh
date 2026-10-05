@@ -4105,6 +4105,13 @@ inject_exercise_segments_from_text() {
   edit_in_place "s|^  const segments = judged.judgement.segments;$|  const segments = argv.join(' ').split(';').map((shape): Segment => ({ shape: shape.trim(), verdict: 'prompt' }));|" exercise/src/ui/GateSegments.tsx
 }
 
+# The operator's scope mark dropped on the way to serve (#453): the composer
+# marks the ask, the transport posts it unmarked, and T1's interview fork
+# never fires. Typecheck and lint pass it.
+inject_exercise_scope_mark_dropped() {
+  edit_in_place "s|^        return { kind: 'ask', text: command.text, ...(command.scoping ? { scoping: true } : {}) };$|        return { kind: 'ask', text: command.text };|" exercise/src/drive/http.ts
+}
+
 # A placed core line diet's reader refuses (#300): an `ask` carrying a key
 # the format does not have. Typecheck, lint and the fold all pass it -- the
 # surface ignores the key -- so only diet's reader, over the projection, says.
@@ -10950,6 +10957,8 @@ selftest() {
     'FAIL.*Approval\.stories\.tsx.*a command waits on you; approved for the session'
   seeded_case "a replayed call's segments drawn from its text" exercise inject_exercise_segments_from_text \
     'FAIL.*Approval\.stories\.tsx.*the conformance corpus, each command drawn as the gate judged it'
+  seeded_case "the operator's scope mark dropped on the way to serve" exercise inject_exercise_scope_mark_dropped \
+    'FAIL.*http\.test\.ts.*posts .scoping: true. on the ask the operator marked'
   seeded_case "a placed core line diet's reader refuses" exercise inject_exercise_placed_line_refused \
     'diet check-log refuses the placed projection: .*`ask` carries no `asked_by`'
   seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \
