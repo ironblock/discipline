@@ -944,9 +944,18 @@ pub(in crate::drive) mod tests {
     /// again, between a PNG and a link to a secret while it is attached.
     /// The secret's bytes are never attached nor copied, whichever side of
     /// the path check each swap lands on.
+    ///
+    /// Each side is HELD for the same [`HOLD`] and both are prepared before
+    /// they are renamed in, so the swap spends as long on the PNG as on the
+    /// link. An unbalanced swap -- the PNG written while the link sat on the
+    /// path -- met only the link on a fast Linux runner: every ask refused,
+    /// the race never ran (#461, CI run 37293445573). And it asks until both
+    /// sides have been met, past [`AT_LEAST`] and up to [`ASKS`].
     #[test]
     fn a_path_swapped_for_a_link_to_a_secret_never_attaches_the_secret() {
-        const ASKS: usize = 100;
+        const AT_LEAST: usize = 100;
+        const ASKS: usize = 2_000;
+        const HOLD: std::time::Duration = std::time::Duration::from_micros(500);
         let fixture = Fixture::new("swapped");
         let (policy, key, secret) = fixture.with_a_secret();
         let attaching = fixture.attaching(policy);
@@ -965,9 +974,11 @@ pub(in crate::drive) mod tests {
                 while !stop.load(Ordering::Relaxed) {
                     let _ = std::fs::remove_file(&link);
                     let _ = std::os::unix::fs::symlink(&key, &link);
-                    let _ = std::fs::rename(&link, &shot);
                     let _ = std::fs::write(&file, &benign);
+                    let _ = std::fs::rename(&link, &shot);
+                    std::thread::sleep(HOLD);
                     let _ = std::fs::rename(&file, &shot);
+                    std::thread::sleep(HOLD);
                 }
             })
         };
@@ -976,7 +987,10 @@ pub(in crate::drive) mod tests {
             crate::drive::serve::base64(&secret)
         );
         let (mut sent, mut refused) = (0, 0);
-        for _ in 0..ASKS {
+        for asked in 0..ASKS {
+            if asked >= AT_LEAST && sent > 0 && refused > 0 {
+                break;
+            }
             match attached("see shot.png", &attaching) {
                 Ok(Attached { message, .. }) => {
                     assert!(
