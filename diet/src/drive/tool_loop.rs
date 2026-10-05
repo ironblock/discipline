@@ -56,15 +56,20 @@ pub const LIFECYCLE_SCRIPTS: &str = "unguarded";
 
 /// The config a free git read runs under: no fsmonitor hook, no pager, no
 /// signature check (`gpg.program`), no external diff (#298 5983544366 (e);
-/// review round 1, finding 2). Global options, so they come before the
-/// subcommand.
+/// review round 1, finding 2), no hook -- a read that refreshes the index
+/// rewrites it and runs `post-index-change` (review round 3, finding 1).
+/// Global options, so they come before the subcommand.
 pub const GIT_FREE_CONFIG: &[&str] = &[
     "-c",
     "core.fsmonitor=",
     "-c",
     "core.pager=cat",
     "-c",
+    "core.hooksPath=/dev/null",
+    "-c",
     "log.showSignature=false",
+    // An empty program, not "none": safe only with `--no-ext-diff`, which
+    // every free read of `GIT_DIFFING` carries (round 3, finding 9).
     "-c",
     "diff.external=",
     "-c",
@@ -99,6 +104,19 @@ pub const GIT_DIFFING: &[&str] = &["diff", "log", "show"];
 
 /// See [`GIT_DIFFING`].
 pub const GIT_NO_PROGRAMS: &[&str] = &["--no-ext-diff", "--no-textconv"];
+
+/// The free reads that take `--ignore-submodules`, and the word they run
+/// with: on the command line it beats a per-submodule `ignore` from
+/// `.gitmodules` -- a tracked file -- or the config, which
+/// `diff.ignoreSubmodules` does not (review round 3, finding 3; measured on
+/// git 2.50.1). It goes right after the subcommand, not after the model's
+/// words, where an option taking a value (`-S`) could swallow it; a later
+/// submodule option of the model's own is never free
+/// ([`shell_gate::git_is_free`]), so nothing after it overrides it.
+pub const GIT_SUBMODULE_READS: &[&str] = &["status", "diff", "log", "show"];
+
+/// See [`GIT_SUBMODULE_READS`].
+pub const GIT_NO_SUBMODULES: &str = "--ignore-submodules=all";
 
 /// The `npm` lifecycle scripts `npm install` and `npm ci` run from the
 /// workspace's own `package.json`, whose text an install approval binds to:
@@ -312,12 +330,32 @@ fn bound(shape: &Shape) -> Option<Bound> {
     }
 }
 
-/// `package.json`'s `scripts` table in `worktree`, or nothing.
+/// `package.json`'s `scripts` table in `worktree`: empty when there is no
+/// `package.json` or it has no `scripts`; `None` when there is one this
+/// cannot read -- npm reads a byte-order mark or a lone surrogate escape
+/// that `serde_json` refuses, and every script would read as absent -- so no
+/// digest can be named and no npm command is standing (review round 3,
+/// finding 7).
 fn scripts(worktree: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
-    let text = std::fs::read_to_string(worktree.join("package.json")).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    value.get("scripts")?.as_object().cloned()
+    let bytes = match std::fs::read(worktree.join("package.json")) {
+        Ok(bytes) => bytes,
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => {
+            return Some(serde_json::Map::new());
+        }
+        Err(_) => return None,
+    };
+    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    match value.get("scripts") {
+        None => Some(serde_json::Map::new()),
+        Some(scripts) => scripts.as_object().cloned(),
+    }
 }
+
+/// The script npm runs in place of an absent `start`, and the file it
+/// runs: `node server.js` when `server.js` exists (npm 11.17.0's
+/// `docs/content/commands/npm-start.md`). A `start` or `restart` digest
+/// holds that file's bytes (review round 3, finding 5).
+const NPM_DEFAULT_START: (&str, &str) = ("start", "server.js");
 
 /// The lines every npm digest opens with: the sha256 of each file in the
 /// worktree that changes what npm runs without being a script -- `.npmrc`
@@ -336,11 +374,19 @@ fn npm_files(worktree: &Path) -> String {
 /// The sha256 of the scripts `names` in the worktree's `package.json`, each
 /// with the `pre` and `post` scripts npm runs around it: one line per
 /// script, `name=text`, or `name` alone where it is absent -- so a script
-/// that appears later is a change, and prompts -- after [`npm_files`].
+/// that appears later is a change, and prompts -- after [`npm_files`], and
+/// for `start` after [`NPM_DEFAULT_START`]'s file. `None` when the
+/// `package.json` cannot be read.
 #[must_use]
-pub fn scripts_digest(worktree: &Path, names: &[&str]) -> String {
-    let scripts = scripts(worktree).unwrap_or_default();
+pub fn scripts_digest(worktree: &Path, names: &[&str]) -> Option<String> {
+    let scripts = scripts(worktree)?;
     let mut text = npm_files(worktree);
+    let (start, server) = NPM_DEFAULT_START;
+    if names.contains(&start) {
+        let digest = std::fs::read(worktree.join(server))
+            .map_or_else(|_| "absent".to_owned(), |bytes| sha256_hex(&bytes));
+        let _ = writeln!(text, "{server} {digest}");
+    }
     for name in names {
         for each in [
             format!("pre{name}"),
@@ -357,23 +403,24 @@ pub fn scripts_digest(worktree: &Path, names: &[&str]) -> String {
             }
         }
     }
-    sha256_hex(text.as_bytes())
+    Some(sha256_hex(text.as_bytes()))
 }
 
 /// The sha256 an `npm run <name>` approval binds to ([`scripts_digest`] of
 /// that one script).
 #[must_use]
-pub fn script_digest(worktree: &Path, name: &str) -> String {
+pub fn script_digest(worktree: &Path, name: &str) -> Option<String> {
     scripts_digest(worktree, &[name])
 }
 
 /// The sha256 an `npm install` approval binds to: [`npm_files`], then the
 /// workspace's own lifecycle scripts, each `name=text` or `name` alone where
 /// absent, one per line in [`LIFECYCLE`]'s order. Dependencies' scripts are
-/// not in it: the receipt says they are [`LIFECYCLE_SCRIPTS`].
+/// not in it: the receipt says they are [`LIFECYCLE_SCRIPTS`]. `None` when
+/// the `package.json` cannot be read.
 #[must_use]
-pub fn lifecycle_digest(worktree: &Path) -> String {
-    let scripts = scripts(worktree).unwrap_or_default();
+pub fn lifecycle_digest(worktree: &Path) -> Option<String> {
+    let scripts = scripts(worktree)?;
     let mut text = npm_files(worktree);
     for name in LIFECYCLE {
         match scripts.get(*name).and_then(serde_json::Value::as_str) {
@@ -385,7 +432,7 @@ pub fn lifecycle_digest(worktree: &Path) -> String {
             }
         }
     }
-    sha256_hex(text.as_bytes())
+    Some(sha256_hex(text.as_bytes()))
 }
 
 /// Whether `word` is a plain package name, as `npm install <name>` may
@@ -406,7 +453,10 @@ fn plain_package(word: &str) -> bool {
 /// What a line's direct `npm` commands run, when every one of them is a
 /// form a standing approval covers (review round 2, finding 2): `npm run
 /// <name>`, `npm test|start|stop|restart`, `npm install` bare or with plain
-/// package names, `npm ci` bare -- with no option word anywhere. The scripts
+/// package names, `npm ci` bare -- the program `npm` exactly, never a path
+/// to one (review round 3, finding 6), with no option word anywhere and no
+/// environment prefix, which can choose what npm runs as `.npmrc` does
+/// (finding 4). The scripts
 /// of each script-running one, in order, and how many installs. `None` for
 /// any other `npm` command on the line; the caller also compares the counts
 /// with the gate's segments, so one inside a wrapper is never standing.
@@ -417,8 +467,11 @@ fn npm_commands(command: &str) -> Option<(Vec<Vec<String>>, usize)> {
     for simple in list.simple_commands() {
         let words = &simple.words;
         let Some(first) = words.first() else { continue };
-        if !first.literal || basename(&first.text) != "npm" {
+        if !first.literal || first.text != "npm" {
             continue;
+        }
+        if !simple.assignments.is_empty() {
+            return None;
         }
         if words.iter().any(|w| !w.literal || w.text.starts_with('-')) {
             return None;
@@ -443,10 +496,6 @@ fn npm_commands(command: &str) -> Option<(Vec<Vec<String>>, usize)> {
         }
     }
     Some((scripts, installs))
-}
-
-fn basename(text: &str) -> &str {
-    text.rsplit('/').next().unwrap_or(text)
 }
 
 /// The digests a line's `npm` segments bind to: per script for a
@@ -477,7 +526,7 @@ impl Digests {
         let runs = read
             .as_ref()
             .filter(|(names, _)| names.len() == count(Bound::Script))
-            .map(|(names, _)| {
+            .and_then(|(names, _)| {
                 names
                     .iter()
                     .map(|each| {
@@ -489,7 +538,7 @@ impl Digests {
         let lifecycle = read
             .as_ref()
             .filter(|(_, installs)| *installs == count(Bound::Lifecycle))
-            .map(|_| lifecycle_digest(worktree));
+            .and_then(|_| lifecycle_digest(worktree));
         Self { runs, lifecycle }
     }
 
@@ -521,6 +570,10 @@ pub const NPM_CONFIG_EXCUSED: &[&str] = &["npm_config_cache", "NPM_CONFIG_CACHE"
 /// or `pretty.*` key can make run `gpg.program`.
 const GIT_PRINTS_COMMITS: &[&str] = &["log", "show"];
 
+/// The config key `git branch` sorts by, as `git config --name-only`
+/// prints it.
+const GIT_BRANCH_SORT: &str = "branch.sort";
+
 /// The `git branch` options that print each branch's commit.
 const GIT_BRANCH_VERBOSE: &[&str] = &["-v", "-vv", "--verbose"];
 
@@ -533,6 +586,11 @@ pub struct Repository {
     /// Its effective config has a `gpg.*`, `format.pretty` or `pretty.*`
     /// key.
     pub signing: bool,
+    /// Its effective config has a `branch.sort`, which `git branch` sorts
+    /// by -- a `signature` key runs `gpg.program` -- and which a `-c`
+    /// override does not replace: the key is multi-valued (review round 3,
+    /// finding 2; measured on git 2.50.1).
+    pub branch_sort: bool,
 }
 
 /// Reads [`Repository`] for a worktree, or nothing when it cannot be read.
@@ -559,8 +617,8 @@ fn git_reading(worktree: &Path, args: &[&str]) -> Option<std::process::Output> {
 
 /// git's own reading of what a free read depends on in `worktree`:
 /// `rev-parse --git-path info/attributes`, and `config --includes
-/// --name-only --get-regexp` for the signing and format keys, includes
-/// followed. `None` when either cannot be read.
+/// --name-only --get-regexp` for the signing, format and branch-sort keys,
+/// includes followed. `None` when either cannot be read.
 #[must_use]
 pub fn git_repository(worktree: &Path) -> Option<Repository> {
     let path = git_reading(worktree, &["rev-parse", "--git-path", "info/attributes"])?;
@@ -586,20 +644,23 @@ pub fn git_repository(worktree: &Path) -> Option<Repository> {
             "--includes",
             "--name-only",
             "--get-regexp",
-            r"^(gpg|pretty)\.|^format\.pretty$",
+            r"^(gpg|pretty)\.|^format\.pretty$|^branch\.sort$",
         ],
     )?;
     // Exit 1 is "no such key"; anything else but 0 is unread.
-    let signing = match keys.status.code() {
-        Some(0) => String::from_utf8_lossy(&keys.stdout)
-            .lines()
-            .any(|key| key != "format.pretty"),
-        Some(1) => false,
+    let keys = match keys.status.code() {
+        Some(0) => String::from_utf8_lossy(&keys.stdout).into_owned(),
+        Some(1) => String::new(),
         _ => return None,
     };
+    let signing = keys
+        .lines()
+        .any(|key| key != "format.pretty" && key != GIT_BRANCH_SORT);
+    let branch_sort = keys.lines().any(|key| key == GIT_BRANCH_SORT);
     Some(Repository {
         info_attributes,
         signing,
+        branch_sort,
     })
 }
 
@@ -777,8 +838,10 @@ impl Gate {
 
     /// Whether the free read `words` (`git <sub> …`) can run as one in this
     /// repository: its `info/attributes` is empty or absent, and, for a read
-    /// that prints commits, no `gpg.*`, `format.pretty` or `pretty.*` key is
-    /// in its effective config. Unreadable is not free.
+    /// that prints commits -- `log`, `show`, and `git branch` verbose, with a
+    /// format, or under a configured `branch.sort` -- no `gpg.*`,
+    /// `format.pretty` or `pretty.*` key is in its effective config.
+    /// Unreadable is not free.
     fn still_free(&self, words: &[String]) -> bool {
         let Some(repository) = (self.repository)(&self.worktree) else {
             return false;
@@ -786,9 +849,10 @@ impl Gate {
         let sub = words.get(1).map_or("", String::as_str);
         let prints_commits = GIT_PRINTS_COMMITS.contains(&sub)
             || (sub == "branch"
-                && words[2..].iter().any(|w| {
-                    GIT_BRANCH_VERBOSE.contains(&w.as_str()) || w.starts_with("--format")
-                }));
+                && (repository.branch_sort
+                    || words[2..].iter().any(|w| {
+                        GIT_BRANCH_VERBOSE.contains(&w.as_str()) || w.starts_with("--format")
+                    })));
         let blocked = repository.info_attributes || (prints_commits && repository.signing);
         !blocked
     }
@@ -952,7 +1016,8 @@ fn alias_words(value: &str) -> Option<Vec<String>> {
 }
 
 /// A free git read as it runs: `git`, git's programs off, the subcommand,
-/// the diff programs off where it takes them, then the model's arguments.
+/// the diff programs and submodules off where it takes them, then the
+/// model's arguments.
 fn free_read(words: &[String]) -> Vec<String> {
     let mut run = vec!["env".to_owned()];
     run.extend(GIT_FREE_ENV.iter().map(|w| (*w).to_owned()));
@@ -961,6 +1026,9 @@ fn free_read(words: &[String]) -> Vec<String> {
     run.push(words[1].clone());
     if GIT_DIFFING.contains(&words[1].as_str()) {
         run.extend(GIT_NO_PROGRAMS.iter().map(|w| (*w).to_owned()));
+    }
+    if GIT_SUBMODULE_READS.contains(&words[1].as_str()) {
+        run.push(GIT_NO_SUBMODULES.to_owned());
     }
     run.extend(words[2..].iter().cloned());
     run
@@ -1597,6 +1665,7 @@ pub(in crate::drive) mod tests {
         Some(Repository {
             info_attributes: false,
             signing: false,
+            branch_sort: false,
         })
     }
 
@@ -1727,7 +1796,7 @@ pub(in crate::drive) mod tests {
         let granted = gate.judge("npm run build", &[]).grants(Scope::Session, 1);
         assert_eq!(
             granted.iter().map(|e| e.digest.clone()).collect::<Vec<_>>(),
-            [Some(script_digest(&dir, "build"))]
+            [script_digest(&dir, "build")]
         );
         assert_eq!(
             gate.judge("npm run build", &granted).outcome(),
@@ -1753,7 +1822,7 @@ pub(in crate::drive) mod tests {
         let gate = gate_in(&dir);
         package(&dir, "vite build");
         let granted = gate.judge("npm install", &[]).grants(Scope::Session, 1);
-        assert_eq!(granted[0].digest, Some(lifecycle_digest(&dir)));
+        assert_eq!(granted[0].digest, lifecycle_digest(&dir));
         assert_eq!(
             gate.judge("npm install left-pad", &granted).outcome(),
             shell_gate::Outcome::Run
@@ -1786,6 +1855,8 @@ pub(in crate::drive) mod tests {
             "core.fsmonitor=",
             "-c",
             "core.pager=cat",
+            "-c",
+            "core.hooksPath=/dev/null",
             "-c",
             "log.showSignature=false",
             "-c",
@@ -2307,11 +2378,20 @@ pub(in crate::drive) mod tests {
         let judged = gate.judge("git status", &[]);
         assert_eq!(judged.outcome(), shell_gate::Outcome::Run);
         assert_eq!(judged.argv, argv_of("git status"));
-        assert_eq!(judged.run, free_read_of(&["status"]));
+        assert_eq!(
+            judged.run,
+            free_read_of(&["status", "--ignore-submodules=all"])
+        );
         let judged = gate.judge("git log -1", &[]);
         assert_eq!(
             judged.run,
-            free_read_of(&["log", "--no-ext-diff", "--no-textconv", "-1"])
+            free_read_of(&[
+                "log",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--ignore-submodules=all",
+                "-1"
+            ])
         );
         // A free read this cannot run with its overrides prompts instead.
         for line in [
@@ -2355,7 +2435,7 @@ pub(in crate::drive) mod tests {
             shell_gate::Outcome::Run,
             "`st` is `status`, a free read"
         );
-        assert_eq!(st.run, free_read_of(&["status"]));
+        assert_eq!(st.run, free_read_of(&["status", "--ignore-submodules=all"]));
         assert_eq!(
             gate.judge("git p", &[]).judgement.refused_by(),
             Some("git push"),
@@ -2532,5 +2612,386 @@ pub(in crate::drive) mod tests {
         );
         assert_eq!(cwd_label(Path::new("/srv/x"), Some(home)), "/srv/x");
         assert_eq!(cwd_label(Path::new("/srv/x"), None), "/srv/x");
+    }
+
+    /// A scratch repository holding one commit of `f`, in a directory with
+    /// no shell metacharacter in its name (git runs hooks and filters
+    /// through the shell).
+    fn repo_with_one_commit(name: &str) -> (PathBuf, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("diet-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let repo = dir.join("repo");
+        std::fs::create_dir_all(&repo).expect("a repo");
+        git_in(&repo, &["init", "-q"]);
+        std::fs::write(repo.join("f"), "a\n").expect("a file");
+        git_in(&repo, &["add", "f"]);
+        git_in(&repo, &["commit", "-qm", "a"]);
+        (dir, repo)
+    }
+
+    /// Makes the index stat-dirty for `f`, its content unchanged, so a read
+    /// that refreshes the index writes it -- and git runs
+    /// `post-index-change`.
+    fn stat_dirty(repo: &Path) {
+        set_a_new_mtime(&repo.join("f"));
+    }
+
+    /// Gives `path` an mtime no earlier call gave any file, its content
+    /// unchanged.
+    fn set_a_new_mtime(path: &Path) {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(946_684_800);
+        let then = std::time::SystemTime::UNIX_EPOCH
+            + std::time::Duration::from_secs(NEXT.fetch_add(1, Ordering::SeqCst));
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .expect("the file")
+            .set_modified(then)
+            .expect("an mtime");
+    }
+
+    /// Review round 3, finding 1: a free read refreshes a stat-dirty index
+    /// and rewrites it, and git runs the repository's `post-index-change`
+    /// hook -- from `.git/hooks/`, or from a `core.hooksPath` the
+    /// repository's config points into the worktree. Plain git runs it (the
+    /// control); a free read as the loop runs it does not.
+    #[test]
+    fn a_free_read_runs_no_hook_the_repository_holds() {
+        let (dir, repo) = repo_with_one_commit("git-hooks");
+        let marker = dir.join("ran");
+        let program = marker_program(&dir, &marker);
+        std::fs::create_dir_all(repo.join(".git/hooks")).expect("hooks");
+        std::fs::copy(&program, repo.join(".git/hooks/post-index-change")).expect("a hook");
+        std::fs::create_dir_all(repo.join("hk")).expect("hk");
+        std::fs::copy(&program, repo.join("hk/post-index-change")).expect("a hook");
+        for hooks_path in [None, Some("hk")] {
+            if let Some(path) = hooks_path {
+                git_in(&repo, &["config", "core.hooksPath", path]);
+            }
+            let _ = std::fs::remove_file(&marker);
+            stat_dirty(&repo);
+            git_in(&repo, &["status"]);
+            assert!(
+                marker.exists(),
+                "control ({hooks_path:?}): plain `git status` runs the hook"
+            );
+            for line in ["git status", "git diff"] {
+                let _ = std::fs::remove_file(&marker);
+                stat_dirty(&repo);
+                run_free(&repo, line);
+                assert!(
+                    !marker.exists(),
+                    "({hooks_path:?}) the free read `{line}` ran the hook"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review round 3, finding 2: sorting branches by a `signature` atom
+    /// verifies each signature, which runs `gpg.program`. Only sort keys
+    /// that read no signature are free.
+    #[test]
+    fn git_branch_sorts_freely_only_by_keys_that_check_no_signature() {
+        let dir = scratch("git-branch-sort");
+        let gate = gate_in(&dir);
+        for line in [
+            "git branch --sort=signature",
+            "git branch --sort=signature:grade",
+            "git branch --list --sort=-signature:signer",
+            "git branch --sort=contents:signature",
+            "git branch --sort=subject",
+            "git branch --sort",
+        ] {
+            assert_eq!(
+                gate.judge(line, &[]).outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{line}` ran as a free read"
+            );
+        }
+        for line in [
+            "git branch --sort=refname",
+            "git branch --sort=-committerdate",
+            "git branch --sort=version:refname --sort=-v:refname",
+            "git branch --list --sort=objectname",
+            "git branch --sort=creatordate --sort=-authordate",
+        ] {
+            assert_eq!(
+                gate.judge(line, &[]).outcome(),
+                shell_gate::Outcome::Run,
+                "`{line}` should stay free"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The same sort, named by the repository's `branch.sort`: a `-c`
+    /// override does not reach it (the key is multi-valued, measured on git
+    /// 2.50.1), so with a signing key in the config `git branch` prompts.
+    #[test]
+    fn a_configured_branch_sort_makes_git_branch_prompt_where_a_signature_is_checked() {
+        let (dir, repo) = repo_with_one_commit("git-branch-sort-config");
+        let marker = dir.join("ran");
+        let program = marker_program(&dir, &marker);
+        sign_head(&repo, &dir);
+        git_in(
+            &repo,
+            &["config", "gpg.program", &program.to_string_lossy()],
+        );
+        git_in(&repo, &["config", "branch.sort", "signature"]);
+        git_in(&repo, &["branch"]);
+        assert!(marker.exists(), "control: `branch.sort` runs gpg.program");
+        for line in ["git branch", "git branch --list"] {
+            assert_eq!(
+                real_outcome(&repo, line),
+                shell_gate::Outcome::Prompt,
+                "`{line}` with a signing key and a `branch.sort`"
+            );
+        }
+        git_in(&repo, &["config", "--unset", "branch.sort"]);
+        assert_eq!(
+            real_outcome(&repo, "git branch"),
+            shell_gate::Outcome::Run,
+            "with no `branch.sort`, `git branch` prints no commit"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review round 3, finding 3: a free read never recurses into a
+    /// submodule, whose own config and attributes it cannot vouch for --
+    /// not when `.gitmodules` (a tracked file) says `ignore = none`, which
+    /// beats `diff.ignoreSubmodules`, and not through an abbreviated
+    /// `status` option.
+    #[test]
+    fn a_free_read_never_recurses_into_a_submodule() {
+        let (dir, main) = repo_with_one_commit("git-submodule");
+        let marker = dir.join("ran");
+        let program = marker_program(&dir, &marker);
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).expect("a sub");
+        git_in(&sub, &["init", "-q"]);
+        std::fs::write(sub.join("s"), "s\n").expect("a file");
+        git_in(&sub, &["add", "s"]);
+        git_in(&sub, &["commit", "-qm", "s"]);
+        let added = git_in(
+            &main,
+            &[
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "-q",
+                "add",
+                &sub.to_string_lossy(),
+                "sub",
+            ],
+        );
+        assert!(added.status.success(), "{added:?}");
+        git_in(&main, &["commit", "-qm", "sub"]);
+        let inner = main.join("sub");
+        let inner_git =
+            String::from_utf8(git_in(&inner, &["rev-parse", "--absolute-git-dir"]).stdout)
+                .expect("utf-8");
+        std::fs::write(
+            Path::new(inner_git.trim()).join("info/attributes"),
+            "s filter=x\n",
+        )
+        .expect("the submodule's info/attributes");
+        git_in(
+            &inner,
+            &["config", "filter.x.clean", &program.to_string_lossy()],
+        );
+        std::fs::write(
+            main.join(".gitmodules"),
+            "[submodule \"sub\"]\n\tpath = sub\n\turl = x\n\tignore = none\n",
+        )
+        .expect(".gitmodules");
+        let touch = || set_a_new_mtime(&inner.join("s"));
+        let _ = std::fs::remove_file(&marker);
+        touch();
+        git_in(&main, &["status"]);
+        assert!(
+            marker.exists(),
+            "control: plain `git status` runs the submodule's filter"
+        );
+        for line in ["git status", "git diff", "git status --short --branch"] {
+            let _ = std::fs::remove_file(&marker);
+            touch();
+            run_free(&main, line);
+            assert!(!marker.exists(), "the free read `{line}` ran it");
+        }
+        let gate = gate_in(&main);
+        for line in [
+            "git status --ignore-sub=none",
+            "git status --ignore-submodules=none",
+            "git status --verb",
+            "git status --unt=no",
+            "git diff --ignore-submodules=dirty",
+        ] {
+            assert_eq!(
+                gate.judge(line, &[]).outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{line}` ran as a free read"
+            );
+        }
+        for line in [
+            "git status --short --branch --show-stash",
+            "git status --porcelain=v2 --untracked-files=no --ignored=matching",
+            "git status --no-ahead-behind --find-renames=50 -- f",
+        ] {
+            assert_eq!(
+                gate.judge(line, &[]).outcome(),
+                shell_gate::Outcome::Run,
+                "`{line}` should stay free"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review round 3, finding 4: an environment prefix on an `npm` command
+    /// changes what npm runs as `.npmrc` does (`npm_config_script_shell`,
+    /// `npm_config_node_options`, `npm_config_userconfig`) -- with no write
+    /// at all, through a `data:` import. No standing approval covers an npm
+    /// command carrying one, and none can be granted for it.
+    #[test]
+    fn an_environment_prefix_on_an_npm_command_is_never_standing() {
+        let dir = scratch("npm-prefix");
+        let gate = gate_in(&dir);
+        package(&dir, "node -e 0");
+        let mut granted = Vec::new();
+        for line in ["npm run build", "npm test", "npm install"] {
+            granted.extend(gate.judge(line, &[]).grants(Scope::Session, 1));
+        }
+        for line in [
+            "npm_config_script_shell=./e npm run build",
+            "npm_config_node_options='--require ./evil.js' npm run build",
+            "npm_config_userconfig=./rc npm run build",
+            "npm_config_node_options=\"--import=data:text/javascript,0\" npm run build",
+            "NPM_CONFIG_SCRIPT_SHELL=./e npm test",
+            "Npm_Config_Script_Shell=./e npm install",
+            "FOO=1 npm run build",
+            "npm run build && npm_config_script_shell=./e npm test",
+        ] {
+            let judged = gate.judge(line, &granted);
+            assert_eq!(
+                judged.outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{line}` was covered"
+            );
+            assert!(!judged.standing(), "`{line}` could be approved standing");
+        }
+        assert_eq!(
+            gate.judge("npm run build", &granted).outcome(),
+            shell_gate::Outcome::Run,
+            "control: the bare form is covered"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review round 3, finding 5: with no `start` script, `npm start` (and
+    /// `npm restart`) runs `node server.js` when the file exists, so an
+    /// approval of either binds to `server.js`'s bytes.
+    #[test]
+    fn npm_start_and_restart_bind_to_the_server_js_npm_runs_without_a_start_script() {
+        let dir = scratch("npm-server-js");
+        let gate = gate_in(&dir);
+        std::fs::write(dir.join("package.json"), "{\"scripts\":{\"build\":\"x\"}}")
+            .expect("package.json");
+        for line in ["npm start", "npm restart"] {
+            let _ = std::fs::remove_file(dir.join("server.js"));
+            let granted = gate.judge(line, &[]).grants(Scope::Session, 1);
+            assert_eq!(
+                gate.judge(line, &granted).outcome(),
+                shell_gate::Outcome::Run
+            );
+            std::fs::write(dir.join("server.js"), "console.log(1)").expect("server.js");
+            assert_eq!(
+                gate.judge(line, &granted).outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{line}` covered a server.js that appeared after its approval"
+            );
+            let granted = gate.judge(line, &[]).grants(Scope::Session, 1);
+            std::fs::write(dir.join("server.js"), "console.log(2)").expect("server.js");
+            assert_eq!(
+                gate.judge(line, &granted).outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{line}` covered a changed server.js"
+            );
+        }
+        let granted = gate.judge("npm run build", &[]).grants(Scope::Session, 1);
+        std::fs::write(dir.join("server.js"), "console.log(3)").expect("server.js");
+        assert_eq!(
+            gate.judge("npm run build", &granted).outcome(),
+            shell_gate::Outcome::Run,
+            "`npm run build` never runs server.js"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review round 3, finding 6: a standing npm approval covers the
+    /// program `npm` as written, never a path to some other `npm`.
+    #[test]
+    fn a_standing_npm_approval_never_covers_a_path_qualified_npm() {
+        let dir = scratch("npm-path");
+        let gate = gate_in(&dir);
+        package(&dir, "vite build");
+        let mut granted = gate.judge("npm run build", &[]).grants(Scope::Session, 1);
+        granted.extend(gate.judge("npm install", &[]).grants(Scope::Session, 1));
+        for line in [
+            "./npm run build",
+            "/usr/local/bin/npm run build",
+            "bin/npm install",
+        ] {
+            let judged = gate.judge(line, &granted);
+            assert_eq!(
+                judged.outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{line}` was covered"
+            );
+            assert!(!judged.standing(), "`{line}` could be approved standing");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Review round 3, finding 7: a `package.json` npm reads but this
+    /// cannot -- a UTF-8 byte-order mark, a lone surrogate escape -- would
+    /// make every script read as absent. It fails closed: no npm command is
+    /// standing, and an approval taken on a readable file covers nothing.
+    #[test]
+    fn an_unreadable_package_json_makes_no_npm_command_standing() {
+        let dir = scratch("npm-unreadable");
+        let gate = gate_in(&dir);
+        package(&dir, "vite build");
+        let mut granted = gate.judge("npm run build", &[]).grants(Scope::Session, 1);
+        granted.extend(gate.judge("npm install", &[]).grants(Scope::Session, 1));
+        for unreadable in [
+            "\u{feff}{\"scripts\":{\"build\":\"curl evil\",\"postinstall\":\"x\"}}",
+            "{\"description\":\"\\ud800\",\"scripts\":{\"build\":\"curl evil\"}}",
+        ] {
+            std::fs::write(dir.join("package.json"), unreadable).expect("package.json");
+            // An approval taken on the unreadable file, then a changed one.
+            let mut granted = granted.clone();
+            for line in ["npm run build", "npm install"] {
+                granted.extend(gate.judge(line, &[]).grants(Scope::Session, 1));
+            }
+            std::fs::write(
+                dir.join("package.json"),
+                unreadable.replace("curl evil", "curl worse"),
+            )
+            .expect("package.json");
+            for line in ["npm run build", "npm install", "npm start"] {
+                let judged = gate.judge(line, &granted);
+                assert_eq!(
+                    judged.outcome(),
+                    shell_gate::Outcome::Prompt,
+                    "`{line}` covered under `{unreadable}`"
+                );
+                assert!(
+                    !judged.standing(),
+                    "`{line}` could be approved standing under `{unreadable}`"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

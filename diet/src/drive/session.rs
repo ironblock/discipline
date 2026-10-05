@@ -4501,7 +4501,10 @@ pub(in crate::drive) mod tests {
         assert_eq!(line.argv, Some(tool_loop::argv_of("git status")));
         assert_eq!(
             line.confined,
-            Some(super::super::tool_loop::tests::free_read_of(&["status"]))
+            Some(super::super::tool_loop::tests::free_read_of(&[
+                "status",
+                "--ignore-submodules=all"
+            ]))
         );
         assert_eq!(line.approval, None, "a free read ran under no decision");
         tidy(&[&tree]);

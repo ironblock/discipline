@@ -1311,6 +1311,70 @@ fn plain_format(text: &str) -> bool {
             || value.contains('%'))
 }
 
+/// `git status`'s long options a free read may carry, exactly. `status`
+/// parses its options with parse-options, which takes any unique
+/// abbreviation (`--ignore-sub=none`, `--verb`), so no prefix denylist is
+/// sound there (review round 3, finding 3): a long option not listed here
+/// or in [`GIT_STATUS_LONG_VALUED`] is not free.
+const GIT_STATUS_LONG: &[&str] = &[
+    "--",
+    "--short",
+    "--branch",
+    "--show-stash",
+    "--porcelain",
+    "--long",
+    "--untracked-files",
+    "--ignored",
+    "--null",
+    "--column",
+    "--no-column",
+    "--ahead-behind",
+    "--no-ahead-behind",
+    "--renames",
+    "--no-renames",
+    "--find-renames",
+];
+
+/// `git status`'s long options a free read may carry with a value: each
+/// prefix, any value.
+const GIT_STATUS_LONG_VALUED: &[&str] = &[
+    "--porcelain=",
+    "--untracked-files=",
+    "--ignored=",
+    "--column=",
+    "--find-renames=",
+];
+
+/// Whether `text` is a `git status` long option outside
+/// [`GIT_STATUS_LONG`] and [`GIT_STATUS_LONG_VALUED`].
+fn status_long_unlisted(text: &str) -> bool {
+    text.starts_with("--")
+        && !GIT_STATUS_LONG.contains(&text)
+        && !GIT_STATUS_LONG_VALUED.iter().any(|p| text.starts_with(p))
+}
+
+/// The keys `git branch --sort=` may name in a free read, each optionally
+/// after `-`: none reads a signature. A `signature` atom verifies one,
+/// which runs `gpg.program` (review round 3, finding 2), so every key not
+/// listed prompts.
+const GIT_BRANCH_SORT_KEYS: &[&str] = &[
+    "refname",
+    "committerdate",
+    "creatordate",
+    "authordate",
+    "objectname",
+    "version:refname",
+    "v:refname",
+];
+
+/// Whether a `git branch` word `--sort=<key>` names a key in
+/// [`GIT_BRANCH_SORT_KEYS`]; `None` when it is no `--sort=` word.
+fn branch_sort_listed(text: &str) -> Option<bool> {
+    let key = text.strip_prefix("--sort=")?;
+    let key = key.strip_prefix('-').unwrap_or(key);
+    Some(GIT_BRANCH_SORT_KEYS.contains(&key))
+}
+
 /// Whether a `git status` option makes it run a diff, which runs the
 /// repository's textconv and diff drivers: `-v`, `--verbose`, and any
 /// bundle of short options holding a `v` (review round 2, finding 1(c)).
@@ -1332,6 +1396,7 @@ pub fn git_is_free(subcommand: &str, args: &[Word]) -> bool {
             || GIT_SUBMODULES.iter().any(|p| w.text.starts_with(p))
             || !plain_format(&w.text)
             || (subcommand == "status" && status_shows_a_diff(&w.text))
+            || (subcommand == "status" && status_long_unlisted(&w.text))
     });
     if GIT_READS.contains(&subcommand) {
         !output
@@ -1370,7 +1435,6 @@ fn branch_lists(args: &[Word]) -> bool {
         "--no-contains",
         "--points-at",
         "--format=",
-        "--sort=",
         "--color=",
         "--column=",
         "--abbrev=",
@@ -1378,7 +1442,9 @@ fn branch_lists(args: &[Word]) -> bool {
     let listing = args.iter().any(|w| w.text == "-l" || w.text == "--list");
     args.iter().all(|w| {
         let text = w.text.as_str();
-        if text.starts_with('-') {
+        if let Some(listed) = branch_sort_listed(text) {
+            listed
+        } else if text.starts_with('-') {
             LISTING.contains(&text) || LISTING_PREFIX.iter().any(|p| text.starts_with(p))
         } else {
             listing

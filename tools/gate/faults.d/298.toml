@@ -266,3 +266,19 @@ check = "lanes"
 label = "drive.npm-abbreviation-is-standing"
 failure_class = "drive.npm-abbreviation-is-standing"
 migrated = false
+
+[[fault]]
+id = "drive.free-git-read-runs-hooks"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.free-git-read-runs-hooks"
+failure_class = "drive.free-git-read-runs-hooks"
+migrated = false
+
+[[fault]]
+id = "drive.npm-env-prefix-is-standing"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.npm-env-prefix-is-standing"
+failure_class = "drive.npm-env-prefix-is-standing"
+migrated = false
