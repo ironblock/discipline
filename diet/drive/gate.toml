@@ -924,7 +924,7 @@ anchor = '''
             state.push(Event::Cancelled { request, partial });'''
 becomes = '''
         Ok(StreamEnded::Cancelled) => {
-            state.trunk.push(Message::new(Role::User, ask));
+            state.trunk.extend(exchange.iter().cloned());
             state.push(Event::Cancelled { request, partial });'''
 catches = [
     "drive::session::tests::a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone",
@@ -1010,7 +1010,7 @@ becomes = '''
             body,
             class,
         }) => {
-            state.trunk.push(Message::new(Role::User, ask));
+            state.trunk.extend(exchange.iter().cloned());
             state.push(Event::Rejected {'''
 catches = [
     "drive::session::tests::a_turn_the_server_refused_is_logged_as_refused_and_leaves_the_trunk_alone",
