@@ -1,0 +1,26 @@
+2026-10-04T19:10:37Z preflight ok; floor pid=111934
+2026-10-04T19:10:37Z floor reading: begin
+2026-10-04T19:23:03Z floor reading rc=0 vram=23612
+2026-10-04T19:23:05Z DOWNTIME START floor stopped vram=21
+2026-10-04T19:25:09Z kld 3.50bpw rc=0 RESULT exl3-3.50bpw base-code.kld: PPL(Q) 1.673211 PPL(base) 1.648707 Mean KLD 0.038213 ± 0.001305 99.9% KLD 2.564108 Median KLD 0.000530 Same top 96.475 ± 0.118 % n=24564|RESULT exl3-3.50bpw base-prose.kld: PPL(Q) 6.192681 PPL(base) 6.331690 Mean KLD 0.042085 ± 0.002928 99.9% KLD 4.809375 Median KLD 0.008987 Same top 93.531 ± 0.157 % n=24564|
+2026-10-04T19:25:22Z A-3.50bpw-c229376 rc=1 
+2026-10-04T19:25:31Z A-3.50bpw-c196608 rc=1 
+2026-10-04T19:25:41Z A-3.50bpw-c163840 rc=1 
+2026-10-04T19:25:53Z A-3.00bpw-c229376 rc=1 
+2026-10-04T19:26:19Z A-3.00bpw-c196608 rc=3 {"tag": "A-3.00bpw-c196608", "event": "loaded", "load_s": 24, "cache_size": 196608, "smi_used_mib": 23068, "smi_free_mib": 1508, "torch_free_mib": 1087} {"tag": "A-3.00bpw-c196608", "event": "too_little_free", "need": 1608} 
+2026-10-04T19:26:40Z A-3.00bpw-c163840 rc=3 {"tag": "A-3.00bpw-c163840", "event": "loaded", "load_s": 19, "cache_size": 163840, "smi_used_mib": 23934, "smi_free_mib": 642, "torch_free_mib": 221} {"tag": "A-3.00bpw-c163840", "event": "too_little_free", "need": 1608} 
+2026-10-04T19:26:40Z EXL3 choice: model= pool=
+2026-10-04T19:26:55Z C-fill-c229376 up server=307590 exe=865044a2bf2d5685 launch_vram_mib=22914 args: -c 229376 --spec-type draft-dflash -ngld 99 -md $HOME/Models/Qwen3.8-27B-DFlash2-GGUF-zlab/Qwen3.8-27B-DFlash2-Q4_K_M.gguf
+C-c229376 fill peak 23164 free 1412 pass_vs_floor True [114122, 114122]
+2026-10-04T19:33:35Z C choice: pool=229376
+2026-10-04T19:33:42Z C-dflash2-q4km up server=311096 exe=865044a2bf2d5685 launch_vram_mib=22914 args: -c 229376 --spec-type draft-dflash -ngld 99 -md $HOME/Models/Qwen3.8-27B-DFlash2-GGUF-zlab/Qwen3.8-27B-DFlash2-Q4_K_M.gguf
+2026-10-04T19:48:27Z deep C-q4km rc=0
+2026-10-04T19:48:38Z Cp-q3km up server=319823 exe=865044a2bf2d5685 launch_vram_mib=22698 args: -c 229376 --spec-type draft-dflash -ngld 99 -md $HOME/Models/Qwen3.8-27B-DFlash2-GGUF-anbeeld/Qwen3.8-27B-DFlash2-Q3_K_M.gguf
+2026-10-04T19:51:01Z deep Cp-q3km rc=0
+2026-10-04T19:51:12Z Cp-q2k up server=321547 exe=865044a2bf2d5685 launch_vram_mib=22498 args: -c 229376 --spec-type draft-dflash -ngld 99 -md $HOME/Models/Qwen3.8-27B-DFlash2-GGUF-anbeeld/Qwen3.8-27B-DFlash2-Q2_K.gguf
+2026-10-04T19:53:36Z deep Cp-q2k rc=0
+2026-10-04T19:53:37Z phases done
+2026-10-04T19:53:37Z restore: begin
+2026-10-04T19:53:57Z provision-diet rc=0
+2026-10-04T19:53:57Z restored: pid=323283 exe=980845d60ae7a820 vram=23066
+2026-10-04T19:53:57Z END

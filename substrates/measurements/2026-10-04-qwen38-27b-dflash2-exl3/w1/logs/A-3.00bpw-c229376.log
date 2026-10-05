@@ -1,0 +1,23 @@
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-igor255
+
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-3.00bpw
+
+Traceback (most recent call last):
+  File "$HOME/w335/exl3deep.py", line 68, in <module>
+    main()
+  File "$HOME/w335/exl3deep.py", line 25, in main
+    model, config, cache, tokenizer, draft_model, draft_config, draft_cache = model_init.init(args)
+                                                                              ^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model_init.py", line 360, in init
+    model.load(
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 124, in decorate_context
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model.py", line 656, in load
+    for _ in f: pass
+             ^
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model.py", line 581, in load_gen
+    yield from self._load_autosplit(
+  File "$HOME/venvs/exl3/lib/python3.12/site-packages/exllamav3/model/model_ls.py", line 274, in _load_autosplit
+    raise RuntimeError("Insufficient VRAM in split for model and cache")
+RuntimeError: Insufficient VRAM in split for model and cache

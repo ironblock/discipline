@@ -1,0 +1,13 @@
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-igor255
+
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-3.00bpw
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "P-c196608", "event": "loaded", "load_s": 17, "cache_size": 196608, "smi_used_mib": 23394, "smi_free_mib": 1182, "torch_free_mib": 761}
+{"tag": "P-c196608", "event": "generator", "num_draft_tokens": 7}
+{"tag": "P-c196608", "depth": 2000, "conc": 1, "rep": 0, "wall_s": 4.1, "tg": [115.23], "agg_tok_s": 62.5, "prompt_n": [2004], "cached": [0], "pp": [1067], "acc": 195, "rej": 232, "a": 0.457, "smi_peak_mib": 23494, "errors": []}
+{"tag": "P-c196608", "depth": 2000, "conc": 1, "rep": 1, "wall_s": 2.4, "tg": [120.73], "agg_tok_s": 105.3, "prompt_n": [2004], "cached": [1792], "pp": [702], "acc": 195, "rej": 232, "a": 0.457, "smi_peak_mib": 23496, "errors": []}
+{"tag": "P-c196608", "depth": 2000, "conc": 1, "rep": 2, "wall_s": 2.4, "tg": [120.66], "agg_tok_s": 105.2, "prompt_n": [2004], "cached": [1792], "pp": [703], "acc": 195, "rej": 232, "a": 0.457, "smi_peak_mib": 23496, "errors": []}
+{"tag": "P-c196608", "event": "done", "smi_peak_mib": 23496, "free_at_peak_mib": 1080}

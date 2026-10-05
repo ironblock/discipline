@@ -1,0 +1,71 @@
+15:00:13.092 INFO:     Using config file config-w335f.yml
+15:00:13.098 INFO:     The 'config.yml' file cannot be found
+15:00:16.380 WARNING:  No sampler overrides are configured
+                       (sampling.override_preset or inline overrides in the
+                       sampling section), so sampling parameters have no
+                       fallback values. Requests that omit them run untruncated:
+                       temperature 1.0, top_k 0, top_p 1.0, min_p 0. Set
+                       override_preset to safe_defaults unless this is
+                       intentional.
+15:00:16.383 INFO:     exllamav3 version: 1.5.4
+15:00:17.276 INFO:     Keeping vision model weights in system RAM
+                       (vision_offload).
+15:00:17.278 INFO:     Using draft model:
+                       $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-i
+                       gor255
+15:00:17.278 INFO:     Disabling GPU split because one GPU is in use.
+15:00:17.278 INFO:     Context: max_seq_len 196,608 tokens (configured),
+                       cache_size 196,608 tokens
+15:00:17.302 INFO:     Using template "chat_template" for chat completions.
+15:00:17.303 INFO:     Response parsing: tool format qwen3_coder (template,
+                       tokenizer, architecture), reasoning tags <think> </think>
+                       (template)
+15:00:22.735 INFO:     Loading model
+                       $HOME/Models/Qwen3.8-27B-exl3-3.00bpw (manual
+                       GPU split)
+Loading vision modules ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 30/30 0:00:00
+Loading draft modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 8/8   0:00:00
+Loading model modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━    96% 64/67 0:00:01
+Traceback (most recent call last):
+  File "$HOME/src/tabbyAPI/main.py", line 239, in <module>
+    entrypoint()
+  File "$HOME/src/tabbyAPI/main.py", line 235, in entrypoint
+    asyncio.run(entrypoint_async())
+  File "$HOME/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "$HOME/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "uvloop/loop.pyx", line 1515, in uvloop.loop.Loop.run_until_complete
+  File "$HOME/src/tabbyAPI/main.py", line 90, in entrypoint_async
+    await model.load_model(
+  File "$HOME/src/tabbyAPI/common/model.py", line 265, in load_model
+    async for _ in load_model_gen(model_path, **kwargs):
+  File "$HOME/src/tabbyAPI/common/model.py", line 233, in load_model_gen
+    async for module, modules in load_status:
+  File "$HOME/src/tabbyAPI/backends/exllamav3/model.py", line 840, in load_gen
+    async for value in iterate_in_threadpool(generator):
+  File "$HOME/src/tabbyAPI/common/concurrency.py", line 30, in iterate_in_threadpool
+    yield await asyncio.to_thread(gen_next, generator)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/concurrent/futures/thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/src/tabbyAPI/common/concurrency.py", line 20, in gen_next
+    return next(generator)
+           ^^^^^^^^^^^^^^^
+  File "$HOME/venvs/tabby154/lib/python3.12/site-packages/torch/utils/_contextlib.py", line 61, in generator_context
+    response = gen.send(request)
+               ^^^^^^^^^^^^^^^^^
+  File "$HOME/src/tabbyAPI/backends/exllamav3/model.py", line 969, in load_model_sync
+    for value in self.model.load_gen(
+                 ^^^^^^^^^^^^^^^^^^^^
+  File "$HOME/venvs/tabby154/lib/python3.12/site-packages/exllamav3/model/model.py", line 639, in load_gen
+    yield from self._load_autosplit(
+  File "$HOME/venvs/tabby154/lib/python3.12/site-packages/exllamav3/model/model_ls.py", line 301, in _load_autosplit
+    raise RuntimeError("Insufficient VRAM in split for model and cache")
+RuntimeError: Insufficient VRAM in split for model and cache

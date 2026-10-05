@@ -1,0 +1,22 @@
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-igor255
+
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-SC_3.00bpw_H4
+
+ -- Warming up...
+
+ -- Loading tokenizer...
+{"tag": "S3-dflash2-cq88", "event": "loaded", "load_s": 9, "cache_size": 196608, "smi_used_mib": 23006, "smi_free_mib": 1570, "torch_free_mib": 1149}
+{"tag": "S3-dflash2-cq88", "event": "generator", "num_draft_tokens": 7}
+{"tag": "S3-dflash2-cq88", "depth": 2000, "conc": 1, "rep": 0, "wall_s": 4.3, "tg": [105.52], "agg_tok_s": 59.5, "prompt_n": [2004], "cached": [0], "pp": [1065], "acc": 188, "rej": 288, "a": 0.395, "smi_peak_mib": 23108, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 2000, "conc": 1, "rep": 1, "wall_s": 2.6, "tg": [111.11], "agg_tok_s": 97.8, "prompt_n": [2004], "cached": [1792], "pp": [695], "acc": 189, "rej": 280, "a": 0.403, "smi_peak_mib": 23108, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 2000, "conc": 1, "rep": 2, "wall_s": 2.6, "tg": [111.01], "agg_tok_s": 97.7, "prompt_n": [2004], "cached": [1792], "pp": [696], "acc": 189, "rej": 280, "a": 0.403, "smi_peak_mib": 23108, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 100000, "conc": 1, "rep": 0, "wall_s": 121.7, "tg": [57.93], "agg_tok_s": 2.1, "prompt_n": [99672], "cached": [1792], "pp": [834], "acc": 178, "rej": 368, "a": 0.326, "smi_peak_mib": 23432, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 100000, "conc": 1, "rep": 1, "wall_s": 4.9, "tg": [57.85], "agg_tok_s": 52.6, "prompt_n": [99672], "cached": [99584], "pp": [199], "acc": 178, "rej": 368, "a": 0.326, "smi_peak_mib": 23432, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 100000, "conc": 1, "rep": 2, "wall_s": 4.9, "tg": [57.85], "agg_tok_s": 52.6, "prompt_n": [99672], "cached": [99584], "pp": [199], "acc": 178, "rej": 368, "a": 0.326, "smi_peak_mib": 23432, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 193608, "conc": 1, "rep": 0, "wall_s": 187.6, "tg": [59.41], "agg_tok_s": 1.4, "prompt_n": [193630], "cached": [99584], "pp": [513], "acc": 202, "rej": 176, "a": 0.534, "smi_peak_mib": 23692, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 193608, "conc": 1, "rep": 1, "wall_s": 5.0, "tg": [60.59], "agg_tok_s": 51.4, "prompt_n": [193630], "cached": [193536], "pp": [125], "acc": 202, "rej": 176, "a": 0.534, "smi_peak_mib": 23692, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 193608, "conc": 1, "rep": 2, "wall_s": 5.0, "tg": [60.52], "agg_tok_s": 51.3, "prompt_n": [193630], "cached": [193536], "pp": [125], "acc": 202, "rej": 176, "a": 0.534, "smi_peak_mib": 23692, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 96304, "conc": 2, "rep": 0, "wall_s": 120.4, "tg": [2.18, 47.82], "agg_tok_s": 4.3, "prompt_n": [96109, 96404], "cached": [96000, 0], "pp": [54, 842], "acc": 352, "rej": 768, "a": 0.314, "smi_peak_mib": 23702, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 96304, "conc": 2, "rep": 1, "wall_s": 8.7, "tg": [41.58, 34.67], "agg_tok_s": 59.0, "prompt_n": [96404, 96109], "cached": [96256, 96000], "pp": [173, 85], "acc": 352, "rej": 768, "a": 0.314, "smi_peak_mib": 23702, "errors": []}
+{"tag": "S3-dflash2-cq88", "depth": 96304, "conc": 2, "rep": 2, "wall_s": 8.7, "tg": [41.58, 34.66], "agg_tok_s": 59.0, "prompt_n": [96404, 96109], "cached": [96256, 96000], "pp": [173, 85], "acc": 352, "rej": 768, "a": 0.314, "smi_peak_mib": 23702, "errors": []}
+{"tag": "S3-dflash2-cq88", "event": "done", "smi_peak_mib": 23702, "free_at_peak_mib": 874}

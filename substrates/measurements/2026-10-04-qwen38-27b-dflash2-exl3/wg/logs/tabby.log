@@ -1,0 +1,187 @@
+15:08:03.461 INFO:     Using config file config-w335g.yml
+15:08:03.466 INFO:     The 'config.yml' file cannot be found
+15:08:05.173 WARNING:  No sampler overrides are configured
+                       (sampling.override_preset or inline overrides in the
+                       sampling section), so sampling parameters have no
+                       fallback values. Requests that omit them run untruncated:
+                       temperature 1.0, top_k 0, top_p 1.0, min_p 0. Set
+                       override_preset to safe_defaults unless this is
+                       intentional.
+15:08:05.176 INFO:     exllamav3 version: 1.5.4
+15:08:06.040 INFO:     Keeping vision model weights in system RAM
+                       (vision_offload).
+15:08:06.042 INFO:     Using draft model:
+                       $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-i
+                       gor255
+15:08:06.042 INFO:     Disabling GPU split because one GPU is in use.
+15:08:06.043 INFO:     Context: max_seq_len 172,032 tokens (configured),
+                       cache_size 172,032 tokens
+15:08:06.069 INFO:     Using template "chat_template" for chat completions.
+15:08:06.070 INFO:     Response parsing: tool format qwen3_coder (template,
+                       tokenizer, architecture), reasoning tags <think> </think>
+                       (template)
+15:08:09.847 INFO:     Loading model
+                       $HOME/Models/Qwen3.8-27B-exl3-3.00bpw (manual
+                       GPU split)
+Loading vision modules ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 30/30 0:00:00
+Loading draft modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 8/8   0:00:00
+Loading model modules  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 100% 67/67 0:00:00
+15:08:13.375 INFO:     Model loaded in 7.3 s
+
+15:08:13.375 WARNING:  Disabling authentication makes your instance vulnerable.
+                       Set the `disable_auth` flag to False in config.yml if you
+                       want to share this instance with others.
+15:08:13.376 WARNING:  With authentication disabled and `allowed_origins` left
+                       at ["*"], any website open in a browser on this machine
+                       can send requests to this instance and read the
+                       responses, including admin endpoints. Set
+                       `network.allowed_origins` to your own frontends (or [])
+                       unless you use a browser-based frontend that needs it.
+15:08:13.377 INFO:     Serving OAI API on http://127.0.0.1:8083 (docs at
+                       http://127.0.0.1:8083/redoc)
+15:08:16.036 INFO:     #4 chat/completions: 287 prompt tokens · temperature: 0.6
+                       (req), top_k: 20 (req), max_tokens: 8192 (req)
+15:08:18.269 INFO:     #4 chat/completions: 61 tokens generated at 49.5 T/s ·
+                       prompt 287 tokens, none cached, 287 new in 0.99 s (290
+                       T/s) · first token 1.00 s, total 2.23 s · draft 43/126
+                       accepted (34%)
+15:08:18.271 INFO:     #5 chat/completions: 287 prompt tokens · temperature: 0.6
+                       (req), top_k: 20 (req), max_tokens: 8192 (req)
+15:08:18.938 INFO:     #5 chat/completions: 66 tokens generated at 111.5 T/s ·
+                       prompt 287 tokens, 89% cached, 31 new in 0.05 s · first
+                       token 0.07 s, total 0.66 s · draft 49/119 accepted (41%)
+15:08:18.941 INFO:     #6 chat/completions: 287 prompt tokens · temperature: 0.6
+                       (req), top_k: 20 (req), max_tokens: 8192 (req)
+15:08:19.568 INFO:     #6 chat/completions: 64 tokens generated at 115.8 T/s ·
+                       prompt 287 tokens, 89% cached, 31 new in 0.05 s · first
+                       token 0.07 s, total 0.62 s · draft 48/112 accepted (43%)
+15:08:19.700 INFO:     #7 chat/completions: 1,739 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+15:08:23.752 INFO:     #7 chat/completions: 256 tokens generated at 103.7 T/s ·
+                       prompt 1,739 tokens, none cached, 1,739 new in 1.58 s
+                       (1,101 T/s) · first token 1.58 s, total 4.05 s · draft
+                       185/497 accepted (37%) · max_tokens reached
+15:08:23.757 INFO:     #8 chat/completions: 1,739 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+15:08:26.548 INFO:     #8 chat/completions: 256 tokens generated at 103.6 T/s ·
+                       prompt 1,739 tokens, 88% cached, 203 new in 0.30 s ·
+                       first token 0.32 s, total 2.79 s · draft 185/497 accepted
+                       (37%) · max_tokens reached
+15:08:26.676 INFO:     #9 chat/completions: 76,828 prompt tokens · temperature:
+                       0, greedy (req), max_tokens: 256 (req)
+[W1004 15:08:26.204061233 CUDACachingAllocator.cpp:508] expandable_segments: memory mapping failed with OOM on device 0 while trying to map 20971520 bytes (free: 3407872, total: 25327763456).
+[W1004 15:08:26.209227300 CUDACachingAllocator.cpp:508] expandable_segments: memory mapping failed with OOM on device 0 while trying to map 20971520 bytes (free: 9699328, total: 25327763456).
+15:08:26.787 WARNING:  Generation failed; error was contained to this request
+                       and the generator is still healthy.
+15:08:26.793 ERROR:    Error Traceback (most recent call last):
+                         File
+                       "$HOME/src/tabbyAPI/endpoints/OAI/utils/chat_co
+                       mpletion.py", line 1013, in generate_chat_completion
+                           raise r
+                         File
+                       "$HOME/src/tabbyAPI/endpoints/OAI/utils/chat_co
+                       mpletion.py", line 738, in _chat_stream_collector
+                           async for generation in new_generation:
+                         File
+                       "$HOME/src/tabbyAPI/backends/exllamav3/model.py
+                       ", line 1316, in stream_generate
+                           async for generation_chunk in self.generate_gen(
+                         File
+                       "$HOME/src/tabbyAPI/backends/exllamav3/model.py
+                       ", line 1855, in generate_gen
+                           raise ex
+                         File
+                       "$HOME/src/tabbyAPI/backends/exllamav3/model.py
+                       ", line 1737, in generate_gen
+                           async for result in job:
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/generator/async_generator.py", line 172, in
+                       __aiter__
+                           raise result
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/generator/generator.py", line 544, in iterate
+                           job.prefill(results)
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/generator/job.py", line 1541, in prefill
+                           self.generator.model.prefill(input_ids = prefill_ids,
+                       params = params)
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       torch/utils/_contextlib.py", line 124, in
+                       decorate_context
+                           return func(*args, **kwargs)
+                                  ^^^^^^^^^^^^^^^^^^^^^
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/model/model.py", line 387, in prefill
+                           y = self.prefill_ls(x, params)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/model/model_ls.py", line 341, in prefill_ls
+                           x = module.forward(x, params)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/modules/transformer.py", line 159, in forward
+                           y = self.attn.forward(y, params)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/modules/attn.py", line 626, in forward
+                           x = self.decode_flash_attn(x, bsz, seqlen, params)
+                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/modules/attn.py", line 1171, in
+                       decode_flash_attn
+                           o = attn_dispatch(
+                               ^^^^^^^^^^^^^^
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/modules/attention_fn/dispatch.py", line 169, in
+                       attn_dispatch
+                           o = fn(args) if fn is not None else None
+                               ^^^^^^^^
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/modules/attention_fn/triton_paged.py", line
+                       2368, in fn_triton_paged_attn_prefill_qc
+                           return paged_attn_triton_prefill(
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/modules/attention_fn/triton_paged.py", line
+                       1989, in paged_attn_triton_prefill
+                           grid, args, num_warps, num_stages, q_blocks,
+                       num_splits, partial_o, partial_ml, block_m, wide_index =
+                       prepare(cfg)
+                       
+                                                                        ^^^^^^^^
+                       ^^^^
+                         File
+                       "$HOME/venvs/tabby154/lib/python3.12/site-packages/
+                       exllamav3/modules/attention_fn/triton_paged.py", line
+                       1956, in prepare
+                           partial_o = torch.empty(programs * splits * block_m *
+                       hd_pad, dtype = torch.float32, device = q.device)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                       torch.OutOfMemoryError: CUDA out of memory. Tried to
+                       allocate 96.00 MiB. GPU 0 has a total capacity of 23.59
+                       GiB of which 49.25 MiB is free. Including non-PyTorch
+                       memory, this process has 23.51 GiB memory in use. Of the
+                       allocated memory 23.07 GiB is allocated by PyTorch, and
+                       30.82 MiB is reserved by PyTorch but unallocated. If
+                       reserved but unallocated memory is large try setting
+                       PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid
+                       fragmentation.  See documentation for Memory Management
+                       (https://docs.pytorch.org/docs/stable/notes/cuda.html#opt
+                       imizing-memory-usage-with-pytorch-cuda-alloc-conf)
+15:08:26.801 ERROR:    Sent to request: #9 chat completion aborted. Maybe the
+                       model was unloaded? Please check the server console.
+15:08:26.989 WARNING:  Shutdown signal called. Exiting gracefully.
+15:08:27.956 INFO:     Model unloaded.

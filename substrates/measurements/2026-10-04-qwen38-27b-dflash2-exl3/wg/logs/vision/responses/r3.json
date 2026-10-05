@@ -1,0 +1,15 @@
+{
+ "n": 3,
+ "started": "2026-10-04T22:08:18.938751Z",
+ "ended": "2026-10-04T22:08:19.568418Z",
+ "status": 200,
+ "headers": {
+  "date": "Sun, 04 Oct 2026 22:08:18 GMT",
+  "server": "uvicorn",
+  "content-length": "1217",
+  "content-type": "application/json",
+  "vary": "Origin",
+  "connection": "close"
+ },
+ "body": "{\"id\":\"cmpl-fffb6a97cf8d410fbdc653099d8037b0\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"eos_reason\":\"stop_token\",\"stop_str\":\"<|im_end|>\",\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\nNPC?\",\"reasoning_content\":\"The user wants the text extracted from the image. I see a pixelated, dark blue font on a white background. Reading the characters left to right: N, P, C, followed by a question mark. The text is \\\"NPC?\\\". I should provide only the text as instructed.\\n\",\"tool_calls\":null,\"tool_call_id\":null},\"logprobs\":null}],\"created\":1791151699,\"model\":\"Qwen3.8-27B-exl3-3.00bpw\",\"object\":\"chat.completion\",\"usage\":{\"prompt_tokens\":287,\"prompt_tokens_details\":{\"cached_tokens\":256},\"prompt_time\":0.05,\"prompt_tokens_per_sec\":620.0,\"completion_tokens\":64,\"completion_tokens_details\":{\"accepted_prediction_tokens\":48,\"rejected_prediction_tokens\":64},\"completion_time\":0.55,\"completion_tokens_per_sec\":115.79,\"total_tokens\":351,\"total_time\":0.62},\"timings\":{\"cache_n\":256,\"prompt_n\":31,\"prompt_ms\":50.0,\"prompt_per_token_ms\":1.6129032258064515,\"prompt_per_second\":620.0,\"predicted_n\":64,\"predicted_ms\":550.0,\"predicted_per_token_ms\":8.59375,\"predicted_per_second\":116.36363636363636,\"draft_n\":112,\"draft_n_accepted\":48}}"
+}

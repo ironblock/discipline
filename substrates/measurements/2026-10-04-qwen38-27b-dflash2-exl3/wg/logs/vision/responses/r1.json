@@ -1,0 +1,15 @@
+{
+ "n": 1,
+ "started": "2026-10-04T22:08:15.330515Z",
+ "ended": "2026-10-04T22:08:18.269181Z",
+ "status": 200,
+ "headers": {
+  "date": "Sun, 04 Oct 2026 22:08:14 GMT",
+  "server": "uvicorn",
+  "content-length": "1264",
+  "content-type": "application/json",
+  "vary": "Origin",
+  "connection": "close"
+ },
+ "body": "{\"id\":\"cmpl-6eb9c30fe1d048fba44ab65850151d00\",\"choices\":[{\"index\":0,\"finish_reason\":\"stop\",\"eos_reason\":\"stop_token\",\"stop_str\":\"<|im_end|>\",\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\nNPC?\",\"reasoning_content\":\"The user wants the text extracted from the image. The image displays pixelated, blocky text in a dark blue color against a white background. The characters are clearly \\\"NPC\\\" followed by a question mark \\\"?\\\". I need to provide just the text without any additional explanation.\\n\",\"tool_calls\":null,\"tool_call_id\":null},\"logprobs\":null}],\"created\":1791151698,\"model\":\"Qwen3.8-27B-exl3-3.00bpw\",\"object\":\"chat.completion\",\"usage\":{\"prompt_tokens\":287,\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_time\":0.99,\"prompt_tokens_per_sec\":289.9,\"completion_tokens\":61,\"completion_tokens_details\":{\"accepted_prediction_tokens\":43,\"rejected_prediction_tokens\":83},\"completion_time\":1.23,\"completion_tokens_per_sec\":49.48,\"total_tokens\":348,\"total_time\":2.23},\"timings\":{\"cache_n\":0,\"prompt_n\":287,\"prompt_ms\":990.0,\"prompt_per_token_ms\":3.4494773519163764,\"prompt_per_second\":289.8989898989899,\"predicted_n\":61,\"predicted_ms\":1230.0,\"predicted_per_token_ms\":20.16393442622951,\"predicted_per_second\":49.59349593495935,\"draft_n\":126,\"draft_n_accepted\":43}}"
+}

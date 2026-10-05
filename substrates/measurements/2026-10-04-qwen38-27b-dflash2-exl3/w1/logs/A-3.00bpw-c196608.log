@@ -1,0 +1,15 @@
+ -- Loading $HOME/Models/Qwen3.8-27B-DFlash2-EXL3-4.00bpw-igor255
+
+ -- Loading $HOME/Models/Qwen3.8-27B-exl3-3.00bpw
+
+ -- Warming up...
+[W1004 12:26:11.072933258 CUDACachingAllocator.cpp:508] expandable_segments: memory mapping failed with OOM on device 0 while trying to map 20971520 bytes (free: 1310720, total: 25327763456).
+[W1004 12:26:13.501842973 CUDACachingAllocator.cpp:508] expandable_segments: memory mapping failed with OOM on device 0 while trying to map 20971520 bytes (free: 3407872, total: 25327763456).
+ !! Warmup pass failed (chunk 4096, 4096 token(s) at 0): OutOfMemoryError('CUDA out of memory. Tried to allocate 1.89 GiB. GPU 0 has a total capacity of 23.59 GiB of which 1.19 GiB is free. Including non-PyTorch memory, this process has 22.37 GiB memory in use. Of the allocated memory 22.00 GiB is allocated by PyTorch, and 19.44 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)')
+[W1004 12:26:16.063051871 CUDACachingAllocator.cpp:508] expandable_segments: memory mapping failed with OOM on device 0 while trying to map 20971520 bytes (free: 3407872, total: 25327763456).
+[W1004 12:26:18.488054095 CUDACachingAllocator.cpp:508] expandable_segments: memory mapping failed with OOM on device 0 while trying to map 20971520 bytes (free: 7602176, total: 25327763456).
+ !! Warmup pass failed (long context 4096, 4096 token(s) at 0): OutOfMemoryError('CUDA out of memory. Tried to allocate 1.89 GiB. GPU 0 has a total capacity of 23.59 GiB of which 1.06 GiB is free. Including non-PyTorch memory, this process has 22.50 GiB memory in use. Of the allocated memory 22.03 GiB is allocated by PyTorch, and 17.73 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)')
+
+ -- Loading tokenizer...
+{"tag": "A-3.00bpw-c196608", "event": "loaded", "load_s": 24, "cache_size": 196608, "smi_used_mib": 23068, "smi_free_mib": 1508, "torch_free_mib": 1087}
+{"tag": "A-3.00bpw-c196608", "event": "too_little_free", "need": 1608}
