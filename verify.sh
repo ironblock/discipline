@@ -4159,6 +4159,13 @@ inject_exercise_scope_mark_dropped() {
   edit_in_place "s|^        return { kind: 'ask', text: command.text, ...(command.scoping ? { scoping: true } : {}) };$|        return { kind: 'ask', text: command.text };|" exercise/src/drive/http.ts
 }
 
+# The operator's screenshot dropped from their ask (#372): the ask line
+# carries `files` (log v5), and the fold leaves them off the user node, so the
+# trunk draws the words without the image. Typecheck and lint pass it.
+inject_exercise_ask_files_dropped() {
+  edit_in_place "s|^            ...(ask.files && ask.files.length > 0 ? { files: ask.files } : {}),$|            ...({}),|" exercise/src/session/fold.ts
+}
+
 # A placed core line diet's reader refuses (#300): an `ask` carrying a key
 # the format does not have. Typecheck, lint and the fold all pass it -- the
 # surface ignores the key -- so only diet's reader, over the projection, says.
@@ -11012,6 +11019,8 @@ selftest() {
     'FAIL.*Approval\.stories\.tsx.*the conformance corpus, each command drawn as the gate judged it'
   seeded_case "the operator's scope mark dropped on the way to serve" exercise inject_exercise_scope_mark_dropped \
     'FAIL.*http\.test\.ts.*posts .scoping: true. on the ask the operator marked'
+  seeded_case "the operator's screenshot dropped from their ask" exercise inject_exercise_ask_files_dropped \
+    'FAIL.*Files\.stories\.tsx.*screenshot on their ask, live: read by digest and drawn'
   seeded_case "a placed core line diet's reader refuses" exercise inject_exercise_placed_line_refused \
     'diet check-log refuses the placed projection: .*`ask` carries no `asked_by`'
   seeded_case "an example bundled into the page's code" exercise inject_exercise_example_bundled_into_page \

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { publishedAssets } from '../replay/assets.ts';
 import { fold } from '../session/fold.ts';
-import { CannedTransport } from './canned.ts';
+import { CannedTransport, snapshot } from './canned.ts';
 import { assetAnswer, assetModule, importedFiles, read } from './files.ts';
 import type { FileSource } from './files.ts';
 import type { FileRef, LogLine } from './log.ts';
@@ -102,5 +102,17 @@ describe('a call whose result is a file, canned (#372)', () => {
     expect(node?.kind === 'tool' && node.files).toEqual([ref]);
     await expect(read(ref, transport.file)).resolves.toEqual({ kind: 'shown', bytes: SCENE.bytes });
     await expect(transport.file('0'.repeat(64))).resolves.toEqual({ kind: 'not-found' });
+  });
+});
+
+describe('the operator’s attachment on an ask (#372, log v5’s `ask.files`)', () => {
+  it('folds an ask’s files onto its user node, by reference, and an ask without files gets none', () => {
+    const lines = snapshot(SCREENSHOT, { beat: SCREENSHOT.length });
+    const attached = lines.map((line) => (line.kind === 'ask' ? { ...line, files: [ref] } : line));
+    const user = (log: readonly LogLine[]) => fold(log).eras.flatMap((e) => e.nodes).find((n) => n.kind === 'user');
+    const marked = user(attached);
+    expect(marked?.kind === 'user' && marked.files).toEqual([ref]);
+    const plain = user(lines);
+    expect(plain?.kind === 'user' && plain.files).toBeUndefined();
   });
 });

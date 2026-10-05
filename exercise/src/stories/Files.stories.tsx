@@ -99,3 +99,49 @@ export const Withheld: StoryObj = {
     await expect(shot(canvasElement)?.querySelector('.ex-file__ref')?.textContent).toContain('shots/scene.png');
   },
 };
+
+/** The operator's screenshot on the ask (#372, log v5's `ask.files`, #458): the same session, the scene attached to its ask. */
+const ref = { path: 'shots/scene.png', sha256: SCENE_SHA256, media_type: 'image/png', bytes: SCENE_PNG.length };
+const attached = fold(snapshot(SCREENSHOT, { beat: SCREENSHOT.length }).map((line) => (line.kind === 'ask' ? { ...line, files: [ref] } : line)));
+const asked = (root: HTMLElement) => root.querySelector<HTMLElement>('.ex-trunk [data-tone="user"] .ex-file');
+
+/** The operator's attachment on their ask, drawn from its checked bytes: as `serve`'s GET /files answers, or a replay's asset. */
+async function drawnOnTheAsk(root: HTMLElement) {
+  const image = await waitFor(async () => {
+    const found = asked(root)?.querySelector<HTMLImageElement>('img.ex-file__image');
+    await expect(found).not.toBeNull();
+    await expect(found!.complete && found!.naturalWidth).toBe(160);
+    return found!;
+  });
+  await expect(image.src.startsWith('blob:')).toBe(true);
+  await expect(image.dataset['sha256']).toBe(SCENE_SHA256);
+  await expect(root.querySelector('.ex-trunk [data-tone="user"] .ex-files')?.getAttribute('aria-label')).toBe('what the operator attached');
+}
+
+export const AskAttachedLive: StoryObj = {
+  name: 'the operator’s screenshot on their ask, live: read by digest and drawn',
+  render: () => <SessionView session={attached} surface={surface} composer={{ phases: PHASES }} files={() => Promise.resolve({ kind: 'bytes', bytes: SCENE_PNG })} />,
+  play: async ({ canvasElement }) => drawnOnTheAsk(canvasElement),
+};
+
+export const AskAttachedReplayed: StoryObj = {
+  name: 'the operator’s screenshot on their ask, replayed from the recording’s asset',
+  render: () => (
+    <SessionView
+      session={attached}
+      surface={surface}
+      composer={{ phases: PHASES }}
+      files={importedFiles((sha256) => (sha256 === SCENE_SHA256 ? `data:text/javascript;base64,${btoa(assetModule(SCENE_PNG))}` : 'data:text/javascript,'))}
+    />
+  ),
+  play: async ({ canvasElement }) => drawnOnTheAsk(canvasElement),
+};
+
+export const AskAttachedNotTheBytes: StoryObj = {
+  name: 'the operator’s screenshot whose bytes are not its digest: refused on the ask, never drawn',
+  render: () => <SessionView session={attached} surface={surface} composer={{ phases: PHASES }} files={() => Promise.resolve({ kind: 'bytes', bytes: SCENE_PNG.slice(0, -1) })} />,
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(asked(canvasElement)?.querySelector('.ex-file__unshown')?.textContent).toMatch(/^refused: the bytes are not /));
+    await expect(asked(canvasElement)?.querySelector('img')).toBeNull();
+  },
+};

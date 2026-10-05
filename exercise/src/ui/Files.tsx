@@ -16,9 +16,9 @@ export const FilesContext = createContext<FileSource | undefined>(undefined);
  * why, under the reference: withheld from the publication, not found, bytes
  * that are not the digest, or a source that cannot be asked.
  */
-export function FileResults({ files }: { readonly files: readonly FileRef[] }) {
+export function FileResults({ files, label = 'the files it wrote' }: { readonly files: readonly FileRef[]; readonly label?: string }) {
   return (
-    <ul className="ex-files" aria-label="the files it wrote">
+    <ul className="ex-files" aria-label={label}>
       {files.map((file) => (
         <li key={`${file.sha256}/${file.path}`} className="ex-file">
           {file.media_type.startsWith('image/') ? <CheckedImage file={file} /> : null}

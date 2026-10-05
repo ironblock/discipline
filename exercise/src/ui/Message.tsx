@@ -6,6 +6,7 @@ import { tokens, took } from './format.ts';
 import { Copy } from './Copy.tsx';
 import { edgeOf, readingOf, warmOf, writingOf, writtenApart } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
+import { FileResults } from './Files.tsx';
 import { Prose } from './Prose.tsx';
 import { alarmOf, failOf, settleOf, stopOf } from './sets.ts';
 import { elapsed, useNow } from './surface.tsx';
@@ -88,6 +89,8 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
       actions={<Copy text={node.text} />}
     >
       <Prose text={node.text} kind="ask" />
+      {/* What the operator attached (#372): the screenshot, from its checked bytes, under the words. */}
+      {node.files ? <FileResults files={node.files} label="what the operator attached" /> : null}
     </Block>
   );
 }
