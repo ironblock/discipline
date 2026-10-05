@@ -71,3 +71,12 @@ check = "lanes"
 label = "drive.an-attachment-is-read-outside-the-confinement"
 failure_class = "drive.an-attachment-is-read-outside-the-confinement"
 migrated = false
+
+# The head rebuild (#458's review NB2): an image turn's head rebuilt with its image.
+[[fault]]
+id = "drive.projection-rebuilds-an-image-turn-without-its-image"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.projection-rebuilds-an-image-turn-without-its-image"
+failure_class = "drive.projection-rebuilds-an-image-turn-without-its-image"
+migrated = false

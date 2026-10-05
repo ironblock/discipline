@@ -366,6 +366,9 @@ fn serve(args: &[String]) -> ExitCode {
     let session = served_session(transport, shape, tools, (claim, interview));
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
+    // Where the projection reads an attached file back from (#372): the
+    // directory its copy was kept in.
+    let recording = attaching.recording.clone();
     let config = Config {
         attaching,
         allowed_origins,
@@ -379,7 +382,10 @@ fn serve(args: &[String]) -> ExitCode {
         log_path.as_deref().zip(log_file),
         record.zip(regime.clone()),
     ) {
-        Ok(started) => started,
+        Ok(started) => Running {
+            recording,
+            ..started
+        },
         Err(code) => return code,
     };
     println!(
@@ -410,7 +416,12 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
     // here, once, after `ended` and before the server stops -- in order, on
     // this thread, so nothing races the exit (#315's second review).
     if let Some((regime, (path, file))) = running.record {
-        match written_record(session, &regime, &path, file) {
+        match written_record(
+            session,
+            &regime,
+            (&path, file),
+            running.recording.as_deref(),
+        ) {
             Ok(report) => {
                 let _ = std::io::Write::write_all(
                     &mut std::io::stdout().lock(),
@@ -852,6 +863,7 @@ fn started(
         record_held,
         record,
         receipt,
+        recording: None,
     })
 }
 
@@ -925,6 +937,9 @@ struct Running {
     record: Option<(diet::formats::record::Regime, (String, std::fs::File))>,
     /// Where the receipt goes: beside the record, else beside the log.
     receipt: Option<String>,
+    /// The recording's directory, which an attached file's copy was kept in
+    /// and the projection reads it back from (#372).
+    recording: Option<std::path::PathBuf>,
 }
 
 /// Project the ended session, check the record reads back, and write it and
@@ -932,8 +947,8 @@ struct Running {
 fn written_record(
     session: &Session<HttpStream>,
     regime: &diet::formats::record::Regime,
-    path: &str,
-    mut file: std::fs::File,
+    (path, mut file): (&str, std::fs::File),
+    recording: Option<&std::path::Path>,
 ) -> Result<String, String> {
     use diet::drive::projection;
     use diet::formats::record::{self, Record};
@@ -946,7 +961,7 @@ fn written_record(
         .iter()
         .map(diet::drive::session::line_of)
         .collect();
-    let projected = projection::project(&lines, regime, engine)?;
+    let projected = projection::project_in(&lines, regime, engine, recording)?;
     let text = record::render(&Record {
         events: projected.events.clone(),
     });
