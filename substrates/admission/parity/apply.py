@@ -66,6 +66,9 @@ POOL = "per-seat"      # "per-seat": each seat over its own counted forks; "pair
 REFIRE_INTERVAL = False  # report the fire's own paired interval beside the word, by band.py's method, and whether it straddles zero
 INTERVIEW_MISS = "fail"  # "fail": a missing interview fork fails the seat (#115); "byte-match": it is reported, and the fire is
                          # void only if a planned fork ran with another request (planning, #143 comment 5921525110)
+ROUTING = "draft_n"      # "draft_n": #115's routing fingerprint; "identity": the candidate's responses are routed by the instance identity
+                         # and /v1/model's id checked at every request (ruled #393 5986337117, ruling 3), the box record carrying the checks
+_BOX = None
 PLANNED = {}             # under "byte-match": seat -> {fork key: the planned request's digest} (the offline rehearsal's)
 BOX_FIELDS = ("instance_before", "instance_after", "verify_before", "verify_after",
               "fingerprint_before", "fingerprint_after", "canary_before", "canary_after", "seatb_canary")
@@ -73,7 +76,7 @@ BOX_FIELDS = ("instance_before", "instance_after", "verify_before", "verify_afte
 
 def configure(path):
     """Read CONFIG and set the applier's constants from it."""
-    global PINNED, BAND_SHA, ARMS, MODEL_ID, INTERVIEWS, DISCLOSURE, SEAT_A_FLOOR, COUNTED_FLOOR, POOL, REFIRE_INTERVAL, INTERVIEW_MISS, PLANNED
+    global ROUTING, PINNED, BAND_SHA, ARMS, MODEL_ID, INTERVIEWS, DISCLOSURE, SEAT_A_FLOOR, COUNTED_FLOOR, POOL, REFIRE_INTERVAL, INTERVIEW_MISS, PLANNED
     try:
         c = json.loads(pathlib.Path(path).read_text(encoding="utf-8"))["apply"]
         PINNED, BAND_SHA, ARMS, MODEL_ID = dict(c["pinned"]), str(c["band_sha256"]), dict(c["arms"]), str(c["model_id"])
@@ -81,6 +84,9 @@ def configure(path):
         COUNTED_FLOOR = None if c.get("counted_fork_floor") is None else int(c["counted_fork_floor"])
         POOL, REFIRE_INTERVAL = str(c.get("pool", "per-seat")), bool(c.get("report_refire_interval", False))
         INTERVIEW_MISS = str(c.get("interview_miss", "fail"))
+        ROUTING = str(c.get("routing", "draft_n"))
+        if ROUTING not in ("draft_n", "identity"):
+            cannot("the config's routing is neither draft_n nor identity")
         if INTERVIEW_MISS == "byte-match":
             planned = c["planned_requests"]  # {"file": relative to the config, "sha256": its pinned digest}
             f = pathlib.Path(path).resolve().parent / planned["file"]
@@ -181,6 +187,12 @@ def check_box(box):
             r.append(f"box: {f} is {box[f]!r}, not PASS within one re-draw")
     if box["seatb_canary"] != {"think": False, "draft_n": False}:
         r.append(f"box: the seat-B pre-fire answer is {box['seatb_canary']!r}")
+    if ROUTING == "identity":
+        rt = box.get("routing")
+        if not (isinstance(rt, dict) and rt.get("model_id") == MODEL_ID and rt.get("instance") == ib
+                and isinstance(rt.get("checks"), dict) and set(rt["checks"]) == {"A", "B"}
+                and all(isinstance(v, list) for v in rt["checks"].values())):
+            r.append("routing: the box record lacks the identity routing check (the instance and the model id the checks were made against, and a list of checks per seat); a fire whose routing check cannot run is void")
     return r
 
 
@@ -214,7 +226,7 @@ def check_seat(grade, name, seat_dir, keys):
             elif name == "B" and ext:
                 if "draft_n" in t:
                     bad(f, "seat-B extraction carrying draft_n")
-            elif "draft_n" not in t:
+            elif ROUTING == "draft_n" and "draft_n" not in t:
                 bad(f, f"seat-{name} {f['lane']} lacking draft_n")
         if name == "B":
             byid = {f["id"]: f for f in forks}
@@ -223,6 +235,16 @@ def check_seat(grade, name, seat_dir, keys):
                         e.get("reasoning") or "<think>" in (e.get("content") or "")):
                     f = byid.get(e.get("id")) or {"lane": "extraction", "turn": e.get("turn"), "step": e.get("step")}
                     bad(f, "seat-B extraction with reasoning or a think block")
+        if ROUTING == "identity" and isinstance(_BOX, dict) and isinstance(_BOX.get("routing"), dict):
+            # the candidate endpoint answered every seat-A fork and every seat-B interview fork; each such request was
+            # preceded by a /v1/model read whose id is recorded in the box's checks for that seat: one per request, all the pinned id
+            chk = _BOX["routing"].get("checks", {}).get(name)
+            if isinstance(chk, list):
+                want = sum(1 for f in forks if name == "A" or f["lane"] != "extraction")
+                if len(chk) < want:
+                    n[f"{want} candidate-routed forks, {len(chk)} model-id checks"] += 1
+                if any(c != MODEL_ID for c in chk):
+                    n["a model-id check named another id than the pinned one"] += 1
         r += [f"routing: {k}: {v}" for k, v in sorted(n.items())]
         tallies, dup = {}, False
         for f in forks:
@@ -262,6 +284,8 @@ def check_seat(grade, name, seat_dir, keys):
 
 
 def adjudicate(grade, band, seat_dirs, box):
+    global _BOX
+    _BOX = box
     reasons = check_box(box)
     if band["seat_a"]["accepted_deduped"] < SEAT_A_FLOOR:
         reasons.append(f"floor: the band's own fire has seat A at {band['seat_a']['accepted_deduped']} accepted, below the floor of {SEAT_A_FLOOR}")
@@ -425,6 +449,31 @@ def _selftest(archived, band_path):
         ("seat B offering nothing", mut(lambda s: [e.__setitem__("content", "") for e in s["B"] if e["event"] == "fork.response" and e["lane"] == "extraction"]), ok, "unadjudicated", None),
     ]
     bad = sum(ask(*f) for f in fixtures)
+    # ruling 3 (#393 5986337117): the identity routing replaces the draft_n fingerprint for the candidate's responses
+    global ROUTING
+    keep_r = ROUTING
+    try:
+        ROUTING = "identity"
+        def nreq(s, n):
+            return sum(1 for e in s[n] if e["event"] == "fork.response" and (n == "A" or e["lane"] != "extraction"))
+        def rbox(s, a=None, b=None, **kw):
+            rt = {"model_id": MODEL_ID, "instance": "2026-09-20",
+                  "checks": {"A": [MODEL_ID] * nreq(s, "A") if a is None else a, "B": [MODEL_ID] * nreq(s, "B") if b is None else b}}
+            rt.update(kw); return dict(ok, routing=rt)
+        nodn = lambda s: [e["timings"].pop("draft_n", None) for n in ("A", "B") for e in s[n] if e["event"] == "fork.response" and e.get("timings") and not (n == "B" and e["lane"] == "extraction")]
+        idf = []
+        s0 = mut(nodn)
+        idf.append(("identity routing: no draft_n anywhere on the candidate, a model-id check per request: adjudicated", s0, rbox(s0), "supported", None))
+        idf.append(("identity routing: the box record without the routing check is void", s0, ok, "unadjudicated", lambda o: any(r.startswith("routing: the box record lacks") for r in o["unadjudicated_checks"])))
+        idf.append(("identity routing: a check naming another model id", s0, rbox(s0, a=[MODEL_ID] * (nreq(s0, "A") - 1) + ["other"]), "unadjudicated", lambda o: any("another id" in r for r in o["unadjudicated_checks"])))
+        idf.append(("identity routing: one request without its check", s0, rbox(s0, a=[MODEL_ID] * (nreq(s0, "A") - 1)), "unadjudicated", lambda o: any("model-id checks" in r for r in o["unadjudicated_checks"])))
+        idf.append(("identity routing: checks made against another instance", s0, rbox(s0, instance="2026-09-21"), "unadjudicated", lambda o: any(r.startswith("routing: the box record lacks") for r in o["unadjudicated_checks"])))
+        idf.append(("identity routing: checks pinned to another model id", s0, rbox(s0, model_id="other"), "unadjudicated", lambda o: any(r.startswith("routing: the box record lacks") for r in o["unadjudicated_checks"])))
+        s1 = mut(lambda s: (nodn(s), resp(s, "B", "extraction")["timings"].__setitem__("draft_n", 1)))
+        idf.append(("identity routing: a seat-B extraction still must not carry draft_n", s1, rbox(s1), "unadjudicated", None))
+        bad += sum(ask(*f) for f in idf)
+    finally:
+        ROUTING = keep_r
     words = [("the band's lower endpoint", lo, "supported"), ("the band's upper endpoint", hi, "supported"),
              ("just above the band", hi + 1e-9, "inconclusive"), ("between zero and the band", lo / 2, "inconclusive"),
              ("exactly zero", 0.0, "refuted"), ("below zero", -0.01, "refuted")]
