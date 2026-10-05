@@ -323,6 +323,14 @@ struct Walk<'a> {
     /// The trunk's last request: its logged digest, and its head rebuilt
     /// from the log when that gave the same digest.
     last_head: Option<(String, Option<Head>)>,
+    /// The forks with a row, by `seq` (v5, #374).
+    forks: BTreeSet<u64>,
+    /// Each fork's capture row, by the fork's `seq`: its place in `events`.
+    captures: BTreeMap<u64, usize>,
+    /// Each lane but the trunk's last logged head digest (v5, #374): a live
+    /// record names every move of a lane's head, and an interview head moves
+    /// with the trunk it is cut from.
+    side_heads: BTreeMap<Lane, String>,
 }
 
 impl<'a> Walk<'a> {
@@ -361,6 +369,9 @@ impl<'a> Walk<'a> {
             asks: BTreeMap::new(),
             turn_of: BTreeMap::new(),
             last_head: None,
+            forks: BTreeSet::new(),
+            captures: BTreeMap::new(),
+            side_heads: BTreeMap::new(),
         }
     }
 
@@ -433,20 +444,31 @@ impl<'a> Walk<'a> {
                 ),
                 Some(message.clone()),
             ),
-            // Facts the record has no row for at all, named once per kind. A
-            // fork's rows arrive with #374's projection layer.
-            Line::IdleGap { .. }
-            | Line::Refused { .. }
-            | Line::Progress { .. }
-            | Line::Fork { .. }
-            | Line::ForkSettled { .. }
-            | Line::Patch { .. } => {
+            // A fork (v5, #374): its row, and its patches as one capture row.
+            Line::Fork { lane, of_turn, .. } => self.fork(line.seq, *lane, *of_turn),
+            Line::Patch { fork, .. } => self.patch(line.seq, *fork),
+            // The record's fork row carries no outcome: a fork that settled
+            // `value` is carried by its capture row, and any other outcome is
+            // named with its word.
+            Line::ForkSettled { fork, outcome } => {
+                if *outcome != log::ForkOutcome::Value {
+                    self.name(
+                        line.seq,
+                        "fork.settled",
+                        format!(
+                            "fork f/{fork} settled `{}`: the record's fork row carries no \
+                             outcome, and only a fork settled `value` captures",
+                            outcome.tag()
+                        ),
+                        None,
+                    );
+                }
+            }
+            // Facts the record has no row for at all, named once per kind.
+            Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
                 let kind = match &line.event {
                     Line::IdleGap { .. } => log::Kind::IdleGap,
                     Line::Refused { .. } => log::Kind::Refused,
-                    Line::Fork { .. } => log::Kind::Fork,
-                    Line::ForkSettled { .. } => log::Kind::ForkSettled,
-                    Line::Patch { .. } => log::Kind::Patch,
                     _ => log::Kind::Progress,
                 }
                 .tag();
@@ -573,6 +595,58 @@ impl<'a> Walk<'a> {
         });
     }
 
+    /// A fork's row, `f/<seq>`, off the turn it follows: served on the
+    /// regime's substrate, like every row this projection writes. Named
+    /// rather than written when that turn has no row.
+    fn fork(&mut self, seq: u64, lane: Lane, of_turn: u32) {
+        let turned = self
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Turn { index, .. } if *index == of_turn));
+        if !turned {
+            self.name(
+                seq,
+                "fork",
+                format!("a fork of turn {of_turn}, which has no row"),
+                None,
+            );
+            return;
+        }
+        self.forks.insert(seq);
+        self.events.push(Event::Fork {
+            id: format!("f/{seq}"),
+            lane: lane.tag().to_owned(),
+            substrate: self.substrate.clone(),
+            of_turn,
+        });
+    }
+
+    /// A patch, counted on its fork's capture row, `c/<fork>`: one entry per
+    /// patch line, the row written at the fork's first patch.
+    fn patch(&mut self, seq: u64, fork: u64) {
+        if !self.forks.contains(&fork) {
+            self.name(
+                seq,
+                "patch",
+                format!("a patch of fork {fork}, which has no row"),
+                None,
+            );
+            return;
+        }
+        if let Some(&at) = self.captures.get(&fork) {
+            if let Some(Event::Capture { entries, .. }) = self.events.get_mut(at) {
+                *entries += 1;
+            }
+            return;
+        }
+        self.captures.insert(fork, self.events.len());
+        self.events.push(Event::Capture {
+            id: format!("c/{fork}"),
+            from_fork: format!("f/{fork}"),
+            entries: 1,
+        });
+    }
+
     fn ask(&mut self, seq: u64, turn: u32) {
         let trunk_timings =
             self.trunk_of
@@ -636,6 +710,8 @@ impl<'a> Walk<'a> {
         if lane == Lane::Trunk {
             self.turn_of.insert(seq, turn);
             self.head_change(seq, turn, head_sha256);
+        } else {
+            self.side_head_change(seq, lane, head_sha256);
         }
         if !self.outcome.contains_key(&seq) {
             self.name(
@@ -707,6 +783,25 @@ impl<'a> Walk<'a> {
             reason: PrefixReason::Unattributed,
             diff: Vec::new(),
         }));
+    }
+
+    /// A side lane's head moving (v5, #374): named as unattributed, since the
+    /// log holds an interview request's digest and not the head it hashed --
+    /// the trunk's warm tail and the fork's question -- so the move cannot be
+    /// rebuilt and attributed as the trunk's is.
+    fn side_head_change(&mut self, seq: u64, lane: Lane, logged: &str) {
+        let Some(previous) = self.side_heads.insert(lane, logged.to_owned()) else {
+            return;
+        };
+        if previous == logged {
+            return;
+        }
+        self.events.push(Event::PrefixChanged {
+            id: format!("{}#prefix", request_id(seq)),
+            at_request: request_id(seq),
+            reason: PrefixReason::Unattributed,
+            diff: Vec::new(),
+        });
     }
 
     /// The trunk after an answered trunk request: its ask and its answer,
@@ -1482,5 +1577,135 @@ mod tests {
             .map(|u| u.text.as_deref())
             .collect();
         assert_eq!(named, vec![Some("ls -la (")]);
+    }
+
+    /// A v5 session with two forks, projected and validated: turn 1's
+    /// scoping fork settled `value` with three patches, a plain turn 2, and
+    /// turn 3's read fork, declined.
+    fn two_forks() -> Projection {
+        let fork = |at: u64, of_turn: u32, why: log::Warrant| Line::Fork {
+            lane: Lane::Interview,
+            of_turn,
+            at,
+            why,
+            question: "what did the operator decide".to_owned(),
+        };
+        let call = |turn: u32, fork: u64| {
+            [
+                // Each fork's head is the trunk's tail at its gap plus its
+                // question, so two forks never share one.
+                Line::Request {
+                    turn,
+                    lane: Lane::Interview,
+                    head_sha256: Some(format!("{fork:064x}")),
+                    fork: Some(fork),
+                },
+                Line::Response {
+                    to_request: fork + 1,
+                    text: "{}".to_owned(),
+                    finish_reason: Some("stop".to_owned()),
+                    reasoning: None,
+                    timings: Some(warm()),
+                    usage: None,
+                    capped: None,
+                },
+            ]
+        };
+        let patch = |fork: u64, id: &str| Line::Patch {
+            fork,
+            op: log::PatchOp::Add,
+            entry: log::PatchEntry {
+                id: id.to_owned(),
+                text: format!("decision {id}"),
+                category: Some("scope".to_owned()),
+            },
+            supersedes: None,
+        };
+        let mut events = vec![start()];
+        events.extend(answered(1, 3, Some(warm()), None));
+        events.push(fork(3, 1, log::Warrant::Scoping));
+        events.extend(call(1, 8));
+        events.push(Line::ForkSettled {
+            fork: 8,
+            outcome: log::ForkOutcome::Value,
+        });
+        events.extend(["d1", "d2", "d3"].map(|id| patch(8, id)));
+        events.extend(answered(2, 17, Some(warm()), None));
+        events.extend(answered(3, 24, Some(warm()), None));
+        events.push(fork(24, 3, log::Warrant::Read));
+        events.extend(call(3, 29));
+        events.push(Line::ForkSettled {
+            fork: 29,
+            outcome: log::ForkOutcome::Decline,
+        });
+        let lines = numbered(events);
+        let document: String = lines.iter().map(|line| log::render(line) + "\n").collect();
+        log::parse(&document).expect("a v5 log the reader accepts");
+        let projection =
+            project(&lines, &regime(), Some(Engine::Commit("e7051ef"))).expect("projected");
+        validates(&projection);
+        projection
+    }
+
+    /// A fork and what it captured (v5, #374): the scope-boundary gap's fork
+    /// is a row with its three patches as one capture of three entries; a
+    /// plain gap has no fork and so no row; a fork that declined is a row,
+    /// captures nothing, and its outcome is named.
+    #[test]
+    fn a_forks_row_and_its_patches_capture_and_a_declined_fork_is_named() {
+        let projection = two_forks();
+        let forks: Vec<(&str, &str, u32)> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Fork {
+                    id, lane, of_turn, ..
+                } => Some((id.as_str(), lane.as_str(), *of_turn)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            forks,
+            vec![("f/8", "interview", 1), ("f/29", "interview", 3)]
+        );
+        let captures: Vec<(&str, &str, u32)> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Capture {
+                    id,
+                    from_fork,
+                    entries,
+                } => Some((id.as_str(), from_fork.as_str(), *entries)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(captures, vec![("c/8", "f/8", 3)]);
+        let named: Vec<(u64, &str)> = projection
+            .unspellable
+            .iter()
+            .filter(|u| u.kind.starts_with("fork") || u.kind == "patch")
+            .map(|u| (u.seq, u.kind))
+            .collect();
+        assert_eq!(named, vec![(32, "fork.settled")]);
+    }
+
+    /// Two forks never share a head -- each is the trunk's tail at its gap
+    /// plus its question -- so the second's moved from the first's, and is
+    /// named: the live record refuses an unnamed move (#442's review, B1).
+    #[test]
+    fn a_second_forks_moved_head_is_named_and_the_record_validates() {
+        let projection = two_forks();
+        let moves: Vec<(&str, PrefixReason)> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::PrefixChanged {
+                    at_request, reason, ..
+                } if at_request.as_str() == "q/30" => Some((at_request.as_str(), *reason)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(moves, vec![("q/30", PrefixReason::Unattributed)]);
     }
 }

@@ -59,3 +59,12 @@ label = "a fork read in a log that declares v4"
 failure_class = "log.fork-read-in-a-v4-log"
 legacy_signature = "log/fixtures/invalid/a-fork-in-a-v4-log\\.jsonl"
 migrated = false
+
+# Layer 3: the projection's capture row counts its fork's patches.
+[[fault]]
+id = "drive.a-forks-capture-counts-one-patch"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.a-forks-capture-counts-one-patch"
+failure_class = "drive.a-forks-capture-counts-one-patch"
+migrated = false

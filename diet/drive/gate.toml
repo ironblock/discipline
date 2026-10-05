@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 245
+faults = 246
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -3926,4 +3926,17 @@ becomes = '''
             claim: None,'''
 catches = [
     "drive::session::tests::every_event_the_session_logs_is_a_line_the_log_format_reads",
+]
+
+[[fault]]
+id = "drive.a-forks-capture-counts-one-patch"
+failure_class = "drive.a-forks-capture-counts-one-patch"
+target = "diet/src/drive/projection.rs"
+expect_exit = 101
+anchor = '''
+                *entries += 1;'''
+becomes = '''
+                *entries = 1;'''
+catches = [
+    "drive::projection::tests::a_forks_row_and_its_patches_capture_and_a_declined_fork_is_named",
 ]
