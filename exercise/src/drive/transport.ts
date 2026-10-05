@@ -34,15 +34,17 @@ export type Command =
 export type Decision = 'once' | 'session' | 'workspace' | 'decline';
 
 /**
- * One segment of a prompted command as the gate read it (#298 5982466351 point 9: the gate module's `Shape` and
- * `Verdict`). `why` is on a prompting segment only.
+ * One segment of a command as the gate read it: the gate module's own value space (`judge_argv`, #402;
+ * `diet/src/drive/shell_gate.rs`), which the waiting event carries (#389 5982826097) and the replay re-derives
+ * (`gate/judge.ts`). `shape` is what an approval of it would cover, absent when it is dynamic or unreadable;
+ * `why` and `reason` are on a prompting segment, `entry` on a refused one.
  */
 export interface Segment {
-  readonly text: string;
-  readonly program?: string;
-  readonly subcommand?: string;
-  readonly verdict: Open<'free' | 'approved' | 'prompt'>;
-  readonly why?: string;
+  readonly shape?: string;
+  readonly verdict: Open<'refused' | 'prompt' | 'free' | 'approved'>;
+  readonly why?: Open<'not_approved' | 'dynamic' | 'unparsable'>;
+  readonly reason?: string;
+  readonly entry?: string;
 }
 
 /**

@@ -213,21 +213,14 @@ export type ToolCall = Omit<V0.ToolCallLine, 'reason' | 'approval'> & {
   readonly reason?: ToolRefusal;
   /** The decision it ran under (log v4, #388), its scope open as the surface's sets are. */
   readonly approval?: Approval;
-  /** AHEAD (log v4, #372 5983588781): the files the call's result is, by reference, never inlined. */
-  readonly files?: readonly FileRef[];
 };
 
 /**
- * A file a tool call's result is (AHEAD, log v4, #372 5983588781): where the
- * call left it, its sha256, its media type and its size. The page never
- * follows `path`: it asks for the bytes by digest and checks them (`files.ts`).
+ * A file a tool call's result is (log v4, #372 5983588781): where the call
+ * left it, its sha256, its media type and its size. The page never follows
+ * `path`: it asks for the bytes by digest and checks them (`files.ts`).
  */
-export interface FileRef {
-  readonly path: string;
-  readonly sha256: string;
-  readonly media_type: string;
-  readonly bytes: number;
-}
+export type FileRef = V0.RecordedFile;
 
 // ------------------------------------------------------------------ AHEAD kinds
 

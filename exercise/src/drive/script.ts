@@ -34,6 +34,12 @@ export interface SessionStart extends At {
   /** The slot the trunk is pinned to. */
   readonly trunk_slot: number;
   readonly phase: string;
+  /**
+   * The log version it is placed as: 3 unless it says. A v4 log carries `cwd` with every `argv`, and a v3 log
+   * refuses v4's keys (`cwd`, `approval`, `files`), so a session that uses them declares 4 and gives each bash
+   * call its `cwd`.
+   */
+  readonly version?: 3 | 4;
   /** The trunk's first system prompt, as sent; its size in tokens when the record measured it. */
   readonly system: { readonly text: string; readonly tokens?: number };
 }

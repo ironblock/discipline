@@ -6,18 +6,16 @@
  * numbers are plausible, not measured.
  *
  * `npm install` waits on the operator. Approved, the beat plays on: it runs,
- * carrying the decision; the model then tries to clear a cache with `rm -rf`,
- * which the denylist refuses without asking; and it answers. Declined, the
+ * carrying the decision; the model then checks the tree and pushes it, and
+ * the denylist refuses `git push` without asking; and it answers. Declined, the
  * call is refused `declined` and the model says it will not install.
  *
- * Placed, it carries log v4's keys (`cwd`, `approval`, the reasons `denylist`
- * and `declined`, #388) in a log that declares v3, which `diet`'s v3 reader
- * refuses. So it is not among the sessions `projections.ts` hands to
- * `diet check-log` until the v4 courier lands; then it joins them.
+ * Placed, it is a v4 log (#388, #417): every bash call carries its `cwd`,
+ * and `projections.ts` hands it to `diet check-log` with the rest.
  */
 
 import type { Beat } from './specimen.ts';
-import type { Timings } from './script.ts';
+import type { Timings, Unplaced } from './script.ts';
 
 const timings = (prompt_n: number, cache_n: number, prompt_ms: number, predicted_n: number, predicted_ms: number): Timings => ({ prompt_n, cache_n, prompt_ms, predicted_n, predicted_ms });
 
@@ -36,6 +34,7 @@ export const APPROVAL: readonly Beat[] = [
         slots: 1,
         trunk_slot: 0,
         phase: 'build',
+        version: 4,
         system: { text: 'You are working in a fresh Vite project. Run commands with the bash tool.', tokens: 640 },
       },
     ],
@@ -66,7 +65,7 @@ export const APPROVAL: readonly Beat[] = [
         cwd: T1_CWD,
         prompt: {
           reason: 'not_approved',
-          segments: [{ text: 'npm install', program: 'npm', subcommand: 'install', verdict: 'prompt', why: 'not_approved' }],
+          segments: [{ shape: 'npm install', verdict: 'prompt', why: 'not_approved' }],
           declined: [
             { kind: 'request', t: 20, id: 'q/1d', lane: 'trunk', slot: 0, turn: 1 },
             {
@@ -89,12 +88,12 @@ export const APPROVAL: readonly Beat[] = [
         t: 10600,
         id: 'q/2#response',
         to_request: 'q/2',
-        reasoning: 'Clear the Vite cache before the first start, to be safe.',
-        text: 'Clearing the build cache before starting.',
+        reasoning: 'Commit is done by the scaffold; push it so the remote has it.',
+        text: 'Pushing the scaffold.',
         stop: 'tool',
         timings: timings(96, 738, 80, 30, 1050),
       },
-      { kind: 'tool.begin', t: 10620, id: 't/2', turn: 1, after: 'q/2#response', tool: 'bash', args: { command: 'rm -rf node_modules/.vite' }, cwd: T1_CWD },
+      { kind: 'tool.begin', t: 10620, id: 't/2', turn: 1, after: 'q/2#response', tool: 'bash', args: { command: 'git status && git push origin main' }, cwd: T1_CWD },
       { kind: 'tool.end', t: 10625, id: 't/2', exit: 0, output: '', refused: 'denylist' },
       { kind: 'request', t: 10640, id: 'q/3', lane: 'trunk', slot: 0, turn: 1 },
       {
@@ -102,7 +101,7 @@ export const APPROVAL: readonly Beat[] = [
         t: 12100,
         id: 'q/3#response',
         to_request: 'q/3',
-        text: 'The dependencies are installed. Removing the cache is not allowed here, and it is not needed: a fresh install has none. Run `npm run dev` to start the server when you want it.',
+        text: 'The dependencies are installed. Pushing is not allowed from here, so the scaffold stays local. Run `npm run dev` to start the server when you want it.',
         stop: 'stop',
         timings: timings(58, 864, 50, 44, 1400),
       },
@@ -110,3 +109,16 @@ export const APPROVAL: readonly Beat[] = [
     ],
   },
 ];
+
+/**
+ * The approved session as its log has it, with no operator at the keyboard: `t/1` decided for this session 4.2 s
+ * after it was held, and no prompt (the log has none). What the replay story draws and `projections.ts` hands to
+ * `diet check-log`, so v4's reader reads an approval.
+ */
+export const APPROVED: readonly Beat[] = APPROVAL.map((beat) => ({
+  ...beat,
+  events: beat.events.map((e): Unplaced => {
+    if (e.kind === 'tool.begin') return Object.fromEntries(Object.entries(e).filter(([key]) => key !== 'prompt')) as Unplaced;
+    return e.kind === 'tool.end' && e.id === 't/1' ? { ...e, approval: { scope: 'session', decided_at: 1420 + 4200, why: 'not_approved' } } : e;
+  }),
+}));

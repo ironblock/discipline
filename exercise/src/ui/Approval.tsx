@@ -2,6 +2,7 @@ import { createContext, useContext, useState } from 'react';
 
 import type { Ack, Decision, Prompt } from '../drive/transport.ts';
 import type { ToolNode } from '../session/fold.ts';
+import { SegmentList } from './GateSegments.tsx';
 import './approval.css';
 
 /**
@@ -48,7 +49,6 @@ export function ApprovalPrompt({ prompt, decide }: { readonly prompt: Prompt; re
       setRefused(ack.refused);
     }
   };
-  const prompting = prompt.segments.filter((s) => s.verdict === 'prompt');
   return (
     <section className="ex-panel ex-approval" role="alertdialog" aria-label="a command waits on you" data-call={prompt.id}>
       <header className="ex-approval__head">
@@ -64,20 +64,7 @@ export function ApprovalPrompt({ prompt, decide }: { readonly prompt: Prompt; re
         <span className="ex-tool__prompt">$ </span>
         {prompt.command}
       </pre>
-      {prompt.segments.length > 1 || prompting.some((s) => s.why !== undefined) ? (
-        <ol className="ex-approval__segments" aria-label="the command, as the gate read it">
-          {prompt.segments.map((segment, i) => (
-            <li key={i} className="ex-approval__segment" data-verdict={segment.verdict}>
-              <code>{segment.text}</code>
-              {segment.program !== undefined ? <span className="ex-approval__shape">{[segment.program, segment.subcommand].filter(Boolean).join(' ')}</span> : null}
-              <span className="ex-approval__verdict">
-                {segment.verdict}
-                {segment.why !== undefined ? ` · ${segment.why}` : ''}
-              </span>
-            </li>
-          ))}
-        </ol>
-      ) : null}
+      {prompt.segments.length > 0 ? <SegmentList segments={prompt.segments} /> : null}
       <div className="ex-approval__answers">
         {DECISIONS.map((d) => (
           <button

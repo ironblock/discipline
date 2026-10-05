@@ -14,10 +14,11 @@
     "storybook": "storybook dev -p 6006",
     "build": "storybook build",
     "build:replay": "vite build --mode replay",
+    "gate": "node scripts/build-gate.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
-    "verify": "pnpm typecheck && pnpm lint && pnpm test",
+    "verify": "pnpm gate && pnpm typecheck && pnpm lint && pnpm test",
     "perf": "node scripts/perf.mjs"
   },
   "dependencies": {

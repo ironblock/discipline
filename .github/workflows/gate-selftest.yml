@@ -222,6 +222,18 @@ jobs:
           shared-key: selftest-${{ env.RUNNER_IMAGE }}
           save-if: ${{ matrix.shard == 1 }}
 
+      # The shell gate the replay judges with (#389): `diet/wasm` built to wasm32
+      # and bound by the `wasm-bindgen` CLI at the exact version that crate
+      # pins (exercise/scripts/build-gate.mjs), read from its Cargo.toml so
+      # the two cannot drift. Restored from the Cargo cache when warm.
+      - name: Add the wasm32 target and the pinned wasm-bindgen CLI
+        run: |
+          set -euo pipefail
+          rustup target add wasm32-unknown-unknown
+          pin="$(sed -n 's/^wasm-bindgen = { version = "=\([0-9.]*\)".*/\1/p' diet/wasm/Cargo.toml)"
+          test -n "$pin"
+          cargo install wasm-bindgen-cli --version "$pin" --locked
+
       # The isolation lane's seeded faults need a sandbox to execute
       # against, same as `pkg-diet.yml`'s own copy of these three steps --
       # without `bwrap` the lane asserts a correct REFUSAL and passes, which

@@ -30,7 +30,7 @@ const configure: NonNullable<ProxyOptions['configure']> = (proxy) => {
   proxy.on('proxyRes', (upstream, _req, res) => upstream.on('close', () => res.destroy()));
   proxy.on('error', (_error, _req, res) => res.destroy());
 };
-const proxied = drive ? Object.fromEntries(['/events', '/commands', '/files'].map((route) => [route, { target: drive, changeOrigin: false, configure }])) : undefined;
+const proxied = drive ? Object.fromEntries(['/events', '/commands', '/approve', '/files'].map((route) => [route, { target: drive, changeOrigin: false, configure }])) : undefined;
 
 // The replay page (#32): `pnpm build:replay` builds `replay.html` alone into
 // ../_site/replay/, its index, with `base: './'` so it works under whatever

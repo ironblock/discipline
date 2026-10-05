@@ -121,8 +121,9 @@ export class Placer {
         const line: Omit<LineOf<'session.start'>, 'seq'> = {
           kind: 'session.start',
           t: e.t,
-          // The newest the placed lines use: v1's timings and progress, v2's reasoning, v3's tool calls.
-          version: 3,
+          // v1's timings and progress, v2's reasoning, v3's tool calls; v4's cwd, approvals and files where the
+          // script declares 4 (its `version`), since a v4 log carries `cwd` with every `argv`.
+          version: e.version ?? 3,
           // These lines were placed from a script, not served as they ran: the log says so (#297, ruled 5976392264).
           provenance: 'placed',
           opened: SCRIPTED_OPENING,

@@ -2,12 +2,14 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, waitFor, within } from 'storybook/test';
 
 import { App, PHASES } from '../App.tsx';
-import { APPROVAL, T1_CWD } from '../drive/approval.ts';
+import { APPROVAL, APPROVED, T1_CWD } from '../drive/approval.ts';
 import { snapshot } from '../drive/canned.ts';
-import type { Unplaced } from '../drive/script.ts';
 import type { Beat } from '../drive/specimen.ts';
 import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
+import { JudgedSegments } from '../ui/GateSegments.tsx';
+import { judge } from '../gate/judge.ts';
+import corpus from '../../../diet/wasm/tests/shell_gate_cases.jsonl?raw';
 
 /**
  * The approval prompt (#389): a command the gate holds waits on the operator,
@@ -75,20 +77,12 @@ export const Declined: Story = {
   },
 };
 
-/** The approved session as its log has it: `t/1` decided for this session 4.2 s after it was held. */
-const decided: readonly Beat[] = APPROVAL.map((beat) => ({
-  ...beat,
-  events: beat.events.map((e): Unplaced => {
-    // The log has no prompt: the call as it ran, with no hold on it.
-    if (e.kind === 'tool.begin') return Object.fromEntries(Object.entries(e).filter(([key]) => key !== 'prompt')) as Unplaced;
-    return e.kind === 'tool.end' && e.id === 't/1' ? { ...e, approval: { scope: 'session', decided_at: 1420 + 4200, why: 'not_approved' } } : e;
-  }),
-}));
+
 
 /** Replayed from the log alone: no prompt waits and nothing can answer, and the call says the same as it did live. */
 export const Replayed: StoryObj<{ readonly beats: readonly Beat[] }> = {
   name: 'replayed from the log: what it ran under, why it was held, where, and the denylist',
-  args: { beats: decided },
+  args: { beats: APPROVED },
   render: ({ beats }) => <SessionView session={fold(snapshot(beats, { beat: beats.length }))} surface={{ curtain: true, gaps: false }} composer={{ phases: PHASES }} />,
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelector('.ex-approval')).toBeNull();
@@ -98,5 +92,48 @@ export const Replayed: StoryObj<{ readonly beats: readonly Beat[] }> = {
     await expect(ran?.textContent).toContain('held: not_approved');
     await expect(refused?.querySelector('.ex-call-outcome')?.textContent).toBe('refused · on the denylist');
     await expect(refused?.textContent).toContain(`in ${T1_CWD}`);
+    // What the gate read, re-derived from the logged argv by diet's own reader, as the live prompt showed it.
+    await waitFor(async () => expect(rows(ran)).toEqual([['npm install', 'prompt · not_approved']]));
+    await waitFor(async () => expect(rows(refused)).toEqual([['git status', 'free'], ['git push', 'refused · on the denylist as git push']]));
+  },
+};
+
+/** A block's gate rows: each segment's shape (or entry) and what became of it. */
+const rows = (block: HTMLElement | undefined) => [...(block?.querySelectorAll('.ex-approval__segment') ?? [])].map((li) => [li.querySelector('code')?.textContent, li.querySelector('.ex-approval__verdict')?.textContent]);
+
+/** The conformance corpus's judged requests (#402): every argv the gate will read. */
+const CASES = corpus
+  .trimEnd()
+  .split('\n')
+  .flatMap((line) => {
+    try {
+      const request = JSON.parse(line) as { readonly argv?: unknown; readonly denylist?: unknown };
+      return Array.isArray(request.argv) && request.argv.length > 0 && request.argv.every((w) => typeof w === 'string') ? [request.argv as string[]] : [];
+    } catch {
+      return [];
+    }
+  });
+
+/** Every case of the corpus, drawn: each row is the gate's segment, in order -- never the command's text split. */
+export const Corpus: StoryObj = {
+  name: 'the conformance corpus, each command drawn as the gate judged it',
+  render: () => (
+    <ol>
+      {CASES.map((argv, i) => (
+        <li key={i} data-case={i}>
+          <JudgedSegments argv={argv} />
+        </li>
+      ))}
+    </ol>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(CASES.length).toBeGreaterThan(20);
+    for (const [i, argv] of CASES.entries()) {
+      const said = await judge(argv);
+      if (!said.ok) continue;
+      const block = canvasElement.querySelector<HTMLElement>(`[data-case="${i}"]`) ?? undefined;
+      await waitFor(async () => expect(rows(block).map(([shape]) => shape)).toEqual(said.judgement.segments.map((s) => s.shape ?? s.entry ?? 'no shape')));
+      await expect(rows(block).map(([, verdict]) => verdict?.split(' · ')[0]?.split(':')[0])).toEqual(said.judgement.segments.map((s) => s.verdict));
+    }
   },
 };
