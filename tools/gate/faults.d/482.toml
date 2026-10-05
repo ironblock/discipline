@@ -1,0 +1,19 @@
+# #482's lane faults: pnpm at parity with npm in the drive's gate, and
+# `npm_config_store_dir` excused beside the cache (#301, 5996135654).
+# Lane faults declared in diet/drive/gate.toml.
+
+[[fault]]
+id = "drive.pnpm-run-stale-digest-approves"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.pnpm-run-stale-digest-approves"
+failure_class = "drive.pnpm-run-stale-digest-approves"
+migrated = false
+
+[[fault]]
+id = "drive.npm-config-store-dir-not-excused"
+kind = "lane-fault"
+check = "lanes"
+label = "drive.npm-config-store-dir-not-excused"
+failure_class = "drive.npm-config-store-dir-not-excused"
+migrated = false

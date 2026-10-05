@@ -1,7 +1,7 @@
 //! The tool loop's parts (#298's integration): the `bash` tool, a call
 //! assembled from its streamed fragments, the gate's judgement turned into
 //! what runs, the allow set and the workspace store behind it, the `npm`
-//! digests, git's aliases and free reads, and the receipt.
+//! and `pnpm` digests, git's aliases and free reads, and the receipt.
 //!
 //! [`super::session`] runs the loop: a step is a request (#29 D11), and on a
 //! call it asks [`Gate::judge`] what to do, runs what may run through the
@@ -14,7 +14,7 @@
 //! module adds only what the module left to the integration (#298
 //! 5983544366): an alias pre-expanded from git's own config before judging
 //! ((f)), a free read run with git's configured programs off ((e)), and the
-//! digests an `npm` approval binds to (point 6).
+//! digests an `npm` approval binds to (point 6), and a `pnpm` one (#482).
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
@@ -286,8 +286,9 @@ pub fn why_word(why: &Why) -> &'static str {
     }
 }
 
-/// What a standing `npm` approval binds to, by its shape. A shape that is
-/// neither is an `npm` command no standing approval covers.
+/// What a standing `npm` or `pnpm` approval binds to, by its shape. A shape
+/// that is neither is a package-manager command no standing approval
+/// covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Bound {
     /// `npm run <x>`, `npm test` and the like: the text of the scripts npm
@@ -299,12 +300,15 @@ enum Bound {
 
 /// The one spelling of `run` a standing approval covers (review round 2,
 /// finding 2: an alias or an abbreviation -- `run-s`, `rum` -- prompts every
-/// time, `once` still answering it).
+/// time, `once` still answering it). pnpm's is the same word.
 const NPM_RUN: &str = "run";
 
 /// npm's commands that run a script of their own name, each by its one
 /// spelling, and the scripts it runs. `restart` runs `restart` if there is
-/// one and `stop` then `start` if not, so it binds to all three.
+/// one and `stop` then `start` if not, so it binds to all three. pnpm's are
+/// the same words over the same scripts (pnpm 11.21.0, measured: `pnpm
+/// restart` runs `stop`, `restart` and `start`, each with its `pre` and
+/// `post`; `pnpm stop` runs `scripts.stop`).
 const NPM_NAMED: &[(&str, &[&str])] = &[
     ("test", &["test"]),
     ("start", &["start"]),
@@ -312,50 +316,160 @@ const NPM_NAMED: &[(&str, &[&str])] = &[
     ("restart", &["restart", "stop", "start"]),
 ];
 
-/// The install commands a standing approval covers, by their one spelling:
-/// `install` (bare, or plain package names) and `ci` (bare).
-const NPM_INSTALL: &[&str] = &["install", "ci"];
+/// What an install subcommand may carry under a standing approval.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Carries {
+    /// Nothing: the bare command.
+    Nothing,
+    /// Nothing, or plain package names ([`plain_package`]).
+    PlainPackages,
+}
+
+/// The `pnpm` lifecycle scripts `pnpm install` runs from the workspace's
+/// own `package.json`: pnpm 11.21.0's `dist/pnpm.mjs`, `DEV_PREINSTALL`
+/// (`pnpm:devPreinstall`, run before any dependency is installed) and the
+/// importer stages `runLifecycleHooksConcurrently` runs.
+pub const PNPM_LIFECYCLE: &[&str] = &[
+    "pnpm:devPreinstall",
+    "preinstall",
+    "install",
+    "postinstall",
+    "preprepare",
+    "prepare",
+    "postprepare",
+];
+
+/// A package manager whose standing approvals bind to digests (#482): the
+/// words and files in which pnpm differs from npm. Everything else -- `run`
+/// and [`NPM_NAMED`], the program exactly as written, no option word, no
+/// environment prefix, a `package.json` read or failed closed -- is one code
+/// path for both.
+#[derive(Debug)]
+struct Manager {
+    /// The program, exactly: never a path to one.
+    program: &'static str,
+    /// The install subcommands a standing approval covers, each by its one
+    /// spelling, and what it may carry.
+    installs: &'static [(&'static str, Carries)],
+    /// The workspace's own scripts an install runs.
+    lifecycle: &'static [&'static str],
+    /// The files, beyond [`npm_files`], that every digest holds: what the
+    /// manager reads as configuration or runs as code in the worktree.
+    files: &'static [&'static str],
+    /// The `package.json` fields every digest holds, beside the scripts.
+    fields: &'static [&'static str],
+    /// Whether a script it runs may install first: then a script's digest
+    /// also holds what the install runs.
+    installs_before_run: bool,
+}
+
+/// npm: `install` bare or with plain package names, `ci` bare.
+const NPM: Manager = Manager {
+    program: "npm",
+    installs: &[
+        ("install", Carries::PlainPackages),
+        ("ci", Carries::Nothing),
+    ],
+    lifecycle: LIFECYCLE,
+    files: &[],
+    fields: &[],
+    installs_before_run: false,
+};
+
+/// pnpm 11.21.0: `install` and `i` bare (pnpm adds a package with `add`),
+/// `add` with plain package names. A hook in `.pnpmfile.mjs`, or else
+/// `.pnpmfile.cjs`, runs JS; `pnpm-workspace.yaml` holds pnpm's settings
+/// (`allowBuilds`, `onlyBuiltDependencies`, `scriptShell`,
+/// `verifyDepsBeforeRun`, …); `package.json`'s `packageManager` and
+/// `devEngines` pick the pnpm that runs (it downloads and switches), and
+/// its `pnpm` field holds settings. `verifyDepsBeforeRun` defaults to
+/// `install`, so a script may install first.
+const PNPM: Manager = Manager {
+    program: "pnpm",
+    installs: &[
+        ("install", Carries::Nothing),
+        ("i", Carries::Nothing),
+        ("add", Carries::PlainPackages),
+    ],
+    lifecycle: PNPM_LIFECYCLE,
+    files: &[".pnpmfile.cjs", ".pnpmfile.mjs", "pnpm-workspace.yaml"],
+    fields: &["packageManager", "devEngines", "pnpm"],
+    installs_before_run: true,
+};
+
+/// The package managers whose approvals bind to digests.
+const MANAGERS: &[Manager] = &[NPM, PNPM];
+
+/// Other names a manager answers to, which no standing approval covers:
+/// `pn`, pnpm 11.21.0's alias of `pnpm`.
+const MANAGER_ALIASES: &[&str] = &["pn"];
+
+fn manager(program: &str) -> Option<&'static Manager> {
+    MANAGERS.iter().find(|manager| manager.program == program)
+}
+
+/// Whether `program` is a package manager: then a command of it that is
+/// not [`Bound`] is covered by no standing approval.
+fn manages(program: &str) -> bool {
+    manager(program).is_some() || MANAGER_ALIASES.contains(&program)
+}
 
 fn bound(shape: &Shape) -> Option<Bound> {
-    if shape.program != "npm" {
-        return None;
-    }
+    let manager = manager(&shape.program)?;
     let subcommand = shape.subcommand.as_deref()?;
     if subcommand == NPM_RUN || NPM_NAMED.iter().any(|(name, _)| *name == subcommand) {
         Some(Bound::Script)
-    } else if NPM_INSTALL.contains(&subcommand) {
+    } else if manager.installs.iter().any(|(name, _)| *name == subcommand) {
         Some(Bound::Lifecycle)
     } else {
         None
     }
 }
 
-/// `package.json`'s `scripts` table in `worktree`: empty when there is no
-/// `package.json` or it has no `scripts`; `None` when there is one this
-/// cannot read -- npm reads a byte-order mark or a lone surrogate escape
-/// that `serde_json` refuses, and every script would read as absent -- so no
-/// digest can be named and no npm command is standing (review round 3,
-/// finding 7).
-fn scripts(worktree: &Path) -> Option<serde_json::Map<String, serde_json::Value>> {
+/// The worktree's `package.json`, read: the whole value and its `scripts`
+/// table.
+struct Package {
+    whole: serde_json::Value,
+    scripts: serde_json::Map<String, serde_json::Value>,
+}
+
+/// `package.json` in `worktree`: empty when there is none, `scripts` empty
+/// when it has none; `None` when there is one this cannot read -- npm reads
+/// a byte-order mark or a lone surrogate escape that `serde_json` refuses,
+/// and every script would read as absent -- so no digest can be named and no
+/// npm command is standing (review round 3, finding 7).
+fn package_json(worktree: &Path) -> Option<Package> {
     let bytes = match std::fs::read(worktree.join("package.json")) {
         Ok(bytes) => bytes,
         Err(why) if why.kind() == std::io::ErrorKind::NotFound => {
-            return Some(serde_json::Map::new());
+            return Some(Package {
+                whole: serde_json::Value::Null,
+                scripts: serde_json::Map::new(),
+            });
         }
         Err(_) => return None,
     };
-    let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    match value.get("scripts") {
-        None => Some(serde_json::Map::new()),
-        Some(scripts) => scripts.as_object().cloned(),
-    }
+    let whole: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let scripts = match whole.get("scripts") {
+        None => serde_json::Map::new(),
+        Some(scripts) => scripts.as_object()?.clone(),
+    };
+    Some(Package { whole, scripts })
 }
 
 /// The script npm runs in place of an absent `start`, and the file it
 /// runs: `node server.js` when `server.js` exists (npm 11.17.0's
-/// `docs/content/commands/npm-start.md`). A `start` or `restart` digest
-/// holds that file's bytes (review round 3, finding 5).
+/// `docs/content/commands/npm-start.md`; pnpm 11.21.0 the same, measured).
+/// A `start` or `restart` digest holds that file's bytes (review round 3,
+/// finding 5).
 const NPM_DEFAULT_START: (&str, &str) = ("start", "server.js");
+
+/// `name`'s line in a digest: its sha256 in `worktree`, or `absent`.
+fn file_line(text: &mut String, worktree: &Path, name: &str) {
+    let digest = std::fs::read(worktree.join(name))
+        .map_or_else(|_| "absent".to_owned(), |bytes| sha256_hex(&bytes));
+    let _ = writeln!(text, "{name} {digest}");
+}
 
 /// The lines every npm digest opens with: the sha256 of each file in the
 /// worktree that changes what npm runs without being a script -- `.npmrc`
@@ -364,46 +478,100 @@ const NPM_DEFAULT_START: (&str, &str) = ("start", "server.js");
 fn npm_files(worktree: &Path) -> String {
     let mut text = String::new();
     for name in [".npmrc", "binding.gyp"] {
-        let digest = std::fs::read(worktree.join(name))
-            .map_or_else(|_| "absent".to_owned(), |bytes| sha256_hex(&bytes));
-        let _ = writeln!(text, "{name} {digest}");
+        file_line(&mut text, worktree, name);
     }
     text
 }
 
-/// The sha256 of the scripts `names` in the worktree's `package.json`, each
-/// with the `pre` and `post` scripts npm runs around it: one line per
-/// script, `name=text`, or `name` alone where it is absent -- so a script
-/// that appears later is a change, and prompts -- after [`npm_files`], and
-/// for `start` after [`NPM_DEFAULT_START`]'s file. `None` when the
-/// `package.json` cannot be read.
-#[must_use]
-pub fn scripts_digest(worktree: &Path, names: &[&str]) -> Option<String> {
-    let scripts = scripts(worktree)?;
+/// The lines every digest of `manager` opens with: [`npm_files`] (pnpm
+/// reads `.npmrc` too), then its own [`Manager::files`], then its
+/// [`Manager::fields`], each `name=json` or `name` alone where absent.
+fn manager_files(manager: &Manager, worktree: &Path, package: &Package) -> String {
     let mut text = npm_files(worktree);
-    let (start, server) = NPM_DEFAULT_START;
-    if names.contains(&start) {
-        let digest = std::fs::read(worktree.join(server))
-            .map_or_else(|_| "absent".to_owned(), |bytes| sha256_hex(&bytes));
-        let _ = writeln!(text, "{server} {digest}");
+    for name in manager.files {
+        file_line(&mut text, worktree, name);
     }
-    for name in names {
-        for each in [
-            format!("pre{name}"),
-            (*name).to_owned(),
-            format!("post{name}"),
-        ] {
-            match scripts.get(&each).and_then(serde_json::Value::as_str) {
-                Some(script) => {
-                    let _ = writeln!(text, "{each}={script}");
-                }
-                None => {
-                    let _ = writeln!(text, "{each}");
-                }
+    for field in manager.fields {
+        match package.whole.get(*field) {
+            Some(value) => {
+                let _ = writeln!(text, "{field}={value}");
+            }
+            None => {
+                let _ = writeln!(text, "{field}");
             }
         }
     }
+    text
+}
+
+/// One line per script of `names` in `scripts`, `name=text`, or `name` alone
+/// where it is absent -- so a script that appears later is a change.
+fn script_lines<'a>(
+    text: &mut String,
+    scripts: &serde_json::Map<String, serde_json::Value>,
+    names: impl IntoIterator<Item = &'a str>,
+) {
+    for name in names {
+        match scripts.get(name).and_then(serde_json::Value::as_str) {
+            Some(script) => {
+                let _ = writeln!(text, "{name}={script}");
+            }
+            None => {
+                let _ = writeln!(text, "{name}");
+            }
+        }
+    }
+}
+
+/// The sha256 of the scripts `names` `manager` runs in the worktree's
+/// `package.json`, each with the `pre` and `post` scripts it runs around it,
+/// after [`manager_files`], for `start` after [`NPM_DEFAULT_START`]'s file,
+/// and, for a manager that may install first, followed by its lifecycle
+/// scripts. `None` when the `package.json` cannot be read.
+fn manager_scripts_digest(manager: &Manager, worktree: &Path, names: &[&str]) -> Option<String> {
+    let package = package_json(worktree)?;
+    let mut text = manager_files(manager, worktree, &package);
+    let (start, server) = NPM_DEFAULT_START;
+    if names.contains(&start) {
+        file_line(&mut text, worktree, server);
+    }
+    for name in names {
+        let each = [
+            format!("pre{name}"),
+            (*name).to_owned(),
+            format!("post{name}"),
+        ];
+        script_lines(&mut text, &package.scripts, each.iter().map(String::as_str));
+    }
+    if manager.installs_before_run {
+        script_lines(
+            &mut text,
+            &package.scripts,
+            manager.lifecycle.iter().copied(),
+        );
+    }
     Some(sha256_hex(text.as_bytes()))
+}
+
+/// The sha256 an install of `manager` binds to: [`manager_files`], then the
+/// workspace's own lifecycle scripts, one per line in its order. Dependencies'
+/// scripts are not in it: the receipt says they are [`LIFECYCLE_SCRIPTS`].
+/// `None` when the `package.json` cannot be read.
+fn manager_lifecycle_digest(manager: &Manager, worktree: &Path) -> Option<String> {
+    let package = package_json(worktree)?;
+    let mut text = manager_files(manager, worktree, &package);
+    script_lines(
+        &mut text,
+        &package.scripts,
+        manager.lifecycle.iter().copied(),
+    );
+    Some(sha256_hex(text.as_bytes()))
+}
+
+/// The sha256 of the npm scripts `names`: [`manager_scripts_digest`] for npm.
+#[must_use]
+pub fn scripts_digest(worktree: &Path, names: &[&str]) -> Option<String> {
+    manager_scripts_digest(&NPM, worktree, names)
 }
 
 /// The sha256 an `npm run <name>` approval binds to ([`scripts_digest`] of
@@ -415,24 +583,10 @@ pub fn script_digest(worktree: &Path, name: &str) -> Option<String> {
 
 /// The sha256 an `npm install` approval binds to: [`npm_files`], then the
 /// workspace's own lifecycle scripts, each `name=text` or `name` alone where
-/// absent, one per line in [`LIFECYCLE`]'s order. Dependencies' scripts are
-/// not in it: the receipt says they are [`LIFECYCLE_SCRIPTS`]. `None` when
-/// the `package.json` cannot be read.
+/// absent, one per line in [`LIFECYCLE`]'s order.
 #[must_use]
 pub fn lifecycle_digest(worktree: &Path) -> Option<String> {
-    let scripts = scripts(worktree)?;
-    let mut text = npm_files(worktree);
-    for name in LIFECYCLE {
-        match scripts.get(*name).and_then(serde_json::Value::as_str) {
-            Some(script) => {
-                let _ = writeln!(text, "{name}={script}");
-            }
-            None => {
-                let _ = writeln!(text, "{name}");
-            }
-        }
-    }
-    Some(sha256_hex(text.as_bytes()))
+    manager_lifecycle_digest(&NPM, worktree)
 }
 
 /// Whether `word` is a plain package name, as `npm install <name>` may
@@ -450,26 +604,30 @@ fn plain_package(word: &str) -> bool {
         })
 }
 
-/// What a line's direct `npm` commands run, when every one of them is a
-/// form a standing approval covers (review round 2, finding 2): `npm run
-/// <name>`, `npm test|start|stop|restart`, `npm install` bare or with plain
-/// package names, `npm ci` bare -- the program `npm` exactly, never a path
-/// to one (review round 3, finding 6), with no option word anywhere and no
-/// environment prefix, which can choose what npm runs as `.npmrc` does
-/// (finding 4). The scripts
-/// of each script-running one, in order, and how many installs. `None` for
-/// any other `npm` command on the line; the caller also compares the counts
-/// with the gate's segments, so one inside a wrapper is never standing.
-fn npm_commands(command: &str) -> Option<(Vec<Vec<String>>, usize)> {
+/// A line's direct package-manager commands: each script-running one's
+/// manager and scripts, in order, and each install's manager.
+type ManagerCommands = (Vec<(&'static Manager, Vec<String>)>, Vec<&'static Manager>);
+
+/// What a line's direct `npm` and `pnpm` commands run, when every one of
+/// them is a form a standing approval covers (review round 2, finding 2):
+/// `run <name>`, `test|start|stop|restart`, and the manager's
+/// [`Manager::installs`] -- the program exactly, never a path to one (review
+/// round 3, finding 6), with no option word anywhere and no environment
+/// prefix, which can choose what npm runs as `.npmrc` does (finding 4).
+/// The scripts of each script-running one, in order, and each install.
+/// `None` for any other such command on the line; the caller also compares
+/// the counts with the gate's segments, so one inside a wrapper is never
+/// standing.
+fn npm_commands(command: &str) -> Option<ManagerCommands> {
     let list = shell::parse(command).ok()?;
     let mut scripts = Vec::new();
-    let mut installs = 0;
+    let mut installs = Vec::new();
     for simple in list.simple_commands() {
         let words = &simple.words;
         let Some(first) = words.first() else { continue };
-        if !first.literal || first.text != "npm" {
+        let Some(manager) = manager(&first.text).filter(|_| first.literal) else {
             continue;
-        }
+        };
         if !simple.assignments.is_empty() {
             return None;
         }
@@ -477,44 +635,50 @@ fn npm_commands(command: &str) -> Option<(Vec<Vec<String>>, usize)> {
             return None;
         }
         let rest: Vec<&str> = words[1..].iter().map(|w| w.text.as_str()).collect();
+        let installs_as = |sub: &str, packages: &[&str]| {
+            manager.installs.iter().any(|(name, carries)| {
+                *name == sub
+                    && (packages.is_empty()
+                        || (*carries == Carries::PlainPackages
+                            && packages.iter().all(|p| plain_package(p))))
+            })
+        };
         match rest.as_slice() {
-            [run, name] if *run == NPM_RUN => scripts.push(vec![(*name).to_owned()]),
+            [run, name] if *run == NPM_RUN => scripts.push((manager, vec![(*name).to_owned()])),
             [sub] if NPM_NAMED.iter().any(|(name, _)| name == sub) => {
                 let names = NPM_NAMED
                     .iter()
                     .find(|(name, _)| name == sub)
                     .map_or(&[][..], |(_, names)| *names);
-                scripts.push(names.iter().map(|name| (*name).to_owned()).collect());
+                scripts.push((
+                    manager,
+                    names.iter().map(|name| (*name).to_owned()).collect(),
+                ));
             }
-            [sub, packages @ ..]
-                if *sub == NPM_INSTALL[0] && packages.iter().all(|p| plain_package(p)) =>
-            {
-                installs += 1;
-            }
-            [sub] if *sub == NPM_INSTALL[1] => installs += 1,
+            [sub, packages @ ..] if installs_as(sub, packages) => installs.push(manager),
             _ => return None,
         }
     }
     Some((scripts, installs))
 }
 
-/// The digests a line's `npm` segments bind to: per script for a
-/// script-running one, the lifecycle digest for an install.
+/// The digests a line's package-manager segments bind to: per script for a
+/// script-running one, per install the lifecycle digest of its manager.
 #[derive(Debug, Clone, Default)]
 struct Digests {
-    /// The digest of each direct script-running `npm` command, or `None`
-    /// when the line's script-running segments cannot all be named, and
-    /// none can be covered.
+    /// The digest of each direct script-running command, or `None` when the
+    /// line's script-running segments cannot all be named, and none can be
+    /// covered.
     runs: Option<Vec<String>>,
-    /// The lifecycle digest, or `None` when the line's installs cannot all
-    /// be read as the worktree's own.
-    lifecycle: Option<String>,
+    /// The lifecycle digest of each install, or `None` when the line's
+    /// installs cannot all be read as the worktree's own.
+    lifecycle: Option<Vec<String>>,
 }
 
 impl Digests {
-    /// `npm_env` is whether the session passes an `npm_config_*` variable,
-    /// which changes what npm runs as `.npmrc` does: then no `npm` command
-    /// is standing.
+    /// `npm_env` is whether the session passes an `npm_config_*` or
+    /// `pnpm_config_*` variable, which changes what npm or pnpm runs as
+    /// `.npmrc` does: then no such command is standing.
     fn of(command: &str, segments: &[Segment], worktree: &Path, npm_env: bool) -> Self {
         let count = |kind: Bound| {
             segments
@@ -529,42 +693,62 @@ impl Digests {
             .and_then(|(names, _)| {
                 names
                     .iter()
-                    .map(|each| {
+                    .map(|(manager, each)| {
                         let each: Vec<&str> = each.iter().map(String::as_str).collect();
-                        scripts_digest(worktree, &each)
+                        manager_scripts_digest(manager, worktree, &each)
                     })
                     .collect()
             });
         let lifecycle = read
             .as_ref()
-            .filter(|(_, installs)| *installs == count(Bound::Lifecycle))
-            .and_then(|_| lifecycle_digest(worktree));
+            .filter(|(_, installs)| installs.len() == count(Bound::Lifecycle))
+            .and_then(|(_, installs)| {
+                installs
+                    .iter()
+                    .map(|manager| manager_lifecycle_digest(manager, worktree))
+                    .collect()
+            });
         Self { runs, lifecycle }
     }
 
     /// The digests an entry for `shape` must hold to cover it: one per
-    /// script for a script-running `npm`, the lifecycle's for an install,
-    /// none for any program but `npm`. `None` when they cannot be named, and
-    /// for every other `npm` command: no standing approval covers it.
+    /// script for a script-running `npm` or `pnpm`, one per install for an
+    /// install, none for any program that is no package manager. `None` when
+    /// they cannot be named, and for every other package-manager command: no
+    /// standing approval covers it.
     fn wanted(&self, shape: &Shape) -> Option<Vec<Option<String>>> {
-        match bound(shape) {
-            None if shape.program == "npm" => None,
-            None => Some(vec![None]),
-            Some(Bound::Lifecycle) => self.lifecycle.clone().map(|digest| vec![Some(digest)]),
-            Some(Bound::Script) => self
-                .runs
+        let all = |digests: &Option<Vec<String>>| {
+            digests
                 .as_ref()
-                .map(|runs| runs.iter().cloned().map(Some).collect()),
+                .map(|digests| digests.iter().cloned().map(Some).collect())
+        };
+        match bound(shape) {
+            None if manages(&shape.program) => None,
+            None => Some(vec![None]),
+            Some(Bound::Lifecycle) => all(&self.lifecycle),
+            Some(Bound::Script) => all(&self.runs),
         }
     }
 }
 
-/// The `npm_config_*` names a session may pass and keep npm standing:
-/// the cache directory, which stores tarballs and chooses nothing that
-/// runs. T1's regimen passes it by ruling (#301, 5981651636: the default
-/// five plus `npm_config_cache`). Exactly these two spellings; every other
-/// `npm_config_*` makes npm non-standing.
-pub const NPM_CONFIG_EXCUSED: &[&str] = &["npm_config_cache", "NPM_CONFIG_CACHE"];
+/// The prefixes of the environment variables npm and pnpm read as config:
+/// `npm_config_*`, and pnpm 11.21.0's `pnpm_config_*` (its config reader's
+/// `env.js`). Case-insensitive.
+const CONFIG_PREFIXES: &[&str] = &["npm_config_", "pnpm_config_"];
+
+/// The `npm_config_*` names a session may pass and keep npm and pnpm
+/// standing: the cache directory, which stores tarballs, and the store
+/// directory (#301, 5996135654), which names pnpm's store; neither chooses
+/// anything that runs. T1's regimen passes them by ruling (#301, 5981651636:
+/// the default five plus `npm_config_cache`; 5996135654: plus
+/// `npm_config_store_dir`). Exactly these spellings; every other config
+/// variable makes npm and pnpm non-standing.
+pub const NPM_CONFIG_EXCUSED: &[&str] = &[
+    "npm_config_cache",
+    "NPM_CONFIG_CACHE",
+    "npm_config_store_dir",
+    "NPM_CONFIG_STORE_DIR",
+];
 
 /// The free reads that print commits, whose output a `gpg.*`, `format.pretty`
 /// or `pretty.*` key can make run `gpg.program`.
@@ -830,7 +1014,10 @@ impl Gate {
     #[must_use]
     pub fn passing(mut self, environment: &[String]) -> Self {
         self.npm_env = environment.iter().any(|name| {
-            name.to_ascii_lowercase().starts_with("npm_config_")
+            let lower = name.to_ascii_lowercase();
+            CONFIG_PREFIXES
+                .iter()
+                .any(|prefix| lower.starts_with(prefix))
                 && !NPM_CONFIG_EXCUSED.contains(&name.as_str())
         });
         self
@@ -2991,6 +3178,416 @@ pub(in crate::drive) mod tests {
                     "`{line}` could be approved standing under `{unreadable}`"
                 );
             }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The gate over `dir` for a session passing `names`.
+    fn passing_in(dir: &Path, names: &[&str]) -> Gate {
+        Gate {
+            aliases: no_aliases,
+            repository: clean_repository,
+            ..Gate::standard(dir)
+                .passing(&names.iter().map(|n| (*n).to_owned()).collect::<Vec<_>>())
+        }
+    }
+
+    /// #301 (5996135654): `npm_config_store_dir` names pnpm's store and
+    /// picks no program, so a session passing it keeps an approved npm or
+    /// pnpm call standing, as `npm_config_cache` does. Every other
+    /// `npm_config_*` still lapses both.
+    #[test]
+    fn npm_config_store_dir_keeps_npm_and_pnpm_standing_as_the_cache_does() {
+        let dir = scratch("npm-store-dir");
+        let gate = gate_in(&dir);
+        package(&dir, "vite build");
+        let mut granted = Vec::new();
+        for line in [
+            "npm run build",
+            "npm install",
+            "pnpm run build",
+            "pnpm install",
+        ] {
+            granted.extend(gate.judge(line, &[]).grants(Scope::Session, 1));
+        }
+        for store in ["npm_config_store_dir", "NPM_CONFIG_STORE_DIR"] {
+            for line in [
+                "npm run build",
+                "npm install",
+                "pnpm run build",
+                "pnpm install",
+            ] {
+                let judged =
+                    passing_in(&dir, &["PATH", "npm_config_cache", store]).judge(line, &granted);
+                assert_eq!(
+                    judged.outcome(),
+                    shell_gate::Outcome::Run,
+                    "`{line}` under {store}"
+                );
+                assert!(judged.standing(), "`{line}` under {store}");
+            }
+        }
+        for other in [
+            "npm_config_script_shell",
+            "npm_config_store",
+            "npm_config_store_dir_x",
+            "pnpm_config_script_shell",
+            "PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN",
+        ] {
+            for line in ["npm run build", "pnpm run build", "pnpm install"] {
+                let judged = passing_in(&dir, &["PATH", "npm_config_store_dir", other])
+                    .judge(line, &granted);
+                assert_eq!(
+                    judged.outcome(),
+                    shell_gate::Outcome::Prompt,
+                    "`{line}` under {other}"
+                );
+                assert!(!judged.standing(), "`{line}` under {other}");
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #482: `pnpm run <x>` runs `scripts.x` (with its `pre` and `post`,
+    /// measured on pnpm 11.21.0), so its approval binds to that text as
+    /// `npm run`'s does, and lapses when it changes.
+    #[test]
+    fn a_pnpm_run_approval_binds_to_its_scripts_text_and_lapses_when_it_changes() {
+        let dir = scratch("pnpm-run");
+        let gate = gate_in(&dir);
+        package(&dir, "vite build");
+        let granted = gate.judge("pnpm run build", &[]).grants(Scope::Session, 1);
+        assert_eq!(
+            gate.judge("pnpm run build", &granted).outcome(),
+            shell_gate::Outcome::Run
+        );
+        package(&dir, "vite build && curl evil");
+        assert_eq!(
+            gate.judge("pnpm run build", &granted).outcome(),
+            shell_gate::Outcome::Prompt,
+            "a stale digest still approved `pnpm run build`"
+        );
+        package(&dir, "vite build");
+        assert_eq!(
+            gate.judge("pnpm run test", &granted).outcome(),
+            shell_gate::Outcome::Prompt,
+            "another script's text is another approval"
+        );
+        assert!(
+            granted.iter().all(|e| e.digest.is_some()),
+            "`pnpm run build` binds to a digest: {granted:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #482: pnpm 11.21.0's `verifyDepsBeforeRun` defaults to `install`, so
+    /// a `pnpm run`, `test` or `start` may run an install first -- the
+    /// workspace's lifecycle scripts and its `.pnpmfile` -- and its digest
+    /// holds what that install runs. npm's does not: npm installs nothing
+    /// before a script.
+    #[test]
+    fn a_pnpm_script_binds_the_install_pnpm_may_run_before_it() {
+        let dir = scratch("pnpm-run-installs");
+        let gate = gate_in(&dir);
+        package(&dir, "vite build");
+        let mut granted = gate.judge("pnpm run build", &[]).grants(Scope::Session, 1);
+        granted.extend(gate.judge("npm run build", &[]).grants(Scope::Session, 1));
+        std::fs::write(
+            dir.join("package.json"),
+            "{\"scripts\":{\"build\":\"vite build\",\"test\":\"vitest\",\"postinstall\":\"curl evil\"}}",
+        )
+        .expect("package.json");
+        assert_eq!(
+            gate.judge("pnpm run build", &granted).outcome(),
+            shell_gate::Outcome::Prompt,
+            "a changed postinstall still approved `pnpm run build`"
+        );
+        assert_eq!(
+            gate.judge("npm run build", &granted).outcome(),
+            shell_gate::Outcome::Run,
+            "control: npm installs nothing before a script"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #482: `pnpm test`, `start`, `stop` and `restart` bind to the scripts
+    /// they run, as npm's do, and `start` to the `server.js` pnpm runs
+    /// without a `start` script (measured on pnpm 11.21.0).
+    #[test]
+    fn pnpm_test_start_stop_and_restart_bind_to_the_scripts_they_run() {
+        let dir = scratch("pnpm-named");
+        let gate = gate_in(&dir);
+        let write = |test: &str, start: &str| {
+            std::fs::write(
+                dir.join("package.json"),
+                format!(
+                    "{{\"scripts\":{{\"test\":\"{test}\",\"start\":\"{start}\",\"stop\":\"x\"}}}}"
+                ),
+            )
+            .expect("package.json");
+        };
+        write("vitest", "vite");
+        let lines = ["pnpm test", "pnpm start", "pnpm stop", "pnpm restart"];
+        let granted: Vec<Vec<Entry>> = lines
+            .iter()
+            .map(|line| gate.judge(line, &[]).grants(Scope::Session, 1))
+            .collect();
+        for (line, granted) in lines.iter().zip(&granted) {
+            assert_eq!(
+                gate.judge(line, granted).outcome(),
+                shell_gate::Outcome::Run,
+                "{line}"
+            );
+        }
+        write("vitest; curl evil", "vite");
+        assert_eq!(
+            gate.judge("pnpm test", &granted[0]).outcome(),
+            shell_gate::Outcome::Prompt,
+            "a changed `scripts.test` still approved `pnpm test`"
+        );
+        write("vitest", "vite --host 0.0.0.0");
+        for (at, line) in [(1, "pnpm start"), (3, "pnpm restart")] {
+            assert_eq!(
+                gate.judge(line, &granted[at]).outcome(),
+                shell_gate::Outcome::Prompt,
+                "a changed `scripts.start` still approved `{line}`"
+            );
+        }
+        std::fs::write(dir.join("package.json"), "{\"scripts\":{\"build\":\"x\"}}")
+            .expect("package.json");
+        let start = gate.judge("pnpm start", &[]).grants(Scope::Session, 1);
+        std::fs::write(dir.join("server.js"), "console.log(1)").expect("server.js");
+        assert_eq!(
+            gate.judge("pnpm start", &start).outcome(),
+            shell_gate::Outcome::Prompt,
+            "`pnpm start` covered a server.js that appeared after its approval"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #482: `pnpm install`, `pnpm i` and `pnpm add <plain names>` bind to
+    /// the workspace's own lifecycle scripts (pnpm's `pnpm:devPreinstall`
+    /// among them) and to what pnpm reads as configuration or runs as code
+    /// at install in the worktree: `.npmrc`, `.pnpmfile.cjs` or
+    /// `.pnpmfile.mjs` (hooks run JS), `pnpm-workspace.yaml` (pnpm's
+    /// settings), and `package.json`'s `packageManager`, `devEngines` and
+    /// `pnpm` fields (the first two pick the pnpm that runs). A change to
+    /// any lapses the approval.
+    #[test]
+    fn a_pnpm_install_approval_binds_to_the_lifecycle_the_pnpmfile_and_the_settings() {
+        let dir = scratch("pnpm-install");
+        let gate = gate_in(&dir);
+        let base = "{\"scripts\":{\"build\":\"vite build\",\"postinstall\":\"x\"}}";
+        let changes: &[(&str, &str)] = &[
+            (
+                "package.json",
+                "{\"scripts\":{\"build\":\"vite build\",\"postinstall\":\"curl evil\"}}",
+            ),
+            (
+                "package.json",
+                "{\"scripts\":{\"build\":\"vite build\",\"postinstall\":\"x\",\"pnpm:devPreinstall\":\"curl evil\"}}",
+            ),
+            (
+                "package.json",
+                "{\"packageManager\":\"pnpm@9.0.0\",\"scripts\":{\"build\":\"vite build\",\"postinstall\":\"x\"}}",
+            ),
+            (
+                "package.json",
+                "{\"devEngines\":{\"packageManager\":{\"name\":\"pnpm\",\"version\":\"9.0.0\"}},\"scripts\":{\"build\":\"vite build\",\"postinstall\":\"x\"}}",
+            ),
+            (
+                "package.json",
+                "{\"pnpm\":{\"onlyBuiltDependencies\":[\"evil\"]},\"scripts\":{\"build\":\"vite build\",\"postinstall\":\"x\"}}",
+            ),
+            (".pnpmfile.cjs", "module.exports = { hooks: {} }"),
+            (".pnpmfile.mjs", "export const hooks = {}"),
+            ("pnpm-workspace.yaml", "onlyBuiltDependencies:\n  - evil\n"),
+            (".npmrc", "script-shell=./evil.sh\n"),
+        ];
+        for (file, text) in changes {
+            std::fs::write(dir.join("package.json"), base).expect("package.json");
+            for each in [
+                ".pnpmfile.cjs",
+                ".pnpmfile.mjs",
+                "pnpm-workspace.yaml",
+                ".npmrc",
+            ] {
+                let _ = std::fs::remove_file(dir.join(each));
+            }
+            let lines = [
+                "pnpm install",
+                "pnpm i",
+                "pnpm add left-pad",
+                "pnpm run build",
+            ];
+            for line in lines {
+                let granted = gate.judge(line, &[]).grants(Scope::Session, 1);
+                assert!(
+                    granted.iter().all(|e| e.digest.is_some()),
+                    "`{line}` binds to a digest: {granted:?}"
+                );
+                assert_eq!(
+                    gate.judge(line, &granted).outcome(),
+                    shell_gate::Outcome::Run,
+                    "{line}"
+                );
+            }
+            let granted: Vec<Entry> = lines
+                .iter()
+                .flat_map(|line| gate.judge(line, &[]).grants(Scope::Session, 1))
+                .collect();
+            std::fs::write(dir.join(file), text).expect("a change");
+            for line in lines {
+                assert_eq!(
+                    gate.judge(line, &granted).outcome(),
+                    shell_gate::Outcome::Prompt,
+                    "`{line}` ran under a `{file}` its approval never saw: {text}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #482: a standing pnpm approval covers only `pnpm run <name>`, `pnpm
+    /// test|start|stop|restart`, `pnpm install` and `pnpm i` bare and `pnpm
+    /// add` with plain package names -- the program `pnpm` exactly, no
+    /// option word anywhere (`-C`, `--dir`, `--filter`, `-r`, `-w` point it
+    /// at another package), no environment prefix. A bare `pnpm <script>`
+    /// is never standing: whether pnpm reads it as a script depends on its
+    /// builtins. `pnpm exec`, `pnpm dlx` and pnpm's alias `pn` are never
+    /// standing.
+    #[test]
+    fn a_standing_pnpm_approval_covers_only_the_exact_forms_and_no_option() {
+        let dir = scratch("pnpm-exact");
+        let gate = gate_in(&dir);
+        package(&dir, "vite build");
+        let mut granted = Vec::new();
+        for line in [
+            "pnpm run build",
+            "pnpm test",
+            "pnpm start",
+            "pnpm install",
+            "pnpm i",
+            "pnpm add left-pad",
+        ] {
+            let judged = gate.judge(line, &[]);
+            assert!(
+                judged.standing(),
+                "`{line}` is a form a standing approval covers"
+            );
+            granted.extend(judged.grants(Scope::Session, 1));
+        }
+        for line in [
+            "pnpm run build -C sub",
+            "pnpm -C sub run build",
+            "pnpm --dir sub run build",
+            "pnpm run build --dir=sub",
+            "pnpm run build --filter sub",
+            "pnpm --filter sub run build",
+            "pnpm -F sub run build",
+            "pnpm -r run build",
+            "pnpm run build -r",
+            "pnpm run build --recursive",
+            "pnpm run build -w",
+            "pnpm run build --workspace-root",
+            "pnpm add -w left-pad",
+            "pnpm add left-pad --filter sub",
+            "pnpm install --dir sub",
+            "pnpm install --ignore-scripts",
+            "pnpm run build -- --flag",
+            "pnpm run build extra",
+            "pnpm build",
+            "pnpm dev",
+            "pnpm t",
+            "pnpm tst",
+            "pnpm run-script build",
+            "pnpm install left-pad",
+            "pnpm i left-pad",
+            "pnpm add ./local",
+            "pnpm add git+https://example.invalid/x.git",
+            "pnpm install-test",
+            "pnpm it",
+            "pnpm ci",
+            "pnpm rebuild",
+            "pnpm exec vite",
+            "pnpm dlx vite",
+            "pnpm create vite",
+            "pn run build",
+            "pn install",
+            "./pnpm run build",
+            "/usr/local/bin/pnpm install",
+            "env pnpm install",
+            "FOO=1 pnpm run build",
+            "npm_config_script_shell=./e pnpm run build",
+            "pnpm_config_verify_deps_before_run=install pnpm run build",
+            "pnpm run build && FOO=1 pnpm test",
+        ] {
+            let judged = gate.judge(line, &granted);
+            assert_eq!(
+                judged.outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{line}` was covered"
+            );
+            assert!(!judged.standing(), "`{line}` could be approved standing");
+        }
+        for line in [
+            "pnpm run build",
+            "pnpm test",
+            "pnpm install",
+            "pnpm i",
+            "pnpm add left-pad",
+        ] {
+            assert_eq!(
+                gate.judge(line, &granted).outcome(),
+                shell_gate::Outcome::Run,
+                "control: {line}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #482: a `package.json` this cannot read fails closed for pnpm as for
+    /// npm (review round 3, finding 7).
+    #[test]
+    fn an_unreadable_package_json_makes_no_pnpm_command_standing() {
+        let dir = scratch("pnpm-unreadable");
+        let gate = gate_in(&dir);
+        std::fs::write(
+            dir.join("package.json"),
+            "\u{feff}{\"scripts\":{\"build\":\"curl evil\",\"postinstall\":\"x\"}}",
+        )
+        .expect("package.json");
+        for line in ["pnpm run build", "pnpm install", "pnpm start", "pnpm add x"] {
+            assert!(
+                !gate.judge(line, &[]).standing(),
+                "`{line}` could be approved standing"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #482: `pnpx X` and `pnx X` (`pnpm dlx X`) are shaped by the program
+    /// they run, as `npx X` is: approving one covers that program only.
+    #[test]
+    fn pnpx_and_pnx_are_shaped_by_the_program_they_run_as_npx_is() {
+        let dir = scratch("pnpx");
+        let gate = gate_in(&dir);
+        for runner in ["npx", "pnpx", "pnx"] {
+            let granted = gate
+                .judge(&format!("{runner} prisma generate"), &[])
+                .grants(Scope::Session, 1);
+            assert_eq!(
+                gate.judge(&format!("{runner} prisma migrate"), &granted)
+                    .outcome(),
+                shell_gate::Outcome::Run,
+                "{runner}"
+            );
+            assert_eq!(
+                gate.judge(&format!("{runner} evil-pkg"), &granted)
+                    .outcome(),
+                shell_gate::Outcome::Prompt,
+                "`{runner} prisma`'s approval covered `{runner} evil-pkg`"
+            );
         }
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -118,6 +118,20 @@ const WRAPPERS: &[&str] = &[
     "env", "timeout", "nice", "nohup", "time", "command", "builtin",
 ];
 
+/// The runners: programs that run the program their first word names --
+/// `npx X`, and pnpm's `pnpx X` and `pnx X`, each `pnpm dlx X` (pnpm
+/// 11.21.0's `package.json` `bin`).
+const RUNNERS: &[&str] = &["npx", "pnpx", "pnx"];
+
+/// Programs that are a runner under these subcommands: `npm exec X` (and
+/// `x`), `pnpm exec X` and `pnpm dlx X`, and the same under `pn`, pnpm
+/// 11.21.0's own alias of `pnpm`.
+const RUNNER_SUBCOMMANDS: &[(&str, &[&str])] = &[
+    ("npm", &["exec", "x"]),
+    ("pnpm", &["exec", "dlx"]),
+    ("pn", &["exec", "dlx"]),
+];
+
 /// `npx`'s and `npm exec`'s flags that take no value.
 const RUNNER_FLAGS: &[&str] = &["-y", "--yes", "--no", "--no-install", "-q", "--quiet"];
 
@@ -318,7 +332,9 @@ const GIT_COMMANDS: &[&str] = &[
 const GIT_READS: &[&str] = &["status", "log", "diff", "show"];
 
 /// The programs whose subcommand is part of an approval's shape (point 5).
-const SUBCOMMANDED: &[&str] = &["git", "npm", "npx", "pnpm", "yarn", "cargo", "pip", "pip3"];
+const SUBCOMMANDED: &[&str] = &[
+    "git", "npm", "npx", "pnpm", "pn", "pnpx", "pnx", "yarn", "cargo", "pip", "pip3",
+];
 
 /// How deep `sh -c '…'` and `$( … )` are read before the call prompts instead.
 const MAX_DEPTH: usize = 4;
@@ -876,15 +892,17 @@ impl Gate<'_> {
                 }
                 Err(why) => vec![dynamic(why)],
             }
-        } else if program == "npx" {
+        } else if RUNNERS.contains(&program) {
             // `npx X` and `npm exec X` run the program X names (point 2): it
             // meets the denylist, and the call is otherwise shaped as written.
+            // pnpm's runners are read the same way (#482).
             self.runner(program, rest, rest)
-        } else if program == "npm"
-            && rest
-                .first()
-                .is_some_and(|w| w.text == "exec" || w.text == "x")
-        {
+        } else if RUNNER_SUBCOMMANDS.iter().any(|(runner, subcommands)| {
+            *runner == program
+                && rest
+                    .first()
+                    .is_some_and(|w| subcommands.contains(&w.text.as_str()))
+        }) {
             self.runner(program, &rest[1..], rest)
         } else if program == "xargs" {
             self.named_inner(program, xargs_inner(rest), simple, depth)
@@ -895,9 +913,10 @@ impl Gate<'_> {
         }
     }
 
-    /// `npx …` or `npm exec …`: the program it runs is the first word past its
-    /// flags that take no value (and past `--`). A denylisted one is refused;
-    /// otherwise the call is shaped from `shaped`, the words after the program.
+    /// `npx …` or `npm exec …` ([`RUNNERS`], [`RUNNER_SUBCOMMANDS`]): the
+    /// program it runs is the first word past its flags that take no value
+    /// (and past `--`). A denylisted one is refused; otherwise the call is
+    /// shaped from `shaped`, the words after the program.
     fn runner(&self, program: &str, inner: &[Word], shaped: &[Word]) -> Vec<Segment> {
         let mut i = 0;
         while let Some(word) = inner.get(i) {
@@ -1555,6 +1574,28 @@ mod tests {
         }
     }
 
+    /// #482: pnpm's runners -- `pnpm dlx`, `pnpm exec`, `pnpx` and `pnx`
+    /// (pnpm 11.21.0's alias of `pnpm dlx`), and `pn` (its alias of `pnpm`)
+    /// -- run the program their first word names, so it meets the denylist
+    /// as it does under `npx` and `npm exec`.
+    #[test]
+    fn pnpms_runners_do_not_hide_a_denylisted_program() {
+        for line in [
+            "pnpx docker ps",
+            "pnpx -y docker ps",
+            "pnpx -- kubectl get pods",
+            "pnx sudo id",
+            "pnpm dlx docker ps",
+            "pnpm dlx -- sudo id",
+            "pnpm exec docker ps",
+            "pnpm exec -- sudo id",
+            "pn dlx crontab -l",
+            "pn exec sudo id",
+        ] {
+            assert_eq!(outcome(line), Outcome::Refused, "{line:?}");
+        }
+    }
+
     #[test]
     fn dynamic_syntax_prompts_and_is_never_read_as_allowed() {
         for line in [
@@ -1743,6 +1784,13 @@ mod tests {
         assert_eq!(shape("npm --prefix x install"), None);
         assert_eq!(shape("npx prisma generate").as_deref(), Some("npx prisma"));
         assert_eq!(shape("npm exec prisma").as_deref(), Some("npm exec"));
+        assert_eq!(
+            shape("pnpx prisma generate").as_deref(),
+            Some("pnpx prisma")
+        );
+        assert_eq!(shape("pnx prisma generate").as_deref(), Some("pnx prisma"));
+        assert_eq!(shape("pnpm dlx prisma").as_deref(), Some("pnpm dlx"));
+        assert_eq!(shape("pnpm exec prisma").as_deref(), Some("pnpm exec"));
         assert_eq!(shape("npm $SUB"), None);
     }
 
