@@ -911,6 +911,7 @@ mod tests {
                 turn,
                 text: "say hello".to_owned(),
                 scoping: None,
+                files: None,
             },
             Line::Settlement {
                 from: State::Awaiting,
@@ -1099,6 +1100,7 @@ mod tests {
                     turn,
                     text: "say hello".to_owned(),
                     scoping: None,
+                    files: None,
                 },
                 Line::Settlement {
                     from: State::Awaiting,

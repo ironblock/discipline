@@ -552,6 +552,10 @@ pub enum Event {
         text: String,
         /// Whether the operator marked it a scoping question (v5, #374).
         scoping: Option<bool>,
+        /// The files the operator attached to it, by reference: sent to the
+        /// model as image parts of this message, never inlined here (v5,
+        /// #372, ruled at 5989411005).
+        files: Option<Vec<RecordedFile>>,
     },
     /// The state moved.
     Settlement {
@@ -1834,6 +1838,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 }
                 scoping => scoping,
             },
+            files: fields.optional_files("files")?,
         },
         Kind::Settlement => Event::Settlement {
             from: fields.tag("from", State::from_tag)?,
@@ -2813,6 +2818,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("turn", Count),
                 must("text", Text),
                 may_v5("scoping", Holds::Flag),
+                may_v5("files", Holds::Files),
             ];
             F
         }
@@ -3250,11 +3256,15 @@ fn to_value(line: &Line) -> Value {
             turn,
             text: asked,
             scoping,
+            files,
         } => {
             put("turn", count(u64::from(*turn)));
             put("text", text(asked));
             if let Some(scoping) = scoping {
                 put("scoping", Value::Boolean(*scoping));
+            }
+            if let Some(files) = files {
+                put("files", files_value(files));
             }
             Kind::Ask
         }
@@ -3490,22 +3500,7 @@ fn to_value(line: &Line) -> Value {
                 put("approval", Value::Object(object));
             }
             if let Some(files) = files {
-                put(
-                    "files",
-                    Value::Array(
-                        files
-                            .iter()
-                            .map(|file| {
-                                Value::Object(BTreeMap::from([
-                                    ("path".to_owned(), text(&file.path)),
-                                    ("sha256".to_owned(), text(&file.sha256)),
-                                    ("media_type".to_owned(), text(&file.media_type)),
-                                    ("bytes".to_owned(), count(file.bytes)),
-                                ]))
-                            })
-                            .collect(),
-                    ),
-                );
+                put("files", files_value(files));
             }
             Kind::ToolCall
         }
@@ -3552,6 +3547,27 @@ fn to_value(line: &Line) -> Value {
     };
     put("kind", text(kind.tag()));
     Value::Object(object)
+}
+
+/// A line's `files` as the log writes them: each [`RECORDED_FILE`] key, and
+/// nothing inlined.
+fn files_value(files: &[RecordedFile]) -> Value {
+    Value::Array(
+        files
+            .iter()
+            .map(|file| {
+                Value::Object(BTreeMap::from([
+                    ("path".to_owned(), Value::String(file.path.clone())),
+                    ("sha256".to_owned(), Value::String(file.sha256.clone())),
+                    (
+                        "media_type".to_owned(),
+                        Value::String(file.media_type.clone()),
+                    ),
+                    ("bytes".to_owned(), count(file.bytes)),
+                ]))
+            })
+            .collect(),
+    )
 }
 
 /// A [`Timings`] as the record's value space holds it: only the keys the
@@ -3985,6 +4001,7 @@ mod tests {
                 turn: 1,
                 text: "say hi".to_owned(),
                 scoping: None,
+                files: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -4027,6 +4044,7 @@ mod tests {
                 turn: 2,
                 text: "again".to_owned(),
                 scoping: None,
+                files: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -4066,6 +4084,7 @@ mod tests {
                 turn: 3,
                 text: "once more".to_owned(),
                 scoping: None,
+                files: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -4124,6 +4143,7 @@ mod tests {
                 turn: 4,
                 text: "a very long one".to_owned(),
                 scoping: None,
+                files: None,
             },
             Event::Settlement {
                 from: State::Awaiting,
@@ -4189,6 +4209,14 @@ mod tests {
                 turn: 5,
                 text: "what are we building".to_owned(),
                 scoping: Some(true),
+                // #372: the operator attached a screenshot to the ask.
+                files: Some(vec![RecordedFile {
+                    path: "files/sketch.png".to_owned(),
+                    sha256: "3f1a8e0c5b2d4f6a7e9c1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d2f4a"
+                        .to_owned(),
+                    media_type: "image/png".to_owned(),
+                    bytes: 48_213,
+                }]),
             },
             Event::Settlement {
                 from: State::Awaiting,
