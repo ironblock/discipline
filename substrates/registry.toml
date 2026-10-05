@@ -892,6 +892,61 @@ process_started_is = "the serving process, from its elapsed time read at 16:33Z 
 pinned_by = "the inference seat's switch on 2026-10-03 and its receipts (substrates/measurements/2026-10-03-ada48-tabbyapi/; #143 5971103350 and 5971127133)"
 current = true
 
+# linux-pc's TabbyAPI + ExLlamaV3 candidate for the interactive drive's 27B line (#393): the floor's weights on the Python/torch engine, identified by the
+# python-torch-exllamav3 form (#337, ruled 5975255706). New and unadmitted: admission is the window's three results (#143, #393 rulings 5986337117).
+[substrate.accel24-tabbyapi-exl3-qwen38-27b-3p00]
+equipment = "linux-pc"
+description = "Qwen3.8 27B as EXL3 at 3.00 bpw (turboderp/Qwen3.8-27B-exl3, branch 3.00bpw) with the DFlash2 EXL3 4.00 bpw drafter (igor255/Qwen3.8-27B-DFlash2-EXL3-4.00bpw), served by TabbyAPI + ExLlamaV3 1.5.4 on the 24 GiB accelerator with the vision tower offloaded to system RAM; a candidate for the floor line, a new substrate, not admitted (#143: admission is the three results)"
+pinned = true
+engine_name = "TabbyAPI + ExLlamaV3 (Python, torch)"
+engine_identity = "b6c2bdf3574882264fc2989df42cdc8b249c01110b49424714fe8af1f1d3e311"
+engine_identity_is = "the composite over engine_components in the python-torch-exllamav3 form's order (#337, ruled 5975255706), computed from the ratified baseline line (#393 5985519740 and 5985596031, the inference seat) and the config digests of 5988815730; the host re-reads every component at the window's start and compares (substrates/admission/depth-probe/tabby_identity.py), so this value is a claim until that read passes"
+engine_component_form = "python-torch-exllamav3"
+engine_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
+engine_commit_is = "TabbyAPI's git HEAD on the ratified baseline line (#393 5985519740); the same commit as the 2026-10-03 line"
+weights_main = ["f9f4afe5fc1a2d67ca547c8dcde0f043eb226018257cdbde7c50a0956cddb822", "d13331e7a531dc2a6e94df6470d5bffa07b13e15912466242b7283469cd58179"]
+weights_main_file = "the two safetensors shards of turboderp/Qwen3.8-27B-exl3 branch 3.00bpw, revision 6fe61ad6 (#393 5985596031); the drafter igor255/Qwen3.8-27B-DFlash2-EXL3-4.00bpw, revision cbf4643e, one shard sha256 f2a397842bcc0c845ce0bd20253395958052308d4fb6eae65138c47e0b516733"
+sampler_card = "TabbyAPI's defaults unless a request sets its own"
+serving_context = 196608
+serving_slots = 2
+serving_context_is = "one paged KV pool of 196,608 tokens (cache_size, equal to max_seq_len) shared by up to two concurrent requests (max_batch_size), read off the config"
+serving_flags = "config-floor.yml: backend exllamav3, max_seq_len 196608, cache_size 196608, cache_mode 8,8, max_batch_size 2, chunk_size 2048, reasoning true, vision true with the tower offloaded, template_vars_default preserve_thinking true, draft_mode model with draft_cache_mode 8,8, auth disabled (substrates/measurements/2026-10-04-accel24-tabbyapi-exl3-27b/config-redacted.yml; the live file sha256 37f389b7..., three non-serving lines redacted per config-redaction.diff)"
+admission = "unadmitted: no admission cell has run on this line; admission is the three results on #143 (the behavioural fingerprint, the canary from its own baseline draw, the parity fire), unchanged by the component identity (#337, 5975255706); the window's rulings are #393 5986337117"
+preflight = "the box preflight re-reads every live component of engine_components and compares, refusing on any difference and naming the component that drifted (#337, 5975255706); the re-read is the inference seat's, on the host"
+hazards = "the fastest engine, and its knowledge is built here (the maintainer, #393 5986337117): reasoning_effort 'high' is a 400; there is no /props or /slots, so no checkpoint-restore report (that word is n/a on this engine) and no draft_n in responses, so the parity routing check is instance identity plus the /v1/model id at every request; output invariance is n/a under this line (ruled #393 5986337117); the chat template's digest and its rendered effort levels come from the model directory, a capability fact"
+
+[substrate.accel24-tabbyapi-exl3-qwen38-27b-3p00.engine_components]
+serving_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
+serving_commit_is = "TabbyAPI's git HEAD (#393 5985519740)"
+exllamav3_wheel_sha256 = "e95ed89809435d6463c3c51f86b3af4266f6bb35bd4ca65c0c0113d4a1f6c0be"
+exllamav3_wheel_sha256_is = "the ExLlamaV3 1.5.4 wheel installed, exllamav3-1.5.4+cu132.torch2.13.0-cp312 (#393 5985519740)"
+exllamav3_extension_sha256 = "ab4fb94e60772ec98beb6ee9d70273a0b162ae91415a34e20bef2334f287e8dd"
+exllamav3_extension_sha256_is = "the installed compiled extension, where the kernels live (#393 5985519740)"
+torch = "2.13.0+cu132"
+torch_is = "torch's version string in the serving venv (#393 5985519740)"
+cuda_runtime = "13.2"
+cuda_runtime_is = "the CUDA runtime torch bundles (#393 5985519740)"
+nvidia_driver = "615.71.09"
+nvidia_driver_is = "the NVIDIA driver version read on the host with the engine (#393 5985519740); it changes the numerics and is not in the frozen set"
+python = "3.12.13"
+python_is = "the serving venv's interpreter version (#393 5985519740); it changes the numerics and is not in the frozen set"
+package_set_sha256 = "d968851205a1c7dd13af62e2dc7ba2004ddeb9eeb17843b235b434c55c0c9b95"
+package_set_sha256_is = "sha256 of the serving venv's frozen package set, 83 packages, TabbyAPI's editable install recorded by commit (#393 5985519740)"
+config_redacted_sha256 = "9440e0c24e39a6af660bfba79dd717c4fbeaef2bab0fc2f67054b1273b41d4d5"
+config_redacted_sha256_is = "sha256 of the live config-floor.yml with three non-serving lines redacted (substrates/measurements/2026-10-04-accel24-tabbyapi-exl3-27b/config-redacted.yml, byte-identical to the copy in #393 5988815730); the live file is 37f389b7..."
+config_redaction_diff_sha256 = "344a839a1de7aeb418d9cfaca3e109cbaeb654b936a9348693a93546a6043205"
+config_redaction_diff_sha256_is = "sha256 of the diff from the live config to the redacted copy, the three lines (network.port, model.model_dir, draft_model.draft_model_dir) and nothing else (substrates/measurements/2026-10-04-accel24-tabbyapi-exl3-27b/config-redaction.diff)"
+
+[[substrate.accel24-tabbyapi-exl3-qwen38-27b-3p00.instance]]
+id = "baseline-2026-10-04"
+exllamav3_wheel_sha256 = "e95ed89809435d6463c3c51f86b3af4266f6bb35bd4ca65c0c0113d4a1f6c0be"
+exllamav3_extension_sha256 = "ab4fb94e60772ec98beb6ee9d70273a0b162ae91415a34e20bef2334f287e8dd"
+python = "3.12.13"
+accelerator_driver_read = "615.71.09"
+pinned_by = "the inference seat's ratified baseline line (#393 5985519740, 5985596031, 5988815730); the process start is recorded by the window's identity read"
+current = false
+current_is = "not the serving line of the machine; served per window"
+
 [substrate.canned]
 equipment = "canned-loopback"
 description = "diet-drive's canned server, replaying its committed acts on loopback; the substrate the first drive in the gym ran on"
