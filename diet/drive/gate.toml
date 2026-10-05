@@ -27,7 +27,7 @@
 name = "diet-drive"
 check = "test"
 command = "cargo test -p discipline-diet -- drive --skip every_seeded_fault_still_names_source_that_is_there"
-faults = 255
+faults = 256
 
 [[fault]]
 id = "drive.the-product-digest-is-of-nothing"
@@ -4074,4 +4074,18 @@ becomes = '''
         for step in self.steps.get(&turn).into_iter().flatten().filter(|_| false) {'''
 catches = [
     "drive::session::tests::a_tool_turns_heads_and_the_trunk_after_it_are_rebuilt_and_verified",
+]
+
+[[fault]]
+id = "drive.serve-pins-no-sampler"
+failure_class = "drive.serve-pins-no-sampler"
+target = "diet/src/bin/drive.rs"
+expect_exit = 101
+anchor = '''
+    let shape = trunk(model, system, max_output_tokens, sampler);'''
+becomes = '''
+    let shape = trunk(model, system, max_output_tokens, SamplerCard::empty());
+    let _ = sampler;'''
+catches = [
+    "a_drive_server_pins_the_regimens_sampler_on_the_trunk_and_the_fork_as_its_record_claims",
 ]

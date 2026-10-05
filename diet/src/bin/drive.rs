@@ -281,11 +281,25 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(system) => system,
         Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
     };
-    let shape = trunk(model, system, max_output_tokens);
     let regime = match regimen_file.as_deref().map(registered_regime).transpose() {
         Ok(regime) => regime,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // The regimen's `[sampler]`, pinned on every request (#486): derived from
+    // the regime's own `sampler_card`, so the record's claim and the wire's
+    // pins are one value. Without a regimen, nothing is pinned, as before.
+    let sampler = match regime
+        .as_ref()
+        .map(|regime| diet::drive::regimen::sampler_pins(&regime.substrates[0].sampler_card))
+        .transpose()
+    {
+        Ok(pins) => pins.unwrap_or_default(),
+        Err(why) => {
+            let path = regimen_file.as_deref().unwrap_or_default();
+            return fail(EXIT_USAGE, &format!("{path}: {why}"));
+        }
+    };
+    let shape = trunk(model, system, max_output_tokens, sampler);
     if record_file.is_some() && regime.is_none() {
         return fail(EXIT_USAGE, RECORD_NEEDS_A_REGIMEN);
     }
@@ -993,12 +1007,19 @@ fn written_record(
     Ok(out)
 }
 
-/// The session's trunk: the system message, and nothing else fixed yet.
-fn trunk(model: String, system: String, max_output_tokens: u32) -> RequestShape {
+/// The session's trunk: the system message and the sampler pins, and
+/// nothing else fixed yet. Every request -- each turn's, each tool step's,
+/// the interview fork's -- is this template's clone, so each carries `sampler`.
+fn trunk(
+    model: String,
+    system: String,
+    max_output_tokens: u32,
+    sampler: SamplerCard,
+) -> RequestShape {
     RequestShape {
         model,
         messages: vec![Message::new(Role::System, system)],
-        sampler: SamplerCard::empty(),
+        sampler,
         limits: Limits {
             attempt: std::time::Duration::from_secs(60),
             call: std::time::Duration::from_secs(180),
