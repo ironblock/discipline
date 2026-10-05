@@ -1491,6 +1491,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             text: text.clone(),
             // Only the operator's mark is written (#374): `true`, or nothing.
             scoping: scoping.then_some(true),
+            // The operator's attachment arrives with #372's loop half.
+            files: None,
         },
         Event::Requested {
             turn,
@@ -4059,6 +4061,7 @@ pub(in crate::drive) mod tests {
                 turn: 1,
                 text: "say \"hi\"\n".to_owned(),
                 scoping: Some(true),
+                files: None,
             },
             log::Event::Settlement {
                 from: log::State::Awaiting,

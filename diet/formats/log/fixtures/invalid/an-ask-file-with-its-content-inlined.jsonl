@@ -1,0 +1,7 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":5}
+{"files":[{"bytes":48213,"content":"iVBORw0KGgo=","media_type":"image/png","path":"files/screenshot.png","sha256":"3f1a8e0c5b2d4f6a7e9c1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9d2f4a"}],"kind":"ask","seq":1,"t":5,"text":"here is the screenshot: ~/shots/screenshot.png -- what is wrong with the terrain?","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"response","seq":4,"t":20,"text":"a tracker for the team's bugs","to_request":3}
+{"kind":"turn.settled","reason":"final","seq":5,"t":25,"turn":1}
+{"from":"turn","kind":"settlement","seq":6,"t":30,"to":"awaiting"}

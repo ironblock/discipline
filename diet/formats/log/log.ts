@@ -224,6 +224,7 @@ export type AskLine = {
   turn: number;
   text: string;
   scoping?: boolean;
+  files?: RecordedFile[];
 };
 
 export type SettlementLine = {
