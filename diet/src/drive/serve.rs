@@ -1718,7 +1718,7 @@ mod tests {
         assert_eq!(body(&again), r#"{"refused":"in-flight"}"#);
         let seam = post(&server, r#"{"kind":"declare-seam"}"#, "");
         assert_eq!(status(&seam), 409, "{seam}");
-        assert_eq!(body(&seam), r#"{"refused":"seam-not-built"}"#);
+        assert_eq!(body(&seam), r#"{"refused":"in-flight"}"#);
 
         gate.open();
         wait_until(&session, "the turn to settle", settled);

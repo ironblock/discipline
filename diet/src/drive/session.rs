@@ -44,10 +44,9 @@
 //! is logged in the same critical section, so the log never says less than
 //! the state.
 //!
-//! **What this does not do yet**, and says: no
-//! seam -- [`Session::declare_seam`] is refused as [`Refusal::SeamNotBuilt`]
-//! until R6, so the command exists for the surface to wire and answers
-//! truthfully meanwhile. The log is in memory. It is a format,
+//! **A seam** (#493): [`Session::declare_seam`] refills the trunk from
+//! working memory and appends from there; the seam's audit and pre-warm are
+//! not built yet, and its docs say so. The log is in memory. It is a format,
 //! `diet/formats/log` (ruled on #117), and what each event carries is what
 //! R2c's plan (`diet/drive/plans/r2c-proposal.md`, D4) drafts for it: a
 //! header line, a turn counter, a `request` per call that the call's other
@@ -115,8 +114,9 @@ vocabulary! {
         Ended => "ended",
         /// There is no call in flight to stop.
         NothingInFlight => "nothing-in-flight",
-        /// Seams are not built yet (#117 R6).
-        SeamNotBuilt => "seam-not-built",
+        /// A seam has nothing to refill from: no turn has settled, or the
+        /// session keeps no working memory (#493).
+        NothingToSeam => "nothing-to-seam",
         /// A cancel named a turn older than the latest one: it arrived after
         /// that turn settled and must not stop the next (the admission
         /// counter ruled on #117).
@@ -450,6 +450,21 @@ pub enum Event {
         fork: u64,
         /// How.
         outcome: log::ForkOutcome,
+    },
+    /// The operator declared a seam, and the trunk was refilled from working
+    /// memory (#493): the head with the working object rendered after it, and
+    /// no turn of the old trunk.
+    Seamed {
+        /// The latest turn, settled, which it follows.
+        at_turn: u32,
+        /// The digest `client::head` gives of a request on the trunk before.
+        prefix_hash_before: String,
+        /// The same, after.
+        prefix_hash_after: String,
+        /// The working object, rendered.
+        render: String,
+        /// How many entries the render carried.
+        carried_entries: u64,
     },
     /// One entry the fork's answer patched into the session's working
     /// object, after the fork settled `value`.
@@ -1216,25 +1231,68 @@ impl<S: Streaming + 'static> Session<S> {
         Err(Rejected::Refused(refused))
     }
 
-    /// Declare a seam. Not built until #117 R6.
+    /// Declare a seam (#493): the trunk is refilled from working memory --
+    /// the head, with the working object rendered after it
+    /// ([`crate::seam::render::refill`]) -- and the next ask is sent on it.
+    /// No turn of the old trunk is carried. Its [`Event::Seamed`] records the
+    /// head's digest either side, the render, and what was carried.
+    ///
+    /// Not yet: the audit (the dogma's operator ask, whose answer grammar is
+    /// unwritten), so nothing is ratified; and the pre-warm, so the next ask
+    /// prefills the refilled trunk itself.
     ///
     /// # Errors
     ///
-    /// Always: [`Refusal::SeamNotBuilt`], logged, or [`Refusal::Ended`] once
-    /// the session has ended, not logged (#291). A refused command's `gap` is
-    /// neither logged nor closed.
+    /// [`Refusal::InFlight`] while a turn or a capture is in flight, and
+    /// [`Refusal::NothingToSeam`] before any turn has settled or in a session
+    /// that keeps no working memory: both logged. [`Refusal::Ended`] once the
+    /// session has ended, not logged (#291). A refused command's `gap` is
+    /// neither logged nor closed. [`Rejected::BadGap`] when `gap` cannot be
+    /// logged, and then nothing is.
     pub fn declare_seam(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
         state.carry(gap, CommandKind::DeclareSeam);
-        let because = if state.settlement == Settlement::Ended {
-            Refusal::Ended
-        } else {
-            Refusal::SeamNotBuilt
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if state.turns == 0 || state.interview.is_none() => {
+                Some(Refusal::NothingToSeam)
+            }
+            Settlement::Awaiting => None,
         };
-        let refused = state.refuse(CommandKind::DeclareSeam, because);
+        if let Some(because) = because {
+            let refused = state.refuse(CommandKind::DeclareSeam, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+        state.admit()?;
+        let Some(interview) = state.interview.as_ref() else {
+            unreachable!("refused above when the session keeps no working memory");
+        };
+        let render = crate::seam::render::render(&interview.object, None);
+        let carried_entries = interview.object.live().count() as u64;
+        let head = self.shared.template.messages.clone();
+        let digest = |messages: &[Message]| {
+            let mut shape = self.shared.template.clone();
+            shape.messages = messages.to_vec();
+            crate::client::head::Head::of(&shape).digest().to_owned()
+        };
+        let prefix_hash_before = digest(&state.trunk);
+        let refilled = crate::seam::render::refill(&head, &render);
+        let prefix_hash_after = digest(&refilled);
+        state.trunk = refilled;
+        let at_turn = state.turns;
+        state.push(Event::Seamed {
+            at_turn,
+            prefix_hash_before,
+            prefix_hash_after,
+            render,
+            carried_entries,
+        });
         drop(state);
         self.shared.changed.notify_all();
-        Err(Rejected::Refused(refused))
+        Ok(())
     }
 
     /// End the session.
@@ -1749,6 +1807,24 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entry: entry.clone(),
             supersedes: supersedes.clone(),
         },
+        Event::Seamed {
+            at_turn,
+            prefix_hash_before,
+            prefix_hash_after,
+            render,
+            carried_entries,
+        } => log::Event::Seam {
+            at_turn: *at_turn,
+            // The only seam a served session fires is the operator's.
+            reason: log::SeamReason::Operator,
+            prefix_hash_before: prefix_hash_before.clone(),
+            prefix_hash_after: prefix_hash_after.clone(),
+            frame: crate::seam::render::FRAME_VERSION.to_owned(),
+            render: render.clone(),
+            carried_entries: *carried_entries,
+            // A total compaction: no turn of the old trunk is carried.
+            carried_turns: 0,
+        },
     };
     log::Line {
         seq: logged.seq,
@@ -1845,7 +1921,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::InFlight => log::Refusal::InFlight,
         Refusal::Ended => log::Refusal::Ended,
         Refusal::NothingInFlight => log::Refusal::NothingInFlight,
-        Refusal::SeamNotBuilt => log::Refusal::SeamNotBuilt,
+        Refusal::NothingToSeam => log::Refusal::NothingToSeam,
         Refusal::Stale => log::Refusal::Stale,
     }
 }
@@ -3513,7 +3589,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(session.cancel(2, None), Err(Rejected::NoSuchTurn(2)));
         assert_eq!(
             session.declare_seam(None),
-            Err(Rejected::Refused(Refusal::SeamNotBuilt))
+            Err(Rejected::Refused(Refusal::NothingToSeam))
         );
         assert_eq!(session.end(None), Ok(()));
         assert_eq!(session.settlement(), Settlement::Ended);
@@ -3552,7 +3628,7 @@ pub(in crate::drive) mod tests {
                 ),
                 (
                     CommandKind::DeclareSeam,
-                    Refusal::SeamNotBuilt,
+                    Refusal::NothingToSeam,
                     Settlement::Awaiting
                 ),
             ]
@@ -4056,6 +4132,13 @@ pub(in crate::drive) mod tests {
                 },
                 supersedes: None,
             },
+            Event::Seamed {
+                at_turn: 1,
+                prefix_hash_before: "c".repeat(64),
+                prefix_hash_after: "d".repeat(64),
+                render: "# regime\n".to_owned(),
+                carried_entries: 1,
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -4083,9 +4166,10 @@ pub(in crate::drive) mod tests {
                 Event::Forked { .. } => 20,
                 Event::ForkSettled { .. } => 21,
                 Event::Patched { .. } => 22,
+                Event::Seamed { .. } => 23,
             });
         }
-        assert_eq!(kinds.len(), 23, "a variant has no sample");
+        assert_eq!(kinds.len(), 24, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -4306,6 +4390,16 @@ pub(in crate::drive) mod tests {
                     category: None,
                 },
                 supersedes: None,
+            },
+            log::Event::Seam {
+                at_turn: 1,
+                reason: log::SeamReason::Operator,
+                prefix_hash_before: "c".repeat(64),
+                prefix_hash_after: "d".repeat(64),
+                frame: crate::seam::render::FRAME_VERSION.to_owned(),
+                render: "# regime\n".to_owned(),
+                carried_entries: 1,
+                carried_turns: 0,
             },
         ]
     }
@@ -4578,11 +4672,12 @@ pub(in crate::drive) mod tests {
         let log = wait_until(&session, "the first turn to settle", settled);
         let first = settling_seq(&log, 1);
 
-        // Refused: a seam is not built. The gap it carried is not logged, and
-        // it stays open (ruled on #146, amending D13 (c)).
+        // Refused: this session keeps no working memory to refill from. The
+        // gap it carried is not logged, and it stays open (ruled on #146,
+        // amending D13 (c)).
         assert_eq!(
             session.declare_seam(Some(gap(first, GapEnd::Seam))),
-            Err(Rejected::Refused(Refusal::SeamNotBuilt))
+            Err(Rejected::Refused(Refusal::NothingToSeam))
         );
         assert!(
             !session
@@ -4769,7 +4864,7 @@ pub(in crate::drive) mod tests {
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
-            "in-flight ended nothing-in-flight seam-not-built stale"
+            "in-flight ended nothing-in-flight nothing-to-seam stale"
         );
         assert_eq!(
             tags(
@@ -5719,6 +5814,171 @@ pub(in crate::drive) mod tests {
         born.push(user(&question));
         assert_eq!(sent[1].messages, born);
         assert_eq!(session.settlement(), Settlement::Awaiting);
+    }
+
+    // -----------------------------------------------------------------------
+    // the operator's seam (#493)
+    // -----------------------------------------------------------------------
+
+    /// #493's test: one ask, a declared seam, one ask after it. The seam
+    /// refills the trunk from working memory -- the head, the render after
+    /// it, and no turn of the old trunk -- the next ask is sent on exactly
+    /// that, and the log says so: the seam line carries the render, what was
+    /// carried, and the head's digest either side, which the projection's
+    /// rebuild of the next request's head checks.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn a_declared_seam_refills_the_trunk_from_working_memory_and_the_next_ask_runs_on_it() {
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["started on the schema"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        let opened_by = settling_seq(&log, 1);
+        let before = session.trunk();
+
+        session
+            .declare_seam(Some(gap(opened_by, GapEnd::Seam)))
+            .expect("a seam after a settled turn is admitted");
+
+        let held = session.shared.lock();
+        let object = &held.interview.as_ref().expect("interviewing").object;
+        let render = crate::seam::render::render(object, None);
+        drop(held);
+        let refilled = crate::seam::render::refill(&template().messages, &render);
+        assert_eq!(session.trunk(), refilled);
+        assert!(
+            render.contains("decision: for one team"),
+            "the render carries working memory: {render}"
+        );
+        assert!(
+            !session
+                .trunk()
+                .iter()
+                .any(|m| m.content.contains("what are we building?") || m.content == SCOPED),
+            "a turn of the old trunk was carried: {:#?}",
+            session.trunk()
+        );
+
+        let digest = |messages: &[Message]| {
+            let mut shape = template();
+            shape.messages = messages.to_vec();
+            crate::client::head::Head::of(&shape).digest().to_owned()
+        };
+        let log = session.events_from(0);
+        let seam = log
+            .iter()
+            .position(|logged| matches!(logged.event, Event::Seamed { .. }))
+            .expect("a seam line");
+        assert!(
+            matches!(&log[seam - 1].event, Event::IdleGap(gap) if gap.ended_by == GapEnd::Seam),
+            "the gap the seam ended is logged just before it"
+        );
+        assert_eq!(
+            line_of(&log[seam]).event,
+            log::Event::Seam {
+                at_turn: 1,
+                reason: log::SeamReason::Operator,
+                prefix_hash_before: digest(&before),
+                prefix_hash_after: digest(&refilled),
+                frame: crate::seam::render::FRAME_VERSION.to_owned(),
+                render: render.clone(),
+                carried_entries: 3,
+                carried_turns: 0,
+            }
+        );
+
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        reads_whole(&session);
+        let sent = session.shared.transport.sent();
+        assert_eq!(
+            sent.len(),
+            3,
+            "a turn, its fork, and the turn after the seam"
+        );
+        let mut expected = refilled.clone();
+        expected.push(user("build it"));
+        assert_eq!(
+            sent[2].messages, expected,
+            "the next ask runs on the refill"
+        );
+
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        // The seam's record row needs its turn's row, which needs timings
+        // this transport does not send: the projection's own test has it.
+        let named: Vec<String> = projected
+            .unspellable
+            .iter()
+            .filter(|u| u.kind == "request")
+            .map(|u| u.why.clone())
+            .collect();
+        assert_eq!(
+            named,
+            Vec::<String>::new(),
+            "every head after the seam verifies"
+        );
+    }
+
+    /// A seam needs something to refill from and a session at rest: before
+    /// any turn, or with no working memory, it is refused `nothing-to-seam`;
+    /// mid-turn, `in-flight`. Each refusal is logged and changes nothing.
+    #[test]
+    fn a_seam_with_nothing_to_refill_from_or_under_a_turn_is_refused() {
+        let gate = Gate::new();
+        let session = Session::open_with(
+            Canned::new([vec![
+                Step::Delta("Hel".to_owned()),
+                Step::Hold(gate.clone()),
+            ]]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[])),
+        );
+        assert_eq!(
+            session.declare_seam(None),
+            Err(Rejected::Refused(Refusal::NothingToSeam))
+        );
+        session.ask("one", None).expect("accepted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        assert_eq!(
+            session.declare_seam(None),
+            Err(Rejected::Refused(Refusal::InFlight))
+        );
+        gate.open();
+        wait_until(&session, "the turn to settle", settled);
+        assert_eq!(session.trunk()[1..], [user("one"), assistant("Hel")]);
+        assert!(
+            !session
+                .events_from(0)
+                .iter()
+                .any(|logged| matches!(logged.event, Event::Seamed { .. }))
+        );
+        reads_whole(&session);
     }
 
     /// The definition of done's second line: a gap after a plain chat turn fires none -- and

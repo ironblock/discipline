@@ -34,8 +34,8 @@ export interface SystemNode extends Provenance {
   readonly id: string;
   readonly text: string;
   readonly tokens?: number;
-  /** Set when this system prompt is a render of working memory. */
-  readonly render?: number;
+  /** Set when this system prompt is a render of working memory: the frame it was rendered with. */
+  readonly render?: string;
 }
 
 export interface UserNode extends Provenance {
@@ -222,6 +222,8 @@ export interface SeamNode extends Provenance {
   readonly prefixBefore?: number;
   readonly prefixAfter?: number;
   readonly warm?: Timings;
+  /** What the refill carried (log v6): working-memory entries, and turns of the old trunk. */
+  readonly carried?: { readonly entries: number; readonly turns: number };
 }
 
 export interface Era {
@@ -605,9 +607,9 @@ export function fold(lines: readonly LogLine[]): Session {
         const rendered: SystemNode = {
           kind: 'system',
           id: `system/${e.seq}`,
-          text: e.render.text,
-          ...(e.render.tokens !== undefined ? { tokens: e.render.tokens } : {}),
-          render: e.render.version,
+          text: e.render,
+          ...(e.render_tokens !== undefined ? { tokens: e.render_tokens } : {}),
+          render: e.render_version !== undefined ? `v${e.render_version}` : (e.frame ?? 'frame not recorded'),
           ...provenance(e),
         };
         eras.push({ seam: e, system: rendered, slots: [] });
@@ -737,7 +739,10 @@ export function fold(lines: readonly LogLine[]): Session {
           hashBefore: seamLine.prefix_hash_before,
           hashAfter: seamLine.prefix_hash_after,
           ...(previousEraEnd ? { prefixBefore: trunkPrefixAt(previousEraEnd)! } : {}),
-          ...(seamLine.render.tokens !== undefined ? { prefixAfter: seamLine.render.tokens } : {}),
+          ...(seamLine.render_tokens !== undefined ? { prefixAfter: seamLine.render_tokens } : {}),
+          ...(seamLine.carried_entries !== undefined && seamLine.carried_turns !== undefined
+            ? { carried: { entries: seamLine.carried_entries, turns: seamLine.carried_turns } }
+            : {}),
           ...(seamLine.warm ? { warm: seamLine.warm } : {}),
           ...provenance(seamLine),
         })

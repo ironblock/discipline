@@ -113,7 +113,8 @@ export type PatchOp = Open<'add' | 'supersede' | 'resolve' | 'retire' | 'park' |
 /** How an entry was known -- `authority`, ruled on #117 (naming 5) (AHEAD, R5). */
 export type Authority = Open<'stated' | 'extracted' | 'observed' | 'arm'>;
 
-export type SeamReason = Open<'operator' | 'phase' | 'cadence' | 'budget'>;
+/** Why a seam fired: the format's words (log v6, #493), open. A served session writes only `operator`. */
+export type SeamReason = Open<V0.SeamReason>;
 
 // ------------------------------------------------------------------ v0's lines, with what is AHEAD on them
 
@@ -266,19 +267,24 @@ export interface Patch extends At {
   readonly authority?: Authority;
 }
 
-/** AHEAD (R6): the one deliberate prefill event -- the trunk rebuilt from working memory. */
-export interface Seam extends At {
-  readonly kind: 'seam';
-  readonly at_turn: number;
-  readonly reason: SeamReason;
-  readonly phase?: { readonly from: string; readonly to: string };
-  readonly prefix_hash_before: string;
-  readonly prefix_hash_after: string;
-  /** The new system prompt: working memory rendered, with the phase's priming. */
-  readonly render: { readonly version: number; readonly text: string; readonly tokens?: number };
-  /** The pre-warm: the new prefix sent once so the next ask finds it cached. */
-  readonly warm?: Timings;
-}
+/**
+ * The one deliberate prefill event -- the trunk refilled from working memory (log v6, #493): the head, the render
+ * after it, and no turn of the old trunk. The format's line, with what is AHEAD on it. A seam placed in the surface's
+ * own older shape (`render_version`, drawn before v6; its re-recording is #427) carries none of `frame`,
+ * `carried_entries` and `carried_turns`.
+ */
+export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'carried_turns'> &
+  Partial<Pick<V0.SeamLine, 'frame' | 'carried_entries' | 'carried_turns'>> & {
+    readonly reason: SeamReason;
+    /** AHEAD (R6): the phases it moved between. */
+    readonly phase?: { readonly from: string; readonly to: string };
+    /** AHEAD (R6): the render's size in tokens. */
+    readonly render_tokens?: number;
+    /** AHEAD (R6): the pre-warm -- the new prefix sent once so the next ask finds it cached. */
+    readonly warm?: Timings;
+    /** The surface's own older shape: the render's number, in a recording placed before v6. */
+    readonly render_version?: number;
+  };
 
 export type LogLine =
   | SessionStart
@@ -328,5 +334,5 @@ export const NEEDS_OF: { readonly [K in Kind]: readonly Need[] } = {
   fork: ['R4'],
   'fork.settled': ['R4'],
   patch: ['R5'],
-  seam: ['R6'],
+  seam: [],
 };

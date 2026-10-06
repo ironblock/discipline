@@ -1,0 +1,7 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":6}
+{"kind":"ask","seq":1,"t":5,"text":"what are we building","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"response","seq":4,"t":20,"text":"a tracker","to_request":3}
+{"kind":"turn.settled","reason":"final","seq":5,"t":25,"turn":1}
+{"at_turn":1,"carried_entries":0,"carried_turns":0,"frame":"placeholder","kind":"seam","prefix_hash_after":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","prefix_hash_before":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","reason":"operator","render":"# working set\n","seq":6,"t":30}

@@ -27,9 +27,15 @@ export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
             <strong>{tokens(node.prefixAfter)}</strong> tok
           </span>
         ) : null}
-        <span title="prefix hash before and after">
-          {node.hashBefore} → {node.hashAfter}
+        <span title={`prefix hash before and after: ${node.hashBefore} → ${node.hashAfter}`}>
+          {node.hashBefore.slice(0, 8)} → {node.hashAfter.slice(0, 8)}
         </span>
+        {node.carried ? (
+          <span title="what the refill carried: working-memory entries, and turns of the old trunk">
+            carried {node.carried.entries} {node.carried.entries === 1 ? 'entry' : 'entries'}, {node.carried.turns}{' '}
+            {node.carried.turns === 1 ? 'turn' : 'turns'}
+          </span>
+        ) : null}
         {node.warm ? (
           <span title="the pre-warm: the new prefix sent once so the next ask finds it cached">warm {ms(node.warm.prompt_ms)}</span>
         ) : (

@@ -302,10 +302,11 @@ pub fn project_in(
     walk.recording = recording.map(std::path::Path::to_path_buf);
     walk.tools = tools_of(tools.as_deref().unwrap_or_default());
     walk.model.clone_from(model);
-    walk.trunk = head
+    walk.head = head
         .iter()
         .map(|message| Message::new(role_of(message.role), message.content.clone()))
         .collect();
+    walk.trunk.clone_from(&walk.head);
     for line in &lines[1..] {
         walk.line(line)?;
     }
@@ -339,8 +340,11 @@ struct Walk<'a> {
     /// The model the session's requests name, from its first line.
     model: String,
     /// The trunk as the session holds it: its head, then each answered
-    /// turn's ask and answer.
+    /// turn's ask and answer -- or, after a seam, the head refilled from the
+    /// seam's render (v6, #493).
     trunk: Vec<Message>,
+    /// The session's head, from `session.start`: what a seam refills from.
+    head: Vec<Message>,
     /// Each turn's ask.
     asks: BTreeMap<u32, String>,
     /// Each trunk request's turn, by `seq`.
@@ -459,6 +463,7 @@ impl<'a> Walk<'a> {
             named_kinds: BTreeSet::new(),
             model: String::new(),
             trunk: Vec::new(),
+            head: Vec::new(),
             asks: BTreeMap::new(),
             turn_of: BTreeMap::new(),
             last_head: None,
@@ -552,6 +557,12 @@ impl<'a> Walk<'a> {
             // `value` is carried by its capture row, and any other outcome is
             // named with its word.
             Line::ForkSettled { fork, outcome } => self.fork_settled(line.seq, *fork, *outcome),
+            // A seam (v6, #493): its row, and the trunk refilled exactly as
+            // the session refills it, so the next request's head is rebuilt
+            // and checked like any other.
+            Line::Seam {
+                at_turn, render, ..
+            } => self.seam(line.seq, *at_turn, render),
             // Facts the record has no row for at all, named once per kind.
             Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
                 let kind = match &line.event {
@@ -712,6 +723,44 @@ impl<'a> Walk<'a> {
             lane: lane.tag().to_owned(),
             substrate: self.substrate.clone(),
             of_turn,
+        });
+    }
+
+    /// A seam's row, `s/<seq>`, at the turn it follows, and the trunk
+    /// refilled from `render` through [`crate::seam::render::refill`]. The
+    /// row is named rather than written when that turn has no row; the
+    /// trunk is refilled either way, since the session's was.
+    fn seam(&mut self, seq: u64, at_turn: u32, render: &str) {
+        self.trunk = crate::seam::render::refill(&self.head, render);
+        // An attachment the old trunk carried and could not be read back is
+        // not on the refilled one.
+        self.trunk_unrebuilt = None;
+        let turned = self
+            .events
+            .iter()
+            .any(|event| matches!(event, Event::Turn { index, .. } if *index == at_turn));
+        if !turned {
+            self.name(
+                seq,
+                "seam",
+                format!("a seam at turn {at_turn}, which has no row"),
+                None,
+            );
+            return;
+        }
+        let Ok(rendered_bytes) = Count::new(render.len() as u64) else {
+            self.name(
+                seq,
+                "seam",
+                "a render past the record's bound".to_owned(),
+                None,
+            );
+            return;
+        };
+        self.events.push(Event::Seam {
+            id: format!("s/{seq}"),
+            at_turn,
+            rendered_bytes,
         });
     }
 
@@ -1304,6 +1353,41 @@ mod tests {
             projection.unspellable[1]
                 .why
                 .contains("equality unmeasured for this engine")
+        );
+        validates(&projection);
+    }
+
+    /// A seam (log v6, #493) is the record's `seam` row at its turn, its
+    /// `rendered_bytes` the render's length.
+    #[test]
+    fn a_seam_is_a_seam_row_at_its_turn() {
+        let render = "# working set\nd1\ta tracker\n";
+        let mut events = vec![start()];
+        events.extend(answered(1, 3, Some(warm()), None));
+        events.push(Line::Seam {
+            at_turn: 1,
+            reason: log::SeamReason::Operator,
+            prefix_hash_before: "a".repeat(64),
+            prefix_hash_after: "b".repeat(64),
+            frame: crate::seam::render::FRAME_VERSION.to_owned(),
+            render: render.to_owned(),
+            carried_entries: 1,
+            carried_turns: 0,
+        });
+        let projection = project(
+            &numbered(events),
+            &regime(),
+            Some(Engine::Commit("e7051ef")),
+        )
+        .expect("projected");
+        assert!(
+            projection.events.iter().any(|event| matches!(
+                event,
+                Event::Seam { at_turn: 1, rendered_bytes, .. }
+                    if rendered_bytes.get() == render.len() as u64
+            )),
+            "{:#?}",
+            projection.events
         );
         validates(&projection);
     }
