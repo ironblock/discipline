@@ -114,8 +114,8 @@ vocabulary! {
         Ended => "ended",
         /// There is no call in flight to stop.
         NothingInFlight => "nothing-in-flight",
-        /// A seam has nothing to refill from: no turn has settled, or the
-        /// session keeps no working memory (#493).
+        /// A seam has nothing to refill from: no turn has settled, or working
+        /// memory holds no entry (#493).
         NothingToSeam => "nothing-to-seam",
         /// A cancel named a turn older than the latest one: it arrived after
         /// that turn settled and must not stop the next (the admission
@@ -457,7 +457,7 @@ pub enum Event {
     Seamed {
         /// The latest turn, settled, which it follows.
         at_turn: u32,
-        /// The digest `client::head` gives of a request on the trunk before.
+        /// The `head_sha256` a trunk request on the trunk before would carry.
         prefix_hash_before: String,
         /// The same, after.
         prefix_hash_after: String,
@@ -1244,8 +1244,8 @@ impl<S: Streaming + 'static> Session<S> {
     /// # Errors
     ///
     /// [`Refusal::InFlight`] while a turn or a capture is in flight, and
-    /// [`Refusal::NothingToSeam`] before any turn has settled or in a session
-    /// that keeps no working memory: both logged. [`Refusal::Ended`] once the
+    /// [`Refusal::NothingToSeam`] before any turn has settled, or when working
+    /// memory holds no entry (or the session keeps none): both logged. [`Refusal::Ended`] once the
     /// session has ended, not logged (#291). A refused command's `gap` is
     /// neither logged nor closed. [`Rejected::BadGap`] when `gap` cannot be
     /// logged, and then nothing is.
@@ -1255,7 +1255,16 @@ impl<S: Streaming + 'static> Session<S> {
         let because = match state.settlement {
             Settlement::Ended => Some(Refusal::Ended),
             Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
-            Settlement::Awaiting if state.turns == 0 || state.interview.is_none() => {
+            // Nothing to refill from: no turn yet, no working object, or an
+            // empty one -- a refill from an empty object would drop every
+            // turn and carry nothing in their place.
+            Settlement::Awaiting
+                if state.turns == 0
+                    || state
+                        .interview
+                        .as_ref()
+                        .is_none_or(|interview| interview.object.live().next().is_none()) =>
+            {
                 Some(Refusal::NothingToSeam)
             }
             Settlement::Awaiting => None,
@@ -1273,9 +1282,12 @@ impl<S: Streaming + 'static> Session<S> {
         let render = crate::seam::render::render(&interview.object, None);
         let carried_entries = interview.object.live().count() as u64;
         let head = self.shared.template.messages.clone();
+        // The head a trunk request on `messages` carries: `Head::of` leaves
+        // out a request's last message, its ask, so one stands in for it.
         let digest = |messages: &[Message]| {
             let mut shape = self.shared.template.clone();
             shape.messages = messages.to_vec();
+            shape.messages.push(Message::new(Role::User, String::new()));
             crate::client::head::Head::of(&shape).digest().to_owned()
         };
         let prefix_hash_before = digest(&state.trunk);
@@ -5873,11 +5885,11 @@ pub(in crate::drive) mod tests {
             session.trunk()
         );
 
-        let digest = |messages: &[Message]| {
-            let mut shape = template();
-            shape.messages = messages.to_vec();
-            crate::client::head::Head::of(&shape).digest().to_owned()
-        };
+        // The head a request on the old trunk would have carried: the trunk,
+        // then an ask, as `ask` builds it.
+        let mut on_before = template();
+        on_before.messages.clone_from(&before);
+        on_before.messages.push(user("an ask"));
         let log = session.events_from(0);
         let seam = log
             .iter()
@@ -5887,13 +5899,25 @@ pub(in crate::drive) mod tests {
             matches!(&log[seam - 1].event, Event::IdleGap(gap) if gap.ended_by == GapEnd::Seam),
             "the gap the seam ended is logged just before it"
         );
+        let log::Event::Seam {
+            prefix_hash_before,
+            prefix_hash_after,
+            ..
+        } = line_of(&log[seam]).event
+        else {
+            panic!("the seam's line is a seam");
+        };
+        assert_eq!(
+            prefix_hash_before,
+            crate::client::head::Head::of(&on_before).digest()
+        );
         assert_eq!(
             line_of(&log[seam]).event,
             log::Event::Seam {
                 at_turn: 1,
                 reason: log::SeamReason::Operator,
-                prefix_hash_before: digest(&before),
-                prefix_hash_after: digest(&refilled),
+                prefix_hash_before: prefix_hash_before.clone(),
+                prefix_hash_after: prefix_hash_after.clone(),
                 frame: crate::seam::render::FRAME_VERSION.to_owned(),
                 render: render.clone(),
                 carried_entries: 3,
@@ -5923,6 +5947,21 @@ pub(in crate::drive) mod tests {
             sent[2].messages, expected,
             "the next ask runs on the refill"
         );
+        // The seam's "after" is the head the next trunk request carried, as
+        // the log itself says.
+        let next_head = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Requested {
+                    turn: 2,
+                    lane: Lane::Trunk,
+                    head_sha256,
+                    ..
+                } => Some(head_sha256.clone()),
+                _ => None,
+            })
+            .expect("turn 2's trunk request");
+        assert_eq!(prefix_hash_after, next_head);
 
         let lines: Vec<log::Line> = log.iter().map(line_of).collect();
         let projected =
@@ -5943,8 +5982,9 @@ pub(in crate::drive) mod tests {
     }
 
     /// A seam needs something to refill from and a session at rest: before
-    /// any turn, or with no working memory, it is refused `nothing-to-seam`;
-    /// mid-turn, `in-flight`. Each refusal is logged and changes nothing.
+    /// any turn, or over working memory with no entry, it is refused
+    /// `nothing-to-seam`; mid-turn, `in-flight`. Each refusal is logged and
+    /// changes nothing.
     #[test]
     fn a_seam_with_nothing_to_refill_from_or_under_a_turn_is_refused() {
         let gate = Gate::new();
@@ -5971,6 +6011,12 @@ pub(in crate::drive) mod tests {
         );
         gate.open();
         wait_until(&session, "the turn to settle", settled);
+        // A settled turn, and a working object with nothing in it: a refill
+        // would drop the turn and carry nothing.
+        assert_eq!(
+            session.declare_seam(None),
+            Err(Rejected::Refused(Refusal::NothingToSeam))
+        );
         assert_eq!(session.trunk()[1..], [user("one"), assistant("Hel")]);
         assert!(
             !session

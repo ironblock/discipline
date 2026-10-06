@@ -97,7 +97,8 @@
 //! settled, while the state is `awaiting` and no fork is unsettled; a fork of
 //! a turn at or before a seam is refused, since its warm tail is gone.
 //! `seam-not-built` stays readable, and no v6 writer writes it; v6 adds the
-//! refusal `nothing-to-seam`, for a seam declared before any turn settled. A log that
+//! refusal `nothing-to-seam`, for a seam declared before any turn settled or
+//! over empty working memory. A log that
 //! declares 0 to 5 and carries a `seam` line is refused the same way.
 //!
 //! # A torn final line
@@ -256,7 +257,8 @@ vocabulary! {
         NothingInFlight => "nothing-in-flight",
         /// Seams are not built yet. Readable; no v6 writer writes it.
         SeamNotBuilt => "seam-not-built",
-        /// No turn has settled, so there is nothing to refill from (v6).
+        /// Nothing to refill from: no turn has settled, or working memory
+        /// holds no entry (v6).
         NothingToSeam => "nothing-to-seam",
         /// A stop named a turn older than the latest.
         Stale => "stale",
@@ -823,8 +825,8 @@ pub enum Event {
         at_turn: u32,
         /// Why it fired.
         reason: SeamReason,
-        /// The digest of the trunk's head before the refill, as a trunk
-        /// request on it would carry in `head_sha256`.
+        /// The `head_sha256` a trunk request on the trunk before the refill
+        /// would carry; `prefix_hash_after`'s is the next trunk request's.
         prefix_hash_before: String,
         /// The same, after.
         prefix_hash_after: String,
