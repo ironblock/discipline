@@ -607,7 +607,9 @@ export function fold(lines: readonly LogLine[]): Session {
         const rendered: SystemNode = {
           kind: 'system',
           id: `system/${e.seq}`,
-          text: e.render,
+          // What the model was sent after the seam: the head's system message, a blank line, then the render --
+          // `diet`'s `seam::render::refill`, whose output the record's head check verifies.
+          text: system ? `${system.content}\n\n${e.render}` : e.render,
           ...(e.render_tokens !== undefined ? { tokens: e.render_tokens } : {}),
           render: e.render_version !== undefined ? `v${e.render_version}` : (e.frame ?? 'frame not recorded'),
           ...provenance(e),

@@ -587,9 +587,8 @@ fn served_session(
 
 /// What `serve`'s capture gap forks under (#374): the rules the regimen at
 /// `regimen` lists under `interview_warrant`, and a working object under
-/// `regime`. With no rules no fork ever fires, and the working object is
-/// still kept: a declared seam refills from it (#493). `None` when there is
-/// no regimen: then there is no working memory, and a seam is refused.
+/// `regime`. `None` when it lists none, or there is no regimen: then no fork
+/// ever fires.
 fn serving_interview(
     regimen: Option<&str>,
     regime: Option<&Regime>,
@@ -601,7 +600,7 @@ fn serving_interview(
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
-    Ok(Some(Interview {
+    Ok((!rules.is_empty()).then(|| Interview {
         rules,
         object: diet::object::WorkingObject::open(regime.clone()),
     }))

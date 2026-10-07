@@ -9,3 +9,5 @@ test-results/
 .vitest/
 # The shell gate built for the page (scripts/build-gate.mjs): built every run, never committed.
 src/gate/wasm/
+# tsc -b writes its build cache beside the config: built every run, never committed.
+*.tsbuildinfo
