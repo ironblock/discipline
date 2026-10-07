@@ -88,7 +88,7 @@ describe('fold over the specimen', () => {
     expect(s.eras).toHaveLength(2);
     expect(s.phase).toBe('build');
     const era = s.eras[1]!;
-    expect(era.system.render).toBe(1);
+    expect(era.system.render).toBe('v1');
     expect(era.seam?.phase).toEqual({ from: 'spec', to: 'build' });
     expect(era.seam?.prefixAfter).toBeLessThan(era.seam?.prefixBefore ?? 0);
   });

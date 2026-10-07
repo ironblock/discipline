@@ -15,6 +15,7 @@
 //! in the same phase are the same bytes, and the byte-identity claim the seam
 //! controller makes is only checkable because that is true.
 
+use crate::client::shape::{Message, Role};
 use crate::object::WorkingObject;
 
 /// Which frame this module renders with.
@@ -83,6 +84,35 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
     }
 
     out
+}
+
+/// The trunk a served session continues from after a seam (#493): its
+/// `head`, with `render` after the head's standing instruction, and nothing
+/// of the old trunk.
+///
+/// A TOTAL compaction, by the maintainer's intent on #493: the refill is not
+/// a summary of the old turns with the later ones kept, and it does not try
+/// to make the model believe it is continuing the session. Each seam hands it
+/// a better starting point, built from working memory alone.
+///
+/// The render joins the first message when that message is the system one,
+/// separated by a blank line, rather than arriving as a message of its own: a
+/// second system message, or two user messages in a row, is a shape some chat
+/// templates refuse. A head with no system message gets one, holding the
+/// render. The session and the record's projection both rebuild the trunk
+/// through this one function, so the projection's head check holds the
+/// session to it.
+#[must_use]
+pub fn refill(head: &[Message], render: &str) -> Vec<Message> {
+    let mut trunk = head.to_vec();
+    match trunk.first_mut() {
+        Some(first) if first.role == Role::System => {
+            first.content.push_str("\n\n");
+            first.content.push_str(render);
+        }
+        _ => trunk.insert(0, Message::new(Role::System, render)),
+    }
+    trunk
 }
 
 /// `text` with everything that could forge a row escaped out of it.

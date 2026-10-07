@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 5;
-export const READS = [0, 1, 2, 3, 4, 5] as const;
+export const VERSION = 6;
+export const READS = [0, 1, 2, 3, 4, 5, 6] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -26,6 +26,7 @@ export type Kind =
   | "fork"
   | "fork.settled"
   | "patch"
+  | "seam"
 ;
 
 export type State =
@@ -52,6 +53,7 @@ export type Refusal =
   | "ended"
   | "nothing-in-flight"
   | "seam-not-built"
+  | "nothing-to-seam"
   | "stale"
 ;
 
@@ -153,6 +155,13 @@ export type PatchOp =
   | "park"
 ;
 
+export type SeamReason =
+  | "operator"
+  | "phase"
+  | "budget"
+  | "cadence"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -209,7 +218,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -388,6 +397,20 @@ export type PatchLine = {
   supersedes?: string;
 };
 
+export type SeamLine = {
+  seq: number;
+  t: number;
+  kind: "seam";
+  at_turn: number;
+  reason: SeamReason;
+  prefix_hash_before: string;
+  prefix_hash_after: string;
+  frame: string;
+  render: string;
+  carried_entries: number;
+  carried_turns: number;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -406,4 +429,5 @@ export type LogLine =
   | ForkLine
   | ForkSettledLine
   | PatchLine
+  | SeamLine
 ;

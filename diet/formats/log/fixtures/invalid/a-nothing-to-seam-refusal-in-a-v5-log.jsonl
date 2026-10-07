@@ -1,0 +1,2 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":5}
+{"because":"nothing-to-seam","command":"declare-seam","during":"awaiting","kind":"refused","seq":1,"t":5}

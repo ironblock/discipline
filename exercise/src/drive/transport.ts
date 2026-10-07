@@ -84,7 +84,7 @@ export type Refusal = Open<
   | 'off-script'
   /** A recording plays; it takes no commands. */
   | 'recording'
-  /** `diet`'s own (log v0 `Refusal`): a turn or a capture is in flight; the turn named has nothing in flight; seams are not built yet; a stop named an older turn. */
+  /** `diet`'s own (log v0 `Refusal`): a turn or a capture is in flight; the turn named has nothing in flight; seams are not built yet (read in an older log; v6 writes `nothing-to-seam` instead); a stop named an older turn. */
   | 'in-flight'
   | 'nothing-in-flight'
   | 'seam-not-built'

@@ -273,7 +273,9 @@ export class Placer {
             ...(e.phase ? { phase: e.phase } : {}),
             prefix_hash_before: e.prefix_hash_before,
             prefix_hash_after: e.prefix_hash_after,
-            render: e.render,
+            render: e.render.text,
+            render_version: e.render.version,
+            ...(e.render.tokens !== undefined ? { render_tokens: e.render.tokens } : {}),
             ...(e.warm ? { warm: e.warm } : {}),
           },
         ];

@@ -40,7 +40,7 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
   return (
     <Block
       tone="system"
-      label={node.render === undefined ? 'system' : `system · render v${node.render}`}
+      label={node.render === undefined ? 'system' : `system · render ${node.render}`}
       {...(node.tokens !== undefined ? { input: <span title="tokens in the prefix">{tokens(node.tokens)} tok</span> } : {})}
       provenance={node}
       id={node.id}

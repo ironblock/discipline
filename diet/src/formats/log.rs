@@ -83,6 +83,24 @@
 //! declares 0 to 3 and carries `approval`, `cwd`, `files`, `denylist` or
 //! `declined` is refused the same way. v4 is closed with `files`.
 //!
+//! v6 (#493) adds the `seam` kind: the operator declared a seam, and the
+//! trunk was refilled from working memory -- the session's head with the
+//! working object rendered after it, and no turn of the old trunk carried
+//! (a total compaction, the maintainer's intent on #493). It carries the turn
+//! it follows (`at_turn`), why it fired (`reason`, a [`SeamReason`]), the
+//! digests of the trunk's head before and after (`prefix_hash_before`,
+//! `prefix_hash_after`), the frame the render was built with and the render
+//! itself (`frame`, `render`), and what the refill carried (`carried_entries`,
+//! `carried_turns`), so a later strategy that carries a tail is told apart
+//! from this one. There is no ratification in v6: the audit's answer grammar
+//! is unwritten. Whole-log rules: a seam follows the latest turn,
+//! settled, while the state is `awaiting` and no fork is unsettled; a fork of
+//! a turn at or before a seam is refused, since its warm tail is gone.
+//! `seam-not-built` stays readable, and no v6 writer writes it; v6 adds the
+//! refusal `nothing-to-seam`, for a seam declared before any turn settled or
+//! over empty working memory. A log that
+//! declares 0 to 5 and carries a `seam` line is refused the same way.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -114,10 +132,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 5;
+pub const VERSION: i64 = 6;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -165,6 +183,24 @@ vocabulary! {
         ForkSettled => "fork.settled",
         /// One entry a fork's answer patched into working memory (v5, #374).
         Patch => "patch",
+        /// The trunk refilled from working memory (v6, #493).
+        Seam => "seam",
+    }
+}
+
+vocabulary! {
+    /// Why a seam fired (v6, #493): `seam::Reason`'s words. Only `operator`
+    /// is written today; the others are the controller's triggers, read so
+    /// that a session that fires them needs no new version.
+    SeamReason {
+        /// The operator declared it.
+        Operator => "operator",
+        /// The phase graph ratified a transition.
+        Phase => "phase",
+        /// The working set reached the declared byte count.
+        Budget => "budget",
+        /// The declared cadence came round.
+        Cadence => "cadence",
     }
 }
 
@@ -219,8 +255,11 @@ vocabulary! {
         Ended => "ended",
         /// The turn named has no call in flight.
         NothingInFlight => "nothing-in-flight",
-        /// Seams are not built yet.
+        /// Seams are not built yet. Readable; no v6 writer writes it.
         SeamNotBuilt => "seam-not-built",
+        /// Nothing to refill from: no turn has settled, or working memory
+        /// holds no entry (v6).
+        NothingToSeam => "nothing-to-seam",
         /// A stop named a turn older than the latest.
         Stale => "stale",
     }
@@ -780,6 +819,27 @@ pub enum Event {
         /// `supersede`.
         supersedes: Option<String>,
     },
+    /// The trunk refilled from working memory (v6, #493).
+    Seam {
+        /// The latest turn, settled, which the seam follows.
+        at_turn: u32,
+        /// Why it fired.
+        reason: SeamReason,
+        /// The `head_sha256` a trunk request on the trunk before the refill
+        /// would carry; `prefix_hash_after`'s is the next trunk request's.
+        prefix_hash_before: String,
+        /// The same, after.
+        prefix_hash_after: String,
+        /// The frame the render was built with (`seam::render::FRAME_VERSION`).
+        frame: String,
+        /// The working object, rendered: what the refilled head carries after
+        /// the session's own.
+        render: String,
+        /// How many working-memory entries the render carried.
+        carried_entries: u64,
+        /// How many turns of the old trunk the refill carried.
+        carried_turns: u64,
+    },
 }
 
 /// A patch's entry (v5, #374): its id, its text, and its category when the
@@ -1315,6 +1375,43 @@ fn gap_once(
     Ok(())
 }
 
+/// A `seam` (v6, #493): after the latest turn, settled, while the session
+/// awaits and no fork is unsettled.
+fn seam_at(
+    at_turn: u32,
+    turns: u32,
+    settled: &BTreeSet<u32>,
+    state: State,
+    forks: &Forks,
+) -> Result<(), String> {
+    if at_turn != turns {
+        return Err(format!(
+            "a seam at turn {at_turn} where the latest is {turns}: a seam follows the latest turn"
+        ));
+    }
+    if turns > 0 && !settled.contains(&turns) {
+        return Err(format!(
+            "a seam at turn {turns}, which has not settled: a seam never refills under a turn"
+        ));
+    }
+    if state != State::Awaiting {
+        return Err(format!(
+            "a seam while the state is `{}`: a seam is declared while the session awaits",
+            state.tag()
+        ));
+    }
+    if let Some(fork) = forks
+        .of_turn
+        .keys()
+        .find(|fork| !forks.settled.contains_key(fork))
+    {
+        return Err(format!(
+            "a seam while fork {fork} is unsettled: the fork is cut from the trunk the seam replaces"
+        ));
+    }
+    Ok(())
+}
+
 /// What the whole-log rules of #374's forks (v5) carry from line to line.
 #[derive(Default)]
 struct Forks {
@@ -1326,6 +1423,9 @@ struct Forks {
     of_turn: BTreeMap<u64, u32>,
     /// Each settled fork's `seq`, to how it ended.
     settled: BTreeMap<u64, ForkOutcome>,
+    /// The turn the latest seam followed (v6, #493): a fork of it, or of any
+    /// turn before it, forks a warm tail the seam replaced.
+    seamed: Option<u32>,
 }
 
 impl Forks {
@@ -1354,6 +1454,12 @@ impl Forks {
         if trunk.get(&of_turn) != Some(&at) || !self.answered.contains(&at) {
             return Err(format!(
                 "a fork at seq {at}, which is not turn {of_turn}'s answered trunk `request`"
+            ));
+        }
+        if self.seamed.is_some_and(|seamed| of_turn <= seamed) {
+            return Err(format!(
+                "a fork of turn {of_turn} after a seam that followed it: the seam replaced the \
+                 trunk the fork would be cut from"
             ));
         }
         if self.of_turn.values().any(|turn| *turn == of_turn) {
@@ -1734,6 +1840,10 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 .settle(*fork, *outcome)
                 .map_err(|why| at(index, why))?,
             Event::Patch { fork, .. } => forks.patch(*fork).map_err(|why| at(index, why))?,
+            Event::Seam { at_turn, .. } => {
+                seam_at(*at_turn, turns, &settled, state, &forks).map_err(|why| at(index, why))?;
+                forks.seamed = Some(*at_turn);
+            }
             Event::ToolCall {
                 request,
                 turn,
@@ -2039,6 +2149,16 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 supersedes,
             }
         }
+        Kind::Seam => Event::Seam {
+            at_turn: fields.turn("at_turn")?,
+            reason: fields.tag("reason", SeamReason::from_tag)?,
+            prefix_hash_before: fields.digest("prefix_hash_before")?,
+            prefix_hash_after: fields.digest("prefix_hash_after")?,
+            frame: fields.string("frame")?,
+            render: fields.string("render")?,
+            carried_entries: fields.count("carried_entries")?,
+            carried_turns: fields.count("carried_turns")?,
+        },
     };
     Ok(Line {
         seq: fields.count("seq")?,
@@ -2436,6 +2556,8 @@ pub enum Tags {
     ForkOutcome,
     /// [`PatchOp`] (v5).
     PatchOp,
+    /// [`SeamReason`] (v6).
+    SeamReason,
 }
 
 impl Tags {
@@ -2459,6 +2581,7 @@ impl Tags {
         Self::Warrant,
         Self::ForkOutcome,
         Self::PatchOp,
+        Self::SeamReason,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -2483,6 +2606,7 @@ impl Tags {
             Self::Warrant => "Warrant",
             Self::ForkOutcome => "ForkOutcome",
             Self::PatchOp => "PatchOp",
+            Self::SeamReason => "SeamReason",
         }
     }
 
@@ -2511,6 +2635,7 @@ impl Tags {
             Self::Warrant => of(Warrant::ALL, Warrant::tag),
             Self::ForkOutcome => of(ForkOutcome::ALL, ForkOutcome::tag),
             Self::PatchOp => of(PatchOp::ALL, PatchOp::tag),
+            Self::SeamReason => of(SeamReason::ALL, SeamReason::tag),
         }
     }
 }
@@ -2711,6 +2836,16 @@ const fn must_v5(key: &'static str, holds: Holds) -> Field {
     }
 }
 
+/// A key that arrived in v6 and is required wherever its object is written.
+const fn must_v6(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 6,
+    }
+}
+
 /// The keys a `delta`'s `tool_call` carries: the call's index always, its
 /// id and name on its first fragment only, as the server sent them, and the
 /// fragment of its arguments. Arrived in v3.
@@ -2769,6 +2904,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Progress => 1,
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
+        Kind::Seam => 6,
         _ => 0,
     }
 }
@@ -2785,6 +2921,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     }
     if tags == Tags::Lane && Lane::from_tag(tag) == Some(Lane::Interview) {
         return 5;
+    }
+    if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::NothingToSeam) {
+        return 6;
     }
     let capped =
         tags == Tags::SettleReason && SettleReason::from_tag(tag) == Some(SettleReason::Capped);
@@ -2981,6 +3120,19 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("op", Tag(Tags::PatchOp)),
                 must_v5("entry", Holds::Entry),
                 may_v5("supersedes", Text),
+            ];
+            F
+        }
+        Kind::Seam => {
+            const F: &[Field] = &[
+                must_v6("at_turn", Count),
+                must_v6("reason", Tag(Tags::SeamReason)),
+                must_v6("prefix_hash_before", Holds::Digest),
+                must_v6("prefix_hash_after", Holds::Digest),
+                must_v6("frame", Text),
+                must_v6("render", Text),
+                must_v6("carried_entries", Count),
+                must_v6("carried_turns", Count),
             ];
             F
         }
@@ -3575,6 +3727,26 @@ fn to_value(line: &Line) -> Value {
                 put("supersedes", text(replaced));
             }
             Kind::Patch
+        }
+        Event::Seam {
+            at_turn,
+            reason,
+            prefix_hash_before,
+            prefix_hash_after,
+            frame,
+            render,
+            carried_entries,
+            carried_turns,
+        } => {
+            put("at_turn", count(u64::from(*at_turn)));
+            put("reason", text(reason.tag()));
+            put("prefix_hash_before", text(prefix_hash_before));
+            put("prefix_hash_after", text(prefix_hash_after));
+            put("frame", text(frame));
+            put("render", text(render));
+            put("carried_entries", count(*carried_entries));
+            put("carried_turns", count(*carried_turns));
+            Kind::Seam
         }
     };
     put("kind", text(kind.tag()));
@@ -5393,7 +5565,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch"
+             fork.settled patch seam"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -5401,7 +5573,7 @@ mod tests {
         );
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
-            "in-flight ended nothing-in-flight seam-not-built stale"
+            "in-flight ended nothing-in-flight seam-not-built nothing-to-seam stale"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -5438,6 +5610,10 @@ mod tests {
         assert_eq!(
             tags(PatchOp::ALL.iter().map(|it| it.tag()).collect()),
             "add supersede resolve retire park"
+        );
+        assert_eq!(
+            tags(SeamReason::ALL.iter().map(|it| it.tag()).collect()),
+            "operator phase budget cadence"
         );
     }
 
