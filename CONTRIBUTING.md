@@ -4,8 +4,6 @@ All found in `.github/ISSUE_TEMPLATE/`:
   - `defect.md`: for a reproduction with an expected/observed pair, 
   - `work.md` for anything built. Acceptance is a command and its exit code in all three.
 
-A pull request is also of one kind more, which has no issue: a **chore** lands something that changes no gate input, no record, no claim and no protocol (#276). Whether it is one is decided by its diff, never its branch name or label: `scripts/pr-scope.py` prints `material` or `chore`.
-
 
 # DOING SCIENCE
 - Isolate a variable before declaring its impact. It will always be possible to run the test again.
@@ -14,21 +12,16 @@ A pull request is also of one kind more, which has no issue: a **chore** lands s
 
 # BRANCHES AND RELEASES
 Two long-lived branches, named once in `.github/branches.tsv` (#326):
-- **The integration branch** (`develop`) is the repository's default branch and the base of every pull request. Merging into it never waits for a full run.
+- **The integration branch** (`develop`) is the repository's default branch and the base of every pull request.
 - **The release branch** (`main`) takes only release pull requests from the integration branch. Nothing is versioned: a release is a tag on the release branch, not a version bump.
 
-What runs where. Until the gate redesign, the selftest (every seeded fault proven red) runs on the nightly, the release path, and a pull request that touches the selftest's machinery: `.github/gate-budget.tsv`'s `selftest_events` (#369, #398).
-- **A pull request into the integration branch** (or into any branch but the release branch) runs every package job -- the checks and fast checkers -- and no selftest, unless its diff touches `verify.sh` or a file `scope-selftest.py`'s `MACHINERY_FILES` names (`pr-scope.py --machinery`, #398): then it runs the scoped selftest, the faults its change reaches, which for the selftest's own functions or files is every one. It is refused while a check it touches has an open drift issue (`check:<name>`), by the `repo` job: the checks `pr-scope.py` names for its diff, or every check when the diff is the selftest's machinery. Its newer push supersedes its older run.
-- **A push to the integration branch** runs the same package jobs and no selftest; the next push cancels it.
-- **A release pull request and the push to the release branch** run the full selftest on `max_shards` and are never cancelled, so the release branch is green by construction. A release pull request is refused while any drift issue (`check:<name>`) is open.
-- **The nightly** runs the full selftest on the integration branch on `max_shards`, and a fault it finds not red opens a drift issue. Its census is what the release path's selftest packs its shards by.
-- **Pages** publishes from the integration branch: the site is the working surface.
+What runs: every pull request, and every push to either branch, runs `verify.yml`: the checks `.github/check-owners.tsv` assigns to each job, which are `verify.sh`'s `DEFAULT_CHECKS` -- conventional checks (fmt, clippy, tests, the surface's suite, hygiene, history) and the product's own data (the results records and regimens parse; the published pages' hygiene). Its `gate` job passes when every job succeeded. A newer push supersedes a run in flight, except on the way into the release branch. The seeded-fault selftest and the checks that guarded it are not run (#506); each still runs locally with `./verify.sh --only NAME`. **Pages** publishes from the integration branch: the site is the working surface.
 
-Who cuts a release: the maintainer, or Dispatch on the maintainer's word, as a pull request from the integration branch into the release branch. It is reviewed and armed like any other pull request once its full run is green, merged with `--no-ff`, and the merge is tagged.
+Who cuts a release: the maintainer, as a pull request from the integration branch into the release branch, merged with `--no-ff` once its run is green; the merge is tagged.
 
 `origin/HEAD` is set when a repository is cloned and is never moved after that, so an existing clone runs `git remote set-head origin --auto` once after the default branch changes; until it does, `origin/HEAD` still names the old default.
 
-Nothing that runs spells either branch: workflows read `github.event.repository.default_branch`, scripts read `origin/HEAD` or the table, and `scripts/check-ci-coverage.py` refuses a literal anywhere else in the workflows, `scripts/` and `verify.sh` (outside its seeded-fault bodies); code elsewhere -- `exercise/`, `diet/`, `substrates/` -- is not scanned, so a branch name there is a review finding. The exceptions are the places that cannot take an expression -- a trigger's `branches:` list and `verify.yml`'s `cancel-in-progress` -- and the check holds each to the table.
+Nothing that runs spells either branch, except where an expression cannot go: a trigger's `branches:` list and `verify.yml`'s `cancel-in-progress`. Workflows read `github.event.repository.default_branch`, and scripts read `origin/HEAD` or `.github/branches.tsv`.
 
 
 # MILESTONES
@@ -42,11 +35,10 @@ One milestone per tag, in the order the tags will be cut (`v0.1.0`, `v0.2.0`, ..
 - PRs merge with `--no-ff` to preserve the branch history.
 - **A merge made through the platform's API stamps the authenticated account as the merge commit's author. That is expected, and it is not provenance.** What a change is and who vouched for it live in the PR's review record and acceptance table; the author field of a merge commit says only which client pressed the button, and the history gate does not read it (#81).
 - **A PR's title and body are content the history gate scans too, and it scans a snapshot.** `pull_request` events fire on `opened`, `synchronize`, and `reopened` -- never on `edited` -- so a fix made by editing the description after a push is real but unseen: the run that already fired scanned the description as it stood at push time, and nothing re-checks it until the next push. Fix the description before you push, not after; if you fix it after, the check will only agree once something else lands (found live on #83, which is why this line exists).
-- A local gate run needs `python3` 3.10 or later first on PATH, the one interpreter requirement: the gate's scripts use 3.10's syntax, and the 3.9 a stock Mac ships in `/usr/bin` cannot parse them. It needs no GNU tools: the tree copies are Python (#380), and the injections apply under BSD `sed` (465 of 465 measured on a stock Mac, #380's body). `--selftest` also needs bash 4 or later.
-- Before pushing: a material pull request runs `./verify.sh`, and `./verify.sh --selftest` when it touches the gate or a fixture; a chore runs the checks `python3 scripts/pr-scope.py --base origin/HEAD` names (`./verify.sh --only CHECK ...`), which for a chore are always hygiene and history, since `pr-scope` calls any diff in the gate's reach material. CI runs every check regardless.
+- A local run needs `python3` 3.10 or later first on PATH: the scripts use 3.10's syntax, and the 3.9 a stock Mac ships in `/usr/bin` cannot parse them.
+- Before pushing, run `./verify.sh` (the checks CI runs), or the checks your change can reach with `./verify.sh --only CHECK ...`.
+- **Every pull request is reviewed adversarially before it merges**, by an instance that did not write the change, briefed to find what would make the change misbehave or make a test give false confidence. The review is posted on the pull request, and each finding is fixed, answered, or deferred to an issue, in the PR body.
 - **Hygiene: nothing from a private environment, anywhere in the tree or on a thread.** Hostnames, addresses, home paths, internal ticket identifiers and private nicknames, which the hygiene gate refuses by pattern; and a person's schedule, habits or whereabouts, which no pattern catches and every reviewer does. A machine's availability is a fact about the machine ("reserved", "down", "restored at <time>"), never about a person's time (#283).
-- **A chore's review is one fresh-instance review, posted as a review event, under the chore brief:** hygiene of everything added, a person's schedule, habits or whereabouts among it; the licensing and provenance of every asset (the tool, its inputs, any embedded font or third-party element, and the licence the repository may carry it under); every rendering claim checked on a device or stated as unseen. A chore owes no issue rows, no `--selftest` and no ruled disclosures; its "Why" is its ticket, and its "Known defects" is "Notes", which may be empty. Its owner merges, and Dispatch arms nothing. A chore cannot be what `pr-scope` calls material, fail hygiene or history, or land without its review event.
-- **A PR that adds or removes a seeded fault edits no shard plan and no fault count.** The plan job packs each fault the newest full run timed into a shard by its seconds, and a hash of the id picks the shard of any fault nothing timed yet, a new one among them (#319); and the red and mechanics counts are derived by `scripts/check-fault-manifest.py`, never kept (#108, #112, #383). Its rows go in `tools/gate/faults.d/<ticket>.toml`, a file only that pull request creates (`tools/gate/README.md`, #383). A new fault has no last-red commit on the base branch, so the PR that adds it runs it.
 - **Acceptance is a command and its exit code.** Issue and PR templates carry it as a field, not a checkbox.
 - **A deferral routes its payload to the successor's spec**, not just the source's grave. A defect measured at zero in a tree scheduled to freeze routes to the successor.
 

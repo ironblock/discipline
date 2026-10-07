@@ -5,7 +5,7 @@ name: pkg-exercise
 # here, so the table and the workflow cannot drift apart.
 #
 # pnpm's version comes from `packageManager` in exercise/package.json. Node's
-# major is pinned here (and in gate-selftest.yml) to the one its `engines`
+# major is pinned here to the one its `engines`
 # asks for at least: change them together. The check itself installs the
 # dependencies and fetches the browser; this job installs them first only to
 # reach Playwright's CLI, for the browser's system libraries, which need the

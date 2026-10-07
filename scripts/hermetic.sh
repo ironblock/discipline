@@ -28,7 +28,7 @@ readonly ALLOWED=(
   CARGO_HOME RUSTUP_HOME RUSTUP_TOOLCHAIN CARGO_TARGET_DIR
 
   # A fresh-instance review of #83 found this list was the reason
-  # `DIET_REQUIRE_SANDBOX=1` (set in `gate-selftest.yml` so a host promising a
+  # `DIET_REQUIRE_SANDBOX=1` (set in CI's diet job, then also the deleted `gate-selftest.yml`, so a host promising a
   # sandbox turns a missing one into a failure, not a silent refusal) never
   # reached the isolation lane's own `cargo test` inside `--selftest` -- every
   # lane case runs through this script, and an allowlist that omits a

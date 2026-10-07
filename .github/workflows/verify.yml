@@ -1,69 +1,28 @@
 name: verify
 
-# The root gate. It composes one reusable workflow per package and one for the
-# gate's own selftest, then requires every one of them to have SUCCEEDED --
-# not merely to have avoided failing.
+# The root gate: one reusable workflow per package, and a `gate` job that
+# passes only when every one of them SUCCEEDED -- not merely avoided failing.
+# What each package runs is `.github/check-owners.tsv`; what a check is, is
+# `verify.sh`. Conventional checks only since #506: the seeded-fault selftest
+# and the machinery around it left CI.
 #
-# There is deliberately no `paths:` filter anywhere here. A skipped job is not
-# a failed job: `!failure()` and `!cancelled()` both pass on skipped, and a
-# whole workflow filtered out by path leaves its required check pending
-# forever. scripts/check-ci-coverage.py enforces that mechanically, so this
-# comment is a description rather than a promise.
+# No `paths:` filter: a skipped job is not a failed job, and a workflow
+# filtered out by path leaves a required check pending forever.
 
 on:
-  # `push` is scoped to the integration and release branches, and nothing
-  # else is. On a branch with a pull request open, `push` and `pull_request`
-  # fire on the SAME sha and GitHub keys the concurrency group per event, so
-  # both ran to completion -- the whole gate, twice, for one commit. Scoping
-  # push to the two named branches leaves each sha with exactly one run: the
-  # pull-request run while it is a branch, the push run once it is history.
-  #
-  # This is a branch filter, not a path filter, and the difference is what
-  # makes it safe: no check is skipped for any sha that a pull request covers.
-  # The cost it does have is real and worth stating -- a branch pushed with no
-  # pull request open gets no run at all. `pull_request` carries no `branches:`
-  # for the same reason: a filter there would leave pull requests targeting
-  # anything but the named branch ungated, which is the failure this comment
-  # is about. check-ci-coverage.py refuses one.
-  #
-  # A `branches:` list cannot take an expression, so the two names are
-  # spelled here: they must be exactly .github/branches.tsv's
-  # `integration_branch` and `release_branch`, which check-ci-coverage.py
-  # checks (#326). Both are listed so the rename can happen in either order.
+  # `push` only to the integration and release branches: on a branch with a
+  # pull request open, `push` and `pull_request` fire on the same sha, and the
+  # whole gate would run twice. A branch pushed with no pull request open gets
+  # no run.
   push:
     branches: [main, develop]
   pull_request:
-  # THE NIGHTLY (#112). Since #369 it is where the integration branch's
-  # faults are proven: a push to it runs no selftest, and a pull request into
-  # it runs the scoped selftest only when its diff touches the selftest's
-  # machinery (#398). An indirect dependency -- a helper, the runner image, the
-  # toolchain's own drift -- is what it catches, within a day. It runs the
-  # full set on the default branch, and a fault it finds not red opens an
-  # issue.
-  schedule:
-    - cron: "17 6 * * *"
 
 permissions:
   contents: read
 
-# SUPERSEDING, EXCEPT ON THE WAY INTO THE RELEASE BRANCH (#326). A pull
-# request's newer push supersedes its older run. A push to the integration
-# branch supersedes the one in flight too: merges never queue behind a run
-# (on 2026-10-03 one waited 60 minutes behind a full one, run 37097117869);
-# since #369 those runs carry no selftest. A release pull request and a push to the release
-# branch are never cancelled: the release branch is green by construction,
-# and every run on the way into it finishes.
-#
-# 'main' below is .github/branches.tsv's `release_branch`. A concurrency
-# expression reads no file, so it is spelled here, and once more in the
-# `selftest` job's `if:`, and check-ci-coverage.py checks each against that
-# row (#326, Q1; #369).
-# A pull request into the release branch BEFORE the rename, while it is still
-# the default branch, is an ordinary pull request and supersedes; so is one
-# into any other branch, a stacked pull request's base.
-#
-# The event is in the key so the nightly has a group of its own: on the same
-# ref as a push, it would otherwise be cancelled by a merge or cancel one.
+# A newer push supersedes the run in flight, except on the way into the
+# release branch, where every run finishes.
 concurrency:
   group: verify-${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: ${{ (github.event_name == 'pull_request' && (github.base_ref != 'main' || github.base_ref == github.event.repository.default_branch)) || (github.event_name == 'push' && github.ref_name != 'main') }}
@@ -77,152 +36,22 @@ jobs:
 
   repo:
     uses: ./.github/workflows/pkg-repo.yml
-    # `issues: read` for the drift issues a pull request is refused on, a
-    # step of the repo job since the selftest no longer runs on one (#369).
-    permissions:
-      contents: read
-      issues: read
-
-  bsd:
-    uses: ./.github/workflows/pkg-bsd.yml
-
-  injections:
-    uses: ./.github/workflows/pkg-injections.yml
-
-  recompute:
-    uses: ./.github/workflows/pkg-recompute.yml
-
-  # WHETHER A PULL REQUEST TOUCHES THE SELFTEST'S MACHINERY (#398): verify.sh,
-  # or a file scope-selftest.py's MACHINERY_FILES names, among the diff's
-  # paths -- `pr-scope.py --machinery`, the one definition, which the chore
-  # lane and the drift refusal's widening also read. The `selftest` job's
-  # `if:` needs the answer, and a job's `if:` reads only the outputs of the
-  # jobs it needs, so it is a job of its own: one checkout and one script,
-  # before the selftest starts. On any other event it runs no step and
-  # outputs nothing, which no `if:` reads as `true`. check-ci-coverage.py
-  # holds the command (rule 17); check-job-results.py reads the output.
-  scope:
-    runs-on: ubuntu-latest
-    outputs:
-      machinery: ${{ steps.machinery.outputs.machinery }}
-    steps:
-      - uses: actions/checkout@v5
-        if: github.event_name == 'pull_request'
-        with:
-          # The base, for the merge base pr-scope.py diffs against.
-          fetch-depth: 0
-      - name: Does this pull request touch the selftest's machinery
-        id: machinery
-        if: github.event_name == 'pull_request'
-        run: python3 scripts/pr-scope.py --machinery --base "origin/${{ github.base_ref }}" --head HEAD >> "$GITHUB_OUTPUT"
-
-  # ON THE NIGHTLY, THE RELEASE PATH AND A MACHINERY PULL REQUEST ONLY (#369,
-  # #398), until the gate redesign: the events .github/gate-budget.tsv's
-  # `selftest_events` names. Any other pull request into the integration
-  # branch, and a push to it, skips this job; their package checks are
-  # unchanged, the nightly's drift opener files what it finds, and the release
-  # path re-proves every fault before a release. A machinery pull request runs
-  # the scoped selftest: the faults its change reaches, which for the
-  # selftest's own functions or files is every one. The expression spells
-  # the release branch because a job's `if:` reads no file; scripts/check-ci-coverage.py holds it to that row and
-  # .github/branches.tsv, and check-job-results.py accepts it skipped only
-  # where the row says so. The `if:` follows `uses:`: a call is a job whose
-  # first line is its `uses:` (check-ci-coverage.py's CALLS).
-  selftest:
-    uses: ./.github/workflows/gate-selftest.yml
-    if: ${{ github.event_name == 'schedule' || (github.event_name == 'pull_request' && github.base_ref == 'main') || (github.event_name == 'push' && github.ref_name == 'main') || (github.event_name == 'pull_request' && needs.scope.outputs.machinery == 'true') }}
-    needs: [scope]
-    # `actions: read` for the scope plan's base-branch censuses, `issues: read` for
-    # the drift issues a pull request is refused on (#112).
-    permissions:
-      contents: read
-      actions: read
-      issues: read
 
   gate:
     name: gate
-    needs: [diet, exercise, repo, bsd, injections, recompute, scope, selftest]
+    needs: [diet, exercise, repo]
     if: always()
     runs-on: ubuntu-latest
-    # `actions: read` on top of the workflow's `contents: read`, because this
-    # job downloads the shards' census artifacts and the workflow-level grant
-    # is a ceiling, not a floor: without it the token cannot read this run's
-    # own artifacts and the census step fails for a reason that has nothing to
-    # do with the shards.
-    permissions:
-      contents: read
-      actions: read
-      # To open a drift issue on the nightly or a push to the release branch
-      # (#112, #369). Pull-request runs never reach the step that uses it.
-      issues: write
     steps:
-      - uses: actions/checkout@v5
-
-      # A FAULT NOT SEEN RED ON A FULL RUN OPENS AN ISSUE AGAINST ITS CHECK
-      # (#112). Before the verdict below, which stops the job when a shard
-      # failed -- and a failed shard is exactly when there is something to
-      # open. The build's verdict is unchanged by it: the run is still red.
-      - uses: actions/download-artifact@v4
-        if: github.event_name != 'pull_request'
-        with:
-          pattern: selftest-not-red-*
-          path: ${{ runner.temp }}/not-red
-      - name: Open an issue for each fault not seen red
-        if: github.event_name != 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/selftest-drift.py open "${{ runner.temp }}/not-red"
-
-      # The comparison lives in a script rather than inline here, so that it
-      # can be run and proven against every result state instead of being
-      # trusted because it looks right in YAML.
-      # `always()`: the opener above only fails when a shard already has, and
-      # its failure must not hide this step's message about which job it was.
-      # The event, so a `selftest` skipped by its own `if:` is accepted where
-      # gate-budget.tsv's `selftest_events` declares it off, and nowhere else
-      # (#369); on a pull request, `needs` carries the `scope` job's machinery
-      # answer, and a skip where it is `true` is refused (#398).
+      # A skipped or cancelled job is not a pass: every one must be `success`.
       - name: Every job must have succeeded
-        if: always()
         env:
-          NEEDS: ${{ toJSON(needs) }}
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          REF_NAME: ${{ github.ref_name }}
-        run: python3 scripts/check-job-results.py
-
-      # Only reached when the step above passed, because `run` steps stop at
-      # the first failure. So the census is asked its question -- did the
-      # shards between them run every fault -- of a set of shards that all
-      # succeeded. Two different claims, in the order that makes each one
-      # answerable: every shard went green, and every fault was in a shard.
-      #
-      # It lives here rather than in a job of its own inside gate-selftest.yml
-      # because this job is the one check-ci-coverage.py already proves is
-      # depended upon. A new job there would be a job nothing checks is
-      # reachable, and a skipped one would leave the called workflow green.
-      #
-      # Not on a run whose `selftest` was skipped (#369): there is no shard to
-      # add up. Where a skip is not declared, the step above has already
-      # failed the run for it, so the census is never what lets one through.
-      - uses: actions/download-artifact@v4
-        if: needs.selftest.result != 'skipped'
-        with:
-          pattern: selftest-census-*
-          path: ${{ runner.temp }}/census
-
-      - name: Every fault was run by exactly one shard
-        if: needs.selftest.result != 'skipped'
-        run: python3 scripts/check-selftest-census.py "${{ runner.temp }}/census"
-
-      # The same question of the sharded packages (#262, ruled on #268): did
-      # their shards, between them, RUN every member of their check exactly
-      # once -- read from what each shard's run loop recorded, never from a
-      # listing, against the unsplit listing verify.sh gives here.
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: members-*
-          path: ${{ runner.temp }}/members
-
-      - name: Every sharded member was run by exactly one shard
-        run: python3 scripts/check-shard-census.py "${{ runner.temp }}/members"
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "needs: $RESULTS"
+          for result in $RESULTS; do
+            if [ "$result" != success ]; then
+              echo "::error::a job the gate needs ended '$result'"
+              exit 1
+            fi
+          done

@@ -85,7 +85,7 @@ its script, style and layout numbers are the app's, its paint and
 compositing numbers are not (glass costs frames there and none on a GPU).
 Compare runs with each other, not with a machine.
 
-CI runs the same thing as the repository's `exercise` check (`./verify.sh --only exercise`, owned in the repository's `.github/check-owners.tsv`, run by its `.github/workflows/pkg-exercise.yml`); its seeded fault is a type error.
+CI runs the same thing as the repository's `exercise` check (`./verify.sh --only exercise`, owned in the repository's `.github/check-owners.tsv`, run by its `.github/workflows/pkg-exercise.yml`).
 
 - **The trunk is a conversation.** One block per message, role by fill,
   prose proportional, chain-of-thought italic. Each block's header says what
