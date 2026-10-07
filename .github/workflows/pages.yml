@@ -27,7 +27,8 @@ name: pages
 # the table that admitted it, each recording against its admission -- before it
 # uploads anything. So it needs the repository at the sha that run checked,
 # bash and the runner's own python3, and no toolchain.
-# scripts/check-ci-coverage.py holds the guards and the order, mechanically.
+# scripts/check-ci-coverage.py held the guards and the order mechanically
+# until #506 took it out of CI; they are now held by review.
 #
 # Static only. Nothing here reaches a network, a model, or a secret; the
 # id-token permission exists so deploy-pages can prove to Pages that this
@@ -39,7 +40,7 @@ on:
     workflows: [verify]
     types: [completed]
     # A `branches:` list cannot take an expression: exactly .github/branches.tsv's
-    # two branches, checked by check-ci-coverage.py (#326). The deploy's own
+    # two branches (#326), kept equal by hand since #506. The deploy's own
     # condition narrows it to whichever is the default, so the rename can
     # happen in either order.
     branches: [main, develop]
