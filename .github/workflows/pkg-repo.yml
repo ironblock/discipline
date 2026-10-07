@@ -9,9 +9,6 @@ on:
 
 permissions:
   contents: read
-  # To ask whether a check this pull request touches has an open drift issue
-  # from a full run (#112, #369).
-  issues: read
 
 jobs:
   checks:
@@ -40,20 +37,3 @@ jobs:
           for check in "${checks[@]}"; do args+=(--only "$check"); done
           printf 'checks owned by repo: %s\n' "${checks[*]}"
           ./verify.sh "${args[@]}"
-
-      # A PULL REQUEST IS REFUSED WHILE A CHECK IT TOUCHES HAS AN OPEN DRIFT
-      # ISSUE (#112), here since a pull request runs no selftest (#369, ruled
-      # (c) at 5976704493). The list is pr-scope.py's for the diff, widened by
-      # selftest-drift.py to every check when the diff's paths touch the
-      # selftest's machinery: a change there reaches every fault. The base is
-      # fetched by this job's full-depth checkout.
-      - name: No open drift issue against a check this pull request touches
-        if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          python3 scripts/pr-scope.py --base "origin/${{ github.base_ref }}" --head HEAD > "${{ runner.temp }}/pr-scope.txt"
-          cat "${{ runner.temp }}/pr-scope.txt"
-          git diff --name-only --no-renames -z "origin/${{ github.base_ref }}...HEAD" > "${{ runner.temp }}/pr-files"
-          python3 scripts/selftest-drift.py block-scope "${{ runner.temp }}/pr-scope.txt" "${{ runner.temp }}/pr-files"

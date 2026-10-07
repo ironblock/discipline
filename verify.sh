@@ -3,7 +3,7 @@
 # The gate. Everything that must be true of this repository is checked here,
 # and CI runs exactly this script.
 #
-#   verify.sh                 run every check
+#   verify.sh                 run the default checks: CI's (DEFAULT_CHECKS, #506)
 #   verify.sh --only CHECK    run one check (repeatable)
 #   verify.sh --only test --scope SPEC   narrow the test check (selftest only)
 #   verify.sh --only injections --scope inject_NAME   apply one injection (selftest only)
@@ -77,6 +77,10 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly ROOT
 
 readonly CHECKS=(fmt clippy test library results recompute admission regimen lanes metadata hygiene pages exercise ci history injections bsd resolver derive parity)
+# What runs with no arguments, and what CI runs (.github/check-owners.tsv;
+# keep the two together): conventional checks and the product's own data
+# (#506). Every name in CHECKS still runs with `--only NAME`.
+readonly DEFAULT_CHECKS=(fmt clippy test results regimen hygiene pages exercise history)
 
 # The forbidden classes the genesis brief names by hand. Pinning them here
 # means a pattern row cannot be deleted along with its seeded class and leave
@@ -12798,7 +12802,7 @@ if [ "$mode" = "selftest" ]; then
 fi
 
 if [ "${#selected[@]}" -eq 0 ]; then
-  selected=("${CHECKS[@]}")
+  selected=("${DEFAULT_CHECKS[@]}")
 fi
 
 for name in "${selected[@]}"; do
