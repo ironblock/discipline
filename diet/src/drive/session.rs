@@ -774,6 +774,9 @@ struct State {
     /// The trunk's tokens as the latest trunk call measured them, cleared
     /// by a seam: what a budget reads.
     trunk_tokens: Option<u64>,
+    /// The latest tool-calling step's measurement, the trunk's only once
+    /// that step's exchange joins it (a `max_steps` settling).
+    step_tokens: Option<u64>,
 }
 
 /// A prompt waiting on the operator, and the answer when one arrives.
@@ -1023,6 +1026,7 @@ impl<S: Streaming + 'static> Session<S> {
             turns: 0,
             turns_at_seam: 0,
             trunk_tokens: None,
+            step_tokens: None,
             opened_at: Instant::now(),
             gap_open: None,
             carried: None,
@@ -2095,7 +2099,7 @@ fn step<S: Streaming>(
                     arguments: call.arguments.clone(),
                 })
                 .collect();
-            state.trunk_tokens = timings.as_ref().and_then(trunk_tokens_of);
+            state.step_tokens = timings.as_ref().and_then(trunk_tokens_of);
             state.push(Event::Called {
                 request,
                 text: partial,
@@ -2208,9 +2212,11 @@ fn run_calls<S: Streaming>(
     };
     if let Some(reason) = settled {
         state.flight = None;
+        let measured = state.step_tokens.take();
         if reason == SettleReason::MaxSteps {
             let ran = std::mem::take(exchange);
             state.trunk.extend(ran);
+            state.trunk_tokens = measured;
         }
         state.push(Event::TurnSettled { turn, reason });
         turn_over(&shared.template, &mut state);
@@ -6062,6 +6068,60 @@ pub(in crate::drive) mod tests {
         });
         assert!(seams_in(&log).is_empty(), "{:#?}", seams_in(&log));
         assert_eq!(session.shared.lock().trunk_tokens, Some(244));
+    }
+
+    /// A step that calls a tool measures a trunk that only holds if the
+    /// step's exchange joins it. Here the call names a tool the session never
+    /// declared, the turn settles `failed`, and nothing joins the trunk
+    /// (T13): its 500 tokens are not the trunk's, and the budget of 100 does
+    /// not fire on them. The first turn measured 10.
+    #[test]
+    fn a_step_whose_exchange_never_joins_the_trunk_does_not_count_against_the_budget() {
+        let mut call = vec![bash("call-1", "touch marker")];
+        call.push(Step::Timings(Timings {
+            prompt_n: Some(400),
+            cache_n: Some(0),
+            predicted_n: Some(100),
+            ..Timings::default()
+        }));
+        let session = Session::open_with(
+            Canned::new([
+                a_reply_with_timings(SCOPED, 4, 0, 6),
+                deltas(&[DECIDED]),
+                call,
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: None,
+                at_trunk_tokens: Some(100),
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        session.ask("go", None).expect("accepted");
+        // The settling and any seam it makes due are pushed under one lock.
+        let log = wait_until(&session, "the second turn", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::TurnSettled {
+                turn: 2,
+                reason: SettleReason::Failed
+            }
+        )));
+        assert!(seams_in(&log).is_empty(), "{:#?}", seams_in(&log));
+        assert_eq!(session.shared.lock().trunk_tokens, Some(10));
     }
 
     /// A cadence that comes round with working memory empty fires nothing
