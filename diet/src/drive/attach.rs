@@ -543,6 +543,32 @@ fn bounded(stream: impl Read + Send + 'static, limit: u64) -> mpsc::Receiver<Vec
     received
 }
 
+/// How many temporary copies this process has begun: each [`kept`] call's
+/// own temporary name, so two threads keeping the same digest at once never
+/// rename one file out from under the other (#514's review).
+static PARTIALS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The copy kept at `<recording>/files/<sha256>`, when it is there, a PNG,
+/// no longer than [`MAX_BYTES`], and hashes to `sha256`: what `GET
+/// /files/<sha256>` answers for a file attached by path, which only the
+/// recording holds.
+#[must_use]
+pub fn recorded(recording: &Path, sha256: &str) -> Option<Vec<u8>> {
+    let named = sha256.len() == 64
+        && sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    if !named {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(recording.join(FILES).join(sha256))
+        .and_then(|opened| opened.take(MAX_BYTES + 1).read_to_end(&mut bytes))
+        .ok()?;
+    let whole = u64::try_from(bytes.len()).unwrap_or(u64::MAX) <= MAX_BYTES;
+    (whole && bytes.starts_with(SIGNATURE) && sha256_hex(&bytes) == sha256).then_some(bytes)
+}
+
 /// `bytes` kept at `file`'s path under `recording`: written when absent
 /// (to a temporary name, then renamed, so a copy is whole or not there),
 /// left alone when the same digest is already there.
@@ -565,10 +591,12 @@ fn kept(recording: &Path, file: &RecordedFile, bytes: &[u8]) -> Result<(), (Chec
         Err(why) => return Err(failed(why)),
     }
     std::fs::create_dir_all(recording.join(FILES)).map_err(failed)?;
-    let partial =
-        recording
-            .join(FILES)
-            .join(format!(".{}.partial-{}", file.sha256, std::process::id()));
+    let partial = recording.join(FILES).join(format!(
+        ".{}.partial-{}-{}",
+        file.sha256,
+        std::process::id(),
+        PARTIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     std::fs::write(&partial, bytes)
         .and_then(|()| std::fs::rename(&partial, &at))
         .map_err(|why| {
@@ -1214,5 +1242,35 @@ pub(in crate::drive) mod tests {
             assert_eq!(read, Some(Check::Unreadable));
             assert!(began.elapsed() < Duration::from_secs(5));
         }
+    }
+
+    /// Two threads keeping the same digest at once each write a temporary
+    /// copy of their own: neither rename finds its file gone (#514's
+    /// review measured 39 failures in 60 pairs with a shared name).
+    #[test]
+    fn the_same_upload_kept_at_once_by_many_threads_never_fails() {
+        let recording = scratch("attach-kept-race");
+        let bytes = png("raced");
+        for round in 0..20 {
+            let gate = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let racers: Vec<_> = (0..8)
+                .map(|_| {
+                    let (gate, bytes, recording) = (
+                        std::sync::Arc::clone(&gate),
+                        bytes.clone(),
+                        recording.clone(),
+                    );
+                    std::thread::spawn(move || {
+                        gate.wait();
+                        super::uploaded(bytes, Some(&recording)).map(|_| ())
+                    })
+                })
+                .collect();
+            for racer in racers {
+                assert_eq!(racer.join().expect("joined"), Ok(()), "round {round}");
+            }
+            let _ = std::fs::remove_dir_all(recording.join(FILES));
+        }
+        let _ = std::fs::remove_dir_all(&recording);
     }
 }
