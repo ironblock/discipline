@@ -13,7 +13,7 @@
  */
 
 import type { Approval, Authority, FailReason, FileRef, ForkLane, ForkOutcome, IsolationWord, Lane, LineOf, LogLine, Need, NetworkWord, Open, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
-import { NEEDS_OF } from '../drive/log.ts';
+import { needsOf } from '../drive/log.ts';
 import { receiptOf } from './receipt.ts';
 import type { Receipt } from './receipt.ts';
 
@@ -205,7 +205,7 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly at: string;
   readonly why: string;
   readonly question: string;
-  /** AHEAD (R4): prefix tokens shared with the trunk; `diet`'s fork line does not say. */
+  /** AHEAD (`slots`): prefix tokens shared with the trunk; `diet`'s fork line does not say. */
   readonly prefixTokens?: number;
   readonly outcome?: ForkOutcome;
   readonly patches: readonly Folded<PatchNode>[];
@@ -313,15 +313,15 @@ function brand<T>(value: T): Folded<T> {
   return value as Folded<T>;
 }
 
-function needsOf(events: readonly LogLine[]): Need[] {
+function needsOfAll(events: readonly LogLine[]): Need[] {
   const out = new Set<Need>();
-  for (const e of events) for (const n of NEEDS_OF[e.kind]) out.add(n);
+  for (const e of events) for (const n of needsOf(e)) out.add(n);
   return [...out].sort();
 }
 
 function provenance(...events: readonly (LogLine | undefined)[]): Provenance {
   const present = events.filter((e): e is LogLine => e !== undefined);
-  return { from: present.map((e) => e.seq), needs: needsOf(present) };
+  return { from: present.map((e) => e.seq), needs: needsOfAll(present) };
 }
 
 type Mutable<T> = { -readonly [K in keyof T]: T[K] };

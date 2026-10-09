@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
+import { needsOf } from './log.ts';
 
 /**
  * `diet`'s own valid logs (`diet/formats/log/fixtures/valid/`), folded. A
@@ -114,6 +115,10 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
       expect(b.slot).not.toBe(session.trunkSlot);
       expect(b.slot).toBeLessThan(session.slots);
     }
+  });
+
+  it('needs nothing ahead of the format on any line diet writes: the gaps overlay outlines none of it (#503)', () => {
+    for (const file of fixtures) for (const line of logOf(file)) expect(needsOf(line), `${file}: seq ${line.seq} (${line.kind})`).toEqual([]);
   });
 
   it('takes the state from the log: an ended session is ended', () => {

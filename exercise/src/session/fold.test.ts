@@ -107,15 +107,18 @@ describe('fold over the specimen', () => {
     expect(s.occupancy[1]).toEqual({ id: s.id('i/4'), lane: 'interview' });
   });
 
-  it('ends the specimen settled, every node carrying where it came from and what it needs', () => {
+  it('ends the specimen settled, every node carrying where it came from, and an ask needing nothing diet lacks', () => {
     const s = at(SPECIMEN.length);
     expect(s.state).toBe('awaiting');
     for (const era of s.eras) {
       for (const node of era.nodes) {
         expect(node.from.length).toBeGreaterThan(0);
-        expect(node.needs.length).toBeGreaterThan(0);
+        // An ask is `diet`'s line, whole: nothing on it is ahead of the format (#503).
+        if (node.kind === 'user') expect(node.needs).toEqual([]);
       }
     }
+    // The specimen runs on declared slots, which `diet` does not write: its assistant answers say so.
+    expect(s.eras.flatMap((e) => e.nodes).some((n) => n.kind === 'assistant' && n.needs.includes('slots'))).toBe(true);
     expect(beatLength(beat(4))).toBeGreaterThan(30_000);
   });
 });

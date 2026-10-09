@@ -238,7 +238,7 @@ export const MemoryDrawer: Story = {
   },
 };
 
-/** Everything drawn from an event `diet` cannot emit yet, outlined with the step of #117 it waits on. */
+/** Everything drawn from a field `diet` does not write yet, outlined with what it is (`NEEDS`). */
 export const Gaps: Story = {
   name: 'what diet can’t emit yet',
   args: { cursor: MOMENTS.done, gaps: true },
