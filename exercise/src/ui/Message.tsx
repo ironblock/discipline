@@ -62,7 +62,10 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
  */
 const outOfContext = (why: OffTrunk) => ({
   value: <span className="ex-context-out">not in the model's context</span>,
-  title: `this turn ${why === 'cancelled' ? 'was cancelled' : 'ended without an answer'}, and the drive sends the model only finished turns: it will not read this ask or its answer`,
+  title:
+    why === 'cancelled'
+      ? 'this turn was cancelled, and the drive sends the model only finished turns: it will not read this ask or its answer'
+      : 'this turn ended without an answer: the drive keeps its ask and the steps it finished, and leaves this one out (#541)',
 });
 
 /** A person's ask. Its header says what it will cost to read: the new tokens it put in front of the model. */
