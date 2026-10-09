@@ -15,6 +15,7 @@
 //! the registry the way #162's registry tests do. By rule, every field read
 //! here stays a one-line `key = "value"` string -- `equipment`,
 //! `engine_name`, `engine_identity`, `engine_commit`, `engine_build_info`,
+//! `engine_check`,
 //! `weights_kind`, `weights_acts_sha256`, `weights_main`, `weights_draft`,
 //! `weights_projector` and `hardware_fingerprint` -- or, for a multi-shard
 //! `weights_main`, a one-line list of quoted digests. A field written another
@@ -170,6 +171,10 @@ pub struct Identity {
     pub engine_build_info: Option<String>,
     /// The chat template's digest, when the registry declares one.
     pub chat_template_sha256: Option<String>,
+    /// How the engine check is made, when the registry says: `declared` is
+    /// the operator's declaration that the engine reports nothing to check,
+    /// so the server is not asked (#509).
+    pub engine_check: Option<String>,
 }
 
 /// The identity the registry in `document` gives substrate `id`.
@@ -221,6 +226,7 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
         engine_commit: table.strings.get("engine_commit").cloned(),
         engine_build_info: table.strings.get("engine_build_info").cloned(),
         chat_template_sha256: table.strings.get("chat_template_sha256").cloned(),
+        engine_check: table.strings.get("engine_check").cloned(),
     })
 }
 

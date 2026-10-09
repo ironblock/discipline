@@ -929,6 +929,47 @@ fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
 }
 
 #[test]
+fn a_drive_server_starts_on_a_declared_engine_without_asking_it() {
+    // #509: TabbyAPI reports no build, so its entry declares the engine
+    // (`engine_check = "declared"`) and serve starts without `/props`: the
+    // stub answers nothing, and the log claims `declared`.
+    let id = "accel24-tabbyapi-exl3-qwen38-27b-3p00";
+    let commit = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("registered")
+        .engine_commit
+        .expect("an engine_commit");
+    let regimen = regimen_registered(id);
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
+    assert_eq!(
+        (
+            served.substrate.as_deref(),
+            served.engine_build.as_deref(),
+            served.engine_identity.as_deref()
+        ),
+        (
+            Some(id),
+            Some(commit.as_str()),
+            Some("declared (the engine not asked)")
+        )
+    );
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["served"],
+        serde_json::json!([{
+            "field": "engine_commit",
+            "value": commit,
+            "provenance": "declared",
+        }]),
+        "{start_line}"
+    );
+    assert_eq!(start_line["version"], 7, "{start_line}");
+}
+
+#[test]
 fn a_drive_server_says_when_its_log_flag_emptied_a_file() {
     // Ruled on #230: the file is truncated, as the scripted path's output is,
     // and the announcement says so.
@@ -1101,13 +1142,13 @@ fn a_drive_servers_log_carries_the_substrate_claim_it_announced() {
             Stub::serving(vec![props_saying(&build)]).expect("loopback"),
             committed,
             "checked (commit)",
-            "checked_commit",
+            "engine_commit",
         ),
         (
             Stub::serving_with_props(Vec::new(), &canned).expect("loopback"),
             dev_loop(),
             "unreported (literal matched)",
-            "literal_matched",
+            "engine_build_info",
         ),
     ] {
         let log_file = file_holding("log", "");
@@ -1117,18 +1158,22 @@ fn a_drive_servers_log_carries_the_substrate_claim_it_announced() {
         let start_line = first_logged_line(&log_file.0);
         assert_eq!(start_line["kind"], "session.start", "{start_line}");
         let claimed = |key: &str| start_line[key].as_str().map(str::to_owned);
+        // v7 (#509): the engine's field, corroborated, and what it reported.
+        let field = |key: &str| start_line["served"][0][key].as_str().map(str::to_owned);
         assert_eq!(
             (
                 claimed("substrate"),
                 claimed("registry_sha256"),
-                claimed("engine_build"),
-                claimed("engine_identity"),
+                field("reported"),
+                field("field"),
+                field("provenance"),
             ),
             (
                 served.substrate.clone(),
                 served.registry_sha256.clone(),
                 served.engine_build.clone(),
                 Some(logged_as.to_owned()),
+                Some("corroborated".to_owned()),
             ),
             "the log claims what stdout announced: {start_line}"
         );
@@ -1145,7 +1190,7 @@ fn a_drive_servers_log_carries_the_substrate_claim_it_announced() {
         assert_eq!(checked.status.code(), Some(0), "{said}");
         let read = log_line_object(&said);
         assert_eq!(
-            read["value"]["events"][0]["engine_identity"].as_str(),
+            read["value"]["events"][0]["served"][0]["field"].as_str(),
             Some(logged_as),
             "{said}"
         );

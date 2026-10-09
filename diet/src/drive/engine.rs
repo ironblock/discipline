@@ -27,6 +27,17 @@
 //! `canned-` and its acts' digest, which the registry declares as the
 //! canned entries' literal, so a canned regime runs only on the canned
 //! server (#219 item 11, closing #204's disclosure 4).
+//!
+//! **An engine declared, not asked** (#509, the maintainer's duty-of-care
+//! ruling of 2026-10-07): an engine that reports no build over HTTP --
+//! `TabbyAPI`, a hosted API -- cannot pass either comparison. Whoever runs the
+//! test declares what serves the substrate, and the registry entry says so
+//! with `engine_check = "declared"`. The server is then not asked; the claim
+//! names the entry's `engine_commit` (or, without one, its
+//! `engine_identity`) as a served field whose provenance is `declared` (log
+//! v7). A field the engine was asked about and agreed on is `corroborated`.
+//! Corroborating what such an engine does report, and refusing on a
+//! contradiction, is the rest of #509.
 
 use crate::client::stream::HttpStream;
 use crate::client::transport::{HttpReply, TransportFailure};
@@ -100,6 +111,8 @@ pub enum EngineIdentity {
     /// The engine reports no commit; its `build_info` is the literal the
     /// registry declares for it.
     Unreported,
+    /// The engine was not asked: the registry declares it (#509).
+    Declared,
 }
 
 impl EngineIdentity {
@@ -109,28 +122,35 @@ impl EngineIdentity {
         match self {
             Self::Checked => "checked (commit)",
             Self::Unreported => "unreported (literal matched)",
+            Self::Declared => "declared (the engine not asked)",
         }
     }
 
-    /// The log's word for it, on `session.start`'s claim (v3, #292): the
-    /// same comparison, in the format's vocabulary (ruled on #297 Q4).
+    /// The log's word for the field it established (v7, #509): a field
+    /// the engine was asked about and agreed on is corroborated.
     #[must_use]
-    pub fn logged(self) -> log::EngineIdentity {
+    pub fn provenance(self) -> log::FieldProvenance {
         match self {
-            Self::Checked => log::EngineIdentity::CheckedCommit,
-            Self::Unreported => log::EngineIdentity::LiteralMatched,
+            Self::Checked | Self::Unreported => log::FieldProvenance::Corroborated,
+            Self::Declared => log::FieldProvenance::Declared,
         }
     }
 }
 
-/// A check that passed: the `build_info` as the server reported it, and how
-/// the engine's identity was established.
+/// A check that passed: the `build_info` as the server reported it, how the
+/// engine's identity was established, and the registry field it established.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Passed {
-    /// `build_info`, as read.
+    /// `build_info`, as read; under [`EngineIdentity::Declared`], the
+    /// declared value, since nothing was read.
     pub build_info: String,
     /// Which comparison passed.
     pub identity: EngineIdentity,
+    /// The registry key whose value the check established:
+    /// `engine_commit`, `engine_build_info` or `engine_identity`.
+    pub field: &'static str,
+    /// That key's declared value.
+    pub declared: String,
 }
 
 impl Passed {
@@ -143,8 +163,13 @@ impl Passed {
         log::SubstrateClaim {
             substrate: id.to_owned(),
             registry_sha256: registry_sha256.to_owned(),
-            engine_build: self.build_info.clone(),
-            engine_identity: self.identity.logged(),
+            engine: log::ClaimedEngine::Served(vec![log::ServedField {
+                field: self.field.to_owned(),
+                value: self.declared.clone(),
+                provenance: self.identity.provenance(),
+                reported: (self.identity != EngineIdentity::Declared)
+                    .then(|| self.build_info.clone()),
+            }]),
         }
     }
 }
@@ -281,6 +306,9 @@ fn checked(
     props: impl FnOnce() -> Result<HttpReply, TransportFailure>,
 ) -> Result<Passed, String> {
     let identity = registry::identity(document, id)?;
+    if let Some(declared) = declared(id, &identity)? {
+        return Ok(declared);
+    }
     // Before the server is asked: a check the registry cannot support is
     // refused without touching the server.
     let wants = expected(id, &identity)?;
@@ -300,11 +328,55 @@ fn checked(
         )));
     }
     let build_info = build_info_of(&reply.body).map_err(refuse)?;
-    let identity = matches(id, &identity, &build_info)?;
+    let (field, declared) = match wants {
+        Expected::Literal(literal) => ("engine_build_info", literal),
+        Expected::Commit(commit) => ("engine_commit", commit),
+    };
+    // A contradiction refuses, naming the field (#509).
+    let identity = matches(id, &identity, &build_info)
+        .map_err(|why| format!("the engine contradicts `{id}`'s `{field}`: {why}"))?;
     Ok(Passed {
         build_info,
         identity,
+        field,
+        declared: declared.to_owned(),
     })
+}
+
+/// What substrate `id` passes with when its registry entry declares its
+/// engine (`engine_check = "declared"`), without asking the server; `None`
+/// when the entry says nothing of how the check is made.
+///
+/// # Errors
+///
+/// An `engine_check` other than `declared`, or a declared `engine_commit`
+/// that is not 40 lowercase hex digits.
+fn declared(id: &str, identity: &Identity) -> Result<Option<Passed>, String> {
+    match identity.engine_check.as_deref() {
+        None => Ok(None),
+        Some("declared") => {
+            let (field, build) = match identity.engine_commit.as_deref() {
+                Some(commit) if commit.len() != 40 || !commit.chars().all(is_hex) => {
+                    return Err(format!(
+                        "the registry's `engine_commit` for `{id}` is \"{commit}\", not a \
+                         commit's 40 lowercase hex digits: the entry is malformed"
+                    ));
+                }
+                Some(commit) => ("engine_commit", commit.to_owned()),
+                None => ("engine_identity", identity.engine.version_or_digest.clone()),
+            };
+            Ok(Some(Passed {
+                build_info: build.clone(),
+                identity: EngineIdentity::Declared,
+                field,
+                declared: build,
+            }))
+        }
+        Some(other) => Err(format!(
+            "the registry's `engine_check` for `{id}` is \"{other}\"; the one value it takes is \
+             \"declared\": the entry is malformed"
+        )),
+    }
 }
 
 /// [`check`] against the server `transport` drives, with the registry this
@@ -365,13 +437,29 @@ mod tests {
         let found = identity(REGISTRY, PINNED).expect("registered");
         let commit = found.engine_commit.expect("an engine_commit");
         let build_info = format!("b1-{}", &commit[..7]);
+        let passed = check(REGISTRY, PINNED, || {
+            Ok(answered(&format!("{{\"build_info\":\"{build_info}\"}}")))
+        })
+        .expect("the registered commit");
+        // The commit is corroborated, and what the engine said is kept.
+        assert_eq!(
+            passed.claim(PINNED, "r").engine,
+            log::ClaimedEngine::Served(vec![log::ServedField {
+                field: "engine_commit".to_owned(),
+                value: commit.clone(),
+                provenance: log::FieldProvenance::Corroborated,
+                reported: Some(build_info.clone()),
+            }])
+        );
         assert_eq!(
             check(REGISTRY, PINNED, || Ok(answered(&format!(
                 "{{\"build_info\":\"{build_info}\"}}"
             )))),
             Ok(Passed {
                 build_info,
-                identity: EngineIdentity::Checked
+                identity: EngineIdentity::Checked,
+                field: "engine_commit",
+                declared: commit,
             })
         );
     }
@@ -399,6 +487,68 @@ mod tests {
             refused.contains("neither an `engine_build_info` nor an `engine_commit`"),
             "{refused}"
         );
+    }
+
+    /// The 3.8 floor on `TabbyAPI`, whose entry declares its engine (#509).
+    const DECLARED: &str = "accel24-tabbyapi-exl3-qwen38-27b-3p00";
+
+    #[test]
+    fn a_declared_engine_passes_with_its_declared_commit_and_the_server_is_not_asked() {
+        let passed = check(REGISTRY, DECLARED, || -> Result<HttpReply, _> {
+            panic!("a declared engine is not asked")
+        })
+        .expect("declared");
+        assert_eq!(
+            passed,
+            Passed {
+                build_info: "be74bf0a00bcb3a518e6feb7606f150c189be637".to_owned(),
+                identity: EngineIdentity::Declared,
+                field: "engine_commit",
+                declared: "be74bf0a00bcb3a518e6feb7606f150c189be637".to_owned(),
+            }
+        );
+        // Every field declared: nothing was reported.
+        assert_eq!(
+            passed.claim(DECLARED, "r").engine,
+            log::ClaimedEngine::Served(vec![log::ServedField {
+                field: "engine_commit".to_owned(),
+                value: "be74bf0a00bcb3a518e6feb7606f150c189be637".to_owned(),
+                provenance: log::FieldProvenance::Declared,
+                reported: None,
+            }])
+        );
+    }
+
+    #[test]
+    fn a_declared_engine_with_no_commit_is_named_by_its_registered_identity() {
+        let mut found = identity(REGISTRY, DECLARED).expect("registered");
+        found.engine_commit = None;
+        let passed = declared(DECLARED, &found)
+            .expect("declared")
+            .expect("passes");
+        assert_eq!(passed.build_info, found.engine.version_or_digest);
+    }
+
+    #[test]
+    fn an_engine_check_other_than_declared_is_refused_as_malformed() {
+        let mut found = identity(REGISTRY, DECLARED).expect("registered");
+        found.engine_check = Some("trusted".to_owned());
+        let refused = declared(DECLARED, &found).expect_err("not a value it takes");
+        assert!(
+            refused.contains("`engine_check`") && refused.contains("\"trusted\""),
+            "{refused}"
+        );
+        found.engine_check = Some("declared".to_owned());
+        found.engine_commit = Some("be74bf0".to_owned());
+        let refused = declared(DECLARED, &found).expect_err("a short commit");
+        assert!(refused.contains("malformed"), "{refused}");
+    }
+
+    #[test]
+    fn an_entry_that_declares_nothing_of_its_check_is_still_asked() {
+        let found = identity(REGISTRY, PINNED).expect("registered");
+        assert_eq!(found.engine_check, None);
+        assert_eq!(declared(PINNED, &found), Ok(None));
     }
 
     #[test]
@@ -441,7 +591,9 @@ mod tests {
             ))),
             Ok(Passed {
                 build_info: "b0-unknown-dirty".to_owned(),
-                identity: EngineIdentity::Unreported
+                identity: EngineIdentity::Unreported,
+                field: "engine_build_info",
+                declared: "b0-unknown-dirty".to_owned(),
             })
         );
         assert_eq!(
@@ -527,7 +679,9 @@ mod tests {
             )))),
             Ok(Passed {
                 build_info: canned.clone(),
-                identity: EngineIdentity::Unreported
+                identity: EngineIdentity::Unreported,
+                field: "engine_build_info",
+                declared: canned.clone(),
             })
         );
         let refused = check(&registry, "c", || {

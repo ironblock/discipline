@@ -4018,8 +4018,12 @@ pub(in crate::drive) mod tests {
         log::SubstrateClaim {
             substrate: "a-substrate".to_owned(),
             registry_sha256: "ab".repeat(32),
-            engine_build: "b1-0123abc".to_owned(),
-            engine_identity: log::EngineIdentity::CheckedCommit,
+            engine: log::ClaimedEngine::Served(vec![log::ServedField {
+                field: "engine_commit".to_owned(),
+                value: "0123abc".repeat(5) + "01234",
+                provenance: log::FieldProvenance::Corroborated,
+                reported: Some("b1-0123abc".to_owned()),
+            }]),
         }
     }
 
