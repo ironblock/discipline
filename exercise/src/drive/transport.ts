@@ -33,8 +33,8 @@ export type Command =
     }
   /** Stop whatever is in flight, the trunk's call or a fork's. */
   | { readonly kind: 'cancel' }
-  /** Declare a phase transition: ratify, render, refill. */
-  | { readonly kind: 'seam'; readonly to: string }
+  /** Declare a seam: ratify, render, refill -- to the phase named, where the drive declares phases; `diet`'s does not yet. */
+  | { readonly kind: 'seam'; readonly to?: string }
   /** End the session: nothing more is asked of it (#289). */
   | { readonly kind: 'end' }
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */

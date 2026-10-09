@@ -4,6 +4,7 @@ import { expect, userEvent, waitFor } from 'storybook/test';
 import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
+import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
@@ -84,6 +85,20 @@ function serving(log: string): Web {
     }
   }
   return { EventSource: Served, fetch: async () => new Response('{}', { status: 200 }) };
+}
+
+/** What the stand-in below was posted, in order: each command's JSON body. */
+const posted: unknown[] = [];
+
+/** `serving`, keeping what the page posts to `/commands`. */
+function posting(log: string): Web {
+  return {
+    ...serving(log),
+    fetch: async (url, init) => {
+      if (String(url).endsWith('/commands') && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
+      return new Response('{}', { status: 200 });
+    },
+  };
 }
 
 /** The rehearsal's log up to the line with SEQ (#177): a session as `serve` wrote it, from its start. */
@@ -290,5 +305,33 @@ export const AttachAScreenshot: Story = {
     await waitFor(async () => expect(canvasElement.querySelector('.ex-trunk [aria-label="what the operator attached"] img')).not.toBeNull());
     // Taken, the chip is gone: the next ask attaches nothing unless the operator says so.
     await expect(canvasElement.querySelector('.ex-composer__file')).toBeNull();
+  },
+};
+
+/**
+ * `?drive`: `diet`'s drive declares no phases, and its declare-seam takes none -- so the composer offers no move,
+ * says so, and its refill sends the bare declare-seam serve takes.
+ */
+export const ServedRefillNamesNoPhase: Story = {
+  name: '?drive: refill offers no phase, since the drive declares none',
+  args: { drive: true, web: posting(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await expect(canvasElement.querySelector('select[aria-label="move to"]')).toBeNull();
+    await expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase not declared');
+    posted.length = 0;
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'refill')!);
+    // The bare declare-seam (with the idle gap it ends): no phase named.
+    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-seam']));
+    await expect(posted.some((p) => 'to' in (p as object))).toBe(false);
+  },
+};
+
+/** The canned demo declares its phases: the composer offers the move. */
+export const CannedRefillOffersPhases: Story = {
+  name: 'canned: refill offers the next phase',
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await expect(canvasElement.querySelector('select[aria-label="move to"]')).not.toBeNull();
   },
 };

@@ -12,7 +12,7 @@ export interface ComposerProps {
   /** The connection to the drive. While it is down the draft is kept and nothing can be sent. */
   readonly link?: Link;
   readonly phase: string;
-  /** Phases the person may declare a transition to. */
+  /** Phases the person may declare a transition to. None: the drive declares none, and a refill names no phase. */
   readonly phases: readonly string[];
   /** Where commands go. Absent: a composer that only shows the session's state. */
   readonly dispatch?: (command: Command) => Promise<Ack>;
@@ -195,18 +195,23 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
           {ending ? 'end the session?' : 'end'}
         </button>
         <span className="ex-composer__phase">
-          <span className="ex-composer__label">phase</span> {phase || 'not said'}
+          <span className="ex-composer__label">phase</span> {phases.length === 0 ? 'not declared' : phase || 'not said'}
         </span>
         <span className="ex-composer__seam">
-          <span className="ex-composer__label" aria-hidden="true">move to</span>
-          <select aria-label="move to" value={to} onChange={(e) => setTo(e.target.value)} disabled={!idle}>
-            {phases
-              .filter((p) => p !== phase)
-              .map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-          </select>
-          <button type="button" disabled={!idle || !dispatch} onClick={() => run({ kind: 'seam', to })}>
+          {/* `diet`'s drive declares no phases yet (its declare-seam takes none): there, a refill offers no move to make. */}
+          {phases.length > 0 ? (
+            <>
+              <span className="ex-composer__label" aria-hidden="true">move to</span>
+              <select aria-label="move to" value={to} onChange={(e) => setTo(e.target.value)} disabled={!idle}>
+                {phases
+                  .filter((p) => p !== phase)
+                  .map((p) => (
+                    <option key={p}>{p}</option>
+                  ))}
+              </select>
+            </>
+          ) : null}
+          <button type="button" disabled={!idle || !dispatch} onClick={() => run(phases.length > 0 ? { kind: 'seam', to } : { kind: 'seam' })}>
             refill
           </button>
         </span>

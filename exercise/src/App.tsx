@@ -82,7 +82,8 @@ export function App({
       {...(transport.file ? { files: transport.file } : {})}
       approving={{ waiting, decide }}
       composer={{
-        phases: PHASES,
+        // The canned script's phases; `diet`'s drive declares none yet, so under `?drive` a refill names no phase.
+        phases: drive ? [] : PHASES,
         dispatch,
         ...(uploader ? { upload: (bytes: Uint8Array) => uploader.call(transport, bytes) } : {}),
         hint: drive

@@ -224,7 +224,7 @@ export class HttpTransport implements DriveTransport {
         return turn?.kind === 'ask' ? { kind: 'cancel', turn: turn.turn } : { refused: 'nothing-in-flight' };
       }
       case 'seam':
-        // v0's declare-seam takes no phase: the one it moves to is the drive's to say.
+        // v0's declare-seam takes no phase, and the composer offers none under `?drive`.
         return { kind: 'declare-seam' };
       case 'end':
         return { kind: 'end' };
