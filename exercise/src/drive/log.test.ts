@@ -105,6 +105,17 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(failed?.kind === 'assistant' && failed.failure?.reason).toBe('transport');
   });
 
+  it("draws diet's forks off the trunk: a fork line names no slot, so each goes to a side slot, and the session has one (v5)", () => {
+    const file = 'a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl';
+    const session = fold(logOf(file));
+    const branches = [...session.branches.values()].flat();
+    expect(branches).toHaveLength(logOf(file).filter((l) => l.kind === 'fork').length);
+    for (const b of branches) {
+      expect(b.slot).not.toBe(session.trunkSlot);
+      expect(b.slot).toBeLessThan(session.slots);
+    }
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });
