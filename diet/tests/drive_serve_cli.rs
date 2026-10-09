@@ -975,6 +975,39 @@ fn a_drive_server_starts_on_a_declared_engine_without_asking_it() {
 }
 
 #[test]
+fn a_drive_server_given_a_base_url_asks_its_chat_completions() {
+    // #496's live turn: a server's bare base URL was a 404 on the first
+    // request. A base URL, or one ending in `/v1`, is completed.
+    for suffix in ["", "/", "/v1"] {
+        let stub = Stub::serving(vec![Act::Raw(ANSWERED.to_vec())]).expect("loopback");
+        let url = stub.url();
+        let base = format!(
+            "{}{suffix}",
+            url.strip_suffix("/v1/chat/completions")
+                .expect("the stub's path")
+        );
+        let served = start(&base, &[]);
+        let address = served.listening.clone();
+        let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+        assert_eq!(status(&reply), 200, "{reply}");
+        let read = exchange(
+            &address,
+            &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+            |read| read.contains("turn.settled"),
+        );
+        assert!(read.contains("turn.settled"), "{read}");
+        drop(served);
+        let heads = stub.heads();
+        assert!(
+            heads
+                .iter()
+                .any(|head| head.starts_with("POST /v1/chat/completions ")),
+            "{base}: {heads:#?}"
+        );
+    }
+}
+
+#[test]
 fn a_drive_server_says_when_its_log_flag_emptied_a_file() {
     // Ruled on #230: the file is truncated, as the scripted path's output is,
     // and the announcement says so.
