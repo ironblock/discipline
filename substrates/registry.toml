@@ -269,6 +269,16 @@ display_gpu = "AMD Radeon RX 7900 XT (Navi 31) drives the desktop; it serves no 
 accelerator_ecc = "off"
 not_measured = "the DIMM population and speed, the power supply, NVMe firmware, cooling -- each needs root or a physical read this seat does not have"
 
+[equipment.canned-loopback-replay-tools]
+display_name = "the stream-replay loopback server, with tool turns"
+entry_type = "canned-server"
+hardware_fingerprint = "1c04e518950209a440101b6f982b8bc2d73f8d8f17502eb04e4d6a43b8852cbf"
+role = "diet-drive's own server in the stub's tool-turn replay mode (#411's follow-up): a request ending in a tool result is answered with a captured llama.cpp e486f80 answer, any other with that server's captured `bash` call, byte for byte, so a model-less rehearsal runs a call through the shell gate and its approval"
+measured = "2026-10-09"
+measured_by = "computed by canned::replay_tools_digest() and canned::hardware_fingerprint() over canned::replay_tool_acts(); canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps re-derives both"
+serves = "diet-drive canned"
+acts_sha256 = "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
+
 [equipment.canned-loopback-replay]
 display_name = "the stream-replay loopback server"
 entry_type = "canned-server"
@@ -1048,6 +1058,21 @@ reproducible_because = "replay the capture and the same bytes play again; exact 
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the capture is the whole of what it plays"
 engine_build_info = "canned-2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
 engine_build_info_is = "derived, not read from a server: canned::replay_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
+
+[substrate.canned-replay-tools]
+equipment = "canned-loopback-replay-tools"
+description = "the tool-turn replay (#411's follow-up): `diet-drive replay` answers a request ending in a tool result with substrates/measurements/2026-10-02-i0-tool-call-captures/turn2-openai.http and any other with turn1.http (a `bash` call of `ls | wc -l`), byte for byte, and GET /props with this entry's literal; a rehearsal substrate for tools, the shell gate and approval prompts when no model is at hand, never a claim substrate"
+pinned = true
+engine_name = "diet-drive replay"
+engine_identity = "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
+engine_identity_is = "the acts digest, as for `canned`: the two captured replies are the whole of what it plays"
+weights_kind = "canned"
+weights_acts_sha256 = "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
+reproducible_by_config = true
+reproducible_because = "replay the captures and the same bytes play again; exact match, no band"
+engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the captures are the whole of what it plays"
+engine_build_info = "canned-7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
+engine_build_info_is = "derived, not read from a server: canned::replay_tools_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
 
 # The drive endpoint's engine commit and weights on this host's CPU, served for #29's I0
 # captures (a streamed tool call and its turn 2); not a claim substrate.

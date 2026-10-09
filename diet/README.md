@@ -8,7 +8,7 @@ It's primarily a library, but exists primarily to apply a `regimen` - a fixed co
 
 - [`drive/floor.toml`](drive/floor.toml) binds a session to the maintainer's registered floor substrate. It starts only against that substrate's registered engine.
 - [`drive/dev-loop.toml`](drive/dev-loop.toml) names the canned substrate: a scripted server inside this crate, with no weights. It is served only by that canned server, which the batch drive starts for itself.
-- [`drive/replay.toml`](drive/replay.toml) is a rehearsal: commands, approvals and a record, with no model. Its substrate, `canned-replay`, is served by `diet-drive replay`, which answers every request with one captured llama.cpp turn.
+- [`drive/replay.toml`](drive/replay.toml) is a rehearsal: commands, approvals and a record, with no model. Its substrate, `canned-replay-tools`, is served by `diet-drive replay`, which answers each ask with a captured llama.cpp `bash` call and then that session's answer, so the shell gate and its approval prompt run.
 
 **Two binaries**, built from the repository root with `cargo build -p discipline-diet`:
 

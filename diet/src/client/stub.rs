@@ -142,6 +142,31 @@ impl Stub {
         )
     }
 
+    /// The stream-replay mode with tool turns (#411's follow-up): a request
+    /// whose last message is a tool result is answered with `answer`, and
+    /// every other request with `call` -- a streamed tool call -- verbatim,
+    /// for as long as the stub runs. Chosen by the request, not by its
+    /// place in a sequence, so a request the replay did not expect (a fork,
+    /// a retry) cannot put the two out of step. `/props` answers
+    /// `build_info`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error if loopback cannot be bound.
+    pub fn replaying_tool_turns(
+        call: Vec<u8>,
+        answer: Vec<u8>,
+        build_info: &str,
+        port: u16,
+    ) -> io::Result<Self> {
+        Self::start(
+            vec![Act::Raw(call), Act::Raw(answer)],
+            Some(format!("{{\"build_info\":\"{build_info}\"}}")),
+            Replay::ToolTurns,
+            port,
+        )
+    }
+
     /// Where it listens.
     #[must_use]
     pub fn address(&self) -> SocketAddr {
@@ -249,8 +274,19 @@ impl Drop for Stub {
 enum Replay {
     No,
     Forever,
+    /// The first act for a request whose last message is not a tool result,
+    /// the second for one whose last message is.
+    ToolTurns,
 }
 
+/// Whether a chat-completions body's last message is a tool result: the
+/// last `"role":"` key in the body names `tool`. A string inside a message
+/// carries its quotes escaped, so the unescaped key is only ever a role.
+fn answers_a_tool(body: &str) -> bool {
+    const KEY: &str = "\"role\":\"";
+    body.rfind(KEY)
+        .is_some_and(|at| body[at + KEY.len()..].starts_with("tool\""))
+}
 /// Serve every act, and collect what was asked.
 fn serve(
     listener: &TcpListener,
@@ -262,9 +298,10 @@ fn serve(
     heads: &Mutex<Vec<String>>,
 ) -> Vec<String> {
     let mut asked = Vec::new();
+    let pair = acts.clone();
     let played: Box<dyn Iterator<Item = Act>> = match replay {
         Replay::No => Box::new(acts.into_iter()),
-        Replay::Forever => Box::new(acts.into_iter().cycle()),
+        Replay::Forever | Replay::ToolTurns => Box::new(acts.into_iter().cycle()),
     };
     let mut acts = played.peekable();
     let idle_cap = (replay == Replay::No).then_some(IDLE_CAP);
@@ -304,6 +341,13 @@ fn serve(
             asked.push(beyond);
             write_reply(&mut stream, 503, "beyond the stub's script", Closing::Yes);
             break;
+        };
+        let act = match (replay, &read) {
+            (Replay::ToolTurns, Ok((_, body))) => pair
+                .get(usize::from(answers_a_tool(body)))
+                .cloned()
+                .unwrap_or(act),
+            _ => act,
         };
         match read {
             Ok((head, body)) => {

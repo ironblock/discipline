@@ -1381,14 +1381,14 @@ fn usage() -> String {
     // The interactive server, which the first form's usage once hid (#290).
     out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");
     out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n");
-    out.push_str("       diet-drive replay [--port N]\n");
-    out.push_str(
-        "       (substrate `canned-replay` on loopback: every request answered with one\n",
+    out.push_str("       diet-drive replay [--answers] [--port N]\n");
+    out.push_str("       (substrate `canned-replay-tools` on loopback: captured llama.cpp\n");
+    out.push_str("       replies, a `bash` call and then its answer, for a regimen rehearsed\n");
+    out.push_str("       with no model; --answers serves `canned-replay`, one captured answer\n");
+    let _ = writeln!(
+        out,
+        "       for every request; port {REPLAY_PORT} unless told; runs until stopped)\n"
     );
-    out.push_str(
-        "       captured llama.cpp turn, for a regimen rehearsed with no model; default\n",
-    );
-    let _ = writeln!(out, "       port {REPLAY_PORT}; runs until stopped)\n");
     out.push_str("Runs the pinned three-turn script through <regimen> in <worktree>\n");
     out.push_str("and writes the record to <output.jsonl>. With no endpoint the canned\n");
     out.push_str("server answers on loopback -- no model, no network out.\n\n");
@@ -1407,15 +1407,18 @@ fn usage() -> String {
     out
 }
 
-/// `diet-drive replay [--port N]`: the stream-replay substrate's server
-/// (#411), `canned-replay` in the registry. Every request that is not `GET
-/// /props` is answered with [`canned::REPLAYED`], byte for byte, and `/props`
-/// with [`canned::replay_build_info`], so `serve` under a regimen naming
-/// `canned-replay` passes its engine check against it and against nothing
-/// else. One JSON line on stdout says where it listens; it runs until
-/// stopped.
+/// `diet-drive replay [--answers] [--port N]`: the stream-replay
+/// substrates' server (#411). By default `canned-replay-tools`: a request
+/// ending in a tool result is answered with [`canned::REPLAYED_ANSWER`], any
+/// other with [`canned::REPLAYED_CALL`]. With `--answers`, `canned-replay`:
+/// every request answered with [`canned::REPLAYED`]. Byte for byte, and
+/// `/props` with the substrate's literal, so `serve` under a regimen naming
+/// it passes its engine check against this and against nothing else. One
+/// JSON line on stdout says where it listens; it runs until stopped.
 fn replay(args: &[String]) -> ExitCode {
-    let port = match args {
+    let answers = args.first().is_some_and(|first| first == "--answers");
+    let rest = if answers { &args[1..] } else { args };
+    let port = match rest {
         [] => REPLAY_PORT,
         [flag, port] if flag == "--port" => match port.parse() {
             Ok(port) => port,
@@ -1426,11 +1429,21 @@ fn replay(args: &[String]) -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    let stub = match Stub::replaying(
-        canned::REPLAYED.to_vec(),
-        &canned::replay_build_info(),
-        port,
-    ) {
+    let (substrate, build_info, started) = if answers {
+        let build_info = canned::replay_build_info();
+        let started = Stub::replaying(canned::REPLAYED.to_vec(), &build_info, port);
+        ("canned-replay", build_info, started)
+    } else {
+        let build_info = canned::replay_tools_build_info();
+        let started = Stub::replaying_tool_turns(
+            canned::REPLAYED_CALL.to_vec(),
+            canned::REPLAYED_ANSWER.to_vec(),
+            &build_info,
+            port,
+        );
+        ("canned-replay-tools", build_info, started)
+    };
+    let stub = match started {
         Ok(stub) => stub,
         Err(why) => {
             return fail(
@@ -1440,8 +1453,7 @@ fn replay(args: &[String]) -> ExitCode {
         }
     };
     println!(
-        "{{\"build_info\":\"{}\",\"listening\":\"{}\",\"ok\":true,\"substrate\":\"canned-replay\"}}",
-        canned::replay_build_info(),
+        "{{\"build_info\":\"{build_info}\",\"listening\":\"{}\",\"ok\":true,\"substrate\":\"{substrate}\"}}",
         stub.url()
     );
     let _ = std::io::Write::flush(&mut std::io::stdout());
