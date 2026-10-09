@@ -73,7 +73,15 @@ npx --yes pnpm@11.20.0 -C exercise install
 DIET_DRIVE=http://127.0.0.1:7801 npx --yes pnpm@11.20.0 -C exercise dev
 ```
 
-Open `http://localhost:5173/?drive`. The surface's dev server proxies `/events` and `/commands` to `serve` (`exercise/vite.config.ts`).
+Open `http://localhost:5173/?drive`. The surface's dev server proxies `/events`, `/commands`, `/approve` and `/files` to `serve` (`exercise/vite.config.ts`).
+
+**A regimen that runs the model's commands** makes `serve` require `--auth-file FILE` (`user:password`). The page cannot answer that credential itself, so name the same file to the surface and its proxy presents it:
+
+```
+DIET_DRIVE=http://127.0.0.1:7801 DIET_DRIVE_AUTH_FILE=<the file given to --auth-file> npx --yes pnpm@11.20.0 -C exercise dev
+```
+
+Without it the page says the drive asks for credentials (401).
 
 ## Ending
 
