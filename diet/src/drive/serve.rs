@@ -30,7 +30,8 @@
 //!   names an upload either way, since this route answers it. An ask's optional
 //!   `"files": [<sha256>, ...]` attaches them, before the PNGs its words
 //!   name; a digest never uploaded refuses the ask `400`. `GET
-//!   /files/<sha256>` answers the bytes as `image/png`, or `404`.
+//!   /files/<sha256>` answers the bytes as `image/png` -- an upload's, or
+//!   the recording's copy of a PNG attached by path -- or `404`.
 //!
 //! # Who may drive it
 //!
@@ -705,7 +706,8 @@ impl<S: Streaming + 'static> Serving<S> {
         }
     }
 
-    /// `GET /files/<sha256>`: an upload's bytes as `image/png`, or `404`.
+    /// `GET /files/<sha256>`: an upload's bytes as `image/png`, else the
+    /// recording's copy of that digest (a PNG attached by path), or `404`.
     fn file(&self, stream: &mut TcpStream, request: &Request) {
         let digest = request.path.strip_prefix("/files/").unwrap_or_default();
         let held = self
@@ -714,6 +716,16 @@ impl<S: Streaming + 'static> Serving<S> {
             .unwrap_or_else(PoisonError::into_inner)
             .get(digest)
             .map(|upload| Arc::clone(&upload.bytes));
+        // A PNG attached by path was never posted here; with a recording,
+        // its copy is.
+        let held = held.or_else(|| {
+            self.config
+                .attaching
+                .recording
+                .as_deref()
+                .and_then(|recording| attach::recorded(recording, digest))
+                .map(Arc::new)
+        });
         match held {
             Some(bytes) => respond_bytes(stream, attach::MEDIA_TYPE, &bytes),
             None => respond(stream, 404, &empty()),
@@ -3119,6 +3131,55 @@ mod tests {
         drop(server);
         drop(session);
         assert!(stub.received().is_empty(), "something was sent");
+        let _ = std::fs::remove_dir_all(&recording);
+    }
+
+    /// A PNG the operator attached by path in a recorded session was never
+    /// posted to `/files`; `GET /files/<sha256>` answers it from the
+    /// recording's copy, so the live page draws it (#514's review). A copy
+    /// whose bytes are not its name's digest, and a name that is not a
+    /// digest, are `404`.
+    #[test]
+    fn files_answers_a_path_attached_png_from_the_recordings_copy() {
+        use crate::drive::attach::{
+            Attaching,
+            tests::{confinement_for, png},
+        };
+        use crate::drive::tool_loop::tests::scratch;
+
+        let tree = scratch("files-serve-path-tree");
+        let recording = scratch("files-serve-path-recording");
+        let bytes = png("on disk");
+        std::fs::write(tree.join("shot.png"), &bytes).expect("the screenshot");
+        let sha256 = crate::digest::sha256_hex(&bytes);
+        let (session, server, _stub) = serve_attaching(
+            1,
+            Attaching {
+                policy: Some(crate::isolation::Policy::merged_usr()),
+                worktree: Some(tree.clone()),
+                confinement: confinement_for(&crate::isolation::Policy::merged_usr()),
+                recording: Some(recording.clone()),
+            },
+            None,
+        );
+        let reply = post(&server, &ask_json("see shot.png"), "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        turns_settled(&session, 1);
+        assert!(get_file(&server, &sha256).ends_with(&bytes));
+
+        let forged = crate::digest::sha256_hex(b"something else");
+        std::fs::write(recording.join("files").join(&forged), png("not that"))
+            .expect("a forged copy");
+        for name in [forged.as_str(), "../shot.png", "SHOT"] {
+            assert_eq!(
+                status(&String::from_utf8_lossy(&get_file(&server, name))),
+                404,
+                "{name}"
+            );
+        }
+        drop(server);
+        drop(session);
+        let _ = std::fs::remove_dir_all(&tree);
         let _ = std::fs::remove_dir_all(&recording);
     }
 }
