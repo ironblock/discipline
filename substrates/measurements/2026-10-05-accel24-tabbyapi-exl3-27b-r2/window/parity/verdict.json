@@ -1,0 +1,37 @@
+{
+ "unadjudicated_checks": "all passed",
+ "band": [
+  0.024877,
+  0.21789
+ ],
+ "counted_forks": {
+  "A": {
+   "counted": 31,
+   "of": 31,
+   "floor": 25,
+   "misses": []
+  },
+  "B": {
+   "counted": 31,
+   "of": 31,
+   "floor": 25,
+   "misses": []
+  },
+  "paired": 31
+ },
+ "interview_misses": {
+  "A": [],
+  "B": []
+ },
+ "seat_a": {
+  "offered": 1217,
+  "accepted_deduped": 71
+ },
+ "seat_b": {
+  "offered": 2127,
+  "accepted_deduped": 131
+ },
+ "effect": 0.0032489118463206734,
+ "word": "inconclusive",
+ "disclosure": "The archived fire's baseline was not measured, and each unmeasured part is a candidate explanation of this word that the record cannot exclude: the substrate instance was inferred from a later capture's uptime and the archive, no capture having been taken at that fire; seat B's engine binary and weights were not recorded, and its launch configuration is known only from the research program's note of the fire; and the harness is identified by commit and rebuilt, its binary and its working tree at the fire not recorded."
+}

@@ -1,0 +1,18 @@
+{
+ "log": "instruments/fixtures/canary-e0827.jsonl",
+ "fork": "e0827",
+ "anchor": "common_chat_templates_apply",
+ "digest": {
+  "sha": "a7d695adc2f9f666",
+  "n": 19,
+  "ver": 1
+ },
+ "k": 36,
+ "hits": 36,
+ "rate": 1.0,
+ "ci": [
+  0.9035781695514236,
+  1.0
+ ],
+ "substrate_label": "accel24-tabbyapi-exl3-qwen38-27b-3p00"
+}
