@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 6;
-export const READS = [0, 1, 2, 3, 4, 5, 6] as const;
+export const VERSION = 7;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -121,6 +121,11 @@ export type EngineIdentity =
   | "literal_matched"
 ;
 
+export type FieldProvenance =
+  | "declared"
+  | "corroborated"
+;
+
 export type Provenance =
   | "placed"
   | "constructed"
@@ -208,6 +213,13 @@ export interface RecordedFile {
   bytes: number;
 }
 
+export interface ServedField {
+  field: string;
+  value: string;
+  provenance: FieldProvenance;
+  reported?: string;
+}
+
 export interface PatchEntry {
   id: string;
   text: string;
@@ -218,14 +230,17 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
   opened: number;
   model: string;
   head: HeadMessage[];
   serving?: Serving;
+  engine_build?: string;
+  engine_identity?: EngineIdentity;
+  served?: ServedField[];
   provenance?: Provenance;
   tools?: string[];
-} & ({ substrate: string; registry_sha256: string; engine_build: string; engine_identity: EngineIdentity } | { substrate?: never; registry_sha256?: never; engine_build?: never; engine_identity?: never });
+} & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {
   seq: number;
