@@ -26,7 +26,8 @@
 //! * `POST /files` takes a PNG's raw bytes as `image/png` (#513): `200`
 //!   `{"sha256", "bytes"}`, `400` without the PNG signature, `413` past
 //!   `attach::MAX_BYTES`. The bytes are held for the session and, with a
-//!   recording, copied to `<recording>/files/<sha256>`. An ask's optional
+//!   recording, copied to `<recording>/files/<sha256>`; the `ask` line
+//!   names an upload either way, since this route answers it. An ask's optional
 //!   `"files": [<sha256>, ...]` attaches them, before the PNGs its words
 //!   name; a digest never uploaded refuses the ask `400`. `GET
 //!   /files/<sha256>` answers the bytes as `image/png`, or `404`.
@@ -3006,10 +3007,13 @@ mod tests {
     }
 
     /// With no recording the upload is held in memory: read back, attached
-    /// and sent, nothing copied, and the `ask` line names no file.
+    /// and sent, nothing copied, and the `ask` line still names it -- digest,
+    /// media type, length -- so a page draws it from `GET /files/<sha256>`
+    /// whether or not the session records.
     #[test]
-    fn with_no_recording_an_upload_is_held_attached_and_named_nowhere() {
+    fn with_no_recording_an_upload_is_held_attached_and_named_on_the_ask() {
         use crate::drive::attach::{Attaching, tests::png};
+        use crate::formats::log::{Event as Line, RecordedFile};
 
         let bytes = png("held");
         let sha256 = crate::digest::sha256_hex(&bytes);
@@ -3019,10 +3023,14 @@ mod tests {
         let reply = post(&server, &ask_files_json("see this", &[&sha256]), "");
         assert_eq!(status(&reply), 200, "{reply}");
         turns_settled(&session, 1);
-        let lines: Vec<_> = session
+        let asks: Vec<Option<Vec<RecordedFile>>> = session
             .events_from(0)
             .iter()
             .map(crate::drive::session::line_of)
+            .filter_map(|line| match line.event {
+                Line::Ask { files, .. } => Some(files),
+                _ => None,
+            })
             .collect();
         drop(server);
         drop(session);
@@ -3030,12 +3038,14 @@ mod tests {
             stub.received()[0].contains(&format!("data:image/png;base64,{}", base64(&bytes))),
             "the image was not sent"
         );
-        assert!(
-            lines.iter().any(|line| matches!(
-                line.event,
-                crate::formats::log::Event::Ask { files: None, .. }
-            )),
-            "{lines:?}"
+        assert_eq!(
+            asks,
+            [Some(vec![RecordedFile {
+                path: format!("files/{sha256}"),
+                sha256,
+                media_type: "image/png".to_owned(),
+                bytes: bytes.len() as u64,
+            }])]
         );
     }
 
