@@ -1081,10 +1081,10 @@ fn read_body(
 /// sending, or `deadline` passes.
 fn drain(stream: &mut TcpStream, early: &[u8], length: u64, deadline: Instant) {
     let mut left = length.saturating_sub(u64::try_from(early.len()).unwrap_or(u64::MAX));
-    let mut chunk = [0_u8; 65536];
+    let mut chunk = [0_u8; 16384];
     while left > 0 {
         let want = usize::try_from(left).map_or(chunk.len(), |left| left.min(chunk.len()));
-        match read_by(stream, &mut chunk[..want], deadline) {
+        match read_by(stream, chunk.get_mut(..want).unwrap_or_default(), deadline) {
             Ok(0) | Err(_) => return,
             Ok(read) => left = left.saturating_sub(u64::try_from(read).unwrap_or(u64::MAX)),
         }
