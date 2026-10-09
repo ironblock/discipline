@@ -2,7 +2,7 @@
 //! its commands as JSON posts (#117 R2c, increment I4 of
 //! `diet/drive/plans/r2c-proposal.md`).
 //!
-//! Two routes, and nothing else answers:
+//! These routes, and nothing else answers:
 //!
 //! * `GET /events` replays the log from a sequence number and then tails it.
 //!   Each event is `id: <opened>-<seq>` and one `data:` line; `opened` is the
@@ -23,6 +23,13 @@
 //!   after the history on every connect while it waits, and `answered`
 //!   `{request, id}` once the operator decides. The log (v4) records the
 //!   decision on the call's own `tool_call` line.
+//! * `POST /files` takes a PNG's raw bytes as `image/png` (#513): `200`
+//!   `{"sha256", "bytes"}`, `400` without the PNG signature, `413` past
+//!   `attach::MAX_BYTES`. The bytes are held for the session and, with a
+//!   recording, copied to `<recording>/files/<sha256>`. An ask's optional
+//!   `"files": [<sha256>, ...]` attaches them, before the PNGs its words
+//!   name; a digest never uploaded refuses the ask `400`. `GET
+//!   /files/<sha256>` answers the bytes as `image/png`, or `404`.
 //!
 //! # Who may drive it
 //!
@@ -31,7 +38,8 @@
 //! finding 1). So every request's `Host` must be one this server answers to,
 //! an `Origin`, when present, must be on the allowed list, and a post must be
 //! `application/json` -- which a page on another site can only send after a
-//! preflight, and the preflight has no route (D17). What this does not stop
+//! preflight, and the preflight has no route (D17). `/files` takes
+//! `image/png`, which is no form encoding either, so the same holds. What this does not stop
 //! is another program on the same machine, or another host once the server
 //! listens off loopback; that is Basic auth's job (I7, D10). With a
 //! [`Credential`] set, every request that passes those checks must also
@@ -53,12 +61,12 @@ use std::collections::BTreeMap;
 use std::fmt::{self, Write as _};
 use std::io::{self, Read as _, Write as _};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use super::attach::{self, Attaching, Unattachable};
+use super::attach::{self, Attaching, Unattachable, Upload};
 use super::session::{
     CommandKind, GapEnd, IdleGap, Logged, Refusal, Rejected, Session, Settlement,
 };
@@ -284,6 +292,7 @@ impl Server {
             render,
             stopping: Arc::clone(&stopping),
             live: Arc::clone(&live),
+            uploads: Arc::new(Mutex::new(BTreeMap::new())),
         };
         let accept = thread::Builder::new()
             .name("diet-serve".to_owned())
@@ -352,6 +361,8 @@ struct Serving<S: Streaming + 'static> {
     render: Render,
     stopping: Arc<AtomicBool>,
     live: Arc<AtomicUsize>,
+    /// What `/files` was posted this session, by digest (#513).
+    uploads: Arc<Mutex<BTreeMap<String, Upload>>>,
 }
 
 impl<S: Streaming + 'static> Clone for Serving<S> {
@@ -364,6 +375,7 @@ impl<S: Streaming + 'static> Clone for Serving<S> {
             render: self.render,
             stopping: Arc::clone(&self.stopping),
             live: Arc::clone(&self.live),
+            uploads: Arc::clone(&self.uploads),
         }
     }
 }
@@ -409,12 +421,15 @@ enum Unread {
 
 type Handler<S> = fn(&Serving<S>, &mut TcpStream, &Request);
 
-/// Every route there is. Anything else, `OPTIONS` included, is `404`.
-fn routes<S: Streaming + 'static>() -> [(&'static str, &'static str, Handler<S>); 3] {
+/// Every route there is. Anything else, `OPTIONS` included, is `404`. A
+/// path ending in `/` is a prefix: `/files/` answers `/files/<sha256>`.
+fn routes<S: Streaming + 'static>() -> [(&'static str, &'static str, Handler<S>); 5] {
     [
         ("GET", "/events", Serving::<S>::events),
         ("POST", "/commands", Serving::<S>::command),
         ("POST", "/approve", Serving::<S>::approve),
+        ("POST", "/files", Serving::<S>::upload),
+        ("GET", "/files/", Serving::<S>::file),
     ]
 }
 
@@ -429,6 +444,7 @@ const REASONS: &[(u16, &str)] = &[
     (410, "Gone"),
     (413, "Content Too Large"),
     (415, "Unsupported Media Type"),
+    (500, "Internal Server Error"),
     (503, "Service Unavailable"),
 ];
 
@@ -497,9 +513,11 @@ impl<S: Streaming + 'static> Serving<S> {
         {
             return respond_with(&mut stream, 401, CHALLENGE, &empty());
         }
-        let route = routes::<S>()
-            .into_iter()
-            .find(|(method, path, _)| *method == request.method && *path == request.path);
+        let route = routes::<S>().into_iter().find(|(method, path, _)| {
+            *method == request.method
+                && (*path == request.path
+                    || (path.ends_with('/') && request.path.starts_with(path)))
+        });
         match route {
             Some((_, _, handler)) => handler(self, &mut stream, &request),
             None => respond(&mut stream, 404, &empty()),
@@ -625,6 +643,82 @@ impl<S: Streaming + 'static> Serving<S> {
         }
     }
 
+    /// `POST /files`: a PNG's raw bytes (#513), held for the session and,
+    /// with a recording, copied beside it. `415` for a body that is not
+    /// `image/png`, `400` without a length or the PNG signature, `413` past
+    /// [`attach::MAX_BYTES`], `500` when the copy cannot be kept.
+    fn upload(&self, stream: &mut TcpStream, request: &Request) {
+        let png_body = request.header("content-type").is_some_and(|kind| {
+            kind.split(';')
+                .next()
+                .is_some_and(|kind| kind.trim().eq_ignore_ascii_case(attach::MEDIA_TYPE))
+        });
+        if !png_body {
+            return respond(stream, 415, &empty());
+        }
+        let Some(length) = request
+            .header("content-length")
+            .and_then(|length| length.trim().parse::<u64>().ok())
+        else {
+            return respond(stream, 400, &empty());
+        };
+        if length > attach::MAX_BYTES {
+            return respond(stream, 413, &empty());
+        }
+        let Ok(length) = usize::try_from(length) else {
+            return respond(stream, 413, &empty());
+        };
+        let Some(body) = read_body(stream, &request.early_body, length, request.deadline) else {
+            return;
+        };
+        match attach::uploaded(body, self.config.attaching.recording.as_deref()) {
+            Ok(upload) => {
+                let reply = BTreeMap::from([
+                    (
+                        "sha256".to_owned(),
+                        Value::String(upload.file.sha256.clone()),
+                    ),
+                    ("bytes".to_owned(), integer(upload.file.bytes)),
+                ]);
+                self.uploads
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(upload.file.sha256.clone(), upload);
+                respond(stream, 200, &Value::Object(reply));
+            }
+            Err((check, why)) => {
+                let status = match check {
+                    attach::Check::NotPng => 400,
+                    attach::Check::TooLarge => 413,
+                    _ => 500,
+                };
+                respond(
+                    stream,
+                    status,
+                    &Value::Object(BTreeMap::from([
+                        ("check".to_owned(), Value::String(check.tag().to_owned())),
+                        ("reason".to_owned(), Value::String(why)),
+                    ])),
+                );
+            }
+        }
+    }
+
+    /// `GET /files/<sha256>`: an upload's bytes as `image/png`, or `404`.
+    fn file(&self, stream: &mut TcpStream, request: &Request) {
+        let digest = request.path.strip_prefix("/files/").unwrap_or_default();
+        let held = self
+            .uploads
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(digest)
+            .map(|upload| Arc::clone(&upload.bytes));
+        match held {
+            Some(bytes) => respond_bytes(stream, attach::MEDIA_TYPE, &bytes),
+            None => respond(stream, 404, &empty()),
+        }
+    }
+
     /// A post's JSON object, or `None` once its refusal is answered: `415`
     /// for a body that is not `application/json`, `400` for a length that is
     /// not one or a body that is not one object, `413` past the cap.
@@ -659,6 +753,22 @@ impl<S: Streaming + 'static> Serving<S> {
         object
     }
 
+    /// The uploads an ask's `files` names, in its order, or the first digest
+    /// never uploaded to this server.
+    fn uploads_named(&self, files: &[String]) -> Result<Vec<Upload>, Unattachable> {
+        let held = self.uploads.lock().unwrap_or_else(PoisonError::into_inner);
+        files
+            .iter()
+            .map(|digest| {
+                held.get(digest).cloned().ok_or_else(|| Unattachable {
+                    path: digest.clone(),
+                    check: attach::Check::NotUploaded,
+                    why: "no PNG with this digest was posted to /files in this session".to_owned(),
+                })
+            })
+            .collect()
+    }
+
     fn run(&self, command: Posted) -> (u16, BTreeMap<String, Value>) {
         let refused = |because: Refusal| {
             (
@@ -681,7 +791,10 @@ impl<S: Streaming + 'static> Serving<S> {
             Rejected::NoSuchTurn(_) | Rejected::BadGap(_) => (400, BTreeMap::new()),
         };
         match command {
-            Command::Ask(text) => match attach::attached(&text, &self.config.attaching) {
+            Command::Ask(text, files) => match self
+                .uploads_named(&files)
+                .and_then(|uploads| attach::attached_with(&text, &uploads, &self.config.attaching))
+            {
                 Err(unattachable) => (400, unattached(&unattachable)),
                 Ok(attached) => match self.session.ask_attached(attached, gap, scoping) {
                     Ok(admitted) => (
@@ -721,7 +834,8 @@ struct Posted {
 
 /// A command.
 enum Command {
-    Ask(String),
+    /// The words, and the digests of the uploads it attaches (#513).
+    Ask(String, Vec<String>),
     Cancel(u32),
     DeclareSeam,
     End,
@@ -740,7 +854,7 @@ impl Command {
             .find(|candidate| candidate.tag() == kind)?;
         // Any command may carry the idle gap it ended (#117, D13 (c)).
         let takes: &[&str] = match kind {
-            CommandKind::Ask => &["kind", "text", "idle_gap", "scoping"],
+            CommandKind::Ask => &["kind", "text", "idle_gap", "scoping", "files"],
             CommandKind::Cancel => &["kind", "turn", "idle_gap"],
             CommandKind::DeclareSeam | CommandKind::End => &["kind", "idle_gap"],
         };
@@ -759,8 +873,16 @@ impl Command {
             Some(_) => return None,
         };
         let command = match kind {
-            CommandKind::Ask => match object.get("text") {
-                Some(Value::String(text)) => Some(Self::Ask(text.clone())),
+            CommandKind::Ask => match (object.get("text"), object.get("files")) {
+                (Some(Value::String(text)), None) => Some(Self::Ask(text.clone(), Vec::new())),
+                (Some(Value::String(text)), Some(Value::Array(files))) => files
+                    .iter()
+                    .map(|file| match file {
+                        Value::String(digest) => Some(digest.clone()),
+                        _ => None,
+                    })
+                    .collect::<Option<Vec<_>>>()
+                    .map(|files| Self::Ask(text.clone(), files)),
                 _ => None,
             },
             CommandKind::Cancel => match object.get("turn") {
@@ -955,6 +1077,19 @@ fn respond(stream: &mut TcpStream, status: u16, body: &Value) {
 /// `204 No Content`: a reply with no body at all.
 fn respond_no_content(stream: &mut TcpStream) {
     let _ = stream.write_all(b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n");
+    let _ = stream.flush();
+    let _ = stream.shutdown(Shutdown::Write);
+}
+
+/// `200` with `bytes` as `media_type`.
+fn respond_bytes(stream: &mut TcpStream, media_type: &str, bytes: &[u8]) {
+    let head = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: {media_type}\r\nContent-Length: {}\r\n\
+         Cache-Control: no-cache\r\nConnection: close\r\n\r\n",
+        bytes.len()
+    );
+    let _ = stream.write_all(head.as_bytes());
+    let _ = stream.write_all(bytes);
     let _ = stream.flush();
     let _ = stream.shutdown(Shutdown::Write);
 }
@@ -2722,5 +2857,258 @@ mod tests {
         for dir in [&tree, &outside, &recording] {
             let _ = std::fs::remove_dir_all(dir);
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // a PNG posted to /files (#513)
+    // -----------------------------------------------------------------------
+
+    /// One request, its whole reply as bytes: a PNG's body is not text.
+    fn exchange(server: &Server, head: &str, body: &[u8]) -> Vec<u8> {
+        let mut stream = TcpStream::connect(server.addr()).expect("connects");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("a read timeout");
+        stream.write_all(head.as_bytes()).expect("the head");
+        stream.write_all(body).expect("the body");
+        let mut reply = Vec::new();
+        let _ = stream.read_to_end(&mut reply);
+        reply
+    }
+
+    fn upload_png(server: &Server, bytes: &[u8], kind: &str) -> String {
+        let head = format!(
+            "POST /files HTTP/1.1\r\nHost: {}\r\nContent-Type: {kind}\r\n\
+             Content-Length: {}\r\n\r\n",
+            host(server),
+            bytes.len()
+        );
+        String::from_utf8_lossy(&exchange(server, &head, bytes)).into_owned()
+    }
+
+    fn get_file(server: &Server, digest: &str) -> Vec<u8> {
+        let head = format!(
+            "GET /files/{digest} HTTP/1.1\r\nHost: {}\r\n\r\n",
+            host(server)
+        );
+        exchange(server, &head, &[])
+    }
+
+    fn ask_files_json(text: &str, files: &[&str]) -> String {
+        let mut out = String::new();
+        json::render(
+            &Value::Object(BTreeMap::from([
+                ("kind".to_owned(), Value::String("ask".to_owned())),
+                ("text".to_owned(), Value::String(text.to_owned())),
+                (
+                    "files".to_owned(),
+                    Value::Array(
+                        files
+                            .iter()
+                            .map(|file| Value::String((*file).to_owned()))
+                            .collect(),
+                    ),
+                ),
+            ])),
+            &mut out,
+        );
+        out
+    }
+
+    /// #513 end to end against a stub engine, with no regimen (an upload is
+    /// the operator's bytes, not a read of the disk): the PNG posted to
+    /// `/files` is answered with its digest and length, copied beside the
+    /// log, read back byte for byte from `GET /files/<sha256>`, and an ask
+    /// naming it reaches the engine as `[image_url, text]` and is logged by
+    /// reference.
+    #[test]
+    fn a_png_posted_to_files_is_read_back_and_attached_by_its_digest() {
+        use crate::drive::attach::{Attaching, tests::png};
+        use crate::drive::tool_loop::tests::scratch;
+        use crate::formats::log::{self, Event as Line, RecordedFile};
+
+        let recording = scratch("files-serve-recording");
+        let bytes = png("the page's screenshot");
+        let sha256 = crate::digest::sha256_hex(&bytes);
+        let log_path = recording.join("session.jsonl");
+        let (session, server, stub) = serve_attaching(
+            1,
+            Attaching {
+                recording: Some(recording.clone()),
+                ..Attaching::default()
+            },
+            Some(&log_path),
+        );
+
+        let reply = upload_png(&server, &bytes, "image/png");
+        assert_eq!(status(&reply), 200, "{reply}");
+        assert_eq!(
+            json::line(body(&reply)).expect("a JSON object"),
+            BTreeMap::from([
+                ("sha256".to_owned(), Value::String(sha256.clone())),
+                ("bytes".to_owned(), integer(bytes.len() as u64)),
+            ])
+        );
+        assert_eq!(
+            std::fs::read(recording.join("files").join(&sha256)).expect("the copy"),
+            bytes
+        );
+        let read_back = get_file(&server, &sha256);
+        let (head, tail) =
+            read_back.split_at(find(&read_back, b"\r\n\r\n").expect("a reply head") + 4);
+        let head = String::from_utf8_lossy(head);
+        assert!(head.starts_with("HTTP/1.1 200 "), "{head}");
+        assert!(head.contains("Content-Type: image/png\r\n"), "{head}");
+        assert_eq!(tail, bytes.as_slice());
+
+        let reply = post(
+            &server,
+            &ask_files_json("what is wrong here?", &[&sha256]),
+            "",
+        );
+        assert_eq!(status(&reply), 200, "{reply}");
+        turns_settled(&session, 1);
+        drop(server);
+        drop(session);
+
+        let received = stub.received();
+        assert_eq!(received.len(), 1);
+        let first: serde_json::Value = serde_json::from_str(&received[0]).expect("JSON");
+        assert_eq!(
+            first["messages"][1]["content"],
+            serde_json::json!([
+                {"type": "image_url", "image_url": {"url": format!("data:image/png;base64,{}", base64(&bytes))}},
+                {"type": "text", "text": "what is wrong here?"},
+            ]),
+            "{}",
+            received[0]
+        );
+        let document = std::fs::read_to_string(&log_path).expect("the log");
+        log::project(&document).unwrap_or_else(|why| panic!("{why}\n{document}"));
+        let asks: Vec<Option<Vec<RecordedFile>>> = log::parse(&document)
+            .expect("the log reads")
+            .into_iter()
+            .filter_map(|line| match line.event {
+                Line::Ask { files, .. } => Some(files),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            asks,
+            [Some(vec![RecordedFile {
+                path: format!("files/{sha256}"),
+                sha256,
+                media_type: "image/png".to_owned(),
+                bytes: bytes.len() as u64,
+            }])]
+        );
+        let _ = std::fs::remove_dir_all(&recording);
+    }
+
+    /// With no recording the upload is held in memory: read back, attached
+    /// and sent, nothing copied, and the `ask` line names no file.
+    #[test]
+    fn with_no_recording_an_upload_is_held_attached_and_named_nowhere() {
+        use crate::drive::attach::{Attaching, tests::png};
+
+        let bytes = png("held");
+        let sha256 = crate::digest::sha256_hex(&bytes);
+        let (session, server, stub) = serve_attaching(1, Attaching::default(), None);
+        assert_eq!(status(&upload_png(&server, &bytes, "image/png")), 200);
+        assert!(get_file(&server, &sha256).ends_with(&bytes));
+        let reply = post(&server, &ask_files_json("see this", &[&sha256]), "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        turns_settled(&session, 1);
+        let lines: Vec<_> = session
+            .events_from(0)
+            .iter()
+            .map(crate::drive::session::line_of)
+            .collect();
+        drop(server);
+        drop(session);
+        assert!(
+            stub.received()[0].contains(&format!("data:image/png;base64,{}", base64(&bytes))),
+            "the image was not sent"
+        );
+        assert!(
+            lines.iter().any(|line| matches!(
+                line.event,
+                crate::formats::log::Event::Ask { files: None, .. }
+            )),
+            "{lines:?}"
+        );
+    }
+
+    /// The refusals: a body without the PNG signature `400`, past the cap
+    /// `413` (decided on the length, before the body is read), not
+    /// `image/png` `415`, a digest never uploaded `404` to read and `400`
+    /// to ask with (logging nothing, sending nothing), and `files` that is
+    /// not a list of strings `400`.
+    #[test]
+    fn files_refuses_what_is_not_a_png_or_past_the_cap_and_an_ask_naming_no_upload() {
+        use crate::drive::attach::{Attaching, MAX_BYTES, tests::png};
+        use crate::drive::tool_loop::tests::scratch;
+
+        let recording = scratch("files-serve-refused");
+        let (session, server, stub) = serve_attaching(
+            1,
+            Attaching {
+                recording: Some(recording.clone()),
+                ..Attaching::default()
+            },
+            None,
+        );
+        let reply = upload_png(&server, b"plain text", "image/png");
+        assert_eq!(status(&reply), 400, "{reply}");
+        assert!(body(&reply).contains(r#""check":"not-png""#), "{reply}");
+        let reply = upload_png(&server, &png("typed"), "application/octet-stream");
+        assert_eq!(status(&reply), 415, "{reply}");
+        let over = format!(
+            "POST /files HTTP/1.1\r\nHost: {}\r\nContent-Type: image/png\r\n\
+             Content-Length: {}\r\n\r\n",
+            host(&server),
+            MAX_BYTES + 1
+        );
+        assert_eq!(
+            status(&String::from_utf8_lossy(&exchange(&server, &over, &[]))),
+            413
+        );
+        assert!(!recording.join("files").exists(), "something was copied");
+
+        let never = crate::digest::sha256_hex(b"never posted");
+        assert_eq!(
+            status(&String::from_utf8_lossy(&get_file(&server, &never))),
+            404
+        );
+        assert_eq!(
+            status(&String::from_utf8_lossy(&get_file(&server, ""))),
+            404
+        );
+        let reply = post(&server, &ask_files_json("look", &[&never]), "");
+        assert_eq!(status(&reply), 400, "{reply}");
+        let refused = json::line(body(&reply)).expect("a JSON object");
+        let Some(Value::Object(unattachable)) = refused.get("unattachable") else {
+            panic!("{reply}");
+        };
+        assert_eq!(
+            (unattachable.get("path"), unattachable.get("check")),
+            (
+                Some(&Value::String(never.clone())),
+                Some(&Value::String("not-uploaded".to_owned()))
+            ),
+            "{reply}"
+        );
+        for malformed in [
+            r#"{"kind":"ask","text":"x","files":"abc"}"#,
+            r#"{"kind":"ask","text":"x","files":[1]}"#,
+            r#"{"kind":"end","files":[]}"#,
+        ] {
+            assert_eq!(status(&post(&server, malformed, "")), 400, "{malformed}");
+        }
+        assert_eq!(session.events_from(0).len(), 1, "something was logged");
+        drop(server);
+        drop(session);
+        assert!(stub.received().is_empty(), "something was sent");
+        let _ = std::fs::remove_dir_all(&recording);
     }
 }

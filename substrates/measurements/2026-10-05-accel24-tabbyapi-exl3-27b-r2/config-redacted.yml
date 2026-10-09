@@ -1,0 +1,32 @@
+# linux-pc retune r2 (2026-10-05, #393): pool 163840, warmup, sampler fallback preset. Was: linux-pc baseline (ratified 2026-10-04, #393): TabbyAPI be74bf0a + ExLlamaV3 1.5.4, EXL3 plain 3.00bpw + DFlash2 EXL3 drafter,
+# BF16 vision tower offloaded to system RAM, image minimum 1,024 visual tokens (overlay preprocessor). Measured #335 (wf/wh).
+network:
+  host: 0.0.0.0
+  port: <port>
+  disable_auth: true
+logging:
+  log_prompt: false
+  log_generation_params: false
+  log_requests: false
+model:
+  model_dir: <models directory>
+  model_name: Qwen3.8-27B-exl3-3.00bpw-img1024
+  backend: exllamav3
+  max_seq_len: 163840
+  cache_size: 163840
+  cache_mode: "8,8"
+  max_batch_size: 2
+  chunk_size: 2048
+  reasoning: true
+  vision: true
+  vision_offload: true
+  warmup: true
+  template_vars_default:
+    preserve_thinking: true
+draft_model:
+  draft_mode: model
+  draft_model_dir: <models directory>
+  draft_model_name: Qwen3.8-27B-DFlash2-EXL3-4.00bpw-igor255
+  draft_cache_mode: "8,8"
+sampling:
+  override_preset: qwen38_thinking

@@ -1,0 +1,34 @@
+# Cells for a TabbyAPI line (#393). One table per cell; recompute.sh re-derives every word derivable from a raw file.
+
+[identity]
+word = "pass"
+reading = "engine identity b6c2bdf35748... recomputed from the live components (tabby_identity.py), the registry's b6c2bdf35748...; /v1/model id 'Qwen3.8-27B-exl3-3.00bpw-img1024'; 2 registered weight digests all in raw/weights-sha256.txt"
+raw = { identity_json = "3c542f06356394a25ddbf638cd44165233f9945e31d445b58b9736902f0eae9d", model_json = "be8c065b7bf4def0992ab2abc2172823aa1e67c574e5f7c383ec4a2bd2fbbb8e", weights_sha256_txt = "b46a0405be4310f087f80d66fce0d35a19037c184911f23f4ed07a73e75874cf" }
+
+[kwarg_delivery]
+word = "pass"
+reading = "enable_thinking false: 0 reasoning characters; true: 137; default: 137; refused levels ['high', 'max', 'none'] each HTTP 400, accepted ['low'] HTTP 200"
+raw = { kw_json = "924640992c4bb27b9c49e3e444ec57a17639276c38c91c59afb01394d0a0bcf6", refusal_json = "392a25c38f3f68651692b84c2e9e5fab6a7b7bde2f84686c9efb2db640ddc9fe" }
+
+[rendered_effort]
+word = "n/a (a capability fact of the template, recorded as data on the registry entry's effort fields, not a cell word: planning on #143; the template digest and rendering come from the model directory, ruled #393 5986337117)"
+reading = "the model directory's template file sha256 is c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041; rendering per level in raw/kw.json"
+raw = { kw_json = "924640992c4bb27b9c49e3e444ec57a17639276c38c91c59afb01394d0a0bcf6" }
+
+[canary]
+word = "baseline"
+reading = "36/36; the first draw on this line, recorded as its baseline, not a test (Q5)"
+raw = { canary_log = "ad193b0978ab49dc84259f08027e3e48616a958440ddea8b1d525f51d46fff11" }
+
+[headroom]
+word = "pass"
+reading = "2 requests of 97280 tokens fired concurrently against a 196608-token pool; peak 23748 of 24576 MiB, 828 MiB free against the 300 MiB bar"
+raw = { fill_json = "113ba4ecb718f1bc00bc02792483225e9080f00a13199db4398214af902b1687" }
+
+[checkpoint_restore]
+word = "n/a (no slot-cache report on this engine: TabbyAPI + ExLlamaV3 reports no per-slot cache state to compare, ruled #393 5986337117)"
+reading = "no instrument applies; the maintainer's reason: this is part of the hazard of running the fastest engine, and building the knowledge is the long-term benefit"
+
+[output_invariance]
+word = "n/a (the registry's hazard line: nothing is gated on token identity, ruled #393 5986337117)"
+reading = "no instrument applies; the maintainer's reason: this is part of the hazard of running the fastest engine, and building the knowledge is the long-term benefit"

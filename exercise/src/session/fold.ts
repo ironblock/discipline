@@ -205,7 +205,8 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly at: string;
   readonly why: string;
   readonly question: string;
-  readonly prefixTokens: number;
+  /** AHEAD (R4): prefix tokens shared with the trunk; `diet`'s fork line does not say. */
+  readonly prefixTokens?: number;
   readonly outcome?: ForkOutcome;
   readonly patches: readonly Folded<PatchNode>[];
 }
@@ -334,7 +335,8 @@ interface GenerationBuilder {
   failed?: LineOf<'request.failed'>;
 }
 
-function generation(g: GenerationBuilder, trunkSlot: number): Generation {
+/** G, drawn; a request that names no slot (v0's never do) is on UNNAMED: the trunk's, or its fork's side slot. */
+function generation(g: GenerationBuilder, unnamed: number): Generation {
   const { request, response, cancelled, failed } = g;
   const streamed = (piece: 'text' | 'reasoning') => g.deltas.map((d) => d[piece] ?? '').join('');
   const reasoning = response?.reasoning ?? streamed('reasoning');
@@ -345,8 +347,7 @@ function generation(g: GenerationBuilder, trunkSlot: number): Generation {
     progress,
     reasoning,
     text,
-    // v0 names no slot: a request on the trunk is on the trunk's.
-    slot: request.slot ?? trunkSlot,
+    slot: request.slot ?? unnamed,
     startedAt: request.t,
     ...(g.deltas[0] ? { writingSince: g.deltas[0].t } : {}),
     lastActivityAt: ended?.t ?? g.deltas.at(-1)?.t ?? request.t,
@@ -415,6 +416,8 @@ export function fold(lines: readonly LogLine[]): Session {
     };
   }
   const trunkSlot = start.trunk_slot ?? 0;
+  // Where a fork goes when neither it nor its request names a slot, as `diet`'s never do: the first one beside the trunk's.
+  const sideSlot = trunkSlot === 0 ? 1 : 0;
   const id = (seq: number) => String(seq);
 
   // Builders, keyed by the `seq` later lines name.
@@ -765,18 +768,19 @@ export function fold(lines: readonly LogLine[]): Session {
   for (const { fork, request, settled, patches } of forks.values()) {
     const g = request !== undefined ? generations.get(request) : undefined;
     const at = id(fork.at);
+    const slot = fork.slot ?? g?.request.slot ?? sideSlot;
     if (!settled) openForks.push(fork);
     const node = brand<BranchNode>({
       kind: 'branch',
       id: id(fork.seq),
       lane: fork.lane,
-      slot: fork.slot,
+      slot,
       at,
       why: fork.why,
       question: fork.question,
-      prefixTokens: fork.prefix_tokens,
+      ...(fork.prefix_tokens !== undefined ? { prefixTokens: fork.prefix_tokens } : {}),
       // A side call has finished when it settles, after its patches -- not at its response.
-      ...(g ? unended(generation(g, trunkSlot)) : {}),
+      ...(g ? unended(generation(g, slot)) : {}),
       ...(settled ? { outcome: settled.outcome, endedAt: settled.t } : {}),
       patches: patches.map((p) =>
         brand<PatchNode>({
@@ -797,10 +801,14 @@ export function fold(lines: readonly LogLine[]): Session {
     branches.set(at, list);
   }
 
-  // Slot occupancy: whatever request is generating, per slot. v0 declares no slots: the trunk's alone.
-  const occupancy: (Holder | undefined)[] = Array.from({ length: start.slots ?? 1 }, () => undefined);
+  // The server's slots: as many as the session declares, or as its branches use -- `diet` declares none.
+  const slots = Math.max(start.slots ?? 1, trunkSlot + 1, ...[...branches.values()].flat().map((b) => b.slot + 1));
+  // Slot occupancy: whatever request is generating, per slot. A fork's request that names none is on its branch's.
+  const occupancy: (Holder | undefined)[] = Array.from({ length: slots }, () => undefined);
+  const forkSlot = new Map([...branches.values()].flat().map((b) => [Number(b.id), b.slot]));
   for (const g of generations.values()) {
-    if (!g.response && !g.cancelled && !g.failed) occupancy[g.request.slot ?? trunkSlot] = { id: id(g.request.fork ?? g.request.seq), lane: g.request.lane };
+    const unnamed = g.request.fork !== undefined ? (forkSlot.get(g.request.fork) ?? sideSlot) : trunkSlot;
+    if (!g.response && !g.cancelled && !g.failed) occupancy[g.request.slot ?? unnamed] = { id: id(g.request.fork ?? g.request.seq), lane: g.request.lane };
   }
 
   const ratifying = openForks.some((f) => f.lane === 'ratify');
@@ -828,7 +836,7 @@ export function fold(lines: readonly LogLine[]): Session {
     opened: start.opened,
     arm: start.arm ?? '',
     model: start.model,
-    slots: start.slots ?? 1,
+    slots,
     trunkSlot,
     phase,
     eras: builtEras,

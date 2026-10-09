@@ -177,7 +177,7 @@ def check_box(box):
         return [f"box: box.json lacks {', '.join(missing)}"]
     r = []
     ib, ia = box["instance_before"], box["instance_after"]
-    if not (isinstance(ib, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", ib) and ib == ia):
+    if not (isinstance(ib, str) and re.fullmatch(r"(?:[a-z][a-z0-9]*-)?\d{4}-\d{2}-\d{2}", ib) and ib == ia):
         r.append("box: the instance is not one registry instance id before and after")
     for f in ("verify_before", "verify_after", "fingerprint_before", "fingerprint_after"):
         if box[f] != 0:

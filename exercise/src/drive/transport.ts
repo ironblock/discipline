@@ -28,11 +28,13 @@ export type Command =
        * (#374). Sent as `"scoping": true` on that ask only; absent, it is unmarked.
        */
       readonly scoping?: true;
+      /** The operator's attachments, by digest, each uploaded first (`DriveTransport.upload`): sent as image parts before the text. */
+      readonly files?: readonly string[];
     }
   /** Stop whatever is in flight, the trunk's call or a fork's. */
   | { readonly kind: 'cancel' }
-  /** Declare a phase transition: ratify, render, refill. */
-  | { readonly kind: 'seam'; readonly to: string }
+  /** Declare a seam: ratify, render, refill -- to the phase named, where the drive declares phases; `diet`'s does not yet. */
+  | { readonly kind: 'seam'; readonly to?: string }
   /** End the session: nothing more is asked of it (#289). */
   | { readonly kind: 'end' }
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
@@ -93,9 +95,18 @@ export type Refusal = Open<
   | 'nothing-waiting'
   /** The HTTP transport's: the drive did not answer. */
   | 'unreachable'
+  /** An upload whose bytes do not begin with the PNG signature (`POST /files`'s 400). */
+  | 'not-a-png'
+  /** An upload over the drive's size cap (`POST /files`'s 413; `MAX_BYTES` in `diet/src/drive/attach.rs`). */
+  | 'too-large'
+  /** An ask naming a digest this session was never sent. */
+  | 'not-uploaded'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };
+
+/** What an upload came to: the digest an ask names it by, and its size; or why it was not kept. */
+export type Uploaded = { readonly ok: true; readonly sha256: string; readonly bytes: number } | { readonly ok: false; readonly refused: Refusal };
 
 /**
  * The connection to the drive, which the log cannot carry: while it is down,
@@ -119,6 +130,11 @@ export interface DriveTransport {
    * script's own. Unchecked: `files.ts`'s `read` hashes what it answers. Absent: this session has no files.
    */
   readonly file?: FileSource;
+  /**
+   * The operator's PNG, its bytes sent ahead of the ask that names it: `serve`'s `POST /files`. Absent: this
+   * transport takes no attachments (a replay).
+   */
+  upload?(bytes: Uint8Array): Promise<Uploaded>;
   /** The connection's state now, then each change, and why when it is not live. Absent: always `live`. */
   watchLink?(listener: (link: Link, why?: string) => void): () => void;
   /** The call waiting on the operator now, then each change: `undefined` when none waits. Absent: none ever does (a replay). */

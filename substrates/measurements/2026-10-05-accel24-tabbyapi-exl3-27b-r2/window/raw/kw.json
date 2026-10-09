@@ -1,0 +1,45 @@
+{
+ "props_template_sha256": "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041",
+ "props_template_chars": 8952,
+ "template_source": "model directory file chat_template.jinja",
+ "template_mentions": {
+  "enable_thinking": true,
+  "reasoning_effort": true,
+  "reasoning_strength": false,
+  "xhigh": true,
+  "preserve_thinking": true
+ },
+ "thinking_disabled": {
+  "status": 200,
+  "reasoning_chars": 0,
+  "content": "144"
+ },
+ "thinking_enabled": {
+  "status": 200,
+  "reasoning_chars": 137,
+  "content": "144"
+ },
+ "default": {
+  "status": 200,
+  "reasoning_chars": 137,
+  "content": "144"
+ },
+ "negative_control": true,
+ "positive_control": true,
+ "rendered_effort": {
+  "reasoning_effort=None": {
+   "sha256": "9fa34f263ce1950b221aeb5aa6563634acdd05e8a29ec4943a890a827ad1a28d",
+   "same_as_default": true,
+   "differs_at": null
+  },
+  "reasoning_effort=high": {
+   "error": "Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low."
+  },
+  "reasoning_effort=none": {
+   "error": "Unexpected reasoning effort none. Supported types are xhigh (default), medium, and low."
+  },
+  "reasoning_effort=max": {
+   "error": "Unexpected reasoning effort max. Supported types are xhigh (default), medium, and low."
+  }
+ }
+}

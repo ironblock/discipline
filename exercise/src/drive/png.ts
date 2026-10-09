@@ -32,6 +32,14 @@ function adler32(bytes: Uint8Array): number {
   return ((b << 16) | a) >>> 0;
 }
 
+/** The eight bytes every PNG begins with. */
+const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] as const;
+
+/** Whether BYTES begin as a PNG does: the media type is the bytes', never a name's (`diet/src/drive/attach.rs`). */
+export function isPng(bytes: Uint8Array): boolean {
+  return SIGNATURE.every((b, i) => bytes[i] === b);
+}
+
 const u32 = (n: number) => [(n >>> 24) & 0xff, (n >>> 16) & 0xff, (n >>> 8) & 0xff, n & 0xff];
 
 function chunk(type: string, data: Uint8Array): number[] {
@@ -57,5 +65,5 @@ export function png(width: number, height: number, pixel: (x: number, y: number)
   }
   z.push(...u32(adler32(data)));
   const header = new Uint8Array([...u32(width), ...u32(height), 8, 2, 0, 0, 0]);
-  return new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...chunk('IHDR', header), ...chunk('IDAT', new Uint8Array(z)), ...chunk('IEND', new Uint8Array())]);
+  return new Uint8Array([...SIGNATURE, ...chunk('IHDR', header), ...chunk('IDAT', new Uint8Array(z)), ...chunk('IEND', new Uint8Array())]);
 }

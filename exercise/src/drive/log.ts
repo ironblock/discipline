@@ -229,15 +229,16 @@ export type FileRef = V0.RecordedFile;
 export interface Fork extends At {
   readonly kind: 'fork';
   readonly lane: ForkLane;
-  readonly slot: number;
+  /** AHEAD (R4): `diet`'s fork line names no slot; the surface puts such a fork beside the trunk. */
+  readonly slot?: number;
   readonly of_turn: number;
   /** The `seq` of the trunk line it branches from: a `request` (its answer), or a tool call's first fragment. */
   readonly at: number;
   /** What `diet` noticed that made it ask. */
   readonly why: string;
   readonly question: string;
-  /** Prefix tokens shared with the trunk: the warm tail it forked from. */
-  readonly prefix_tokens: number;
+  /** AHEAD (R4): prefix tokens shared with the trunk, the warm tail it forked from. `diet`'s fork line does not say. */
+  readonly prefix_tokens?: number;
 }
 
 /** AHEAD (R4): how a fork ended. */

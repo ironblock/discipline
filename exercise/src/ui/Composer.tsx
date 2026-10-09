@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { FormEvent, KeyboardEvent, MouseEvent } from 'react';
+import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from 'react';
 
 import type { SessionState } from '../session/fold.ts';
-import type { Ack, Command, Link } from '../drive/transport.ts';
+import type { Ack, Command, Link, Uploaded } from '../drive/transport.ts';
 import { refusalOf } from './sets.ts';
 import './panel.css';
 import './composer.css';
@@ -12,12 +12,21 @@ export interface ComposerProps {
   /** The connection to the drive. While it is down the draft is kept and nothing can be sent. */
   readonly link?: Link;
   readonly phase: string;
-  /** Phases the person may declare a transition to. */
+  /** Phases the person may declare a transition to. None: the drive declares none, and a refill names no phase. */
   readonly phases: readonly string[];
   /** Where commands go. Absent: a composer that only shows the session's state. */
   readonly dispatch?: (command: Command) => Promise<Ack>;
   /** A line under the input, for a transport that has something to say. */
   readonly hint?: string | undefined;
+  /** Where the operator's PNGs go ahead of the ask that names them. Absent: nothing can be attached. */
+  readonly upload?: (bytes: Uint8Array) => Promise<Uploaded>;
+}
+
+/** A PNG the drive has taken, waiting for the ask that names it: its digest, and a picture of it for the chip. */
+interface Attached {
+  readonly sha256: string;
+  readonly name: string;
+  readonly url: string;
 }
 
 /** What the input says about the session, so a busy drive never looks like a stuck input. */
@@ -33,8 +42,13 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload }: ComposerProps) {
   const [draft, setDraft] = useState('');
+  // The operator's attachments (#372): uploaded as they are added, named by digest on the next ask, cleared once taken.
+  const [attached, setAttached] = useState<readonly Attached[]>([]);
+  const picker = useRef<HTMLInputElement>(null);
+  const urls = useRef(new Set<string>());
+  useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
   // The operator's mark on the next ask: the scope answer (#453). It rides on that ask only, and clears once taken.
   const [scoping, setScoping] = useState(false);
   const [refusal, setRefusal] = useState<string | undefined>();
@@ -57,6 +71,42 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
     setRefusal(refused.known ? refused.label : `not taken: ${refused.label}`);
   };
   const run = (command: Command) => dispatch && void dispatch(command).then(answer);
+
+  const attachable = idle && dispatch !== undefined && upload !== undefined;
+  const attach = async (files: readonly File[]) => {
+    if (!attachable) return;
+    for (const file of files) {
+      const taken = await upload(new Uint8Array(await file.arrayBuffer()));
+      if (!taken.ok) {
+        answer(taken);
+        continue;
+      }
+      const url = URL.createObjectURL(file);
+      urls.current.add(url);
+      setAttached((now) => (now.some((a) => a.sha256 === taken.sha256) ? now : [...now, { sha256: taken.sha256, name: file.name || 'pasted image', url }]));
+      setRefusal(undefined);
+    }
+  };
+  const detach = (sha256: string) =>
+    setAttached((now) => {
+      const gone = now.find((a) => a.sha256 === sha256);
+      if (gone) {
+        URL.revokeObjectURL(gone.url);
+        urls.current.delete(gone.url);
+      }
+      return now.filter((a) => a.sha256 !== sha256);
+    });
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const images = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
+    if (images.length === 0 || !attachable) return;
+    e.preventDefault();
+    void attach(images);
+  };
+  const onDrop = (e: DragEvent<HTMLFormElement>) => {
+    if (!attachable || e.dataTransfer.files.length === 0) return;
+    e.preventDefault();
+    void attach([...e.dataTransfer.files]);
+  };
   const end = (e: MouseEvent<HTMLButtonElement>) => {
     if (!ending) {
       armedAt.current = performance.now();
@@ -71,11 +121,13 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
     if (!dispatch || !idle || draft.trim() === '') return;
-    const ack = await dispatch({ kind: 'ask', text: draft.trim(), ...(scoping ? { scoping: true as const } : {}) });
+    const files = attached.map((a) => a.sha256);
+    const ack = await dispatch({ kind: 'ask', text: draft.trim(), ...(scoping ? { scoping: true as const } : {}), ...(files.length > 0 ? { files } : {}) });
     answer(ack);
     if (ack.ok) {
       setDraft('');
       setScoping(false);
+      setAttached([]);
     }
   };
 
@@ -89,12 +141,32 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
   };
 
   return (
-    <form className="ex-panel ex-composer" onSubmit={send} data-state={state} data-link={link}>
+    <form
+      className="ex-panel ex-composer"
+      onSubmit={send}
+      onDragOver={(e) => attachable && e.dataTransfer.types.includes('Files') && e.preventDefault()}
+      onDrop={onDrop}
+      data-state={state}
+      data-link={link}
+    >
+      {attached.length > 0 ? (
+        <ul className="ex-composer__files" aria-label="attached to this ask">
+          {attached.map((a) => (
+            <li key={a.sha256} className="ex-composer__file" data-sha256={a.sha256}>
+              <img src={a.url} alt={a.name} />
+              <button type="button" aria-label={`remove ${a.name}`} title={`remove ${a.name}`} onClick={() => detach(a.sha256)}>
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <textarea
         className="ex-composer__input"
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={onKey}
+        onPaste={onPaste}
         placeholder={idle ? (scoping ? 'The scope answer…' : 'Ask…') : ''}
         disabled={state === 'ended' || state === 'connecting'}
         rows={2}
@@ -123,18 +195,23 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
           {ending ? 'end the session?' : 'end'}
         </button>
         <span className="ex-composer__phase">
-          <span className="ex-composer__label">phase</span> {phase || 'not said'}
+          <span className="ex-composer__label">phase</span> {phases.length === 0 ? 'not declared' : phase || 'not said'}
         </span>
         <span className="ex-composer__seam">
-          <span className="ex-composer__label" aria-hidden="true">move to</span>
-          <select aria-label="move to" value={to} onChange={(e) => setTo(e.target.value)} disabled={!idle}>
-            {phases
-              .filter((p) => p !== phase)
-              .map((p) => (
-                <option key={p}>{p}</option>
-              ))}
-          </select>
-          <button type="button" disabled={!idle || !dispatch} onClick={() => run({ kind: 'seam', to })}>
+          {/* `diet`'s drive declares no phases yet (its declare-seam takes none): there, a refill offers no move to make. */}
+          {phases.length > 0 ? (
+            <>
+              <span className="ex-composer__label" aria-hidden="true">move to</span>
+              <select aria-label="move to" value={to} onChange={(e) => setTo(e.target.value)} disabled={!idle}>
+                {phases
+                  .filter((p) => p !== phase)
+                  .map((p) => (
+                    <option key={p}>{p}</option>
+                  ))}
+              </select>
+            </>
+          ) : null}
+          <button type="button" disabled={!idle || !dispatch} onClick={() => run(phases.length > 0 ? { kind: 'seam', to } : { kind: 'seam' })}>
             refill
           </button>
         </span>
@@ -144,6 +221,27 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint }
           </button>
         ) : (
           <>
+            {upload ? (
+              <>
+                {/* The operator's screenshot (#372): picked, pasted or dropped, sent to the drive now, named by the ask. */}
+                <input
+                  ref={picker}
+                  type="file"
+                  accept="image/png"
+                  multiple
+                  hidden
+                  aria-label="attach a PNG"
+                  onChange={(e) => {
+                    const files = [...(e.target.files ?? [])];
+                    e.target.value = '';
+                    void attach(files);
+                  }}
+                />
+                <button type="button" className="ex-composer__attach" disabled={!attachable} title="attach a PNG: or paste or drop one here" onClick={() => picker.current?.click()}>
+                  attach
+                </button>
+              </>
+            ) : null}
             {/* The operator's mark (#453): this ask is the scope answer, whose settled turn warrants the interview fork. */}
             <button
               type="button"

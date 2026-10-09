@@ -1,0 +1,10 @@
+{
+ "forks": 31,
+ "level": 0.95,
+ "interval": [
+  -0.051213,
+  0.072482
+ ],
+ "straddles_zero": true,
+ "sentence": "The fire's own 95% interval [-0.051213, 0.072482] straddles zero."
+}

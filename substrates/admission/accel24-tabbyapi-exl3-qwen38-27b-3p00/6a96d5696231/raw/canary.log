@@ -1,0 +1,48 @@
+note: e0827 is a fork.response; replaying its request e0826
+  e0827: 20 messages, digest VERIFIED sha=a7d695adc2f9f666 n=19 ver=1
+replaying e0827: 20 messages, params={"temperature": 0.6, "top_k": 20, "top_p": 1.0, "max_tokens": 4096, "preserve_thinking": true, "enable_thinking": false}
+digest: sha=a7d695adc2f9f666 n=19 ver=1
+anchor: 'common_chat_templates_apply'   k=36
+
+    1/36  HIT     9.5s   1420 chars
+    2/36  HIT     3.1s   1665 chars
+    3/36  HIT     2.8s   1388 chars
+    4/36  HIT     1.9s   1006 chars
+    5/36  HIT     2.4s    987 chars
+    6/36  HIT     5.0s   2290 chars
+    7/36  HIT     3.9s   2044 chars
+    8/36  HIT     3.6s   1898 chars
+    9/36  HIT     4.1s   2091 chars
+   10/36  HIT     4.7s   2600 chars
+   11/36  HIT     4.9s   2466 chars
+   12/36  HIT     2.0s    998 chars
+   13/36  HIT     1.7s    931 chars
+   14/36  HIT     4.6s   2358 chars
+   15/36  HIT     4.6s   2258 chars
+   16/36  HIT     5.6s   2718 chars
+   17/36  HIT     4.1s   1977 chars
+   18/36  HIT     4.7s   2298 chars
+   19/36  HIT     4.8s   2292 chars
+   20/36  HIT     3.5s   1821 chars
+   21/36  HIT     4.1s   2082 chars
+   22/36  HIT     4.4s   2316 chars
+   23/36  HIT     3.6s   1713 chars
+   24/36  HIT     1.7s    845 chars
+   25/36  HIT     4.6s   2283 chars
+   26/36  HIT     5.9s   3771 chars
+   27/36  HIT     3.2s   1734 chars
+   28/36  HIT     3.4s   1759 chars
+   29/36  HIT     2.1s    995 chars
+   30/36  HIT     4.6s   2292 chars
+   31/36  HIT     2.0s    927 chars
+   32/36  HIT     5.4s   2889 chars
+   33/36  HIT     2.1s   1023 chars
+   34/36  HIT     2.1s   1019 chars
+   35/36  HIT     2.1s    853 chars
+   36/36  HIT     1.8s    844 chars
+
+rate: 36/36 = 1.000   95% CI [0.904, 1.000]
+latency: median 3.9s  max 9.5s  total 134s
+
+BASELINE ESTABLISHED (no --expect given).
+Drift detection is possible from the NEXT run onward, not this one.

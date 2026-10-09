@@ -1,0 +1,27 @@
+{
+ "engine": "tabbyapi",
+ "n_ctx": 196608,
+ "np": 2,
+ "max_seq_len": 196608,
+ "per_slot_target": 97280,
+ "requests": [
+  {
+   "prompt_tokens": 97242,
+   "wall_s": 224.9,
+   "slot": 0
+  },
+  {
+   "prompt_tokens": 97242,
+   "wall_s": 224.9,
+   "slot": 1
+  }
+ ],
+ "concurrent": 2,
+ "vram_total_mib": 24576,
+ "vram_peak_mib": 23748,
+ "vram_after_mib": 23748,
+ "vram_free_at_peak_mib": 828,
+ "samples": 434,
+ "bar_mib": 300,
+ "passes_bar": true
+}
