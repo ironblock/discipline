@@ -110,7 +110,12 @@
 //! claim carries `served` or the two older keys, never both; a log that
 //! declares 0 to 6 and carries `served` is refused the same way, and one that
 //! declares 7 and carries `engine_build` or `engine_identity` is refused. A
-//! contradiction is never logged: `serve` refuses to start on one.
+//! contradiction is never logged: `serve` refuses to start on one. v7 also
+//! adds a `session.start`'s `template_kwargs` (R1): the template variables
+//! every request of the session sends, as sent -- `enable_thinking` and
+//! `reasoning_effort` -- an object never empty -- and its `unsent`, what the
+//! regime declares and no request carries (`budget_tokens`), recorded rather
+//! than refused.
 //!
 //! # A torn final line
 //!
@@ -553,6 +558,23 @@ pub enum ClaimedEngine {
     Served(Vec<ServedField>),
 }
 
+/// The template variables a session sends on every request (v7, R1): what
+/// reaches the chat template, as sent. At least one is carried.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TemplateKwargs {
+    /// `enable_thinking`: whether thinking was requested.
+    pub enable_thinking: Option<bool>,
+    /// `reasoning_effort`: the level, in the template's own words.
+    pub reasoning_effort: Option<String>,
+}
+
+/// What a session's regime declares and its requests cannot carry (v7, R1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unsent {
+    /// `[reasoning]`'s token budget: no chat template variable carries one.
+    pub budget_tokens: u64,
+}
+
 /// One field of the served configuration (v7, #509).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServedField {
@@ -636,6 +658,12 @@ pub enum Event {
         /// order its requests carry them (v5, #472): what a head is rebuilt
         /// with.
         tools: Option<Vec<String>>,
+        /// The `chat_template_kwargs` every request of the session carries
+        /// (v7, R1): the reasoning state as it was requested on the wire.
+        template_kwargs: Option<TemplateKwargs>,
+        /// What the regime declares and no request carries (v7, R1): best
+        /// effort in the duty-of-care sense, recorded rather than refused.
+        unsent: Option<Unsent>,
     },
     /// An ask was admitted.
     Ask {
@@ -2018,6 +2046,15 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     }
                     tools => tools,
                 },
+                template_kwargs: match object.get("template_kwargs") {
+                    None => None,
+                    Some(_) => Some(fields.template_kwargs("template_kwargs")?),
+                },
+                unsent: if object.contains_key("unsent") {
+                    Some(fields.unsent("unsent")?)
+                } else {
+                    None
+                },
             }
         }
         Kind::Ask => Event::Ask {
@@ -2738,6 +2775,12 @@ pub enum Holds {
     /// A `response`'s [`Usage`]: an object of the keys [`USAGE`] declares,
     /// its two counts required and its cache count optional (v2).
     Usage,
+    /// A `session.start`'s [`TemplateKwargs`] (v7): an object of the keys
+    /// [`TEMPLATE_KWARGS`] declares.
+    TemplateKwargs,
+    /// A `session.start`'s [`Unsent`] (v7): an object of the keys [`UNSENT`]
+    /// declares.
+    Unsent,
     /// A substrate claim's `served` (v7): a non-empty list of objects of
     /// the keys [`SERVED_FIELD`] declares.
     Served,
@@ -2883,6 +2926,17 @@ pub const RECORDED_FILE: &[Field] = &[
     must_v4("bytes", Holds::Count),
 ];
 
+/// The keys a `session.start`'s `template_kwargs` may carry, each as sent.
+/// Arrived in v7.
+pub const TEMPLATE_KWARGS: &[Field] = &[
+    may_v7("enable_thinking", Holds::Flag),
+    may_v7("reasoning_effort", Holds::Text),
+];
+
+/// The keys of a `session.start`'s `unsent`: what the regime declares and
+/// no request carries. Arrived in v7.
+pub const UNSENT: &[Field] = &[must_v7("budget_tokens", Holds::Count)];
+
 /// The keys of each entry of a substrate claim's `served`: the field, its
 /// declared value and its provenance always, and what the engine reported
 /// under `corroborated` only. Arrived in v7.
@@ -2994,6 +3048,8 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Timings => Some(TIMINGS),
         Holds::Usage => Some(USAGE),
         Holds::Serving => Some(SERVING),
+        Holds::TemplateKwargs => Some(TEMPLATE_KWARGS),
+        Holds::Unsent => Some(UNSENT),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
@@ -3076,6 +3132,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("served", Holds::Served),
                 may_v3("provenance", Tag(Tags::Provenance)),
                 may_v5("tools", Holds::Strings),
+                may_v7("template_kwargs", Holds::TemplateKwargs),
+                may_v7("unsent", Holds::Unsent),
             ];
             F
         }
@@ -3299,6 +3357,8 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Flag => "boolean".to_owned(),
         Holds::Usage => "Usage".to_owned(),
         Holds::Serving => "Serving".to_owned(),
+        Holds::TemplateKwargs => "TemplateKwargs".to_owned(),
+        Holds::Unsent => "Unsent".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
@@ -3395,6 +3455,8 @@ pub fn typescript() -> String {
         ("Timings", TIMINGS),
         ("Usage", USAGE),
         ("Serving", SERVING),
+        ("TemplateKwargs", TEMPLATE_KWARGS),
+        ("Unsent", UNSENT),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
@@ -3495,6 +3557,8 @@ fn to_value(line: &Line) -> Value {
             claim,
             provenance,
             tools,
+            template_kwargs,
+            unsent,
         } => {
             put("version", Value::Integer(*version));
             put("opened", count(*opened));
@@ -3537,6 +3601,25 @@ fn to_value(line: &Line) -> Value {
                 put(
                     "tools",
                     Value::Array(tools.iter().map(|tool| text(tool)).collect()),
+                );
+            }
+            if let Some(kwargs) = template_kwargs {
+                let mut object = BTreeMap::new();
+                if let Some(thinking) = kwargs.enable_thinking {
+                    object.insert("enable_thinking".to_owned(), Value::Boolean(thinking));
+                }
+                if let Some(effort) = &kwargs.reasoning_effort {
+                    object.insert("reasoning_effort".to_owned(), text(effort));
+                }
+                put("template_kwargs", Value::Object(object));
+            }
+            if let Some(unsent) = unsent {
+                put(
+                    "unsent",
+                    Value::Object(BTreeMap::from([(
+                        "budget_tokens".to_owned(),
+                        count(unsent.budget_tokens),
+                    )])),
                 );
             }
             Kind::SessionStart
@@ -4358,6 +4441,36 @@ impl Fields<'_> {
         })
     }
 
+    /// A `session.start`'s `template_kwargs` (v7, R1): an object of
+    /// [`TEMPLATE_KWARGS`]'s keys, at least one.
+    fn template_kwargs(&self, key: &str) -> Result<TemplateKwargs, String> {
+        let inner = Fields(self.object(key, TEMPLATE_KWARGS)?);
+        let at = |why: String| format!("`{key}`: {why}");
+        let kwargs = TemplateKwargs {
+            enable_thinking: inner.optional_flag("enable_thinking").map_err(at)?,
+            reasoning_effort: match inner.0.get("reasoning_effort") {
+                None => None,
+                Some(_) => Some(inner.string("reasoning_effort").map_err(at)?),
+            },
+        };
+        if kwargs == TemplateKwargs::default() {
+            return Err(format!(
+                "`{key}` is empty: a session that sends none carries no `{key}`"
+            ));
+        }
+        Ok(kwargs)
+    }
+
+    /// A `session.start`'s `unsent` (v7, R1): an object of [`UNSENT`]'s keys.
+    fn unsent(&self, key: &str) -> Result<Unsent, String> {
+        let inner = Fields(self.object(key, UNSENT)?);
+        Ok(Unsent {
+            budget_tokens: inner
+                .count("budget_tokens")
+                .map_err(|why| format!("`{key}`: {why}"))?,
+        })
+    }
+
     /// A `session.start`'s `serving`: its dialect, and its concurrency when
     /// declared.
     fn serving(&self, key: &str) -> Result<Serving, String> {
@@ -4425,6 +4538,8 @@ mod tests {
                     content: "you are the trunk".to_owned(),
                 }],
                 tools: None,
+                template_kwargs: None,
+                unsent: None,
             },
         }
     }
@@ -4751,6 +4866,8 @@ mod tests {
                 Holds::Timings
                 | Holds::Usage
                 | Holds::Serving
+                | Holds::TemplateKwargs
+                | Holds::Unsent
                 | Holds::ToolCallPiece
                 | Holds::Approval
                 | Holds::Entry,
@@ -4977,6 +5094,8 @@ mod tests {
             ("timings", TIMINGS),
             ("usage", USAGE),
             ("serving", SERVING),
+            ("template_kwargs", TEMPLATE_KWARGS),
+            ("unsent", UNSENT),
             ("tool_call", TOOL_CALL_PIECE),
             ("approval", APPROVAL),
             ("files", RECORDED_FILE),

@@ -232,6 +232,11 @@ pub enum Event {
         /// The tools its requests declare, by name, in order (#472): empty
         /// when they declare none.
         tools: Vec<String>,
+        /// The template variables every request carries (R1), as sent:
+        /// empty when it sends none.
+        template_kwargs: BTreeMap<String, Value>,
+        /// What the regime declares and no request carries (R1).
+        unsent: Option<log::Unsent>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -958,7 +963,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// before any.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
-        Self::opened_as(transport, template, None, None, None, None)
+        Self::opened_as(transport, template, None, None, (None, None, None))
     }
 
     /// [`Session::open`], declaring what serves it -- the dialect it speaks
@@ -966,7 +971,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// `session.start` carries (#292).
     #[must_use]
     pub fn open_serving(transport: S, template: RequestShape, serving: Serving) -> Self {
-        Self::opened_as(transport, template, Some(serving), None, None, None)
+        Self::opened_as(transport, template, Some(serving), None, (None, None, None))
     }
 
     /// A session that runs the model's calls (#298): `template` declares the
@@ -978,7 +983,13 @@ impl<S: Streaming + 'static> Session<S> {
         serving: Option<Serving>,
         tools: Tools,
     ) -> Self {
-        Self::opened_as(transport, template, serving, Some(tools), None, None)
+        Self::opened_as(
+            transport,
+            template,
+            serving,
+            Some(tools),
+            (None, None, None),
+        )
     }
 
     /// [`Session::open_serving`] or [`Session::open_looping`], by whether it
@@ -995,7 +1006,36 @@ impl<S: Streaming + 'static> Session<S> {
         claim: Option<log::SubstrateClaim>,
         interview: Option<Interview>,
     ) -> Self {
-        Self::opened_as(transport, template, serving, tools, claim, interview)
+        Self::opened_as(
+            transport,
+            template,
+            serving,
+            tools,
+            (claim, interview, None),
+        )
+    }
+
+    /// [`Self::open_with`], recording what the regime declares and no
+    /// request carries (R1) on `session.start`.
+    #[must_use]
+    pub fn open_declaring(
+        transport: S,
+        template: RequestShape,
+        serving: Option<Serving>,
+        tools: Option<Tools>,
+        (claim, interview, unsent): (
+            Option<log::SubstrateClaim>,
+            Option<Interview>,
+            Option<log::Unsent>,
+        ),
+    ) -> Self {
+        Self::opened_as(
+            transport,
+            template,
+            serving,
+            tools,
+            (claim, interview, unsent),
+        )
     }
 
     fn opened_as(
@@ -1003,8 +1043,11 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        claim: Option<log::SubstrateClaim>,
-        interview: Option<Interview>,
+        (claim, interview, unsent): (
+            Option<log::SubstrateClaim>,
+            Option<Interview>,
+            Option<log::Unsent>,
+        ),
     ) -> Self {
         // A head is the trunk before any turn; a tool result answers a call
         // made in one, and the log's head has no word for it (`role_of`).
@@ -1062,6 +1105,8 @@ impl<S: Streaming + 'static> Session<S> {
                 .iter()
                 .map(|tool| tool.name.clone())
                 .collect(),
+            template_kwargs: template.template_kwargs.clone(),
+            unsent,
         });
         Self {
             shared: Arc::new(Shared {
@@ -1558,6 +1603,23 @@ fn from(log: &[Logged], first: u64) -> Vec<Logged> {
     log[start..].to_vec()
 }
 
+/// The template variables a session sends, in the log's words (R1): the
+/// two it knows, `enable_thinking` and `reasoning_effort`. `None` when it
+/// sends neither.
+fn logged_kwargs(kwargs: &BTreeMap<String, Value>) -> Option<log::TemplateKwargs> {
+    let logged = log::TemplateKwargs {
+        enable_thinking: match kwargs.get("enable_thinking") {
+            Some(Value::Boolean(thinking)) => Some(*thinking),
+            _ => None,
+        },
+        reasoning_effort: match kwargs.get("reasoning_effort") {
+            Some(Value::String(effort)) => Some(effort.clone()),
+            _ => None,
+        },
+    };
+    (logged != log::TemplateKwargs::default()).then_some(logged)
+}
+
 /// A logged event as a line of the session log format, `diet/formats/log`,
 /// at its current [`log::VERSION`] (#117, R2c I3). One exhaustive match, so an event with no line fails
 /// to compile, and every word goes through the format's own vocabulary.
@@ -1572,8 +1634,13 @@ pub fn line_of(logged: &Logged) -> log::Line {
             serving,
             claim,
             tools,
+            template_kwargs,
+            unsent,
         } => log::Event::SessionStart {
+            unsent: unsent.clone(),
             version: log::VERSION,
+            // R1: what reaches the template, as sent; nothing when nothing is.
+            template_kwargs: logged_kwargs(template_kwargs),
             opened: *opened,
             model: model.clone(),
             head: head
@@ -3971,6 +4038,8 @@ pub(in crate::drive) mod tests {
             serving: None,
             claim: None,
             tools: _,
+            template_kwargs: _,
+            unsent: None,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -4059,6 +4128,14 @@ pub(in crate::drive) mod tests {
                 }),
                 claim: Some(claimed()),
                 tools: Vec::new(),
+                template_kwargs: BTreeMap::from([
+                    ("enable_thinking".to_owned(), Value::Boolean(true)),
+                    (
+                        "reasoning_effort".to_owned(),
+                        Value::String("medium".to_owned()),
+                    ),
+                ]),
+                unsent: Some(log::Unsent { budget_tokens: 512 }),
             },
             Event::Asked {
                 turn: 1,
@@ -4304,6 +4381,11 @@ pub(in crate::drive) mod tests {
                 claim: Some(claimed()),
                 provenance: None,
                 tools: None,
+                template_kwargs: Some(log::TemplateKwargs {
+                    enable_thinking: Some(true),
+                    reasoning_effort: Some("medium".to_owned()),
+                }),
+                unsent: Some(log::Unsent { budget_tokens: 512 }),
             },
             log::Event::Ask {
                 turn: 1,
