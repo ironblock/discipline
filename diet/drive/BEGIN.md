@@ -146,3 +146,17 @@ An ask is answered `200` with the turn it opened, `{"seq":1,"turn":1}`. `end` is
 8. after `end`, `settlement` from `awaiting` to `ended`, the log's last line.
 
 After `end`, the stream closes, `serve` exits `0`, and `session.log` holds the same lines the stream carried. Before `end`, a command `serve` refuses is answered `409` with `{"refused": <why>}`, and the log gains a `refused` line naming it. An ask sent while a turn is in flight is one: `{"refused":"in-flight"}`.
+
+## Rehearsing a regimen with no model
+
+To rehearse a session that runs commands, with approvals and a record, use the rehearsal regimen [`replay.toml`](replay.toml) against `diet-drive replay`. It answers every request with one captured llama.cpp turn, byte for byte. Each turn streams, settles `final`, and the record carries `turn` and `response` rows with that capture's counts. The words are the capture's, whatever you ask. The capture makes no tool call, so nothing prompts; the regimen's commands and approval policy are in force all the same.
+
+```
+target/debug/diet-drive replay
+target/debug/diet-drive serve --endpoint http://127.0.0.1:7902/v1/chat/completions \
+    --model replay --head diet/drive/heads/floor.md --regimen diet/drive/replay.toml \
+    --worktree <a scratch checkout> --auth-file <a file holding user:password> \
+    --port 7801 --allow-origin http://localhost:5173 --log session.log --record session.record.jsonl
+```
+
+`serve`'s engine check passes only against the replay: its `GET /props` reports the `build_info` the registry's `canned-replay` entry declares.

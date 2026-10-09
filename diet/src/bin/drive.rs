@@ -74,6 +74,12 @@ const EXIT_OUTPUT: u8 = 3;
 /// The subcommand that serves an interactive session (#117 R2c, I5).
 const SERVE: &str = "serve";
 
+/// The stream-replay server's subcommand (#411).
+const REPLAY: &str = "replay";
+
+/// The port `diet-drive replay` listens on unless told another.
+const REPLAY_PORT: u16 = 7902;
+
 fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
@@ -1374,7 +1380,15 @@ fn usage() -> String {
         String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n");
     // The interactive server, which the first form's usage once hid (#290).
     out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");
-    out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n\n");
+    out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n");
+    out.push_str("       diet-drive replay [--port N]\n");
+    out.push_str(
+        "       (substrate `canned-replay` on loopback: every request answered with one\n",
+    );
+    out.push_str(
+        "       captured llama.cpp turn, for a regimen rehearsed with no model; default\n",
+    );
+    let _ = writeln!(out, "       port {REPLAY_PORT}; runs until stopped)\n");
     out.push_str("Runs the pinned three-turn script through <regimen> in <worktree>\n");
     out.push_str("and writes the record to <output.jsonl>. With no endpoint the canned\n");
     out.push_str("server answers on loopback -- no model, no network out.\n\n");
@@ -1393,6 +1407,49 @@ fn usage() -> String {
     out
 }
 
+/// `diet-drive replay [--port N]`: the stream-replay substrate's server
+/// (#411), `canned-replay` in the registry. Every request that is not `GET
+/// /props` is answered with [`canned::REPLAYED`], byte for byte, and `/props`
+/// with [`canned::replay_build_info`], so `serve` under a regimen naming
+/// `canned-replay` passes its engine check against it and against nothing
+/// else. One JSON line on stdout says where it listens; it runs until
+/// stopped.
+fn replay(args: &[String]) -> ExitCode {
+    let port = match args {
+        [] => REPLAY_PORT,
+        [flag, port] if flag == "--port" => match port.parse() {
+            Ok(port) => port,
+            Err(_) => return fail(EXIT_USAGE, &format!("`{port}` is not a port")),
+        },
+        _ => {
+            eprint!("{}", usage());
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let stub = match Stub::replaying(
+        canned::REPLAYED.to_vec(),
+        &canned::replay_build_info(),
+        port,
+    ) {
+        Ok(stub) => stub,
+        Err(why) => {
+            return fail(
+                EXIT_HALT,
+                &format!("127.0.0.1:{port} could not be listened on: {why}"),
+            );
+        }
+    };
+    println!(
+        "{{\"build_info\":\"{}\",\"listening\":\"{}\",\"ok\":true,\"substrate\":\"canned-replay\"}}",
+        canned::replay_build_info(),
+        stub.url()
+    );
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    loop {
+        std::thread::park();
+    }
+}
+
 fn main() -> ExitCode {
     // FIRST, before any thread: a sandboxed command can read this process's
     // environment and argv (`KERN_PROCARGS2`), so the drive re-executes
@@ -1409,6 +1466,9 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         return serve(&args[1..]);
+    }
+    if args.first().map(String::as_str) == Some(REPLAY) {
+        return replay(&args[1..]);
     }
     if args
         .first()

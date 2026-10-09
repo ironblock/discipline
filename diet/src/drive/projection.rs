@@ -57,6 +57,14 @@ pub const CITED: &[Engine] = &[
         "b0-unknown-dirty",
         "980845d60ae7a820f5e2a8b7081727a242b35d3ca8a4021a6fb1240f4a0aa3d4",
     ),
+    // The stream-replay substrate (#411): it plays an `e7051ef` capture,
+    // byte for byte, so its `usage` and `timings` are that capture's, which
+    // the measurement covers. Its literal and acts digest, as
+    // `canned::replay_build_info` and `canned::replay_digest` compute them.
+    Engine::Literal(
+        "canned-2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8",
+        "2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8",
+    ),
 ];
 
 /// An engine, as the registry pins it.
@@ -1840,6 +1848,25 @@ mod tests {
         )
         .expect("registered");
         assert_eq!(cited(&beellama), Some(CITED[2]), "the binary measured");
+        let replay =
+            crate::drive::registry::identity(crate::drive::registry::REGISTRY, "canned-replay")
+                .expect("registered");
+        let Engine::Literal(literal, binary) = CITED[3] else {
+            panic!("the replay is cited by its literal");
+        };
+        assert_eq!(
+            (literal.to_owned(), binary.to_owned()),
+            (
+                crate::drive::canned::replay_build_info(),
+                crate::drive::canned::replay_digest()
+            ),
+            "the cited literal is the one the replay computes"
+        );
+        assert_eq!(cited(&replay), Some(CITED[3]), "the stream replay");
+        let canned =
+            crate::drive::registry::identity(crate::drive::registry::REGISTRY, "canned-cache-n")
+                .expect("registered");
+        assert_eq!(cited(&canned), None, "the canned acts are not a capture");
         // A literal governs: a cited commit beside an uncited literal is not cited.
         identity.engine_commit = Some("e7051efc8002847f7269c5606318431179b5904e".to_owned());
         identity.engine_build_info = Some("b9-somethingelse".to_owned());
