@@ -9,6 +9,7 @@ import { playwright } from '@vitest/browser-playwright';
 import type { Plugin, ProxyOptions } from 'vite';
 import { defineConfig } from 'vitest/config';
 
+import { driveAuthHeaders } from './src/drive/proxy-auth.ts';
 import { EXAMPLES, PUBLISHED } from './src/replay/published.ts';
 import { wrap } from './src/replay/payload.ts';
 import { publishedAssets } from './src/replay/assets.ts';
@@ -26,11 +27,14 @@ const dirname = path.dirname(fileURLToPath(import.meta.url));
 // Here it ends with its upstream, and a connection `diet` refuses is dropped:
 // the browser retries, and a `diet` that comes back answers the resume 410.
 const drive = process.env['DIET_DRIVE'];
+// A drive that runs the model's commands asks for a credential; the proxy presents it (`src/drive/proxy-auth.ts`).
+const authFile = process.env['DIET_DRIVE_AUTH_FILE'];
+const headers = authFile ? driveAuthHeaders(readFileSync(authFile, 'utf8')) : undefined;
 const configure: NonNullable<ProxyOptions['configure']> = (proxy) => {
   proxy.on('proxyRes', (upstream, _req, res) => upstream.on('close', () => res.destroy()));
   proxy.on('error', (_error, _req, res) => res.destroy());
 };
-const proxied = drive ? Object.fromEntries(['/events', '/commands', '/approve', '/files'].map((route) => [route, { target: drive, changeOrigin: false, configure }])) : undefined;
+const proxied = drive ? Object.fromEntries(['/events', '/commands', '/approve', '/files'].map((route) => [route, { target: drive, changeOrigin: false, configure, ...(headers ? { headers } : {}) }])) : undefined;
 
 // The replay page (#32): `pnpm build:replay` builds `replay.html` alone into
 // ../_site/replay/, its index, with `base: './'` so it works under whatever

@@ -76,7 +76,7 @@ export function whyClosed(status: number | undefined): string {
     case undefined:
       return 'the drive cannot be reached';
     case 401:
-      return 'the drive asks for credentials (401)';
+      return 'the drive asks for credentials (401): start the surface with DIET_DRIVE_AUTH_FILE naming serve’s --auth-file';
     case 403:
       return "the drive refused this page: its origin or host is not allowed (start diet with --allow-origin naming this page's origin) (403)";
     case 404:
