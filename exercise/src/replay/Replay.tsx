@@ -12,9 +12,8 @@ import './replay.css';
 
 /** What the page does not show yet, and whose it is to add (#32, rulings 5-7). */
 const GAPS = [
-  'Working memory at any turn, and the receipt beside the floor’s, are the surface’s to add (#31).',
   'The first driven session under #117 is not recorded yet; it will be a results directory (#177).',
-  'Reading a diet log in the browser waits on diet’s own reader (#117), so these are migrated recordings, not logs.',
+  'Reading a diet log in the browser waits on diet’s own reader (#78), so these are migrated recordings, not logs.',
 ];
 
 /** The page's frame, on every page: where it is, what it does not show yet and whose that is, the licence. */
