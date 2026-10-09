@@ -395,3 +395,21 @@ describe('HttpTransport: the operator’s attachment (#372)', () => {
     expect(posted).toEqual([{ kind: 'ask', text: 'this is wrong', files: [sha] }, { kind: 'ask', text: 'hi' }]);
   });
 });
+
+describe('HttpTransport: an attachment serve would not take (#372, #514)', () => {
+  const sha = 'ef'.repeat(32);
+  const unattachable = JSON.stringify({ unattachable: { path: sha, check: 'not-uploaded', reason: 'no upload has that digest' } });
+  const gap = { opened_by: 7, notice: 100, read: 2000, compose: 900, away: 0, blocked: 0, ended_by: 'ask' as const };
+
+  it('answers serve’s 415 for another type as not a PNG', async () => {
+    const web: Web = { EventSource: class extends FakeSource {}, fetch: () => Promise.resolve(new Response(null, { status: 415 })) };
+    await expect(new HttpTransport('', web).upload(png(1, 1, () => [0, 0, 0]))).resolves.toEqual({ ok: false, refused: 'not-a-png' });
+  });
+
+  it('refuses an ask by the unattachable check, and does not send it again without its gap', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response(unattachable, { status: 400 })) });
+    await expect(transport.dispatch({ kind: 'ask', text: 'this', files: [sha] }, { idle_gap: gap })).resolves.toEqual({ ok: false, refused: 'not-uploaded' });
+    expect(posted).toHaveLength(1);
+  });
+});

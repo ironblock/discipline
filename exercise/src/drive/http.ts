@@ -15,8 +15,10 @@
  *                             page checks the bytes (`files.ts`).
  *   POST /files               the operator's PNG, raw, `Content-Type: image/png`:
  *                             200 `{"sha256", "bytes"}`, 400 when it is not a
- *                             PNG, 413 over the cap. An ask names it after by
- *                             digest, `"files": [<sha256>]`.
+ *                             PNG, 413 over the cap, 415 for another type. An
+ *                             ask names it after by digest, `"files": [<sha>]`;
+ *                             one it cannot attach is 400 `{"unattachable":
+ *                             {path, check, reason}}`, nothing logged.
  *   POST /approve             the operator's answer to the call waiting on them,
  *                             `{"call": <id>, "scope": "once" | "session" |
  *                             "workspace" | "decline"}`: 204, or 409
@@ -141,7 +143,7 @@ export class HttpTransport implements DriveTransport {
     } catch {
       return { ok: false, refused: 'unreachable' };
     }
-    if (reply.status === 400) return { ok: false, refused: 'not-a-png' };
+    if (reply.status === 400 || reply.status === 415) return { ok: false, refused: 'not-a-png' };
     if (reply.status === 413) return { ok: false, refused: 'too-large' };
     if (!reply.ok) return { ok: false, refused: `http-${reply.status}` };
     const said = (await reply.json().catch(() => ({}))) as { readonly sha256?: unknown; readonly bytes?: unknown };
@@ -177,11 +179,12 @@ export class HttpTransport implements DriveTransport {
     if (typeof plain['refused'] === 'string') return { ok: false, refused: plain['refused'] };
     const gap = extras?.idle_gap;
     const first = await this.#post(gap ? { ...plain, idle_gap: gap } : plain);
-    return gap && first.status === 400 ? (await this.#post(plain)).ack : first.ack;
+    // An ask whose attachment the drive refused is refused for that, gap or none: it does not go again.
+    return gap && first.status === 400 && !first.unattachable ? (await this.#post(plain)).ack : first.ack;
   }
 
   /** One post, and what it came to: its status (0 when nothing answered), and the ack. */
-  async #post(body: Readonly<Record<string, unknown>>, route = '/commands'): Promise<{ readonly status: number; readonly ack: Ack }> {
+  async #post(body: Readonly<Record<string, unknown>>, route = '/commands'): Promise<{ readonly status: number; readonly ack: Ack; readonly unattachable?: true }> {
     let reply: Response;
     try {
       reply = await this.#web.fetch(`${this.#base}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -192,6 +195,12 @@ export class HttpTransport implements DriveTransport {
     if (reply.status === 409) {
       const said = (await reply.json().catch(() => ({}))) as { readonly refused?: unknown };
       return { status: 409, ack: { ok: false, refused: typeof said.refused === 'string' ? said.refused : 'refused' } };
+    }
+    if (reply.status === 400) {
+      // An attachment the drive would not take (#372): an upload it never had, or a named path it refused -- by its check.
+      const said = (await reply.json().catch(() => ({}))) as { readonly unattachable?: { readonly check?: unknown } };
+      const check = said.unattachable?.check;
+      if (typeof check === 'string') return { status: 400, ack: { ok: false, refused: check }, unattachable: true };
     }
     return { status: reply.status, ack: { ok: false, refused: `http-${reply.status}` } };
   }
