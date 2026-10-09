@@ -1146,6 +1146,10 @@ pub enum Event {
         /// is the one the run used when the two digests agree. Optional: a
         /// record adapted from another harness had no regimen file.
         regimen_sha256: Option<String>,
+        /// Each lever's state the session ran at (docs/program.md §2), by
+        /// lever, in that table's words; `undeclared` where nothing said.
+        /// Best effort: absent, partial or `undeclared`, it is never refused.
+        levers: Option<BTreeMap<String, String>>,
     },
     /// A turn happened.
     Turn {
@@ -2387,6 +2391,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             regime: Box::new(regime(&mut take_object(&mut members, of, "regime")?, of)?),
             source: source(&mut members, of)?,
             regimen_sha256: take_optional_digest(&mut members, of, "regimen_sha256")?,
+            levers: levers(&mut members),
         },
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
@@ -3967,6 +3972,24 @@ fn take_optional_integer(
     }
 }
 
+/// A start's `levers`, best effort: each state that is a word is kept, and
+/// anything else -- not an object, a state that is not a string -- is left
+/// out rather than refused (the maintainer, 2026-10-09).
+fn levers(members: &mut BTreeMap<String, Value>) -> Option<BTreeMap<String, String>> {
+    let Some(Value::Object(levers)) = members.remove("levers") else {
+        return None;
+    };
+    Some(
+        levers
+            .into_iter()
+            .filter_map(|(lever, state)| match state {
+                Value::String(state) => Some((lever, state)),
+                _ => None,
+            })
+            .collect(),
+    )
+}
+
 fn take_object(
     members: &mut BTreeMap<String, Value>,
     of: &'static str,
@@ -4704,10 +4727,22 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             regime,
             source,
             regimen_sha256,
+            levers,
         } => {
             members.put("regime", regime_value(regime));
             members.put("source", source_value(source));
             members.put_optional("regimen_sha256", regimen_sha256.clone().map(Value::String));
+            members.put_optional(
+                "levers",
+                levers.as_ref().map(|levers| {
+                    Value::Object(
+                        levers
+                            .iter()
+                            .map(|(lever, state)| (lever.clone(), Value::String(state.clone())))
+                            .collect(),
+                    )
+                }),
+            );
         }
         Event::Turn {
             index,
@@ -5355,6 +5390,41 @@ mod tests {
 
     fn record(rest: &str) -> String {
         format!("{START}\n{rest}")
+    }
+
+    #[test]
+    fn a_starts_declared_levers_round_trip_and_a_malformed_or_absent_one_is_never_refused() {
+        let with = |levers: &str| {
+            START.replacen(
+                r#""record":"start","#,
+                &format!(r#""record":"start","levers":{levers},"#),
+                1,
+            )
+        };
+        let declared =
+            with(r#"{"fork_warrant":"one-per-gap-gated:scoping","fork_delivery":"undeclared"}"#);
+        let parsed = parse(&declared).expect("a record");
+        let Some(Event::Start {
+            levers: Some(levers),
+            ..
+        }) = parsed.events.first()
+        else {
+            panic!("the start keeps its levers: {declared}");
+        };
+        assert_eq!(
+            levers.get("fork_warrant").map(String::as_str),
+            Some("one-per-gap-gated:scoping")
+        );
+        assert_eq!(parse(&render(&parsed)).expect("it reads back"), parsed);
+        // Best effort: a state that is not a word is left out, a table that is
+        // not one is ignored, and no levers at all is a start like any other.
+        for lenient in [
+            with(r#"{"isolation":7,"approval":"undeclared"}"#),
+            with("[]"),
+            START.to_owned(),
+        ] {
+            parse(&lenient).expect("never refused for its levers");
+        }
     }
 
     #[test]

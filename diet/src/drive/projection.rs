@@ -314,6 +314,7 @@ pub fn project_in(
         regime: Box::new(regime.clone()),
         source: Source::Live,
         regimen_sha256: None,
+        levers: None,
     }];
     events.extend(walk.events);
     Ok(Projection {

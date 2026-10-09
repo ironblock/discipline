@@ -494,6 +494,7 @@ anchor = '''
         // rows as they happened. Nothing else in this crate may say `Live`.
         source: Source::Live,
         regimen_sha256: None,
+        levers: None,
     }];'''
 becomes = '''
     let mut regime = script.regime.clone();
@@ -502,6 +503,7 @@ becomes = '''
         regime: Box::new(regime),
         source: Source::Live,
         regimen_sha256: None,
+        levers: None,
     }];'''
 catches = [
     "drive::tests::every_row_the_drive_writes_is_true_of_the_run_that_produced_it",
@@ -2338,9 +2340,9 @@ failure_class = "drive.serve-bin-ignores-the-regimen"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-    let (regime, regimen_sha256) = match regimen_file.as_deref().map(registered_regime).transpose()'''
+    let (regime, read_at_start) = match regimen_file.as_deref().map(registered_regime).transpose()'''
 becomes = '''
-    let (regime, regimen_sha256) = match regimen_file.as_deref().filter(|_| false).map(registered_regime).transpose()'''
+    let (regime, read_at_start) = match regimen_file.as_deref().filter(|_| false).map(registered_regime).transpose()'''
 catches = [
     "a_drive_server_announces_the_registered_substrate_its_regimen_names",
     "a_drive_server_checks_the_engine_before_it_binds",

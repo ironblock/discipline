@@ -2252,6 +2252,7 @@ fn synthesized_record(
                 regime: Box::new(done.record.regime().clone()),
                 source: done.record.source().clone(),
                 regimen_sha256: done.record.regimen_sha256().map(str::to_owned),
+                levers: None,
             },
             Event::Claim {
                 id: "c1".to_owned(),

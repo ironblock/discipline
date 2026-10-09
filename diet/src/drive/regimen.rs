@@ -342,7 +342,27 @@ fn sampled(value: &regimen::Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use super::regime_of;
+    use super::{UNDECLARED, regime_of, serve_levers};
+
+    #[test]
+    fn t1s_draft_regimen_puts_every_lever_at_a_word_and_undescribed_ones_at_undeclared() {
+        let text = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../drafts/t1-session-one.regimen.toml"
+        ))
+        .expect("the draft");
+        let levers = serve_levers(&regimen::parse(&text).expect("a regimen"));
+        let at = |lever: &str| levers.get(lever).map(String::as_str);
+        assert_eq!(at("fork_warrant"), Some("one-per-gap-gated:scoping"));
+        assert_eq!(at("isolation"), Some("sandbox"));
+        assert_eq!(at("approval"), Some("denylist-prompt-preseeded"));
+        assert_eq!(at("substrate_rung"), Some("accel24-beellama-qwen27b-q4kxl"));
+        assert_eq!(at("fork_delivery"), Some(UNDECLARED));
+        // A regimen that says nothing still gets a table, never an error.
+        let empty = serve_levers(&regimen::parse("").expect("an empty regimen"));
+        assert_eq!(empty.get("fork_warrant").map(String::as_str), Some("none"));
+        assert_eq!(empty.get("isolation").map(String::as_str), Some(UNDECLARED));
+    }
     use crate::formats::record::{Budget, Count, ReasoningControl};
     use crate::formats::regimen;
 
@@ -517,4 +537,63 @@ mod tests {
         // so rather than carrying a digest-shaped string nothing computed.
         assert_eq!(silent.substrates[0].chat_template_sha256, None);
     }
+}
+
+/// The word a lever is written with when nothing says its state: the lever
+/// exists in docs/program.md §2, and this run cannot describe where it sat.
+pub const UNDECLARED: &str = "undeclared";
+
+/// The state of each lever (docs/program.md §2) a session `serve` runs
+/// under `regimen` sits at, by lever, in that table's words: best effort.
+/// A lever this build cannot describe is [`UNDECLARED`], never an error,
+/// and nothing reads a missing one as a fault (the maintainer, 2026-10-09:
+/// "best effort in the 'duty of care' sense").
+///
+/// Some states are the build's, not the regimen's: serve's seam is declared
+/// by the operator and refills totally (#493), and a call's output reaches
+/// the trunk whole.
+#[must_use]
+pub fn serve_levers(regimen: &Regimen) -> BTreeMap<String, String> {
+    let word = |key: &str| match regimen.get(key) {
+        Some(regimen::Value::String(word)) => word.clone(),
+        Some(regimen::Value::Integer(n)) => n.to_string(),
+        _ => UNDECLARED.to_owned(),
+    };
+    let runs_commands = regimen
+        .get(crate::drive::tool_loop::ALLOWED_COMMANDS)
+        .is_some();
+    let warrant = match crate::drive::session::interview_warrant(regimen) {
+        Ok(rules) if rules.is_empty() => "none".to_owned(),
+        Ok(rules) => format!(
+            "one-per-gap-gated:{}",
+            rules
+                .iter()
+                .map(|rule| rule.tag())
+                .collect::<Vec<_>>()
+                .join("+")
+        ),
+        Err(_) => UNDECLARED.to_owned(),
+    };
+    let commands = |state: &str| {
+        if runs_commands {
+            state.to_owned()
+        } else {
+            UNDECLARED.to_owned()
+        }
+    };
+    BTreeMap::from([
+        ("compaction_depth".to_owned(), "total".to_owned()),
+        ("seam_trigger".to_owned(), "operator-declared".to_owned()),
+        ("fork_warrant".to_owned(), warrant),
+        ("fork_delivery".to_owned(), UNDECLARED.to_owned()),
+        ("tool_output_disposition".to_owned(), commands("keep")),
+        (
+            "isolation".to_owned(),
+            word(crate::isolation::policy::ISOLATION),
+        ),
+        ("approval".to_owned(), commands("denylist-prompt-preseeded")),
+        ("reasoning_state".to_owned(), word("substrate_reasoning")),
+        ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
+        ("substrate_rung".to_owned(), word("substrate")),
+    ])
 }
