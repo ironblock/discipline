@@ -364,6 +364,12 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(build) => build,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // The dialect the substrate's server speaks, as the registry names it
+    // (#496); llama.cpp's without a regimen, or where the entry names none.
+    let dialect = match substrate.map(served_dialect).transpose() {
+        Ok(dialect) => dialect.unwrap_or_else(Dialect::llama_cpp),
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
     // What the announcement prints and the log's `session.start` claims,
     // built once from the same values (#292): the substrate, the registry's
     // digest, and the engine the check passed.
@@ -380,7 +386,7 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
-    let session = served_session(transport, shape, tools, (claim, interview));
+    let session = served_session(transport, (shape, dialect), tools, (claim, interview));
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
     // Where the projection reads an attached file back from (#372): the
@@ -565,7 +571,7 @@ fn outputs(
 /// how many streams the server serves.
 fn served_session(
     transport: HttpStream,
-    mut shape: RequestShape,
+    (mut shape, dialect): (RequestShape, Dialect),
     tools: Option<Tools>,
     (claim, interview): (
         Option<diet::formats::log::SubstrateClaim>,
@@ -581,12 +587,32 @@ fn served_session(
         shape,
         Some(Serving {
             concurrency: Concurrency::Undeclared,
-            dialect: Dialect::llama_cpp(),
+            dialect,
         }),
         tools,
         claim,
         interview,
     ))
+}
+
+/// The dialect the registry names for substrate `id` (#496): llama.cpp's
+/// where its entry names none.
+///
+/// # Errors
+///
+/// When the entry cannot be read, or names a dialect this client does not
+/// speak.
+fn served_dialect(id: &str) -> Result<Dialect, String> {
+    let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+    match identity.dialect.as_deref() {
+        None => Ok(Dialect::llama_cpp()),
+        Some(name) => Dialect::named(name).ok_or_else(|| {
+            format!(
+                "the registry names `{name}` as `{id}`'s dialect, which this client does not \
+                 speak: `llama.cpp` or `tabbyapi`"
+            )
+        }),
+    }
 }
 
 /// What `serve`'s capture gap forks under (#374): the rules the regimen at

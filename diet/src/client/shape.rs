@@ -457,6 +457,30 @@ impl Dialect {
             timings: Some("timings".to_owned()),
         }
     }
+
+    /// `TabbyAPI`'s OpenAI-compatible chat endpoint (#496).
+    ///
+    /// **Read from `TabbyAPI`'s source at `be74bf0`, not from a capture:** its
+    /// replies put the reasoning in `reasoning_content`, a llama-server-shaped
+    /// `timings` with `cache_n` (and `draft_n` when a draft ran), and
+    /// `usage` -- the paths [`Self::llama_cpp`] declares, under its own name
+    /// so a record says which server answered.
+    #[must_use]
+    pub fn tabbyapi() -> Self {
+        Self {
+            name: "tabbyapi".to_owned(),
+            ..Self::llama_cpp()
+        }
+    }
+
+    /// The dialect a registry entry names by `dialect`: `llama.cpp` or
+    /// `tabbyapi`. `None` for any other name.
+    #[must_use]
+    pub fn named(name: &str) -> Option<Self> {
+        [Self::llama_cpp(), Self::tabbyapi()]
+            .into_iter()
+            .find(|dialect| dialect.name == name)
+    }
 }
 
 #[cfg(test)]

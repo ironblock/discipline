@@ -15,7 +15,7 @@
 //! the registry the way #162's registry tests do. By rule, every field read
 //! here stays a one-line `key = "value"` string -- `equipment`,
 //! `engine_name`, `engine_identity`, `engine_commit`, `engine_build_info`,
-//! `engine_check`,
+//! `engine_check`, `dialect`,
 //! `weights_kind`, `weights_acts_sha256`, `weights_main`, `weights_draft`,
 //! `weights_projector` and `hardware_fingerprint` -- or, for a multi-shard
 //! `weights_main`, a one-line list of quoted digests. A field written another
@@ -175,6 +175,9 @@ pub struct Identity {
     /// the operator's declaration that the engine reports nothing to check,
     /// so the server is not asked (#509).
     pub engine_check: Option<String>,
+    /// The client dialect its server speaks, by name, when the registry
+    /// says (#496); llama.cpp's otherwise.
+    pub dialect: Option<String>,
 }
 
 /// The identity the registry in `document` gives substrate `id`.
@@ -227,6 +230,7 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
         engine_build_info: table.strings.get("engine_build_info").cloned(),
         chat_template_sha256: table.strings.get("chat_template_sha256").cloned(),
         engine_check: table.strings.get("engine_check").cloned(),
+        dialect: table.strings.get("dialect").cloned(),
     })
 }
 
