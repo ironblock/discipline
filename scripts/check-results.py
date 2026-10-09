@@ -727,6 +727,10 @@ def check_run(directory: pathlib.Path) -> list[str]:
             # Every key under [regime], not only the required three: a regime
             # field the regimen does not bind is a claim about the run that
             # nothing backs.
+            # A drive's regimen names its one substrate as `substrate`
+            # (`diet-drive`'s spelling); that backs `substrates = [it]`.
+            if "substrates" not in regimen and isinstance(regimen.get("substrate"), str):
+                regimen = {**regimen, "substrates": [regimen["substrate"]]}
             for key in regime:
                 if key not in regimen:
                     fail("results.regime-unbacked", f"regimen.toml does not bind `{key}`, so `regime.{key}` is unbacked")

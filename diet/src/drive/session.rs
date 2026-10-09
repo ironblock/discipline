@@ -1433,6 +1433,19 @@ impl<S: Streaming + 'static> Session<S> {
         }
     }
 
+    /// The session's product: its working object at this moment, dumped as
+    /// the batch drive dumps its own ([`super::dump`]). Empty when the
+    /// regimen warrants no fork, or no fork patched anything.
+    #[must_use]
+    pub fn product(&self) -> String {
+        let state = self.shared.lock();
+        state
+            .interview
+            .as_ref()
+            .map(|interview| super::dump(&interview.object))
+            .unwrap_or_default()
+    }
+
     /// The session's receipt (#298 point 9), when it runs commands: the
     /// allow set it ends with, the decisions, and the rest of
     /// [`tool_loop::receipt`]. `reference_modified` is read now.

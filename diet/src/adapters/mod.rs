@@ -117,6 +117,7 @@ impl Adapted {
                 source_digest,
                 source_available,
             },
+            regimen_sha256: None,
         });
         events.extend(self.events);
         Record { events }

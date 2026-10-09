@@ -95,7 +95,9 @@ fn serve_usage() -> String {
     out.push_str("it, and a wildcard (0.0.0.0, ::) is refused: name one interface.\n");
     out.push_str("--record FILE (needs --regimen) writes the session's record there once it\n");
     out.push_str("ends, projected from its log, beside FILE.unspellable.json naming what\n");
-    out.push_str("the record could not spell; both digests are reported on stdout.\n");
+    out.push_str("the record could not spell, and FILE.product.txt, the working memory at\n");
+    out.push_str("the end, whose sha256 is the summary's product_sha256; all three digests\n");
+    out.push_str("are reported on stdout.\n");
     out.push_str("--max-output-tokens defaults to 8192, room for a reasoning model's thinking\n");
     out.push_str("(measured on the floor, #290); a turn that hits it is logged capped.\n");
     out.push_str("--log FILE writes the session's log there as each line is appended, the\n");
@@ -281,8 +283,9 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(system) => system,
         Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
     };
-    let regime = match regimen_file.as_deref().map(registered_regime).transpose() {
-        Ok(regime) => regime,
+    let (regime, regimen_sha256) = match regimen_file.as_deref().map(registered_regime).transpose()
+    {
+        Ok(read) => read.unzip(),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     // The regimen's `[sampler]`, pinned on every request (#486): derived from
@@ -398,6 +401,7 @@ fn serve(args: &[String]) -> ExitCode {
     ) {
         Ok(started) => Running {
             recording,
+            regimen_sha256,
             ..started
         },
         Err(code) => return code,
@@ -432,7 +436,7 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
     if let Some((regime, (path, file))) = running.record {
         match written_record(
             session,
-            &regime,
+            (&regime, running.regimen_sha256.as_deref()),
             (&path, file),
             running.recording.as_deref(),
         ) {
@@ -878,6 +882,7 @@ fn started(
         record,
         receipt,
         recording: None,
+        regimen_sha256: None,
     })
 }
 
@@ -922,7 +927,14 @@ fn started_writers(
                     .map_err(|why| emptied.named(format!("{sidecar} cannot be removed: {why}")))?;
                 emptied.push(format!("the previous sidecar at {sidecar}"));
             }
-            Ok::<_, String>((held || stale, (regime, (path, file))))
+            let product = format!("{path}.product.txt");
+            let stale_product = std::path::Path::new(&product).exists();
+            if stale_product {
+                std::fs::remove_file(&product)
+                    .map_err(|why| emptied.named(format!("{product} cannot be removed: {why}")))?;
+                emptied.push(format!("the previous product at {product}"));
+            }
+            Ok::<_, String>((held || stale || stale_product, (regime, (path, file))))
         })
         .transpose()?;
     let log_held = log
@@ -954,13 +966,16 @@ struct Running {
     /// The recording's directory, which an attached file's copy was kept in
     /// and the projection reads it back from (#372).
     recording: Option<std::path::PathBuf>,
+    /// The sha256 of the regimen's bytes as serve read them at start, which
+    /// the record's `start` carries.
+    regimen_sha256: Option<String>,
 }
 
 /// Project the ended session, check the record reads back, and write it and
 /// its sidecar: the line `serve` reports once the session has ended.
 fn written_record(
     session: &Session<HttpStream>,
-    regime: &diet::formats::record::Regime,
+    (regime, regimen_sha256): (&diet::formats::record::Regime, Option<&str>),
     (path, mut file): (&str, std::fs::File),
     recording: Option<&std::path::Path>,
 ) -> Result<String, String> {
@@ -975,7 +990,34 @@ fn written_record(
         .iter()
         .map(diet::drive::session::line_of)
         .collect();
-    let projected = projection::project_in(&lines, regime, engine, recording)?;
+    let mut projected = projection::project_in(&lines, regime, engine, recording)?;
+    if let Some(record::Event::Start {
+        regimen_sha256: at, ..
+    }) = projected.events.first_mut()
+    {
+        *at = regimen_sha256.map(str::to_owned);
+    }
+    // The summary: the turns and prefill the rows carry, and the product --
+    // the working memory at the session's end, kept beside the record as
+    // FILE.product.txt so `sha256sum` recomputes the digest the row claims.
+    let product = session.product();
+    let (turns, prefill) = projected
+        .events
+        .iter()
+        .fold((0u32, 0u64), |(n, total), event| match event {
+            record::Event::Turn { prefill_tokens, .. } => (n + 1, total + prefill_tokens.get()),
+            _ => (n, total),
+        });
+    projected.events.push(record::Event::Summary {
+        summary: record::Summary::Drive {
+            turns,
+            prefill_tokens_total: record::Count::new(prefill)
+                .map_err(|why| format!("prefill_tokens_total: {why:?}"))?,
+        },
+        product_sha256: diet::digest::sha256_hex(product.as_bytes()),
+    });
+    let product_path = format!("{path}.product.txt");
+    std::fs::write(&product_path, &product).map_err(|why| format!("{product_path}: {why}"))?;
     let text = record::render(&Record {
         events: projected.events.clone(),
     });
@@ -997,6 +1039,11 @@ fn written_record(
         (
             "sidecar_sha256".to_owned(),
             Value::String(diet::digest::sha256_hex(sidecar.as_bytes())),
+        ),
+        ("product".to_owned(), Value::String(product_path)),
+        (
+            "product_sha256".to_owned(),
+            Value::String(diet::digest::sha256_hex(product.as_bytes())),
         ),
     ]);
     if let Value::Object(fields) = projection::sidecar_value(&projected) {
@@ -1127,13 +1174,15 @@ fn announcement(
 }
 
 /// The regime the regimen at `path` declares, its substrate resolved from the
-/// registry this program was built with (#157 Q2).
-fn registered_regime(path: &str) -> Result<diet::formats::record::Regime, String> {
+/// registry this program was built with (#157 Q2), and the sha256 of the
+/// bytes it was read from.
+fn registered_regime(path: &str) -> Result<(diet::formats::record::Regime, String), String> {
     let text =
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let regimen =
         regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
+        .map(|regime| (regime, diet::digest::sha256_hex(text.as_bytes())))
         .map_err(|why| format!("{path}: {why}"))
 }
 

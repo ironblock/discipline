@@ -1222,6 +1222,36 @@ fn a_drive_server_refuses_a_canned_regimen_against_a_server_with_no_props() {
 /// `diet`, the checker.
 const DIET: &str = env!("CARGO_BIN_EXE_diet");
 
+/// The start names the regimen's bytes as serve read them, and the summary's
+/// product is the file beside the record: the dev-loop regimen warrants no
+/// fork, so the working memory is empty.
+fn the_start_and_summary_name_the_regimen_and_the_product(
+    written: &str,
+    report: &serde_json::Value,
+    path: &str,
+) {
+    let rows: Vec<serde_json::Value> = written.lines().map(log_line_object).collect();
+    assert_eq!(
+        rows[0]["regimen_sha256"].as_str(),
+        Some(diet::digest::sha256_hex(&std::fs::read(dev_loop()).expect("the regimen")).as_str()),
+        "{written}"
+    );
+    let product = PathBuf::from(format!("{path}.product.txt"));
+    assert_eq!(std::fs::read(&product).expect("the product"), b"");
+    assert_eq!(
+        (
+            rows[4]["product_sha256"].as_str(),
+            report["product_sha256"].as_str()
+        ),
+        (
+            Some(diet::digest::sha256_hex(b"").as_str()),
+            Some(diet::digest::sha256_hex(b"").as_str())
+        ),
+        "{written}"
+    );
+    let _ = std::fs::remove_file(&product);
+}
+
 #[test]
 fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
     // #157's acceptance as ruled (a): the projection and the unspellable
@@ -1302,9 +1332,10 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
     // rebuilt from the log and named by client::head (ruled on #157).
     assert_eq!(
         kinds,
-        ["start", "request", "request", "prefix.changed"],
+        ["start", "request", "request", "prefix.changed", "summary"],
         "{written}"
     );
+    the_start_and_summary_name_the_regimen_and_the_product(&written, &report, &path);
     assert!(
         !written.contains(r#""reason":"unattributed""#),
         "the head was rebuilt: {written}"
@@ -1339,16 +1370,20 @@ fn a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts() {
         let path = record.0.to_string_lossy().into_owned();
         let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
         std::fs::write(&sidecar, "an earlier session's sidecar\n").expect("written");
+        let product = PathBuf::from(format!("{path}.product.txt"));
+        std::fs::write(&product, "an earlier session's product\n").expect("written");
         let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
         let left = (
             served.record.clone(),
             std::fs::read_to_string(&record.0).expect("the record"),
             sidecar.exists(),
+            product.exists(),
         );
         let _ = std::fs::remove_file(&sidecar);
+        let _ = std::fs::remove_file(&product);
         assert_eq!(
             left,
-            (Some((path, true)), String::new(), false),
+            (Some((path, true)), String::new(), false, false),
             "{earlier:?}"
         );
     }
