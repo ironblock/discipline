@@ -12,7 +12,7 @@
 - Edit the description, don't comment: Tools, agents, and people may only look at the body.
 - Edits refine, changes cancel: An edit that's a materially different task is a new ticket.
 - One work item per issue: An issue that describes several is closed in favor of successors that each hold one. You can close one of three related tickets; you can't close a third of one ticket.
-- A ticket closes with a reason, and the reason is a label: `close: refiled` (replaced by tickets that each ask one thing), `close: out-of-scope` (outside the code's declared scope), `close: mechanism-off` (hardens machinery that is turned off), `close: no-defect` (no observable defect today, by its own body). The closing edit adds a dated line pointing at the record of the decision.
+- A ticket closes with a reason, and the reason is a label: `close: refiled` (replaced by tickets that each ask one thing), `close: out-of-scope` (outside the code's declared scope), `close: mechanism-off` (hardens machinery that is turned off), `close: no-defect` (no observable defect today, by its own body), `close: lives-elsewhere` (an issue used as documentation, whose content now lives in the tree). The closing edit adds a dated line pointing at the record of the decision.
 - Feature complete first: Nothing is built before the product is feature complete unless the drive and `exercise` loop needs it. Everything else goes to a `Later —` milestone that names the condition on which it returns (the grooming of 2026-10-06, #495).
 - Test scheduling and device status never go through GitHub: Coordinate windows and a machine's state directly, in private files and notes local to the device under test or to the system monitoring the test. A results directory records what ran, after the fact; it is not where a run is arranged.
 - Done means done. A partial result is not a negative result. A flaky gate trains every reader to scroll past it.
@@ -24,7 +24,7 @@
 
 
 # DOCUMENTATION
-- GitHub issues are not documentation: A ruling, a rule or a fact the program depends on lives in a file in this repository, in the directory where it is read. An issue may point at that line; the line never depends on the issue.
+- GitHub issues are not documentation: A ruling, a rule or a fact the program depends on lives in a file in this repository, in the directory where it is read. An issue may point at that line; the line never depends on the issue. The program's state is in `docs/`, and `docs/AGENTS.md` says who may change which line.
 - Authored, never inherited: Documentation is written fresh from the record by the person who holds the intent. Extraction during authorship loses almost nothing; extraction as a chore has a measured fabrication rate. Agents compile; the author writes.
 - Undeclared intent is a vacuum: Declare the intent, or expect confident re-derivation from whatever threads are lying around. *Specimen: a single paraphrased line in a handoff became a whole binary, a README-edit recommendation, and an argument for both.*
 - If the brief doesn't settle it, stop and ask: Never fill a gap silently. An agent at full momentum that stops at the judgment boundary and asks for the line is doing the most valuable thing it can do.

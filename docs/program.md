@@ -2,13 +2,13 @@
 
 *The system, its levers, and what is known about each. Read before any session. Short on purpose: a lever gets a paragraph; anything longer is a link to a results directory. Threads are the transcript; this file is the state.*
 
-*Compiled by planning on 2026-10-07 from the threads (#25, #31, #117, #143, #165, #24) and planning's own notes, and adapted by Claude on 2026-10-08. No human has authored this text yet; the maintainer edits before it is relied on. Lines marked `[unsettled]` are questions, not facts; figures marked `[unsourced here]` come from records outside this repository and cannot be checked from it.*
+*Compiled by planning on 2026-10-07 from the threads (#25, #31, #117, #143, #165, #24) and planning's own notes, and adapted by Claude on 2026-10-08. No human has authored this text yet; the maintainer edits before it is relied on. Lines marked `[unsettled]` are questions, not facts. Who may change which line is in `docs/AGENTS.md`.*
 
 ## 0. The premise
 
-Context is a working set, not a transcript. Locally, prefill is the only cost that scales badly with the working set; decode is flat. So the game is prefix stability and a small, curated working set, with durable artifacts replacing the disposable transcript. Measured: an identical 50K resend went 46.2 s cold → 0.10 s hot; a mid-prefix edit costs a full re-prefill, quantized to the server's checkpoints. `[unsourced here]`
+Context is a working set, not a transcript. Locally, prefill is the only cost that scales badly with the working set; decode is flat. So the game is prefix stability and a small, curated working set, with durable artifacts replacing the disposable transcript.
 
-The economic case from the frontier side, one developer, 4.2 months: cache reads 52.6% of spend, cache writes 35.8%; median Opus context 214–234K; 22.3% of requests beyond 262K; KV, not compute, decides how many developers a node serves. **The working-set discipline is the admission condition for self-hosting, not an optimisation.** `[unsourced here]`: anonymised aggregates in a tracker outside this repository.
+From the frontier side, KV, not compute, decides how many developers a node serves. **The working-set discipline is the admission condition for self-hosting, not an optimisation.**
 
 ## 1. The components
 
@@ -19,7 +19,7 @@ The economic case from the frontier side, one developer, 4.2 months: cache reads
 - **The record.** The log (`diet/formats/log`, append-only, sequence-numbered) is the source; the record is projected from it; a results directory is the unit of evidence, digest-pinned, hygiene-scanned, recomputable.
 - **The regimen.** A TOML file naming the arm, the dogma version, the substrate, the sampler, the isolation, and the approval policy a session is held to. `diet check-regimen` reads one.
 - **The substrate.** A served model on a registered machine: engine, weights, template, serving line, reasoning state as rendered. Its served configuration is declared by whoever runs the test, and serve is to corroborate each field the engine can report, refusing only on a contradiction (duty of care, ruled 2026-10-07; not built until #509 lands, so serve still requires llama.cpp's `build_info`). Whether it is fit for a claim is measured, never declared (§4).
-- **`exercise`.** The reference surface: the Claude-app-shaped harness with the curtain pulled back — ask, tools, approval, image, forks, seam, cancel/end, record. v0.1.0 is each of those shown working live on the floor by the maintainer; a passing test does not count (#177).
+- **`exercise`.** The reference surface: the Claude-app-shaped harness with the curtain pulled back — ask, tools, approval, image, forks, seam, cancel/end, record. v0.1.0 is each of those shown working live on the floor by the maintainer; a passing test does not count (`docs/releases.md`).
 
 ## 2. The levers
 
@@ -29,7 +29,7 @@ Each lever has states; the current build sits at one of them; the experiments mo
 |---|---|---|---|
 | **compaction depth** | none · one entry · *n* entries · total | total (#505) | `[unsettled]` whether partial compaction is ever better than total; the 0-1-n sweep is the experiment |
 | **seam trigger** | operator-declared · model-proposed, operator-ratified · cadence · budget | declared | walk before run; model-proposed is #124 (v0.2.0) |
-| **fork warrant** | every gap · one per gap, gated on prior turn · none | one per gap, gated (#374) | the floor's 18.8 side-calls per ask is the failure this lever exists to fix `[unsourced here]`; a generative interview at a null step confabulates (`results/2026-07-29-confabulation-on-nulls/`) |
+| **fork warrant** | every gap · one per gap, gated on prior turn · none | one per gap, gated (#374) | a generative interview at a null step confabulates (`results/2026-07-29-confabulation-on-nulls/`) |
 | **fork delivery of results** | advisory · imperative · none | — | measured: advisory is ignored (1/99), imperative is obeyed (~50%) and **capability-independent** (#142); the collector-as-nominator is dead in both framings (#17) |
 | **tool-output disposition** | keep · replace with reference · capture salient line · evict | keep | the token-carriage metric (#31) is what would say what keeping costs |
 | **isolation** | `none` · `sandbox` (Seatbelt on macOS, `bwrap` on Linux) · `vm` (refused by serve) | `sandbox` | "accident containment, not adversarial security" (`diet/src/isolation/mod.rs`); the approval layer is frozen (its hardening tickets closed as not planned in the grooming, #495) |
