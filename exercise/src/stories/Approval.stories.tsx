@@ -9,6 +9,7 @@ import { fold } from '../session/fold.ts';
 import { SessionView } from '../ui/SessionView.tsx';
 import { JudgedSegments } from '../ui/GateSegments.tsx';
 import { judge } from '../gate/judge.ts';
+import { verdictOf } from '../ui/sets.ts';
 import corpus from '../../../diet/wasm/tests/shell_gate_cases.jsonl?raw';
 
 /**
@@ -41,7 +42,7 @@ async function prompted(root: HTMLElement): Promise<HTMLElement> {
   });
   await expect(dock.querySelector('.ex-approval__command')?.textContent).toBe('$ npm install');
   await expect(dock.textContent).toContain(T1_CWD);
-  await expect(dock.textContent).toContain('not_approved');
+  await expect(dock.textContent).toContain('no approval covers it yet');
   await expect([...dock.querySelectorAll('.ex-approval__answer')].map((b) => b.textContent)).toEqual(['once', 'for this session', 'for this workspace', 'decline']);
   await expect(calls(root)[0]?.textContent).toContain('waiting on you');
   return dock;
@@ -56,7 +57,7 @@ export const Approved: Story = {
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'), { timeout: 10_000 });
     const [ran, refused] = calls(canvasElement);
     await expect(ran?.querySelector('.ex-approval-chip')?.textContent).toMatch(/^approved for this session · .+ to decide$/);
-    await expect(ran?.textContent).toContain('held: not_approved');
+    await expect(ran?.textContent).toContain('held: no approval covers it yet');
     await expect(ran?.textContent).toContain('added 212 packages');
     await expect(refused?.querySelector('.ex-call-outcome')?.textContent).toBe('refused · on the denylist');
     await expect(refused?.textContent).toContain('did not run');
@@ -89,11 +90,11 @@ export const Replayed: StoryObj<{ readonly beats: readonly Beat[] }> = {
     const [ran, refused] = calls(canvasElement);
     await expect(ran?.querySelector('.ex-approval-chip')?.textContent).toBe('approved for this session · 4.2 s to decide');
     await expect(ran?.textContent).toContain(`in ${T1_CWD}`);
-    await expect(ran?.textContent).toContain('held: not_approved');
+    await expect(ran?.textContent).toContain('held: no approval covers it yet');
     await expect(refused?.querySelector('.ex-call-outcome')?.textContent).toBe('refused · on the denylist');
     await expect(refused?.textContent).toContain(`in ${T1_CWD}`);
     // What the gate read, re-derived from the logged argv by diet's own reader, as the live prompt showed it.
-    await waitFor(async () => expect(rows(ran)).toEqual([['npm install', 'prompt · not_approved']]));
+    await waitFor(async () => expect(rows(ran)).toEqual([['npm install', 'asks you · no approval covers it yet']]));
     await waitFor(async () => expect(rows(refused)).toEqual([['git status', 'free'], ['git push', 'refused · on the denylist as git push']]));
   },
 };
@@ -133,7 +134,10 @@ export const Corpus: StoryObj = {
       if (!said.ok) continue;
       const block = canvasElement.querySelector<HTMLElement>(`[data-case="${i}"]`) ?? undefined;
       await waitFor(async () => expect(rows(block).map(([shape]) => shape)).toEqual(said.judgement.segments.map((s) => s.shape ?? s.entry ?? 'no shape')));
-      await expect(rows(block).map(([, verdict]) => verdict?.split(' · ')[0]?.split(':')[0])).toEqual(said.judgement.segments.map((s) => s.verdict));
+      // The gate's own word is the row's, and the row reads it as the surface draws that word.
+      const drawn = [...(block?.querySelectorAll<HTMLElement>('.ex-approval__segment') ?? [])];
+      await expect(drawn.map((li) => li.dataset['verdict'])).toEqual(said.judgement.segments.map((s) => s.verdict));
+      await expect(rows(block).map(([, verdict]) => verdict?.split(' · ')[0]?.split(':')[0])).toEqual(said.judgement.segments.map((s) => verdictOf(s.verdict).label));
     }
   },
 };
