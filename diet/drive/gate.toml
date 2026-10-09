@@ -1164,9 +1164,9 @@ failure_class = "drive.serve-an-ask-never-reaches-the-session"
 target = "diet/src/drive/serve.rs"
 expect_exit = 101
 anchor = '''
-                Some(Value::String(text)) => Some(Self::Ask(text.clone())),'''
+                (Some(Value::String(text)), None) => Some(Self::Ask(text.clone(), Vec::new())),'''
 becomes = '''
-                Some(Value::String(_)) => None,'''
+                (Some(Value::String(_)), None) => None,'''
 catches = [
     "drive::serve::tests::a_cancel_over_http_reaches_a_call_blocked_mid_answer",
     "drive::serve::tests::a_command_carrying_its_idle_gap_logs_it_and_a_bad_one_is_400",
@@ -1398,11 +1398,11 @@ failure_class = "drive.serve-a-malformed-ask-is-an-empty-ask"
 target = "diet/src/drive/serve.rs"
 expect_exit = 101
 anchor = '''
-                Some(Value::String(text)) => Some(Self::Ask(text.clone())),
+                    .map(|files| Self::Ask(text.clone(), files)),
                 _ => None,'''
 becomes = '''
-                Some(Value::String(text)) => Some(Self::Ask(text.clone())),
-                _ => Some(Self::Ask(String::new())),'''
+                    .map(|files| Self::Ask(text.clone(), files)),
+                _ => Some(Self::Ask(String::new(), Vec::new())),'''
 catches = [
     "drive::serve::tests::a_malformed_command_is_400_and_not_logged",
 ]

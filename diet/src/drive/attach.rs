@@ -113,6 +113,8 @@ vocabulary! {
         CopyFailed => "copy-failed",
         /// The file is longer than [`MAX_BYTES`].
         TooLarge => "too-large",
+        /// The ask names a digest that was never uploaded to this server.
+        NotUploaded => "not-uploaded",
     }
 }
 
@@ -184,6 +186,47 @@ impl Attached {
     }
 }
 
+/// A PNG posted to `serve`'s `/files` (#513): its reference and its bytes,
+/// held for the session so an ask can name it by digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Upload {
+    /// The reference an `ask` line carries for it.
+    pub file: RecordedFile,
+    /// Its bytes, exactly as posted.
+    pub bytes: std::sync::Arc<Vec<u8>>,
+}
+
+/// `bytes`, posted to `/files`, checked as a named PNG's read is -- the
+/// signature, [`MAX_BYTES`] -- and, with a recording, copied to
+/// `<recording>/files/<sha256>` as an ask's named PNG is.
+///
+/// # Errors
+///
+/// [`Check::NotPng`], [`Check::TooLarge`], or the copy's
+/// [`Check::CopyConflict`] or [`Check::CopyFailed`].
+pub fn uploaded(bytes: Vec<u8>, recording: Option<&Path>) -> Result<Upload, (Check, String)> {
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_BYTES {
+        return Err((
+            Check::TooLarge,
+            format!("the upload is longer than the {MAX_BYTES} bytes an attachment may be"),
+        ));
+    }
+    if !bytes.starts_with(SIGNATURE) {
+        return Err((
+            Check::NotPng,
+            "the upload does not begin with the PNG signature".to_owned(),
+        ));
+    }
+    let file = reference(&bytes);
+    if let Some(recording) = recording {
+        kept(recording, &file, &bytes)?;
+    }
+    Ok(Upload {
+        file,
+        bytes: std::sync::Arc::new(bytes),
+    })
+}
+
 /// The tokens of `text` that name a PNG, trimmed, in order.
 #[must_use]
 pub fn candidates(text: &str) -> Vec<&str> {
@@ -207,6 +250,23 @@ pub fn candidates(text: &str) -> Vec<&str> {
 /// copy cannot be kept; then nothing was copied for it, and the ask must not
 /// be sent.
 pub fn attached(text: &str, attaching: &Attaching) -> Result<Attached, Unattachable> {
+    attached_with(text, &[], attaching)
+}
+
+/// [`attached`], with `uploads` -- PNGs posted to `/files` and named by the
+/// ask's `files` (#513) -- attached first, in their order, then the PNGs
+/// `text` names. With a recording each upload's copy is kept again (whole,
+/// or refused) and named on the `ask` line before the named files.
+///
+/// # Errors
+///
+/// As [`attached`]; an upload's copy that cannot be kept is refused under
+/// its digest.
+pub fn attached_with(
+    text: &str,
+    uploads: &[Upload],
+    attaching: &Attaching,
+) -> Result<Attached, Unattachable> {
     // Every check first, so a refusal copies nothing: not even the files
     // named before the one refused.
     let mut found = Vec::new();
@@ -221,6 +281,15 @@ pub fn attached(text: &str, attaching: &Attaching) -> Result<Attached, Unattacha
         found.push((named, file, bytes));
     }
     let mut message = Message::new(Role::User, text);
+    for upload in uploads {
+        message = crate::client::attach(message, &upload.file, &upload.bytes).map_err(|why| {
+            Unattachable {
+                path: upload.file.sha256.clone(),
+                check: Check::Unreadable,
+                why: why.to_string(),
+            }
+        })?;
+    }
     for (named, file, bytes) in &found {
         message = crate::client::attach(message, file, bytes).map_err(|why| Unattachable {
             path: (*named).to_owned(),
@@ -230,6 +299,14 @@ pub fn attached(text: &str, attaching: &Attaching) -> Result<Attached, Unattacha
     }
     let mut files = Vec::new();
     if let Some(recording) = &attaching.recording {
+        for upload in uploads {
+            kept(recording, &upload.file, &upload.bytes).map_err(|(check, why)| Unattachable {
+                path: upload.file.sha256.clone(),
+                check,
+                why,
+            })?;
+            files.push(upload.file.clone());
+        }
         for (named, file, bytes) in &found {
             kept(recording, file, bytes).map_err(|(check, why)| Unattachable {
                 path: (*named).to_owned(),
@@ -280,14 +357,20 @@ fn checked(named: &str, attaching: &Attaching) -> Result<(RecordedFile, Vec<u8>)
             format!("{} does not begin with the PNG signature", file.display()),
         ));
     }
-    let sha256 = sha256_hex(&bytes);
-    let file = RecordedFile {
+    let file = reference(&bytes);
+    Ok((file, bytes))
+}
+
+/// The reference an `ask` line carries for `bytes`: its copy's path under
+/// the recording, its digest, its media type and its length.
+fn reference(bytes: &[u8]) -> RecordedFile {
+    let sha256 = sha256_hex(bytes);
+    RecordedFile {
         path: format!("{FILES}/{sha256}"),
         sha256,
         media_type: MEDIA_TYPE.to_owned(),
         bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-    };
-    Ok((file, bytes))
+    }
 }
 
 /// `file`'s bytes, read ONCE: the digest, the size, the signature, the copy
