@@ -840,6 +840,7 @@ fn serving_tools(
         allowed,
         store: Some(store),
         approval_policy: declared.approval_policy,
+        approvals_off: declared.approvals_off,
     }))
 }
 

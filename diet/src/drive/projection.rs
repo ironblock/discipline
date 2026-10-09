@@ -1268,6 +1268,7 @@ mod tests {
             tools: None,
             template_kwargs: None,
             unsent: None,
+            approvals_off: None,
         }
     }
 

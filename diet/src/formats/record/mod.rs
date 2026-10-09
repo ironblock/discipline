@@ -3623,7 +3623,10 @@ fn take_approval(
         }
         .into());
     }
-    let preseeded = scope == log::ApprovalScope::Preseeded;
+    let preseeded = matches!(
+        scope,
+        log::ApprovalScope::Preseeded | log::ApprovalScope::Off
+    );
     if preseeded == decided_at.is_some() {
         return Err(SchemaError::Inconsistent {
             of,
