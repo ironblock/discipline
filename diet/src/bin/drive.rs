@@ -117,6 +117,8 @@ fn serve_usage() -> String {
     out.push_str("A substrate whose entry declares engine_check = \"declared\" (an engine that\n");
     out.push_str("reports no build, TabbyAPI's) is not asked: its engine is the declared one,\n");
     out.push_str("and the client speaks the dialect its entry names (llama.cpp by default).\n");
+    out.push_str("--endpoint given as a base URL (no path, or /v1) is completed to its\n");
+    out.push_str("/v1/chat/completions; any other path is used as written.\n");
     out.push_str("--help prints this to stdout and exits 0; a usage error exits 2.\n");
     out.push_str("--worktree DIR, absolute, is where the model's commands run; a regimen\n");
     out.push_str("that runs commands (it declares `allowed_commands`, the pre-seeded set) needs\n");
@@ -285,7 +287,7 @@ fn serve(args: &[String]) -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     };
     let endpoint = match Endpoint::parse(&endpoint) {
-        Ok(endpoint) => endpoint,
+        Ok(endpoint) => chat_endpoint(endpoint),
         Err(why) => return fail(EXIT_INPUT, &format!("{endpoint} is not an endpoint: {why}")),
     };
     let system = match std::fs::read_to_string(&head) {
@@ -1156,6 +1158,21 @@ fn trunk(
         tools: Vec::new(),
     }
 }
+
+/// The chat endpoint a base URL names: an endpoint given with no path, or
+/// with only `/v1`, is the server's `/v1/chat/completions` -- the path every
+/// engine `serve` speaks to answers on. A server's bare base URL was a 404
+/// on the first request (#496's live turn). Any other path is the
+/// operator's, kept as written.
+fn chat_endpoint(mut endpoint: Endpoint) -> Endpoint {
+    if matches!(endpoint.path.as_str(), "/" | "/v1" | "/v1/") {
+        CHAT_COMPLETIONS.clone_into(&mut endpoint.path);
+    }
+    endpoint
+}
+
+/// The path [`chat_endpoint`] completes a base URL to.
+const CHAT_COMPLETIONS: &str = "/v1/chat/completions";
 
 /// The address `serve` may listen on: `listen`, refused when it is a
 /// wildcard, or off loopback with no credential (fail-closed, I7). A usage
