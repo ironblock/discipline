@@ -2,7 +2,7 @@
 
 *The system, its levers, and what is known about each. Read before any session. Short on purpose: a lever gets a paragraph; anything longer is a link to a results directory. Threads are the transcript; this file is the state.*
 
-*Compiled by planning on 2026-10-07 from the threads (#25, #31, #117, #143, #165, #24) and planning's own notes, and adapted by Claude on 2026-10-08. No human has authored this text yet; the maintainer edits before it is relied on. Lines marked `[unsettled]` are questions, not facts. Who may change which line is in `docs/AGENTS.md`.*
+*Lines marked `[unsettled]` are questions, not facts. Who may change which line is in [`AGENTS.md`](AGENTS.md).*
 
 ## 0. The premise
 

@@ -2,7 +2,7 @@
 
 *Who posts here and how to tell them apart, which file holds each rule, and what went wrong before. Most comments in this repository were written by model sessions acting for the maintainer under a prefix; this file says how to read them.*
 
-*Compiled by planning on 2026-10-07, adapted by Claude on 2026-10-08, and rewritten by Dispatch the same day for the pattern the maintainer ruled then. No human has authored this text yet; the maintainer edits before it is relied on. A line marked `[unsettled]` is a proposal, not a ruling.*
+*A line marked `[unsettled]` is a proposal, not a ruling. Who may change which line is in [`AGENTS.md`](AGENTS.md).*
 
 ## Who posts
 
@@ -24,7 +24,7 @@ A rule lives in the file its reader opens, once:
 | Milestones, cuts, and backlog aging | `CONTRIBUTING.md`, Milestones |
 | What each open release means, and its evidence | `docs/releases.md` |
 | A trajectory's script | `docs/trajectories/` |
-| Who edits which line of these documents | `docs/AGENTS.md` |
+| Who may change which line of these documents | `docs/AGENTS.md` |
 | Branches, merging, review, hygiene, acceptance | `CONTRIBUTING.md` and `.github/PULL_REQUEST_TEMPLATE.md` |
 | What CI runs | `.github/check-owners.tsv` and `verify.sh` (`DEFAULT_CHECKS`) |
 | A results directory's contract | `results/_template/`, enforced by `scripts/check-results.py`; `results/AGENTS.md` |
@@ -48,11 +48,11 @@ The last instance is on record. On 2026-10-07 the seeded-fault selftest left CI 
 
 Ruled by the maintainer on 2026-10-08:
 
-- **Work comes from the open release.** Its definition of done is in `docs/releases.md`; a builder is given only a ticket on the path to an unticked row.
+- **Work comes from the earliest open release** (now v0.1.0). A builder is given a ticket only if it is on the path to a row of that release in `docs/releases.md` with no evidence yet. A ticket in its milestone that is on no row's path waits until no ticket on a path is open.
 - **At most two builders and Dispatch.** One open pull request per builder. No stacked pull requests.
-- **Dispatch files no ticket while a release is open unless it blocks a row.** Any other finding becomes a wanted row in `docs/experiments.md`, or nothing. The `Later —` milestones are sorted at a grooming, not as things are found.
-- **A ruling lives in a file.** One made in chat or in a comment is written into the file where it is read, in the next pull request that touches that file or one of its own.
+- **A finding that is on no row's path is not worked.** Where it goes is in `CONTRIBUTING.md` (review). No session files tickets speculatively.
+- **A ruling lives in a file.** One made in chat or in a comment is written into the file where it is read, by the next pull request that touches that file or by one of its own, which the maintainer merges (`AGENTS.md`).
 
 ## Unsettled
 
-- `[unsettled]` A week with no row ticked pauses orchestration, and the maintainer runs a piece. (Proposed by planning, 2026-10-07.)
+- `[unsettled]` A week in which no row gains evidence pauses orchestration, and the maintainer runs a piece. (Proposed by planning.)

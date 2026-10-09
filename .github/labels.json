@@ -8,7 +8,7 @@
     { "name": "results", "color": "fbca04", "description": "The results/ invariant, the lint, and the claim ledger." },
     { "name": "ci",      "color": "666666", "description": "verify.sh, the workflows, and the gates they run." },
     { "name": "pages",   "color": "c5def5", "description": "The static site: replay viewer and rendered claim ledger." },
-    { "name": "needs-plan", "color": "0e8a16", "description": "Planning wrote goal, constraints and definition of done; Dispatch owes the plan." },
-    { "name": "planned",    "color": "1d76db", "description": "Plan ratified on the ticket; routed to a track to build." }
+    { "name": "needs-plan", "color": "0e8a16", "description": "Goal, constraints and definition of done are written; the plan is owed." },
+    { "name": "planned",    "color": "1d76db", "description": "Plan ratified; routed to a builder." }
   ]
 }

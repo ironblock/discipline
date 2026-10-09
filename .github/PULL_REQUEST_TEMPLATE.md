@@ -27,6 +27,12 @@
      change: a link to it on this thread, and what became of each finding --
      fixed (the commit), answered (why not), or deferred (the issue). -->
 
+## Program documents
+
+<!-- docs/AGENTS.md: if this lands evidence for a row of docs/releases.md, or
+     makes a line of docs/ false, update that line here. If it changes a thesis
+     line, name it: the maintainer merges this pull request himself. -->
+
 ## Known defects
 
 <!-- What is still wrong after this lands. Empty is a claim. -->

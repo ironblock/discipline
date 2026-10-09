@@ -2,7 +2,7 @@
 
 *Each test run or wanted, as a row: what lever it moves, what instrument measures it, and where it stands. The gap this file fills: until now these lived in four people's and sessions' memories. A row with a result links its directory; a wanted row names the piece it waits on.*
 
-*Compiled by planning on 2026-10-07 and adapted by Claude on 2026-10-08. No human has authored this text yet; the maintainer edits before it is relied on.*
+*Who may change which line is in [`AGENTS.md`](AGENTS.md).*
 
 ## Two kinds of row
 
