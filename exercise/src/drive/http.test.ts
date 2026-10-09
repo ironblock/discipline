@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { EventSourceLike, Web } from './http.ts';
 import { HttpTransport } from './http.ts';
 import type { LogLine } from './log.ts';
+import { png } from './png.ts';
 
 /**
  * `HttpTransport` against a stand-in for `serve.rs`: an EventSource the test
@@ -354,5 +355,43 @@ describe('HttpTransport: the operator’s scope mark (#453)', () => {
     await transport.dispatch({ kind: 'ask', text: 'hi' });
     expect(posted).toEqual([{ kind: 'ask', text: 'hi' }]);
     expect('scoping' in posted[0]!).toBe(false);
+  });
+});
+
+describe('HttpTransport: the operator’s attachment (#372)', () => {
+  const sha = 'cd'.repeat(32);
+  const answering = (status: number, body: BodyInit | null = null) => {
+    const sent: { url: string; init: RequestInit | undefined }[] = [];
+    const web: Web = {
+      EventSource: class extends FakeSource {},
+      fetch: (url, init) => (sent.push({ url, init }), Promise.resolve(new Response(body, { status }))),
+    };
+    return { transport: new HttpTransport('', web), sent };
+  };
+  const bytes = png(2, 2, () => [0, 0, 0]);
+
+  it('posts the raw bytes to POST /files as image/png, and answers the digest serve keeps them by', async () => {
+    const { transport, sent } = answering(200, JSON.stringify({ sha256: sha, bytes: bytes.length }));
+    await expect(transport.upload(bytes)).resolves.toEqual({ ok: true, sha256: sha, bytes: bytes.length });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.url).toBe('/files');
+    expect(sent[0]!.init?.method).toBe('POST');
+    expect(new Headers(sent[0]!.init?.headers).get('Content-Type')).toBe('image/png');
+    expect(sent[0]!.init?.body).toBe(bytes);
+  });
+
+  it('answers serve’s 400 as not a PNG, its 413 as over the cap, and no answer as unreachable', async () => {
+    await expect(answering(400).transport.upload(bytes)).resolves.toEqual({ ok: false, refused: 'not-a-png' });
+    await expect(answering(413).transport.upload(bytes)).resolves.toEqual({ ok: false, refused: 'too-large' });
+    const down = new HttpTransport('', { EventSource: class extends FakeSource {}, fetch: () => Promise.reject(new TypeError('down')) });
+    await expect(down.upload(bytes)).resolves.toEqual({ ok: false, refused: 'unreachable' });
+  });
+
+  it('names the uploads on the ask by digest, and an ask with none carries no `files`', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });
+    await transport.dispatch({ kind: 'ask', text: 'this is wrong', files: [sha] });
+    await transport.dispatch({ kind: 'ask', text: 'hi', files: [] });
+    expect(posted).toEqual([{ kind: 'ask', text: 'this is wrong', files: [sha] }, { kind: 'ask', text: 'hi' }]);
   });
 });

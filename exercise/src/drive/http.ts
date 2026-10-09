@@ -10,9 +10,13 @@
  *                             `{"kind": "cancel", "turn"}`, `{"kind":
  *                             "declare-seam"}`, `{"kind": "end"}`. A refusal is
  *                             409 `{"refused": <tag>}`, and logged.
- *   GET  /files/<sha256>      a tool call's file, its bytes, from the worktree;
- *                             404 naming the digest when it has none (#372,
- *                             5976915436). The page checks the bytes (`files.ts`).
+ *   GET  /files/<sha256>      a file the log names, its bytes; 404 naming the
+ *                             digest when it has none (#372, 5976915436). The
+ *                             page checks the bytes (`files.ts`).
+ *   POST /files               the operator's PNG, raw, `Content-Type: image/png`:
+ *                             200 `{"sha256", "bytes"}`, 400 when it is not a
+ *                             PNG, 413 over the cap. An ask names it after by
+ *                             digest, `"files": [<sha256>]`.
  *   POST /approve             the operator's answer to the call waiting on them,
  *                             `{"call": <id>, "scope": "once" | "session" |
  *                             "workspace" | "decline"}`: 204, or 409
@@ -39,7 +43,7 @@
 
 import type { IdleGapBody } from '../session/gap.ts';
 import type { LogLine } from './log.ts';
-import type { Ack, Command, DriveTransport, Link, Prompt } from './transport.ts';
+import type { Ack, Command, DriveTransport, Link, Prompt, Uploaded } from './transport.ts';
 import type { FileAnswer } from './files.ts';
 
 /** What the transport needs from the browser: injectable, so a test can stand in for the server. */
@@ -129,6 +133,21 @@ export class HttpTransport implements DriveTransport {
     return { kind: 'bytes', bytes: new Uint8Array(await reply.arrayBuffer()) };
   };
 
+  /** The operator's PNG, sent ahead of the ask that names it (`POST /files`). */
+  async upload(bytes: Uint8Array): Promise<Uploaded> {
+    let reply: Response;
+    try {
+      reply = await this.#web.fetch(`${this.#base}/files`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: bytes as Uint8Array<ArrayBuffer> });
+    } catch {
+      return { ok: false, refused: 'unreachable' };
+    }
+    if (reply.status === 400) return { ok: false, refused: 'not-a-png' };
+    if (reply.status === 413) return { ok: false, refused: 'too-large' };
+    if (!reply.ok) return { ok: false, refused: `http-${reply.status}` };
+    const said = (await reply.json().catch(() => ({}))) as { readonly sha256?: unknown; readonly bytes?: unknown };
+    return typeof said.sha256 === 'string' && typeof said.bytes === 'number' ? { ok: true, sha256: said.sha256, bytes: said.bytes } : { ok: false, refused: 'http-200' };
+  }
+
   watchPrompt(listener: (prompt: Prompt | undefined) => void): () => void {
     listener(this.#prompt);
     this.#prompts.add(listener);
@@ -189,7 +208,7 @@ export class HttpTransport implements DriveTransport {
     switch (command.kind) {
       case 'ask':
         // The operator's mark rides on the ask it marks, and on no other (#453): serve refuses it anywhere else.
-        return { kind: 'ask', text: command.text, ...(command.scoping ? { scoping: true } : {}) };
+        return { kind: 'ask', text: command.text, ...(command.scoping ? { scoping: true } : {}), ...(command.files && command.files.length > 0 ? { files: command.files } : {}) };
       case 'cancel': {
         // A stop names the turn it is for: the latest asked.
         const turn = this.#log.findLast((l) => l.kind === 'ask');

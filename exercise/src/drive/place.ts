@@ -140,8 +140,8 @@ export class Placer {
       case 'ask':
         this.#turnOpen = true;
         // The operator's scope mark (#453), as serve logs it: a v5 key, which only a live canned session carries.
-        if (e.scoping) return [{ kind: 'ask', t: e.t, turn: e.turn, text: e.text, scoping: true }];
-        return [{ kind: 'ask', t: e.t, turn: e.turn, text: e.text }];
+        // What the operator attached, by reference: v5 keys too.
+        return [{ kind: 'ask', t: e.t, turn: e.turn, text: e.text, ...(e.scoping ? { scoping: true as const } : {}), ...(e.files && e.files.length > 0 ? { files: [...e.files] } : {}) }];
       case 'request': {
         this.#name(e.id);
         this.#name(`${e.id}#response`);

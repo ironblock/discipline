@@ -7,6 +7,7 @@ import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
+import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
@@ -271,5 +272,23 @@ export const ServedForks: Story = {
       ['interview', 'value'],
       ['interview', 'decline'],
     ]);
+  },
+};
+
+/**
+ * The operator's screenshot (#372), attached in the composer: picked, shown as a chip, sent ahead of the ask by
+ * the transport's upload, named on the ask by digest -- and drawn on the operator's message, read back by that digest.
+ */
+export const AttachAScreenshot: Story = {
+  name: 'attach a screenshot to the ask',
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const shot = new File([png(8, 6, (x) => [x * 30, 90, 160]) as Uint8Array<ArrayBuffer>], 'shot.png', { type: 'image/png' });
+    await userEvent.upload(canvasElement.querySelector('input[aria-label="attach a PNG"]') as HTMLInputElement, shot);
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-composer__file img')).toHaveLength(1));
+    await userEvent.type(canvasElement.querySelector('textarea') as HTMLTextAreaElement, 'Where is the output format decided?{Enter}');
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-trunk [aria-label="what the operator attached"] img')).not.toBeNull());
+    // Taken, the chip is gone: the next ask attaches nothing unless the operator says so.
+    await expect(canvasElement.querySelector('.ex-composer__file')).toBeNull();
   },
 };
