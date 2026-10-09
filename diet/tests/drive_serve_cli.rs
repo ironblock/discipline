@@ -2058,8 +2058,8 @@ fn a_drive_server_runs_an_approved_call_records_it_and_writes_its_receipt() {
             "cwd": recorded_cwd(&tree),
             "reason": "not_approved",
             "segments": [
-                {"text": "ls", "program": "ls", "verdict": "prompt", "why": "not_approved"},
-                {"text": "wc -l", "program": "wc", "verdict": "prompt", "why": "not_approved"},
+                {"text": "ls", "shape": "ls", "program": "ls", "verdict": "prompt", "why": "not_approved"},
+                {"text": "wc -l", "shape": "wc", "program": "wc", "verdict": "prompt", "why": "not_approved"},
             ],
         })
     );

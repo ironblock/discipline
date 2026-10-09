@@ -2293,7 +2293,9 @@ mod tests {
             .and_then(|rest| rest.split('\n').next())
             .expect("the prompt's data line");
         // The wire shape #400's surface reads (`exercise/src/drive/http.ts`,
-        // `#waiting`; ruled at #389 5982826097 point 2): exactly these keys.
+        // `#waiting`; ruled at #389 5982826097 point 2, with `shape` added so
+        // the surface shows what a standing approval covers): exactly these
+        // keys.
         let prompt: serde_json::Value = serde_json::from_str(shown).expect("JSON");
         assert_eq!(
             prompt,
@@ -2305,6 +2307,7 @@ mod tests {
                 "reason": "not_approved",
                 "segments": [{
                     "text": "touch a",
+                    "shape": "touch",
                     "program": "touch",
                     "verdict": "prompt",
                     "why": "not_approved",

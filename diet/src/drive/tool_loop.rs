@@ -1858,8 +1858,9 @@ fn segment_texts(command: &str, count: usize) -> Vec<String> {
 }
 
 /// The segments as the `waiting` event carries them (#389 5982826097
-/// point 2): the gate module's `Shape` and `Verdict`, `why` on a prompting
-/// segment only.
+/// point 2): the gate module's `Shape` -- whole as `shape`, the key the log's
+/// approval segments use, and as `program` and `subcommand` -- and
+/// `Verdict`, `why` on a prompting segment only.
 fn segment_values(judged: &Judged) -> Value {
     let text = |s: &str| Value::String(s.to_owned());
     let segments = &judged.judgement.segments;
@@ -1871,6 +1872,9 @@ fn segment_values(judged: &Judged) -> Value {
             .map(|(segment, said)| {
                 let mut fields = BTreeMap::from([("text".to_owned(), text(&said))]);
                 if let Some(shape) = &segment.shape {
+                    // Whole, as the log's approval segments write it and the
+                    // surface reads it: what a standing approval would cover.
+                    fields.insert("shape".to_owned(), text(&shape.to_string()));
                     fields.insert("program".to_owned(), text(&shape.program));
                     if let Some(sub) = &shape.subcommand {
                         fields.insert("subcommand".to_owned(), text(sub));
@@ -2178,6 +2182,34 @@ pub(in crate::drive) mod tests {
             gate.judge("npm restart", &restart).outcome(),
             shell_gate::Outcome::Prompt,
             "`npm restart` runs `start` when it has no `restart`"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The `waiting` event names what a standing approval of the call would
+    /// cover, as `shape` -- the key the surface and the log's approval
+    /// segments read -- beside `program` and `subcommand`: `npm install`
+    /// for `npm install` (T1's approval piece).
+    #[test]
+    fn a_waiting_prompt_names_the_shape_a_standing_approval_covers() {
+        let dir = scratch("waiting-shape");
+        let gate = gate_in(&dir);
+        package(&dir, "vite build");
+        let judged = gate.judge("npm install", &[]);
+        assert_eq!(judged.outcome(), shell_gate::Outcome::Prompt);
+        let waiting: serde_json::Value =
+            serde_json::from_str(&prompt_of(&judged, 1, 1, "call-1", ".").render()).expect("JSON");
+        assert_eq!(
+            waiting["segments"],
+            serde_json::json!([{
+                "text": "npm install",
+                "shape": "npm install",
+                "program": "npm",
+                "subcommand": "install",
+                "verdict": "prompt",
+                "why": "not_approved",
+            }]),
+            "{waiting}"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
