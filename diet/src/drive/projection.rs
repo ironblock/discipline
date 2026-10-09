@@ -631,6 +631,12 @@ impl<'a> Walk<'a> {
                 reason: log::SettleReason::MaxSteps,
                 ..
             } => self.stepping(line),
+            // A turn that failed after a step keeps the steps that completed,
+            // as the session does (`State::keep_ran_steps`).
+            Line::TurnSettled {
+                turn,
+                reason: log::SettleReason::Failed | log::SettleReason::Timeout,
+            } => self.failed_after_steps(*turn),
             // Carried by the rows above: a delta by its response's text, a
             // settlement and a settled turn by the turn and response rows.
             Line::Delta { .. }
@@ -1134,6 +1140,31 @@ impl<'a> Walk<'a> {
         }
         self.step_call(&line.event);
         self.tool_call_line(line.seq, &line.event);
+    }
+
+    /// A turn settled `failed` or `timeout`: the steps the turn went on from
+    /// -- every step but one whose request was the turn's last -- join the
+    /// trunk with its ask, as the session puts them there. None completed,
+    /// and nothing joins it.
+    fn failed_after_steps(&mut self, turn: u32) {
+        let last_request = self
+            .turn_of
+            .iter()
+            .filter(|(_, of)| **of == turn)
+            .map(|(request, _)| *request)
+            .max();
+        let steps = self.steps.get(&turn).map_or(0, Vec::len);
+        let unfinished = self
+            .steps
+            .get(&turn)
+            .and_then(|steps| steps.last())
+            .is_some_and(|step| Some(step.request) == last_request);
+        let completed = steps - usize::from(unfinished);
+        if completed == 0 {
+            self.steps.remove(&turn);
+            return;
+        }
+        self.onto_the_trunk(turn, completed);
     }
 
     /// A `tool_call` line's call, onto its step (#472).
