@@ -586,9 +586,12 @@ fn served_session(
 }
 
 /// What `serve`'s capture gap forks under (#374): the rules the regimen at
-/// `regimen` lists under `interview_warrant`, and a working object under
-/// `regime`. `None` when it lists none, or there is no regimen: then no fork
-/// ever fires.
+/// `regimen` lists under `interview_warrant`, a working object under
+/// `regime`, and the cadence and budget its derived seams fire on, the
+/// budget taken of the substrate's registered `serving_context`. `None` when
+/// it lists no rule, or there is no regimen: then no fork and no derived
+/// seam ever fires, and a regimen that declares a seam trigger anyway is
+/// refused.
 fn serving_interview(
     regimen: Option<&str>,
     regime: Option<&Regime>,

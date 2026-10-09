@@ -5986,6 +5986,7 @@ pub(in crate::drive) mod tests {
             "the ask after the seam runs on the refill"
         );
         assert_eq!(session.settlement(), Settlement::Awaiting);
+        reads_whole(&session);
     }
 
     /// A budget: the trunk call reports 18 prefilled, 160 reused and 66
@@ -6016,6 +6017,7 @@ pub(in crate::drive) mod tests {
         });
         assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Budget)]);
         assert_eq!(session.shared.lock().trunk_tokens, None);
+        reads_whole(&session);
     }
 
     /// Under the limit, no seam: 18 + 160 + 66 is 244, and the limit is 245.
