@@ -196,6 +196,17 @@
   transform: none;
 }
 
+/* The drawer runs edge to edge, its panels at the top: the strip under them is not the drawer's to catch. A click
+   there reaches what is beneath -- the lanes, the composer's buttons -- and only the tab and the panels take one. */
+.ex-session[data-drawer] .ex-session__memory {
+  pointer-events: none;
+}
+
+.ex-session[data-drawer] .ex-drawer__tab,
+.ex-session[data-drawer] .ex-drawer__body > * {
+  pointer-events: auto;
+}
+
 .ex-session[data-drawer] .ex-drawer__body,
 .ex-session[data-drawer] .ex-drawer__body > .ex-memory {
   max-height: 100%;
