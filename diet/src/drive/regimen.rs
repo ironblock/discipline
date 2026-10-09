@@ -350,9 +350,9 @@ pub const UNDECLARED: &str = "undeclared";
 /// and nothing reads a missing one as a fault (the maintainer, 2026-10-09:
 /// "best effort in the 'duty of care' sense").
 ///
-/// Some states are the build's, not the regimen's: serve's seam is declared
-/// by the operator and refills totally (#493), and a call's output reaches
-/// the trunk whole.
+/// Some states are the build's, not the regimen's: serve's seam refills
+/// totally (#493), the operator may always declare one, and a call's output
+/// reaches the trunk whole. The regimen adds a cadence or a budget (#520).
 #[must_use]
 pub fn serve_levers(regimen: &Regimen) -> BTreeMap<String, String> {
     let word = |key: &str| match regimen.get(key) {
@@ -382,9 +382,22 @@ pub fn serve_levers(regimen: &Regimen) -> BTreeMap<String, String> {
             UNDECLARED.to_owned()
         }
     };
+    let mut triggers = vec!["operator-declared"];
+    if regimen.get(crate::seam::policy::SEAM_EVERY_TURNS).is_some() {
+        triggers.push("cadence");
+    }
+    if [
+        crate::seam::policy::SEAM_AT_WORKING_SET_BYTES,
+        "seam_at_context_fraction",
+    ]
+    .iter()
+    .any(|key| regimen.get(key).is_some())
+    {
+        triggers.push("budget");
+    }
     BTreeMap::from([
         ("compaction_depth".to_owned(), "total".to_owned()),
-        ("seam_trigger".to_owned(), "operator-declared".to_owned()),
+        ("seam_trigger".to_owned(), triggers.join("+")),
         ("fork_warrant".to_owned(), warrant),
         ("fork_delivery".to_owned(), UNDECLARED.to_owned()),
         ("tool_output_disposition".to_owned(), commands("keep")),
@@ -421,6 +434,11 @@ mod tests {
         let empty = serve_levers(&regimen::parse("").expect("an empty regimen"));
         assert_eq!(empty.get("fork_warrant").map(String::as_str), Some("none"));
         assert_eq!(empty.get("isolation").map(String::as_str), Some(UNDECLARED));
+        let paced = serve_levers(&regimen::parse("seam_every_turns = 3\n").expect("a regimen"));
+        assert_eq!(
+            paced.get("seam_trigger").map(String::as_str),
+            Some("operator-declared+cadence")
+        );
     }
     use crate::formats::record::{Budget, Count, ReasoningControl};
     use crate::formats::regimen;
