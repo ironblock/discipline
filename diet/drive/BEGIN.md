@@ -149,7 +149,13 @@ After `end`, the stream closes, `serve` exits `0`, and `session.log` holds the s
 
 ## Rehearsing a regimen with no model
 
-To rehearse a session that runs commands, with approvals and a record, use the rehearsal regimen [`replay.toml`](replay.toml) against `diet-drive replay`. It answers every request with one captured llama.cpp turn, byte for byte. Each turn streams, settles `final`, and the record carries `turn` and `response` rows with that capture's counts. The words are the capture's, whatever you ask. The capture makes no tool call, so nothing prompts; the regimen's commands and approval policy are in force all the same.
+To rehearse a session that runs commands, with approvals and a record, use the rehearsal regimen [`replay.toml`](replay.toml) against `diet-drive replay`. It plays two captures of one real llama.cpp session, byte for byte. Every ask is answered with a `bash` call of `ls | wc -l`, and once the call's output comes back, with that session's answer, which settles `final`.
+
+- `ls` is in the regimen's allowed set and `wc` is not, so the first call waits on you: the surface's approval prompt, or `POST /approve`.
+- Approve it for the session or the workspace, and later calls run without asking. Decline it, and the model is told so and answers anyway.
+- The record carries `turn`, `tool_call` and `response` rows with the captures' counts.
+
+The words are the captures', whatever you ask. `diet-drive replay --answers` serves one captured answer for every request instead, with no call.
 
 ```
 target/debug/diet-drive replay

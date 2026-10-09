@@ -1,13 +1,17 @@
 # A rehearsal regimen: a commands-running session, with its approvals, driven
 # with no model and no GPU (#411).
 #
-# The substrate is `canned-replay`, which `diet-drive replay` serves on
-# loopback: every request is answered with one captured llama.cpp `e7051ef`
-# warm turn, byte for byte (`diet/client/fixtures/llama-server-e7051ef-warm-
-# turn2-stream.http`). So each turn streams, settles `final`, and the record
-# carries `turn` and `response` rows with that capture's counts. The words are
-# the capture's, whatever was asked: nothing under this regimen is a claim
-# about a model.
+# The substrate is `canned-replay-tools`, which `diet-drive replay` serves on
+# loopback from two captures of one real llama.cpp `e486f80` session
+# (`substrates/measurements/2026-10-02-i0-tool-call-captures/`): a request
+# ending in a tool result is answered with that server's answer, any other
+# with its streamed `bash` call of `ls | wc -l`, byte for byte. So every ask
+# makes the call; `ls` is allowed below and `wc` is not, so the gate prompts,
+# and the approval decides whether it runs; then the answer settles `final`.
+# The record carries `turn`, `tool_call` and `response` rows with the
+# captures' counts. The words are the captures', whatever was asked: nothing
+# under this regimen is a claim about a model. `diet-drive replay --answers`
+# serves `canned-replay` instead: one captured answer for every request.
 #
 #     target/debug/diet-drive replay                     # 127.0.0.1:7902
 #     target/debug/diet-drive serve --endpoint http://127.0.0.1:7902/v1/chat/completions \
@@ -23,12 +27,12 @@
 arm = "rehearsal"
 dogma_version = 0
 
-substrate = "canned-replay"
+substrate = "canned-replay-tools"
 substrate_reasoning = "off"
-# The `hardware_fingerprint` of equipment `canned-loopback-replay` in
+# The `hardware_fingerprint` of equipment `canned-loopback-replay-tools` in
 # `substrates/registry.toml`: `canned::hardware_fingerprint` over the acts
 # the replay plays.
-substrate_hardware = "cc12840de6240097540cb1a6e832c217ad3fd47c88cd4c6c5a6dc58e97dbc53b"
+substrate_hardware = "1c04e518950209a440101b6f982b8bc2d73f8d8f17502eb04e4d6a43b8852cbf"
 
 # Unconfined, so the rehearsal starts on any machine; a rehearsal of the
 # floor's own isolation says `isolation = "sandbox"` here.

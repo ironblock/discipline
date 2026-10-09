@@ -65,6 +65,13 @@ pub const CITED: &[Engine] = &[
         "canned-2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8",
         "2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8",
     ),
+    // The tool-turn replay: two `e486f80` captures, in each of which
+    // `usage` equals `timings` (`canned::tests::the_tool_turn_replays_usage_
+    // is_its_timings`), as `canned::replay_tools_build_info` computes it.
+    Engine::Literal(
+        "canned-7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966",
+        "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966",
+    ),
 ];
 
 /// An engine, as the registry pins it.
@@ -1863,6 +1870,23 @@ mod tests {
             "the cited literal is the one the replay computes"
         );
         assert_eq!(cited(&replay), Some(CITED[3]), "the stream replay");
+        let tools = crate::drive::registry::identity(
+            crate::drive::registry::REGISTRY,
+            "canned-replay-tools",
+        )
+        .expect("registered");
+        assert_eq!(cited(&tools), Some(CITED[4]), "the tool-turn replay");
+        assert_eq!(
+            CITED[4],
+            Engine::Literal(
+                "canned-7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966",
+                "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966",
+            )
+        );
+        assert_eq!(
+            crate::drive::canned::replay_tools_build_info(),
+            "canned-7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
+        );
         let canned =
             crate::drive::registry::identity(crate::drive::registry::REGISTRY, "canned-cache-n")
                 .expect("registered");

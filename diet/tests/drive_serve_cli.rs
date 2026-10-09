@@ -2426,9 +2426,20 @@ impl Drop for Replaying {
     }
 }
 
-fn replaying() -> Replaying {
+fn replaying(answers: bool) -> Replaying {
+    let mode: &[&str] = if answers { &["--answers"] } else { &[] };
+    let (substrate, build_info) = if answers {
+        ("canned-replay", diet::drive::canned::replay_build_info())
+    } else {
+        (
+            "canned-replay-tools",
+            diet::drive::canned::replay_tools_build_info(),
+        )
+    };
     let mut child = Command::new(DRIVE)
-        .args(["replay", "--port", "0"])
+        .arg("replay")
+        .args(mode)
+        .args(["--port", "0"])
         .stdout(Stdio::piped())
         .spawn()
         .expect("diet-drive replay starts");
@@ -2447,12 +2458,8 @@ fn replaying() -> Replaying {
         .recv_timeout(Duration::from_secs(10))
         .expect("diet-drive replay announced itself");
     let announced = log_line_object(&first);
-    assert_eq!(announced["substrate"], "canned-replay", "{first}");
-    assert_eq!(
-        announced["build_info"],
-        diet::drive::canned::replay_build_info().as_str(),
-        "{first}"
-    );
+    assert_eq!(announced["substrate"], substrate, "{first}");
+    assert_eq!(announced["build_info"], build_info.as_str(), "{first}");
     announced["listening"]
         .as_str()
         .expect("the endpoint")
@@ -2464,6 +2471,23 @@ fn replay_regimen() -> String {
     format!("{}/drive/replay.toml", env!("CARGO_MANIFEST_DIR"))
 }
 
+/// The rehearsal regimen, naming the answer-only replay instead.
+fn answers_regimen() -> HeadFile {
+    let tools = std::fs::read_to_string(replay_regimen()).expect("the rehearsal regimen");
+    let fingerprint = |acts: &str| diet::drive::canned::hardware_fingerprint(acts);
+    let answers = tools
+        .replace(
+            "substrate = \"canned-replay-tools\"",
+            "substrate = \"canned-replay\"",
+        )
+        .replace(
+            &fingerprint(&diet::drive::canned::replay_tools_digest()),
+            &fingerprint(&diet::drive::canned::replay_digest()),
+        );
+    assert_ne!(answers, tools);
+    file_holding("regimen", &answers)
+}
+
 /// #411's acceptance: a model-less `serve --record` under the rehearsal
 /// regimen -- commands allowed, an approval policy, a worktree -- against
 /// `diet-drive replay` records real turns. The engine check passes on the
@@ -2473,7 +2497,9 @@ fn replay_regimen() -> String {
 /// cited engine. Nothing is left unspellable but the asks.
 #[test]
 fn a_drive_server_records_real_turns_against_the_stream_replay_substrate() {
-    let replayed = replaying();
+    let replayed = replaying(true);
+    let regimen = answers_regimen();
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
     let tree = Dir::new("replay-tree");
     let auth = file_holding("auth", "author:s3cret\n");
     let auth_path = auth.0.to_string_lossy().into_owned();
@@ -2483,7 +2509,7 @@ fn a_drive_server_records_real_turns_against_the_stream_replay_substrate() {
         &replayed.endpoint,
         &[
             "--regimen",
-            &replay_regimen(),
+            &regimen_path,
             "--worktree",
             &tree.path(),
             "--auth-file",
@@ -2566,7 +2592,7 @@ fn a_drive_server_records_real_turns_against_the_stream_replay_substrate() {
 /// rehearsal regimen is refused against the canned server.
 #[test]
 fn the_stream_replay_and_the_canned_server_each_pass_only_their_own_regimen() {
-    let replayed = replaying();
+    let replayed = replaying(false);
     let refused = Command::new(DRIVE)
         .args([
             "serve",
@@ -2607,4 +2633,138 @@ fn the_stream_replay_and_the_canned_server_each_pass_only_their_own_regimen() {
         .output()
         .expect("diet-drive runs");
     assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+}
+
+/// The tool-turn replay through the gate (#411's follow-up): each ask is
+/// answered with the captured `bash` call of `ls | wc -l`. On turn one `wc`
+/// is not in the regimen's allowed set, so the call waits on the operator;
+/// approved for the session, it runs in the worktree, its output goes back
+/// as a tool message, and the captured answer settles the turn `final`. On
+/// turn two the standing approval covers it and nothing prompts. The record
+/// reads, with a row for each call.
+#[test]
+fn the_tool_turn_replay_runs_a_call_through_the_gate_and_its_approval() {
+    let replayed = replaying(false);
+    let tree = Dir::new("replay-tools-tree");
+    let state = Dir::new("replay-tools-state");
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let served = start_with(
+        &replayed.endpoint,
+        &[
+            "--regimen",
+            &replay_regimen(),
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--record",
+            &path,
+        ],
+        &[("XDG_STATE_HOME", &state.path())],
+    );
+    assert_eq!(served.substrate.as_deref(), Some("canned-replay-tools"));
+    let address = served.listening.clone();
+    let reply = post_authed(&address, "/commands", r#"{"kind":"ask","text":"count"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let read = events_authed(&address, |read| read.contains("event: waiting"));
+    let waiting = read
+        .split("event: waiting\ndata: ")
+        .nth(1)
+        .and_then(|rest| rest.split('\n').next())
+        .unwrap_or_else(|| panic!("no prompt: {read}"));
+    let prompt = log_line_object(waiting);
+    assert_eq!(prompt["command"], "ls | wc -l", "{prompt}");
+    let approve = format!(
+        r#"{{"call":"{}","scope":"session"}}"#,
+        prompt["id"].as_str().expect("the call's id")
+    );
+    let reply = post_authed(&address, "/approve", &approve);
+    assert_eq!(status(&reply), 204, "{reply}");
+    events_authed(&address, |read| {
+        read.matches(r#""reason":"final""#).count() >= 1
+    });
+    let reply = post_authed(&address, "/commands", r#"{"kind":"ask","text":"again"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let read = events_authed(&address, |read| {
+        read.matches(r#""reason":"final""#).count() >= 2
+    });
+    assert_eq!(
+        read.matches("event: waiting").count(),
+        0,
+        "a fresh stream shows no prompt once both turns settled: {read}"
+    );
+    let reply = post_authed(&address, "/commands", r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _report = served
+        .said
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the record's report");
+    the_tool_turn_record_reads(&record.0);
+    let _ = std::fs::remove_file(format!("{path}.unspellable.json"));
+}
+
+/// The tool-turn replay's record: `diet check-record` reads it, each turn is
+/// one call and then its answer, and turn one's call was approved for the
+/// session at its prompt while turn two's was covered without one.
+fn the_tool_turn_record_reads(record: &std::path::Path) {
+    let checked = Command::new(DIET)
+        .args(["check-record"])
+        .arg(record)
+        .output()
+        .expect("diet runs");
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&checked.stdout)
+    );
+    let written = std::fs::read_to_string(record).expect("the record");
+    let kinds: Vec<String> = written
+        .lines()
+        .map(|line| {
+            log_line_object(line)["record"]
+                .as_str()
+                .expect("a row's kind")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "start",
+            "turn",
+            "request",
+            "response",
+            "tool_call",
+            "request",
+            "prefix.changed",
+            "response",
+            "turn",
+            "request",
+            "prefix.changed",
+            "response",
+            "tool_call",
+            "request",
+            "prefix.changed",
+            "response",
+            "summary",
+        ],
+        "one call, then its answer, each turn: {written}"
+    );
+    let calls: Vec<serde_json::Value> = written
+        .lines()
+        .map(log_line_object)
+        .filter(|row| row["record"] == "tool_call")
+        .collect();
+    assert_eq!(calls[0]["outcome"], "ran", "{written}");
+    assert_eq!(calls[0]["approval"]["scope"], "session", "{written}");
+    assert_eq!(calls[0]["approval"]["why"], "not_approved", "{written}");
+    assert_eq!(calls[1]["outcome"], "ran", "{written}");
+    assert!(
+        calls[1]["approval"].get("why").is_none(),
+        "turn two's call was standing, not prompted: {written}"
+    );
 }
