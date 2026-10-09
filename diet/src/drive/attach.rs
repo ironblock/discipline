@@ -255,8 +255,9 @@ pub fn attached(text: &str, attaching: &Attaching) -> Result<Attached, Unattacha
 
 /// [`attached`], with `uploads` -- PNGs posted to `/files` and named by the
 /// ask's `files` (#513) -- attached first, in their order, then the PNGs
-/// `text` names. With a recording each upload's copy is kept again (whole,
-/// or refused) and named on the `ask` line before the named files.
+/// `text` names. Each upload is named on the `ask` line before the named
+/// files, recording or not; with a recording its copy is kept again (whole,
+/// or refused).
 ///
 /// # Errors
 ///
@@ -298,15 +299,20 @@ pub fn attached_with(
         })?;
     }
     let mut files = Vec::new();
-    if let Some(recording) = &attaching.recording {
-        for upload in uploads {
+    // An upload is named on the line with or without a recording: serve
+    // holds its bytes for the session and answers them at `GET
+    // /files/<sha256>`, so the reference names something either way (#513).
+    for upload in uploads {
+        if let Some(recording) = &attaching.recording {
             kept(recording, &upload.file, &upload.bytes).map_err(|(check, why)| Unattachable {
                 path: upload.file.sha256.clone(),
                 check,
                 why,
             })?;
-            files.push(upload.file.clone());
         }
+        files.push(upload.file.clone());
+    }
+    if let Some(recording) = &attaching.recording {
         for (named, file, bytes) in &found {
             kept(recording, file, bytes).map_err(|(check, why)| Unattachable {
                 path: (*named).to_owned(),
