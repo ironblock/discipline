@@ -1,0 +1,5 @@
+{
+ "recipe": "sha256 of the canonical JSON below (sorted keys, no spaces); the directory is named by its first 12 hex characters",
+ "canonical": "{\"engine\":\"61b380f214eefea2bd731a027e5341081ff49369dec8695e997acfcf98c10b52\",\"reasoning_state\":\"reasoning true with template_vars_default preserve_thinking true; no effort or budget on the line (reasoning_effort high, none and max are refused with 400)\",\"serving_line\":\"backend exllamav3, max_seq_len 163840, cache_size 163840, cache_mode 8,8, max_batch_size 2, chunk_size 2048, warmup true, sampling override_preset qwen38_thinking, vision true with the tower offloaded, draft_mode model with draft_cache_mode 8,8, auth disabled\",\"template\":\"c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041\",\"weights\":{\"drafter\":\"f2a397842bcc0c845ce0bd20253395958052308d4fb6eae65138c47e0b516733\",\"main_shard1\":\"f9f4afe5fc1a2d67ca547c8dcde0f043eb226018257cdbde7c50a0956cddb822\",\"main_shard2\":\"d13331e7a531dc2a6e94df6470d5bffa07b13e15912466242b7283469cd58179\"}}",
+ "sha256": "3060052d6cb9caa55fc4784c17dc13eb3e8dabe6434d5403e821b88110e71954"
+}

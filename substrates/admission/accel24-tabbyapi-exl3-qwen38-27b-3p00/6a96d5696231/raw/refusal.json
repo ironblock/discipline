@@ -1,0 +1,28 @@
+{
+ "candidate": {
+  "high": {
+   "endpoint": "/v1/chat/completions",
+   "status": 400,
+   "body_sha256": "894929f20a8065a9bd4178e59ecd2a980e9d660d67bd9afbdd4bb09bb6d4171c",
+   "body_head": "{\"detail\":\"TemplateError: Unexpected reasoning effort high. Supported types are xhigh (default), medium, and low.\"}"
+  },
+  "none": {
+   "endpoint": "/v1/chat/completions",
+   "status": 400,
+   "body_sha256": "8243d0aeced9fbc42925e280622e05d3df4fa0ad517ccdb02141db88dda7b9de",
+   "body_head": "{\"detail\":\"TemplateError: Unexpected reasoning effort none. Supported types are xhigh (default), medium, and low.\"}"
+  },
+  "max": {
+   "endpoint": "/v1/chat/completions",
+   "status": 400,
+   "body_sha256": "1f207524f943362f8e4b99c9f9715cdf1f2af7517636787903423c7f5b854349",
+   "body_head": "{\"detail\":\"TemplateError: Unexpected reasoning effort max. Supported types are xhigh (default), medium, and low.\"}"
+  },
+  "low": {
+   "endpoint": "/v1/chat/completions",
+   "status": 200,
+   "body_sha256": "e5f57b0d4d2c41400c39e96a9be7e5fd7460a0f2af017be1375e3c3ee2157fea",
+   "body_head": "{\"id\":\"cmpl-505c528623c14196857c6ce0c879fbd5\",\"choices\":[{\"index\":0,\"finish_reason\":\"length\",\"eos_reason\":\"max_new_tokens\",\"stop_str\":null,\"message\":{\"role\":\"assistant\",\"content\":\"\\n\\n144\",\"reasoning_content\":\"The user is asking for 12 times 12, which is 144. They want the number only.\\n\",\"tool_call"
+  }
+ }
+}
