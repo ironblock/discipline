@@ -46,6 +46,8 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
   const [draft, setDraft] = useState('');
   // The operator's attachments (#372): uploaded as they are added, named by digest on the next ask, cleared once taken.
   const [attached, setAttached] = useState<readonly Attached[]>([]);
+  // Uploads still out: an ask waits for them, so a screenshot never rides the ask after the one it was meant for.
+  const [uploading, setUploading] = useState(0);
   const picker = useRef<HTMLInputElement>(null);
   const urls = useRef(new Set<string>());
   useEffect(() => () => urls.current.forEach((url) => URL.revokeObjectURL(url)), []);
@@ -72,29 +74,35 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
   };
   const run = (command: Command) => dispatch && void dispatch(command).then(answer);
 
-  const attachable = idle && dispatch !== undefined && upload !== undefined;
+  // Whenever the operator can type: an upload does not depend on what the session is doing (`POST /files`).
+  const attachable = dispatch !== undefined && upload !== undefined && link === 'live' && state !== 'ended' && state !== 'connecting';
   const attach = async (files: readonly File[]) => {
     if (!attachable) return;
+    setUploading((n) => n + files.length);
     for (const file of files) {
-      const taken = await upload(new Uint8Array(await file.arrayBuffer()));
-      if (!taken.ok) {
-        answer(taken);
-        continue;
+      try {
+        const taken = await upload(new Uint8Array(await file.arrayBuffer()));
+        if (!taken.ok) {
+          answer(taken);
+          continue;
+        }
+        const url = URL.createObjectURL(file);
+        urls.current.add(url);
+        setAttached((now) => (now.some((a) => a.sha256 === taken.sha256) ? now : [...now, { sha256: taken.sha256, name: file.name || 'pasted image', url }]));
+        setRefusal(undefined);
+      } finally {
+        setUploading((n) => n - 1);
       }
-      const url = URL.createObjectURL(file);
-      urls.current.add(url);
-      setAttached((now) => (now.some((a) => a.sha256 === taken.sha256) ? now : [...now, { sha256: taken.sha256, name: file.name || 'pasted image', url }]));
-      setRefusal(undefined);
     }
   };
-  const detach = (sha256: string) =>
+  /** Take the chips whose digests are DIGESTS off the composer, and let their pictures go. */
+  const detach = (digests: readonly string[]) =>
     setAttached((now) => {
-      const gone = now.find((a) => a.sha256 === sha256);
-      if (gone) {
+      for (const gone of now.filter((a) => digests.includes(a.sha256))) {
         URL.revokeObjectURL(gone.url);
         urls.current.delete(gone.url);
       }
-      return now.filter((a) => a.sha256 !== sha256);
+      return now.filter((a) => !digests.includes(a.sha256));
     });
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const images = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
@@ -120,14 +128,15 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
 
   const send = async (e?: FormEvent) => {
     e?.preventDefault();
-    if (!dispatch || !idle || draft.trim() === '') return;
+    if (!dispatch || !idle || draft.trim() === '' || uploading > 0) return;
     const files = attached.map((a) => a.sha256);
     const ack = await dispatch({ kind: 'ask', text: draft.trim(), ...(scoping ? { scoping: true as const } : {}), ...(files.length > 0 ? { files } : {}) });
     answer(ack);
     if (ack.ok) {
       setDraft('');
       setScoping(false);
-      setAttached([]);
+      // Only what this ask named: a chip added while it was out rides the next one.
+      detach(files);
     }
   };
 
@@ -154,7 +163,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
           {attached.map((a) => (
             <li key={a.sha256} className="ex-composer__file" data-sha256={a.sha256}>
               <img src={a.url} alt={a.name} />
-              <button type="button" aria-label={`remove ${a.name}`} title={`remove ${a.name}`} onClick={() => detach(a.sha256)}>
+              <button type="button" aria-label={`remove ${a.name}`} title={`remove ${a.name}`} onClick={() => detach([a.sha256])}>
                 ×
               </button>
             </li>
@@ -215,33 +224,33 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
             refill
           </button>
         </span>
+        {upload ? (
+          <>
+            {/* The operator's screenshot (#372): picked, pasted or dropped, sent to the drive now, named by the ask. */}
+            <input
+              ref={picker}
+              type="file"
+              accept="image/png"
+              multiple
+              hidden
+              aria-label="attach a PNG"
+              onChange={(e) => {
+                const files = [...(e.target.files ?? [])];
+                e.target.value = '';
+                void attach(files);
+              }}
+            />
+            <button type="button" className="ex-composer__attach" disabled={!attachable} title="attach a PNG: or paste or drop one here" onClick={() => picker.current?.click()}>
+              attach
+            </button>
+          </>
+        ) : null}
         {running ? (
           <button type="button" className="ex-composer__cancel" disabled={!dispatch} onClick={() => run({ kind: 'cancel' })}>
             cancel
           </button>
         ) : (
           <>
-            {upload ? (
-              <>
-                {/* The operator's screenshot (#372): picked, pasted or dropped, sent to the drive now, named by the ask. */}
-                <input
-                  ref={picker}
-                  type="file"
-                  accept="image/png"
-                  multiple
-                  hidden
-                  aria-label="attach a PNG"
-                  onChange={(e) => {
-                    const files = [...(e.target.files ?? [])];
-                    e.target.value = '';
-                    void attach(files);
-                  }}
-                />
-                <button type="button" className="ex-composer__attach" disabled={!attachable} title="attach a PNG: or paste or drop one here" onClick={() => picker.current?.click()}>
-                  attach
-                </button>
-              </>
-            ) : null}
             {/* The operator's mark (#453): this ask is the scope answer, whose settled turn warrants the interview fork. */}
             <button
               type="button"
@@ -253,7 +262,7 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
             >
               scope answer
             </button>
-            <button type="submit" className="ex-composer__send" disabled={!idle || !dispatch || draft.trim() === ''}>
+            <button type="submit" className="ex-composer__send" disabled={!idle || !dispatch || draft.trim() === '' || uploading > 0} title={uploading > 0 ? 'waiting for the attachment to reach the drive' : undefined}>
               {scoping ? 'send as scope answer' : 'send'}
             </button>
           </>

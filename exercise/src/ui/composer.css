@@ -59,6 +59,7 @@
     margin-left: auto;
   }
   .ex-composer__attach + .ex-composer__scope,
+  .ex-composer__attach + .ex-composer__cancel,
   .ex-composer__scope + .ex-composer__send {
     margin-left: 0;
   }

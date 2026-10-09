@@ -11,7 +11,7 @@ import { Cable } from '../ui/Cable.tsx';
 import { Copy } from '../ui/Copy.tsx';
 import { Flowing } from '../ui/Flowing.tsx';
 import { Composer } from '../ui/Composer.tsx';
-import type { Command } from '../drive/transport.ts';
+import type { Ack, Command, Uploaded } from '../drive/transport.ts';
 import type { ComposerProps } from '../ui/Composer.tsx';
 import { Preferred, Settings } from '../ui/Prefs.tsx';
 import { Memory } from '../ui/Memory.tsx';
@@ -1196,5 +1196,96 @@ export const EndDisarmedWhenNotIdle: Story = {
     await new Promise((resolve) => setTimeout(resolve, 600));
     await userEvent.click(end);
     await expect(canvasElement.querySelector('[data-probe="sent"]')?.textContent).toBe('');
+  },
+};
+
+/** Held open until the story lets go: an upload, or an ask's answer. */
+function held<T>() {
+  let release!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => (release = resolve));
+  return { promise, release };
+}
+
+/**
+ * The composer's attachments against a drive the story paces (#515's review): each upload waits on `uploads[i]`,
+ * each ask on `asks[i]`, and what was asked is listed. The state toggles between idle and a running turn.
+ */
+const attachDrive = { uploads: [] as ReturnType<typeof held<Uploaded>>[], asks: [] as ReturnType<typeof held<Ack>>[], sent: [] as Command[] };
+function AttachHarness() {
+  const [state, setState] = useState<SessionState>('awaiting');
+  return (
+    <div>
+      <Composer
+        state={state}
+        phase="spec"
+        phases={PHASES}
+        dispatch={(c) => {
+          attachDrive.sent.push(c);
+          const ask = held<Ack>();
+          attachDrive.asks.push(ask);
+          return ask.promise;
+        }}
+        upload={() => {
+          const upload = held<Uploaded>();
+          attachDrive.uploads.push(upload);
+          return upload.promise;
+        }}
+      />
+      <button type="button" data-probe="busy" onClick={() => setState('turn')}>
+        busy
+      </button>
+    </div>
+  );
+}
+const pick = async (root: HTMLElement, name: string) =>
+  userEvent.upload(root.querySelector('input[aria-label="attach a PNG"]') as HTMLInputElement, new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: 'image/png' }));
+const chips = (root: HTMLElement) => [...root.querySelectorAll('.ex-composer__file img')].map((i) => i.getAttribute('alt'));
+const fresh = () => Object.assign(attachDrive, { uploads: [], asks: [], sent: [] });
+
+export const AttachHoldsSend: Story = {
+  name: 'Composer · send waits for an upload in flight, and takes only the chips it sent',
+  render: () => <AttachHarness />,
+  play: async ({ canvasElement }) => {
+    fresh();
+    const send = canvasElement.querySelector('.ex-composer__send') as HTMLButtonElement;
+    await pick(canvasElement, 'a.png');
+    await userEvent.type(canvasElement.querySelector('textarea') as HTMLTextAreaElement, 'look{Enter}');
+    // The upload is still out: nothing goes, and the button says it cannot.
+    await expect(attachDrive.sent).toEqual([]);
+    await expect(send.disabled).toBe(true);
+    attachDrive.uploads[0]!.release({ ok: true, sha256: 'a'.repeat(64), bytes: 4 });
+    await waitFor(async () => expect(chips(canvasElement)).toEqual(['a.png']));
+    await waitFor(async () => expect(send.disabled).toBe(false));
+    const revoked: string[] = [];
+    const revoke = URL.revokeObjectURL;
+    URL.revokeObjectURL = (url: string) => (revoked.push(url), revoke.call(URL, url));
+    try {
+      const urlA = (canvasElement.querySelector('.ex-composer__file img') as HTMLImageElement).src;
+      await userEvent.click(send);
+      await expect(attachDrive.sent).toEqual([{ kind: 'ask', text: 'look', files: ['a'.repeat(64)] }]);
+      // A chip added while that ask is out is not the ask's: taken, the ask clears only its own.
+      await pick(canvasElement, 'b.png');
+      attachDrive.uploads[1]!.release({ ok: true, sha256: 'b'.repeat(64), bytes: 4 });
+      await waitFor(async () => expect(chips(canvasElement)).toEqual(['a.png', 'b.png']));
+      attachDrive.asks[0]!.release({ ok: true });
+      await waitFor(async () => expect(chips(canvasElement)).toEqual(['b.png']));
+      await expect(revoked).toEqual([urlA]);
+    } finally {
+      URL.revokeObjectURL = revoke;
+    }
+  },
+};
+
+export const AttachWhileRunning: Story = {
+  name: 'Composer · a screenshot can be attached while a turn runs',
+  render: () => <AttachHarness />,
+  play: async ({ canvasElement }) => {
+    fresh();
+    (canvasElement.querySelector('[data-probe="busy"]') as HTMLButtonElement).click();
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__cancel')).not.toBeNull());
+    await pick(canvasElement, 'during.png');
+    await waitFor(async () => expect(attachDrive.uploads).toHaveLength(1));
+    attachDrive.uploads[0]!.release({ ok: true, sha256: 'c'.repeat(64), bytes: 4 });
+    await waitFor(async () => expect(chips(canvasElement)).toEqual(['during.png']));
   },
 };
