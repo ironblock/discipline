@@ -193,6 +193,15 @@ export interface Serving {
   concurrency?: number;
 }
 
+export interface TemplateKwargs {
+  enable_thinking?: boolean;
+  reasoning_effort?: string;
+}
+
+export interface Unsent {
+  budget_tokens: number;
+}
+
 export interface ToolCallPiece {
   index: number;
   id?: string;
@@ -240,6 +249,8 @@ export type SessionStartLine = {
   served?: ServedField[];
   provenance?: Provenance;
   tools?: string[];
+  template_kwargs?: TemplateKwargs;
+  unsent?: Unsent;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {

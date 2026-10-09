@@ -285,9 +285,14 @@ pub fn project_in(
     recording: Option<&std::path::Path>,
 ) -> Result<Projection, String> {
     let Some(log::Line {
-        event: Line::SessionStart {
-            model, head, tools, ..
-        },
+        event:
+            Line::SessionStart {
+                model,
+                head,
+                tools,
+                template_kwargs,
+                ..
+            },
         ..
     }) = lines.first()
     else {
@@ -301,6 +306,7 @@ pub fn project_in(
     let mut walk = Walk::over(lines, substrate, engine);
     walk.recording = recording.map(std::path::Path::to_path_buf);
     walk.tools = tools_of(tools.as_deref().unwrap_or_default());
+    walk.template_kwargs = kwargs_of(template_kwargs.as_ref());
     walk.model.clone_from(model);
     walk.head = head
         .iter()
@@ -364,6 +370,9 @@ struct Walk<'a> {
     /// The tools the session's requests declared, rebuilt from
     /// `session.start`'s names (#472), or why they cannot be.
     tools: Result<Vec<ToolDefinition>, String>,
+    /// The template variables every request sent, from `session.start`
+    /// (v7, R1).
+    template_kwargs: BTreeMap<String, crate::formats::record::json::Value>,
     /// The trunk requests that were tool steps: a `tool_call` line cites
     /// them.
     stepped: BTreeSet<u64>,
@@ -406,6 +415,24 @@ impl Step {
         }));
         messages
     }
+}
+
+/// The template variables `session.start` says every request sent (R1), as
+/// a request carries them.
+fn kwargs_of(
+    kwargs: Option<&log::TemplateKwargs>,
+) -> BTreeMap<String, crate::formats::record::json::Value> {
+    use crate::formats::record::json::Value;
+    let mut sent = BTreeMap::new();
+    if let Some(kwargs) = kwargs {
+        if let Some(thinking) = kwargs.enable_thinking {
+            sent.insert("enable_thinking".to_owned(), Value::Boolean(thinking));
+        }
+        if let Some(effort) = &kwargs.reasoning_effort {
+            sent.insert("reasoning_effort".to_owned(), Value::String(effort.clone()));
+        }
+    }
+    sent
 }
 
 /// The tools `session.start` names, as the session declared them (#472):
@@ -473,6 +500,7 @@ impl<'a> Walk<'a> {
             recording: None,
             ask_files: BTreeMap::new(),
             tools: Ok(Vec::new()),
+            template_kwargs: BTreeMap::new(),
             stepped,
             steps: BTreeMap::new(),
             trunk_unrebuilt: None,
@@ -919,8 +947,9 @@ impl<'a> Walk<'a> {
                 retries: 0,
             },
             grammar: None,
-            // ASSERTED by the digest check below: `serve`'s trunk sends none.
-            template_kwargs: BTreeMap::new(),
+            // From `session.start` (R1), and ASSERTED by the digest check
+            // below: a kwarg the log cannot carry leaves the head unverified.
+            template_kwargs: self.template_kwargs.clone(),
             // The session's declared tools, from `session.start` (#472).
             tools: self.tools.clone().unwrap_or_default(),
         });
@@ -1191,6 +1220,8 @@ mod tests {
             claim: None,
             provenance: None,
             tools: None,
+            template_kwargs: None,
+            unsent: None,
         }
     }
 
@@ -1689,13 +1720,14 @@ mod tests {
 
     #[test]
     fn a_trunk_with_a_shape_the_rebuild_does_not_assume_is_unattributed() {
-        // The rebuild assumes no kwargs and no tools (ruled on #157); a trunk
-        // that sends kwargs is caught by the digest, not rebuilt wrong.
+        // The rebuild carries only the kwargs `session.start` names (R1); a
+        // trunk that sends one the log cannot carry is caught by the digest,
+        // not rebuilt wrong.
         let log = a_real_session_log_shaped(
             None,
             BTreeMap::from([(
-                "enable_thinking".to_owned(),
-                crate::formats::record::json::Value::Boolean(false),
+                "thinking_budget".to_owned(),
+                crate::formats::record::json::Value::Integer(512),
             )]),
         );
         let projection = project(&log, &regime(), None).expect("projected");
@@ -1710,6 +1742,45 @@ mod tests {
         assert_eq!(reasons, [&PrefixReason::Unattributed]);
         assert!(
             projection
+                .unspellable
+                .iter()
+                .any(|item| item.why.starts_with("its head could not be rebuilt")),
+            "{:?}",
+            projection.unspellable
+        );
+    }
+
+    #[test]
+    fn a_trunk_sending_the_reasoning_state_is_rebuilt_from_its_start() {
+        // R1: `enable_thinking` and `reasoning_effort` are logged on
+        // `session.start`, so the rebuilt head carries them and verifies.
+        let log = a_real_session_log_shaped(
+            None,
+            BTreeMap::from([
+                (
+                    "enable_thinking".to_owned(),
+                    crate::formats::record::json::Value::Boolean(true),
+                ),
+                (
+                    "reasoning_effort".to_owned(),
+                    crate::formats::record::json::Value::String("medium".to_owned()),
+                ),
+            ]),
+        );
+        let projection = project(&log, &regime(), None).expect("projected");
+        assert!(
+            !projection.events.iter().any(|event| matches!(
+                event,
+                Event::PrefixChanged {
+                    reason: PrefixReason::Unattributed,
+                    ..
+                }
+            )),
+            "{:?}",
+            projection.events
+        );
+        assert!(
+            !projection
                 .unspellable
                 .iter()
                 .any(|item| item.why.starts_with("its head could not be rebuilt")),

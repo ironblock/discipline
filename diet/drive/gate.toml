@@ -4176,9 +4176,9 @@ failure_class = "drive.serve-pins-no-sampler"
 target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
-    let shape = trunk(model, system, max_output_tokens, sampler);'''
+    let mut shape = trunk(model, system, max_output_tokens, sampler);'''
 becomes = '''
-    let shape = trunk(model, system, max_output_tokens, SamplerCard::empty());
+    let mut shape = trunk(model, system, max_output_tokens, SamplerCard::empty());
     let _ = sampler;'''
 catches = [
     "a_drive_server_pins_the_regimens_sampler_on_the_trunk_and_the_fork_as_its_record_claims",

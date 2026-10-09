@@ -305,7 +305,24 @@ fn serve(args: &[String]) -> ExitCode {
             return fail(EXIT_USAGE, &format!("{path}: {why}"));
         }
     };
-    let shape = trunk(model, system, max_output_tokens, sampler);
+    let mut shape = trunk(model, system, max_output_tokens, sampler);
+    // The regime's reasoning state, on every request, the forks' included
+    // (R1): a clone of the trunk carries it.
+    // A budget no template variable carries is recorded and announced as
+    // unsent, never refused for being missing (duty of care).
+    let mut unsent_budget = None;
+    if let Some(regime) = regime.as_ref() {
+        match diet::drive::regimen::template_kwargs(&regime.substrates[0]) {
+            Ok((kwargs, unsent)) => {
+                shape.template_kwargs = kwargs;
+                unsent_budget = unsent;
+            }
+            Err(why) => {
+                let path = regimen_file.as_deref().unwrap_or_default();
+                return fail(EXIT_USAGE, &format!("{path}: {why}"));
+            }
+        }
+    }
     if record_file.is_some() && regime.is_none() {
         return fail(EXIT_USAGE, RECORD_NEEDS_A_REGIMEN);
     }
@@ -389,7 +406,12 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
-    let session = served_session(transport, (shape, dialect), tools, (claim, interview));
+    let session = served_session(
+        transport,
+        (shape, dialect),
+        tools,
+        (claim, interview, unsent_budget),
+    );
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
     // Where the projection reads an attached file back from (#372): the
@@ -424,6 +446,7 @@ fn serve(args: &[String]) -> ExitCode {
             engine.as_ref(),
             log_path.as_deref().zip(running.log_held),
             record_file.as_deref().zip(running.record_held),
+            unsent_budget,
         )
     );
     ended(&watching, running)
@@ -576,16 +599,17 @@ fn served_session(
     transport: HttpStream,
     (mut shape, dialect): (RequestShape, Dialect),
     tools: Option<Tools>,
-    (claim, interview): (
+    (claim, interview, unsent_budget): (
         Option<diet::formats::log::SubstrateClaim>,
         Option<Interview>,
+        Option<u64>,
     ),
 ) -> std::sync::Arc<Session<HttpStream>> {
     // A session that runs commands declares the one tool they run through.
     if tools.is_some() {
         shape.tools = vec![tool_loop::bash_tool()];
     }
-    std::sync::Arc::new(Session::open_with(
+    std::sync::Arc::new(Session::open_declaring(
         transport,
         shape,
         Some(Serving {
@@ -593,8 +617,11 @@ fn served_session(
             dialect,
         }),
         tools,
-        claim,
-        interview,
+        (
+            claim,
+            interview,
+            unsent_budget.map(|budget_tokens| diet::formats::log::Unsent { budget_tokens }),
+        ),
     ))
 }
 
@@ -1171,6 +1198,7 @@ fn announcement(
     engine: Option<&diet::drive::engine::Passed>,
     log: Option<(&str, bool)>,
     record: Option<(&str, bool)>,
+    unsent_budget: Option<u64>,
 ) -> String {
     let mut fields = BTreeMap::from([
         ("listening".to_owned(), Value::String(listening.to_owned())),
@@ -1199,6 +1227,14 @@ fn announcement(
         fields.insert(
             "engine_identity".to_owned(),
             Value::String(engine.identity.tag().to_owned()),
+        );
+    }
+    // A budget the regime declares and no request carries (R1): said, so
+    // the operator knows the cap is not in force.
+    if let Some(budget) = unsent_budget {
+        fields.insert(
+            "budget_tokens_unsent".to_owned(),
+            Value::Integer(i64::try_from(budget).unwrap_or(i64::MAX)),
         );
     }
     // Where the log is written, and whether naming it emptied a file that

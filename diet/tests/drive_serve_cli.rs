@@ -42,6 +42,8 @@ struct Served {
     engine_build: Option<String>,
     /// And how the engine's identity was established.
     engine_identity: Option<String>,
+    /// A reasoning budget the regime declares and no request carries (R1).
+    budget_tokens_unsent: Option<u64>,
     /// Where `--log` writes, and whether naming it emptied a file.
     log: Option<(String, bool)>,
     /// Where `--record` writes, and whether naming it emptied anything.
@@ -119,6 +121,7 @@ fn start_with(endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
         registry_sha256: announced["registry_sha256"].as_str().map(str::to_owned),
         engine_build: announced["engine_build"].as_str().map(str::to_owned),
         engine_identity: announced["engine_identity"].as_str().map(str::to_owned),
+        budget_tokens_unsent: announced["budget_tokens_unsent"].as_u64(),
         log: announced["log"]
             .as_str()
             .zip(announced["log_truncated"].as_bool())
@@ -2293,6 +2296,12 @@ fn a_drive_server_pins_the_regimens_sampler_on_the_trunk_and_the_fork_as_its_rec
             pinned,
             "the {lane}'s sampler fields: {body}"
         );
+        // R1: the regime's reasoning state, on the fork as on the trunk.
+        assert_eq!(
+            log_line_object(body)["chat_template_kwargs"],
+            serde_json::json!({"enable_thinking": false}),
+            "the {lane}'s template kwargs: {body}"
+        );
         for written in [
             r#""temperature":0.6,"#,
             r#""top_k":20,"#,
@@ -2320,6 +2329,44 @@ fn a_drive_server_pins_the_regimens_sampler_on_the_trunk_and_the_fork_as_its_rec
         );
     }
     let _ = std::fs::remove_file(format!("{path}.unspellable.json"));
+}
+
+#[test]
+fn a_drive_server_records_and_announces_a_reasoning_budget_it_cannot_send() {
+    // R1, duty of care: no chat template has a variable for a budget, so it
+    // is not sent -- and nothing refuses for that. The announcement says so,
+    // `session.start` records it beside what was sent, and serve starts.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let whole = std::fs::read_to_string(dev_loop()).expect("the dev loop's regimen");
+    let regimen = file_holding(
+        "regimen",
+        &whole
+            .replace(
+                "substrate_reasoning = \"off\"",
+                "substrate_reasoning = \"on\"",
+            )
+            .replace(
+                "\n[sampler]\n",
+                "\n[reasoning]\neffort = \"medium\"\nbudget_tokens = 512\n\n[sampler]\n",
+            ),
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+    assert_eq!(served.budget_tokens_unsent, Some(512));
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["unsent"],
+        serde_json::json!({"budget_tokens": 512}),
+        "{start_line}"
+    );
+    assert_eq!(
+        start_line["template_kwargs"],
+        serde_json::json!({"enable_thinking": true, "reasoning_effort": "medium"}),
+        "{start_line}"
+    );
 }
 
 #[test]

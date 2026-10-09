@@ -209,6 +209,58 @@ pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, St
     Ok(regime)
 }
 
+/// The `chat_template_kwargs` a session sends on every request (R1): the
+/// reasoning state the regime requests, in the template's own words.
+/// `enable_thinking` is `false` under `off` and `true` under `on` or
+/// `suppressed` (both requested it); `reasoning_effort` is `[reasoning]`'s
+/// level, as written, since the levels are the template's (the 3.8's knows
+/// `low`, `medium` and `xhigh`, and `high` is a 400). Nothing is sent for an
+/// `undeclared` state.
+///
+/// A token budget no chat template here has a variable for is returned
+/// beside them as unsent: best effort in the duty-of-care sense, recorded on
+/// `session.start` and announced, never refused for being missing.
+///
+/// # Errors
+///
+/// A level with thinking `off`: the declaration contradicts itself, and that
+/// is the operator's to fix.
+pub fn template_kwargs(
+    substrate: &Substrate,
+) -> Result<(BTreeMap<String, Value>, Option<u64>), String> {
+    let mut kwargs = BTreeMap::new();
+    let thinking = match substrate.reasoning {
+        Reasoning::Off => Some(false),
+        Reasoning::On | Reasoning::Suppressed => Some(true),
+        Reasoning::Undeclared => None,
+    };
+    if let Some(thinking) = thinking {
+        kwargs.insert("enable_thinking".to_owned(), Value::Boolean(thinking));
+    }
+    if let Some(control) = &substrate.reasoning_control {
+        if thinking == Some(false) {
+            return Err(format!(
+                "`[reasoning]` names the level \"{}\" and `substrate_reasoning` is \"off\": a \
+                 level instructs thinking that was not requested",
+                control.effort
+            ));
+        }
+        kwargs.insert(
+            "reasoning_effort".to_owned(),
+            Value::String(control.effort.clone()),
+        );
+    }
+    let unsent =
+        substrate
+            .reasoning_control
+            .as_ref()
+            .and_then(|control| match control.budget_tokens {
+                crate::formats::record::Budget::Tokens(cap) => Some(cap.get()),
+                crate::formats::record::Budget::Uncapped => None,
+            });
+    Ok((kwargs, unsent))
+}
+
 /// The pins a request sends for `card`, a regime's `sampler_card`: one per
 /// setting, each the very value the record holds (#486).
 ///
@@ -433,6 +485,46 @@ mod tests {
             refused.contains("`nowhere-at-all` is not a substrate"),
             "{refused}"
         );
+    }
+
+    /// R1: the regime's reasoning state as the template variables every
+    /// request sends.
+    #[test]
+    fn the_reasoning_state_is_sent_in_the_templates_words() {
+        use crate::formats::record::json::Value;
+        use std::collections::BTreeMap;
+        let kwargs = |reasoning: &str, table: &str| {
+            let text = format!(
+                "arm = \"a\"\ndogma_version = 0\nsubstrate = \"canned\"\n\
+                 substrate_reasoning = \"{reasoning}\"\nsubstrate_hardware = \"{}\"\n\
+                 {table}[sampler]\nseed = 7\n",
+                "a".repeat(64)
+            );
+            let regime =
+                regime_of(&regimen::parse(&text).expect("a regimen"), false).expect("a regime");
+            super::template_kwargs(&regime.substrates[0])
+        };
+        assert_eq!(
+            kwargs("off", ""),
+            Ok((
+                BTreeMap::from([("enable_thinking".to_owned(), Value::Boolean(false))]),
+                None
+            ))
+        );
+        let level = "[reasoning]\neffort = \"medium\"\nbudget_tokens = \"none\"\n";
+        let medium = BTreeMap::from([
+            ("enable_thinking".to_owned(), Value::Boolean(true)),
+            (
+                "reasoning_effort".to_owned(),
+                Value::String("medium".to_owned()),
+            ),
+        ]);
+        assert_eq!(kwargs("on", level), Ok((medium.clone(), None)));
+        let refused = kwargs("off", level).expect_err("a level with thinking off");
+        assert!(refused.contains("\"medium\""), "{refused}");
+        // A budget no template carries is recorded as unsent, never refused.
+        let capped = "[reasoning]\neffort = \"medium\"\nbudget_tokens = 512\n";
+        assert_eq!(kwargs("on", capped), Ok((medium, Some(512))));
     }
 
     /// #486: the pins are the record's card, setting for setting, and a
