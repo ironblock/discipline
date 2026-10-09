@@ -108,6 +108,9 @@ fn serve_usage() -> String {
     out.push_str("for the substrate exactly, or else name its engine_commit, or serve refuses\n");
     out.push_str("to start. A canned substrate's literal is canned-<acts sha256>, which only\n");
     out.push_str("this crate's own canned server reports.\n");
+    out.push_str("A substrate whose entry declares engine_check = \"declared\" (an engine that\n");
+    out.push_str("reports no build, TabbyAPI's) is not asked: its engine is the declared one,\n");
+    out.push_str("and the client speaks the dialect its entry names (llama.cpp by default).\n");
     out.push_str("--help prints this to stdout and exits 0; a usage error exits 2.\n");
     out.push_str("--worktree DIR, absolute, is where the model's commands run; a regimen\n");
     out.push_str("that runs commands (it declares `allowed_commands`, the pre-seeded set) needs\n");
