@@ -451,12 +451,14 @@ pub enum Event {
         /// How.
         outcome: log::ForkOutcome,
     },
-    /// The operator declared a seam, and the trunk was refilled from working
-    /// memory (#493): the head with the working object rendered after it, and
-    /// no turn of the old trunk.
+    /// A seam fired, and the trunk was refilled from working memory (#493):
+    /// the head with the working object rendered after it, and no turn of
+    /// the old trunk.
     Seamed {
         /// The latest turn, settled, which it follows.
         at_turn: u32,
+        /// What fired it: the operator, or the regimen's budget or cadence.
+        reason: crate::seam::Reason,
         /// The `head_sha256` a trunk request on the trunk before would carry.
         prefix_hash_before: String,
         /// The same, after.
@@ -596,6 +598,8 @@ pub struct Interview {
     pub rules: Vec<log::Warrant>,
     /// The session's working object.
     pub object: WorkingObject,
+    /// When derived seams fire: the regimen's cadence and budget.
+    pub seams: crate::seam::policy::Served,
 }
 
 /// The rule that warrants a fork after `turn` settled `final`, and the
@@ -765,6 +769,11 @@ struct State {
     interview: Option<Interview>,
     /// The fork in flight in the capture gap, by its sequence number.
     forking: Option<u64>,
+    /// `turns` at the latest seam, or 0: what a cadence counts from.
+    turns_at_seam: u32,
+    /// The trunk's tokens as the latest trunk call measured them, cleared
+    /// by a seam: what a budget reads.
+    trunk_tokens: Option<u64>,
 }
 
 /// A prompt waiting on the operator, and the answer when one arrives.
@@ -1012,6 +1021,8 @@ impl<S: Streaming + 'static> Session<S> {
             log: Vec::new(),
             flight: None,
             turns: 0,
+            turns_at_seam: 0,
+            trunk_tokens: None,
             opened_at: Instant::now(),
             gap_open: None,
             carried: None,
@@ -1276,32 +1287,11 @@ impl<S: Streaming + 'static> Session<S> {
             return Err(Rejected::Refused(refused));
         }
         state.admit()?;
-        let Some(interview) = state.interview.as_ref() else {
-            unreachable!("refused above when the session keeps no working memory");
-        };
-        let render = crate::seam::render::render(&interview.object, None);
-        let carried_entries = interview.object.live().count() as u64;
-        let head = self.shared.template.messages.clone();
-        // The head a trunk request on `messages` carries: `Head::of` leaves
-        // out a request's last message, its ask, so one stands in for it.
-        let digest = |messages: &[Message]| {
-            let mut shape = self.shared.template.clone();
-            shape.messages = messages.to_vec();
-            shape.messages.push(Message::new(Role::User, String::new()));
-            crate::client::head::Head::of(&shape).digest().to_owned()
-        };
-        let prefix_hash_before = digest(&state.trunk);
-        let refilled = crate::seam::render::refill(&head, &render);
-        let prefix_hash_after = digest(&refilled);
-        state.trunk = refilled;
-        let at_turn = state.turns;
-        state.push(Event::Seamed {
-            at_turn,
-            prefix_hash_before,
-            prefix_hash_after,
-            render,
-            carried_entries,
-        });
+        refill_trunk(
+            &self.shared.template,
+            &mut state,
+            crate::seam::Reason::Operator,
+        );
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
@@ -1834,14 +1824,19 @@ pub fn line_of(logged: &Logged) -> log::Line {
         },
         Event::Seamed {
             at_turn,
+            reason,
             prefix_hash_before,
             prefix_hash_after,
             render,
             carried_entries,
         } => log::Event::Seam {
             at_turn: *at_turn,
-            // The only seam a served session fires is the operator's.
-            reason: log::SeamReason::Operator,
+            reason: match reason {
+                crate::seam::Reason::Operator => log::SeamReason::Operator,
+                crate::seam::Reason::Phase => log::SeamReason::Phase,
+                crate::seam::Reason::Budget => log::SeamReason::Budget,
+                crate::seam::Reason::Cadence => log::SeamReason::Cadence,
+            },
             prefix_hash_before: prefix_hash_before.clone(),
             prefix_hash_after: prefix_hash_after.clone(),
             frame: crate::seam::render::FRAME_VERSION.to_owned(),
@@ -2100,6 +2095,7 @@ fn step<S: Streaming>(
                     arguments: call.arguments.clone(),
                 })
                 .collect();
+            state.trunk_tokens = timings.as_ref().and_then(trunk_tokens_of);
             state.push(Event::Called {
                 request,
                 text: partial,
@@ -2217,7 +2213,7 @@ fn run_calls<S: Streaming>(
             state.trunk.extend(ran);
         }
         state.push(Event::TurnSettled { turn, reason });
-        state.after_the_turn();
+        turn_over(&shared.template, &mut state);
         drop(state);
         shared.changed.notify_all();
         return None;
@@ -2514,6 +2510,76 @@ fn one_call<S: Streaming>(
     }
 }
 
+/// Refill the trunk from working memory for a seam `reason` fired (#493):
+/// the head with the working object rendered after it, and no turn of the
+/// old trunk. The caller has checked the session is awaiting and working
+/// memory holds an entry. A cadence then counts from here, and a budget
+/// waits for the next trunk call to measure the refilled trunk.
+fn refill_trunk(template: &RequestShape, state: &mut State, reason: crate::seam::Reason) {
+    let Some(interview) = state.interview.as_ref() else {
+        unreachable!("a seam is refused or not due when the session keeps no working memory");
+    };
+    let render = crate::seam::render::render(&interview.object, None);
+    let carried_entries = interview.object.live().count() as u64;
+    // The head a trunk request on `messages` carries: `Head::of` leaves
+    // out a request's last message, its ask, so one stands in for it.
+    let digest = |messages: &[Message]| {
+        let mut shape = template.clone();
+        shape.messages = messages.to_vec();
+        shape.messages.push(Message::new(Role::User, String::new()));
+        crate::client::head::Head::of(&shape).digest().to_owned()
+    };
+    let prefix_hash_before = digest(&state.trunk);
+    let refilled = crate::seam::render::refill(&template.messages, &render);
+    let prefix_hash_after = digest(&refilled);
+    state.trunk = refilled;
+    state.turns_at_seam = state.turns;
+    state.trunk_tokens = None;
+    let at_turn = state.turns;
+    state.push(Event::Seamed {
+        at_turn,
+        reason,
+        prefix_hash_before,
+        prefix_hash_after,
+        render,
+        carried_entries,
+    });
+}
+
+/// The turn is over: back to awaiting, or on to ended; then, while
+/// awaiting, the seam the regimen's cadence or budget makes due, if working
+/// memory holds an entry to refill from. Not due with nothing to refill
+/// from: it stays due, and fires after the next turn that leaves an entry.
+fn turn_over(template: &RequestShape, state: &mut State) {
+    state.after_the_turn();
+    if state.settlement != Settlement::Awaiting {
+        return;
+    }
+    let due = state.interview.as_ref().and_then(|interview| {
+        interview.object.live().next()?;
+        interview
+            .seams
+            .due(state.turns - state.turns_at_seam, state.trunk_tokens)
+    });
+    if let Some(reason) = due {
+        refill_trunk(template, state, reason);
+    }
+}
+
+/// The trunk's tokens after a trunk call: what it prefilled, what it reused
+/// from the cache, and what it generated. `None` when the server reported
+/// none of them.
+fn trunk_tokens_of(timings: &Timings) -> Option<u64> {
+    if timings.prompt_n.is_none() && timings.cache_n.is_none() && timings.predicted_n.is_none() {
+        return None;
+    }
+    Some(
+        timings.prompt_n.unwrap_or(0)
+            + timings.cache_n.unwrap_or(0)
+            + timings.predicted_n.unwrap_or(0),
+    )
+}
+
 /// A call that finished. One its output cap ended is not an answer: off the
 /// trunk, settled `failed` (#290, ruled 5969297103), as a failed or
 /// cancelled call is (D13). On the floor a loop on a literal `</think>`
@@ -2556,6 +2622,7 @@ fn settle_finished(
     let mut answer = Message::new(Role::Assistant, partial.clone());
     answer.reasoning.clone_from(&reasoning);
     state.trunk.push(answer);
+    state.trunk_tokens = timings.as_ref().and_then(trunk_tokens_of);
     state.push(Event::Answered {
         request,
         text: partial,
@@ -2604,7 +2671,7 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         .filter(|_| !state.ending)
         .and_then(|interview| warranted(&interview.rules, &state.log, turn, answer));
     let Some((why, question)) = fired else {
-        state.after_the_turn();
+        turn_over(&shared.template, state);
         return None;
     };
     let mut shape = shared.template.clone();
@@ -2764,7 +2831,7 @@ fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
     for patch in patches {
         state.push(patch);
     }
-    state.after_the_turn();
+    turn_over(&shared.template, &mut state);
     drop(state);
     shared.changed.notify_all();
 }
@@ -2845,7 +2912,7 @@ fn settle_reason_of(failure: &TransportFailure) -> SettleReason {
 fn crashed<S>(shared: &Shared<S>, why: String) {
     let mut state = shared.lock();
     if state.settlement == Settlement::Capture {
-        crashed_fork(&mut state, why);
+        crashed_fork(&shared.template, &mut state, why);
         drop(state);
         shared.changed.notify_all();
         return;
@@ -2883,7 +2950,7 @@ fn crashed<S>(shared: &Shared<S>, why: String) {
 /// The gap's fork, when its thread died: its call `crashed`, with what it
 /// had delivered, and the fork settled `failed` (#374); then the gap is
 /// over.
-fn crashed_fork(state: &mut State, why: String) {
+fn crashed_fork(template: &RequestShape, state: &mut State, why: String) {
     if let (Some(flight), Some(fork)) = (state.flight.take(), state.forking.take()) {
         let mut partial = String::new();
         for logged in &state.log {
@@ -2903,7 +2970,7 @@ fn crashed_fork(state: &mut State, why: String) {
             outcome: log::ForkOutcome::Failed,
         });
     }
-    state.after_the_turn();
+    turn_over(template, state);
 }
 
 /// What a panic said, when it said it as text.
@@ -4159,6 +4226,7 @@ pub(in crate::drive) mod tests {
             },
             Event::Seamed {
                 at_turn: 1,
+                reason: crate::seam::Reason::Operator,
                 prefix_hash_before: "c".repeat(64),
                 prefix_hash_after: "d".repeat(64),
                 render: "# regime\n".to_owned(),
@@ -5712,6 +5780,7 @@ pub(in crate::drive) mod tests {
         Interview {
             rules: rules.to_vec(),
             object: WorkingObject::open(regime()),
+            seams: crate::seam::policy::Served::default(),
         }
     }
 
@@ -5839,6 +5908,220 @@ pub(in crate::drive) mod tests {
         born.push(user(&question));
         assert_eq!(sent[1].messages, born);
         assert_eq!(session.settlement(), Settlement::Awaiting);
+    }
+
+    // -----------------------------------------------------------------------
+    // derived seams: the regimen's cadence and budget
+    // -----------------------------------------------------------------------
+
+    /// An interview whose regimen declares `seams`.
+    fn seaming(seams: crate::seam::policy::Served) -> Interview {
+        Interview {
+            seams,
+            ..interviewing(&[log::Warrant::Scoping])
+        }
+    }
+
+    /// The seam lines in `log`, as the log writes them: turn and reason.
+    fn seams_in(log: &[Logged]) -> Vec<(u32, log::SeamReason)> {
+        log.iter()
+            .filter_map(|logged| match line_of(logged).event {
+                log::Event::Seam {
+                    at_turn, reason, ..
+                } => Some((at_turn, reason)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn a_reply_with_timings(
+        text: &str,
+        prompt_n: u64,
+        cache_n: u64,
+        predicted_n: u64,
+    ) -> Vec<Step> {
+        vec![
+            Step::Delta(text.to_owned()),
+            Step::Timings(Timings {
+                prompt_n: Some(prompt_n),
+                cache_n: Some(cache_n),
+                predicted_n: Some(predicted_n),
+                ..Timings::default()
+            }),
+        ]
+    }
+
+    /// A cadence of one operator turn: the scoping turn's fork fills working
+    /// memory, and the seam fires on its own once the gap is over, logged
+    /// `cadence`; the next ask runs on the refilled trunk, and the turn after
+    /// it fires the next. Nobody declared either.
+    #[test]
+    fn a_cadence_fires_a_seam_on_its_own_after_each_counted_turn() {
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["started on the schema"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: Some(1),
+                at_trunk_tokens: None,
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the cadence's seam", |log| {
+            !seams_in(log).is_empty()
+        });
+        assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Cadence)]);
+        assert!(
+            !session.trunk().iter().any(|m| m.content == SCOPED),
+            "the seam carried a turn of the old trunk"
+        );
+        let refilled = session.trunk();
+
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the second seam", |log| seams_in(log).len() == 2);
+        assert_eq!(
+            seams_in(&log),
+            vec![(1, log::SeamReason::Cadence), (2, log::SeamReason::Cadence)]
+        );
+        let sent = session.shared.transport.sent();
+        let mut expected = refilled;
+        expected.push(user("build it"));
+        assert_eq!(
+            sent[2].messages, expected,
+            "the ask after the seam runs on the refill"
+        );
+        assert_eq!(session.settlement(), Settlement::Awaiting);
+        reads_whole(&session);
+    }
+
+    /// A budget: the trunk call reports 18 prefilled, 160 reused and 66
+    /// generated, 244 tokens, against a limit of 200, so the seam fires
+    /// `budget` though the cadence (every 5 turns) has not come round. The
+    /// refilled trunk is unmeasured until its next call.
+    #[test]
+    fn a_budget_fires_a_seam_once_the_trunk_call_reports_the_limit_reached() {
+        let session = Session::open_with(
+            Canned::new([
+                a_reply_with_timings(SCOPED, 18, 160, 66),
+                deltas(&[DECIDED]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: Some(5),
+                at_trunk_tokens: Some(200),
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the budget's seam", |log| {
+            !seams_in(log).is_empty()
+        });
+        assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Budget)]);
+        assert_eq!(session.shared.lock().trunk_tokens, None);
+        reads_whole(&session);
+    }
+
+    /// Under the limit, no seam: 18 + 160 + 66 is 244, and the limit is 245.
+    #[test]
+    fn a_trunk_under_the_budget_fires_no_seam() {
+        let session = Session::open_with(
+            Canned::new([
+                a_reply_with_timings(SCOPED, 18, 160, 66),
+                deltas(&[DECIDED]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: None,
+                at_trunk_tokens: Some(245),
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert!(seams_in(&log).is_empty(), "{:#?}", seams_in(&log));
+        assert_eq!(session.shared.lock().trunk_tokens, Some(244));
+    }
+
+    /// A cadence that comes round with working memory empty fires nothing
+    /// (a refill would drop every turn and carry nothing) and stays due: the
+    /// first turn that leaves an entry fires it, at that turn.
+    #[test]
+    fn a_due_seam_with_nothing_to_refill_from_waits_for_an_entry() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["hello"]), deltas(&[SCOPED]), deltas(&[DECIDED])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: Some(1),
+                at_trunk_tokens: None,
+            })),
+        );
+        session.ask("hi", None).expect("accepted");
+        let log = wait_until(&session, "the first turn", settled);
+        assert!(seams_in(&log).is_empty());
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        assert_eq!(seams_in(&log), vec![(2, log::SeamReason::Cadence)]);
+    }
+
+    /// An operator's seam resets the cadence: with a cadence of two, a
+    /// declared seam after turn 1 means turn 2 does not fire one.
+    #[test]
+    fn an_operator_seam_restarts_the_cadence() {
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["started on the schema"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: Some(2),
+                at_trunk_tokens: None,
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        session.declare_seam(None).expect("admitted");
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Operator)]);
     }
 
     // -----------------------------------------------------------------------

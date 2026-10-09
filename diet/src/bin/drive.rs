@@ -590,9 +590,12 @@ fn served_session(
 }
 
 /// What `serve`'s capture gap forks under (#374): the rules the regimen at
-/// `regimen` lists under `interview_warrant`, and a working object under
-/// `regime`. `None` when it lists none, or there is no regimen: then no fork
-/// ever fires.
+/// `regimen` lists under `interview_warrant`, a working object under
+/// `regime`, and the cadence and budget its derived seams fire on, the
+/// budget taken of the substrate's registered `serving_context`. `None` when
+/// it lists no rule, or there is no regimen: then no fork and no derived
+/// seam ever fires, and a regimen that declares a seam trigger anyway is
+/// refused.
 fn serving_interview(
     regimen: Option<&str>,
     regime: Option<&Regime>,
@@ -604,9 +607,22 @@ fn serving_interview(
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
+    let window = diet::drive::registry::serving_context(
+        diet::drive::registry::REGISTRY,
+        &regime.substrates[0].id,
+    );
+    let seams = diet::seam::policy::Served::from_regimen(&read, window)
+        .map_err(|why| format!("{path}: {why}"))?;
+    if rules.is_empty() && seams.declares_a_trigger() {
+        return Err(format!(
+            "{path} declares a seam trigger and no `interview_warrant`: nothing fills \
+             working memory, so no seam could ever fire"
+        ));
+    }
     Ok((!rules.is_empty()).then(|| Interview {
         rules,
         object: diet::object::WorkingObject::open(regime.clone()),
+        seams,
     }))
 }
 
