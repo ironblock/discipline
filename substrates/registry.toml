@@ -269,6 +269,16 @@ display_gpu = "AMD Radeon RX 7900 XT (Navi 31) drives the desktop; it serves no 
 accelerator_ecc = "off"
 not_measured = "the DIMM population and speed, the power supply, NVMe firmware, cooling -- each needs root or a physical read this seat does not have"
 
+[equipment.canned-loopback-replay]
+display_name = "the stream-replay loopback server"
+entry_type = "canned-server"
+hardware_fingerprint = "cc12840de6240097540cb1a6e832c217ad3fd47c88cd4c6c5a6dc58e97dbc53b"
+role = "diet-drive's own server in the stub's stream-replay mode (#411): every request answered with one captured llama.cpp e7051ef warm turn, byte for byte, so a model-less serve records turns that settle and carry counts"
+measured = "2026-10-09"
+measured_by = "computed by canned::replay_digest() and canned::hardware_fingerprint() over canned::replay_acts(); canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps re-derives both"
+serves = "diet-drive canned"
+acts_sha256 = "2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
+
 [equipment.canned-loopback]
 display_name = "the canned loopback server"
 entry_type = "canned-server"
@@ -1023,6 +1033,21 @@ reproducible_because = "as for `canned`: replay the acts and the same bytes play
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
 engine_build_info = "canned-188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
 engine_build_info_is = "derived, not read from a server: canned::build_info(), \"canned-\" + the entry's acts digest (weights_acts_sha256, equal to engine_identity); the acts the crate plays now, so the canned server reports this literal at GET /props"
+
+[substrate.canned-replay]
+equipment = "canned-loopback-replay"
+description = "the stream-replay substrate (#411): `diet-drive replay` answers every request with diet/client/fixtures/llama-server-e7051ef-warm-turn2-stream.http, byte for byte, and GET /props with this entry's literal; a rehearsal substrate for regimens with tools and approvals when no model is at hand, and never a claim substrate: every answer is the same captured turn"
+pinned = true
+engine_name = "diet-drive replay"
+engine_identity = "2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
+engine_identity_is = "the acts digest, as for `canned`: the captured reply is the whole of what it plays"
+weights_kind = "canned"
+weights_acts_sha256 = "2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
+reproducible_by_config = true
+reproducible_because = "replay the capture and the same bytes play again; exact match, no band"
+engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the capture is the whole of what it plays"
+engine_build_info = "canned-2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
+engine_build_info_is = "derived, not read from a server: canned::replay_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
 
 # The drive endpoint's engine commit and weights on this host's CPU, served for #29's I0
 # captures (a streamed tool call and its turn 2); not a claim substrate.

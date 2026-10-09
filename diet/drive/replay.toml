@@ -1,0 +1,45 @@
+# A rehearsal regimen: a commands-running session, with its approvals, driven
+# with no model and no GPU (#411).
+#
+# The substrate is `canned-replay`, which `diet-drive replay` serves on
+# loopback: every request is answered with one captured llama.cpp `e7051ef`
+# warm turn, byte for byte (`diet/client/fixtures/llama-server-e7051ef-warm-
+# turn2-stream.http`). So each turn streams, settles `final`, and the record
+# carries `turn` and `response` rows with that capture's counts. The words are
+# the capture's, whatever was asked: nothing under this regimen is a claim
+# about a model.
+#
+#     target/debug/diet-drive replay                     # 127.0.0.1:7902
+#     target/debug/diet-drive serve --endpoint http://127.0.0.1:7902/v1/chat/completions \
+#         --model replay --head diet/drive/heads/floor.md --regimen diet/drive/replay.toml \
+#         --worktree <a scratch checkout> --auth-file <user:password file> \
+#         --port 7801 --allow-origin http://localhost:5173 \
+#         --log session.log --record session.record.jsonl
+#
+# `serve`'s engine check reads `GET /props` and refuses any server but the
+# replay: its `build_info` is the registry entry's literal, `canned-` and the
+# digest of what it plays.
+
+arm = "rehearsal"
+dogma_version = 0
+
+substrate = "canned-replay"
+substrate_reasoning = "off"
+# The `hardware_fingerprint` of equipment `canned-loopback-replay` in
+# `substrates/registry.toml`: `canned::hardware_fingerprint` over the acts
+# the replay plays.
+substrate_hardware = "cc12840de6240097540cb1a6e832c217ad3fd47c88cd4c6c5a6dc58e97dbc53b"
+
+# Unconfined, so the rehearsal starts on any machine; a rehearsal of the
+# floor's own isolation says `isolation = "sandbox"` here.
+isolation = "none"
+allowed_commands = ["ls", "cat", "rg"]
+approval_policy = "approve any command whose effects stay in the worktree; deny everything else"
+
+[limits]
+max_steps = 4
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7

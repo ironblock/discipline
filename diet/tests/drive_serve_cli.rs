@@ -2407,3 +2407,204 @@ fn a_drive_server_without_a_regimen_pins_no_sampler_setting() {
     };
     assert!(sampler_fields(body).is_empty(), "{body}");
 }
+
+// ---------------------------------------------------------------------------
+// the stream-replay substrate (#411)
+// ---------------------------------------------------------------------------
+
+/// `diet-drive replay` on a port of the system's choosing: the child, killed
+/// when dropped, and the endpoint its first line names.
+struct Replaying {
+    child: std::process::Child,
+    endpoint: String,
+}
+
+impl Drop for Replaying {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn replaying() -> Replaying {
+    let mut child = Command::new(DRIVE)
+        .args(["replay", "--port", "0"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("diet-drive replay starts");
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let (line, lines) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut first = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut first);
+        let _ = line.send(first);
+    });
+    let mut replaying = Replaying {
+        child,
+        endpoint: String::new(),
+    };
+    let first = lines
+        .recv_timeout(Duration::from_secs(10))
+        .expect("diet-drive replay announced itself");
+    let announced = log_line_object(&first);
+    assert_eq!(announced["substrate"], "canned-replay", "{first}");
+    assert_eq!(
+        announced["build_info"],
+        diet::drive::canned::replay_build_info().as_str(),
+        "{first}"
+    );
+    announced["listening"]
+        .as_str()
+        .expect("the endpoint")
+        .clone_into(&mut replaying.endpoint);
+    replaying
+}
+
+fn replay_regimen() -> String {
+    format!("{}/drive/replay.toml", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// #411's acceptance: a model-less `serve --record` under the rehearsal
+/// regimen -- commands allowed, an approval policy, a worktree -- against
+/// `diet-drive replay` records real turns. The engine check passes on the
+/// replay's literal; each turn settles; `diet check-record` reads the record,
+/// and it carries `turn` and `response` rows with the capture's counts
+/// (prompt 18 + cached 160, predicted 66), derived because the replay is a
+/// cited engine. Nothing is left unspellable but the asks.
+#[test]
+fn a_drive_server_records_real_turns_against_the_stream_replay_substrate() {
+    let replayed = replaying();
+    let tree = Dir::new("replay-tree");
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let served = start(
+        &replayed.endpoint,
+        &[
+            "--regimen",
+            &replay_regimen(),
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--record",
+            &path,
+        ],
+    );
+    assert_eq!(served.substrate.as_deref(), Some("canned-replay"));
+    let address = served.listening.clone();
+    for turn in 1..=2 {
+        let reply = post_authed(&address, "/commands", r#"{"kind":"ask","text":"hi"}"#);
+        assert_eq!(status(&reply), 200, "{reply}");
+        let read = events_authed(&address, |read| {
+            read.matches(r#""to":"awaiting""#).count() >= turn
+        });
+        assert_eq!(
+            read.matches(r#""reason":"final""#).count(),
+            turn,
+            "each turn settles final: {read}"
+        );
+    }
+    let reply = post_authed(&address, "/commands", r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _report = served
+        .said
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the record's report");
+    let checked = Command::new(DIET)
+        .args(["check-record"])
+        .arg(&record.0)
+        .output()
+        .expect("diet runs");
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&checked.stdout)
+    );
+    let written = std::fs::read_to_string(&record.0).expect("the record");
+    let rows: Vec<serde_json::Value> = written.lines().map(log_line_object).collect();
+    let kinds: Vec<&str> = rows
+        .iter()
+        .map(|row| row["record"].as_str().expect("a row's kind"))
+        .collect();
+    assert_eq!(
+        kinds.iter().filter(|kind| **kind == "turn").count(),
+        2,
+        "{written}"
+    );
+    assert_eq!(
+        kinds.iter().filter(|kind| **kind == "response").count(),
+        2,
+        "{written}"
+    );
+    for row in &rows {
+        match row["record"].as_str() {
+            Some("turn") => assert_eq!(row["prefill_tokens"], 178, "{row}"),
+            Some("response") => assert_eq!(row["output_tokens"], 66, "{row}"),
+            _ => {}
+        }
+    }
+    let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+    let named = log_line_object(&std::fs::read_to_string(&sidecar).expect("the sidecar"));
+    let named_kinds: Vec<&str> = named["unspellable"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter_map(|item| item["kind"].as_str())
+        .collect();
+    assert!(
+        !named_kinds.contains(&"response"),
+        "a response was left unspellable: {named}"
+    );
+    let _ = std::fs::remove_file(&sidecar);
+}
+
+/// The replay answers only a regimen naming it: the canned-cache-n regimen
+/// is refused against it (its literal is another digest's), and the
+/// rehearsal regimen is refused against the canned server.
+#[test]
+fn the_stream_replay_and_the_canned_server_each_pass_only_their_own_regimen() {
+    let replayed = replaying();
+    let refused = Command::new(DRIVE)
+        .args([
+            "serve",
+            "--endpoint",
+            &replayed.endpoint,
+            "--model",
+            "m",
+            "--head",
+        ])
+        .arg(&file_holding("head", HEAD).0)
+        .args(["--regimen", &dev_loop(), "--port", "0"])
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+    let canned =
+        Stub::serving_with_props(vec![], &diet::drive::canned::build_info()).expect("loopback");
+    let tree = Dir::new("replay-refused-tree");
+    let refused = Command::new(DRIVE)
+        .args([
+            "serve",
+            "--endpoint",
+            &canned.url(),
+            "--model",
+            "m",
+            "--head",
+        ])
+        .arg(&file_holding("head", HEAD).0)
+        .args([
+            "--regimen",
+            &replay_regimen(),
+            "--worktree",
+            &tree.path(),
+            "--port",
+            "0",
+        ])
+        .arg("--auth-file")
+        .arg(&file_holding("auth", "author:s3cret\n").0)
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+}

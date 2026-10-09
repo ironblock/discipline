@@ -103,7 +103,7 @@ impl Stub {
     ///
     /// Returns the I/O error if loopback cannot be bound.
     pub fn serving(acts: Vec<Act>) -> io::Result<Self> {
-        Self::start(acts, None)
+        Self::start(acts, None, Replay::No, 0)
     }
 
     /// A stub serving `acts` that ALSO answers `GET /props` with
@@ -117,11 +117,39 @@ impl Stub {
     ///
     /// Returns the I/O error if loopback cannot be bound.
     pub fn serving_with_props(acts: Vec<Act>, build_info: &str) -> io::Result<Self> {
-        Self::start(acts, Some(format!("{{\"build_info\":\"{build_info}\"}}")))
+        Self::start(
+            acts,
+            Some(format!("{{\"build_info\":\"{build_info}\"}}")),
+            Replay::No,
+            0,
+        )
     }
 
-    fn start(acts: Vec<Act>, props: Option<String>) -> io::Result<Self> {
-        let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    /// The stream-replay mode (#411): every request that is not a `GET
+    /// /props` is answered with `reply`, verbatim, for as long as the stub
+    /// runs -- no script to run out of, and no idle cap -- and `/props` with
+    /// `build_info`. On `port` of loopback; `0` lets the system choose.
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error if loopback cannot be bound.
+    pub fn replaying(reply: Vec<u8>, build_info: &str, port: u16) -> io::Result<Self> {
+        Self::start(
+            vec![Act::Raw(reply)],
+            Some(format!("{{\"build_info\":\"{build_info}\"}}")),
+            Replay::Forever,
+            port,
+        )
+    }
+
+    /// Where it listens.
+    #[must_use]
+    pub fn address(&self) -> SocketAddr {
+        self.address
+    }
+
+    fn start(acts: Vec<Act>, props: Option<String>, replay: Replay, port: u16) -> io::Result<Self> {
+        let listener = TcpListener::bind(("127.0.0.1", port))?;
         listener.set_nonblocking(true)?;
         // Spelled through the type rather than as a method call on the
         // binding, which the hygiene table reads as an internal hostname:
@@ -136,8 +164,17 @@ impl Stub {
         let seen = Arc::clone(&hangups);
         let heads = Arc::new(Mutex::new(Vec::new()));
         let headed = Arc::clone(&heads);
-        let worker =
-            thread::spawn(move || serve(&listener, acts, props.as_deref(), &flag, &seen, &headed));
+        let worker = thread::spawn(move || {
+            serve(
+                &listener,
+                acts,
+                props.as_deref(),
+                replay,
+                &flag,
+                &seen,
+                &headed,
+            )
+        });
         Ok(Self {
             address,
             stop,
@@ -206,17 +243,31 @@ impl Drop for Stub {
     }
 }
 
+/// Whether the script is played once, or over and over (the stream-replay
+/// mode, [`Stub::replaying`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Replay {
+    No,
+    Forever,
+}
+
 /// Serve every act, and collect what was asked.
 fn serve(
     listener: &TcpListener,
     acts: Vec<Act>,
     props: Option<&str>,
+    replay: Replay,
     stop: &AtomicBool,
     hangups: &Mutex<Vec<Held>>,
     heads: &Mutex<Vec<String>>,
 ) -> Vec<String> {
     let mut asked = Vec::new();
-    let mut acts = acts.into_iter().peekable();
+    let played: Box<dyn Iterator<Item = Act>> = match replay {
+        Replay::No => Box::new(acts.into_iter()),
+        Replay::Forever => Box::new(acts.into_iter().cycle()),
+    };
+    let mut acts = played.peekable();
+    let idle_cap = (replay == Replay::No).then_some(IDLE_CAP);
     loop {
         // Without a `/props` to answer, the stub serves exactly its acts and
         // then refuses, as it always has. With one, it answers `/props`
@@ -225,7 +276,7 @@ fn serve(
         if props.is_none() && acts.peek().is_none() {
             break;
         }
-        let Some(mut stream) = accept(listener, stop) else {
+        let Some(mut stream) = accept(listener, stop, idle_cap) else {
             break;
         };
         let read = read_request(&mut stream);
@@ -287,7 +338,11 @@ fn serve(
 
 /// Wait for one connection, giving up when the stub is stopped or the cap is
 /// reached.
-fn accept(listener: &TcpListener, stop: &AtomicBool) -> Option<TcpStream> {
+fn accept(
+    listener: &TcpListener,
+    stop: &AtomicBool,
+    idle_cap: Option<Duration>,
+) -> Option<TcpStream> {
     let waiting_since = Instant::now();
     loop {
         if stop.load(Ordering::SeqCst) {
@@ -299,7 +354,7 @@ fn accept(listener: &TcpListener, stop: &AtomicBool) -> Option<TcpStream> {
                 return Some(stream);
             }
             Err(why) if why.kind() == io::ErrorKind::WouldBlock => {
-                if waiting_since.elapsed() > IDLE_CAP {
+                if idle_cap.is_some_and(|cap| waiting_since.elapsed() > cap) {
                     return None;
                 }
                 thread::sleep(Duration::from_millis(2));
