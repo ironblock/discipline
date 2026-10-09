@@ -1,10 +1,19 @@
 # Releases
 
-*What each open release means, as an observable, and the evidence that it happened. A release's definition and rows are the maintainer's, and so is every evidence cell of v0.1.0 ([`AGENTS.md`](AGENTS.md)). How milestones and tags work is in `CONTRIBUTING.md`, Milestones.*
+*The program's initiatives, the milestones (epics) inside each, what each open milestone means as an observable, and the evidence that it happened. A definition or row changes only with the maintainer's approval ([`AGENTS.md`](AGENTS.md)). How milestones and tags work is in `CONTRIBUTING.md`, Milestones.*
+
+## Initiatives
+
+The maintainer, 2026-10-09: "Working prototype _with every theorized lever present_ → controls and reproducible tests → rigor, test matrix, data collection → publish." Each is an initiative, run in that order, and holds as many milestones as it needs; nothing in a later initiative is an obstacle to an earlier one.
+
+1. **The prototype:** every theorized lever (`program.md`, The levers) present and working. v0.1.0 is its first milestone; the milestones after it are the remainder of the levers, proposed once each lever's code is inventoried.
+2. **Controls and reproducible tests.**
+3. **Rigor:** the test matrix and data collection.
+4. **Publish.**
 
 ## v0.1.0 — the pieces work
 
-Each piece of the harness shown working **once, live, on the floor, by the maintainer**. A passing test does not count. Using the pieces together is v0.2.0's.
+The prototype's first milestone. Each piece of the harness shown working **once, live, on the floor**. A passing test does not count. Using the pieces together is v0.2.0's.
 
 **Floor:** the 3.8 EXL3 line, config r2, on linux-pc (`accel24-tabbyapi-exl3-qwen38-27b-3p00`, #497), driven through TabbyAPI (#496). The 3.6 is retired; `diet/drive/BEGIN.md` names it until #497 lands.
 
@@ -21,11 +30,11 @@ Each piece of the harness shown working **once, live, on the floor, by the maint
 | Cancel and end | an in-flight call is cancelled; the session ends with confirm and serve exits | — |
 | Record | the log parses, the record is projected from it and names the engine that ran, the receipt renders, and the results directory is committed, digest-pinned and hygiene-scanned | — |
 
-A row's evidence is a results directory, or a line in one, filled from the recording. Its README names the maintainer as the operator who drove it; a run driven by anyone else, an agent's smoke run included, is not evidence for this release. A v0.1.0 evidence cell is filled only in a pull request the maintainer merges himself. The release is done when every row has evidence.
+A row's evidence is a results directory, or a line in one, filled from the recording. Its README says truthfully who drove the run, the maintainer or an agent. A row counts once the maintainer approves its evidence. The milestone is done when every row counts.
 
 ## v0.2.0 — the pieces together (T2)
 
-The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written.
+The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. This milestone and v0.3.0 predate the initiatives; where they sit among the lever milestones is proposed with those.
 
 ## v0.3.0 — T3, NetHack
 

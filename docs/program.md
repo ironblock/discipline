@@ -19,7 +19,7 @@ From the frontier side, KV, not compute, decides how many developers a node serv
 - **The record.** The log (`diet/formats/log`, append-only, sequence-numbered) is the source; the record is projected from it; a results directory is the unit of evidence, digest-pinned, hygiene-scanned, recomputable.
 - **The regimen.** A TOML file naming the arm, the dogma version, the substrate, the sampler, the isolation, and the approval policy a session is held to. `diet check-regimen` reads one.
 - **The substrate.** A served model on a registered machine: engine, weights, template, serving line, reasoning state as rendered. Its served configuration is declared by whoever runs the test, and serve is to corroborate each field the engine can report, refusing only on a contradiction (duty of care, ruled 2026-10-07; not built until #509 lands, so serve still requires llama.cpp's `build_info`). Whether it is fit for a claim is measured, never declared (§4).
-- **`exercise`.** The reference surface: the Claude-app-shaped harness with the curtain pulled back — ask, tools, approval, image, forks, seam, cancel/end, record. v0.1.0 is each of those shown working live on the floor by the maintainer; a passing test does not count (`docs/releases.md`).
+- **`exercise`.** The reference surface: the Claude-app-shaped harness with the curtain pulled back — ask, tools, approval, image, forks, seam, cancel/end, record. v0.1.0 is each of those shown working live on the floor; a passing test does not count (`docs/releases.md`).
 
 ## 2. The levers
 

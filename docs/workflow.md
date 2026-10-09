@@ -2,17 +2,17 @@
 
 *Who posts here and how to tell them apart, which file holds each rule, and what went wrong before. Most comments in this repository were written by model sessions acting for the maintainer under a prefix; this file says how to read them.*
 
-*A line marked `[unsettled]` is a proposal, not a ruling. Who may change which line is in [`AGENTS.md`](AGENTS.md).*
+*Who may change which line is in [`AGENTS.md`](AGENTS.md).*
 
 ## Who posts
 
-One GitHub identity (the maintainer's) posts for every session. Prefixes tell them apart:
+One GitHub identity (the maintainer's) posts for every session until the agents have their own account, which the maintainer approved on 2026-10-09. Prefixes tell the sessions apart:
 
-- **`[Dispatch]`**: an orchestrating Claude Code session. It routes work, decides how it is done, and writes the maintainer's rulings into the file where they are read.
-- **Builders** (`[Track …]` in older threads): sessions that each hold a worktree and one pull request.
-- **The maintainer**: names what a release means, ratifies thesis lines (`docs/AGENTS.md`), runs windows on the boxes, drives sessions, and is the only one who sends anything outside the repository.
+- **`[Dispatch]`**: the orchestrating Claude Code session. It decides how work is done and who does it, carries questions and results to the maintainer, and writes his answers where they are read.
+- **Builders** (`[Track …]`): sessions that each hold a worktree and one pull request at a time, and follow Dispatch's lead.
+- **The maintainer** approves every significant decision and result, in any form, and is otherwise not hands-on. He runs windows on the boxes and is the only one who sends anything outside the repository.
 
-**Planning is off GitHub and off the code** from 2026-10-08. It is the maintainer's ideation chat; what comes of it reaches this repository only as the maintainer's words, in a file. `[Planning]` comments before that date were written by it while it posted here.
+**Planning is off GitHub and off the code** from 2026-10-08. It is the maintainer's ideation chat; what comes of it reaches this repository only through him. `[Planning]` comments before that date were written by it.
 
 ## Where each rule lives
 
@@ -46,13 +46,13 @@ The last instance is on record. On 2026-10-07 the seeded-fault selftest left CI 
 
 ## How work is orchestrated
 
-Ruled by the maintainer on 2026-10-08:
+**The maintainer, 2026-10-09:**
+- "Any significant decision or result needs my approval in some form." Knowing the program runs this way, any ratified outcome came through him. Nothing is done in his name.
+- "The priority now, above all else: get a working version of the system that exercises the core idea. No constraints, restrictions, or 'correctness' obstacles." The initiatives are in `releases.md`.
+- Sessions that know why a punted item mattered give him the data and the perspective; they do not put it back on the map themselves.
 
-- **Work comes from the earliest open release** (now v0.1.0). A builder is given a ticket only if it is on the path to a row of that release in `docs/releases.md` with no evidence yet. A ticket in its milestone that is on no row's path waits until no ticket on a path is open.
-- **At most two builders and Dispatch.** One open pull request per builder. No stacked pull requests.
-- **A finding that is on no row's path is not worked.** Where it goes is in `CONTRIBUTING.md` (review). No session files tickets speculatively.
-- **A ruling lives in a file.** One made in chat or in a comment is written into the file where it is read, by the next pull request that touches that file or by one of its own, which the maintainer merges (`AGENTS.md`).
-
-## Unsettled
-
-- `[unsettled]` A week in which no row gains evidence pauses orchestration, and the maintainer runs a piece. (Proposed by planning.)
+**Dispatch's practice, which it may change:**
+- Work comes from the earliest open milestone of the prototype initiative, and every session may take some. A blank in what a lever means goes to the maintainer as a question; work that depends on it waits, and other work goes on.
+- A question to the maintainer is answerable from a phone in seconds: the recommendation, why, and what yes and no each do. Silence is not a yes.
+- One open pull request per session, branched from `develop`. No stacked pull requests.
+- A finding on no milestone's path is not worked; where it goes is in `CONTRIBUTING.md` (review).
