@@ -664,10 +664,14 @@ impl<S: Streaming + 'static> Serving<S> {
         else {
             return respond(stream, 400, &empty());
         };
-        if length > attach::MAX_BYTES {
-            return respond(stream, 413, &empty());
-        }
-        let Ok(length) = usize::try_from(length) else {
+        let Some(length) = usize::try_from(length)
+            .ok()
+            .filter(|_| length <= attach::MAX_BYTES)
+        else {
+            // Read the declared body before answering: a close with it
+            // unread can reset the connection, and a browser then sees a
+            // failed fetch instead of the 413 (#515's review).
+            drain(stream, &request.early_body, length, request.deadline);
             return respond(stream, 413, &empty());
         };
         let Some(body) = read_body(stream, &request.early_body, length, request.deadline) else {
@@ -1070,6 +1074,21 @@ fn read_body(
         }
     }
     Some(body)
+}
+
+/// Read and discard what is left of a body declared `length` long, of which
+/// `early` arrived with the head, until it is all read, the client stops
+/// sending, or `deadline` passes.
+fn drain(stream: &mut TcpStream, early: &[u8], length: u64, deadline: Instant) {
+    let mut left = length.saturating_sub(u64::try_from(early.len()).unwrap_or(u64::MAX));
+    let mut chunk = [0_u8; 16384];
+    while left > 0 {
+        let want = usize::try_from(left).map_or(chunk.len(), |left| left.min(chunk.len()));
+        match read_by(stream, chunk.get_mut(..want).unwrap_or_default(), deadline) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => left = left.saturating_sub(u64::try_from(read).unwrap_or(u64::MAX)),
+        }
+    }
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -3181,5 +3200,42 @@ mod tests {
         drop(session);
         let _ = std::fs::remove_dir_all(&tree);
         let _ = std::fs::remove_dir_all(&recording);
+    }
+
+    /// An upload past the cap whose body is actually sent is answered `413`
+    /// after the body is read and discarded, never a reset: closing with it
+    /// unread made a browser see a failed fetch (#515's review, 7 of 30 at
+    /// 17 MiB). Each round sends the whole body, then reads the reply.
+    #[test]
+    fn an_upload_past_the_cap_is_drained_and_answered_413() {
+        use crate::drive::attach::{Attaching, MAX_BYTES};
+
+        let (_session, server, _stub) = serve_attaching(0, Attaching::default(), None);
+        let body = vec![0_u8; usize::try_from(MAX_BYTES + 1024 * 1024).expect("fits")];
+        for round in 0..10 {
+            let head = format!(
+                "POST /files HTTP/1.1\r\nHost: {}\r\nContent-Type: image/png\r\n\
+                 Content-Length: {}\r\n\r\n",
+                host(&server),
+                body.len()
+            );
+            let mut stream = TcpStream::connect(server.addr()).expect("connects");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("a read timeout");
+            stream.write_all(head.as_bytes()).expect("the head");
+            stream
+                .write_all(&body)
+                .unwrap_or_else(|why| panic!("round {round}: the body was refused: {why}"));
+            let mut reply = Vec::new();
+            stream
+                .read_to_end(&mut reply)
+                .unwrap_or_else(|why| panic!("round {round}: the reply was lost: {why}"));
+            assert_eq!(
+                status(&String::from_utf8_lossy(&reply)),
+                413,
+                "round {round}"
+            );
+        }
     }
 }
