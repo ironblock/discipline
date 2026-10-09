@@ -600,9 +600,22 @@ fn serving_interview(
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
+    let window = diet::drive::registry::serving_context(
+        diet::drive::registry::REGISTRY,
+        &regime.substrates[0].id,
+    );
+    let seams = diet::seam::policy::Served::from_regimen(&read, window)
+        .map_err(|why| format!("{path}: {why}"))?;
+    if rules.is_empty() && seams.declares_a_trigger() {
+        return Err(format!(
+            "{path} declares a seam trigger and no `interview_warrant`: nothing fills \
+             working memory, so no seam could ever fire"
+        ));
+    }
     Ok((!rules.is_empty()).then(|| Interview {
         rules,
         object: diet::object::WorkingObject::open(regime.clone()),
+        seams,
     }))
 }
 

@@ -101,7 +101,9 @@ vocabulary! {
         Operator => "operator",
         /// The phase graph ratified a transition.
         Phase => "phase",
-        /// The working set reached the declared byte count.
+        /// The working set reached the declared byte count, or in a served
+        /// session the trunk reached its declared share of the serving
+        /// context.
         Budget => "budget",
         /// The declared cadence came round.
         Cadence => "cadence",

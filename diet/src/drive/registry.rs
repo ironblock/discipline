@@ -109,6 +109,30 @@ pub fn tables(document: &str) -> BTreeMap<String, Table> {
     tables
 }
 
+/// A substrate's `serving_context`: the tokens its server was started to
+/// hold, read from its own `[substrate.<id>]` table. `None` when the table
+/// or the key is missing, or the value is not a whole number.
+#[must_use]
+pub fn serving_context(document: &str, id: &str) -> Option<u64> {
+    let header = format!("[substrate.{id}]");
+    let quoted = format!("[substrate.\"{id}\"]");
+    let mut inside = false;
+    for line in document.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            let header_only = trimmed.split_once('#').map_or(trimmed, |(h, _)| h).trim();
+            inside = header_only == header || header_only == quoted;
+            continue;
+        }
+        if let Some(value) = trimmed.strip_prefix("serving_context = ")
+            && inside
+        {
+            return value.trim().parse().ok();
+        }
+    }
+    None
+}
+
 /// The items of a one-line list, from just after its `[`: each a quoted
 /// string with no quote inside it, or `None` for anything else.
 fn quoted_items(after_bracket: &str) -> Option<Vec<String>> {
@@ -288,6 +312,24 @@ fn weight_set(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_substrates_serving_context_is_read_from_its_own_table_only() {
+        assert_eq!(
+            serving_context(REGISTRY, "accel24-beellama-qwen27b-q4kxl"),
+            Some(160_000)
+        );
+        assert_eq!(serving_context(REGISTRY, "no-such-substrate"), None);
+        let doc = "[substrate.a]\nname = \"a\"\n[substrate.a.instance]\nserving_context = 9\n\
+                   [substrate.\"b.c\"]\nserving_context = 4096\n[substrate.d]\nserving_context = lots\n";
+        assert_eq!(
+            serving_context(doc, "a"),
+            None,
+            "a sub-table's key is not the substrate's"
+        );
+        assert_eq!(serving_context(doc, "b.c"), Some(4096));
+        assert_eq!(serving_context(doc, "d"), None);
+    }
 
     #[test]
     fn a_registered_weights_set_resolves_to_every_file_the_registry_declares() {
