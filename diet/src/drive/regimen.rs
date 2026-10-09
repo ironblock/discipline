@@ -340,6 +340,65 @@ fn sampled(value: &regimen::Value) -> Value {
     }
 }
 
+/// The word a lever is written with when nothing says its state: the lever
+/// exists in docs/program.md §2, and this run cannot describe where it sat.
+pub const UNDECLARED: &str = "undeclared";
+
+/// The state of each lever (docs/program.md §2) a session `serve` runs
+/// under `regimen` sits at, by lever, in that table's words: best effort.
+/// A lever this build cannot describe is [`UNDECLARED`], never an error,
+/// and nothing reads a missing one as a fault (the maintainer, 2026-10-09:
+/// "best effort in the 'duty of care' sense").
+///
+/// Some states are the build's, not the regimen's: serve's seam is declared
+/// by the operator and refills totally (#493), and a call's output reaches
+/// the trunk whole.
+#[must_use]
+pub fn serve_levers(regimen: &Regimen) -> BTreeMap<String, String> {
+    let word = |key: &str| match regimen.get(key) {
+        Some(regimen::Value::String(word)) => word.clone(),
+        Some(regimen::Value::Integer(n)) => n.to_string(),
+        _ => UNDECLARED.to_owned(),
+    };
+    let runs_commands = regimen
+        .get(crate::drive::tool_loop::ALLOWED_COMMANDS)
+        .is_some();
+    let warrant = match crate::drive::session::interview_warrant(regimen) {
+        Ok(rules) if rules.is_empty() => "none".to_owned(),
+        Ok(rules) => format!(
+            "one-per-gap-gated:{}",
+            rules
+                .iter()
+                .map(|rule| rule.tag())
+                .collect::<Vec<_>>()
+                .join("+")
+        ),
+        Err(_) => UNDECLARED.to_owned(),
+    };
+    let commands = |state: &str| {
+        if runs_commands {
+            state.to_owned()
+        } else {
+            UNDECLARED.to_owned()
+        }
+    };
+    BTreeMap::from([
+        ("compaction_depth".to_owned(), "total".to_owned()),
+        ("seam_trigger".to_owned(), "operator-declared".to_owned()),
+        ("fork_warrant".to_owned(), warrant),
+        ("fork_delivery".to_owned(), UNDECLARED.to_owned()),
+        ("tool_output_disposition".to_owned(), commands("keep")),
+        (
+            "isolation".to_owned(),
+            word(crate::isolation::policy::ISOLATION),
+        ),
+        ("approval".to_owned(), commands("denylist-prompt-preseeded")),
+        ("reasoning_state".to_owned(), word("substrate_reasoning")),
+        ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
+        ("substrate_rung".to_owned(), word("substrate")),
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::{UNDECLARED, regime_of, serve_levers};
@@ -537,63 +596,4 @@ mod tests {
         // so rather than carrying a digest-shaped string nothing computed.
         assert_eq!(silent.substrates[0].chat_template_sha256, None);
     }
-}
-
-/// The word a lever is written with when nothing says its state: the lever
-/// exists in docs/program.md §2, and this run cannot describe where it sat.
-pub const UNDECLARED: &str = "undeclared";
-
-/// The state of each lever (docs/program.md §2) a session `serve` runs
-/// under `regimen` sits at, by lever, in that table's words: best effort.
-/// A lever this build cannot describe is [`UNDECLARED`], never an error,
-/// and nothing reads a missing one as a fault (the maintainer, 2026-10-09:
-/// "best effort in the 'duty of care' sense").
-///
-/// Some states are the build's, not the regimen's: serve's seam is declared
-/// by the operator and refills totally (#493), and a call's output reaches
-/// the trunk whole.
-#[must_use]
-pub fn serve_levers(regimen: &Regimen) -> BTreeMap<String, String> {
-    let word = |key: &str| match regimen.get(key) {
-        Some(regimen::Value::String(word)) => word.clone(),
-        Some(regimen::Value::Integer(n)) => n.to_string(),
-        _ => UNDECLARED.to_owned(),
-    };
-    let runs_commands = regimen
-        .get(crate::drive::tool_loop::ALLOWED_COMMANDS)
-        .is_some();
-    let warrant = match crate::drive::session::interview_warrant(regimen) {
-        Ok(rules) if rules.is_empty() => "none".to_owned(),
-        Ok(rules) => format!(
-            "one-per-gap-gated:{}",
-            rules
-                .iter()
-                .map(|rule| rule.tag())
-                .collect::<Vec<_>>()
-                .join("+")
-        ),
-        Err(_) => UNDECLARED.to_owned(),
-    };
-    let commands = |state: &str| {
-        if runs_commands {
-            state.to_owned()
-        } else {
-            UNDECLARED.to_owned()
-        }
-    };
-    BTreeMap::from([
-        ("compaction_depth".to_owned(), "total".to_owned()),
-        ("seam_trigger".to_owned(), "operator-declared".to_owned()),
-        ("fork_warrant".to_owned(), warrant),
-        ("fork_delivery".to_owned(), UNDECLARED.to_owned()),
-        ("tool_output_disposition".to_owned(), commands("keep")),
-        (
-            "isolation".to_owned(),
-            word(crate::isolation::policy::ISOLATION),
-        ),
-        ("approval".to_owned(), commands("denylist-prompt-preseeded")),
-        ("reasoning_state".to_owned(), word("substrate_reasoning")),
-        ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
-        ("substrate_rung".to_owned(), word("substrate")),
-    ])
 }
