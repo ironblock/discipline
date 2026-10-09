@@ -27,8 +27,7 @@ name: pages
 # the table that admitted it, each recording against its admission -- before it
 # uploads anything. So it needs the repository at the sha that run checked,
 # bash and the runner's own python3, and no toolchain.
-# scripts/check-ci-coverage.py held the guards and the order mechanically
-# until #506 took it out of CI; they are now held by review.
+# The guards and the order are held by review.
 #
 # Static only. Nothing here reaches a network, a model, or a secret; the
 # id-token permission exists so deploy-pages can prove to Pages that this

@@ -11,9 +11,8 @@
 //! files it writes.
 //!
 //! **Every test here has `drive` in its name, and that is load-bearing.**
-//! `cargo test -- drive` -- which is what this lane's `gate.toml` declares --
-//! is a substring filter over test names, and an integration test is named by
-//! its function alone with no module path. Two tests here were called
+//! `cargo test -- drive` is a substring filter over test names, and an
+//! integration test is named by its function alone with no module path. Two tests here were called
 //! `the_regime_crosses_…` and `every_refusal_…`, and the seeded faults they
 //! catch were recorded as catching nothing: the filter never reached them.
 //!

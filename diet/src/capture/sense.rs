@@ -3320,8 +3320,8 @@ mod tests {
         assert_eq!(provenance(&good).expect("a row").len(), 1);
         let missing = good.replace(r#","era":"2026-08-05 to 2026-08-08""#, "");
         // The key is asserted rather than matched: a string literal in a
-        // pattern is what `check-library.py` refuses, and for the reason it
-        // refuses it -- a spelling in an arm is a spelling nothing checks.
+        // pattern is what this crate does not write -- a spelling in an arm is
+        // a spelling nothing checks.
         match provenance(&missing) {
             Err(DataError::MissingKey { key, .. }) => assert_eq!(key, "era"),
             other => panic!("a provenance row with no era was read: {other:?}"),
