@@ -115,7 +115,9 @@
 //! every request of the session sends, as sent -- `enable_thinking` and
 //! `reasoning_effort` -- an object never empty -- and its `unsent`, what the
 //! regime declares and no request carries (`budget_tokens`), recorded rather
-//! than refused.
+//! than refused. And v7 adds the [`ApprovalScope`] `off` and a
+//! `session.start`'s `approvals_off`, `true` or absent: the approval lever's
+//! `none`, under which no gate decided a call and nothing prompted.
 //!
 //! # A torn final line
 //!
@@ -462,6 +464,8 @@ vocabulary! {
         Workspace => "workspace",
         /// The session started with it allowed: no prompt decided it.
         Preseeded => "preseeded",
+        /// Approvals were off (v7): no gate decided it and nothing prompted.
+        Off => "off",
     }
 }
 
@@ -664,6 +668,9 @@ pub enum Event {
         /// What the regime declares and no request carries (v7, R1): best
         /// effort in the duty-of-care sense, recorded rather than refused.
         unsent: Option<Unsent>,
+        /// Approvals were off for the session (v7, the approval lever's
+        /// `none`): `true`, or absent.
+        approvals_off: Option<bool>,
     },
     /// An ask was admitted.
     Ask {
@@ -1790,6 +1797,26 @@ fn beyond(line: &Line, declared: i64) -> Option<String> {
         {
             return Some(why);
         }
+        // One object down: a tag that arrived after its object did (the
+        // approval scope `off`, v7).
+        if let (Some(inner_fields), Value::Object(inner)) = (object_fields(field.holds), value) {
+            for nested in inner_fields {
+                if let (Holds::Tag(tags), Some(Value::String(tag))) =
+                    (nested.holds, inner.get(nested.key))
+                    && let Some(why) = arrived(
+                        tag_introduced(tags, tag),
+                        format!(
+                            "`{}`'s `{}.{}` is `{tag}`",
+                            kind.tag(),
+                            field.key,
+                            nested.key
+                        ),
+                    )
+                {
+                    return Some(why);
+                }
+            }
+        }
     }
     None
 }
@@ -2054,6 +2081,16 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     Some(fields.unsent("unsent")?)
                 } else {
                     None
+                },
+                approvals_off: match fields.optional_flag("approvals_off")? {
+                    Some(false) => {
+                        return Err(
+                            "`approvals_off` is `false`: only `true` is written, and absent is \
+                             the gate"
+                                .to_owned(),
+                        );
+                    }
+                    off => off,
                 },
             }
         }
@@ -2407,7 +2444,11 @@ fn argv_if_it_parsed(
 /// outcome.
 fn decided_as_its_scope_says(approval: &Approval, t: u64) -> Result<(), String> {
     let scope = approval.scope.tag();
-    let preseeded = approval.scope == ApprovalScope::Preseeded;
+    // Neither a pre-seed nor approvals off was decided by a prompt.
+    let preseeded = matches!(
+        approval.scope,
+        ApprovalScope::Preseeded | ApprovalScope::Off
+    );
     let prompted = !preseeded;
     if prompted && approval.why.is_none() {
         return Err(format!(
@@ -2415,7 +2456,9 @@ fn decided_as_its_scope_says(approval: &Approval, t: u64) -> Result<(), String> 
         ));
     }
     if !prompted && approval.why.is_some() {
-        return Err("a `preseeded` approval carries `why`: no prompt asked".to_owned());
+        return Err(format!(
+            "a `{scope}` approval carries `why`: no prompt asked"
+        ));
     }
     let Some(decided_at) = approval.decided_at else {
         if !preseeded {
@@ -2426,7 +2469,9 @@ fn decided_as_its_scope_says(approval: &Approval, t: u64) -> Result<(), String> 
         return Ok(());
     };
     if preseeded {
-        return Err("a `preseeded` approval carries `decided_at`: no prompt decided it".to_owned());
+        return Err(format!(
+            "a `{scope}` approval carries `decided_at`: no prompt decided it"
+        ));
     }
     if decided_at > t {
         return Err(format!(
@@ -3087,6 +3132,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::NothingToSeam) {
         return 6;
     }
+    if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
+        return 7;
+    }
     let capped =
         tags == Tags::SettleReason && SettleReason::from_tag(tag) == Some(SettleReason::Capped);
     if capped {
@@ -3134,6 +3182,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v5("tools", Holds::Strings),
                 may_v7("template_kwargs", Holds::TemplateKwargs),
                 may_v7("unsent", Holds::Unsent),
+                may_v7("approvals_off", Holds::Flag),
             ];
             F
         }
@@ -3559,8 +3608,12 @@ fn to_value(line: &Line) -> Value {
             tools,
             template_kwargs,
             unsent,
+            approvals_off,
         } => {
             put("version", Value::Integer(*version));
+            if let Some(off) = approvals_off {
+                put("approvals_off", Value::Boolean(*off));
+            }
             put("opened", count(*opened));
             put("model", text(model));
             put(
@@ -4540,6 +4593,7 @@ mod tests {
                 tools: None,
                 template_kwargs: None,
                 unsent: None,
+                approvals_off: None,
             },
         }
     }
@@ -5535,20 +5589,20 @@ mod tests {
         };
         for scope in ApprovalScope::ALL {
             let tag = scope.tag();
-            if *scope == ApprovalScope::Preseeded {
+            if matches!(scope, ApprovalScope::Preseeded | ApprovalScope::Off) {
                 line(&call(&format!(r#"{{"scope":"{tag}"}}"#))).unwrap_or_else(|why| {
                     panic!("{tag} under {outcome}, without `decided_at` and `why`: {why}")
                 });
                 for decided_at in [0, 45, 46] {
                     refused_naming(
                         format!(r#"{{"decided_at":{decided_at},"scope":"{tag}"}}"#),
-                        "a `preseeded` approval carries `decided_at`",
+                        &format!("a `{tag}` approval carries `decided_at`"),
                         "a preseeded approval with `decided_at`",
                     );
                 }
                 refused_naming(
                     format!(r#"{{"scope":"{tag}","why":"not_approved"}}"#),
-                    "a `preseeded` approval carries `why`",
+                    &format!("a `{tag}` approval carries `why`"),
                     "a preseeded approval with `why`",
                 );
                 continue;
@@ -5950,7 +6004,7 @@ mod tests {
         );
         assert_eq!(
             tags(ApprovalScope::ALL.iter().map(|it| it.tag()).collect()),
-            "once session workspace preseeded"
+            "once session workspace preseeded off"
         );
         assert_eq!(
             tags(EngineIdentity::ALL.iter().map(|it| it.tag()).collect()),

@@ -114,6 +114,7 @@ export const approvalOf = registry<ApprovalScope>({
   session: { label: 'approved for this session', level: 'ok' },
   workspace: { label: 'approved for this workspace', level: 'ok' },
   preseeded: { label: 'pre-seeded', level: 'quiet' },
+  off: { label: 'approvals off', level: 'quiet' },
 });
 
 // ------------------------------------------------------------------ fork outcomes

@@ -237,6 +237,8 @@ pub enum Event {
         template_kwargs: BTreeMap<String, Value>,
         /// What the regime declares and no request carries (R1).
         unsent: Option<log::Unsent>,
+        /// Whether approvals were off: the approval lever's `none`.
+        approvals_off: bool,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -1125,6 +1127,7 @@ impl<S: Streaming + 'static> Session<S> {
                 .collect(),
             template_kwargs: template.template_kwargs.clone(),
             unsent,
+            approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
         });
         Self {
             shared: Arc::new(Shared {
@@ -1654,7 +1657,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tools,
             template_kwargs,
             unsent,
+            approvals_off,
         } => log::Event::SessionStart {
+            // The approval lever's `none`: `true`, or nothing.
+            approvals_off: approvals_off.then_some(true),
             unsent: unsent.clone(),
             version: log::VERSION,
             // R1: what reaches the template, as sent; nothing when nothing is.
@@ -2468,110 +2474,122 @@ fn one_call<S: Streaming>(
     if last {
         return (parsed(refused(log::ToolRefusal::MaxSteps)), None);
     }
-    let mut allowed = shared.lock().allowed.clone();
-    let mut judged = tools.gate.judge(&command, &allowed);
-    let mut approval = None;
-    match judged.outcome() {
-        GateOutcome::Refused => {
-            let entry = judged.judgement.refused_by().unwrap_or_default().to_owned();
-            return (
-                parsed(refused(log::ToolRefusal::Denylist)),
-                Some(tool_loop::refusal_text(log::ToolRefusal::Denylist, &entry)),
+    // Approvals off (the approval lever's `none`): no gate decision and no
+    // prompt; the command runs as the model sent it, confined as ever.
+    let (run, approval) = 'gated: {
+        if tools.approvals_off {
+            break 'gated (
+                tool_loop::argv_of(&command),
+                Some(log::Approval {
+                    scope: log::ApprovalScope::Off,
+                    decided_at: None,
+                    why: None,
+                }),
             );
         }
-        GateOutcome::Prompt => {
-            let why = judged.why().unwrap_or("not_approved").to_owned();
-            let answer = match tools.decider {
-                Decider::Decline => Some((Decision::Decline, 0)),
-                Decider::Operator => decided(
-                    shared,
-                    cancel,
-                    tool_loop::prompt_of(&judged, request, turn, &call.id, &tools.cwd),
-                ),
-            };
-            let Some((decision, at)) = answer else {
-                return (cancelled_line(shared, (turn, request), call), None);
-            };
-            let mut state = shared.lock();
-            let scope = match decision {
-                Decision::Decline => {
-                    state.counts.declined += 1;
-                    return (
-                        parsed(refused(log::ToolRefusal::Declined)),
-                        Some(tool_loop::refusal_text(log::ToolRefusal::Declined, "")),
-                    );
-                }
-                Decision::Once => {
-                    state.counts.once += 1;
-                    judged.approve_once();
-                    Scope::Once
-                }
-                Decision::Session | Decision::Workspace => {
-                    let mut scope = if decision == Decision::Workspace {
-                        Scope::Workspace
-                    } else {
-                        Scope::Session
-                    };
-                    let mut granted = judged.grants(scope, at);
-                    if scope == Scope::Workspace
-                        && let Some(store) = &tools.store
-                    {
-                        let wall = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0));
-                        for entry in &mut granted {
-                            entry.approved_unix_ms = Some(wall);
-                        }
-                        let mut kept: Vec<Entry> = state
-                            .allowed
-                            .iter()
-                            .filter(|e| e.scope == Scope::Workspace)
-                            .cloned()
-                            .collect();
-                        kept.extend(granted.iter().cloned());
-                        // An approval the store cannot keep is not a
-                        // workspace one, and is not recorded as one.
-                        if store.write(&kept, wall).is_err() {
-                            scope = Scope::Session;
+        let mut allowed = shared.lock().allowed.clone();
+        let mut judged = tools.gate.judge(&command, &allowed);
+        let mut approval = None;
+        match judged.outcome() {
+            GateOutcome::Refused => {
+                let entry = judged.judgement.refused_by().unwrap_or_default().to_owned();
+                return (
+                    parsed(refused(log::ToolRefusal::Denylist)),
+                    Some(tool_loop::refusal_text(log::ToolRefusal::Denylist, &entry)),
+                );
+            }
+            GateOutcome::Prompt => {
+                let why = judged.why().unwrap_or("not_approved").to_owned();
+                let answer = match tools.decider {
+                    Decider::Decline => Some((Decision::Decline, 0)),
+                    Decider::Operator => decided(
+                        shared,
+                        cancel,
+                        tool_loop::prompt_of(&judged, request, turn, &call.id, &tools.cwd),
+                    ),
+                };
+                let Some((decision, at)) = answer else {
+                    return (cancelled_line(shared, (turn, request), call), None);
+                };
+                let mut state = shared.lock();
+                let scope = match decision {
+                    Decision::Decline => {
+                        state.counts.declined += 1;
+                        return (
+                            parsed(refused(log::ToolRefusal::Declined)),
+                            Some(tool_loop::refusal_text(log::ToolRefusal::Declined, "")),
+                        );
+                    }
+                    Decision::Once => {
+                        state.counts.once += 1;
+                        judged.approve_once();
+                        Scope::Once
+                    }
+                    Decision::Session | Decision::Workspace => {
+                        let mut scope = if decision == Decision::Workspace {
+                            Scope::Workspace
+                        } else {
+                            Scope::Session
+                        };
+                        let mut granted = judged.grants(scope, at);
+                        if scope == Scope::Workspace
+                            && let Some(store) = &tools.store
+                        {
+                            let wall = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0));
                             for entry in &mut granted {
-                                entry.scope = Scope::Session;
-                                entry.approved_unix_ms = None;
+                                entry.approved_unix_ms = Some(wall);
+                            }
+                            let mut kept: Vec<Entry> = state
+                                .allowed
+                                .iter()
+                                .filter(|e| e.scope == Scope::Workspace)
+                                .cloned()
+                                .collect();
+                            kept.extend(granted.iter().cloned());
+                            // An approval the store cannot keep is not a
+                            // workspace one, and is not recorded as one.
+                            if store.write(&kept, wall).is_err() {
+                                scope = Scope::Session;
+                                for entry in &mut granted {
+                                    entry.scope = Scope::Session;
+                                    entry.approved_unix_ms = None;
+                                }
                             }
                         }
+                        if scope == Scope::Workspace {
+                            state.counts.workspace += 1;
+                        } else {
+                            state.counts.session += 1;
+                        }
+                        state.allowed.extend(granted);
+                        allowed.clone_from(&state.allowed);
+                        judged = tools.gate.judge(&command, &allowed);
+                        scope
                     }
-                    if scope == Scope::Workspace {
-                        state.counts.workspace += 1;
-                    } else {
-                        state.counts.session += 1;
-                    }
-                    state.allowed.extend(granted);
-                    allowed.clone_from(&state.allowed);
-                    judged = tools.gate.judge(&command, &allowed);
-                    scope
+                };
+                drop(state);
+                if judged.outcome() != GateOutcome::Run {
+                    // The operator approved this call: whatever no entry covers,
+                    // the decision does.
+                    judged.approve_once();
                 }
-            };
-            drop(state);
-            if judged.outcome() != GateOutcome::Run {
-                // The operator approved this call: whatever no entry covers,
-                // the decision does.
-                judged.approve_once();
+                approval = Some(log::Approval {
+                    scope: tool_loop::scope_tag(scope),
+                    decided_at: Some(at),
+                    why: Some(why),
+                });
             }
-            approval = Some(log::Approval {
-                scope: tool_loop::scope_tag(scope),
-                decided_at: Some(at),
-                why: Some(why),
-            });
+            GateOutcome::Run => {}
         }
-        GateOutcome::Run => {}
-    }
-    let approval = approval.or_else(|| approval_of(&judged, &allowed));
+        let approval = approval.or_else(|| approval_of(&judged, &allowed));
+        (judged.run, approval)
+    };
     let mut line = parsed(ToolLine::of(request, turn, call, log::ToolOutcome::Ran));
     line.approval = approval;
     let profiled = tools.confinement.isolation() != crate::isolation::Isolation::None;
-    match tools
-        .confinement
-        .run(&tools.policy, &tools.worktree, &judged.run)
-    {
+    match tools.confinement.run(&tools.policy, &tools.worktree, &run) {
         Ok(ran) => {
             let denied = ran.denials().iter().any(|d| d.kind.is_unambiguous());
             if profiled && ran.exit != Some(0) && denied {
@@ -2598,7 +2616,7 @@ fn one_call<S: Streaming>(
             let said = not_run.to_string();
             let confined = tools
                 .confinement
-                .compose(&tools.policy, &tools.worktree, &judged.run);
+                .compose(&tools.policy, &tools.worktree, &run);
             line.outcome = log::ToolOutcome::CommandFailed;
             line.policy = tools.confinement.policy_of(&confined);
             line.confined = Some(confined);
@@ -4077,6 +4095,7 @@ pub(in crate::drive) mod tests {
             tools: _,
             template_kwargs: _,
             unsent: None,
+            approvals_off: false,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -4173,6 +4192,7 @@ pub(in crate::drive) mod tests {
                     ),
                 ]),
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
+                approvals_off: true,
             },
             Event::Asked {
                 turn: 1,
@@ -4423,6 +4443,7 @@ pub(in crate::drive) mod tests {
                     reasoning_effort: Some("medium".to_owned()),
                 }),
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
+                approvals_off: Some(true),
             },
             log::Event::Ask {
                 turn: 1,
@@ -5156,6 +5177,7 @@ pub(in crate::drive) mod tests {
             allowed,
             store: None,
             approval_policy: None,
+            approvals_off: false,
         }
     }
 
@@ -5796,6 +5818,47 @@ pub(in crate::drive) mod tests {
             session.approve("call-1", Decision::Once),
             Err(ApproveRefusal::NothingWaiting)
         );
+        tidy(&[&tree]);
+    }
+
+    /// The approval lever's `none`: a call that would prompt runs with no
+    /// gate decision and nothing waiting on the operator, its line says
+    /// approvals were off, and so does `session.start`.
+    #[test]
+    fn with_approvals_off_a_call_that_would_prompt_runs_and_says_so() {
+        let tree = scratch("approvals-off");
+        let mut off = tools(Confinement::Unconfined, &tree, &[], None, Decider::Operator);
+        off.approvals_off = true;
+        let session = Session::open_looping(
+            Canned::new([vec![bash("call-1", "touch a")], deltas(&["done"])]),
+            looping(),
+            None,
+            off,
+        );
+        session.ask("go", None).expect("accepted");
+        // Settles with no `approve`: an operator decider would wait forever.
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        assert!(session.waiting().is_none());
+        let written = lines(&log);
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].outcome, log::ToolOutcome::Ran);
+        assert_eq!(
+            written[0].approval,
+            Some(log::Approval {
+                scope: log::ApprovalScope::Off,
+                decided_at: None,
+                why: None,
+            })
+        );
+        assert!(tree.join("a").exists());
+        assert!(matches!(
+            line_of(&log[0]).event,
+            log::Event::SessionStart {
+                approvals_off: Some(true),
+                ..
+            }
+        ));
         tidy(&[&tree]);
     }
 

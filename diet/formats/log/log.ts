@@ -136,6 +136,7 @@ export type ApprovalScope =
   | "session"
   | "workspace"
   | "preseeded"
+  | "off"
 ;
 
 export type Warrant =
@@ -251,6 +252,7 @@ export type SessionStartLine = {
   tools?: string[];
   template_kwargs?: TemplateKwargs;
   unsent?: Unsent;
+  approvals_off?: boolean;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {

@@ -41,6 +41,12 @@ pub const BASH: &str = "bash";
 /// key).
 pub const ALLOWED_COMMANDS: &str = "allowed_commands";
 
+/// The regimen key for the approval lever's state: `"none"` turns
+/// approvals off -- every command runs with no gate decision and no prompt,
+/// under the regimen's isolation -- and needs no `allowed_commands`. Absent,
+/// the gate decides as it always has.
+pub const APPROVAL: &str = "approval";
+
 /// The regimen's stance, a sentence carried into the receipt (#29
 /// 5981606817).
 pub const APPROVAL_POLICY: &str = "approval_policy";
@@ -1336,6 +1342,8 @@ pub struct Declared {
     pub max_steps: Option<u32>,
     /// The stance, as written.
     pub approval_policy: Option<String>,
+    /// `approval = "none"`: no gate decision, no prompt.
+    pub approvals_off: bool,
 }
 
 /// What `regimen` declares for the loop, or `None` when it runs no commands
@@ -1367,8 +1375,24 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         Some(regimen::Value::String(text)) => Some(text.clone()),
         Some(_) => return Err(format!("`{APPROVAL_POLICY}` is not a string")),
     };
+    let approvals_off = match regimen.get(APPROVAL) {
+        None => false,
+        Some(regimen::Value::String(state)) if state == "none" => true,
+        Some(_) => {
+            return Err(format!(
+                "`{APPROVAL}` takes one value, \"none\" (approvals off); leave it out for the \
+                 gate"
+            ));
+        }
+    };
     let Some(value) = regimen.get(ALLOWED_COMMANDS) else {
-        return Ok(None);
+        // Approvals off runs commands with no allow set to seed.
+        return Ok(approvals_off.then(|| Declared {
+            allowed_commands: Vec::new(),
+            max_steps,
+            approval_policy,
+            approvals_off,
+        }));
     };
     let regimen::Value::Array(items) = value else {
         return Err(format!("`{ALLOWED_COMMANDS}` is not a list"));
@@ -1388,6 +1412,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         allowed_commands,
         max_steps,
         approval_policy,
+        approvals_off,
     }))
 }
 
@@ -1741,6 +1766,9 @@ pub struct Tools {
     pub store: Option<Store>,
     /// The regimen's stance, for the receipt.
     pub approval_policy: Option<String>,
+    /// Approvals off (`approval = "none"`): every command runs with no gate
+    /// decision and no prompt, under the same confinement.
+    pub approvals_off: bool,
 }
 
 vocabulary! {
@@ -2778,8 +2806,20 @@ pub(in crate::drive) mod tests {
                 allowed_commands: Vec::new(),
                 max_steps: Some(4),
                 approval_policy: Some("ask".to_owned()),
+                approvals_off: false,
             }))
         );
+        // The approval lever's `none`: commands run with no allow set.
+        assert_eq!(
+            read("approval = \"none\"\n"),
+            Ok(Some(Declared {
+                allowed_commands: Vec::new(),
+                max_steps: None,
+                approval_policy: None,
+                approvals_off: true,
+            }))
+        );
+        assert!(read("approval = \"ask\"\n").is_err());
         assert!(read("allowed_commands = \"ls\"\n").is_err());
         assert!(read("allowed_commands = [\"\"]\n").is_err());
         assert!(read("allowed_commands = []\n[limits]\nmax_steps = 0\n").is_err());
