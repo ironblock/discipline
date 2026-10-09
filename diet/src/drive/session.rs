@@ -782,6 +782,11 @@ struct State {
     /// The latest tool-calling step's measurement, the trunk's only once
     /// that step's exchange joins it (a `max_steps` settling).
     step_tokens: Option<u64>,
+    /// The turn in flight's exchange through its last completed step: its
+    /// ask, then each step's call and results that the turn went on from.
+    /// A turn that fails after a step keeps it on the trunk, as `max_steps`
+    /// does, rather than losing the commands it ran.
+    ran: Vec<Message>,
 }
 
 /// A prompt waiting on the operator, and the answer when one arrives.
@@ -874,6 +879,18 @@ impl State {
 
     /// The turn is over: back to `awaiting`, and on to `ended` when an
     /// `end` was admitted while it waited on a prompt.
+    /// A turn that settled `failed` or `timeout` after at least one step
+    /// keeps those steps on the trunk -- the ask, each call and its results
+    /// -- as a `max_steps` settle does (#29): the commands it ran are not
+    /// lost. A turn that failed on its first request keeps nothing.
+    fn keep_ran_steps(&mut self) {
+        let ran = std::mem::take(&mut self.ran);
+        if ran.len() > 1 {
+            self.trunk.extend(ran);
+            self.trunk_tokens = self.step_tokens.take();
+        }
+    }
+
     fn after_the_turn(&mut self) {
         self.move_to(Settlement::Awaiting);
         if self.ending {
@@ -1070,6 +1087,7 @@ impl<S: Streaming + 'static> Session<S> {
             turns_at_seam: 0,
             trunk_tokens: None,
             step_tokens: None,
+            ran: Vec::new(),
             opened_at: Instant::now(),
             gap_open: None,
             carried: None,
@@ -2051,8 +2069,11 @@ fn call<S: Streaming>(
     let mut steps = 1;
     // The turn's exchange so far: its ask, then each step's calls and their
     // results. It joins the trunk when the turn settles `final` or
-    // `max_steps` (Q12), and never otherwise (D13).
+    // `max_steps` (Q12); settling `failed` or `timeout` after a step, the
+    // steps that completed join it (`State::keep_ran_steps`); cancelled,
+    // never (D13).
     let mut exchange = vec![ask];
+    shared.lock().ran.clear();
     while let Some(next) = step(
         shared,
         &mut shape,
@@ -2205,6 +2226,7 @@ fn step<S: Streaming>(
                 class,
                 partial,
             });
+            state.keep_ran_steps();
             state.push(Event::TurnSettled {
                 turn,
                 reason: SettleReason::Failed,
@@ -2218,6 +2240,7 @@ fn step<S: Streaming>(
                 failure,
                 partial,
             });
+            state.keep_ran_steps();
             state.push(Event::TurnSettled { turn, reason });
             state.move_to(Settlement::Awaiting);
         }
@@ -2284,6 +2307,10 @@ fn run_calls<S: Streaming>(
             let ran = std::mem::take(exchange);
             state.trunk.extend(ran);
             state.trunk_tokens = measured;
+            state.ran.clear();
+        } else if reason == SettleReason::Failed {
+            state.step_tokens = measured;
+            state.keep_ran_steps();
         }
         state.push(Event::TurnSettled { turn, reason });
         turn_over(&shared.template, &mut state);
@@ -2293,6 +2320,7 @@ fn run_calls<S: Streaming>(
     }
     exchange.push(said.clone());
     exchange.extend(results.iter().cloned());
+    state.ran.clone_from(exchange);
     shape.messages.push(said);
     shape.messages.extend(results);
     let next = state.push(Event::Requested {
@@ -2684,6 +2712,7 @@ fn settle_finished(
             reasoning: (!reasoning.is_empty()).then_some(reasoning),
             timings,
         });
+        state.keep_ran_steps();
         state.push(Event::TurnSettled {
             turn,
             reason: SettleReason::Failed,
@@ -2691,6 +2720,7 @@ fn settle_finished(
         state.move_to(Settlement::Awaiting);
         return false;
     }
+    state.ran.clear();
     state.trunk.extend(exchange);
     // The reasoning goes back with the answer, byte for byte and
     // untrimmed: measured on e7051ef (#117, Q10), dropping it
@@ -3015,6 +3045,7 @@ fn crashed<S>(shared: &Shared<S>, why: String) {
                 partial,
                 why,
             });
+            state.keep_ran_steps();
             state.push(Event::TurnSettled {
                 turn: flight.turn,
                 reason: SettleReason::Failed,
@@ -5417,6 +5448,125 @@ pub(in crate::drive) mod tests {
         assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
         assert_eq!(trunk[1], user("loop"));
         assert_eq!(trunk[4], call_message("call-1", "touch m1"));
+        tidy(&[&tree]);
+    }
+
+    /// A turn that fails after its tool steps keeps them on the trunk, as a
+    /// `max_steps` turn does (#29): two calls ran, then the third request's
+    /// answer hit the output cap and the turn settled `failed`. The ask and
+    /// both exchanges stay on the trunk, the next ask's request carries them,
+    /// and the record's projection rebuilds every head from the log.
+    #[test]
+    fn a_turn_that_fails_after_its_tool_steps_keeps_them_on_the_trunk() {
+        let tree = scratch("failed-keeps-steps");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![bash("call-2", "touch b")],
+                vec![
+                    Step::Delta("cut off".to_owned()),
+                    Step::FinishReason("length".to_owned()),
+                ],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Failed));
+        assert!(tree.join("a").exists() && tree.join("b").exists());
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
+        assert_eq!(trunk[1], user("work"));
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        assert_eq!(trunk[4], call_message("call-2", "touch b"));
+
+        session.ask("next", None).expect("accepted");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        reads_whole(&session);
+        let sent = session.shared.transport.sent();
+        assert_eq!(sent.len(), 4);
+        assert_eq!(
+            sent[3].messages[..trunk.len()],
+            trunk[..],
+            "the next ask's request carries the failed turn's steps"
+        );
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let unrebuilt: Vec<&str> = projected
+            .unspellable
+            .iter()
+            .filter(|named| named.why.contains("could not be rebuilt"))
+            .map(|named| named.why.as_str())
+            .collect();
+        assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
+        tidy(&[&tree]);
+    }
+
+    /// A call to an undeclared tool fails the turn after a step that ran:
+    /// the step that ran stays on the trunk, the failing step does not.
+    #[test]
+    fn a_turn_failed_by_an_undeclared_tool_keeps_the_step_before_it() {
+        let tree = scratch("failed-unknown-keeps-step");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![Step::call(0, "call-2", "python", "{}")],
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Failed));
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2, "{trunk:#?}");
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        tidy(&[&tree]);
+    }
+
+    /// A turn that fails on its first request ran nothing, and keeps nothing:
+    /// the trunk is as it was (#289's rule, unchanged for it).
+    #[test]
+    fn a_turn_that_fails_before_any_step_keeps_nothing() {
+        let tree = scratch("failed-keeps-nothing");
+        let session = Session::open_looping(
+            Canned::new([vec![Step::Reject(500, "broken".to_owned())]]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Failed));
+        assert_eq!(session.trunk().len(), 1, "only the head");
         tidy(&[&tree]);
     }
 
