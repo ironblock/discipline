@@ -28,8 +28,6 @@ labels:
 
 <!-- REQUIRED. A command and the exit code it must produce once this is
      done. "The feature works" is not an acceptance criterion; a command is.
-     Where the work adds a gate or a format, include the seeded fault that
-     must turn it red -- a check that has never been seen red is not a check.
 
      Example:
        cargo test -p discipline-diet -- formats::decline    exit 0

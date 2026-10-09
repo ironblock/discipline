@@ -101,6 +101,22 @@
 //! over empty working memory. A log that
 //! declares 0 to 5 and carries a `seam` line is refused the same way.
 //!
+//! v7 (#509, the duty-of-care ruling of 2026-10-07) replaces the substrate
+//! claim's `engine_build` and `engine_identity` with `served`: each field of
+//! the served configuration the registry declares, by its registry key, with
+//! its `value`, its `provenance` ([`FieldProvenance`]: `declared` when the
+//! engine reports nothing on it, `corroborated` when it reports it and the
+//! report agreed), and under `corroborated` what the engine `reported`. A
+//! claim carries `served` or the two older keys, never both; a log that
+//! declares 0 to 6 and carries `served` is refused the same way, and one that
+//! declares 7 and carries `engine_build` or `engine_identity` is refused. A
+//! contradiction is never logged: `serve` refuses to start on one. v7 also
+//! adds a `session.start`'s `template_kwargs` (R1): the template variables
+//! every request of the session sends, as sent -- `enable_thinking` and
+//! `reasoning_effort` -- an object never empty -- and its `unsent`, what the
+//! regime declares and no request carries (`budget_tokens`), recorded rather
+//! than refused.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -132,10 +148,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 6;
+pub const VERSION: i64 = 7;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -461,6 +477,18 @@ vocabulary! {
 }
 
 vocabulary! {
+    /// Where a served field's value comes from (v7, #509, the duty-of-care
+    /// ruling of 2026-10-07).
+    FieldProvenance {
+        /// Whoever ran the test declared it; the engine did not report it.
+        Declared => "declared",
+        /// The engine reported it, and the report agreed with the
+        /// declaration.
+        Corroborated => "corroborated",
+    }
+}
+
+vocabulary! {
     /// Who wrote a log that a session did not write as it ran (v3, ruled on
     /// #297 at 5976392264). Absent, a session wrote it as it ran.
     Provenance {
@@ -510,10 +538,54 @@ pub struct SubstrateClaim {
     pub substrate: String,
     /// The sha256 of the registry the id was read from.
     pub registry_sha256: String,
-    /// The `build_info` the engine check passed.
-    pub engine_build: String,
-    /// How the engine's identity was established.
-    pub engine_identity: EngineIdentity,
+    /// What the start-time check established about the engine.
+    pub engine: ClaimedEngine,
+}
+
+/// What a substrate claim says of the engine: in v3 to v6, the build the
+/// check passed and how; from v7 (#509), each served field and where its
+/// value comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ClaimedEngine {
+    /// `engine_build` and `engine_identity` (v3 to v6).
+    Checked {
+        /// The `build_info` the engine check passed.
+        build: String,
+        /// How the engine's identity was established.
+        identity: EngineIdentity,
+    },
+    /// `served` (v7): never empty.
+    Served(Vec<ServedField>),
+}
+
+/// The template variables a session sends on every request (v7, R1): what
+/// reaches the chat template, as sent. At least one is carried.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TemplateKwargs {
+    /// `enable_thinking`: whether thinking was requested.
+    pub enable_thinking: Option<bool>,
+    /// `reasoning_effort`: the level, in the template's own words.
+    pub reasoning_effort: Option<String>,
+}
+
+/// What a session's regime declares and its requests cannot carry (v7, R1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Unsent {
+    /// `[reasoning]`'s token budget: no chat template variable carries one.
+    pub budget_tokens: u64,
+}
+
+/// One field of the served configuration (v7, #509).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServedField {
+    /// The field, by its registry key.
+    pub field: String,
+    /// The declared value.
+    pub value: String,
+    /// Where the value comes from.
+    pub provenance: FieldProvenance,
+    /// What the engine reported, under `corroborated` only.
+    pub reported: Option<String>,
 }
 
 /// One output stream of a call's command: its text, whole, and its length
@@ -586,6 +658,12 @@ pub enum Event {
         /// order its requests carry them (v5, #472): what a head is rebuilt
         /// with.
         tools: Option<Vec<String>>,
+        /// The `chat_template_kwargs` every request of the session carries
+        /// (v7, R1): the reasoning state as it was requested on the wire.
+        template_kwargs: Option<TemplateKwargs>,
+        /// What the regime declares and no request carries (v7, R1): best
+        /// effort in the duty-of-care sense, recorded rather than refused.
+        unsent: Option<Unsent>,
     },
     /// An ask was admitted.
     Ask {
@@ -1749,7 +1827,24 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::SessionStart { .. } if index > 0 => {
                 return Err(at(index, "a second `session.start`".to_owned()));
             }
-            Event::SessionStart { claim, .. } => claimed = claim.is_some(),
+            Event::SessionStart { claim, .. } => {
+                // v7 replaced the claim's two older keys with `served` (#509).
+                if declared >= 7
+                    && let Some(SubstrateClaim {
+                        engine: ClaimedEngine::Checked { .. },
+                        ..
+                    }) = claim
+                {
+                    return Err(at(
+                        index,
+                        format!(
+                            "`session.start` carries `engine_build` and `engine_identity`, \
+                             which v7 replaced with `served`, and this log declares v{declared}"
+                        ),
+                    ));
+                }
+                claimed = claim.is_some();
+            }
             Event::Settlement { from, to } => {
                 if *from != state {
                     return Err(at(
@@ -1928,18 +2023,18 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     None => None,
                     Some(_) => Some(fields.serving("serving")?),
                 },
-                // Built only when all four are carried: [`all_or_none`] is
-                // the one rule that refuses a part of the claim.
-                claim: if together.iter().all(|key| object.contains_key(*key)) {
-                    Some(SubstrateClaim {
-                        substrate: fields.string("substrate")?,
-                        registry_sha256: fields.digest("registry_sha256")?,
-                        engine_build: fields.string("engine_build")?,
-                        engine_identity: fields.tag("engine_identity", EngineIdentity::from_tag)?,
+                // Built only when its two keys are carried ([`all_or_none`]),
+                // with exactly one form of what it says of the engine.
+                claim: fields
+                    .claimed_engine(together.iter().all(|key| object.contains_key(*key)))?
+                    .map(|engine| -> Result<SubstrateClaim, String> {
+                        Ok(SubstrateClaim {
+                            substrate: fields.string("substrate")?,
+                            registry_sha256: fields.digest("registry_sha256")?,
+                            engine,
+                        })
                     })
-                } else {
-                    None
-                },
+                    .transpose()?,
                 provenance: fields.optional_tag("provenance", Provenance::from_tag)?,
                 tools: match fields.optional_strings("tools")? {
                     Some(tools) if tools.is_empty() => {
@@ -1950,6 +2045,15 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                         );
                     }
                     tools => tools,
+                },
+                template_kwargs: match object.get("template_kwargs") {
+                    None => None,
+                    Some(_) => Some(fields.template_kwargs("template_kwargs")?),
+                },
+                unsent: if object.contains_key("unsent") {
+                    Some(fields.unsent("unsent")?)
+                } else {
+                    None
                 },
             }
         }
@@ -2546,6 +2650,8 @@ pub enum Tags {
     ToolRefusal,
     /// [`EngineIdentity`] (v3).
     EngineIdentity,
+    /// [`FieldProvenance`] (v7).
+    FieldProvenance,
     /// [`Provenance`] (v3).
     Provenance,
     /// [`ApprovalScope`] (v4).
@@ -2576,6 +2682,7 @@ impl Tags {
         Self::Network,
         Self::ToolRefusal,
         Self::EngineIdentity,
+        Self::FieldProvenance,
         Self::Provenance,
         Self::ApprovalScope,
         Self::Warrant,
@@ -2601,6 +2708,7 @@ impl Tags {
             Self::Network => "Network",
             Self::ToolRefusal => "ToolRefusal",
             Self::EngineIdentity => "EngineIdentity",
+            Self::FieldProvenance => "FieldProvenance",
             Self::Provenance => "Provenance",
             Self::ApprovalScope => "ApprovalScope",
             Self::Warrant => "Warrant",
@@ -2630,6 +2738,7 @@ impl Tags {
             Self::Network => of(Network::ALL, Network::tag),
             Self::ToolRefusal => of(ToolRefusal::ALL, ToolRefusal::tag),
             Self::EngineIdentity => of(EngineIdentity::ALL, EngineIdentity::tag),
+            Self::FieldProvenance => of(FieldProvenance::ALL, FieldProvenance::tag),
             Self::Provenance => of(Provenance::ALL, Provenance::tag),
             Self::ApprovalScope => of(ApprovalScope::ALL, ApprovalScope::tag),
             Self::Warrant => of(Warrant::ALL, Warrant::tag),
@@ -2666,6 +2775,15 @@ pub enum Holds {
     /// A `response`'s [`Usage`]: an object of the keys [`USAGE`] declares,
     /// its two counts required and its cache count optional (v2).
     Usage,
+    /// A `session.start`'s [`TemplateKwargs`] (v7): an object of the keys
+    /// [`TEMPLATE_KWARGS`] declares.
+    TemplateKwargs,
+    /// A `session.start`'s [`Unsent`] (v7): an object of the keys [`UNSENT`]
+    /// declares.
+    Unsent,
+    /// A substrate claim's `served` (v7): a non-empty list of objects of
+    /// the keys [`SERVED_FIELD`] declares.
+    Served,
     /// A `session.start`'s [`Serving`]: an object of the keys [`SERVING`]
     /// declares (v2).
     Serving,
@@ -2808,6 +2926,27 @@ pub const RECORDED_FILE: &[Field] = &[
     must_v4("bytes", Holds::Count),
 ];
 
+/// The keys a `session.start`'s `template_kwargs` may carry, each as sent.
+/// Arrived in v7.
+pub const TEMPLATE_KWARGS: &[Field] = &[
+    may_v7("enable_thinking", Holds::Flag),
+    may_v7("reasoning_effort", Holds::Text),
+];
+
+/// The keys of a `session.start`'s `unsent`: what the regime declares and
+/// no request carries. Arrived in v7.
+pub const UNSENT: &[Field] = &[must_v7("budget_tokens", Holds::Count)];
+
+/// The keys of each entry of a substrate claim's `served`: the field, its
+/// declared value and its provenance always, and what the engine reported
+/// under `corroborated` only. Arrived in v7.
+pub const SERVED_FIELD: &[Field] = &[
+    must_v7("field", Holds::Text),
+    must_v7("value", Holds::Text),
+    must_v7("provenance", Holds::Tag(Tags::FieldProvenance)),
+    may_v7("reported", Holds::Text),
+];
+
 /// The keys of a `patch`'s entry: its id and text always, its category when
 /// the fold names one. Arrived in v5.
 pub const PATCH_ENTRY: &[Field] = &[
@@ -2833,6 +2972,26 @@ const fn must_v5(key: &'static str, holds: Holds) -> Field {
         holds,
         required: true,
         since: 5,
+    }
+}
+
+/// A key that arrived in v6 and is required wherever its object is written.
+const fn may_v7(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 7,
+    }
+}
+
+/// A key that arrived in v7 and is required wherever its object is written.
+const fn must_v7(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: true,
+        since: 7,
     }
 }
 
@@ -2889,9 +3048,12 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Timings => Some(TIMINGS),
         Holds::Usage => Some(USAGE),
         Holds::Serving => Some(SERVING),
+        Holds::TemplateKwargs => Some(TEMPLATE_KWARGS),
+        Holds::Unsent => Some(UNSENT),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
+        Holds::Served => Some(SERVED_FIELD),
         Holds::Entry => Some(PATCH_ENTRY),
         _ => None,
     }
@@ -2967,8 +3129,11 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v3("registry_sha256", Holds::Digest),
                 may_v3("engine_build", Text),
                 may_v3("engine_identity", Tag(Tags::EngineIdentity)),
+                may_v7("served", Holds::Served),
                 may_v3("provenance", Tag(Tags::Provenance)),
                 may_v5("tools", Holds::Strings),
+                may_v7("template_kwargs", Holds::TemplateKwargs),
+                may_v7("unsent", Holds::Unsent),
             ];
             F
         }
@@ -3154,12 +3319,7 @@ pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
 #[must_use]
 pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
     match kind {
-        Kind::SessionStart => &[
-            "substrate",
-            "registry_sha256",
-            "engine_build",
-            "engine_identity",
-        ],
+        Kind::SessionStart => &["substrate", "registry_sha256"],
         _ => &[],
     }
 }
@@ -3197,11 +3357,14 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Flag => "boolean".to_owned(),
         Holds::Usage => "Usage".to_owned(),
         Holds::Serving => "Serving".to_owned(),
+        Holds::TemplateKwargs => "TemplateKwargs".to_owned(),
+        Holds::Unsent => "Unsent".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
         Holds::Entry => "PatchEntry".to_owned(),
         Holds::Files => "RecordedFile[]".to_owned(),
+        Holds::Served => "ServedField[]".to_owned(),
         Holds::Head => "HeadMessage[]".to_owned(),
         Holds::Tag(tags) => tags.name().to_owned(),
     }
@@ -3292,9 +3455,12 @@ pub fn typescript() -> String {
         ("Timings", TIMINGS),
         ("Usage", USAGE),
         ("Serving", SERVING),
+        ("TemplateKwargs", TEMPLATE_KWARGS),
+        ("Unsent", UNSENT),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
+        ("ServedField", SERVED_FIELD),
         ("PatchEntry", PATCH_ENTRY),
     ] {
         let _ = writeln!(out, "export interface {name} {{");
@@ -3391,6 +3557,8 @@ fn to_value(line: &Line) -> Value {
             claim,
             provenance,
             tools,
+            template_kwargs,
+            unsent,
         } => {
             put("version", Value::Integer(*version));
             put("opened", count(*opened));
@@ -3418,8 +3586,13 @@ fn to_value(line: &Line) -> Value {
             if let Some(claim) = claim {
                 put("substrate", text(&claim.substrate));
                 put("registry_sha256", text(&claim.registry_sha256));
-                put("engine_build", text(&claim.engine_build));
-                put("engine_identity", text(claim.engine_identity.tag()));
+                match &claim.engine {
+                    ClaimedEngine::Checked { build, identity } => {
+                        put("engine_build", text(build));
+                        put("engine_identity", text(identity.tag()));
+                    }
+                    ClaimedEngine::Served(served) => put("served", served_value(served)),
+                }
             }
             if let Some(provenance) = provenance {
                 put("provenance", text(provenance.tag()));
@@ -3428,6 +3601,25 @@ fn to_value(line: &Line) -> Value {
                 put(
                     "tools",
                     Value::Array(tools.iter().map(|tool| text(tool)).collect()),
+                );
+            }
+            if let Some(kwargs) = template_kwargs {
+                let mut object = BTreeMap::new();
+                if let Some(thinking) = kwargs.enable_thinking {
+                    object.insert("enable_thinking".to_owned(), Value::Boolean(thinking));
+                }
+                if let Some(effort) = &kwargs.reasoning_effort {
+                    object.insert("reasoning_effort".to_owned(), text(effort));
+                }
+                put("template_kwargs", Value::Object(object));
+            }
+            if let Some(unsent) = unsent {
+                put(
+                    "unsent",
+                    Value::Object(BTreeMap::from([(
+                        "budget_tokens".to_owned(),
+                        count(unsent.budget_tokens),
+                    )])),
                 );
             }
             Kind::SessionStart
@@ -3753,6 +3945,30 @@ fn to_value(line: &Line) -> Value {
     Value::Object(object)
 }
 
+/// A claim's `served` as the log writes it: each [`SERVED_FIELD`] key, and
+/// `reported` only where the engine reported.
+fn served_value(served: &[ServedField]) -> Value {
+    Value::Array(
+        served
+            .iter()
+            .map(|field| {
+                let mut entry = BTreeMap::from([
+                    ("field".to_owned(), Value::String(field.field.clone())),
+                    ("value".to_owned(), Value::String(field.value.clone())),
+                    (
+                        "provenance".to_owned(),
+                        Value::String(field.provenance.tag().to_owned()),
+                    ),
+                ]);
+                if let Some(reported) = &field.reported {
+                    entry.insert("reported".to_owned(), Value::String(reported.clone()));
+                }
+                Value::Object(entry)
+            })
+            .collect(),
+    )
+}
+
 /// A line's `files` as the log writes them: each [`RECORDED_FILE`] key, and
 /// nothing inlined.
 fn files_value(files: &[RecordedFile]) -> Value {
@@ -4013,6 +4229,105 @@ impl Fields<'_> {
         }))
     }
 
+    /// What a `session.start`'s substrate claim says of the engine, when it
+    /// is `claimed`: `served` (v7), or `engine_build` with `engine_identity`
+    /// (v3 to v6), exactly one form. Unclaimed, it carries none of them.
+    fn claimed_engine(&self, claimed: bool) -> Result<Option<ClaimedEngine>, String> {
+        let carries = |key: &str| self.0.contains_key(key);
+        let older = carries("engine_build") || carries("engine_identity");
+        if !claimed {
+            return match ["engine_build", "engine_identity", "served"]
+                .into_iter()
+                .find(|key| carries(key))
+            {
+                Some(key) => Err(format!(
+                    "`session.start` carries `{key}` without `substrate` and `registry_sha256`: \
+                     it is part of the substrate claim"
+                )),
+                None => Ok(None),
+            };
+        }
+        match (carries("served"), older) {
+            (true, true) => Err(
+                "`session.start`'s substrate claim carries `served` beside `engine_build` or \
+                 `engine_identity`: v7's `served` replaces them"
+                    .to_owned(),
+            ),
+            (true, false) => Ok(Some(ClaimedEngine::Served(self.served("served")?))),
+            (false, true) => Ok(Some(ClaimedEngine::Checked {
+                build: self.string("engine_build")?,
+                identity: self.tag("engine_identity", EngineIdentity::from_tag)?,
+            })),
+            (false, false) => Err(
+                "`session.start`'s substrate claim says nothing of the engine: it carries \
+                 `served`, or `engine_build` and `engine_identity`"
+                    .to_owned(),
+            ),
+        }
+    }
+
+    /// A claim's `served` (v7): a non-empty list, each entry the keys of
+    /// [`SERVED_FIELD`] and nothing else, `reported` under `corroborated`
+    /// only, and no field named twice.
+    fn served(&self, key: &str) -> Result<Vec<ServedField>, String> {
+        let Value::Array(entries) = self.get(key)? else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a claim names at least one field"
+            ));
+        }
+        let mut served: Vec<ServedField> = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !SERVED_FIELD.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            let field = inner.string("field").map_err(at)?;
+            if served.iter().any(|seen| seen.field == field) {
+                return Err(at(format!("names `{field}` a second time")));
+            }
+            let provenance = inner
+                .tag("provenance", FieldProvenance::from_tag)
+                .map_err(at)?;
+            let reported = match entry.get("reported") {
+                None => None,
+                Some(_) => Some(inner.string("reported").map_err(at)?),
+            };
+            match (provenance, &reported) {
+                (FieldProvenance::Corroborated, None) => {
+                    return Err(at(
+                        "is `corroborated` and carries no `reported`: what the engine said"
+                            .to_owned(),
+                    ));
+                }
+                (FieldProvenance::Declared, Some(_)) => {
+                    return Err(at(
+                        "is `declared` and carries `reported`: a declared field is one the \
+                         engine did not report"
+                            .to_owned(),
+                    ));
+                }
+                _ => {}
+            }
+            served.push(ServedField {
+                field,
+                value: inner.string("value").map_err(at)?,
+                provenance,
+                reported,
+            });
+        }
+        Ok(served)
+    }
+
     /// A `tool_call`'s `files`, when carried (v4, ruled at 5983588924): a
     /// non-empty list, each entry all four of [`RECORDED_FILE`]'s keys and
     /// nothing else -- no `content`, `data` or any other inlining of the file.
@@ -4126,6 +4441,36 @@ impl Fields<'_> {
         })
     }
 
+    /// A `session.start`'s `template_kwargs` (v7, R1): an object of
+    /// [`TEMPLATE_KWARGS`]'s keys, at least one.
+    fn template_kwargs(&self, key: &str) -> Result<TemplateKwargs, String> {
+        let inner = Fields(self.object(key, TEMPLATE_KWARGS)?);
+        let at = |why: String| format!("`{key}`: {why}");
+        let kwargs = TemplateKwargs {
+            enable_thinking: inner.optional_flag("enable_thinking").map_err(at)?,
+            reasoning_effort: match inner.0.get("reasoning_effort") {
+                None => None,
+                Some(_) => Some(inner.string("reasoning_effort").map_err(at)?),
+            },
+        };
+        if kwargs == TemplateKwargs::default() {
+            return Err(format!(
+                "`{key}` is empty: a session that sends none carries no `{key}`"
+            ));
+        }
+        Ok(kwargs)
+    }
+
+    /// A `session.start`'s `unsent` (v7, R1): an object of [`UNSENT`]'s keys.
+    fn unsent(&self, key: &str) -> Result<Unsent, String> {
+        let inner = Fields(self.object(key, UNSENT)?);
+        Ok(Unsent {
+            budget_tokens: inner
+                .count("budget_tokens")
+                .map_err(|why| format!("`{key}`: {why}"))?,
+        })
+    }
+
     /// A `session.start`'s `serving`: its dialect, and its concurrency when
     /// declared.
     fn serving(&self, key: &str) -> Result<Serving, String> {
@@ -4193,6 +4538,8 @@ mod tests {
                     content: "you are the trunk".to_owned(),
                 }],
                 tools: None,
+                template_kwargs: None,
+                unsent: None,
             },
         }
     }
@@ -4519,6 +4866,8 @@ mod tests {
                 Holds::Timings
                 | Holds::Usage
                 | Holds::Serving
+                | Holds::TemplateKwargs
+                | Holds::Unsent
                 | Holds::ToolCallPiece
                 | Holds::Approval
                 | Holds::Entry,
@@ -4537,16 +4886,19 @@ mod tests {
             (Holds::Text, Value::String(_)) | (Holds::Flag, Value::Boolean(_)) => true,
             (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
             (Holds::WorkingDirectory, Value::String(cwd)) => is_a_working_directory(cwd),
-            (Holds::Files, Value::Array(entries)) => {
+            (Holds::Files | Holds::Served, Value::Array(entries)) => {
+                let declared = object_fields(holds).expect("a list of objects");
                 !entries.is_empty()
                     && entries.iter().all(|entry| match entry {
                         Value::Object(entry) => {
                             entry.iter().all(|(key, value)| {
-                                RECORDED_FILE
+                                declared
                                     .iter()
                                     .find(|f| f.key == key)
                                     .is_some_and(|f| written_as(f.holds, value))
-                            }) && RECORDED_FILE.iter().all(|f| entry.contains_key(f.key))
+                            }) && declared
+                                .iter()
+                                .all(|f| !f.required || entry.contains_key(f.key))
                         }
                         _ => false,
                     })
@@ -4742,9 +5094,12 @@ mod tests {
             ("timings", TIMINGS),
             ("usage", USAGE),
             ("serving", SERVING),
+            ("template_kwargs", TEMPLATE_KWARGS),
+            ("unsent", UNSENT),
             ("tool_call", TOOL_CALL_PIECE),
             ("approval", APPROVAL),
             ("files", RECORDED_FILE),
+            ("served", SERVED_FIELD),
         ] {
             for inner in inner_fields {
                 assert!(
@@ -4854,6 +5209,12 @@ mod tests {
                 .collect();
             for present in optional_text.iter().filter(|k| object.contains_key(**k)) {
                 for absent in optional_text.iter().filter(|k| !object.contains_key(**k)) {
+                    // A claim's two forms are the reader's other refusal
+                    // ([`Fields::claimed_engine`], v7): `served` or the older
+                    // keys, never both.
+                    if object.contains_key("served") && ["engine_build"].contains(absent) {
+                        continue;
+                    }
                     let mut both = object.clone();
                     both.insert((*absent).to_owned(), Value::String("x".to_owned()));
                     let mut rendered = String::new();

@@ -1,0 +1,49 @@
+# A rehearsal regimen: a commands-running session, with its approvals, driven
+# with no model and no GPU (#411).
+#
+# The substrate is `canned-replay-tools`, which `diet-drive replay` serves on
+# loopback from two captures of one real llama.cpp `e486f80` session
+# (`substrates/measurements/2026-10-02-i0-tool-call-captures/`): a request
+# ending in a tool result is answered with that server's answer, any other
+# with its streamed `bash` call of `ls | wc -l`, byte for byte. So every ask
+# makes the call; `ls` is allowed below and `wc` is not, so the gate prompts,
+# and the approval decides whether it runs; then the answer settles `final`.
+# The record carries `turn`, `tool_call` and `response` rows with the
+# captures' counts. The words are the captures', whatever was asked: nothing
+# under this regimen is a claim about a model. `diet-drive replay --answers`
+# serves `canned-replay` instead: one captured answer for every request.
+#
+#     target/debug/diet-drive replay                     # 127.0.0.1:7902
+#     target/debug/diet-drive serve --endpoint http://127.0.0.1:7902/v1/chat/completions \
+#         --model replay --head diet/drive/heads/floor.md --regimen diet/drive/replay.toml \
+#         --worktree <a scratch checkout> --auth-file <user:password file> \
+#         --port 7801 --allow-origin http://localhost:5173 \
+#         --log session.log --record session.record.jsonl
+#
+# `serve`'s engine check reads `GET /props` and refuses any server but the
+# replay: its `build_info` is the registry entry's literal, `canned-` and the
+# digest of what it plays.
+
+arm = "rehearsal"
+dogma_version = 0
+
+substrate = "canned-replay-tools"
+substrate_reasoning = "off"
+# The `hardware_fingerprint` of equipment `canned-loopback-replay-tools` in
+# `substrates/registry.toml`: `canned::hardware_fingerprint` over the acts
+# the replay plays.
+substrate_hardware = "1c04e518950209a440101b6f982b8bc2d73f8d8f17502eb04e4d6a43b8852cbf"
+
+# Unconfined, so the rehearsal starts on any machine; a rehearsal of the
+# floor's own isolation says `isolation = "sandbox"` here.
+isolation = "none"
+allowed_commands = ["ls", "cat", "rg"]
+approval_policy = "approve any command whose effects stay in the worktree; deny everything else"
+
+[limits]
+max_steps = 4
+
+[sampler]
+temperature = 0.6
+top_p = 0.95
+seed = 7

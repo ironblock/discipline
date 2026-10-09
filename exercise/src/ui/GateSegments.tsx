@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { judge } from '../gate/judge.ts';
 import type { Judgement } from '../gate/judge.ts';
 import type { Segment } from '../drive/transport.ts';
+import { heldOf, verdictOf } from './sets.ts';
 
 /**
  * A command's segments as the gate read it (#389): one row each, what an
@@ -15,10 +16,12 @@ export function SegmentList({ segments }: { readonly segments: readonly Segment[
     <ol className="ex-approval__segments" aria-label="the command, as the gate read it">
       {segments.map((segment, i) => (
         <li key={i} className="ex-approval__segment" data-verdict={segment.verdict}>
-          <code>{segment.shape ?? segment.entry ?? 'no shape'}</code>
-          <span className="ex-approval__verdict">
-            {segment.verdict}
-            {segment.why !== undefined ? ` · ${segment.why}` : ''}
+          <code title={segment.shape === undefined && segment.entry === undefined ? 'the gate names no shape an approval of it would cover' : 'what an approval of it would cover'}>
+            {segment.shape ?? segment.entry ?? 'no shape'}
+          </code>
+          <span className="ex-approval__verdict" title={[segment.verdict, segment.why].filter(Boolean).join(' · ')}>
+            {verdictOf(segment.verdict).label}
+            {segment.why !== undefined ? ` · ${heldOf(segment.why).label}` : ''}
             {segment.reason !== undefined ? `: ${segment.reason}` : ''}
             {segment.verdict === 'refused' && segment.entry !== undefined ? ` · on the denylist as ${segment.entry}` : ''}
           </span>

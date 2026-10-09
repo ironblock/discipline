@@ -26,7 +26,7 @@ export const FirstDrive: Story = {
     await expect(lines.some((line) => line.startsWith('Scrubbed:'))).toBe(true);
     await expect(canvasElement.querySelector('.ex-replay__foot')?.textContent).toContain('Apache-2.0');
     // What the page does not show yet, and whose it is, on the recording's page too (#32, ruling 6).
-    await expect(canvasElement.querySelector('.ex-replay__gaps')?.textContent).toContain('#31');
+    await expect(canvasElement.querySelector('.ex-replay__gaps')?.textContent).toContain('#78');
     await waitFor(async () => expect(canvasElement.querySelector('.ex-trunk .ex-block')).not.toBeNull());
   },
 };
@@ -56,7 +56,7 @@ export const Index: Story = {
     await expect(examples?.querySelector('h2')?.textContent).toBe('Authored examples (not sessions)');
     await expect(examples?.querySelector('.ex-replay__label')?.textContent).toBe(EXAMPLE_LABEL);
     await expect([...(examples?.querySelectorAll('a') ?? [])].map((a) => a.textContent)).toEqual(['kitchen-sink']);
-    await expect(canvasElement.textContent).toContain('#31');
+    await expect(canvasElement.textContent).toContain('#78');
   },
 };
 

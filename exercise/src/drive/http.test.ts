@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { EventSourceLike, Web } from './http.ts';
 import { HttpTransport } from './http.ts';
 import type { LogLine } from './log.ts';
+import { png } from './png.ts';
 
 /**
  * `HttpTransport` against a stand-in for `serve.rs`: an EventSource the test
@@ -92,6 +93,21 @@ describe('HttpTransport: the log, served', () => {
     last().send(ask(3));
     last().send(ask(1));
     expect(lines.map((l) => l.seq)).toEqual([0, 1]);
+  });
+
+  it('lets an ended session’s stream go: serve exits after `end`, and that close is the end, not a dropped link', async () => {
+    for (const state of [0, 2] as const) {
+      const { sources, fetched, links, last } = stand();
+      last().open();
+      last().send(start);
+      last().send({ seq: 1, t: 1, kind: 'settlement', from: 'awaiting', to: 'ended' });
+      last().fail(state);
+      await settle();
+      expect(links.at(-1)).toBe('live');
+      expect(last().closed).toBe(true);
+      expect(sources).toHaveLength(1);
+      expect(fetched).toEqual([]);
+    }
   });
 
   it('says it is reconnecting while the browser retries a dropped stream, and makes no new one', () => {
@@ -354,5 +370,61 @@ describe('HttpTransport: the operator’s scope mark (#453)', () => {
     await transport.dispatch({ kind: 'ask', text: 'hi' });
     expect(posted).toEqual([{ kind: 'ask', text: 'hi' }]);
     expect('scoping' in posted[0]!).toBe(false);
+  });
+});
+
+describe('HttpTransport: the operator’s attachment (#372)', () => {
+  const sha = 'cd'.repeat(32);
+  const answering = (status: number, body: BodyInit | null = null) => {
+    const sent: { url: string; init: RequestInit | undefined }[] = [];
+    const web: Web = {
+      EventSource: class extends FakeSource {},
+      fetch: (url, init) => (sent.push({ url, init }), Promise.resolve(new Response(body, { status }))),
+    };
+    return { transport: new HttpTransport('', web), sent };
+  };
+  const bytes = png(2, 2, () => [0, 0, 0]);
+
+  it('posts the raw bytes to POST /files as image/png, and answers the digest serve keeps them by', async () => {
+    const { transport, sent } = answering(200, JSON.stringify({ sha256: sha, bytes: bytes.length }));
+    await expect(transport.upload(bytes)).resolves.toEqual({ ok: true, sha256: sha, bytes: bytes.length });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.url).toBe('/files');
+    expect(sent[0]!.init?.method).toBe('POST');
+    expect(new Headers(sent[0]!.init?.headers).get('Content-Type')).toBe('image/png');
+    expect(sent[0]!.init?.body).toBe(bytes);
+  });
+
+  it('answers serve’s 400 as not a PNG, its 413 as over the cap, and no answer as unreachable', async () => {
+    await expect(answering(400).transport.upload(bytes)).resolves.toEqual({ ok: false, refused: 'not-a-png' });
+    await expect(answering(413).transport.upload(bytes)).resolves.toEqual({ ok: false, refused: 'too-large' });
+    const down = new HttpTransport('', { EventSource: class extends FakeSource {}, fetch: () => Promise.reject(new TypeError('down')) });
+    await expect(down.upload(bytes)).resolves.toEqual({ ok: false, refused: 'unreachable' });
+  });
+
+  it('names the uploads on the ask by digest, and an ask with none carries no `files`', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });
+    await transport.dispatch({ kind: 'ask', text: 'this is wrong', files: [sha] });
+    await transport.dispatch({ kind: 'ask', text: 'hi', files: [] });
+    expect(posted).toEqual([{ kind: 'ask', text: 'this is wrong', files: [sha] }, { kind: 'ask', text: 'hi' }]);
+  });
+});
+
+describe('HttpTransport: an attachment serve would not take (#372, #514)', () => {
+  const sha = 'ef'.repeat(32);
+  const unattachable = JSON.stringify({ unattachable: { path: sha, check: 'not-uploaded', reason: 'no upload has that digest' } });
+  const gap = { opened_by: 7, notice: 100, read: 2000, compose: 900, away: 0, blocked: 0, ended_by: 'ask' as const };
+
+  it('answers serve’s 415 for another type as not a PNG', async () => {
+    const web: Web = { EventSource: class extends FakeSource {}, fetch: () => Promise.resolve(new Response(null, { status: 415 })) };
+    await expect(new HttpTransport('', web).upload(png(1, 1, () => [0, 0, 0]))).resolves.toEqual({ ok: false, refused: 'not-a-png' });
+  });
+
+  it('refuses an ask by the unattachable check, and does not send it again without its gap', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response(unattachable, { status: 400 })) });
+    await expect(transport.dispatch({ kind: 'ask', text: 'this', files: [sha] }, { idle_gap: gap })).resolves.toEqual({ ok: false, refused: 'not-uploaded' });
+    expect(posted).toHaveLength(1);
   });
 });

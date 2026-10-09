@@ -17,6 +17,13 @@
   margin-top: 0.35rem;
 }
 
+/* The command wraps where the output does not: a path read outside the worktree is the part the operator checks,
+   and a line scrolled sideways hides exactly that part. */
+.ex-tool__call {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* The shell's prompt, a script cut short, and a whole written as one: said, quietly. */
 .ex-tool__prompt,
 .ex-tool__clip,

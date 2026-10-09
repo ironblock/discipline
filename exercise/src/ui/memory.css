@@ -60,9 +60,17 @@
   list-style: none;
 }
 
+/* One id column per list, as wide as its longest id (diet's are `interview-t4-0`, the surface's own `d1`), shared
+   by every entry so the texts line up; an id past a third of the panel wraps inside its own column. */
+.ex-memory__category > ul {
+  display: grid;
+  grid-template-columns: minmax(2.5rem, max-content) minmax(0, 1fr);
+}
+
 .ex-memory__entry {
   display: grid;
-  grid-template-columns: 2.5rem minmax(0, 1fr);
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
   gap: 0.4rem;
   padding: 0.2rem 0 0.2rem 0.5rem;
   border-left: 2px solid transparent;
@@ -89,7 +97,9 @@
 .ex-root[data-motion='still'] .ex-memory__entry[data-fresh] { animation: none; }
 
 .ex-memory__id {
+  max-width: 7.5rem;
   color: var(--ink-faint);
+  overflow-wrap: anywhere;
 }
 
 .ex-memory__text {

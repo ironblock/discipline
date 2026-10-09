@@ -4,8 +4,11 @@ import { expect, userEvent, waitFor } from 'storybook/test';
 import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
+import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
+import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
+import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
@@ -82,6 +85,20 @@ function serving(log: string): Web {
     }
   }
   return { EventSource: Served, fetch: async () => new Response('{}', { status: 200 }) };
+}
+
+/** What the stand-in below was posted, in order: each command's JSON body. */
+const posted: unknown[] = [];
+
+/** `serving`, keeping what the page posts to `/commands`. */
+function posting(log: string): Web {
+  return {
+    ...serving(log),
+    fetch: async (url, init) => {
+      if (String(url).endsWith('/commands') && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
+      return new Response('{}', { status: 200 });
+    },
+  };
 }
 
 /** The rehearsal's log up to the line with SEQ (#177): a session as `serve` wrote it, from its start. */
@@ -255,5 +272,66 @@ export const ServedToolCallFailedUnderPolicy: Story = {
     const call = await servedCall(canvasElement);
     await expect(call.querySelector('.ex-call-outcome[data-outcome="command_failed"]')?.textContent).toBe('failed under policy');
     await expect(call.querySelector('.ex-tool__stderr')?.textContent).toContain('Operation not permitted');
+  },
+};
+
+/** `?drive`, log v5: `diet`'s forks, whose lines name no slot, drawn in a lane behind the curtain -- one branch per fork. */
+export const ServedForks: Story = {
+  name: '?drive: the interview forks, drawn in their lane (v5)',
+  args: { drive: true, web: serving(forks) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-lane .ex-branch')).toHaveLength(2));
+    // Settled, each is a thin bar: its lane and how it ended -- the scoping fork patched, the read fork declined.
+    const drawn = [...canvasElement.querySelectorAll<HTMLElement>('.ex-lane .ex-branch')].map((b) => [b.dataset['lane'], b.dataset['outcome']]);
+    await expect(drawn).toEqual([
+      ['interview', 'value'],
+      ['interview', 'decline'],
+    ]);
+  },
+};
+
+/**
+ * The operator's screenshot (#372), attached in the composer: picked, shown as a chip, sent ahead of the ask by
+ * the transport's upload, named on the ask by digest -- and drawn on the operator's message, read back by that digest.
+ */
+export const AttachAScreenshot: Story = {
+  name: 'attach a screenshot to the ask',
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    const shot = new File([png(8, 6, (x) => [x * 30, 90, 160]) as Uint8Array<ArrayBuffer>], 'shot.png', { type: 'image/png' });
+    await userEvent.upload(canvasElement.querySelector('input[aria-label="attach a PNG"]') as HTMLInputElement, shot);
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-composer__file img')).toHaveLength(1));
+    await userEvent.type(canvasElement.querySelector('textarea') as HTMLTextAreaElement, 'Where is the output format decided?{Enter}');
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-trunk [aria-label="what the operator attached"] img')).not.toBeNull());
+    // Taken, the chip is gone: the next ask attaches nothing unless the operator says so.
+    await expect(canvasElement.querySelector('.ex-composer__file')).toBeNull();
+  },
+};
+
+/**
+ * `?drive`: `diet`'s drive declares no phases, and its declare-seam takes none -- so the composer offers no move,
+ * says so, and its refill sends the bare declare-seam serve takes.
+ */
+export const ServedRefillNamesNoPhase: Story = {
+  name: '?drive: refill offers no phase, since the drive declares none',
+  args: { drive: true, web: posting(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await expect(canvasElement.querySelector('select[aria-label="move to"]')).toBeNull();
+    await expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase not declared');
+    posted.length = 0;
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'refill')!);
+    // The bare declare-seam (with the idle gap it ends): no phase named.
+    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-seam']));
+    await expect(posted.some((p) => 'to' in (p as object))).toBe(false);
+  },
+};
+
+/** The canned demo declares its phases: the composer offers the move. */
+export const CannedRefillOffersPhases: Story = {
+  name: 'canned: refill offers the next phase',
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await expect(canvasElement.querySelector('select[aria-label="move to"]')).not.toBeNull();
   },
 };

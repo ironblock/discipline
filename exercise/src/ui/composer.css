@@ -52,11 +52,14 @@
   .ex-composer__spacer {
     display: none;
   }
+  .ex-composer__attach,
   .ex-composer__scope,
   .ex-composer__send,
   .ex-composer__cancel {
     margin-left: auto;
   }
+  .ex-composer__attach + .ex-composer__scope,
+  .ex-composer__attach + .ex-composer__cancel,
   .ex-composer__scope + .ex-composer__send {
     margin-left: 0;
   }
@@ -141,4 +144,37 @@
 .ex-composer__end[data-armed]:not(:disabled) {
   border-color: var(--bad);
   color: var(--bad);
+}
+
+/* The operator's attachments, waiting for the ask that names them (#372). */
+.ex-composer__files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ex-composer__file {
+  position: relative;
+}
+
+.ex-composer__file img {
+  display: block;
+  max-width: 6rem;
+  max-height: 4rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--ink-faint);
+}
+
+.ex-composer__file button {
+  position: absolute;
+  top: -0.4rem;
+  right: -0.4rem;
+  width: 1.2rem;
+  height: 1.2rem;
+  padding: 0;
+  border-radius: 50%;
+  line-height: 1;
 }

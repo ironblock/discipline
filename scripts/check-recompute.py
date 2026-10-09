@@ -27,8 +27,7 @@ recomputable directory at all is exit 2 rather than a pass.
 
 Stdlib only. Exit 0 if every recomputable directory re-derives, 1 if one does
 not or a directory is undeclared, 2 if there is nothing to recompute. Under
-`--only` (#318, the selftest's narrowing to the directories a seeded fault
-mutated) a scope naming only the template has no results directory to count,
+`--only` (#318, a narrowing to named directories) a scope naming only the template has no results directory to count,
 and says so with exit 0; a name that is not there is exit 2.
 """
 
@@ -43,8 +42,6 @@ import sys
 import tempfile
 import time
 import tomllib
-
-import gatelib
 
 FENCE = "+++"
 RECOMPUTE = "recompute.sh"
@@ -214,19 +211,11 @@ def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default="results", help="the results tree to walk")
     parser.add_argument(
-        "--shard",
-        metavar="K/N",
-        help="re-derive only the directories whose name hashes to shard K of N "
-        "(#262); every directory lands in exactly one shard",
-    )
-    parser.add_argument(
         "--only",
         metavar="NAME[,NAME]",
-        help="re-derive only these directories under --root (#318): a seeded "
-        "fault's case narrowed to the directory it mutated. A name that is not "
-        "there is a misuse (exit 2). A scope of only the template re-derives no "
-        "results directory and says so; that is the selftest's narrowing, and "
-        "CI never passes one",
+        help="re-derive only these directories under --root (#318). A name that "
+        "is not there is a misuse (exit 2). A scope of only the template "
+        "re-derives no results directory and says so",
     )
     parser.add_argument(
         "--names",
@@ -234,18 +223,12 @@ def main(argv: list[str]) -> int:
         help="print the directories this invocation would re-derive, and re-derive none",
     )
     args = parser.parse_args(argv)
-    shard = None
-    if args.shard is not None:
-        shard = gatelib.shard_arg(args.shard)
-        if shard is None:
-            print(f"check-recompute: --shard {args.shard!r} is not K/N with 1 <= K <= N", file=sys.stderr)
-            return 2
     only = None
     if args.only is not None:
         only = [n for n in args.only.split(",")]
-        if shard is not None or not only or any(not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]*", n) for n in only):
+        if not only or any(not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9._-]*", n) for n in only):
             print(f"check-recompute: --only {args.only!r} is not a comma-separated list of directory "
-                  f"names, or is given with --shard", file=sys.stderr)
+                  f"names", file=sys.stderr)
             return 2
 
     root = pathlib.Path(args.root)
@@ -266,8 +249,6 @@ def main(argv: list[str]) -> int:
     results_seen = 0
 
     directories = sorted(p for p in root.iterdir() if p.is_dir())
-    if shard is not None:
-        directories = [p for p in directories if gatelib.in_shard(p.name, *shard)]
     if only is not None:
         missing = sorted(set(only) - {p.name for p in directories})
         if missing:
@@ -276,17 +257,12 @@ def main(argv: list[str]) -> int:
             return 2
         directories = [p for p in directories if p.name in only]
     if args.names:
-        print("\n".join([gatelib.LISTING, *(p.name for p in directories)]))
+        print("\n".join(p.name for p in directories))
         return 0
-    # Each directory's own seconds (#262): a split by name balances counts,
-    # not cost, and this is what a re-balance is read from. Printed as the
-    # next directory starts, since `one()` leaves each one by `return`.
+    # Each directory's own seconds, printed as the next directory starts,
+    # since `one()` leaves each one by `return`.
     timing: tuple[str, float] | None = None
-    # ONE DIRECTORY, TO ITS OUTCOME (#262, #268's fifth review). The census
-    # row is written from what this returns, so a directory the loop skips
-    # writes no row, and a path that returns no outcome writes a row the
-    # census refuses -- a row written on entry said only that the loop got
-    # there, and a `continue` after it went unseen.
+    # One directory, to its outcome.
     def one(directory: pathlib.Path) -> str:
         nonlocal timing, results_seen, undeclared, historical, templates, recomputed
         if timing is not None:
@@ -413,16 +389,10 @@ def main(argv: list[str]) -> int:
         return "template" if is_template else "recomputed"
 
     for directory in directories:
-        if gatelib.census_dry():
-            gatelib.record_ran(directory.name)
-            continue
-        gatelib.record_ran(directory.name, one(directory))
+        one(directory)
 
     if timing is not None:
         print(f"check-recompute: {timing[0]} took {time.monotonic() - timing[1]:.1f}s")
-    if gatelib.census_dry():
-        print(f"check-recompute: dry census: {len(directories)} directory(ies) recorded, none recomputed")
-        return 0
 
     for message in failures:
         print(message, file=sys.stderr)
@@ -430,7 +400,6 @@ def main(argv: list[str]) -> int:
     census = (
         f"check-recompute: template: {templates} · results: {recomputed} recomputed, "
         f"{historical} declared historical, {undeclared} undeclared"
-        f"{f' (shard {shard[0]} of {shard[1]})' if shard else ''}"
         f"{f' (only {args.only})' if only else ''}"
     )
     if failures:
@@ -457,8 +426,7 @@ def main(argv: list[str]) -> int:
         # moment a results directory lands, because the next branch is then
         # the one that runs.
         print(
-            f"{census}\ncheck-recompute: no results directory hashes into shard {shard[0]} of {shard[1]}"
-            if shard else f"{census}\ncheck-recompute: --only names no results directory"
+            f"{census}\ncheck-recompute: --only names no results directory"
             if only else f"{census}\ncheck-recompute: no results directory yet; declared empty"
         )
         return 0

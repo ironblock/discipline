@@ -23,7 +23,7 @@ export const STRIPPED = {
     request: ['slot'],
     response: ['calls_from'],
   },
-  /** Lanes the format does not have yet (R4): a request on one goes, with every line that names it. */
+  /** Lanes the format does not have yet (`lanes`): a request on one goes, with every line that names it. */
   lanes: ['ratify', 'extraction'],
   /**
    * The surface's own older shapes of a kind the format now has: a line of the kind carrying any of these keys was

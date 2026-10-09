@@ -69,6 +69,8 @@ export function App({
   useEffect(() => (transport as DriveTransport).watchLink?.((next, why) => setLink(why === undefined ? { link: next } : { link: next, why })), [transport]);
   const [surface, setSurface] = useState<Surface>({ curtain: true, gaps: false });
   const expects = transport instanceof CannedTransport ? transport.expects : undefined;
+  // The operator's PNGs go here ahead of the ask (#372); a replay takes none.
+  const uploader = (transport as DriveTransport).upload;
   return (
     <SessionView
       session={session}
@@ -80,8 +82,10 @@ export function App({
       {...(transport.file ? { files: transport.file } : {})}
       approving={{ waiting, decide }}
       composer={{
-        phases: PHASES,
+        // The canned script's phases; `diet`'s drive declares none yet, so under `?drive` a refill names no phase.
+        phases: drive ? [] : PHASES,
         dispatch,
+        ...(uploader ? { upload: (bytes: Uint8Array) => uploader.call(transport, bytes) } : {}),
         hint: drive
           ? `driving: diet's session, over HTTP`
           : recording

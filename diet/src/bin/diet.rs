@@ -67,8 +67,8 @@ enum Operation {
 
 /// The verb each operation is exposed under.
 ///
-/// A table, not a match: `scripts/check-library.py` refuses a match arm on a
-/// string literal in this crate, and `every_format_has_a_command` refuses a
+/// A table, not a match: this crate keeps no match arm on a string literal,
+/// and `every_format_has_a_command` refuses a
 /// format that this table forgets.
 const COMMANDS: &[(&str, Operation)] = &[
     ("classify-decline", Operation::Format("decline")),

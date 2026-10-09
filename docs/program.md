@@ -12,7 +12,7 @@ From the frontier side, KV, not compute, decides how many developers a node serv
 
 ## 1. The components
 
-- **The trunk.** The session's single prefix: system, tool definitions, the project prefix, the conversation. Frozen except at its tail. The trunk carries settled turns only; a `max_steps` turn keeps its ran commands on the trunk (#29).
+- **The trunk.** The session's single prefix: system, tool definitions, the project prefix, the conversation. Frozen except at its tail. The trunk carries settled turns only; a turn that stops at `max_steps` (#29) or fails after its tool steps (#541) keeps the commands it ran on the trunk; a cancelled turn keeps none.
 - **Working memory.** A typed object in program memory — goal, constraints, decisions, open questions, next steps, gotchas, files — mutated by classical code from patches. The context is only ever a render of it (`diet/src/seam/render.rs`).
 - **Forks.** Disposable one-turn sessions born off the warm trunk in an idle gap; each answers one templated ask (`diet/dogma/templates/`), emits a patch, and is never continued. The dogma pins every ask by digest (`diet/dogma/MANIFEST.tsv`).
 - **The seam.** A declared boundary at which the trunk is rebuilt from the head plus the rendered working memory, carrying no turns (#493, #505). **Total compaction by design: the refilled session is a better starting point each time — a hill climb — not an imitation of continuity.** Refused as `nothing-to-seam` when working memory is empty.

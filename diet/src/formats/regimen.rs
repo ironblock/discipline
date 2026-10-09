@@ -725,9 +725,9 @@ mod tests {
     #[test]
     fn a_reasoning_state_is_two_fields_and_half_of_one_is_not_a_regimen() {
         // Compared against the module's own constants rather than spelled
-        // again as literals: `check-library.py` refuses a string literal in
-        // a match pattern anywhere in this crate, and a second spelling of a
-        // field name is the drift that rule exists for.
+        // again as literals: this crate keeps no string literal in a match
+        // pattern, and a second spelling of a field name is the drift that
+        // rule exists for.
         assert!(
             matches!(
                 parse("[reasoning]\neffort = \"high\"\n"),

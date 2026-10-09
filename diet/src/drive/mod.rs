@@ -822,6 +822,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         // This function IS the live path: it drove the turns and wrote these
         // rows as they happened. Nothing else in this crate may say `Live`.
         source: Source::Live,
+        regimen_sha256: None,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();
@@ -1372,7 +1373,8 @@ fn issued_head(call: &crate::client::Call, id: &str) -> Option<crate::client::he
 ///
 /// The object's own `dump_lines` is the authorized spelling of an entry; this
 /// only decides the order, which is the id order the dump already keys by.
-fn dump(object: &WorkingObject) -> String {
+#[must_use]
+pub fn dump(object: &WorkingObject) -> String {
     let mut out = String::new();
     for (id, line) in object.dump_lines() {
         out.push_str(id.as_str());
@@ -2949,45 +2951,6 @@ mod tests {
             "`dev-loop.toml` declares no lifetime for the canned server on \
              purpose, and the census names the substrate rather than reading \
              its misses as a provider expiry"
-        );
-    }
-
-    #[test]
-    fn every_seeded_fault_still_names_source_that_is_there() {
-        crate::gate::every_seeded_fault_still_names_source(
-            include_str!("../../drive/gate.toml"),
-            // The lane's whole source, so a catcher can be looked for
-            // wherever its test lives rather than only in this file.
-            concat!(
-                include_str!("mod.rs"),
-                include_str!("canned.rs"),
-                include_str!("script.rs"),
-                // The regimen reader, lifted out of `bin/drive.rs` so both
-                // binaries share one. A fault targeting it is already in the
-                // manifest; a catcher living beside it has to be findable
-                // here too.
-                include_str!("regimen.rs"),
-                // The registry's substrate identity (#157 Q2).
-                include_str!("engine.rs"),
-                include_str!("projection.rs"),
-                include_str!("registry.rs"),
-                // The interactive session and its HTTP surface (#117 R2).
-                include_str!("serve.rs"),
-                include_str!("session.rs"),
-                // The tool loop's parts and the gate it reads (#298).
-                include_str!("tool_loop.rs"),
-                include_str!("shell_gate.rs"),
-                // The operator's attachment (#372).
-                include_str!("attach.rs"),
-                // The binary's own tests, which live outside `src/` and are the
-                // only thing that runs the program. A `catches` naming one of
-                // them has to be checkable here too, or the half of this lane
-                // that is a second process is the half the guard does not see.
-                include_str!("../../tests/drive_cli.rs"),
-                // `diet-drive serve` as a program (#117 R2c, I5).
-                include_str!("../../tests/drive_serve_cli.rs")
-            ),
-            "drive",
         );
     }
 

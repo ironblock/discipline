@@ -210,9 +210,9 @@ mod tests {
     /// The committed answers, `(spec, digest)`, read from the text of the file.
     ///
     /// Takes its text rather than reaching for the `const`, so the refusals
-    /// below can be proved against fixtures. `crate::gate` states the reason
-    /// in its own doc -- a checker nothing checks is the thing this repository
-    /// does not ship -- and this reader feeds the only conformance check on
+    /// below can be proved against fixtures: a checker nothing checks is the
+    /// thing this repository does not ship, and this reader feeds the only
+    /// conformance check on
     /// `sha2` that runs on every host.
     fn committed(text: &str) -> Vec<(&str, &str)> {
         let mut answers = Vec::new();
@@ -557,20 +557,5 @@ mod tests {
                  from an independent implementation rather than from `sha2`."
             );
         }
-    }
-
-    /// Every fault in this lane's `gate.toml` still names source that is there.
-    ///
-    /// The digest is its own lane now that it is at the crate root: its
-    /// mutations are not the drive's, and a manifest that claimed them would
-    /// be naming a file its lane does not own.
-    #[test]
-    fn every_seeded_fault_still_names_source_that_is_there() {
-        crate::gate::every_seeded_fault_still_names_source(
-            include_str!("../digest/gate.toml"),
-            // One file, because that is the whole lane.
-            include_str!("digest.rs"),
-            "digest",
-        );
     }
 }

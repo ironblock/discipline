@@ -1,0 +1,5 @@
+config-redacted.yml differs from the live config-floor-r2.yml (sha256 1e17c49df4e8acb13a543d6bf342d7624238b573371282a9310ebac116ad30d3)
+in exactly three lines, all values that are not to be published; no setting that affects serving was changed:
+  line 5  network.port: replaced by <port>
+  line 12 model.model_dir: the local models directory was replaced by <models directory>
+  line 28 draft_model.draft_model_dir: the local models directory was replaced by <models directory>

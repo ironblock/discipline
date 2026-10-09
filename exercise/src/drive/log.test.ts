@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
+import { needsOf } from './log.ts';
 
 /**
  * `diet`'s own valid logs (`diet/formats/log/fixtures/valid/`), folded. A
@@ -103,6 +104,21 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(unsaid(told)).toBe(unsaid(bare));
     const failed = told.eras[0]?.nodes.find((n) => n.kind === 'assistant');
     expect(failed?.kind === 'assistant' && failed.failure?.reason).toBe('transport');
+  });
+
+  it("draws diet's forks off the trunk: a fork line names no slot, so each goes to a side slot, and the session has one (v5)", () => {
+    const file = 'a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl';
+    const session = fold(logOf(file));
+    const branches = [...session.branches.values()].flat();
+    expect(branches).toHaveLength(logOf(file).filter((l) => l.kind === 'fork').length);
+    for (const b of branches) {
+      expect(b.slot).not.toBe(session.trunkSlot);
+      expect(b.slot).toBeLessThan(session.slots);
+    }
+  });
+
+  it('needs nothing ahead of the format on any line diet writes: the gaps overlay outlines none of it (#503)', () => {
+    for (const file of fixtures) for (const line of logOf(file)) expect(needsOf(line), `${file}: seq ${line.seq} (${line.kind})`).toEqual([]);
   });
 
   it('takes the state from the log: an ended session is ended', () => {

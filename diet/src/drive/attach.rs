@@ -113,6 +113,8 @@ vocabulary! {
         CopyFailed => "copy-failed",
         /// The file is longer than [`MAX_BYTES`].
         TooLarge => "too-large",
+        /// The ask names a digest that was never uploaded to this server.
+        NotUploaded => "not-uploaded",
     }
 }
 
@@ -184,6 +186,47 @@ impl Attached {
     }
 }
 
+/// A PNG posted to `serve`'s `/files` (#513): its reference and its bytes,
+/// held for the session so an ask can name it by digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Upload {
+    /// The reference an `ask` line carries for it.
+    pub file: RecordedFile,
+    /// Its bytes, exactly as posted.
+    pub bytes: std::sync::Arc<Vec<u8>>,
+}
+
+/// `bytes`, posted to `/files`, checked as a named PNG's read is -- the
+/// signature, [`MAX_BYTES`] -- and, with a recording, copied to
+/// `<recording>/files/<sha256>` as an ask's named PNG is.
+///
+/// # Errors
+///
+/// [`Check::NotPng`], [`Check::TooLarge`], or the copy's
+/// [`Check::CopyConflict`] or [`Check::CopyFailed`].
+pub fn uploaded(bytes: Vec<u8>, recording: Option<&Path>) -> Result<Upload, (Check, String)> {
+    if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > MAX_BYTES {
+        return Err((
+            Check::TooLarge,
+            format!("the upload is longer than the {MAX_BYTES} bytes an attachment may be"),
+        ));
+    }
+    if !bytes.starts_with(SIGNATURE) {
+        return Err((
+            Check::NotPng,
+            "the upload does not begin with the PNG signature".to_owned(),
+        ));
+    }
+    let file = reference(&bytes);
+    if let Some(recording) = recording {
+        kept(recording, &file, &bytes)?;
+    }
+    Ok(Upload {
+        file,
+        bytes: std::sync::Arc::new(bytes),
+    })
+}
+
 /// The tokens of `text` that name a PNG, trimmed, in order.
 #[must_use]
 pub fn candidates(text: &str) -> Vec<&str> {
@@ -207,6 +250,24 @@ pub fn candidates(text: &str) -> Vec<&str> {
 /// copy cannot be kept; then nothing was copied for it, and the ask must not
 /// be sent.
 pub fn attached(text: &str, attaching: &Attaching) -> Result<Attached, Unattachable> {
+    attached_with(text, &[], attaching)
+}
+
+/// [`attached`], with `uploads` -- PNGs posted to `/files` and named by the
+/// ask's `files` (#513) -- attached first, in their order, then the PNGs
+/// `text` names. Each upload is named on the `ask` line before the named
+/// files, recording or not; with a recording its copy is kept again (whole,
+/// or refused).
+///
+/// # Errors
+///
+/// As [`attached`]; an upload's copy that cannot be kept is refused under
+/// its digest.
+pub fn attached_with(
+    text: &str,
+    uploads: &[Upload],
+    attaching: &Attaching,
+) -> Result<Attached, Unattachable> {
     // Every check first, so a refusal copies nothing: not even the files
     // named before the one refused.
     let mut found = Vec::new();
@@ -221,6 +282,15 @@ pub fn attached(text: &str, attaching: &Attaching) -> Result<Attached, Unattacha
         found.push((named, file, bytes));
     }
     let mut message = Message::new(Role::User, text);
+    for upload in uploads {
+        message = crate::client::attach(message, &upload.file, &upload.bytes).map_err(|why| {
+            Unattachable {
+                path: upload.file.sha256.clone(),
+                check: Check::Unreadable,
+                why: why.to_string(),
+            }
+        })?;
+    }
     for (named, file, bytes) in &found {
         message = crate::client::attach(message, file, bytes).map_err(|why| Unattachable {
             path: (*named).to_owned(),
@@ -229,6 +299,19 @@ pub fn attached(text: &str, attaching: &Attaching) -> Result<Attached, Unattacha
         })?;
     }
     let mut files = Vec::new();
+    // An upload is named on the line with or without a recording: serve
+    // holds its bytes for the session and answers them at `GET
+    // /files/<sha256>`, so the reference names something either way (#513).
+    for upload in uploads {
+        if let Some(recording) = &attaching.recording {
+            kept(recording, &upload.file, &upload.bytes).map_err(|(check, why)| Unattachable {
+                path: upload.file.sha256.clone(),
+                check,
+                why,
+            })?;
+        }
+        files.push(upload.file.clone());
+    }
     if let Some(recording) = &attaching.recording {
         for (named, file, bytes) in &found {
             kept(recording, file, bytes).map_err(|(check, why)| Unattachable {
@@ -280,14 +363,20 @@ fn checked(named: &str, attaching: &Attaching) -> Result<(RecordedFile, Vec<u8>)
             format!("{} does not begin with the PNG signature", file.display()),
         ));
     }
-    let sha256 = sha256_hex(&bytes);
-    let file = RecordedFile {
+    let file = reference(&bytes);
+    Ok((file, bytes))
+}
+
+/// The reference an `ask` line carries for `bytes`: its copy's path under
+/// the recording, its digest, its media type and its length.
+fn reference(bytes: &[u8]) -> RecordedFile {
+    let sha256 = sha256_hex(bytes);
+    RecordedFile {
         path: format!("{FILES}/{sha256}"),
         sha256,
         media_type: MEDIA_TYPE.to_owned(),
         bytes: u64::try_from(bytes.len()).unwrap_or(u64::MAX),
-    };
-    Ok((file, bytes))
+    }
 }
 
 /// `file`'s bytes, read ONCE: the digest, the size, the signature, the copy
@@ -454,6 +543,32 @@ fn bounded(stream: impl Read + Send + 'static, limit: u64) -> mpsc::Receiver<Vec
     received
 }
 
+/// How many temporary copies this process has begun: each [`kept`] call's
+/// own temporary name, so two threads keeping the same digest at once never
+/// rename one file out from under the other (#514's review).
+static PARTIALS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The copy kept at `<recording>/files/<sha256>`, when it is there, a PNG,
+/// no longer than [`MAX_BYTES`], and hashes to `sha256`: what `GET
+/// /files/<sha256>` answers for a file attached by path, which only the
+/// recording holds.
+#[must_use]
+pub fn recorded(recording: &Path, sha256: &str) -> Option<Vec<u8>> {
+    let named = sha256.len() == 64
+        && sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
+    if !named {
+        return None;
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(recording.join(FILES).join(sha256))
+        .and_then(|opened| opened.take(MAX_BYTES + 1).read_to_end(&mut bytes))
+        .ok()?;
+    let whole = u64::try_from(bytes.len()).unwrap_or(u64::MAX) <= MAX_BYTES;
+    (whole && bytes.starts_with(SIGNATURE) && sha256_hex(&bytes) == sha256).then_some(bytes)
+}
+
 /// `bytes` kept at `file`'s path under `recording`: written when absent
 /// (to a temporary name, then renamed, so a copy is whole or not there),
 /// left alone when the same digest is already there.
@@ -476,10 +591,12 @@ fn kept(recording: &Path, file: &RecordedFile, bytes: &[u8]) -> Result<(), (Chec
         Err(why) => return Err(failed(why)),
     }
     std::fs::create_dir_all(recording.join(FILES)).map_err(failed)?;
-    let partial =
-        recording
-            .join(FILES)
-            .join(format!(".{}.partial-{}", file.sha256, std::process::id()));
+    let partial = recording.join(FILES).join(format!(
+        ".{}.partial-{}-{}",
+        file.sha256,
+        std::process::id(),
+        PARTIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
     std::fs::write(&partial, bytes)
         .and_then(|()| std::fs::rename(&partial, &at))
         .map_err(|why| {
@@ -1125,5 +1242,35 @@ pub(in crate::drive) mod tests {
             assert_eq!(read, Some(Check::Unreadable));
             assert!(began.elapsed() < Duration::from_secs(5));
         }
+    }
+
+    /// Two threads keeping the same digest at once each write a temporary
+    /// copy of their own: neither rename finds its file gone (#514's
+    /// review measured 39 failures in 60 pairs with a shared name).
+    #[test]
+    fn the_same_upload_kept_at_once_by_many_threads_never_fails() {
+        let recording = scratch("attach-kept-race");
+        let bytes = png("raced");
+        for round in 0..20 {
+            let gate = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let racers: Vec<_> = (0..8)
+                .map(|_| {
+                    let (gate, bytes, recording) = (
+                        std::sync::Arc::clone(&gate),
+                        bytes.clone(),
+                        recording.clone(),
+                    );
+                    std::thread::spawn(move || {
+                        gate.wait();
+                        super::uploaded(bytes, Some(&recording)).map(|_| ())
+                    })
+                })
+                .collect();
+            for racer in racers {
+                assert_eq!(racer.join().expect("joined"), Ok(()), "round {round}");
+            }
+            let _ = std::fs::remove_dir_all(recording.join(FILES));
+        }
+        let _ = std::fs::remove_dir_all(&recording);
     }
 }

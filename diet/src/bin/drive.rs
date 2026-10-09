@@ -74,6 +74,12 @@ const EXIT_OUTPUT: u8 = 3;
 /// The subcommand that serves an interactive session (#117 R2c, I5).
 const SERVE: &str = "serve";
 
+/// The stream-replay server's subcommand (#411).
+const REPLAY: &str = "replay";
+
+/// The port `diet-drive replay` listens on unless told another.
+const REPLAY_PORT: u16 = 7902;
+
 fn serve_usage() -> String {
     let mut out = String::from(
         "usage: diet-drive serve --endpoint URL --model NAME --head FILE [--key-file FILE]\n\
@@ -95,7 +101,9 @@ fn serve_usage() -> String {
     out.push_str("it, and a wildcard (0.0.0.0, ::) is refused: name one interface.\n");
     out.push_str("--record FILE (needs --regimen) writes the session's record there once it\n");
     out.push_str("ends, projected from its log, beside FILE.unspellable.json naming what\n");
-    out.push_str("the record could not spell; both digests are reported on stdout.\n");
+    out.push_str("the record could not spell, and FILE.product.txt, the working memory at\n");
+    out.push_str("the end, whose sha256 is the summary's product_sha256; all three digests\n");
+    out.push_str("are reported on stdout.\n");
     out.push_str("--max-output-tokens defaults to 8192, room for a reasoning model's thinking\n");
     out.push_str("(measured on the floor, #290); a turn that hits it is logged capped.\n");
     out.push_str("--log FILE writes the session's log there as each line is appended, the\n");
@@ -106,6 +114,9 @@ fn serve_usage() -> String {
     out.push_str("for the substrate exactly, or else name its engine_commit, or serve refuses\n");
     out.push_str("to start. A canned substrate's literal is canned-<acts sha256>, which only\n");
     out.push_str("this crate's own canned server reports.\n");
+    out.push_str("A substrate whose entry declares engine_check = \"declared\" (an engine that\n");
+    out.push_str("reports no build, TabbyAPI's) is not asked: its engine is the declared one,\n");
+    out.push_str("and the client speaks the dialect its entry names (llama.cpp by default).\n");
     out.push_str("--help prints this to stdout and exits 0; a usage error exits 2.\n");
     out.push_str("--worktree DIR, absolute, is where the model's commands run; a regimen\n");
     out.push_str("that runs commands (it declares `allowed_commands`, the pre-seeded set) needs\n");
@@ -281,8 +292,9 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(system) => system,
         Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
     };
-    let regime = match regimen_file.as_deref().map(registered_regime).transpose() {
-        Ok(regime) => regime,
+    let (regime, regimen_sha256) = match regimen_file.as_deref().map(registered_regime).transpose()
+    {
+        Ok(read) => read.unzip(),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     // The regimen's `[sampler]`, pinned on every request (#486): derived from
@@ -299,7 +311,24 @@ fn serve(args: &[String]) -> ExitCode {
             return fail(EXIT_USAGE, &format!("{path}: {why}"));
         }
     };
-    let shape = trunk(model, system, max_output_tokens, sampler);
+    let mut shape = trunk(model, system, max_output_tokens, sampler);
+    // The regime's reasoning state, on every request, the forks' included
+    // (R1): a clone of the trunk carries it.
+    // A budget no template variable carries is recorded and announced as
+    // unsent, never refused for being missing (duty of care).
+    let mut unsent_budget = None;
+    if let Some(regime) = regime.as_ref() {
+        match diet::drive::regimen::template_kwargs(&regime.substrates[0]) {
+            Ok((kwargs, unsent)) => {
+                shape.template_kwargs = kwargs;
+                unsent_budget = unsent;
+            }
+            Err(why) => {
+                let path = regimen_file.as_deref().unwrap_or_default();
+                return fail(EXIT_USAGE, &format!("{path}: {why}"));
+            }
+        }
+    }
     if record_file.is_some() && regime.is_none() {
         return fail(EXIT_USAGE, RECORD_NEEDS_A_REGIMEN);
     }
@@ -361,6 +390,12 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(build) => build,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // The dialect the substrate's server speaks, as the registry names it
+    // (#496); llama.cpp's without a regimen, or where the entry names none.
+    let dialect = match substrate.map(served_dialect).transpose() {
+        Ok(dialect) => dialect.unwrap_or_else(Dialect::llama_cpp),
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
     // What the announcement prints and the log's `session.start` claims,
     // built once from the same values (#292): the substrate, the registry's
     // digest, and the engine the check passed.
@@ -377,7 +412,12 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listener) => listener,
         Err(refused) => return refused,
     };
-    let session = served_session(transport, shape, tools, (claim, interview));
+    let session = served_session(
+        transport,
+        (shape, dialect),
+        tools,
+        (claim, interview, unsent_budget),
+    );
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
     // Where the projection reads an attached file back from (#372): the
@@ -398,6 +438,7 @@ fn serve(args: &[String]) -> ExitCode {
     ) {
         Ok(started) => Running {
             recording,
+            regimen_sha256,
             ..started
         },
         Err(code) => return code,
@@ -411,6 +452,7 @@ fn serve(args: &[String]) -> ExitCode {
             engine.as_ref(),
             log_path.as_deref().zip(running.log_held),
             record_file.as_deref().zip(running.record_held),
+            unsent_budget,
         )
     );
     ended(&watching, running)
@@ -432,7 +474,7 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
     if let Some((regime, (path, file))) = running.record {
         match written_record(
             session,
-            &regime,
+            (&regime, running.regimen_sha256.as_deref()),
             (&path, file),
             running.recording.as_deref(),
         ) {
@@ -561,34 +603,61 @@ fn outputs(
 /// how many streams the server serves.
 fn served_session(
     transport: HttpStream,
-    mut shape: RequestShape,
+    (mut shape, dialect): (RequestShape, Dialect),
     tools: Option<Tools>,
-    (claim, interview): (
+    (claim, interview, unsent_budget): (
         Option<diet::formats::log::SubstrateClaim>,
         Option<Interview>,
+        Option<u64>,
     ),
 ) -> std::sync::Arc<Session<HttpStream>> {
     // A session that runs commands declares the one tool they run through.
     if tools.is_some() {
         shape.tools = vec![tool_loop::bash_tool()];
     }
-    std::sync::Arc::new(Session::open_with(
+    std::sync::Arc::new(Session::open_declaring(
         transport,
         shape,
         Some(Serving {
             concurrency: Concurrency::Undeclared,
-            dialect: Dialect::llama_cpp(),
+            dialect,
         }),
         tools,
-        claim,
-        interview,
+        (
+            claim,
+            interview,
+            unsent_budget.map(|budget_tokens| diet::formats::log::Unsent { budget_tokens }),
+        ),
     ))
 }
 
+/// The dialect the registry names for substrate `id` (#496): llama.cpp's
+/// where its entry names none.
+///
+/// # Errors
+///
+/// When the entry cannot be read, or names a dialect this client does not
+/// speak.
+fn served_dialect(id: &str) -> Result<Dialect, String> {
+    let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+    match identity.dialect.as_deref() {
+        None => Ok(Dialect::llama_cpp()),
+        Some(name) => Dialect::named(name).ok_or_else(|| {
+            format!(
+                "the registry names `{name}` as `{id}`'s dialect, which this client does not \
+                 speak: `llama.cpp` or `tabbyapi`"
+            )
+        }),
+    }
+}
+
 /// What `serve`'s capture gap forks under (#374): the rules the regimen at
-/// `regimen` lists under `interview_warrant`, and a working object under
-/// `regime`. `None` when it lists none, or there is no regimen: then no fork
-/// ever fires.
+/// `regimen` lists under `interview_warrant`, a working object under
+/// `regime`, and the cadence and budget its derived seams fire on, the
+/// budget taken of the substrate's registered `serving_context`. `None` when
+/// it lists no rule, or there is no regimen: then no fork and no derived
+/// seam ever fires, and a regimen that declares a seam trigger anyway is
+/// refused.
 fn serving_interview(
     regimen: Option<&str>,
     regime: Option<&Regime>,
@@ -600,9 +669,22 @@ fn serving_interview(
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let read = regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     let rules = session::interview_warrant(&read).map_err(|why| format!("{path}: {why}"))?;
+    let window = diet::drive::registry::serving_context(
+        diet::drive::registry::REGISTRY,
+        &regime.substrates[0].id,
+    );
+    let seams = diet::seam::policy::Served::from_regimen(&read, window)
+        .map_err(|why| format!("{path}: {why}"))?;
+    if rules.is_empty() && seams.declares_a_trigger() {
+        return Err(format!(
+            "{path} declares a seam trigger and no `interview_warrant`: nothing fills \
+             working memory, so no seam could ever fire"
+        ));
+    }
     Ok((!rules.is_empty()).then(|| Interview {
         rules,
         object: diet::object::WorkingObject::open(regime.clone()),
+        seams,
     }))
 }
 
@@ -878,6 +960,7 @@ fn started(
         record,
         receipt,
         recording: None,
+        regimen_sha256: None,
     })
 }
 
@@ -922,7 +1005,14 @@ fn started_writers(
                     .map_err(|why| emptied.named(format!("{sidecar} cannot be removed: {why}")))?;
                 emptied.push(format!("the previous sidecar at {sidecar}"));
             }
-            Ok::<_, String>((held || stale, (regime, (path, file))))
+            let product = format!("{path}.product.txt");
+            let stale_product = std::path::Path::new(&product).exists();
+            if stale_product {
+                std::fs::remove_file(&product)
+                    .map_err(|why| emptied.named(format!("{product} cannot be removed: {why}")))?;
+                emptied.push(format!("the previous product at {product}"));
+            }
+            Ok::<_, String>((held || stale || stale_product, (regime, (path, file))))
         })
         .transpose()?;
     let log_held = log
@@ -954,13 +1044,16 @@ struct Running {
     /// The recording's directory, which an attached file's copy was kept in
     /// and the projection reads it back from (#372).
     recording: Option<std::path::PathBuf>,
+    /// The sha256 of the regimen's bytes as serve read them at start, which
+    /// the record's `start` carries.
+    regimen_sha256: Option<String>,
 }
 
 /// Project the ended session, check the record reads back, and write it and
 /// its sidecar: the line `serve` reports once the session has ended.
 fn written_record(
     session: &Session<HttpStream>,
-    regime: &diet::formats::record::Regime,
+    (regime, regimen_sha256): (&diet::formats::record::Regime, Option<&str>),
     (path, mut file): (&str, std::fs::File),
     recording: Option<&std::path::Path>,
 ) -> Result<String, String> {
@@ -975,7 +1068,34 @@ fn written_record(
         .iter()
         .map(diet::drive::session::line_of)
         .collect();
-    let projected = projection::project_in(&lines, regime, engine, recording)?;
+    let mut projected = projection::project_in(&lines, regime, engine, recording)?;
+    if let Some(record::Event::Start {
+        regimen_sha256: at, ..
+    }) = projected.events.first_mut()
+    {
+        *at = regimen_sha256.map(str::to_owned);
+    }
+    // The summary: the turns and prefill the rows carry, and the product --
+    // the working memory at the session's end, kept beside the record as
+    // FILE.product.txt so `sha256sum` recomputes the digest the row claims.
+    let product = session.product();
+    let (turns, prefill) = projected
+        .events
+        .iter()
+        .fold((0u32, 0u64), |(n, total), event| match event {
+            record::Event::Turn { prefill_tokens, .. } => (n + 1, total + prefill_tokens.get()),
+            _ => (n, total),
+        });
+    projected.events.push(record::Event::Summary {
+        summary: record::Summary::Drive {
+            turns,
+            prefill_tokens_total: record::Count::new(prefill)
+                .map_err(|why| format!("prefill_tokens_total: {why:?}"))?,
+        },
+        product_sha256: diet::digest::sha256_hex(product.as_bytes()),
+    });
+    let product_path = format!("{path}.product.txt");
+    std::fs::write(&product_path, &product).map_err(|why| format!("{product_path}: {why}"))?;
     let text = record::render(&Record {
         events: projected.events.clone(),
     });
@@ -997,6 +1117,11 @@ fn written_record(
         (
             "sidecar_sha256".to_owned(),
             Value::String(diet::digest::sha256_hex(sidecar.as_bytes())),
+        ),
+        ("product".to_owned(), Value::String(product_path)),
+        (
+            "product_sha256".to_owned(),
+            Value::String(diet::digest::sha256_hex(product.as_bytes())),
         ),
     ]);
     if let Value::Object(fields) = projection::sidecar_value(&projected) {
@@ -1079,6 +1204,7 @@ fn announcement(
     engine: Option<&diet::drive::engine::Passed>,
     log: Option<(&str, bool)>,
     record: Option<(&str, bool)>,
+    unsent_budget: Option<u64>,
 ) -> String {
     let mut fields = BTreeMap::from([
         ("listening".to_owned(), Value::String(listening.to_owned())),
@@ -1109,6 +1235,14 @@ fn announcement(
             Value::String(engine.identity.tag().to_owned()),
         );
     }
+    // A budget the regime declares and no request carries (R1): said, so
+    // the operator knows the cap is not in force.
+    if let Some(budget) = unsent_budget {
+        fields.insert(
+            "budget_tokens_unsent".to_owned(),
+            Value::Integer(i64::try_from(budget).unwrap_or(i64::MAX)),
+        );
+    }
     // Where the log is written, and whether naming it emptied a file that
     // held something (ruled on #230).
     if let Some((path, truncated)) = log {
@@ -1127,13 +1261,15 @@ fn announcement(
 }
 
 /// The regime the regimen at `path` declares, its substrate resolved from the
-/// registry this program was built with (#157 Q2).
-fn registered_regime(path: &str) -> Result<diet::formats::record::Regime, String> {
+/// registry this program was built with (#157 Q2), and the sha256 of the
+/// bytes it was read from.
+fn registered_regime(path: &str) -> Result<(diet::formats::record::Regime, String), String> {
     let text =
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let regimen =
         regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
+        .map(|regime| (regime, diet::digest::sha256_hex(text.as_bytes())))
         .map_err(|why| format!("{path}: {why}"))
 }
 
@@ -1244,7 +1380,15 @@ fn usage() -> String {
         String::from("usage: diet-drive <regimen> <worktree> <output.jsonl> [endpoint]\n");
     // The interactive server, which the first form's usage once hid (#290).
     out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");
-    out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n\n");
+    out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n");
+    out.push_str("       diet-drive replay [--answers] [--port N]\n");
+    out.push_str("       (substrate `canned-replay-tools` on loopback: captured llama.cpp\n");
+    out.push_str("       replies, a `bash` call and then its answer, for a regimen rehearsed\n");
+    out.push_str("       with no model; --answers serves `canned-replay`, one captured answer\n");
+    let _ = writeln!(
+        out,
+        "       for every request; port {REPLAY_PORT} unless told; runs until stopped)\n"
+    );
     out.push_str("Runs the pinned three-turn script through <regimen> in <worktree>\n");
     out.push_str("and writes the record to <output.jsonl>. With no endpoint the canned\n");
     out.push_str("server answers on loopback -- no model, no network out.\n\n");
@@ -1263,6 +1407,61 @@ fn usage() -> String {
     out
 }
 
+/// `diet-drive replay [--answers] [--port N]`: the stream-replay
+/// substrates' server (#411). By default `canned-replay-tools`: a request
+/// ending in a tool result is answered with [`canned::REPLAYED_ANSWER`], any
+/// other with [`canned::REPLAYED_CALL`]. With `--answers`, `canned-replay`:
+/// every request answered with [`canned::REPLAYED`]. Byte for byte, and
+/// `/props` with the substrate's literal, so `serve` under a regimen naming
+/// it passes its engine check against this and against nothing else. One
+/// JSON line on stdout says where it listens; it runs until stopped.
+fn replay(args: &[String]) -> ExitCode {
+    let answers = args.first().is_some_and(|first| first == "--answers");
+    let rest = if answers { &args[1..] } else { args };
+    let port = match rest {
+        [] => REPLAY_PORT,
+        [flag, port] if flag == "--port" => match port.parse() {
+            Ok(port) => port,
+            Err(_) => return fail(EXIT_USAGE, &format!("`{port}` is not a port")),
+        },
+        _ => {
+            eprint!("{}", usage());
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let (substrate, build_info, started) = if answers {
+        let build_info = canned::replay_build_info();
+        let started = Stub::replaying(canned::REPLAYED.to_vec(), &build_info, port);
+        ("canned-replay", build_info, started)
+    } else {
+        let build_info = canned::replay_tools_build_info();
+        let started = Stub::replaying_tool_turns(
+            canned::REPLAYED_CALL.to_vec(),
+            canned::REPLAYED_ANSWER.to_vec(),
+            &build_info,
+            port,
+        );
+        ("canned-replay-tools", build_info, started)
+    };
+    let stub = match started {
+        Ok(stub) => stub,
+        Err(why) => {
+            return fail(
+                EXIT_HALT,
+                &format!("127.0.0.1:{port} could not be listened on: {why}"),
+            );
+        }
+    };
+    println!(
+        "{{\"build_info\":\"{build_info}\",\"listening\":\"{}\",\"ok\":true,\"substrate\":\"{substrate}\"}}",
+        stub.url()
+    );
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    loop {
+        std::thread::park();
+    }
+}
+
 fn main() -> ExitCode {
     // FIRST, before any thread: a sandboxed command can read this process's
     // environment and argv (`KERN_PROCARGS2`), so the drive re-executes
@@ -1279,6 +1478,9 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         return serve(&args[1..]);
+    }
+    if args.first().map(String::as_str) == Some(REPLAY) {
+        return replay(&args[1..]);
     }
     if args
         .first()
