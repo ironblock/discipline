@@ -187,4 +187,8 @@ export const refusalOf = registry<Refusal>({
   'seam-not-built': { label: 'not taken: the drive cannot refill yet', level: 'quiet' },
   stale: { label: 'not taken: that turn is over', level: 'quiet' },
   unreachable: { label: 'not taken: the drive cannot be reached', level: 'bad' },
+  // An attachment's (`POST /files`), and an ask naming one the drive was never sent.
+  'not-a-png': { label: 'not attached: the file is not a PNG', level: 'warn' },
+  'too-large': { label: 'not attached: the file is over the drive\'s size cap', level: 'warn' },
+  'not-uploaded': { label: 'not taken: an attachment never reached the drive', level: 'bad' },
 });

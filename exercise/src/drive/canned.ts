@@ -10,12 +10,14 @@
  */
 
 import { frames } from './progress.ts';
-import type { LogLine } from './log.ts';
+import type { FileRef, LogLine } from './log.ts';
+import { isPng } from './png.ts';
 import { place as placeAll, Placer } from './place.ts';
 import type { Response, ScriptedPrompt, Unplaced } from './script.ts';
 import type { Beat, Trigger } from './specimen.ts';
 import type { IdleGapBody } from '../session/gap.ts';
-import type { Ack, Command, Decision, DriveTransport, Prompt } from './transport.ts';
+import type { Ack, Command, Decision, DriveTransport, Prompt, Uploaded } from './transport.ts';
+import { sha256 } from './files.ts';
 import type { FileAnswer } from './files.ts';
 
 /** The gap a snapshot assumes between beats: a person reading, then typing. */
@@ -33,7 +35,7 @@ export interface Cursor {
  * the deltas it would have streamed: reasoning first, then text, spread from
  * the end of prefill to the response.
  */
-export function expand(beat: Beat, start: number, ask?: string, scoping?: true): Unplaced[] {
+export function expand(beat: Beat, start: number, ask?: string, scoping?: true, files?: readonly FileRef[]): Unplaced[] {
   const out: Unplaced[] = [];
   const requestAt = new Map<string, number>();
   for (const event of beat.events) {
@@ -42,7 +44,7 @@ export function expand(beat: Beat, start: number, ask?: string, scoping?: true):
     if (event.kind === 'response') out.push(...deltas(event, requestAt.get(event.to_request) ?? t, t), ...frames(event, requestAt.get(event.to_request) ?? t, t));
     // A decision a script declares is on the beat's clock, as its time is.
     const decided = event.kind === 'tool.end' && event.approval?.decided_at !== undefined ? { approval: { ...event.approval, decided_at: start + event.approval.decided_at } } : {};
-    out.push(event.kind === 'ask' && ask !== undefined ? { ...event, t, text: ask, ...(scoping ? { scoping } : {}) } : { ...event, t, ...decided });
+    out.push(event.kind === 'ask' && ask !== undefined ? { ...event, t, text: ask, ...(scoping ? { scoping } : {}), ...(files && files.length > 0 ? { files } : {}) } : { ...event, t, ...decided });
   }
   return out.sort((a, b) => a.t - b.t);
 }
@@ -141,11 +143,22 @@ export class CannedTransport implements DriveTransport {
   readonly #opened = performance.now();
   #next = 0;
 
-  /** The script's files, by the digest it gives them: unchecked, as a server's are (#372). */
+  /** What the operator uploaded, by digest: as `serve` keeps it, in the recording's `files/`. */
+  readonly #uploads = new Map<string, Uint8Array>();
+
+  /** The script's files and the operator's uploads, by digest: unchecked, as a server's are (#372). */
   readonly file = (sha256: string): Promise<FileAnswer> => {
-    const found = this.#beats.flatMap((b) => b.events).flatMap((e) => (e.kind === 'tool.end' ? (e.files ?? []) : [])).find((f) => f.sha256 === sha256);
-    return Promise.resolve(found ? { kind: 'bytes', bytes: found.bytes } : { kind: 'not-found' });
+    const found = this.#uploads.get(sha256) ?? this.#beats.flatMap((b) => b.events).flatMap((e) => (e.kind === 'tool.end' ? (e.files ?? []) : [])).find((f) => f.sha256 === sha256)?.bytes;
+    return Promise.resolve(found ? { kind: 'bytes', bytes: found } : { kind: 'not-found' });
   };
+
+  /** As `serve`'s `POST /files`: a PNG by its signature, kept by digest; anything else refused. */
+  async upload(bytes: Uint8Array): Promise<Uploaded> {
+    if (!isPng(bytes)) return { ok: false, refused: 'not-a-png' };
+    const digest = await sha256(bytes);
+    this.#uploads.set(digest, bytes);
+    return { ok: true, sha256: digest, bytes: bytes.length };
+  }
 
   constructor(beats: readonly Beat[], options: CannedOptions = {}) {
     this.#beats = beats;
@@ -184,12 +197,23 @@ export class CannedTransport implements DriveTransport {
     const opened = this.#openGap;
     this.#gap = gap && gap.ended_by === ENDS[command.kind] && gap.opened_by === opened ? gap : undefined;
     const ack =
-      command.kind === 'ask' ? this.#fire('send', command.text, command.scoping) : command.kind === 'seam' ? this.#seam(command.to) : command.kind === 'end' ? this.#end() : this.#cancel();
+      command.kind === 'ask' ? this.#ask(command) : command.kind === 'seam' ? this.#seam(command.to) : command.kind === 'end' ? this.#end() : this.#cancel();
     // Refused, it is dropped. Admitted, the gap that was open closes, carried or not -- unless the command settled a
     // turn and opened the next one itself, as a cancel does (`diet` closes it at admission, before the command runs).
     this.#gap = undefined;
     if (ack.ok && this.#openGap === opened) this.#openGap = undefined;
     return Promise.resolve(ack);
+  }
+
+  /** An ask, its attachments by reference as `serve` logs them: each must have been uploaded first. */
+  #ask(command: Extract<Command, { kind: 'ask' }>): Ack {
+    const files: FileRef[] = [];
+    for (const digest of command.files ?? []) {
+      const bytes = this.#uploads.get(digest);
+      if (!bytes) return { ok: false, refused: 'not-uploaded' };
+      files.push({ path: `files/${digest}`, sha256: digest, media_type: 'image/png', bytes: bytes.length });
+    }
+    return this.#fire('send', command.text, command.scoping, files);
   }
 
   #seam(to: string): Ack {
@@ -266,14 +290,14 @@ export class CannedTransport implements DriveTransport {
     this.#timers.clear();
   }
 
-  #fire(trigger: Trigger, ask?: string, scoping?: true): Ack {
+  #fire(trigger: Trigger, ask?: string, scoping?: true, files?: readonly FileRef[]): Ack {
     if (this.busy) return { ok: false, refused: 'busy' };
     const beat = this.#beats[this.#next];
     if (!beat) return { ok: false, refused: 'ended' };
     if (beat.trigger !== trigger) return { ok: false, refused: 'off-script' };
     this.#next += 1;
     const start = this.#now();
-    this.#schedule(expand(beat, start, ask, scoping), start);
+    this.#schedule(expand(beat, start, ask, scoping, files), start);
     return { ok: true };
   }
 

@@ -11,7 +11,7 @@
  * the log. A session run against `diet` never passes through here.
  */
 
-import type { Approval, Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolRefusal } from './log.ts';
+import type { Approval, Authority, FailReason, FileRef, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolRefusal } from './log.ts';
 import type { Segment } from './transport.ts';
 
 export type { Approval, Authority, FailReason, ForkLane, ForkOutcome, Lane, PatchOp, SeamReason, SettleReason, Timings, Tool, ToolRefusal } from './log.ts';
@@ -51,6 +51,8 @@ export interface Ask extends At {
   readonly text: string;
   /** The operator marked it the scope answer (#453): placed on its `ask` line, as serve logs it (log v5). */
   readonly scoping?: true;
+  /** What the operator attached (log v5's `ask.files`): by reference, as serve logs it. */
+  readonly files?: readonly FileRef[];
 }
 
 export interface Request extends At {
