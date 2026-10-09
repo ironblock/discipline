@@ -3,6 +3,7 @@ import { createContext, useContext, useState } from 'react';
 import type { Ack, Decision, Prompt } from '../drive/transport.ts';
 import type { ToolNode } from '../session/fold.ts';
 import { SegmentList } from './GateSegments.tsx';
+import { heldOf } from './sets.ts';
 import './approval.css';
 
 /**
@@ -53,8 +54,8 @@ export function ApprovalPrompt({ prompt, decide }: { readonly prompt: Prompt; re
     <section className="ex-panel ex-approval" role="alertdialog" aria-label="a command waits on you" data-call={prompt.id}>
       <header className="ex-approval__head">
         <span className="ex-approval__title">a command waits on you</span>
-        <span className="ex-approval__reason" title="why the gate held it">
-          {prompt.reason}
+        <span className="ex-approval__reason" title={`why the gate held it: ${prompt.reason}`}>
+          {heldOf(prompt.reason).label}
         </span>
       </header>
       <div className="ex-approval__cwd" title="the directory it would run in">

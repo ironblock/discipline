@@ -249,6 +249,13 @@ export class HttpTransport implements DriveTransport {
     });
     source.onerror = () => {
       if (source !== this.#source) return;
+      // The session ended and serve exits (#289): its stream closing is the end, not a link to restore.
+      const last = this.#log.at(-1);
+      if (last?.kind === 'settlement' && last.to === 'ended') {
+        source.close();
+        this.#source = undefined;
+        return this.#setLink('live');
+      }
       // Still trying: the browser retries a dropped stream itself, resuming from the last id.
       if (source.readyState === CONNECTING) return this.#setLink('reconnecting');
       if (source.readyState === CLOSED) void this.#probe();

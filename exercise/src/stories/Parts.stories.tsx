@@ -577,6 +577,25 @@ export const ProseStreaming: Story = {
 
 // ---------------------------------------------------------------- Tool calls
 
+/** A read outside the worktree, its path long (the T1 smoke run's): the whole command shows, wrapped, never clipped. */
+const LONG_READ = `cat ${'/a-long-reference-checkout'.repeat(6)}/examples/minecraft/main.js`;
+export const ToolLongCommand: Story = {
+  name: 'Tool · a long command wraps, so its path is read whole',
+  render: () => {
+    const node = trunkNodeAt(MOMENTS.testsRunning, 't/5', 'tool');
+    return (
+      <div style={{ width: 420 }}>
+        <ToolBlock node={{ ...node, args: { command: LONG_READ }, arguments: JSON.stringify({ command: LONG_READ }) }} />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const call = canvasElement.querySelector('.ex-tool__call') as HTMLElement;
+    await expect(call.textContent).toContain('main.js');
+    await expect(call.scrollWidth).toBeLessThanOrEqual(call.clientWidth);
+  },
+};
+
 export const ToolRunning: Story = {
   name: 'Tool · running',
   render: () => <ToolBlock node={trunkNodeAt(MOMENTS.testsRunning, 't/5', 'tool')} />,
@@ -766,6 +785,22 @@ export const MemoryFresh: Story = {
   play: async ({ canvasElement }) => {
     await expect([...entriesOf(canvasElement)].sort()).toEqual(['#d1 live new', '#d2 live new', '#f1 live new', '#f2 live new', '#f3 live new', '#o1 live new']);
     await expect(canvasElement.querySelector('.ex-memory__fresh')?.textContent).toBe('+6 new');
+  },
+};
+
+/** `diet`'s own entry ids, as a served interview writes them (`interview-t4-0`): longer than the surface's `d1`. */
+export const MemoryDietIds: Story = {
+  name: 'Memory · diet’s long entry ids keep clear of the text',
+  render: () => lane(<Memory entries={sessionAt(MOMENTS.firstSettled).memory.map((e, i) => ({ ...e, id: `interview-t4-${i}` }))} />),
+  play: async ({ canvasElement }) => {
+    const entries = [...canvasElement.querySelectorAll('.ex-memory__entry')];
+    await expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      const id = entry.querySelector('.ex-memory__id') as HTMLElement;
+      // The id's text fits its own box -- none of it spills into the entry's text beside it.
+      await expect(id.scrollWidth).toBeLessThanOrEqual(id.clientWidth);
+      await expect(id.getBoundingClientRect().right).toBeLessThanOrEqual((entry.querySelector('.ex-memory__text') as HTMLElement).getBoundingClientRect().left + 0.5);
+    }
   },
 };
 

@@ -95,6 +95,21 @@ describe('HttpTransport: the log, served', () => {
     expect(lines.map((l) => l.seq)).toEqual([0, 1]);
   });
 
+  it('lets an ended session’s stream go: serve exits after `end`, and that close is the end, not a dropped link', async () => {
+    for (const state of [0, 2] as const) {
+      const { sources, fetched, links, last } = stand();
+      last().open();
+      last().send(start);
+      last().send({ seq: 1, t: 1, kind: 'settlement', from: 'awaiting', to: 'ended' });
+      last().fail(state);
+      await settle();
+      expect(links.at(-1)).toBe('live');
+      expect(last().closed).toBe(true);
+      expect(sources).toHaveLength(1);
+      expect(fetched).toEqual([]);
+    }
+  });
+
   it('says it is reconnecting while the browser retries a dropped stream, and makes no new one', () => {
     const { sources, links, last } = stand();
     last().open();
