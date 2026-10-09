@@ -967,6 +967,8 @@ fn a_drive_server_starts_on_a_declared_engine_without_asking_it() {
         "{start_line}"
     );
     assert_eq!(start_line["version"], 7, "{start_line}");
+    // And its server speaks TabbyAPI's dialect, by name (#496).
+    assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
 }
 
 #[test]

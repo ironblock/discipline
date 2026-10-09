@@ -3429,10 +3429,10 @@ target = "diet/src/bin/drive.rs"
 expect_exit = 101
 anchor = '''
             concurrency: Concurrency::Undeclared,
-            dialect: Dialect::llama_cpp(),'''
+            dialect,'''
 becomes = '''
             concurrency: Concurrency::Declared(1),
-            dialect: Dialect::llama_cpp(),'''
+            dialect,'''
 catches = [
     "a_served_drive_streams_a_real_servers_answer_over_sse",
 ]
