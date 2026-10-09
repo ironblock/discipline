@@ -313,6 +313,7 @@ pub fn project_in(
     let mut events = vec![Event::Start {
         regime: Box::new(regime.clone()),
         source: Source::Live,
+        regimen_sha256: None,
     }];
     events.extend(walk.events);
     Ok(Projection {

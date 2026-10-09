@@ -1141,6 +1141,11 @@ pub enum Event {
         regime: Box<Regime>,
         /// Where this record's rows came from. Required; see [`Source`].
         source: Source,
+        /// The sha256 of the regimen document's bytes, as the session read
+        /// it at start: the file a results directory keeps beside the record
+        /// is the one the run used when the two digests agree. Optional: a
+        /// record adapted from another harness had no regimen file.
+        regimen_sha256: Option<String>,
     },
     /// A turn happened.
     Turn {
@@ -1555,6 +1560,15 @@ impl Record {
     pub fn source(&self) -> &Source {
         match self.events.first() {
             Some(Event::Start { source, .. }) => source,
+            _ => unreachable!("validate() refuses a record whose first event is not a start"),
+        }
+    }
+
+    /// The sha256 of the regimen the session read at start, when it says.
+    #[must_use]
+    pub fn regimen_sha256(&self) -> Option<&str> {
+        match self.events.first() {
+            Some(Event::Start { regimen_sha256, .. }) => regimen_sha256.as_deref(),
             _ => unreachable!("validate() refuses a record whose first event is not a start"),
         }
     }
@@ -2372,6 +2386,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         Kind::Start => Event::Start {
             regime: Box::new(regime(&mut take_object(&mut members, of, "regime")?, of)?),
             source: source(&mut members, of)?,
+            regimen_sha256: take_optional_digest(&mut members, of, "regimen_sha256")?,
         },
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
@@ -4441,6 +4456,7 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
             Event::Start {
                 regime: found,
                 source: declared,
+                ..
             } => {
                 // A live record is one this library wrote as it went, so the
                 // two states that exist only for adapted records are refused
@@ -4684,9 +4700,14 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
     members.put_text("record", event.kind().tag());
     members.put_optional("id", event.id().map(|id| Value::String(id.to_owned())));
     match event {
-        Event::Start { regime, source } => {
+        Event::Start {
+            regime,
+            source,
+            regimen_sha256,
+        } => {
             members.put("regime", regime_value(regime));
             members.put("source", source_value(source));
+            members.put_optional("regimen_sha256", regimen_sha256.clone().map(Value::String));
         }
         Event::Turn {
             index,

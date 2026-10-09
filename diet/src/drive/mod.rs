@@ -822,6 +822,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         // This function IS the live path: it drove the turns and wrote these
         // rows as they happened. Nothing else in this crate may say `Live`.
         source: Source::Live,
+        regimen_sha256: None,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();
@@ -1372,7 +1373,8 @@ fn issued_head(call: &crate::client::Call, id: &str) -> Option<crate::client::he
 ///
 /// The object's own `dump_lines` is the authorized spelling of an entry; this
 /// only decides the order, which is the id order the dump already keys by.
-fn dump(object: &WorkingObject) -> String {
+#[must_use]
+pub fn dump(object: &WorkingObject) -> String {
     let mut out = String::new();
     for (id, line) in object.dump_lines() {
         out.push_str(id.as_str());
