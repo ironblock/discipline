@@ -5,6 +5,7 @@ import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
+import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
@@ -255,5 +256,20 @@ export const ServedToolCallFailedUnderPolicy: Story = {
     const call = await servedCall(canvasElement);
     await expect(call.querySelector('.ex-call-outcome[data-outcome="command_failed"]')?.textContent).toBe('failed under policy');
     await expect(call.querySelector('.ex-tool__stderr')?.textContent).toContain('Operation not permitted');
+  },
+};
+
+/** `?drive`, log v5: `diet`'s forks, whose lines name no slot, drawn in a lane behind the curtain -- one branch per fork. */
+export const ServedForks: Story = {
+  name: '?drive: the interview forks, drawn in their lane (v5)',
+  args: { drive: true, web: serving(forks) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-lane .ex-branch')).toHaveLength(2));
+    // Settled, each is a thin bar: its lane and how it ended -- the scoping fork patched, the read fork declined.
+    const drawn = [...canvasElement.querySelectorAll<HTMLElement>('.ex-lane .ex-branch')].map((b) => [b.dataset['lane'], b.dataset['outcome']]);
+    await expect(drawn).toEqual([
+      ['interview', 'value'],
+      ['interview', 'decline'],
+    ]);
   },
 };
