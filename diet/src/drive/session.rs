@@ -2378,14 +2378,20 @@ fn decided<S: Streaming>(
 }
 
 /// The approval a call that runs records: the decision made for it, or the
-/// entry that covered its first approved segment.
+/// standing entry that covered it -- an operator's (`session`,
+/// `workspace`) over a pre-seed whenever one covered any segment, since
+/// that is the approval the call needed; the first segment's otherwise.
 fn approval_of(judged: &Judged, allowed: &[Entry]) -> Option<log::Approval> {
-    let entry = judged
+    let covering: Vec<&Entry> = judged
         .covered_by
         .iter()
         .flatten()
-        .next()
-        .and_then(|at| allowed.get(*at))?;
+        .filter_map(|at| allowed.get(*at))
+        .collect();
+    let entry = covering
+        .iter()
+        .find(|entry| entry.scope != Scope::Preseeded)
+        .or_else(|| covering.first())?;
     Some(log::Approval {
         scope: tool_loop::scope_tag(entry.scope),
         decided_at: entry.decided_at,
@@ -5639,6 +5645,49 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             session.approve("call-1", Decision::Once),
             Err(ApproveRefusal::NothingWaiting)
+        );
+        tidy(&[&tree]);
+    }
+
+    /// A call whose segments are covered partly by a pre-seed and partly by
+    /// the operator's session approval records the operator's approval, the
+    /// one it needed: `ls | wc -l` with `ls` pre-seeded and `wc` approved
+    /// for the session records `session` on its repeat, never `preseeded`
+    /// (the approval trace is a measurement).
+    #[test]
+    fn a_repeat_covered_by_a_session_approval_records_session_not_the_preseed() {
+        let tree = scratch("approve-mixed");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "ls | wc -l")],
+                vec![bash("call-2", "ls | wc -l")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["ls"],
+                None,
+                Decider::Operator,
+            ),
+        );
+        session.ask("go", None).expect("accepted");
+        let prompt = waiting_on(&session);
+        assert_eq!(prompt.command, "ls | wc -l");
+        assert_eq!(session.approve("call-1", Decision::Session), Ok(()));
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written.len(), 2);
+        assert!(written.iter().all(|l| l.outcome == log::ToolOutcome::Ran));
+        let first = written[0].approval.clone().expect("an approval");
+        assert_eq!(first.scope, log::ApprovalScope::Session);
+        assert_eq!(
+            written[1].approval,
+            Some(first),
+            "the repeat ran under the operator's session approval"
         );
         tidy(&[&tree]);
     }

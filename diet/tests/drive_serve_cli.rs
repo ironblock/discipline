@@ -2708,7 +2708,8 @@ fn the_tool_turn_replay_runs_a_call_through_the_gate_and_its_approval() {
 
 /// The tool-turn replay's record: `diet check-record` reads it, each turn is
 /// one call and then its answer, and turn one's call was approved for the
-/// session at its prompt while turn two's was covered without one.
+/// session at its prompt while turn two's ran under that same approval --
+/// recorded as it, not as the pre-seed that covered `ls`.
 fn the_tool_turn_record_reads(record: &std::path::Path) {
     let checked = Command::new(DIET)
         .args(["check-record"])
@@ -2763,8 +2764,8 @@ fn the_tool_turn_record_reads(record: &std::path::Path) {
     assert_eq!(calls[0]["approval"]["scope"], "session", "{written}");
     assert_eq!(calls[0]["approval"]["why"], "not_approved", "{written}");
     assert_eq!(calls[1]["outcome"], "ran", "{written}");
-    assert!(
-        calls[1]["approval"].get("why").is_none(),
-        "turn two's call was standing, not prompted: {written}"
+    assert_eq!(
+        calls[1]["approval"], calls[0]["approval"],
+        "turn two's call ran under turn one's session approval, unprompted: {written}"
     );
 }
