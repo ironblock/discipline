@@ -216,7 +216,7 @@ export class CannedTransport implements DriveTransport {
     return this.#fire('send', command.text, command.scoping, files);
   }
 
-  #seam(to: string): Ack {
+  #seam(to: string | undefined): Ack {
     if (!this.#log.some((e) => e.kind === 'turn.settled')) return { ok: false, refused: 'nothing-to-seam' };
     const scripted = this.#beats[this.#next]?.events.find((e) => e.kind === 'seam');
     if (scripted?.kind === 'seam' && scripted.phase && scripted.phase.to !== to) return { ok: false, refused: 'off-script' };
