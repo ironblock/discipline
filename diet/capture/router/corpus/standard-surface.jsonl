@@ -1,0 +1,10 @@
+{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"harness","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":0},"reasoning":"on","hardware_fingerprint":"298beafcb1d73a5c03e19700f6ca93f7972c8afe78ff7724d87e06d5cc24fbf8"}]}}
+{"record":"turn","index":1,"prefill_tokens":800}
+{"record":"request","id":"r1","lane":"main","substrate":"harness","text":"Read the notes and the parser, then fix the parser, on the standard tool surface (#557).","head_sha256":"d4f3dc5b6ec9e150c8cfa9cd50ca2f8bdca2a84061cbebd9e13b2e37f6d283a6"}
+{"record":"tool_call","id":"s0","at_turn":1,"tool":"glob","args":{"pattern":"src/**/*.rs"}}
+{"record":"tool_call","id":"s1","at_turn":1,"tool":"read","args":{"path":"docs/notes.md"}}
+{"record":"tool_call","id":"s2","at_turn":1,"tool":"read","args":{"path":"src/parser.rs","offset":1,"limit":40}}
+{"record":"tool_call","id":"s3","at_turn":1,"tool":"edit","args":{"file_path":"src/parser.rs","old_string":"a","new_string":"b"}}
+{"record":"tool_call","id":"s4","at_turn":1,"tool":"write","args":{"path":"src/parser_test.rs","content":"// test\n"}}
+{"record":"response","id":"p1","to_request":"r1","output_tokens":14,"text":"The parser reads the notes' grammar now, and its test is written."}
+{"record":"summary","kind":"drive","turns":1,"prefill_tokens_total":800,"product_sha256":"3c0b6988ca8b9cf01f678a21eebb835d24e289051bb3762f9407acbe57f51f37"}
