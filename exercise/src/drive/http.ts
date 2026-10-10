@@ -228,6 +228,11 @@ export class HttpTransport implements DriveTransport {
         return { kind: 'declare-seam', ...(command.to !== undefined ? { phase: command.to } : {}) };
       case 'end':
         return { kind: 'end' };
+      // A tangent's open and close, as serve takes them (#608).
+      case 'open-tangent':
+        return { kind: 'open-tangent', id: command.id };
+      case 'close-tangent':
+        return { kind: 'close-tangent', dispositions: command.dispositions };
       case 'background':
         return { kind: 'background' };
     }

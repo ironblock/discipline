@@ -106,7 +106,7 @@ export interface CannedOptions {
 }
 
 /** Which command ends a gap with which `ended_by`. An answer to a prompt ends none: a turn is in flight. */
-const ENDS = { ask: 'ask', seam: 'seam', cancel: 'cancel', end: 'end', approve: undefined, background: undefined } as const satisfies Record<Command['kind'], IdleGapBody['ended_by'] | undefined>;
+const ENDS = { ask: 'ask', seam: 'seam', cancel: 'cancel', end: 'end', approve: undefined, 'open-tangent': undefined, 'close-tangent': undefined, background: undefined } as const satisfies Record<Command['kind'], IdleGapBody['ended_by'] | undefined>;
 
 /** An event the script will play, and what follows it: what a timer holds, and what a prompt holds back. */
 interface Scheduled {
@@ -193,6 +193,8 @@ export class CannedTransport implements DriveTransport {
     // turns a bad one away with the command (400), and `HttpTransport` sends the command again without it; here
     // the two are one step: the command goes ahead, its gap unlogged.
     if (command.kind === 'approve') return Promise.resolve(this.#approve(command.call, command.scope));
+    // The canned script plays no tangent (#608): the served drive's to take.
+    if (command.kind === 'open-tangent' || command.kind === 'close-tangent') return Promise.resolve({ ok: false, refused: 'off-script' });
     // The canned script runs no command long enough to move (#614): the served drive's to take.
     if (command.kind === 'background') return Promise.resolve({ ok: false, refused: 'off-script' });
     const gap = extras?.idle_gap;

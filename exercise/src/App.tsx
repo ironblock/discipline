@@ -53,9 +53,9 @@ export function App({
   // refused because work was in flight blocks the person from there.
   const gap = useIdleGap(session);
   const dispatch = async (command: Command) => {
-    // An answer to a prompt comes mid-turn: no gap is open, and it ends none.
-    // Moving a command to the background (#614) comes mid-turn too.
-    if (command.kind === 'approve' || command.kind === 'background') return transport.dispatch(command);
+    // An answer to a prompt and a move to the background (#614) come mid-turn, and a tangent's open or close (#608) is no
+    // `GapEnd`: none of them ends a gap.
+    if (command.kind === 'approve' || command.kind === 'background' || command.kind === 'open-tangent' || command.kind === 'close-tangent') return transport.dispatch(command);
     // A command's kind is the word for what it ends the gap with (the format's `GapEnd`): ask, seam, cancel, end.
     const idleGap = gap.carry(command.kind);
     const ack = await transport.dispatch(command, idleGap ? { idle_gap: idleGap } : undefined);
@@ -86,6 +86,8 @@ export function App({
         // The canned script's phases; under `?drive`, the moves the logged phase graph allows from where the session is (#563).
         phases: drive ? session.phaseMoves : PHASES,
         dispatch,
+        // Tangents are the served drive's (#608): the canned script plays none.
+        tangents: drive === true,
         ...(uploader ? { upload: (bytes: Uint8Array) => uploader.call(transport, bytes) } : {}),
         hint: drive
           ? `driving: diet's session, over HTTP`

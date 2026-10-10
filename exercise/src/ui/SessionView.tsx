@@ -610,6 +610,12 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                 state={session.state}
                 link={link}
                 phase={session.phase}
+                tangent={{
+                  next: `t/${session.tangentsOpened + 1}`,
+                  ...(session.tangent
+                    ? { open: { id: session.tangent.id, entries: session.tangent.entries.map((entry) => ({ id: entry, text: session.memory.find((m) => m.id === entry)?.text ?? entry })) } }
+                    : {}),
+                }}
                 // A bash call running in the foreground (#614): what "move to background" moves.
                 foreground={session.eras.at(-1)?.nodes.some((n) => n.kind === 'tool' && n.running && n.tool === 'bash') ?? false}
                 {...composer}
