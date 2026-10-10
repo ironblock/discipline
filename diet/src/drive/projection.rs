@@ -1363,23 +1363,18 @@ impl<'a> Walk<'a> {
     /// trunk's own server sends the trunk as it stands, then its question, so
     /// its head is rebuilt from the projected trunk and verified by digest
     /// (#157): no row when it matches -- its move from the lane's last head
-    /// is the trunk's own growth -- and `unattributed` when it does not.
-    /// Any other side head (a `last:N` view, an offboard seat) is not rebuilt
-    /// here: a move from the lane's last head is named `unattributed`.
+    /// is the trunk's own growth. Any other side head -- one that does not
+    /// match, a `last:N` view, an offboard seat -- is not attributed here: a
+    /// move from the lane's last head is named `unattributed`, and the lane's
+    /// first head is no move at all.
     fn side_head_change(&mut self, seq: u64, (lane, fork): (Lane, Option<u64>), logged: &str) {
-        if fork.is_some_and(|fork| self.whole_trunk_forks.contains(&fork)) {
-            self.side_heads.insert(lane, logged.to_owned());
-            if !self.rebuilds_the_trunk(logged) {
-                self.events.push(Event::PrefixChanged {
-                    id: format!("{}#prefix", request_id(seq)),
-                    at_request: request_id(seq),
-                    reason: PrefixReason::Unattributed,
-                    diff: Vec::new(),
-                });
-            }
+        let verified = fork.is_some_and(|fork| self.whole_trunk_forks.contains(&fork))
+            && self.rebuilds_the_trunk(logged);
+        let previous = self.side_heads.insert(lane, logged.to_owned());
+        if verified {
             return;
         }
-        let Some(previous) = self.side_heads.insert(lane, logged.to_owned()) else {
+        let Some(previous) = previous else {
             return;
         };
         if previous == logged {
