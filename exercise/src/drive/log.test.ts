@@ -82,6 +82,26 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(marks('an-answered-turn.jsonl')).toEqual([['user', false], ['assistant', false]]);
   });
 
+  it('keeps a turn that failed after its tool steps on the trunk, as diet now does (#541): only its failing step is out of context', () => {
+    // diet's own turn of one call that ran, then a second request that failed: the step a later request followed stays.
+    const ran = logOf('a-v3-tool-call-that-ran.jsonl');
+    const at = ran.length;
+    const failedAfter: LogLine[] = [
+      ...ran,
+      { kind: 'request', lane: 'trunk', seq: at, t: 95, turn: 1 },
+      { kind: 'request.failed', reason: 'transport', message: 'could not connect: refused', request: at, seq: at + 1, t: 100 },
+      { kind: 'turn.settled', reason: 'failed', seq: at + 2, t: 105, turn: 1 },
+    ] as LogLine[];
+    const marks = (log: LogLine[]) => (fold(log).eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, 'outOfContext' in n ? n.outOfContext : false]);
+    expect(marks(failedAfter)).toEqual([
+      ['user', false],
+      ['assistant', false],
+      ['assistant', 'failed'],
+    ]);
+    // A turn that failed on its first request ran nothing and keeps nothing: ask and answer both out, as before.
+    expect(marks(logOf('a-turn-whose-connection-failed.jsonl'))).toEqual([['user', 'failed'], ['assistant', 'failed']]);
+  });
+
   it('folds a reasoning delta as reasoning, not answer', () => {
     const log = logOf('a-reasoning-delta.jsonl');
     const answer = fold(log).eras[0]?.nodes.find((n) => n.kind === 'assistant');
