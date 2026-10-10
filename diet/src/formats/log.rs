@@ -815,6 +815,9 @@ pub enum Event {
         /// The `seq` of the fork it is the call of, on the `interview` lane
         /// (v5, #374).
         fork: Option<u64>,
+        /// The `max_tokens` it was sent with, after the output cap was
+        /// clamped to the room left in the context window (v7, #588).
+        max_tokens: Option<u64>,
     },
     /// A command was refused.
     Refused {
@@ -2255,6 +2258,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             lane: fields.tag("lane", Lane::from_tag)?,
             head_sha256: fields.optional_digest("head_sha256")?,
             fork: fields.optional_count("fork")?,
+            max_tokens: fields.optional_count("max_tokens")?,
         },
         Kind::Refused => Event::Refused {
             command: fields.tag("command", Command::from_tag)?,
@@ -3383,6 +3387,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("lane", Tag(Tags::Lane)),
                 may_v2("head_sha256", Holds::Digest),
                 may_v5("fork", Count),
+                may_v7("max_tokens", Count),
             ];
             F
         }
@@ -3915,6 +3920,7 @@ fn to_value(line: &Line) -> Value {
             lane,
             head_sha256,
             fork,
+            max_tokens,
         } => {
             put("turn", count(u64::from(*turn)));
             put("lane", text(lane.tag()));
@@ -3923,6 +3929,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(fork) = fork {
                 put("fork", count(*fork));
+            }
+            if let Some(max_tokens) = max_tokens {
+                put("max_tokens", count(*max_tokens));
             }
             Kind::Request
         }
@@ -4905,6 +4914,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::Delta {
                 request: 3,
@@ -4948,6 +4958,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::RequestFailed {
                 request: 13,
@@ -4988,6 +4999,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::Progress {
                 request: 20,
@@ -5047,6 +5059,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::RequestFailed {
                 request: 29,
@@ -5121,6 +5134,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::Response {
                 to_request: request,
@@ -5151,6 +5165,7 @@ mod tests {
                 lane: Lane::Interview,
                 head_sha256: None,
                 fork: Some(fork),
+                max_tokens: Some(4000),
             },
             Event::Response {
                 to_request: fork + 1,

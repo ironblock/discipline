@@ -336,6 +336,11 @@ pub struct Limits {
     /// How many retries may be attempted. Zero means the first attempt is the
     /// only attempt.
     pub retries: u8,
+    /// The server's context window, in tokens, when it is known (#588): the
+    /// engine's report, else the registry's declaration. With one, each
+    /// request's `max_output_tokens` is clamped to the room the prompt leaves
+    /// ([`crate::drive::session`]); with none, nothing is clamped.
+    pub context_window: Option<u64>,
 }
 
 /// How the server was configured to serve.
@@ -675,6 +680,7 @@ mod tests {
                 call: Duration::from_secs(1),
                 max_output_tokens: 16,
                 retries: 0,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

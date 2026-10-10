@@ -117,6 +117,38 @@ const WARMUP: &str = "warmup";
 /// The declared key for a draft model.
 const DRAFT: &str = "draft";
 
+/// The server's context window per request, in tokens, and where it was
+/// read (#588): `reported` from the engine's own report -- llama.cpp's
+/// `default_generation_settings.n_ctx` (per slot), `TabbyAPI`'s
+/// `parameters.max_seq_len` -- else `declared`, the registry's
+/// `served_n_ctx` or `served_max_seq_len`, else its `serving_context`. `None`
+/// when nothing names one, and then nothing is clamped.
+#[must_use]
+pub fn window(
+    identity: &Identity,
+    report: Option<&serde_json::Value>,
+    serving_context: Option<u64>,
+) -> Option<(u64, &'static str)> {
+    let engine = Engine::of(identity);
+    let field = match engine {
+        Engine::LlamaCpp => "n_ctx",
+        Engine::TabbyApi => "max_seq_len",
+    };
+    let count = |text: &str| text.parse::<u64>().ok().filter(|n| *n > 0);
+    report
+        .and_then(|report| reported(engine, field, report))
+        .and_then(|text| count(&text))
+        .map(|n| (n, "reported"))
+        .or_else(|| {
+            identity
+                .served
+                .get(field)
+                .and_then(|text| count(text))
+                .or(serving_context)
+                .map(|n| (n, "declared"))
+        })
+}
+
 /// The engine's report on `field`, as text, when it makes one.
 fn reported(engine: Engine, field: &str, report: &serde_json::Value) -> Option<String> {
     // The template the engine renders with, by the digest of its text:
@@ -353,6 +385,32 @@ mod tests {
     /// llama.cpp's `/props`, at `448147d`: each declared field it reports is
     /// corroborated, the chat template by digest, and a field it does not
     /// report (the KV cache type) stands declared.
+    #[test]
+    fn the_window_is_the_engines_report_else_the_declaration_else_none() {
+        let llama = identity("served_n_ctx = \"8192\"\n");
+        let props = serde_json::json!({"default_generation_settings": {"n_ctx": 32_768}});
+        assert_eq!(
+            window(&llama, Some(&props), None),
+            Some((32_768, "reported"))
+        );
+        assert_eq!(
+            window(&llama, None, Some(160_000)),
+            Some((8_192, "declared"))
+        );
+        let bare = identity("");
+        assert_eq!(
+            window(&bare, None, Some(160_000)),
+            Some((160_000, "declared"))
+        );
+        assert_eq!(window(&bare, None, None), None);
+        let tabby = identity("dialect = \"tabbyapi\"\n");
+        let card = serde_json::json!({"parameters": {"max_seq_len": 65_536}});
+        assert_eq!(
+            window(&tabby, Some(&card), None),
+            Some((65_536, "reported"))
+        );
+    }
+
     #[test]
     fn llama_cpp_props_corroborate_the_model_context_slots_modalities_and_template() {
         let template = "{{ messages }}";

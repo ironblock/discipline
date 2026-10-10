@@ -310,6 +310,7 @@ export type RequestLine = {
   lane: Lane;
   head_sha256?: string;
   fork?: number;
+  max_tokens?: number;
 };
 
 export type RefusedLine = {

@@ -841,6 +841,7 @@ mod tests {
                 call: Duration::from_millis(call_ms),
                 max_output_tokens: 128,
                 retries,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

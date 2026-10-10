@@ -1461,6 +1461,13 @@ fn the_start_and_summary_name_the_regimen_and_the_product(
         (Some("none"), Some("undeclared")),
         "{written}"
     );
+    // The canned server names no window, so no request was clamped (#588).
+    assert!(
+        rows[0]["levers"]["step_and_output_limits"]
+            .as_str()
+            .is_some_and(|word| word.ends_with(":unclamped")),
+        "{written}"
+    );
     let product = PathBuf::from(format!("{path}.product.txt"));
     assert_eq!(std::fs::read(&product).expect("the product"), b"");
     assert_eq!(

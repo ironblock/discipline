@@ -294,7 +294,7 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(system) => system,
         Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
     };
-    let (regime, read_at_start) = match regimen_file
+    let (regime, mut read_at_start) = match regimen_file
         .as_deref()
         .map(|path| registered_regime(path, max_output_tokens))
         .transpose()
@@ -442,11 +442,25 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(confirmed) => confirmed,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // Each request's output cap is clamped to the room its prompt leaves in
+    // this window (#588); the record's lever says whether it was.
+    let window = confirmed.as_ref().and_then(|(_, _, window)| *window);
+    shape.limits.context_window = window.map(|(tokens, _)| tokens);
+    if let Some(levers) = read_at_start.as_mut().map(|read| &mut read.levers) {
+        levers
+            .entry("step_and_output_limits".to_owned())
+            .and_modify(|word| match window {
+                Some((tokens, from)) => {
+                    let _ = write!(word, ":clamped:{tokens}:{from}");
+                }
+                None => word.push_str(":unclamped"),
+            });
+    }
     let registry_sha256 = diet::drive::registry::registry_sha256();
     let claim = substrate.zip(engine.as_ref()).map(|(id, passed)| {
         let fields = confirmed
             .as_ref()
-            .map(|(fields, _)| fields.clone())
+            .map(|(fields, _, _)| fields.clone())
             .unwrap_or_default();
         passed.claim_with(id, &registry_sha256, fields)
     });
@@ -505,7 +519,7 @@ fn serve(args: &[String]) -> ExitCode {
             substrate.map(|id| (id, registry_sha256.as_str())),
             engine
                 .as_ref()
-                .zip(confirmed.as_ref().map(|(_, warmed)| *warmed)),
+                .zip(confirmed.as_ref().map(|(_, warmed, _)| *warmed)),
             log_path.as_deref().zip(running.log_held),
             record_file.as_deref().zip(running.record_held),
             unsent_budget,
@@ -1224,6 +1238,7 @@ fn trunk(
             call: std::time::Duration::from_secs(180),
             max_output_tokens,
             retries: 0,
+            context_window: None,
         },
         grammar: None,
         template_kwargs: BTreeMap::new(),
@@ -1307,6 +1322,14 @@ impl Warmed {
     }
 }
 
+/// What the start confirmed of a server: each served field, how it was
+/// warmed, and its context window and where that was read (#588).
+type Confirmed = (
+    Vec<diet::formats::log::ServedField>,
+    Warmed,
+    Option<(u64, &'static str)>,
+);
+
 /// What the start confirms of substrate `id`'s server beyond its engine
 /// (#509): each declared `served_*` field and the chat template's digest,
 /// against the engine's report on itself; then, unless the engine warms
@@ -1321,19 +1344,23 @@ fn confirmations(
     id: &str,
     passed: &diet::drive::engine::Passed,
     shape: &RequestShape,
-) -> Result<(Vec<diet::formats::log::ServedField>, Warmed), String> {
+) -> Result<Confirmed, String> {
     use diet::drive::served::{self, Engine, ServerKind};
     let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
     if matches!(
         identity.weights,
         diet::formats::record::Weights::Canned { .. }
     ) {
-        return Ok((Vec::new(), Warmed::NotApplicable));
+        return Ok((Vec::new(), Warmed::NotApplicable, None));
     }
+    // The window each request's output cap is clamped to (#588).
+    let serving_context =
+        diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id);
     if ServerKind::of(id, &identity)? == ServerKind::Api {
         let mut fields = served::corroborated(id, &identity, None)?;
         fields.extend(served::draft_corroborated(id, &identity, None)?);
-        return Ok((fields, Warmed::NotApplicable));
+        let window = served::window(&identity, None, serving_context);
+        return Ok((fields, Warmed::NotApplicable, window));
     }
     let engine = Engine::of(&identity);
     let report = match (&passed.props, engine) {
@@ -1347,6 +1374,7 @@ fn confirmations(
         )?,
     };
     let mut fields = served::corroborated(id, &identity, report.as_ref())?;
+    let window = served::window(&identity, report.as_ref(), serving_context);
     let warms = served::warms_itself(&identity);
     let timings = if warms && !identity.served.contains_key("draft") {
         None
@@ -1361,6 +1389,7 @@ fn confirmations(
         } else {
             Warmed::ByServe
         },
+        window,
     ))
 }
 
@@ -1992,6 +2021,7 @@ fn shape(regime: &Regime) -> RequestShape {
             call: std::time::Duration::from_secs(180),
             max_output_tokens: 512,
             retries: 1,
+            context_window: None,
         },
         grammar: None,
         template_kwargs: std::collections::BTreeMap::new(),
