@@ -86,7 +86,8 @@ fn serve_usage() -> String {
          \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
-         \x20                       [--worktree DIR]\n\n",
+         \x20                       [--worktree DIR]\n\
+         \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\n",
     );
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
     out.push_str("--listen's address:\n");
@@ -138,6 +139,11 @@ fn serve_usage() -> String {
     out.push_str("\"decline\"}: 204, or 409 {\"refused\": \"nothing-waiting\"|\"stale\"|...}.\n");
     out.push_str("After the session the receipt is written beside the record (or the log),\n");
     out.push_str("as FILE.receipt.json.\n");
+    out.push_str("A regimen declaring `extraction_seat = \"offboard:<registry id>\"` runs its\n");
+    out.push_str("interview forks on a second server: --seat-endpoint and --seat-model are\n");
+    out.push_str("then required (--seat-key-file as --key-file), the seat's engine is checked\n");
+    out.push_str("against that entry as the trunk's is, and its endpoint may not be the\n");
+    out.push_str("trunk's. A fork there sees the last turn unless `fork_view` says otherwise.\n");
     out
 }
 
@@ -157,6 +163,16 @@ struct ServeArgs {
     /// `--max-output-tokens`, when given: it beats the regimen's (#569).
     max_output_tokens: Option<u32>,
     worktree: Option<String>,
+    /// `--seat-endpoint`, `--seat-model` and `--seat-key-file` (#570).
+    seat: SeatArgs,
+}
+
+/// Where an offboard extraction seat is reached, as `serve`'s flags say.
+#[derive(Default)]
+struct SeatArgs {
+    endpoint: Option<String>,
+    model: Option<String>,
+    key_file: Option<String>,
 }
 
 /// Whether `args` asks for the usage: `--help` or `-h` where a flag goes.
@@ -187,6 +203,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut allowed_origins = Vec::new();
     let mut max_output_tokens = None;
     let mut worktree = None;
+    let mut seat = SeatArgs::default();
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -201,6 +218,15 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
             true
         } else if flag == "--key-file" {
             key_file = Some(value.clone());
+            true
+        } else if flag == "--seat-endpoint" {
+            seat.endpoint = Some(value.clone());
+            true
+        } else if flag == "--seat-model" {
+            seat.model = Some(value.clone());
+            true
+        } else if flag == "--seat-key-file" {
+            seat.key_file = Some(value.clone());
             true
         } else if flag == "--auth-file" {
             auth_file = Some(value.clone());
@@ -255,6 +281,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         allowed_origins,
         max_output_tokens,
         worktree,
+        seat,
     })
 }
 
@@ -281,6 +308,7 @@ fn serve(args: &[String]) -> ExitCode {
         allowed_origins,
         max_output_tokens,
         worktree,
+        seat,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -359,7 +387,14 @@ fn serve(args: &[String]) -> ExitCode {
     // default, and the template's default level named when none is sent.
     let mut unsent_budget = None;
     let mut effort_default = None;
-    if let Some(regime) = regime.as_ref() {
+    // A hosted API's entry (#555): its requests carry no template kwargs --
+    // a local template's -- and its thinking is the transport's.
+    let hosted = regime.as_ref().and_then(|regime| {
+        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
+            .ok()
+            .filter(|identity| identity.server_kind.as_deref() == Some("api"))
+    });
+    if let Some(regime) = regime.as_ref().filter(|_| hosted.is_none()) {
         let identity = diet::drive::registry::identity(
             diet::drive::registry::REGISTRY,
             &regime.substrates[0].id,
@@ -400,6 +435,15 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(tools) => tools,
         Err((code, why)) => return fail(code, &why),
     };
+    // A prune has nothing to prune in a session that runs no tools (#612).
+    if tools.is_none() && interview.as_ref().is_some_and(|i| i.prune.is_some()) {
+        return fail(
+            EXIT_INPUT,
+            "`model_pruning = \"on\"` needs a session that runs commands: it prunes tool \
+             results, and this one makes no tool calls (give it `--worktree` and \
+             `allowed_commands`)",
+        );
+    }
     // What an ask's named PNGs are checked against and copied to (#372):
     // the policy the commands run under, or the regimen's when it runs
     // none, and the recording's directory.
@@ -429,12 +473,57 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listen) => listen,
         Err(refused) => return refused,
     };
+    let trunk_endpoint = endpoint.clone();
     let mut transport = HttpStream::new(endpoint);
-    if let Some(key_file) = key_file {
-        match key_file_in_declared_path(regimen_file.as_deref(), &key_file)
-            .map_or_else(|| bearer_from(&key_file), Err)
+    if let Some(key_file) = key_file.as_deref() {
+        match key_file_in_declared_path(regimen_file.as_deref(), key_file)
+            .map_or_else(|| bearer_from(key_file), Err)
         {
             Ok(bearer) => transport = transport.with_bearer(bearer),
+            Err(why) => return fail(EXIT_INPUT, &why),
+        }
+    }
+    // A hosted API (#555): its key, from the file or the harnesses' own
+    // variable, and its wire, checked against its entry before anything
+    // binds.
+    if let Some((identity, regime)) = hosted.as_ref().zip(regime.as_ref()) {
+        let key = if key_file.is_some() {
+            diet::drive::hosted::Key::Given
+        } else {
+            diet::drive::hosted::Key::Environment(
+                std::env::var(diet::drive::hosted::ANTHROPIC_API_KEY).ok(),
+                tools.as_ref().is_some_and(|tools| {
+                    tools
+                        .policy
+                        .environment
+                        .iter()
+                        .any(|name| name == diet::drive::hosted::ANTHROPIC_API_KEY)
+                }),
+            )
+        };
+        // The cache-lifetime lever (#556), from the regimen as written.
+        let ttl = regimen_file
+            .as_deref()
+            .map(|path| {
+                std::fs::read_to_string(path)
+                    .map_err(|why| format!("{path} cannot be read: {why}"))
+                    .and_then(|text| {
+                        regimen::parse(&text).map_err(|why| format!("{path}: {why:?}"))
+                    })
+                    .and_then(|read| diet::drive::hosted::cache_ttl(&read))
+            })
+            .transpose();
+        let ttl = match ttl {
+            Ok(ttl) => ttl.unwrap_or_default(),
+            Err(why) => return fail(EXIT_INPUT, &why),
+        };
+        match diet::drive::hosted::transport(
+            transport,
+            (identity, &regime.substrates[0]),
+            (key, ttl),
+            &shape,
+        ) {
+            Ok(hosted) => transport = hosted,
             Err(why) => return fail(EXIT_INPUT, &why),
         }
     }
@@ -443,6 +532,9 @@ fn serve(args: &[String]) -> ExitCode {
     let substrate = regime
         .as_ref()
         .map(|regime| regime.substrates[0].id.as_str());
+    if let Err(why) = tls_only_for_an_api(&trunk_endpoint, substrate) {
+        return fail(EXIT_INPUT, &why);
+    }
     let engine = match substrate
         .map(|id| diet::drive::engine::check_served(&transport, id))
         .transpose()
@@ -454,6 +546,20 @@ fn serve(args: &[String]) -> ExitCode {
     // (#496); llama.cpp's without a regimen, or where the entry names none.
     let dialect = match substrate.map(served_dialect).transpose() {
         Ok(dialect) => dialect.unwrap_or_else(Dialect::llama_cpp),
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    // The offboard seat, checked as the trunk's server is (#570), before
+    // anything binds.
+    // With it, the chat template it reports: where a fork's ask is rendered.
+    let (seat, seat_template) = match offboard_seat(
+        regime.as_ref(),
+        seat,
+        &trunk_endpoint,
+        (&dialect, &shape),
+        regimen_file.as_deref(),
+    ) {
+        Ok(Some((seat, template))) => (Some(seat), template),
+        Ok(None) => (None, None),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     // What the announcement prints and the log's `session.start` claims,
@@ -472,7 +578,46 @@ fn serve(args: &[String]) -> ExitCode {
     };
     // Each request's output cap is clamped to the room its prompt leaves in
     // this window (#588); the record's lever says whether it was.
-    let window = confirmed.as_ref().and_then(|(_, _, window)| *window);
+    let window = confirmed.as_ref().and_then(|confirmed| confirmed.window);
+    // The interview's role (#599): a role but `user` runs only where the
+    // served template renders it, refused before anything binds -- the
+    // offboard seat's template when forks go there, else the trunk's.
+    if let Some(role) = interview
+        .as_ref()
+        .map(|interview| interview.role)
+        .filter(|role| *role != diet::client::shape::Role::User)
+    {
+        let (template, whose) = if seat.is_some() {
+            (seat_template.as_deref(), "the extraction seat")
+        } else {
+            (
+                confirmed
+                    .as_ref()
+                    .and_then(|confirmed| confirmed.template.as_deref()),
+                "the server",
+            )
+        };
+        let refused = template.map_or_else(
+            || {
+                Err(format!(
+                    "{whose} reports no chat template, so a `{}` interview ask cannot be confirmed to render",
+                    role.tag()
+                ))
+            },
+            |template| diet::drive::template_roles::renders(template, role.tag()),
+        );
+        if let Err(why) = refused {
+            let why = if seat.is_some() {
+                format!("the extraction seat: {why}")
+            } else {
+                why
+            };
+            return fail(
+                EXIT_INPUT,
+                &format!("`interview_role = \"{}\"`: {why}", role.tag()),
+            );
+        }
+    }
     shape.limits.context_window = window.map(|(tokens, _)| tokens);
     if let Some(levers) = read_at_start.as_mut().map(|read| &mut read.levers) {
         levers
@@ -488,7 +633,7 @@ fn serve(args: &[String]) -> ExitCode {
     let claim = substrate.zip(engine.as_ref()).map(|(id, passed)| {
         let fields = confirmed
             .as_ref()
-            .map(|(fields, _, _)| fields.clone())
+            .map(|confirmed| confirmed.fields.clone())
             .unwrap_or_default();
         passed.claim_with(id, &registry_sha256, fields)
     });
@@ -502,7 +647,7 @@ fn serve(args: &[String]) -> ExitCode {
         Err(refused) => return refused,
     };
     let session = served_session(
-        transport,
+        (transport, seat),
         (shape, dialect),
         tools,
         (
@@ -550,7 +695,7 @@ fn serve(args: &[String]) -> ExitCode {
             substrate.map(|id| (id, registry_sha256.as_str())),
             engine
                 .as_ref()
-                .zip(confirmed.as_ref().map(|(_, warmed, _)| *warmed)),
+                .zip(confirmed.as_ref().map(|confirmed| confirmed.warmed)),
             log_path.as_deref().zip(running.log_held),
             record_file.as_deref().zip(running.record_held),
             unsent_budget,
@@ -703,20 +848,31 @@ fn outputs(
 /// (#292): its transport speaks llama-server's dialect, and nobody declared
 /// how many streams the server serves.
 fn served_session(
-    transport: HttpStream,
+    (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
     (mut shape, dialect): (RequestShape, Dialect),
     tools: Option<Tools>,
     declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
+    let forks = transport.for_forks();
     // A session that runs commands declares its surface's tools (#557):
-    // `bash` alone, or `bash` and the standard set.
+    // `bash` alone, or `bash` and the standard set; then `prune_output`
+    // when the regimen offers it (#612).
     if let Some(tools) = tools.as_ref() {
-        shape.tools = tools.surface.tools();
+        shape.tools = tools
+            .surface
+            .tools_timed(tools.background, tools.timeout_ms);
+        if declared
+            .1
+            .as_ref()
+            .is_some_and(|interview| interview.prune.is_some())
+        {
+            shape.tools.push(diet::drive::prune::definition());
+        }
     }
     // Self-capture's tools after them (#609), from the first request and
     // never changed; with self-capture off the tools are as they were.
     session::declare_self_capture(&mut shape, declared.1.as_ref());
-    std::sync::Arc::new(Session::open_declaring(
+    let session = Session::open_declaring(
         transport,
         shape,
         Some(Serving {
@@ -725,7 +881,144 @@ fn served_session(
         }),
         tools,
         declared,
-    ))
+    );
+    // A hosted fork's own lifetimes (#556), when they differ.
+    let session = match forks {
+        Some(forks) => session.forking_through(forks),
+        None => session,
+    };
+    std::sync::Arc::new(match seat {
+        Some(seat) => session.seated(seat),
+        None => session,
+    })
+}
+
+/// An offboard seat, and the chat template its server reports.
+type Seated = (session::Offboard<HttpStream>, Option<String>);
+
+/// The offboard extraction seat the regime declares (#570), reached by
+/// `serve`'s seat flags: its server, checked against the registry's entry
+/// as the trunk's is -- its engine, then [`confirmations`]' model, settings
+/// and warming, asked as a fork asks it -- and the model a fork names,
+/// beside the chat template the seat reports, which a fork's ask renders
+/// through (#599). `None` for a warm seat.
+///
+/// # Errors
+///
+/// An offboard seat without its endpoint or model; seat flags for a warm
+/// one; a seat at the trunk's own endpoint, which is the warm seat under
+/// another name; a seat whose dialect is not the trunk's, since one session
+/// reads its servers one way; an unreadable key; a failed engine check.
+fn offboard_seat(
+    regime: Option<&Regime>,
+    given: SeatArgs,
+    trunk: &Endpoint,
+    (dialect, shape): (&Dialect, &RequestShape),
+    regimen: Option<&str>,
+) -> Result<Option<Seated>, String> {
+    let seat = regime.and_then(|regime| regime.substrates.get(1));
+    let Some(seat) = seat else {
+        return match (&given.endpoint, &given.model, &given.key_file) {
+            (None, None, None) => Ok(None),
+            _ => Err(
+                "--seat-endpoint, --seat-model and --seat-key-file reach an offboard seat, and \
+                 the regimen declares none: `extraction_seat = \"offboard:<registry id>\"`"
+                    .to_owned(),
+            ),
+        };
+    };
+    let id = seat.id.as_str();
+    let (Some(endpoint), Some(model)) = (given.endpoint, given.model) else {
+        return Err(format!(
+            "the regimen seats its forks offboard on `{id}`: --seat-endpoint and --seat-model \
+             say where and as what"
+        ));
+    };
+    let endpoint = match Endpoint::parse(&endpoint) {
+        Ok(endpoint) => chat_endpoint(endpoint),
+        Err(why) => return Err(format!("{endpoint} is not an endpoint: {why}")),
+    };
+    tls_only_for_an_api(&endpoint, Some(id))?;
+    if endpoint == *trunk {
+        return Err(format!(
+            "--seat-endpoint is the trunk's own endpoint: a seat on the executor's server is \
+             `warm`, not `offboard:{id}`"
+        ));
+    }
+    let entry = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+    if entry.server_kind.as_deref() == Some("api") {
+        return Err(format!(
+            "`{id}` is a hosted API, and an offboard seat on one is not built: a seat speaks the \
+             trunk's local wire"
+        ));
+    }
+    let seat_dialect = served_dialect(id)?;
+    if seat_dialect.name != dialect.name {
+        return Err(format!(
+            "`{id}` speaks `{}` and the trunk's server `{}`: one session reads its servers \
+             one way",
+            seat_dialect.name, dialect.name
+        ));
+    }
+    let mut transport = HttpStream::new(endpoint);
+    if let Some(key_file) = given.key_file {
+        let bearer = key_file_in_declared_path(regimen, &key_file)
+            .map_or_else(|| bearer_from(&key_file), Err)?;
+        transport = transport.with_bearer(bearer);
+    }
+    let passed = diet::drive::engine::check_served(&transport, id)
+        .map_err(|why| format!("the extraction seat: {why}"))?;
+    let mut asked = shape.clone();
+    asked.model.clone_from(&model);
+    let Confirmed {
+        window, template, ..
+    } = confirmations(&transport, id, &passed, &asked)
+        .map_err(|why| format!("the extraction seat: {why}"))?;
+    Ok(Some((
+        session::Offboard {
+            transport,
+            substrate: id.to_owned(),
+            model,
+            // The window the seat reports, else the one its entry declares.
+            context_window: window.map(|(tokens, _)| tokens).or_else(|| {
+                diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
+            }),
+        },
+        template,
+    )))
+}
+
+/// An `https` endpoint is a hosted API's (#555): served for a substrate the
+/// registry declares `server_kind = "api"`, and refused for any other, or
+/// for none. A server we run is reached in the clear on a network we own;
+/// one we reach over TLS is one we do not, and its entry has to say so.
+///
+/// # Errors
+///
+/// An `https` endpoint with no substrate, or one whose entry is not `api`.
+fn tls_only_for_an_api(endpoint: &Endpoint, substrate: Option<&str>) -> Result<(), String> {
+    if !endpoint.tls {
+        return Ok(());
+    }
+    let api = substrate
+        .map(|id| {
+            let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+            diet::drive::served::ServerKind::of(id, &identity)
+                .map(|kind| kind == diet::drive::served::ServerKind::Api)
+        })
+        .transpose()?;
+    match (substrate, api) {
+        (Some(_), Some(true)) => Ok(()),
+        (Some(id), _) => Err(format!(
+            "an https endpoint is a hosted API's, and `{id}`'s entry is not \
+             `server_kind = \"api\"`: a server we run is reached at its http address"
+        )),
+        (None, _) => Err(
+            "an https endpoint is a hosted API's, and without a regimen there is no \
+             registry entry to say this one is"
+                .to_owned(),
+        ),
+    }
 }
 
 /// The dialect the registry names for substrate `id` (#496): llama.cpp's
@@ -742,7 +1035,7 @@ fn served_dialect(id: &str) -> Result<Dialect, String> {
         Some(name) => Dialect::named(name).ok_or_else(|| {
             format!(
                 "the registry names `{name}` as `{id}`'s dialect, which this client does not \
-                 speak: `llama.cpp` or `tabbyapi`"
+                 speak: `llama.cpp`, `tabbyapi` or `anthropic-messages`"
             )
         }),
     }
@@ -789,6 +1082,37 @@ fn serving_interview(
     }
     // Self-capture (#609) keeps working memory too, forks or none.
     let self_capture = session::self_capture(&read);
+    // #610: a fork answers through the capture tools only where it is asked
+    // to, in a set written for them, and where self-capture declares them.
+    let capture = session::capture_modality(&read).map_err(|why| format!("{path}: {why}"))?;
+    let asks = session::fork_asks(&read);
+    if rules.is_empty() && self_capture.is_none() && diet::drive::prune::of(&read).is_some() {
+        return Err(format!(
+            "{path} declares `model_pruning = \"on\"` and neither an `interview_warrant` nor \
+             self-capture: nothing fills working memory, so no seam could ever replace a \
+             pruned result"
+        ));
+    }
+    if capture == diet::dogma::asks::Modality::Tools {
+        let refused = if rules.is_empty() {
+            Some("no `interview_warrant`, so no fork ever answers".to_owned())
+        } else if self_capture.is_none() {
+            Some("self-capture off, so no fork is offered the capture tools".to_owned())
+        } else if asks.modality != capture {
+            Some(format!(
+                "the ask set `{}`, whose asks have a fork answer in fields",
+                asks.name
+            ))
+        } else {
+            None
+        };
+        if let Some(why) = refused {
+            return Err(format!(
+                "{path} declares `{}` = \"tools\" with {why}",
+                session::CAPTURE_MODALITY
+            ));
+        }
+    }
     Ok(
         (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
             rules,
@@ -798,9 +1122,26 @@ fn serving_interview(
             phases,
             // #566: how archived items are recalled; off unless declared.
             recall: diet::drive::archive::Recall::of(&read),
-            view: session::fork_view(&read),
+            // Undeclared is left to the seat (#570): the whole trunk warm,
+            // the last turn offboard.
+            view: read
+                .get(session::FORK_VIEW)
+                .is_some()
+                .then(|| session::fork_view(&read)),
             self_capture,
-            asks: session::fork_asks(&read),
+            asks,
+            capture,
+            // #564: when a fork fires, and on what; one per gap unless declared.
+            cadence: session::interview_cadence(&read),
+            threshold_bytes: session::interview_threshold_bytes(&read),
+            // #611: off unless declared.
+            skip_self_recorded: session::interview_skip_self_recorded(&read),
+            role: session::interview_role(&read),
+            // #612: whether the model may prune its tool results; off unless
+            // declared.
+            prune: diet::drive::prune::of(&read),
+            // #406: a fork's tail; the output cap unless declared.
+            fork_tail: session::fork_tail(&read),
         }),
     )
 }
@@ -965,6 +1306,10 @@ fn serving_tools(
         // names (#554, #557).
         read_tool: declared.surface.read_tool(),
         surface: declared.surface,
+        // #614: on unless the regimen turns it off.
+        background: declared.background,
+        // #613: the regimen's default timeout, 120000 ms unless it says.
+        timeout_ms: declared.timeout_ms,
     }))
 }
 
@@ -1370,13 +1715,18 @@ impl Warmed {
     }
 }
 
-/// What the start confirmed of a server: each served field, how it was
-/// warmed, and its context window and where that was read (#588).
-type Confirmed = (
-    Vec<diet::formats::log::ServedField>,
-    Warmed,
-    Option<(u64, &'static str)>,
-);
+/// What the start confirmed of a server.
+struct Confirmed {
+    /// Each served field, corroborated or declared.
+    fields: Vec<diet::formats::log::ServedField>,
+    /// How it was warmed.
+    warmed: Warmed,
+    /// Its context window, and where that was read (#588).
+    window: Option<(u64, &'static str)>,
+    /// The chat template it reports rendering with (#599), when it reports
+    /// one.
+    template: Option<String>,
+}
 
 /// What the start confirms of substrate `id`'s server beyond its engine
 /// (#509): each declared `served_*` field and the chat template's digest,
@@ -1399,7 +1749,12 @@ fn confirmations(
         identity.weights,
         diet::formats::record::Weights::Canned { .. }
     ) {
-        return Ok((Vec::new(), Warmed::NotApplicable, None));
+        return Ok(Confirmed {
+            fields: Vec::new(),
+            warmed: Warmed::NotApplicable,
+            window: None,
+            template: None,
+        });
     }
     // The window each request's output cap is clamped to (#588).
     let serving_context =
@@ -1408,7 +1763,12 @@ fn confirmations(
         let mut fields = served::corroborated(id, &identity, None)?;
         fields.extend(served::draft_corroborated(id, &identity, None)?);
         let window = served::window(&identity, None, serving_context);
-        return Ok((fields, Warmed::NotApplicable, window));
+        return Ok(Confirmed {
+            fields,
+            warmed: Warmed::NotApplicable,
+            window,
+            template: None,
+        });
     }
     let engine = Engine::of(&identity);
     let report = match (&passed.props, engine) {
@@ -1430,15 +1790,18 @@ fn confirmations(
         served::probe(transport, shape)?
     };
     fields.extend(served::draft_corroborated(id, &identity, timings.as_ref())?);
-    Ok((
+    Ok(Confirmed {
         fields,
-        if warms {
+        warmed: if warms {
             Warmed::ByEngine
         } else {
             Warmed::ByServe
         },
         window,
-    ))
+        template: report
+            .as_ref()
+            .and_then(|report| served::template_of(engine, report)),
+    })
 }
 
 fn announcement(

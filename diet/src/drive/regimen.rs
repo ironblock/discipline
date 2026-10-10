@@ -41,6 +41,55 @@ pub const SUBSTRATE_KEYS: &[&str] = &["substrate_reasoning", "substrate_hardware
 /// table over.
 pub const CACHE_TTL_KEY: &str = "substrate_cache_ttl";
 
+/// The regimen key for where the interview fork runs (#570).
+pub const EXTRACTION_SEAT: &str = "extraction_seat";
+
+/// Where the interview fork runs: `warm`, on the trunk's own server, the
+/// default and the only arrangement before #570; or `offboard:<registry id>`,
+/// on a second server the registry resolves, never the executor's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Seat {
+    /// The trunk's server, its model, its cache.
+    #[default]
+    Warm,
+    /// The substrate the registry resolves for this id.
+    Offboard(String),
+}
+
+impl Seat {
+    /// The seat `regimen` declares, read leniently: `offboard:<id>` with an
+    /// id, and anything else, or nothing, `warm`.
+    #[must_use]
+    pub fn of(regimen: &Regimen) -> Self {
+        match regimen.get(EXTRACTION_SEAT) {
+            Some(regimen::Value::String(seat)) => match seat.strip_prefix("offboard:") {
+                Some(id) if !id.is_empty() => Self::Offboard(id.to_owned()),
+                _ => Self::Warm,
+            },
+            _ => Self::Warm,
+        }
+    }
+
+    /// The start row's word for the seat `regimen` declares: `warm-model`
+    /// (the lever's word for it before #570) or `offboard:<id>`, and for a
+    /// value read as warm that is not `warm`, the value it fell back from
+    /// (`warm-model:unknown:cold`).
+    #[must_use]
+    pub fn lever(regimen: &Regimen) -> String {
+        match (Self::of(regimen), regimen.get(EXTRACTION_SEAT)) {
+            (Self::Offboard(id), _) => format!("offboard:{id}"),
+            (Self::Warm, None) => "warm-model".to_owned(),
+            (Self::Warm, Some(regimen::Value::String(seat))) if seat == "warm" => {
+                "warm-model".to_owned()
+            }
+            (Self::Warm, Some(regimen::Value::String(seat))) => {
+                format!("warm-model:unknown:{seat}")
+            }
+            (Self::Warm, Some(_)) => "warm-model:unknown".to_owned(),
+        }
+    }
+}
+
 /// The regime `regimen` declares, or the list of what it is missing.
 ///
 /// # Errors
@@ -205,6 +254,28 @@ pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, St
         substrate.engine = identity.engine;
         substrate.weights = identity.weights;
         substrate.chat_template_sha256 = identity.chat_template_sha256;
+    }
+    // An offboard seat is a second substrate (#570): the registry says what
+    // it is, and the fork's requests -- a clone of the trunk's, its sampler
+    // and reasoning state with it -- say how it was asked.
+    if let Seat::Offboard(id) = Seat::of(regimen) {
+        let trunk = regime.substrates[0].clone();
+        if id == trunk.id {
+            return Err(format!(
+                "`extraction_seat = \"offboard:{id}\"` names the trunk's own substrate: \
+                 a seat on the executor's server is `warm`"
+            ));
+        }
+        let identity = crate::drive::registry::identity(registry, &id)
+            .map_err(|why| format!("`extraction_seat`: {why}"))?;
+        regime.substrates.push(Substrate {
+            id,
+            engine: identity.engine,
+            weights: identity.weights,
+            hardware_fingerprint: identity.hardware_fingerprint,
+            chat_template_sha256: identity.chat_template_sha256,
+            ..trunk
+        });
     }
     Ok(regime)
 }
@@ -523,7 +594,7 @@ fn phase_graph_lever(regimen: &Regimen) -> String {
 /// has them.
 #[must_use]
 pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<String, String> {
-    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS, SEAM_TAIL_TOKENS};
+    use crate::seam::policy::SEAM_TAIL_TOKENS;
     let word = |key: &str| match regimen.get(key) {
         Some(regimen::Value::String(word)) => word.clone(),
         Some(regimen::Value::Integer(n)) => n.to_string(),
@@ -547,27 +618,9 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
         Some(_) => undeclared(),
     };
-    let mut triggers = vec!["operator-declared"];
-    if regimen.get(SEAM_EVERY_TURNS).is_some() {
-        triggers.push("cadence");
-    }
-    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
-        .iter()
-        .any(|key| regimen.get(key).is_some())
-    {
-        triggers.push("budget");
-    }
+    let triggers = seam_triggers(regimen);
     let [disposition, approval, surface, limits] = command_levers(regimen, output_cap);
-    let reasoning = match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
-        (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
-            match table.get("effort") {
-                Some(regimen::Value::String(effort)) => format!("{state}:effort:{effort}"),
-                _ => state.clone(),
-            }
-        }
-        (Some(regimen::Value::String(state)), _) => state.clone(),
-        _ => undeclared(),
-    };
+    let reasoning = reasoning_lever(regimen);
     let delivery = crate::drive::session::fork_delivery(regimen)
         .map_or_else(|_| undeclared(), |delivery| delivery.tag().to_owned());
     // #560: whether a call written as text is recovered. `off` by default,
@@ -577,9 +630,18 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         Some(regimen::Value::String(state)) if state == "off" || state == "on" => state.clone(),
         Some(_) => undeclared(),
     };
+    let pruning = crate::drive::prune::lever(regimen);
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
-        ("seam_trigger".to_owned(), triggers.join("+")),
+        ("seam_trigger".to_owned(), triggers),
+        (
+            "seam_audit".to_owned(),
+            seam_work_lever(regimen, crate::seam::policy::SEAM_AUDIT),
+        ),
+        (
+            "seam_warm".to_owned(),
+            seam_work_lever(regimen, crate::seam::policy::SEAM_WARM),
+        ),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         (
             "archive_recall".to_owned(),
@@ -594,38 +656,70 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ),
         ("approval".to_owned(), approval),
         ("reasoning_state".to_owned(), reasoning),
-        ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
+        (
+            "cache_lifetime".to_owned(),
+            cache_lifetime_lever(regimen, word),
+        ),
         ("substrate_rung".to_owned(), word("substrate")),
         ("tool_surface".to_owned(), surface),
+        ("background_commands".to_owned(), background_lever(regimen)),
+        ("bash_timeout".to_owned(), timeout_lever(regimen)),
         ("tool_call_text_fallback".to_owned(), text_fallback),
         (
             "instruction_files".to_owned(),
-            if crate::drive::instructions::enabled(regimen) {
-                "on"
-            } else {
-                "off"
-            }
-            .to_owned(),
+            instruction_files_lever(regimen),
         ),
         // The operator opens and closes a tangent where there is working
         // memory to scope (#22); an agent nominating is a later ask set.
         ("tangent_closure".to_owned(), tangent_closure_lever(regimen)),
         ("self_capture".to_owned(), self_capture_lever(regimen)),
-        ("capture_modality".to_owned(), undeclared()),
-        ("interview_routing_and_cadence".to_owned(), warrant),
-        ("render_budget".to_owned(), render_budget_lever(regimen)),
-        ("fork_memory_share".to_owned(), undeclared()),
         (
-            "fork_input_view".to_owned(),
-            crate::drive::session::fork_view(regimen).word(),
+            "capture_modality".to_owned(),
+            capture_modality_lever(regimen),
         ),
+        (
+            "interview_routing_and_cadence".to_owned(),
+            cadence_lever(regimen),
+        ),
+        ("render_budget".to_owned(), render_budget_lever(regimen)),
+        (
+            "fork_memory_share".to_owned(),
+            fork_memory_share_lever(regimen),
+        ),
+        ("fork_input_view".to_owned(), fork_input_view_lever(regimen)),
         ("fork_asks".to_owned(), fork_asks_lever(regimen)),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
+        ("interview_role".to_owned(), interview_role_lever(regimen)),
         ("step_and_output_limits".to_owned(), limits),
-        ("extraction_seat".to_owned(), "warm-model".to_owned()),
+        ("extraction_seat".to_owned(), Seat::lever(regimen)),
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
         ("subagent".to_owned(), "harness".to_owned()),
+        ("model_pruning".to_owned(), pruning),
     ])
+}
+
+/// The fork input view lever's word (#567): the regimen's `fork_view`, and
+/// undeclared, the seat's default -- the whole trunk warm, the last turn
+/// offboard, which the word says was defaulted (`last_turn:defaulted`, #570).
+fn fork_input_view_lever(regimen: &Regimen) -> String {
+    let declared = regimen.get(crate::drive::session::FORK_VIEW).is_some();
+    match Seat::of(regimen) {
+        Seat::Offboard(_) if !declared => format!(
+            "{}:defaulted",
+            crate::drive::session::ForkView::Last(1).word()
+        ),
+        _ => crate::drive::session::fork_view(regimen).word(),
+    }
+}
+
+/// The cache lifetime lever's word: the regimen's `cache_ttl` -- what a
+/// hosted API's breakpoints ask for (#556) -- when it declares one, else
+/// its declared `substrate_cache_ttl` as before.
+fn cache_lifetime_lever(regimen: &Regimen, word: impl Fn(&str) -> String) -> String {
+    match regimen.get(crate::drive::hosted::CACHE_TTL) {
+        Some(regimen::Value::String(ttl)) => ttl.clone(),
+        _ => word(CACHE_TTL_KEY),
+    }
 }
 
 /// The render budget lever's word (#565): `none`, or `<tokens>:<tier|elide>`.
@@ -640,6 +734,22 @@ fn render_budget_lever(regimen: &Regimen) -> String {
             format!("{}:{over}", budget.tokens)
         },
     )
+}
+
+/// The interview routing and cadence lever (#564): the cadence's word, and
+/// the read fork's output threshold when one is declared.
+fn cadence_lever(regimen: &Regimen) -> String {
+    let cadence = crate::drive::session::interview_cadence(regimen).word();
+    let threshold = crate::drive::session::interview_threshold_bytes(regimen)
+        .map(|bytes| format!(":threshold:{bytes}-bytes"))
+        .unwrap_or_default();
+    // #611: forks the turn's self-capture already recorded, skipped.
+    let skip = if crate::drive::session::interview_skip_self_recorded(regimen) {
+        ":skip-self-recorded"
+    } else {
+        ""
+    };
+    format!("{cadence}{threshold}{skip}")
 }
 
 /// The fork ask set lever's word (#595): the set's name and digest.
@@ -658,12 +768,132 @@ fn tangent_closure_lever(regimen: &Regimen) -> String {
     }
 }
 
+/// The bash timeout lever (#613): the default in milliseconds, `off` for
+/// none; undeclared where the regimen runs no commands.
+fn timeout_lever(regimen: &Regimen) -> String {
+    crate::drive::tool_loop::declared(regimen)
+        .ok()
+        .flatten()
+        .map_or_else(
+            || UNDECLARED.to_owned(),
+            |declared| {
+                declared
+                    .timeout_ms
+                    .map_or_else(|| "off".to_owned(), |ms| format!("{ms}ms"))
+            },
+        )
+}
+
+/// The background commands lever (#614): on unless the regimen turns them
+/// off; undeclared where it runs no commands.
+fn background_lever(regimen: &Regimen) -> String {
+    crate::drive::tool_loop::declared(regimen)
+        .ok()
+        .flatten()
+        .map_or_else(
+            || UNDECLARED.to_owned(),
+            |declared| if declared.background { "on" } else { "off" }.to_owned(),
+        )
+}
+
+/// The interview role lever's word (#599): the role the regimen asks in.
+fn interview_role_lever(regimen: &Regimen) -> String {
+    crate::drive::session::interview_role(regimen)
+        .tag()
+        .to_owned()
+}
+
 /// The self-capture lever's word (#609): `off`, or `on:every:<n>` with the
 /// reminder's cadence of silent turns.
 fn self_capture_lever(regimen: &Regimen) -> String {
     crate::drive::session::self_capture(regimen).map_or_else(
         || "off".to_owned(),
         |cadence| format!("on:every:{}", cadence.interval()),
+    )
+}
+
+/// The instruction files lever's word: `on` or `off`.
+fn instruction_files_lever(regimen: &Regimen) -> String {
+    if crate::drive::instructions::enabled(regimen) {
+        "on"
+    } else {
+        "off"
+    }
+    .to_owned()
+}
+
+/// The seam triggers a regimen leaves armed, in [`serve_levers`]' words:
+/// the operator's always, then the cadence and budget it declares, and the
+/// automatic seam unless it turns it off (#617).
+fn seam_triggers(regimen: &Regimen) -> String {
+    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS};
+    let mut triggers = vec!["operator-declared"];
+    if regimen.get(SEAM_EVERY_TURNS).is_some() {
+        triggers.push("cadence");
+    }
+    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
+        .iter()
+        .any(|key| regimen.get(key).is_some())
+    {
+        triggers.push("budget");
+    }
+    // The automatic seam (#617): on unless the regimen turns it off; it
+    // fires only where serve knows the window and keeps working memory.
+    if crate::seam::policy::Served::from_regimen(regimen, None)
+        .map_or(true, |served| !served.window_off)
+    {
+        triggers.push("window");
+    }
+    // #124: the model proposes a move through self-capture's tool, ruled by
+    // the graph, and the operator ratifies it.
+    let phased = crate::seam::policy::phase_graph(regimen).is_ok_and(|graph| !graph.is_empty());
+    if phased && crate::drive::session::self_capture(regimen).is_some() {
+        triggers.push("model-proposed");
+    }
+    triggers.join("+")
+}
+
+/// The reasoning state lever's word: the substrate's reasoning state, with
+/// the effort its `reasoning` table names when it names one.
+fn reasoning_lever(regimen: &Regimen) -> String {
+    match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
+        (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
+            match table.get("effort") {
+                Some(regimen::Value::String(effort)) => format!("{state}:effort:{effort}"),
+                _ => state.clone(),
+            }
+        }
+        (Some(regimen::Value::String(state)), _) => state.clone(),
+        _ => UNDECLARED.to_owned(),
+    }
+}
+
+/// A seam's audit or pre-warm lever's word (#504): `on` or `off`.
+fn seam_work_lever(regimen: &Regimen, key: &str) -> String {
+    let on = match regimen.get(key) {
+        Some(regimen::Value::Boolean(on)) => *on,
+        Some(regimen::Value::String(word)) => word == "on",
+        _ => false,
+    };
+    if on { "on" } else { "off" }.to_owned()
+}
+
+/// The fork memory share lever's word (#406): the tail a fork's call is
+/// clamped from, `tail:output-cap` or the regimen's `tail:<tokens>`; a fork
+/// that would not fit its window is refused unsent either way.
+fn fork_memory_share_lever(regimen: &Regimen) -> String {
+    crate::drive::session::fork_tail(regimen).map_or_else(
+        || "tail:output-cap".to_owned(),
+        |tokens| format!("tail:{tokens}"),
+    )
+}
+
+/// The capture modality lever's word (#610): how a fork answers, `fields`
+/// or `tools`; [`UNDECLARED`] for a word serve refuses at start.
+fn capture_modality_lever(regimen: &Regimen) -> String {
+    crate::drive::session::capture_modality(regimen).map_or_else(
+        |_| UNDECLARED.to_owned(),
+        |modality| modality.word().to_owned(),
     )
 }
 
@@ -714,6 +944,20 @@ fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4
 mod tests {
     use super::{UNDECLARED, regime_of, serve_levers};
 
+    /// #124: a regimen that declares phases and turns self-capture on arms
+    /// the model's proposal, ratified by the operator; either alone does not.
+    #[test]
+    fn the_seam_trigger_names_a_model_proposed_move_where_both_are_on() {
+        let levers = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["seam_trigger"]
+                .clone()
+        };
+        let phased = "phases = [\"plan\", \"build\"]\n[phase_transitions]\nplan = [\"build\"]\n";
+        assert!(levers(&format!("self_capture = true\n{phased}")).contains("model-proposed"));
+        assert!(!levers(phased).contains("model-proposed"));
+        assert!(!levers("self_capture = true\n").contains("model-proposed"));
+    }
+
     #[test]
     fn the_output_cap_is_the_flag_else_the_regimens_else_the_default_and_steps_read_top_level_first()
      {
@@ -750,6 +994,29 @@ mod tests {
         assert_eq!(declared.max_steps, Some(40), "`[limits]` beneath it");
     }
 
+    /// The interview routing and cadence lever names the cadence (#564)
+    /// and, when declared, the read fork's threshold: no longer the warrant.
+    #[test]
+    fn the_interview_lever_names_the_cadence_and_its_threshold() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("interview_routing_and_cadence")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever("interview_warrant = [\"scoping\"]\n"), "gap");
+        assert_eq!(
+            lever("interview_cadence = \"per_class\"\ninterview_threshold_bytes = 3000\n"),
+            "per_class:threshold:3000-bytes"
+        );
+        // #611, off unless declared.
+        assert_eq!(
+            lever("interview_skip_self_recorded = true\n"),
+            "gap:skip-self-recorded"
+        );
+        assert_eq!(lever("interview_skip_self_recorded = \"maybe\"\n"), "gap");
+    }
+
     /// The tool-output disposition names the cap on arrival and, beside
     /// it, what a seam carries of the outputs it compacts away (#553):
     /// `evict` unless the regimen declares a state, an unknown word unset.
@@ -782,6 +1049,47 @@ mod tests {
         );
     }
 
+    /// Background commands (#614) are on unless the regimen turns them
+    /// off, and undeclared where it runs no commands.
+    #[test]
+    fn the_background_commands_lever_is_on_unless_turned_off() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("background_commands")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever("approval = \"none\"\n"), "on");
+        assert_eq!(
+            lever("approval = \"none\"\nbackground_commands = false\n"),
+            "off"
+        );
+        assert_eq!(
+            lever("approval = \"none\"\nbackground_commands = \"off\"\n"),
+            "off"
+        );
+        assert_eq!(lever(""), UNDECLARED);
+    }
+
+    /// The default timeout (#613): 120000 ms unless the regimen says, 0
+    /// for none, and undeclared where it runs no commands.
+    #[test]
+    fn the_bash_timeout_lever_names_the_default_or_off() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("bash_timeout")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever("approval = \"none\"\n"), "120000ms");
+        assert_eq!(
+            lever("approval = \"none\"\nbash_timeout_ms = 30000\n"),
+            "30000ms"
+        );
+        assert_eq!(lever("approval = \"none\"\nbash_timeout_ms = 0\n"), "off");
+        assert_eq!(lever(""), UNDECLARED);
+    }
+
     #[test]
     fn t1s_draft_regimens_put_every_lever_at_a_word_and_undescribed_ones_at_undeclared() {
         let draft = |name: &str| {
@@ -802,7 +1110,7 @@ mod tests {
         );
         assert_eq!(at(&floor, "tool_surface"), "bash");
         assert_eq!(at(&floor, "tangent_closure"), "operator");
-        assert_eq!(at(&floor, "capture_modality"), UNDECLARED);
+        assert_eq!(at(&floor, "capture_modality"), "fields");
         let line = draft("t1-session-one-qwen38.regimen.toml");
         assert_eq!(at(&line, "approval"), "none");
         assert_eq!(at(&line, "reasoning_state"), "on:effort:xhigh");
@@ -829,7 +1137,10 @@ mod tests {
             &regimen::parse("seam_every_turns = 3\nseam_tail_tokens = 8000\n").expect("a regimen"),
             (8192, "default"),
         );
-        assert_eq!(at(&paced, "seam_trigger"), "operator-declared+cadence");
+        assert_eq!(
+            at(&paced, "seam_trigger"),
+            "operator-declared+cadence+window"
+        );
         assert_eq!(at(&paced, "compaction_depth"), "tail:8000");
     }
     use crate::formats::record::{Budget, Count, ReasoningControl};
@@ -884,6 +1195,60 @@ mod tests {
                 acts_sha256: crate::drive::canned::acts_digest()
             }
         );
+    }
+
+    /// #570: the seat reads leniently, and an offboard one is a second
+    /// substrate the registry says what it is, asked as the trunk is.
+    #[test]
+    fn an_offboard_seat_is_a_second_substrate_the_registry_resolves() {
+        use crate::drive::registry::{REGISTRY, identity};
+        let read = |line: &str| {
+            let text = format!("{line}\narm = \"a\"\n");
+            let parsed = regimen::parse(&text).expect("a regimen");
+            (super::Seat::of(&parsed), super::Seat::lever(&parsed))
+        };
+        assert_eq!(read(""), (super::Seat::Warm, "warm-model".to_owned()));
+        assert_eq!(
+            read("extraction_seat = \"warm\""),
+            (super::Seat::Warm, "warm-model".to_owned())
+        );
+        assert_eq!(
+            read("extraction_seat = \"offboard:cpu\""),
+            (
+                super::Seat::Offboard("cpu".to_owned()),
+                "offboard:cpu".to_owned()
+            )
+        );
+        for unread in ["offboard:", "cold"] {
+            assert_eq!(
+                read(&format!("extraction_seat = \"{unread}\"")),
+                (super::Seat::Warm, format!("warm-model:unknown:{unread}"))
+            );
+        }
+
+        let dev_loop = crate::drive::canned::DEV_LOOP;
+        let seated = |seat: &str| {
+            let text = format!("extraction_seat = \"offboard:{seat}\"\n{dev_loop}");
+            super::regime_registered(&regimen::parse(&text).expect("a regimen"), REGISTRY)
+        };
+        let regime = seated("canned-replay").expect("a registered seat");
+        let [trunk, seat] = regime.substrates.as_slice() else {
+            panic!("two substrates: {:#?}", regime.substrates);
+        };
+        let registered = identity(REGISTRY, "canned-replay").expect("registered");
+        assert_eq!(seat.id, "canned-replay");
+        assert_eq!(seat.engine, registered.engine);
+        assert_eq!(seat.weights, registered.weights);
+        assert_eq!(seat.hardware_fingerprint, registered.hardware_fingerprint);
+        // Asked as the trunk is: a fork's request is a clone of the trunk's.
+        assert_eq!(seat.sampler_card, trunk.sampler_card);
+        assert_eq!(seat.reasoning, trunk.reasoning);
+        assert_ne!(seat.weights, trunk.weights);
+
+        let own = seated(&trunk.id).expect_err("the trunk's own substrate");
+        assert!(own.contains("is `warm`"), "{own}");
+        let unknown = seated("no-such-seat").expect_err("unregistered");
+        assert!(unknown.starts_with("`extraction_seat`: "), "{unknown}");
     }
 
     #[test]

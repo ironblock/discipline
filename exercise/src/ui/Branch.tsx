@@ -6,8 +6,8 @@ import { barHeight, rowsOf } from './condensed.ts';
 import { edgeOf, readingOf, warmOf, writingOf } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
 import { useNow } from './surface.tsx';
-import { tokens } from './format.ts';
-import { alarmOf, failOf, opOf, outcomeOf } from './sets.ts';
+import { took, tokens } from './format.ts';
+import { alarmOf, failOf, hazardOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
 
 /**
@@ -41,6 +41,24 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         {...(writing ? { output: <Flowing flow={writing} title="tokens written" /> } : {})}
         alarm={outcome ? alarmOf(outcome.level) : undefined}
         stats={[
+          // An offboard seat (#615): where it ran, and what reading the trunk cold cost there. A warm fork names none.
+          // What triggered it (#620): the turn's end, or a call that warranted it mid-turn.
+          // A seam's audit (#646): what it did to working memory -- kept, updated, removed.
+          node.audit && {
+            value: <span className="ex-branch__audit">{`kept ${node.audit.kept.length} · updated ${node.audit.updated.length} · removed ${node.audit.removed.length}`}</span>,
+            title: [`kept: ${node.audit.kept.join(', ') || 'none'}`, `updated: ${node.audit.updated.join(', ') || 'none'}`, `removed: ${node.audit.removed.join(', ') || 'none'}`].join('\n'),
+          },
+          node.trigger !== undefined && { value: <span className="ex-branch__trigger">{node.trigger}</span>, title: 'what triggered this fork' },
+          // A hazard it was sent knowing (#637).
+          node.hazard !== undefined && { value: <span className="ex-branch__hazard" data-level={hazardOf(node.hazard).level}>{hazardOf(node.hazard).label}</span>, title: `a hazard this fork was sent knowing: ${node.hazard}` },
+          node.seat && {
+            value: (
+              <span className="ex-branch__seat">
+                {[node.seat.substrate, ...(node.seat.promptTokens !== undefined ? [`${tokens(node.seat.promptTokens)} tok`] : []), ...(node.seat.wallMs !== undefined ? [took(node.seat.wallMs)] : [])].join(' · ')}
+              </span>
+            ),
+            title: `ran offboard on ${node.seat.substrate} (${node.seat.model}), reading the trunk cold`,
+          },
           node.patches.length > 0 && { value: <PatchSummary patches={node.patches} />, title: 'patches it landed in working memory, by op' },
           pending && {
             value: (
@@ -54,7 +72,8 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
             node.outcome !== 'value' && {
               value: (
                 <span className="ex-branch__outcome" data-level={outcome.level} data-known={outcome.known ? '' : undefined}>
-                  {outcome.label}
+                  {/* A fork refused before it was sent (#637) says why, and that it never was. */}
+                  {node.refused !== undefined ? `${outcome.label} · ${node.refused} · never sent` : outcome.label}
                 </span>
               ),
               title: outcome.known ? 'how the side call ended' : 'how the side call ended: a name this surface does not know yet',

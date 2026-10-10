@@ -19,6 +19,7 @@
 //! directory, an entry in [`FORMATS`] and a name in the harness's
 //! `per_format!` list -- not a new test file.
 
+pub mod audit;
 pub mod decline;
 pub mod interview;
 pub mod log;
@@ -61,6 +62,12 @@ pub struct Format {
 /// The conformance harness iterates this list; a format absent from it is not
 /// covered, which is why it lives next to the modules rather than in the test.
 pub const FORMATS: &[Format] = &[
+    Format {
+        name: "audit",
+        case_extension: "txt",
+        project: audit::project,
+        decode: std::str::from_utf8,
+    },
     Format {
         name: "decline",
         case_extension: "txt",

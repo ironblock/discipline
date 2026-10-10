@@ -80,6 +80,7 @@
 //! case turned out to be narrower than the test written for it (the narrower
 //! case is now the test).
 
+pub mod anthropic;
 pub mod cache;
 pub mod echo;
 pub mod head;
@@ -87,6 +88,7 @@ pub mod journal;
 pub mod shape;
 pub mod stream;
 pub mod stub;
+pub mod tls;
 pub mod transport;
 pub mod wire;
 pub mod xml_fallback;

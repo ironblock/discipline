@@ -694,6 +694,10 @@ impl Run {
             return Ok(());
         }
         self.events.push(Event::Response {
+            cache_read: None,
+            cache_creation: None,
+            cache_creation_5m: None,
+            cache_creation_1h: None,
             id: format!("a/{}", self.events.len()),
             to_request: format!("u/{}", self.turn),
             output_tokens: count_of(at_row, "message.usage.output_tokens", tokens)?,

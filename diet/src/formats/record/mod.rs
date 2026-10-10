@@ -1132,6 +1132,18 @@ vocabulary! {
     }
 }
 
+/// A tool result the model pruned and a seam replaced (#612): the call's
+/// row, its whole's sha256, and the bytes the trunk no longer carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrunedOutput {
+    /// The `tool_call` row of the call whose result it was.
+    pub tool_call: String,
+    /// The sha256 of the result's whole, as saved.
+    pub sha256: String,
+    /// The bytes of the result the trunk carried.
+    pub bytes: u64,
+}
+
 /// One row of a session record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -1283,6 +1295,15 @@ pub enum Event {
         text: Option<String>,
         /// What the server reported about the work, when it reported it.
         timings: Option<Timings>,
+        /// Prompt tokens read from a hosted API's cache (#555), as its usage
+        /// reported them; absent where the server reports none.
+        cache_read: Option<u64>,
+        /// Prompt tokens written to its cache (#555).
+        cache_creation: Option<u64>,
+        /// Of those, written for five minutes (#555): the billed lifetime.
+        cache_creation_5m: Option<u64>,
+        /// Of those, written for an hour (#555).
+        cache_creation_1h: Option<u64>,
     },
     /// An interview fork was opened.
     Fork {
@@ -1298,6 +1319,12 @@ pub enum Event {
         substrate: String,
         /// The turn it forked from.
         of_turn: u32,
+        /// The share of its responses' prompt tokens a hosted API read from
+        /// its cache (#555): their `cache_read` over their whole prompts --
+        /// uncached, read and written -- to four places. Absent where no
+        /// response reported cache counts. The API's analogue of a warm
+        /// fork: a fork reuses the trunk's prefix through the prompt cache.
+        cache_read_share: Option<json::Decimal>,
     },
     /// A capture wrote to the working object.
     Capture {
@@ -1324,6 +1351,14 @@ pub enum Event {
         carried_turns: Option<u64>,
         /// Their estimated tokens, beside `tail_tokens`.
         carried_tokens: Option<u64>,
+        /// The prompt, in tokens as serve sized it, that fired an automatic
+        /// seam (#617); absent on any other seam.
+        prompt_tokens: Option<u64>,
+        /// The context window it would not have fit, beside `prompt_tokens`.
+        window: Option<u64>,
+        /// The tool results the model pruned that this seam replaced with
+        /// their reference lines (#612), in the order they were pruned.
+        pruned: Option<Vec<PrunedOutput>>,
     },
     /// A tool was called.
     ToolCall {
@@ -2456,18 +2491,13 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         },
         Kind::PrefixChanged => prefix_changed(&mut members, of)?,
         Kind::Compaction => compaction(&mut members, of)?,
-        Kind::Response => Event::Response {
-            id: take_string(&mut members, of, "id")?,
-            to_request: take_string(&mut members, of, "to_request")?,
-            output_tokens: take_u64(&mut members, of, "output_tokens")?,
-            text: take_optional_text(&mut members, of, "text")?,
-            timings: take_timings(&mut members, of)?,
-        },
+        Kind::Response => response(&mut members, of)?,
         Kind::Fork => Event::Fork {
             id: take_string(&mut members, of, "id")?,
             lane: take_string(&mut members, of, "lane")?,
             substrate: take_string(&mut members, of, "substrate")?,
             of_turn: take_u32(&mut members, of, "of_turn")?,
+            cache_read_share: take_optional_share(&mut members, of)?,
         },
         Kind::Capture => Event::Capture {
             id: take_string(&mut members, of, "id")?,
@@ -2481,6 +2511,9 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             tail_tokens: take_optional_count(&mut members, of, "tail_tokens")?,
             carried_turns: take_optional_count(&mut members, of, "carried_turns")?,
             carried_tokens: take_optional_count(&mut members, of, "carried_tokens")?,
+            prompt_tokens: take_optional_count(&mut members, of, "prompt_tokens")?,
+            window: take_optional_count(&mut members, of, "window")?,
+            pruned: take_optional_pruned(&mut members, of)?,
         },
         Kind::ToolCall => tool_call(&mut members, of)?,
         Kind::Rejected => Event::Rejected {
@@ -4046,6 +4079,92 @@ fn take_tool_output(
     }))
 }
 
+/// A `response` row: its request, its output, and a hosted API's cache
+/// counts where its usage reported them (#555).
+fn response(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Event, ParseError> {
+    Ok(Event::Response {
+        id: take_string(members, of, "id")?,
+        to_request: take_string(members, of, "to_request")?,
+        output_tokens: take_u64(members, of, "output_tokens")?,
+        text: take_optional_text(members, of, "text")?,
+        timings: take_timings(members, of)?,
+        cache_read: take_optional_count(members, of, "cache_read")?,
+        cache_creation: take_optional_count(members, of, "cache_creation")?,
+        cache_creation_5m: take_optional_count(members, of, "cache_creation_5m")?,
+        cache_creation_1h: take_optional_count(members, of, "cache_creation_1h")?,
+    })
+}
+
+/// A fork row's `cache_read_share` (#555): absent, or a decimal from 0 to
+/// 1 -- the share of its responses' prompt tokens read from the cache.
+fn take_optional_share(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<json::Decimal>, ParseError> {
+    let wrong = || {
+        ParseError::from(SchemaError::WrongType {
+            of,
+            field: "cache_read_share".to_owned(),
+            want: "a decimal from 0 to 1",
+        })
+    };
+    match members.remove("cache_read_share") {
+        None => Ok(None),
+        Some(Value::Decimal(share)) => {
+            let within = share
+                .as_str()
+                .parse::<f64>()
+                .is_ok_and(|n| (0.0..=1.0).contains(&n));
+            within.then_some(Some(share)).ok_or_else(wrong)
+        }
+        Some(_) => Err(wrong()),
+    }
+}
+
+/// A seam row's `pruned` (#612): absent, or a non-empty list of objects
+/// holding exactly `tool_call`, `sha256` and `bytes`.
+fn take_optional_pruned(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<Vec<PrunedOutput>>, ParseError> {
+    let wrong = || {
+        ParseError::from(SchemaError::WrongType {
+            of,
+            field: "pruned".to_owned(),
+            want: "a non-empty list of {tool_call, sha256, bytes}",
+        })
+    };
+    let Some(value) = members.remove("pruned") else {
+        return Ok(None);
+    };
+    let Value::Array(items) = value else {
+        return Err(wrong());
+    };
+    if items.is_empty() {
+        return Err(wrong());
+    }
+    items
+        .into_iter()
+        .map(|item| {
+            let Value::Object(mut fields) = item else {
+                return Err(wrong());
+            };
+            let tool_call = take_string(&mut fields, of, "tool_call")?;
+            let sha256 = take_optional_digest(&mut fields, of, "sha256")?.ok_or_else(wrong)?;
+            let bytes = take_optional_count(&mut fields, of, "bytes")?.ok_or_else(wrong)?;
+            if !fields.is_empty() {
+                return Err(wrong());
+            }
+            Ok(PrunedOutput {
+                tool_call,
+                sha256,
+                bytes,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
 /// An optional non-negative integer.
 fn take_optional_count(
     members: &mut BTreeMap<String, Value>,
@@ -4923,22 +5042,37 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             output_tokens,
             text,
             timings,
+            cache_read,
+            cache_creation,
+            cache_creation_5m,
+            cache_creation_1h,
             ..
         } => {
             members.put_text("to_request", to_request);
             members.put_count("output_tokens", *output_tokens);
             members.put_optional("text", text.clone().map(Value::String));
             members.put_optional("timings", timings.as_ref().map(timings_value));
+            let count =
+                |n: &Option<u64>| n.map(|n| Value::Integer(i64::try_from(n).unwrap_or(i64::MAX)));
+            members.put_optional("cache_read", count(cache_read));
+            members.put_optional("cache_creation", count(cache_creation));
+            members.put_optional("cache_creation_5m", count(cache_creation_5m));
+            members.put_optional("cache_creation_1h", count(cache_creation_1h));
         }
         Event::Fork {
             lane,
             substrate,
             of_turn,
+            cache_read_share,
             ..
         } => {
             members.put_text("lane", lane);
             members.put_text("substrate", substrate);
             members.put_u32("of_turn", *of_turn);
+            members.put_optional(
+                "cache_read_share",
+                cache_read_share.clone().map(Value::Decimal),
+            );
         }
         Event::Capture {
             from_fork, entries, ..
@@ -4952,6 +5086,9 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             tail_tokens,
             carried_turns,
             carried_tokens,
+            prompt_tokens,
+            window,
+            pruned,
             ..
         } => {
             members.put_u32("at_turn", *at_turn);
@@ -4961,6 +5098,33 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_optional("tail_tokens", count(tail_tokens));
             members.put_optional("carried_turns", count(carried_turns));
             members.put_optional("carried_tokens", count(carried_tokens));
+            members.put_optional("prompt_tokens", count(prompt_tokens));
+            members.put_optional("window", count(window));
+            members.put_optional(
+                "pruned",
+                pruned.as_ref().map(|pruned| {
+                    Value::Array(
+                        pruned
+                            .iter()
+                            .map(|output| {
+                                Value::Object(BTreeMap::from([
+                                    (
+                                        "tool_call".to_owned(),
+                                        Value::String(output.tool_call.clone()),
+                                    ),
+                                    ("sha256".to_owned(), Value::String(output.sha256.clone())),
+                                    (
+                                        "bytes".to_owned(),
+                                        Value::Integer(
+                                            i64::try_from(output.bytes).unwrap_or(i64::MAX),
+                                        ),
+                                    ),
+                                ]))
+                            })
+                            .collect(),
+                    )
+                }),
+            );
         }
         Event::Rejected {
             lane,

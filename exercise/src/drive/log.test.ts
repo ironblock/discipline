@@ -6,6 +6,8 @@ import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
+import { PHASE_PROPOSED, PHASE_RULED_CONTINUE } from './served/phase-proposal.ts';
+import { SELF_CAPTURE } from './served/self-capture.ts';
 import { TANGENT_CLOSED, TANGENT_OPEN } from './served/tangent.ts';
 import { needsOf } from './log.ts';
 
@@ -52,6 +54,18 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     const response = logOf('an-answered-turn.jsonl').find((l) => l.kind === 'response');
     expect(answer?.kind === 'assistant' && answer.progress).toBe('done');
     expect(answer?.kind === 'assistant' && answer.text).toBe(response?.kind === 'response' ? response.text : undefined);
+  });
+
+  it('carries a prune on the turn that made it (v7, #612)', () => {
+    const file = 'a-v7-prune-applied-at-the-turns-seam.jsonl';
+    const line = logOf(file).find((l) => l.kind === 'pruned');
+    const user = fold(logOf(file))
+      .eras.flatMap((era) => era.nodes)
+      .find((n) => n.kind === 'user');
+    expect(line?.kind).toBe('pruned');
+    expect(user?.kind === 'user' && user.pruned).toEqual(
+      line?.kind === 'pruned' ? [{ call: line.call, bytes: line.bytes, text: line.text }] : undefined,
+    );
   });
 
   it("opens a second era at a served seam (v6, #493): its system prompt is the head's and the render, and it says what it carried", () => {
@@ -197,6 +211,93 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(moved.phaseMoves).toEqual(['review']);
     // A log with no graph offers no move.
     expect(fold(logOf('an-answered-turn.jsonl')).phaseMoves).toEqual([]);
+  });
+
+  it('folds the harness’s notes onto the ask they followed, and a self-capture call’s outcome onto the call (#574)', () => {
+    const userOf = (log: LogLine[], turn: number) => fold(log).eras[0]?.nodes.find((n) => n.kind === 'user' && n.turn === turn);
+    const delivered = userOf(logOf('a-v7-imperative-delivery-after-an-ask.jsonl'), 2);
+    expect(delivered?.kind === 'user' && delivered.delivered?.framing).toBe('imperative');
+    const recalled = userOf(logOf('a-v7-recall-after-an-ask.jsonl'), 2);
+    expect(recalled?.kind === 'user' && recalled.recalled?.recall).toBe('literal');
+    const session = fold([...SELF_CAPTURE]);
+    expect([...session.unknown.keys()]).toEqual([]);
+    const reminded = session.eras[0]?.nodes.find((n) => n.kind === 'user' && n.turn === 2);
+    expect(reminded?.kind === 'user' && reminded.reminded).toBe('If this turn settled anything worth keeping, record it with update_record.');
+    const call = session.eras[0]?.nodes.find((n) => n.kind === 'tool');
+    expect(call?.kind === 'tool' && call.capture).toEqual({ outcome: 'recorded', entries: ['r10/c1/fact'] });
+  });
+
+  it('keeps the whole lever table session.start declares, as given, and none for a log from before it (#573, #623)', () => {
+    const declared = logOf('a-v7-session-declaring-its-levers.jsonl');
+    const start = declared[0];
+    expect(fold(declared).levers.table).toEqual(start?.kind === 'session.start' ? start.levers : undefined);
+    expect(fold(declared).levers.table).not.toBeUndefined();
+    expect(fold(logOf('an-answered-turn.jsonl')).levers.table).toBeUndefined();
+  });
+
+  it('folds an offboard fork’s seat onto its branch, with its prefill and wall time, and a warm fork’s as before (#570, #615)', () => {
+    // diet's v5 forks, the first one moved offboard -- WRITTEN HERE: no diet fixture has an offboard fork yet.
+    const file = 'a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl';
+    const log = logOf(file);
+    const first = log.find((l) => l.kind === 'fork')!;
+    const offboard = log.map((l) =>
+      l === first ? { ...l, substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b' } : l.kind === 'fork.settled' && l.fork === first.seq ? { ...l, prompt_tokens: 1820, wall_ms: 4300 } : l,
+    ) as LogLine[];
+    const branches = [...fold(offboard).branches.values()].flat();
+    expect(branches.map((b) => b.seat)).toEqual([{ substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b', promptTokens: 1820, wallMs: 4300 }, undefined]);
+  });
+
+  it('draws the trunk’s own working-memory changes from their patch lines, each with its lane (#574, #627)', () => {
+    const session = fold(logOf('a-v7-self-capture-patch-named-by-its-lane.jsonl'));
+    expect([...session.unknown.keys()]).toEqual([]);
+    expect(session.memory.map((e) => [e.id, e.text, e.state, e.lane])).toEqual([['r3/call-1/fact', 'The parser drops blank lines before it tokenizes.', 'live', 'self-capture']]);
+  });
+
+  it('folds an overflow with its sizes and who told it, a window seam with its size, a pruned call’s replacement, and a fork refused for the pool (#628, #633, #630, #637)', () => {
+    const answerOf = (file: string) => fold(logOf(file)).eras.flatMap((e) => e.nodes).find((n) => n.kind === 'assistant');
+    const inferred = answerOf('a-v7-overflow-told-from-the-prompts-size.jsonl');
+    expect(inferred?.kind === 'assistant' && inferred.failure?.overflow).toEqual({ promptTokens: 161840, window: 163840, inferred: true });
+    const reported = answerOf('a-context-overflow.jsonl');
+    expect(reported?.kind === 'assistant' && reported.failure?.reason).toBe('context_overflow');
+    expect(reported?.kind === 'assistant' && reported.failure?.overflow).toBeUndefined();
+    const windowed = fold(logOf('a-v7-window-seam-under-the-turn-it-makes-fit.jsonl'));
+    expect(windowed.eras[1]?.seam).toMatchObject({ reason: 'window', size: { promptTokens: 150000, window: 163840 } });
+    const pruned = fold(logOf('a-v7-prune-applied-at-the-turns-seam.jsonl')).eras[0]?.nodes.find((n) => n.kind === 'tool' && n.tool === 'bash');
+    expect(pruned?.kind === 'tool' && pruned.pruned).toEqual({ bytes: 14, replaced: true });
+    const [refused] = [...fold(logOf('a-v7-fork-refused-for-the-pool-and-one-that-may-displace-the-trunk-cache.jsonl')).branches.values()].flat();
+    expect([refused?.outcome, refused?.refused, refused?.hazard]).toEqual(['refused', 'pool', 'may-displace-trunk-cache']);
+  });
+
+  it('folds a call moved to the background with its job and how it ended, the harness’s notice, and a fork’s trigger (#614, #620)', () => {
+    const session = fold(logOf('a-v7-call-started-in-the-background.jsonl'));
+    expect([...session.unknown.keys()]).toEqual([]);
+    const calls = session.eras[0]?.nodes.filter((n) => n.kind === 'tool') ?? [];
+    expect(calls.map((c) => c.kind === 'tool' && c.background)).toEqual([
+      { job: 'bg_0123abcd', status: 'completed', exit: 0 },
+      { job: 'bg_4567cdef', status: 'cancelled' },
+    ]);
+    const asked = session.eras[0]?.nodes.find((n) => n.kind === 'user' && n.turn === 2);
+    expect(asked?.kind === 'user' && asked.noticed).toBe('<task-notification>\n<task-id>bg_0123abcd</task-id>\n</task-notification>');
+    const triggers = [...fold(logOf('a-v7-gap-with-two-triggered-forks.jsonl')).branches.values()].flat().map((b) => b.trigger);
+    expect(triggers).toEqual(['call:document-read:c1', 'turn_end']);
+  });
+
+  it('folds a seam’s audit on its own lane: the entries it kept, updated and removed (#646)', () => {
+    const [audit] = [...fold(logOf('a-v7-seam-audited-on-its-lane-and-warmed.jsonl')).branches.values()].flat().filter((b) => b.lane === 'audit');
+    expect(audit?.outcome).toBe('value');
+    expect(audit?.audit).toEqual({ kept: [], updated: ['d1'], removed: [] });
+  });
+
+  it('folds the model’s phase proposal as pending until the operator rules on it, and a “continue” moves the phase (#124, #651)', () => {
+    const pending = fold([...PHASE_PROPOSED]);
+    expect(pending.proposal).toEqual({ call: 'p1', from: 'plan', to: 'build', reason: 'the spec is settled' });
+    expect(pending.phase).toBe('plan');
+    const ruled = fold([...PHASE_RULED_CONTINUE]);
+    expect([...ruled.unknown.keys()]).toEqual([]);
+    expect(ruled.proposal).toBeUndefined();
+    expect(ruled.phase).toBe('build');
+    const call = ruled.eras[0]?.nodes.find((n) => n.kind === 'tool' && n.tool === 'propose_phase_transition');
+    expect(call?.kind === 'tool' && call.ruled).toEqual({ choice: 'continue', to: 'build' });
   });
 
   it('takes the state from the log: an ended session is ended', () => {

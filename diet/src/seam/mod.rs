@@ -105,6 +105,13 @@ vocabulary! {
         Budget => "budget",
         /// The declared cadence came round.
         Cadence => "cadence",
+        /// A served session's next trunk request would not fit the context
+        /// window with room for its output (#617): the automatic seam. The
+        /// scripted drive never fires it.
+        Window => "window",
+        /// The model pruned a tool result, and the regimen applies a prune
+        /// as soon as the turn settles (#612). Served sessions only.
+        Prune => "prune",
     }
 }
 
@@ -479,6 +486,10 @@ impl<R: Ratifier> Controller<R> {
                     .policy
                     .every_turns
                     .is_some_and(|every| self.turn > 0 && self.turn.is_multiple_of(every)),
+                // The window is a served session's measure, never the
+                // scripted controller's; and a scripted drive makes no tool
+                // calls to prune.
+                Reason::Window | Reason::Prune => false,
             })
             .collect()
     }
@@ -530,6 +541,38 @@ impl<R: Ratifier> Controller<R> {
     }
 }
 
+/// The audit ask a seam fired by `reason` puts over `items` (#504): the
+/// pinned template filled with the notes numbered 1..n, one line each, or
+/// `None` when the dogma pins no ask for `reason` or there is nothing to
+/// audit. The served session's audit and the controller's are the same ask.
+#[must_use]
+pub fn audit_ask(reason: Reason, items: &[(EntryId, String)]) -> Option<Ask> {
+    let template = pinned_ask(reason)?;
+    if items.is_empty() {
+        return None;
+    }
+    let numbered = items
+        .iter()
+        .enumerate()
+        .map(|(index, (_, content))| format!("{}. {}", index + 1, render::one_line(content)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let count = items.len().to_string();
+    let text = template
+        .fill(&[
+            (Hole::Category, AUDIT_CATEGORY),
+            (Hole::LineCount, &count),
+            (Hole::Items, &numbered),
+        ])
+        .ok()?;
+    Some(Ask {
+        reason,
+        template,
+        text,
+        items: items.iter().map(|(id, _)| id.clone()).collect(),
+    })
+}
+
 /// The dogma's audit ask for a trigger, where one is pinned.
 ///
 /// A table rather than a guess. The dogma pins an ask for a phase boundary
@@ -543,7 +586,7 @@ pub fn pinned_ask(reason: Reason) -> Option<Template> {
         Reason::Operator => Some(Template::AuditQHuman),
         Reason::Phase => Some(Template::AuditQ),
         Reason::Cadence => Some(Template::AuditQCadence),
-        Reason::Budget => None,
+        Reason::Budget | Reason::Window | Reason::Prune => None,
     }
 }
 
@@ -1736,7 +1779,7 @@ mod tests {
     fn the_seams_vocabularies_are_the_words_a_record_carries() {
         assert_eq!(
             Reason::ALL.iter().map(|r| r.tag()).collect::<Vec<_>>(),
-            ["operator", "phase", "budget", "cadence"],
+            ["operator", "phase", "budget", "cadence", "window", "prune"],
             "declaration order is precedence: an explicit act outranks every derived one"
         );
         assert_eq!(

@@ -15,6 +15,8 @@ name = "diet"
 path = "src/bin/diet.rs"
 
 [dependencies]
+minijinja = "2.5.0"
+minijinja-contrib = { version = "2.5.0", features = ["pycompat"] }
 pest = "2.9"
 pest_derive = "2.9"
 # A real JSON reader for a FOREIGN format. The record's own value space is a
@@ -37,6 +39,23 @@ serde_json = { version = "1", features = ["arbitrary_precision"] }
 # nine transitive crates rather than ten. No feature is added back, because
 # the empty set is what compiles.
 sha2 = { version = "0.11", default-features = false }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# TLS for a hosted API (#555), bought rather than written under ruling 7: a
+# cryptographic protocol is the canonical buy. `rustls` with `ring`'s
+# primitives, no default features (no `aws-lc-rs`, no logging), and the
+# Mozilla roots as `webpki-roots` ships them, so a certificate is checked the
+# same way on every machine. Twelve crates in all, measured 2026-10-10.
+# Not on wasm32: the exercise's wasm build has no sockets to put TLS on.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+
+[dev-dependencies]
+# A self-signed certificate for the local TLS server the TLS path is tested
+# against (#555), made at test time: the hygiene gate refuses a committed
+# private key, and hand-assembling X.509 over `ring` would be the bespoke
+# encoder ruling 7 rules out. Test-only; seven crates.
+rcgen = { version = "0.13", default-features = false, features = ["ring", "crypto"] }
 
 [lints]
 workspace = true

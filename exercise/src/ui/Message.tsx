@@ -40,7 +40,8 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
   return (
     <Block
       tone="system"
-      label={node.render === undefined ? 'system' : `${node.placement === 'message' ? 'user' : 'system'} · render ${node.render}`}
+      // The refill as a user message (#604) is the harness's summary, sent in the user's role -- never the operator's words.
+      label={node.render === undefined ? 'system' : `${node.placement === 'message' ? 'harness summary' : 'system'} · render ${node.render}`}
       {...(node.tokens !== undefined ? { input: <span title="tokens in the prefix">{tokens(node.tokens)} tok</span> } : {})}
       provenance={node}
       id={node.id}
@@ -96,7 +97,26 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
       <Prose text={node.text} kind="ask" />
       {/* What the operator attached (#372): the screenshot, from its checked bytes, under the words. */}
       {node.files ? <FileResults files={node.files} label="what the operator attached" /> : null}
+      {/* What the harness sent after the ask (#574), in the order it did (#619): never the operator's words. */}
+      {node.delivered ? <HarnessNote note="delivered" label={`harness · fork delivery · ${node.delivered.framing}`} text={node.delivered.text} /> : null}
+      {node.recalled ? <HarnessNote note="recalled" label={`harness · recall · ${node.recalled.recall}`} text={node.recalled.text} /> : null}
+      {node.reminded ? <HarnessNote note="reminded" label="harness · self-capture reminder" text={node.reminded} /> : null}
+      {node.noticed ? <HarnessNote note="notice" label="harness · notice" text={node.noticed} /> : null}
     </Block>
+  );
+}
+
+/**
+ * A note the harness put after the operator's ask, as the model was sent it (#574): a fork's patches delivered, an
+ * archived item recalled, self-capture's reminder. Drawn under the ask and named as the harness's, so nobody reads
+ * it as what the operator wrote.
+ */
+function HarnessNote({ note, label, text }: { readonly note: string; readonly label: string; readonly text: string }) {
+  return (
+    <section className="ex-harness-note" data-note={note} aria-label={label} title="the harness sent this after the ask: these are not the operator's words">
+      <span className="ex-harness-note__label">{label}</span>
+      <Prose text={text} kind="ask" />
+    </section>
   );
 }
 
@@ -217,6 +237,12 @@ function AssistantBody({
         // What failed is the footer's to name; here, what the server said.
         <p className="ex-failed" role="alert" title={failOf(node.failure.reason).label}>
           {node.failure.message}
+        </p>
+      ) : null}
+      {/* An overflow's sizes (#628), and who told it: the engine, or serve from the prompt's size. */}
+      {node.failure?.overflow ? (
+        <p className="ex-overflow">
+          {`${tokens(node.failure.overflow.promptTokens)} tok against a ${tokens(node.failure.overflow.window)} window · ${node.failure.overflow.inferred ? 'serve inferred it from the prompt’s size' : 'the engine reported it'}`}
         </p>
       ) : null}
     </>

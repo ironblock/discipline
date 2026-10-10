@@ -30,7 +30,7 @@
 use std::collections::VecDeque;
 use std::fmt;
 use std::io::{self, Read as _, Write as _};
-use std::net::{Shutdown, TcpStream, ToSocketAddrs as _};
+use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -237,6 +237,9 @@ pub enum Rejection {
     /// prefill: llama.cpp's `error.type` `exceed_context_size_error`, as
     /// R3.0's C3 captured it.
     ContextOverflow,
+    /// The model declined to answer: a hosted API's `stop_reason`
+    /// `refusal` (#555). Never read from a body; the stream says it.
+    Refusal,
 }
 
 impl Rejection {
@@ -299,6 +302,15 @@ pub enum Piece<'a> {
     Reasoning(&'a str),
     /// The server's prefill progress: not answer text, and never sent back.
     Progress(Progress),
+    /// The signature a hosted model signs its thinking with (#555): sent
+    /// back with the thinking, verbatim, and never shown.
+    Signature(&'a str),
+    /// A thinking block the provider redacted, as its opaque data (#555):
+    /// sent back as it came, and never shown.
+    Redacted(&'a str),
+    /// What a hosted API counted of the request, cache reads and writes
+    /// included (#555): delivered once, as the stream ends.
+    Usage(&'a super::anthropic::Usage),
     /// One fragment of a call the model is making: `delta.tool_calls[i]`,
     /// exactly as the server sent it (#298 T11). Never answer text: the
     /// arguments are the call's, and they go back as the call.
@@ -367,6 +379,19 @@ pub struct HttpStream {
     endpoint: Endpoint,
     reply_cap: usize,
     bearer: Option<Bearer>,
+    trust: super::tls::Trust,
+    wire: Wire,
+}
+
+/// Which API a streamed call speaks: the shapes differ, so the kind is
+/// explicit (#555).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Wire {
+    /// The OpenAI-compatible chat surface: llama.cpp's and `TabbyAPI`'s.
+    #[default]
+    OpenAi,
+    /// Anthropic's Messages API, under these options.
+    Anthropic(super::anthropic::Options),
 }
 
 /// A credential sent as `Authorization: Bearer <key>` -- what the DoD-1
@@ -401,7 +426,45 @@ impl HttpStream {
             endpoint,
             reply_cap: transport::MAX_REPLY_BYTES,
             bearer: None,
+            trust: super::tls::Trust::default(),
+            wire: Wire::OpenAi,
         }
+    }
+
+    /// The same, speaking Anthropic's Messages API under `options` (#555):
+    /// its body, its headers -- the key as `x-api-key`, `anthropic-version`,
+    /// the betas the options ask for -- and its events.
+    #[must_use]
+    pub fn with_anthropic(mut self, options: super::anthropic::Options) -> Self {
+        self.wire = Wire::Anthropic(options);
+        self
+    }
+
+    /// This transport as a fork on the same server makes its calls, when that
+    /// differs (#556): a hosted API's fork never writes its own tail to the
+    /// cache for an hour, since nothing reuses it; its system and tools ask
+    /// as the trunk's do, so they read the trunk's entries. `None` when a
+    /// fork's calls are the trunk's.
+    #[must_use]
+    pub fn for_forks(&self) -> Option<Self> {
+        let Wire::Anthropic(options) = &self.wire else {
+            return None;
+        };
+        let ttl = options.ttl.for_a_fork();
+        (ttl != options.ttl).then(|| Self {
+            wire: Wire::Anthropic(super::anthropic::Options {
+                ttl,
+                ..options.clone()
+            }),
+            ..self.clone()
+        })
+    }
+
+    /// The same, trusting `trust`'s roots for an `https` endpoint.
+    #[must_use]
+    pub fn with_trust(mut self, trust: super::tls::Trust) -> Self {
+        self.trust = trust;
+        self
     }
 
     /// The same, sending `bearer` with every request.
@@ -409,6 +472,22 @@ impl HttpStream {
     pub fn with_bearer(mut self, bearer: Bearer) -> Self {
         self.bearer = Some(bearer);
         self
+    }
+
+    /// Anthropic's header lines (#555): the key as `x-api-key` when there
+    /// is one, the API version, and the betas `options` ask for.
+    fn anthropic_headers(&self, options: &super::anthropic::Options) -> String {
+        let key = self
+            .bearer
+            .as_ref()
+            .map_or_else(String::new, |Bearer(key)| format!("x-api-key: {key}\r\n"));
+        let beta = options
+            .beta()
+            .map_or_else(String::new, |beta| format!("anthropic-beta: {beta}\r\n"));
+        format!(
+            "{key}anthropic-version: {}\r\n{beta}",
+            super::anthropic::VERSION
+        )
     }
 
     /// The `Authorization` header line every request carries, or nothing
@@ -451,7 +530,12 @@ impl HttpStream {
              {authorization}Connection: close\r\n\r\n",
             self.endpoint.host, self.endpoint.port
         );
-        transport::exchange(&self.endpoint, &request, self.reply_cap, deadline)
+        transport::exchange(
+            (&self.endpoint, &self.trust),
+            &request,
+            self.reply_cap,
+            deadline,
+        )
     }
 
     /// The same, with a smaller cap -- the unstreamed transport's reason,
@@ -463,6 +547,8 @@ impl HttpStream {
             endpoint,
             reply_cap,
             bearer: None,
+            trust: super::tls::Trust::default(),
+            wire: Wire::OpenAi,
         }
     }
 }
@@ -489,21 +575,9 @@ impl Streaming for HttpStream {
         if cancel.is_asked() {
             return Ok(Ended::Cancelled);
         }
-        let address = (self.endpoint.host.as_str(), self.endpoint.port)
-            .to_socket_addrs()
-            .map_err(|why| TransportFailure::Connect(why.to_string()))?
-            .next()
-            .ok_or_else(|| {
-                TransportFailure::Connect("the host resolves to no address".to_owned())
-            })?;
-        let budget = remaining().ok_or_else(timeout)?;
-        let mut socket = TcpStream::connect_timeout(&address, budget).map_err(|why| {
-            if is_timeout(&why) {
-                timeout()
-            } else {
-                TransportFailure::Connect(why.to_string())
-            }
-        })?;
+        // Over TLS for an `https` endpoint (#555): the handshake is part
+        // of the connect, and the stopper below shuts the socket under it.
+        let mut socket = super::tls::connect(&self.endpoint, &self.trust, deadline, started)?;
 
         // The stopper: a second handle on the same socket, shut from
         // whichever thread asks. Shutting it is what makes a read blocked
@@ -516,15 +590,20 @@ impl Streaming for HttpStream {
         // connection is a slot still generating (measured; see above).
         // Taken out of its slot either way, so the socket closes once and a
         // reused `Cancel` holds no open connection per call.
-        let handle = Arc::new(Mutex::new(Some(socket.try_clone().map_err(|why| {
-            TransportFailure::Connect(format!("no second handle to cancel through: {why}"))
-        })?)));
+        let handle = Arc::new(Mutex::new(Some(socket.socket().try_clone().map_err(
+            |why| TransportFailure::Connect(format!("no second handle to cancel through: {why}")),
+        )?)));
         let waker = Arc::clone(&handle);
         cancel.on_cancel(move || close(&waker));
         let _closing = Closing(handle);
 
-        let body = wire::streaming_body(shape);
-        let authorization = self.authorization();
+        let (body, authorization) = match &self.wire {
+            Wire::OpenAi => (wire::streaming_body(shape), self.authorization()),
+            Wire::Anthropic(options) => (
+                super::anthropic::body(shape, options).map_err(TransportFailure::Write)?,
+                self.anthropic_headers(options),
+            ),
+        };
         let request = format!(
             "POST {} HTTP/1.1\r\nHost: {}:{}\r\nContent-Type: application/json\r\n\
              Accept: text/event-stream\r\n{authorization}Content-Length: {}\r\n\
@@ -537,6 +616,7 @@ impl Streaming for HttpStream {
         );
         let budget = remaining().ok_or_else(timeout)?;
         socket
+            .socket()
             .set_write_timeout(Some(budget))
             .map_err(|why| TransportFailure::Connect(why.to_string()))?;
         if let Err(why) = socket
@@ -552,7 +632,11 @@ impl Streaming for HttpStream {
             };
         }
 
-        let mut reading = Reading::default();
+        let mut reading = Reading {
+            anthropic: matches!(self.wire, Wire::Anthropic(_))
+                .then(super::anthropic::Decoder::default),
+            ..Reading::default()
+        };
         let mut buffer = [0_u8; 16 * 1024];
         loop {
             // NO flag check here, before the read. A check here only races
@@ -567,7 +651,7 @@ impl Streaming for HttpStream {
             // Re-armed on every pass, as the unstreamed transport does: one
             // timeout bounds one read, not the call.
             let budget = remaining().ok_or_else(timeout)?;
-            if let Err(why) = socket.set_read_timeout(Some(budget)) {
+            if let Err(why) = socket.socket().set_read_timeout(Some(budget)) {
                 // A stop that landed since the last read has shut the socket,
                 // and on macOS an option set on a shut socket fails (`EINVAL`).
                 // That is the stop landing too.
@@ -605,8 +689,15 @@ impl Streaming for HttpStream {
 
     fn describes(&self) -> String {
         format!(
-            "http://{}:{}{} (streamed)",
-            self.endpoint.host, self.endpoint.port, self.endpoint.path
+            "{}://{}:{}{} (streamed{})",
+            self.endpoint.scheme(),
+            self.endpoint.host,
+            self.endpoint.port,
+            self.endpoint.path,
+            match self.wire {
+                Wire::OpenAi => "",
+                Wire::Anthropic(_) => ", anthropic-messages",
+            }
         )
     }
 }
@@ -658,6 +749,9 @@ struct Reading {
     finish_reason: Option<String>,
     /// The last `timings` object any chunk carried.
     timings: Option<Timings>,
+    /// Anthropic's events, when the wire is its Messages API (#555): read
+    /// by its own decoder, the framing above shared.
+    anthropic: Option<super::anthropic::Decoder>,
 }
 
 impl Reading {
@@ -714,7 +808,7 @@ impl Reading {
             return Ok(whole.then(|| self.refused(status)));
         }
         for data in self.events.feed(&decoded)? {
-            if let Some(ended) = self.event(&data, on_delta)? {
+            if let Some(ended) = self.dispatch(&data, on_delta)? {
                 return Ok(Some(ended));
             }
         }
@@ -729,12 +823,24 @@ impl Reading {
     fn closed(&mut self, on_delta: &mut dyn FnMut(Piece<'_>)) -> Result<Ended, TransportFailure> {
         if matches!(self.head, Some((200, _))) {
             for data in self.events.finish()? {
-                if let Some(ended) = self.event(&data, on_delta)? {
+                if let Some(ended) = self.dispatch(&data, on_delta)? {
                     return Ok(ended);
                 }
             }
         }
-        self.at_close()
+        self.at_close(on_delta)
+    }
+
+    /// One event's data, to the wire's decoder.
+    fn dispatch(
+        &mut self,
+        data: &str,
+        on_delta: &mut dyn FnMut(Piece<'_>),
+    ) -> Result<Option<Ended>, TransportFailure> {
+        match self.anthropic.as_mut() {
+            Some(decoder) => decoder.event(data, on_delta),
+            None => self.event(data, on_delta),
+        }
     }
 
     fn refused(&self, status: u16) -> Ended {
@@ -832,7 +938,7 @@ impl Reading {
     }
 
     /// The server closed, or the body's framing said it was whole.
-    fn at_close(&mut self) -> Result<Ended, TransportFailure> {
+    fn at_close(&mut self, on_delta: &mut dyn FnMut(Piece<'_>)) -> Result<Ended, TransportFailure> {
         let Some((status, framing)) = self.head else {
             return Err(TransportFailure::Malformed(
                 String::from_utf8_lossy(&self.raw)
@@ -857,6 +963,9 @@ impl Reading {
         }
         if status != 200 {
             return Ok(self.refused(status));
+        }
+        if let Some(decoder) = self.anthropic.as_mut() {
+            return decoder.at_close(on_delta);
         }
         // A server that said why it stopped and then closed without `[DONE]`
         // finished; one that never said why did not.
@@ -1096,6 +1205,15 @@ impl Canned {
         }
     }
 
+    /// `reply` played after the replies already queued: for a script that
+    /// names what the session made, such as a background job's id (#614).
+    pub fn append(&self, reply: Vec<Step>) {
+        self.replies
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend(std::iter::once(reply));
+    }
+
     /// Every request sent so far, in order.
     #[must_use]
     pub fn sent(&self) -> Vec<RequestShape> {
@@ -1316,6 +1434,9 @@ mod tests {
             pieces.push(match piece {
                 Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
                 Piece::Text(text) => (false, text.to_owned()),
+                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                    panic!("a hosted piece from an OpenAI stream")
+                }
                 Piece::Progress(progress) => panic!("progress where none was sent: {progress:?}"),
                 Piece::ToolCall { arguments, .. } => {
                     panic!("a call where none was sent: {arguments:?}")
@@ -1435,6 +1556,9 @@ mod tests {
             Piece::Reasoning(reasoning) => {
                 panic!("reasoning where only text was sent: {reasoning:?}")
             }
+            Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                panic!("a hosted piece from an OpenAI stream")
+            }
             Piece::Progress(progress) => panic!("progress where only text was sent: {progress:?}"),
             Piece::ToolCall { arguments, .. } => {
                 panic!("a tool call where only text was sent: {arguments:?}")
@@ -1465,6 +1589,9 @@ mod tests {
                 pieces.push(match piece {
                     Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
                     Piece::Text(text) => (false, text.to_owned()),
+                    Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                        panic!("a hosted piece from an OpenAI stream")
+                    }
                     Piece::Progress(progress) => {
                         panic!("progress where none was sent: {progress:?}")
                     }
@@ -1766,6 +1893,7 @@ mod tests {
         let mut frame_after_answer = false;
         for piece in pieces {
             match piece {
+                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {}
                 Piece::Progress(progress) => {
                     frame_after_answer |= answer_seen;
                     frames.push(*progress);
@@ -1820,6 +1948,9 @@ mod tests {
                 owned.push(match piece {
                     Piece::Text(text) => (0, text.to_owned(), None),
                     Piece::Reasoning(text) => (1, text.to_owned(), None),
+                    Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                        panic!("a hosted piece from an OpenAI stream")
+                    }
                     Piece::Progress(progress) => (2, String::new(), Some(progress)),
                     Piece::ToolCall { arguments, .. } => (3, arguments.to_owned(), None),
                 });
@@ -1901,6 +2032,9 @@ mod tests {
         let ended = reading
             .feed(raw.as_bytes(), usize::MAX, &mut |piece| {
                 pieces.push(match piece {
+                    Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                        panic!("a hosted piece from an OpenAI stream")
+                    }
                     Piece::Progress(progress) => format!("progress {}", progress.processed),
                     Piece::Text(text) => format!("text {text}"),
                     Piece::Reasoning(text) => format!("reasoning {text}"),
@@ -2006,6 +2140,9 @@ mod tests {
         let mut seen = Vec::new();
         let ended = canned.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
             seen.push(match piece {
+                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                    panic!("a hosted piece from an OpenAI stream")
+                }
                 Piece::Progress(progress) => format!("{progress:?}"),
                 Piece::Text(text)
                 | Piece::Reasoning(text)
@@ -2084,7 +2221,8 @@ mod tests {
                     arguments.to_owned(),
                 )),
                 Piece::Text(text) | Piece::Reasoning(text) => texts.push(text.to_owned()),
-                Piece::Progress(_) => {}
+                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) | Piece::Progress(_) => {
+                }
             },
         );
         (calls, texts, ended)

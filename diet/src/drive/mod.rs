@@ -96,11 +96,14 @@
 
 pub mod archive;
 pub mod attach;
+pub mod background;
 pub mod canned;
 pub mod engine;
+pub mod hosted;
 pub mod instructions;
 pub mod output;
 pub mod projection;
+pub mod prune;
 pub mod regimen;
 pub mod registry;
 pub mod script;
@@ -109,6 +112,7 @@ pub mod served;
 pub mod session;
 pub mod shell_gate;
 pub mod standard;
+pub mod template_roles;
 pub mod tool_loop;
 
 use std::cell::Cell;
@@ -576,6 +580,9 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
             tool_calls: Vec::new(),
             tool_call_id: None,
             images: Vec::new(),
+            reasoning_signature: None,
+            redacted: Vec::new(),
+            tool_error: false,
         }];
         // Immediately before the call, like `Heads::about_to_call`: what a
         // cache lifetime is compared against is the gap between two
@@ -874,6 +881,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             tool_calls: Vec::new(),
             tool_call_id: None,
             images: Vec::new(),
+            reasoning_signature: None,
+            redacted: Vec::new(),
+            tool_error: false,
         }];
         asking
             .template_kwargs
@@ -944,6 +954,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tool_calls: Vec::new(),
                 tool_call_id: None,
                 images: Vec::new(),
+                reasoning_signature: None,
+                redacted: Vec::new(),
+                tool_error: false,
             },
             Message {
                 role: Role::User,
@@ -952,6 +965,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tool_calls: Vec::new(),
                 tool_call_id: None,
                 images: Vec::new(),
+                reasoning_signature: None,
+                redacted: Vec::new(),
+                tool_error: false,
             },
         ];
         // THE LINT, before the call. The main lane is the one whose head
@@ -1027,6 +1043,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tool_calls: Vec::new(),
                 tool_call_id: None,
                 images: Vec::new(),
+                reasoning_signature: None,
+                redacted: Vec::new(),
+                tool_error: false,
             }];
             linted_head(&asking, index, INTERVIEW)?;
             heads.about_to_call(INTERVIEW);
@@ -1061,6 +1080,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                     .is_some_and(|thought| !thought.is_empty());
             let fork_id = format!("fork-{index}");
             events.push(Event::Fork {
+                cache_read_share: None,
                 id: fork_id.clone(),
                 lane: INTERVIEW.to_owned(),
                 substrate: substrate.clone(),
@@ -1203,6 +1223,10 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tail_tokens: None,
                 carried_turns: None,
                 carried_tokens: None,
+                // Never the window's: the scripted drive has none.
+                prompt_tokens: None,
+                window: None,
+                pruned: None,
             });
             seams.push(seam);
         }

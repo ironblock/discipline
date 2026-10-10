@@ -1,0 +1,15 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-hosted-model","opened":1790000000000,"seq":0,"serving":{"dialect":"anthropic-messages"},"t":0,"version":7}
+{"kind":"ask","seq":1,"t":5,"text":"finish it","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"delta","reasoning":"brief","request":3,"seq":4,"t":20}
+{"kind":"delta","request":3,"seq":5,"t":25,"text":"Done."}
+{"finish_reason":"stop","kind":"response","reasoning":"brief","reasoning_signature":"sig-xyz","redacted":["opaque"],"seq":6,"t":30,"text":"Done.","to_request":3,"usage":{"cache_creation_1h_tokens":0,"cache_creation_5m_tokens":64,"cache_creation_tokens":64,"cached_tokens":2048,"completion_tokens":30,"prompt_tokens":2121}}
+{"kind":"turn.settled","reason":"final","seq":7,"t":35,"turn":1}
+{"from":"turn","kind":"settlement","seq":8,"t":40,"to":"awaiting"}
+{"kind":"ask","seq":9,"t":45,"text":"and this?","turn":2}
+{"from":"awaiting","kind":"settlement","seq":10,"t":50,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":11,"t":55,"turn":2}
+{"kind":"request.failed","message":"{\"stop_reason\":\"refusal\"}","reason":"refusal","request":11,"seq":12,"status":200,"t":60}
+{"kind":"turn.settled","reason":"failed","seq":13,"t":65,"turn":2}
+{"from":"turn","kind":"settlement","seq":14,"t":70,"to":"awaiting"}

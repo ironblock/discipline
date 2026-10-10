@@ -6,14 +6,29 @@ import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-c
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
 import approvalsOff from '../../../diet/formats/log/fixtures/valid/a-v7-call-that-ran-with-approvals-off.jsonl?raw';
 import phaseMoved from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-moved-a-phase.jsonl?raw';
+import deliveredNote from '../../../diet/formats/log/fixtures/valid/a-v7-imperative-delivery-after-an-ask.jsonl?raw';
+import recalledNote from '../../../diet/formats/log/fixtures/valid/a-v7-recall-after-an-ask.jsonl?raw';
+import refillMessage from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-refill-is-a-message.jsonl?raw';
+import leversDeclared from '../../../diet/formats/log/fixtures/valid/a-v7-session-declaring-its-levers.jsonl?raw';
+import selfCapturePatch from '../../../diet/formats/log/fixtures/valid/a-v7-self-capture-patch-named-by-its-lane.jsonl?raw';
+import overflowInferred from '../../../diet/formats/log/fixtures/valid/a-v7-overflow-told-from-the-prompts-size.jsonl?raw';
+import windowSeam from '../../../diet/formats/log/fixtures/valid/a-v7-window-seam-under-the-turn-it-makes-fit.jsonl?raw';
+import pruneSeam from '../../../diet/formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl?raw';
+import poolRefused from '../../../diet/formats/log/fixtures/valid/a-v7-fork-refused-for-the-pool-and-one-that-may-displace-the-trunk-cache.jsonl?raw';
+import backgroundCalls from '../../../diet/formats/log/fixtures/valid/a-v7-call-started-in-the-background.jsonl?raw';
+import triggeredForks from '../../../diet/formats/log/fixtures/valid/a-v7-gap-with-two-triggered-forks.jsonl?raw';
+import auditedSeam from '../../../diet/formats/log/fixtures/valid/a-v7-seam-audited-on-its-lane-and-warmed.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
+import { outcomeOf } from '../ui/sets.ts';
 import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { TANGENT_OPEN } from '../drive/served/tangent.ts';
+import { SELF_CAPTURE } from '../drive/served/self-capture.ts';
+import { PHASE_PROPOSED, PHASE_RULED_CONTINUE } from '../drive/served/phase-proposal.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
@@ -445,5 +460,302 @@ export const ServedNothingToBackground: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="tool"]').length).toBe(1));
     await expect([...canvasElement.querySelectorAll('button')].some((b) => b.textContent === 'move to background')).toBe(false);
+  },
+};
+
+/** The harness's note on an ask, as drawn: under the operator's words, named as the harness's, never as theirs. */
+const harnessNote = async (root: HTMLElement, note: string) =>
+  waitFor(async () => {
+    const found = root.querySelector<HTMLElement>(`.ex-trunk .ex-harness-note[data-note="${note}"]`);
+    await expect(found).not.toBeNull();
+    return found!;
+  });
+
+/** `?drive`, log v7 (#574): the fork-delivery note sent after turn 2's ask, drawn as the harness's. */
+export const ServedDeliveredNote: Story = {
+  name: '?drive: the fork-delivery note after an ask, marked as the harness’s',
+  args: { drive: true, web: serving(deliveredNote) },
+  play: async ({ canvasElement }) => {
+    const note = await harnessNote(canvasElement, 'delivered');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · fork delivery · imperative');
+    await expect(note.textContent).toContain('Working record');
+  },
+};
+
+/** `?drive`, log v7 (#574): archive recall's note, drawn as the harness's. */
+export const ServedRecalledNote: Story = {
+  name: '?drive: the recall note after an ask, marked as the harness’s',
+  args: { drive: true, web: serving(recalledNote) },
+  play: async ({ canvasElement }) => {
+    const note = await harnessNote(canvasElement, 'recalled');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · recall · literal');
+  },
+};
+
+/** `?drive` (#574): self-capture's reminder note, and its call on the trunk with what it recorded. */
+export const ServedSelfCapture: Story = {
+  name: '?drive: self-capture’s reminder and its recorded call',
+  args: { drive: true, web: serving(SELF_CAPTURE.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const note = await harnessNote(canvasElement, 'reminded');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · self-capture reminder');
+    const call = canvasElement.querySelector<HTMLElement>('.ex-trunk [data-tone="tool"]');
+    await expect(call?.querySelector('.ex-capture')?.textContent).toBe('self-capture · recorded r10/c1/fact');
+  },
+};
+
+/** `?drive`, log v7 (#604): the seam's refill sent as a user message -- the harness's summary, not the operator's ask. */
+export const ServedRefillSummary: Story = {
+  name: '?drive: the seam’s refill message is labelled as the harness’s summary',
+  args: { drive: true, web: serving(refillMessage) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="system"]').length).toBeGreaterThan(1));
+    const labels = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="system"] .ex-block__label')].map((l) => l.textContent ?? '');
+    await expect(labels.some((l) => l.startsWith('harness summary'))).toBe(true);
+    await expect(labels.some((l) => l.startsWith('user'))).toBe(false);
+  },
+};
+
+/** `?drive` (#573): a session.start with the whole lever table -- the header lists every lever and its state, as given. */
+export const ServedLeverTable: Story = {
+  name: '?drive: the header lists every lever the session declares',
+  args: { drive: true, web: serving(leversDeclared) },
+  play: async ({ canvasElement }) => {
+    const table = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLDetailsElement>('.ex-header__levers');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    const start = JSON.parse(leversDeclared.split('\n')[0]!) as { levers: Record<string, string> };
+    const rows = [...table.querySelectorAll<HTMLElement>('[data-lever-row]')].map((row) => [row.dataset['leverRow'], row.querySelector('dd')?.textContent]);
+    await expect(rows).toEqual(Object.entries(start.levers));
+  },
+};
+
+/** A log from before the table (#623) has none to list: the header keeps its three, and offers no table. */
+export const ServedNoLeverTable: Story = {
+  name: '?drive: a log without the lever table offers none',
+  args: { drive: true, web: serving(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await expect(canvasElement.querySelector('.ex-header__levers')).toBeNull();
+  },
+};
+
+/** diet's v5 forks with the first moved offboard (#615) -- WRITTEN HERE: no diet fixture has an offboard fork yet. */
+const offboardForks = (() => {
+  const lines = forks.trimEnd().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+  const first = lines.find((l) => l['kind'] === 'fork')!;
+  return lines
+    .map((l) => (l === first ? { ...l, substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b' } : l['kind'] === 'fork.settled' && l['fork'] === first['seq'] ? { ...l, prompt_tokens: 1820, wall_ms: 4300 } : l))
+    .map((l) => JSON.stringify(l))
+    .join('\n');
+})();
+
+/** `?drive` (#570): an offboard fork names its seat on its branch, with its prefill and wall time; a warm one does not. */
+export const ServedOffboardFork: Story = {
+  name: '?drive: an offboard fork names its seat, prefill and wall time',
+  args: { drive: true, web: serving(offboardForks) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-lane .ex-branch')).toHaveLength(2));
+    const [offboard, warm] = [...canvasElement.querySelectorAll<HTMLElement>('.ex-lane .ex-branch')];
+    await expect(offboard?.querySelector('.ex-branch__seat')?.textContent).toBe('mac-pro-llamacpp-qwen3-4b · 1.8k tok · 4.3 s');
+    await expect(warm?.querySelector('.ex-branch__seat')).toBeNull();
+  },
+};
+
+/** `?drive`, log v7 (#627): a self-captured entry in the working-memory panel, marked with the lane that wrote it. */
+export const ServedSelfCapturedEntry: Story = {
+  name: '?drive: a self-captured entry in working memory, marked self-capture',
+  args: { drive: true, web: serving(selfCapturePatch) },
+  play: async ({ canvasElement }) => {
+    const entry = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-memory__entry[data-lane="self-capture"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(entry.querySelector('.ex-memory__lane')?.textContent).toBe('self-capture');
+    await expect(entry.querySelector('.ex-memory__text')?.textContent).toContain('The parser drops blank lines');
+  },
+};
+
+/** `?drive`, log v7 (#628): an overflow says so with its sizes, and that serve told it from the prompt's size. */
+export const ServedOverflowInferred: Story = {
+  name: '?drive: an overflow names its sizes and who told it',
+  args: { drive: true, web: serving(overflowInferred) },
+  play: async ({ canvasElement }) => {
+    const overflow = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-trunk .ex-overflow');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(overflow.textContent).toBe('161.8k tok against a 163.8k window · serve inferred it from the prompt’s size');
+  },
+};
+
+/** `?drive`, log v7 (#633): an automatic seam where it fell -- between the ask and its answer -- with the size that fired it. */
+export const ServedWindowSeam: Story = {
+  name: '?drive: an automatic window seam where it falls, with the size that fired it',
+  args: { drive: true, web: serving(windowSeam) },
+  play: async ({ canvasElement }) => {
+    const seam = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-seam[data-reason="window"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(seam.querySelector('.ex-seam__size')?.textContent).toBe('automatic · 150k of a 163.8k window');
+    // Where it fell: after turn 2's ask, before its answer.
+    const order = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="user"], .ex-trunk .ex-seam, .ex-trunk [data-tone="assistant"]')].map((n) =>
+      n.classList.contains('ex-seam') ? 'seam' : (n as HTMLElement).dataset['tone'],
+    );
+    await expect(order.slice(-3)).toEqual(['user', 'seam', 'assistant']);
+  },
+};
+
+/** `?drive`, log v7 (#630): the model prunes a call's output, and the seam replaces it with its pointer. */
+export const ServedPrunedOutput: Story = {
+  name: '?drive: a pruned output, replaced by its pointer at the seam',
+  args: { drive: true, web: serving(pruneSeam) },
+  play: async ({ canvasElement }) => {
+    const mark = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-trunk .ex-pruned');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(mark.textContent).toBe('pruned by the model (14 B) · replaced by its pointer at the seam');
+  },
+};
+
+/** `?drive`, log v7 (#637): a fork refused for the pool, never sent, and the cache hazard it would have carried. */
+export const ServedForkRefusedForPool: Story = {
+  name: '?drive: a fork refused for the pool, and its cache hazard',
+  args: { drive: true, web: serving(poolRefused) },
+  play: async ({ canvasElement }) => {
+    const branch = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-lane .ex-branch');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(branch.querySelector('.ex-branch__outcome')?.textContent).toBe('refused · pool · never sent');
+    await expect(branch.querySelector('.ex-branch__hazard')?.textContent).toBe('may displace the trunk’s cache');
+  },
+};
+
+/** `?drive`, log v7 (#614): calls run in the background name their job and how it ended; the harness's notice after an ask. */
+export const ServedBackgroundCalls: Story = {
+  name: '?drive: background calls, how their jobs ended, and the notice after an ask',
+  args: { drive: true, web: serving(backgroundCalls) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk .ex-background')).toHaveLength(2));
+    const jobs = [...canvasElement.querySelectorAll('.ex-trunk .ex-background')].map((b) => b.textContent);
+    await expect(jobs).toEqual(['background bg_0123abcd · completed · exit 0', 'background bg_4567cdef · cancelled']);
+    const note = await harnessNote(canvasElement, 'notice');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · notice');
+  },
+};
+
+/** `?drive`, log v7 (#620): what triggered each fork, on its branch. */
+export const ServedForkTriggers: Story = {
+  name: '?drive: each fork names what triggered it',
+  args: { drive: true, web: serving(triggeredForks) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-lane .ex-branch')).toHaveLength(2));
+    const triggers = [...canvasElement.querySelectorAll('.ex-lane .ex-branch')].map((b) => b.querySelector('.ex-branch__trigger')?.textContent);
+    await expect(triggers).toEqual(['call:document-read:c1', 'turn_end']);
+  },
+};
+
+/** The same call, still running, warned near its timeout (#613) -- the line serve logs 15 s before it times out. */
+const callNearTimeout = `${callRunning}\n${JSON.stringify({ seq: 18, t: 90, kind: 'timeout.near', request: 3, call: '7GJeYs3ux1SaqFVPB5ee2AExFLbsukd7', timeout_ms: 120000 })}`;
+
+/** `?drive` (#613): near its timeout, the running command's move asks itself -- "move to background?" -- and posts the move. */
+export const ServedNearTimeout: Story = {
+  name: '?drive: a command near its timeout offers "move to background?"',
+  args: { drive: true, web: posting(callNearTimeout) },
+  play: async ({ canvasElement }) => {
+    const move = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLButtonElement>('.ex-composer__background[data-urgent]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(move.textContent).toBe('move to background?');
+    posted.length = 0;
+    await userEvent.click(move);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'background' }]));
+  },
+};
+
+/** The audit branch, once drawn in its lane. */
+const auditBranch = (root: HTMLElement) =>
+  waitFor(async () => {
+    const found = root.querySelector<HTMLElement>('.ex-lane .ex-branch[data-lane="audit"]');
+    await expect(found).not.toBeNull();
+    return found!;
+  });
+
+/** `?drive`, log v7 (#646): a seam's audit runs in its own lane, coloured as itself, and says what it did to working memory. */
+export const ServedSeamAudit: Story = {
+  name: '?drive: a seam’s audit in its own lane, with what it kept, updated and removed',
+  args: { drive: true, web: serving(auditedSeam) },
+  play: async ({ canvasElement }) => {
+    const branch = await auditBranch(canvasElement);
+    await expect(branch.querySelector('.ex-branch__audit')?.textContent).toBe('kept 0 · updated 1 · removed 0');
+    // Its own lane colours, not the neutral fallback an unknown lane gets.
+    const block = branch.querySelector<HTMLElement>('.ex-block');
+    await expect(block?.style.getPropertyValue('--lane-ink')).toBe('var(--ink-audit)');
+  },
+};
+
+/** The same audit answered in words the grammar cannot read: drawn as unparseable, with nothing changed. */
+export const ServedSeamAuditUnparseable: Story = {
+  name: '?drive: a seam’s audit the grammar could not read',
+  args: {
+    drive: true,
+    web: serving(
+      auditedSeam
+        .trimEnd()
+        .split('\n')
+        .filter((l) => !(l.includes('"kind":"patch"') && l.includes('"fork":8')))
+        .map((l, i) => {
+          const e = JSON.parse(l) as Record<string, unknown>;
+          return JSON.stringify({ ...(e['kind'] === 'fork.settled' ? { ...e, outcome: 'unparseable' } : e), seq: i });
+        })
+        .join('\n'),
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const branch = await auditBranch(canvasElement);
+    await expect(branch.querySelector('.ex-branch__outcome')?.textContent).toBe(outcomeOf('unparseable').label);
+    await expect(branch.querySelector('.ex-branch__audit')).toBeNull();
+  },
+};
+
+/** `?drive` (#124): the model's phase proposal, waiting on the operator -- three answers, each posting the ruling. */
+export const ServedPhaseProposal: Story = {
+  name: '?drive: the model proposes a phase move, and the operator rules',
+  args: { drive: true, web: posting(PHASE_PROPOSED.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const dock = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-composer__proposal');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(dock.querySelector('.ex-composer__proposal-move')?.textContent).toBe('plan → build');
+    await expect(dock.querySelector('.ex-composer__proposal-reason')?.textContent).toBe('the spec is settled');
+    await expect([...dock.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['seam', 'continue', 'stay']);
+    posted.length = 0;
+    await userEvent.click([...dock.querySelectorAll('button')].find((b) => b.textContent === 'continue')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'continue' }]));
+  },
+};
+
+/** Ruled "continue": no proposal waits, the phase is the new one, and the call says how it was ruled. */
+export const ServedPhaseRuled: Story = {
+  name: '?drive: a ruled proposal moves the phase and says how it was ruled',
+  args: { drive: true, web: serving(PHASE_RULED_CONTINUE.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
+    await expect(canvasElement.querySelector('.ex-composer__proposal')).toBeNull();
+    await expect(canvasElement.querySelector('.ex-trunk .ex-ruled')?.textContent).toBe('ruled · continue → build');
   },
 };

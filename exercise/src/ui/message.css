@@ -49,3 +49,25 @@
   height: 1px;
   background: color-mix(in oklab, currentColor 30%, transparent);
 }
+
+/* A note the harness sent after the ask (#574): set apart from the operator's words, and named as the harness's. */
+.ex-harness-note {
+  margin-top: 0.6rem;
+  padding: 0.45rem 0.6rem;
+  border-left: 2px dashed var(--ink-faint);
+  color: var(--ink-muted);
+}
+
+.ex-harness-note__label {
+  display: block;
+  margin-bottom: 0.2rem;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}
+
+/* An overflow's sizes and who told it (#628). */
+.ex-overflow {
+  margin: 0.3rem 0 0;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}

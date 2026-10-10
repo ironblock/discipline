@@ -39,7 +39,7 @@ function registry<K extends string>(known: Readonly<Record<string, Omit<Drawn, '
 // ------------------------------------------------------------------ lanes
 
 /** Lanes with colour tokens of their own (`--fill-<lane>`, `--ink-<lane>`). */
-const LANES: ReadonlySet<string> = new Set(['interview', 'ratify', 'extraction']);
+const LANES: ReadonlySet<string> = new Set(['interview', 'ratify', 'extraction', 'audit']);
 
 /**
  * A lane's colours, as custom properties for whatever draws it -- a bar, a
@@ -159,6 +159,13 @@ export const seamReasonOf = registry<SeamReason>({
   phase: { label: 'phase', level: 'quiet' },
   cadence: { label: 'cadence', level: 'quiet' },
   budget: { label: 'over budget', level: 'warn' },
+  window: { label: 'the window', level: 'warn' },
+  prune: { label: 'the model pruned output', level: 'quiet' },
+});
+
+/** A hazard a fork was sent knowing (#637). */
+export const hazardOf = registry<string>({
+  'may-displace-trunk-cache': { label: 'may displace the trunk’s cache', level: 'warn' },
 });
 
 /** Why a generation stopped. The expected ones draw nothing; the rest say so. */
@@ -212,6 +219,7 @@ export const refusalOf = registry<Refusal>({
   'no-tangent': { label: 'not taken: no tangent is open', level: 'quiet' },
   'bad-tangent': { label: 'not taken: a tangent needs working memory, and a new id', level: 'warn' },
   'not-the-scope': { label: 'not taken: rule on exactly the tangent’s entries', level: 'warn' },
+  'no-proposal': { label: 'not taken: no phase proposal waits on a ruling', level: 'quiet' },
   'nothing-running': { label: 'not taken: no command is running to move', level: 'quiet' },
   // A seam's phase the graph would not take (#563).
   'no-phase-graph': { label: 'not taken: this session declares no phases', level: 'quiet' },

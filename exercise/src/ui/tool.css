@@ -39,3 +39,35 @@
 .ex-call-outcome[data-level='bad'] { color: var(--bad); }
 .ex-confinement { color: var(--ink-faint); }
 .ex-tool__stderr { color: var(--ink-faint); }
+
+/* What a self-capture call did to working memory (#619). */
+.ex-capture {
+  margin: 0.35rem 0 0;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}
+
+/* A call run in the background (#614): its job and how it ended, said quietly. */
+.ex-background {
+  margin: 0.35rem 0 0;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}
+
+.ex-background[data-status='failed'] {
+  color: var(--bad);
+}
+
+/* Output the model pruned (#630). */
+.ex-pruned {
+  margin: 0.35rem 0 0;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}
+
+/* A phase proposal's ruling (#651). */
+.ex-ruled {
+  margin: 0.35rem 0 0;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}

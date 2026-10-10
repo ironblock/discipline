@@ -22,7 +22,6 @@ export const NEEDS = {
   record: 'the arm a session runs, and its system prompt’s size in tokens, on its start',
   slots: 'the server’s slots, and the one that served each call',
   phases: 'phases: the one a session opens in, and the move a seam makes',
-  'pre-warm': 'a seam’s render size, and the pre-warm after it',
   lanes: 'the ratify and extraction side lanes',
 } as const;
 
@@ -49,7 +48,7 @@ export type SettleReason = Open<V0.SettleReason>;
 export type FailReason = Open<V0.FailReason>;
 
 /** The side lanes a fork runs in: `diet`'s `interview`, and AHEAD `ratify` and `extraction` (the predecessor's mechanical read of the trunk). */
-export type ForkLane = Open<'interview' | 'ratify' | 'extraction'>;
+export type ForkLane = Open<'interview' | 'ratify' | 'extraction' | 'audit'>;
 /** Which lane a request was made on: `diet`'s, or an AHEAD side lane. */
 export type Lane = V0.Lane | ForkLane;
 
@@ -238,6 +237,13 @@ export interface Fork extends At {
   readonly question: string;
   /** AHEAD (`slots`): prefix tokens shared with the trunk, the warm tail it forked from. `diet`'s fork line does not say. */
   readonly prefix_tokens?: number;
+  /** An offboard seat's registry id, when the fork ran off the warm trunk (log v7, #615); with the model it served. */
+  readonly substrate?: string;
+  readonly model?: string;
+  /** What triggered it (log v7, #620): `turn_end`, or `call:<class>:<id>` for a call that warranted it mid-turn. */
+  readonly trigger?: string;
+  /** A hazard it was sent knowing (log v7, #637): `may-displace-trunk-cache` when its slot may evict the trunk's cache. */
+  readonly hazard?: string;
 }
 
 /** How a fork ended. */
@@ -246,6 +252,12 @@ export interface ForkSettled extends At {
   /** The `seq` of the `fork`. */
   readonly fork: number;
   readonly outcome: ForkOutcome;
+  /** An offboard fork's prompt as it read it cold (#615): its prefill, in tokens. */
+  readonly prompt_tokens?: number;
+  /** An offboard fork's wall time, from its request to its settle (#615). */
+  readonly wall_ms?: number;
+  /** Why it was never sent, when its outcome is `refused` (log v7, #637): `pool` when the slots had no room for it. */
+  readonly refused?: string;
 }
 
 export interface Entry {
@@ -258,8 +270,10 @@ export interface Entry {
 /** A change to working memory, from the fork that produced it. */
 export interface Patch extends At {
   readonly kind: 'patch';
-  /** The `seq` of the `fork` that produced it. */
-  readonly fork: number;
+  /** The `seq` of the `fork` that produced it; absent for the trunk's own change, which names its `lane` (#627). */
+  readonly fork?: number;
+  /** The trunk's lane that made it, when no fork did (log v7, #627): today always `self-capture`. */
+  readonly lane?: string;
   readonly op: PatchOp;
   readonly entry: Entry;
   /** For `supersede`: the entry this one replaces. */
@@ -285,7 +299,7 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
     readonly reason: SeamReason;
     /** The phases it moved between (v7, #563). */
     readonly phase?: { readonly from: string; readonly to: string };
-    /** AHEAD (`pre-warm`): the pre-warm -- the new prefix sent once so the next ask finds it cached. */
+    /** The pre-warm (log v7, #504): the new prefix sent once so the next ask finds it cached. */
     readonly warm?: Timings;
     /** The surface's own older shape: the render's number, in a recording placed before v6. */
     readonly render_version?: number;
@@ -293,8 +307,22 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
 
 /** Forks' patches delivered after an ask (v7, the fork delivery lever). */
 export type Delivered = V0.DeliveredLine;
+/** Self-capture's reminder, a note after an ask (v7, #619): the harness's words, not the operator's. */
+export type Reminded = V0.RemindedLine;
+/** What a self-capture call did (v7, #619), logged beside its `tool_call` line: its outcome and the entries it wrote. */
+export type Capture = V0.CaptureLine;
 /** Archived items recalled after an ask (v7, the archive recall lever, #566). */
 export type Recalled = V0.RecalledLine;
+/** A background command's end (v7, #614). Folded, not yet drawn. */
+export type BackgroundEnded = V0.BackgroundEndedLine;
+/** Ended background commands' notifications delivered after an ask (v7, #614). */
+export type Notice = V0.NoticeLine;
+/** A running call near its timeout (v7, #613): for the surface's warning, never the model's. */
+export type TimeoutNear = V0.TimeoutNearLine;
+/** A fork the turn's own self-capture already recorded, screened out of its gap (v7, #611). Folded, not yet drawn. */
+export type ForkSkipped = V0.ForkSkippedLine;
+/** A tool result the model pruned, replaced at a later seam (v7, `prune_output`, #612). */
+export type Pruned = V0.PrunedLine;
 
 export type LogLine =
   | SessionStart
@@ -317,8 +345,19 @@ export type LogLine =
   | Seam
   | Delivered
   | Recalled
+  | Reminded
+  | Capture
   | TangentOpen
-  | TangentClose;
+  | TangentClose
+  | Pruned
+  | BackgroundEnded
+  | Notice
+  | TimeoutNear
+  | ForkSkipped
+  | PhaseRuled;
+
+/** The operator's ruling on the model's phase proposal (log v7, #651): `seam` (a seam follows), `continue`, or `stay`. */
+export type PhaseRuled = V0.PhaseRuledLine;
 
 export type Kind = LogLine['kind'];
 
@@ -351,8 +390,7 @@ export function needsOf(line: LogLine): Need[] {
       break;
     case 'seam':
       // `phase` is the format's own since v7 (#563); `render_tokens`, the render's estimated size, since v7's render
-      // budget (#565), written beside the budget that produced it.
-      has('pre-warm', line.warm);
+      // budget (#565), written beside the budget that produced it; `warm`, the pre-warm's timings, since #504.
       break;
   }
   return out;

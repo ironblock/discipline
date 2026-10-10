@@ -251,10 +251,18 @@ fn output_tokens(
 
 /// A turn's `prefill_tokens` from its trunk response's `timings`, on a
 /// cited engine: `prompt_n + cache_n`, both as the server reported them.
+/// A hosted API's response, which carries `usage` and no timings, says it
+/// directly: its whole prompt, uncached, read and written (#555).
 fn prefill_tokens(
     timings: Option<&log::Timings>,
+    usage: Option<&log::Usage>,
     engine: Option<Engine>,
 ) -> Result<Count, &'static str> {
+    if let (None, Some(usage)) = (timings, usage)
+        && usage.cache_creation_tokens.is_some()
+    {
+        return Count::new(usage.prompt_tokens).map_err(|_| "a count past the record's bound");
+    }
     if engine.is_none() {
         return Err("equality unmeasured for this engine");
     }
@@ -309,6 +317,7 @@ pub fn project_in(
                 fork_delivery,
                 tool_output,
                 levers,
+                bash_timeout_ms,
                 ..
             },
         ..
@@ -323,7 +332,7 @@ pub fn project_in(
         .ok_or("the regime declares no substrate")?;
     let mut walk = Walk::over(lines, substrate, engine);
     walk.recording = recording.map(std::path::Path::to_path_buf);
-    walk.tools = tools_of(tools.as_deref().unwrap_or_default());
+    walk.tools = tools_of(tools.as_deref().unwrap_or_default(), *bash_timeout_ms);
     walk.template_kwargs = kwargs_of(template_kwargs.as_ref());
     walk.model.clone_from(model);
     walk.head = head
@@ -420,6 +429,21 @@ struct Walk<'a> {
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
     side_heads: BTreeMap<Lane, String>,
+    /// The forks whose head is the trunk's own (#157): a whole-trunk view,
+    /// on the trunk's server -- what [`Walk::side_head_change`] can rebuild.
+    whole_trunk_forks: BTreeSet<u64>,
+    /// Each call's latest `tool_call` line, by its id: its row and what the
+    /// trunk carried as its result (#612).
+    calls: BTreeMap<String, (u64, Option<String>)>,
+    /// The results the model pruned (#612), in the order it pruned them.
+    pruned: Vec<Pruned>,
+    /// Each fork's call, by its request's `seq`, and what its responses'
+    /// usage counted: cache reads over whole prompts (#555).
+    fork_calls: BTreeMap<u64, u64>,
+    fork_cache: BTreeMap<u64, (u64, u64)>,
+    /// A lane's substrate where a fork's line names an offboard seat
+    /// (#570): its requests and its fork rows name it, not the trunk's.
+    seated: BTreeMap<Lane, String>,
     /// The trunk at an open tangent's fork point (v7, #22): what its close
     /// rolls the rebuilt trunk back to, as the session's close does.
     tangent_trunk: Option<Vec<Message>>,
@@ -477,14 +501,30 @@ fn kwargs_of(
 /// each name to the definition its requests carried. The head's digest is
 /// the check: a definition that differs from what was sent leaves the head
 /// unverified, never wrongly verified.
-fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
+fn tools_of(names: &[String], bash_timeout_ms: Option<u64>) -> Result<Vec<ToolDefinition>, String> {
+    // Background commands (#614) were on exactly when `task_stop` was
+    // declared: `bash` then took `is_background`.
+    let background = names
+        .iter()
+        .any(|name| name == super::background::TASK_STOP);
     names
         .iter()
         .map(|name| {
             if name == super::tool_loop::BASH {
-                Ok(super::tool_loop::bash_tool())
+                // A session since #613 names its default timeout, 0 for
+                // none, and its `bash` took `timeout`; one before it did
+                // not.
+                Ok(match bash_timeout_ms {
+                    Some(ms) => {
+                        super::tool_loop::bash_tool_timed(background, (ms > 0).then_some(ms))
+                    }
+                    None => super::tool_loop::bash_tool_with(background),
+                })
+            } else if name == super::background::TASK_STOP {
+                Ok(super::background::task_stop_tool())
             } else if let Some(tool) = super::standard::definitions()
                 .into_iter()
+                .chain([super::prune::definition()])
                 .find(|tool| tool.name == *name)
             {
                 Ok(tool)
@@ -513,6 +553,26 @@ fn earlier_bash(tools: &[ToolDefinition]) -> Option<Vec<ToolDefinition>> {
     let mut earlier = tools.to_vec();
     earlier[at] = super::tool_loop::bash_tool_before_its_description();
     Some(earlier)
+}
+
+/// A result the model pruned (#612), as its `pruned` line names it.
+#[derive(Debug, Clone)]
+struct Pruned {
+    call: String,
+    shown: String,
+    text: String,
+    output: record::PrunedOutput,
+    applied: bool,
+}
+
+impl Pruned {
+    /// Whether `message` is the result it prunes, as the trunk carried it
+    /// or as a seam already replaced it: the session's own test.
+    fn is(&self, message: &Message) -> bool {
+        message.role == Role::Tool
+            && message.tool_call_id.as_deref() == Some(self.call.as_str())
+            && (message.content == self.shown || message.content == self.text)
+    }
 }
 
 impl<'a> Walk<'a> {
@@ -570,6 +630,12 @@ impl<'a> Walk<'a> {
             trunk_unrebuilt: None,
             refilled: false,
             side_heads: BTreeMap::new(),
+            whole_trunk_forks: BTreeSet::new(),
+            calls: BTreeMap::new(),
+            pruned: Vec::new(),
+            fork_calls: BTreeMap::new(),
+            fork_cache: BTreeMap::new(),
+            seated: BTreeMap::new(),
         }
     }
 
@@ -580,6 +646,39 @@ impl<'a> Walk<'a> {
             why,
             text,
         });
+    }
+
+    /// A failed call, named: the record has no row for one. An overflow's
+    /// why carries its prompt as sized and the window (#616), and whether
+    /// the engine said so or its size did.
+    fn failed(
+        &mut self,
+        seq: u64,
+        reason: log::FailReason,
+        message: &str,
+        overflow: Option<log::Overflow>,
+    ) {
+        let sizes = overflow.map_or_else(String::new, |overflow| {
+            format!(
+                ", {}: a prompt of {} tokens as sized, against a window of {}",
+                if overflow.inferred {
+                    "told from its size"
+                } else {
+                    "as the engine said"
+                },
+                overflow.prompt_tokens,
+                overflow.window
+            )
+        });
+        self.name(
+            seq,
+            "request.failed",
+            format!(
+                "a failed call ({}{sizes}): the record has no row for one",
+                reason.tag()
+            ),
+            Some(message.to_owned()),
+        );
     }
 
     /// A tangent's line (v7, #22): its open keeps the rebuilt trunk as the
@@ -613,6 +712,12 @@ impl<'a> Walk<'a> {
             Line::IdleGap { .. } => log::Kind::IdleGap,
             Line::Refused { .. } => log::Kind::Refused,
             Line::Capture { .. } => log::Kind::Capture,
+            Line::PhaseRuled { .. } => log::Kind::PhaseRuled,
+            Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
+            Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
+            Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
+            // The trunk's own self-capture patch (#609), fork-less.
+            Line::Patch { .. } => log::Kind::Patch,
             _ => log::Kind::Progress,
         }
         .tag();
@@ -628,6 +733,9 @@ impl<'a> Walk<'a> {
 
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
+            // A prune (v7, #612): applied to the trunk by the seam that
+            // lists its call, as the session applies it.
+            Line::Pruned { .. } => self.pruned_line(line),
             Line::Ask {
                 turn, text, files, ..
             } => {
@@ -638,8 +746,14 @@ impl<'a> Walk<'a> {
                 turn,
                 lane,
                 head_sha256,
+                fork,
                 ..
-            } => self.request(line.seq, *turn, *lane, head_sha256.as_deref())?,
+            } => {
+                if let Some(fork) = fork {
+                    self.fork_calls.insert(line.seq, *fork);
+                }
+                self.request(line.seq, (*turn, *lane, *fork), head_sha256.as_deref())?;
+            }
             // A capped call is not an answer (#290, ruled 5969297103): no
             // row, its text named, and nothing put on the rebuilt trunk.
             Line::Response {
@@ -675,23 +789,20 @@ impl<'a> Walk<'a> {
                 request, partial, ..
             } => self.cancelled_call(line.seq, *request, partial),
             Line::RequestFailed {
-                reason, message, ..
-            } => self.name(
-                line.seq,
-                "request.failed",
-                format!(
-                    "a failed call ({}): the record has no row for one",
-                    reason.tag()
-                ),
-                Some(message.clone()),
-            ),
+                reason,
+                message,
+                overflow,
+                ..
+            } => self.failed(line.seq, *reason, message, *overflow),
             // A fork (v5, #374): its row, and its patches as one capture row.
-            Line::Fork { lane, of_turn, .. } => self.fork(line.seq, *lane, *of_turn),
-            Line::Patch { fork, .. } => self.patch(line.seq, *fork),
+            Line::Fork { .. } => self.fork(line),
+            Line::Patch {
+                fork: Some(fork), ..
+            } => self.patch(line.seq, *fork),
             // The record's fork row carries no outcome: a fork that settled
             // `value` is carried by its capture row, and any other outcome is
             // named with its word.
-            Line::ForkSettled { fork, outcome } => self.fork_settled(line.seq, *fork, *outcome),
+            Line::ForkSettled { fork, outcome, .. } => self.fork_settled(line.seq, *fork, *outcome),
             // A seam (v6, #493): its row, and the trunk refilled exactly as
             // the session refills it, so the next request's head is rebuilt
             // and checked like any other.
@@ -703,17 +814,28 @@ impl<'a> Walk<'a> {
             // on the rebuilt trunk, as it does on the session's.
             // Archived items recalled (v7, #566): a note after it too, in
             // the log's order.
-            // The self-capture reminder (v7, #609): a note after it too.
+            // Background commands' notices (v7, #614), the self-capture
+            // reminder (v7, #609): notes after it too, in the log's order.
             Line::Delivered { turn, text, .. }
             | Line::Recalled { turn, text, .. }
-            | Line::Reminded { turn, text } => {
+            | Line::Reminded { turn, text }
+            | Line::Notice { turn, text } => {
                 self.notes.entry(*turn).or_default().push(text.clone());
             }
             // Facts the record has no row for at all, named once per kind.
             Line::IdleGap { .. }
             | Line::Refused { .. }
             | Line::Progress { .. }
-            | Line::Capture { .. } => self.no_row(line),
+            | Line::BackgroundEnded { .. }
+            | Line::TimeoutNear { .. }
+            | Line::ForkSkipped { .. }
+            | Line::Capture { .. }
+            // The operator's ruling on a phase proposal (#124): a seam it
+            // declares has its own row.
+            | Line::PhaseRuled { .. }
+            // The trunk's own self-capture patch (#609): no fork row to
+            // count it on, as its `capture` line has none.
+            | Line::Patch { fork: None, .. } => self.no_row(line),
             // A tool call (v3, #302): its row carries how it ran under the
             // log's own words, so the record says what confined it.
             Line::ToolCall { .. }
@@ -846,7 +968,33 @@ impl<'a> Walk<'a> {
     /// A fork's row, `f/<seq>`, off the turn it follows: served on the
     /// regime's substrate, like every row this projection writes. Named
     /// rather than written when that turn has no row.
-    fn fork(&mut self, seq: u64, lane: Lane, of_turn: u32) {
+    /// The substrate `lane`'s rows name: its seat's, else the trunk's.
+    fn substrate_of(&self, lane: Lane) -> String {
+        self.seated.get(&lane).unwrap_or(&self.substrate).clone()
+    }
+
+    fn fork(&mut self, forked: &log::Line) {
+        let Line::Fork {
+            lane,
+            of_turn,
+            seat,
+            view,
+            ..
+        } = &forked.event
+        else {
+            return;
+        };
+        let (seq, lane, of_turn) = (forked.seq, *lane, *of_turn);
+        // A whole-trunk fork on the trunk's own server: its head is the
+        // trunk's, and its request's head can be rebuilt (#157).
+        if view.is_none() && seat.is_none() {
+            self.whole_trunk_forks.insert(seq);
+        }
+        // The lane's requests name the seat whether or not this row can be
+        // written.
+        if let Some(seat) = seat {
+            self.seated.insert(lane, seat.substrate.clone());
+        }
         let turned = self
             .events
             .iter()
@@ -862,10 +1010,38 @@ impl<'a> Walk<'a> {
         }
         self.forks.insert(seq);
         self.events.push(Event::Fork {
+            cache_read_share: None,
             id: format!("f/{seq}"),
             lane: lane.tag().to_owned(),
-            substrate: self.substrate.clone(),
+            substrate: self.substrate_of(lane),
             of_turn,
+        });
+    }
+
+    /// A `pruned` line (#612), kept until the seam that lists its call: the
+    /// pruned call's row and what the trunk carried as its result.
+    fn pruned_line(&mut self, line: &log::Line) {
+        let Line::Pruned {
+            call,
+            sha256,
+            bytes,
+            text,
+            ..
+        } = &line.event
+        else {
+            return;
+        };
+        let (row, shown) = self.calls.get(call).cloned().unwrap_or_default();
+        self.pruned.push(Pruned {
+            call: call.clone(),
+            shown: shown.unwrap_or_default(),
+            text: text.clone(),
+            output: record::PrunedOutput {
+                tool_call: format!("t/{row}"),
+                sha256: sha256.clone(),
+                bytes: *bytes,
+            },
+            applied: false,
         });
     }
 
@@ -881,6 +1057,8 @@ impl<'a> Walk<'a> {
             tail_tokens,
             outputs,
             placement,
+            fired,
+            pruned,
             ..
         } = &line.event
         else {
@@ -893,7 +1071,26 @@ impl<'a> Walk<'a> {
             .trunk
             .get(self.head.len() + usize::from(self.refilled)..)
             .unwrap_or_default();
-        let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+        let mut kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+        // The prunes this seam applied (#612), then each pruned result in
+        // the kept tail replaced by its line, as the session replaces it.
+        let mut applied = Vec::new();
+        for call in pruned.iter().flatten() {
+            if let Some(prune) = self
+                .pruned
+                .iter_mut()
+                .find(|prune| !prune.applied && prune.call == *call)
+            {
+                prune.applied = true;
+                applied.push(prune.output.clone());
+            }
+        }
+        for message in &mut kept {
+            if let Some(prune) = self.pruned.iter().find(|prune| prune.is(message)) {
+                message.content.clone_from(&prune.text);
+                message.images.clear();
+            }
+        }
         let carried_turns = kept
             .iter()
             .filter(|message| message.role == Role::User)
@@ -949,6 +1146,10 @@ impl<'a> Walk<'a> {
             tail_tokens: tailed.then_some(tail_tokens),
             carried_turns: tailed.then_some(carried_turns),
             carried_tokens: tailed.then_some(carried_tokens),
+            // An automatic seam names the prompt that fired it (#617).
+            prompt_tokens: fired.map(|fired| fired.prompt_tokens),
+            window: fired.map(|fired| fired.window),
+            pruned: (!applied.is_empty()).then_some(applied),
         });
     }
 
@@ -982,18 +1183,21 @@ impl<'a> Walk<'a> {
         if let Some(files) = files {
             self.ask_files.insert(turn, files.clone());
         }
-        let trunk_timings =
-            self.trunk_of
-                .get(&turn)
-                .and_then(|request| match self.outcome.get(request) {
-                    // A capped call's prompt was still prefilled: the cap
-                    // bounds the output, not the prompt (#313's review).
-                    Some(Line::Response { timings, .. }) => timings.as_ref(),
-                    _ => None,
-                });
+        let (trunk_timings, trunk_usage) = self
+            .trunk_of
+            .get(&turn)
+            .and_then(|request| match self.outcome.get(request) {
+                // A capped call's prompt was still prefilled: the cap
+                // bounds the output, not the prompt (#313's review).
+                Some(Line::Response { timings, usage, .. }) => {
+                    Some((timings.as_ref(), usage.as_ref()))
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
         match (
             self.turns_broken,
-            prefill_tokens(trunk_timings, self.engine),
+            prefill_tokens(trunk_timings, trunk_usage, self.engine),
         ) {
             (false, Ok(prefill_tokens)) => {
                 self.events.push(Event::Turn {
@@ -1044,8 +1248,7 @@ impl<'a> Walk<'a> {
     fn request(
         &mut self,
         seq: u64,
-        turn: u32,
-        lane: Lane,
+        (turn, lane, fork): (u32, Lane, Option<u64>),
         head_sha256: Option<&str>,
     ) -> Result<(), String> {
         let Some(head_sha256) = head_sha256 else {
@@ -1057,7 +1260,7 @@ impl<'a> Walk<'a> {
         self.events.push(Event::Request {
             id: request_id(seq),
             lane: lane.tag().to_owned(),
-            substrate: self.substrate.clone(),
+            substrate: self.substrate_of(lane),
             retry_of: None,
             text: None,
             head_sha256: Some(head_sha256.to_owned()),
@@ -1066,7 +1269,7 @@ impl<'a> Walk<'a> {
             self.turn_of.insert(seq, turn);
             self.head_change(seq, turn, head_sha256);
         } else {
-            self.side_head_change(seq, lane, head_sha256);
+            self.side_head_change(seq, (lane, fork), head_sha256);
         }
         if !self.outcome.contains_key(&seq) {
             self.name(
@@ -1183,12 +1386,22 @@ impl<'a> Walk<'a> {
         }));
     }
 
-    /// A side lane's head moving (v5, #374): named as unattributed, since the
-    /// log holds an interview request's digest and not the head it hashed --
-    /// the trunk's warm tail and the fork's question -- so the move cannot be
-    /// rebuilt and attributed as the trunk's is.
-    fn side_head_change(&mut self, seq: u64, lane: Lane, logged: &str) {
-        let Some(previous) = self.side_heads.insert(lane, logged.to_owned()) else {
+    /// A side lane's head moving (v5, #374). A whole-trunk fork on the
+    /// trunk's own server sends the trunk as it stands, then its question, so
+    /// its head is rebuilt from the projected trunk and verified by digest
+    /// (#157): no row when it matches -- its move from the lane's last head
+    /// is the trunk's own growth. Any other side head -- one that does not
+    /// match, a `last:N` view, an offboard seat -- is not attributed here: a
+    /// move from the lane's last head is named `unattributed`, and the lane's
+    /// first head is no move at all.
+    fn side_head_change(&mut self, seq: u64, (lane, fork): (Lane, Option<u64>), logged: &str) {
+        let verified = fork.is_some_and(|fork| self.whole_trunk_forks.contains(&fork))
+            && self.rebuilds_the_trunk(logged);
+        let previous = self.side_heads.insert(lane, logged.to_owned());
+        if verified {
+            return;
+        }
+        let Some(previous) = previous else {
             return;
         };
         if previous == logged {
@@ -1200,6 +1413,43 @@ impl<'a> Walk<'a> {
             reason: PrefixReason::Unattributed,
             diff: Vec::new(),
         });
+    }
+
+    /// Whether `logged` is the head a request on the projected trunk carries
+    /// -- the trunk, then the request's own last message, which
+    /// `client::head` leaves out -- under the session's tools (or the `bash`
+    /// definition an older log sent, #558). Never, while the trunk carries
+    /// something the log cannot rebuild.
+    fn rebuilds_the_trunk(&self, logged: &str) -> bool {
+        if self.trunk_unrebuilt.is_some() {
+            return false;
+        }
+        let Ok(tools) = self.tools.clone() else {
+            return false;
+        };
+        let mut messages = self.trunk.clone();
+        messages.push(Message::new(Role::User, String::new()));
+        std::iter::once(tools.clone())
+            .chain(earlier_bash(&tools))
+            .any(|tools| {
+                Head::of(&RequestShape {
+                    model: self.model.clone(),
+                    messages: messages.clone(),
+                    sampler: SamplerCard::empty(),
+                    limits: Limits {
+                        attempt: std::time::Duration::ZERO,
+                        call: std::time::Duration::ZERO,
+                        max_output_tokens: 0,
+                        retries: 0,
+                        context_window: None,
+                    },
+                    grammar: None,
+                    template_kwargs: self.template_kwargs.clone(),
+                    tools,
+                })
+                .digest()
+                    == logged
+            })
     }
 
     /// Turn `turn`'s user message as the session sent it: the ask's words,
@@ -1304,6 +1554,9 @@ impl<'a> Walk<'a> {
             let ran = self.steps.get(turn).map_or(0, Vec::len).saturating_sub(1);
             self.onto_the_trunk(*turn, ran);
             return;
+        }
+        if let Line::ToolCall { id, shown, .. } = &line.event {
+            self.calls.insert(id.clone(), (line.seq, shown.clone()));
         }
         self.step_call(&line.event);
         self.tool_call_line(line.seq, &line.event);
@@ -1472,8 +1725,31 @@ impl<'a> Walk<'a> {
         timings: Option<&log::Timings>,
         usage: Option<&log::Usage>,
     ) {
+        // A fork's cache share, over its responses' usage (#555).
+        if let (Some(&fork), Some(usage)) = (self.fork_calls.get(&to_request), usage)
+            && usage.cached_tokens.is_some()
+        {
+            let (read, prompt) = self.fork_cache.entry(fork).or_default();
+            *read += usage.cached_tokens.unwrap_or(0);
+            *prompt += usage.prompt_tokens;
+            let share = cache_read_share(*read, *prompt);
+            let id = format!("f/{fork}");
+            if let Some(Event::Fork {
+                cache_read_share, ..
+            }) = self
+                .events
+                .iter_mut()
+                .find(|event| matches!(event, Event::Fork { id: row, .. } if *row == id))
+            {
+                *cache_read_share = share;
+            }
+        }
         match output_tokens(usage, timings, self.engine) {
             Ok(output_tokens) => self.events.push(Event::Response {
+                cache_read: usage.and_then(|usage| usage.cached_tokens),
+                cache_creation: usage.and_then(|usage| usage.cache_creation_tokens),
+                cache_creation_5m: usage.and_then(|usage| usage.cache_creation_5m_tokens),
+                cache_creation_1h: usage.and_then(|usage| usage.cache_creation_1h_tokens),
                 id: format!("{}#response", request_id(to_request)),
                 to_request: request_id(to_request),
                 output_tokens,
@@ -1488,6 +1764,21 @@ impl<'a> Walk<'a> {
             ),
         }
     }
+}
+
+/// `read` over `prompt` to four places, half up, as a record decimal; none
+/// for an empty prompt (#555).
+fn cache_read_share(read: u64, prompt: u64) -> Option<record::json::Decimal> {
+    if prompt == 0 {
+        return None;
+    }
+    let ten_thousandths =
+        (u128::from(read) * 10_000 * 2 + u128::from(prompt)) / (2 * u128::from(prompt));
+    record::json::Decimal::new(&format!(
+        "{}.{:04}",
+        ten_thousandths / 10_000,
+        ten_thousandths % 10_000
+    ))
 }
 
 #[cfg(test)]
@@ -1522,6 +1813,7 @@ mod tests {
 
     fn start() -> Line {
         Line::SessionStart {
+            bash_timeout_ms: None,
             version: VERSION,
             opened: 1_790_000_000_000,
             model: "a-model".to_owned(),
@@ -1559,6 +1851,34 @@ mod tests {
         }
     }
 
+    /// #609: a trunk self-capture's `patch` line -- no fork -- has no record
+    /// row and is named as the `patch` line it is, never as `progress`.
+    #[test]
+    fn a_trunk_patch_is_named_a_patch_line() {
+        let mut events = vec![start()];
+        events.extend(answered(1, 3, None, None));
+        events.push(Line::Patch {
+            fork: None,
+            lane: Some("self-capture".to_owned()),
+            op: log::PatchOp::Add,
+            entry: log::PatchEntry {
+                id: "r3/call-1/fact".to_owned(),
+                text: "Hello".to_owned(),
+                category: None,
+            },
+            supersedes: None,
+            tangent: None,
+        });
+        let projection = project(&numbered(events), &regime(), None).expect("projected");
+        let kinds: Vec<&str> = projection
+            .unspellable
+            .iter()
+            .map(|item| item.kind)
+            .collect();
+        assert!(kinds.contains(&"patch"), "{kinds:?}");
+        assert!(!kinds.contains(&"progress"), "{kinds:?}");
+    }
+
     /// One answered turn, its request at `request`.
     fn answered(
         turn: u32,
@@ -1589,6 +1909,8 @@ mod tests {
                 piece: log::Piece::Text("Hello".to_owned()),
             },
             Line::Response {
+                reasoning_signature: None,
+                redacted: None,
                 to_request: request,
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
@@ -1738,6 +2060,9 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            fired: None,
+            pruned: None,
+            warm: None,
         });
         let projection = project(
             &numbered(events),
@@ -1782,6 +2107,9 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            fired: None,
+            pruned: None,
+            warm: None,
         });
         let projection = project(
             &numbered(events),
@@ -1814,6 +2142,9 @@ mod tests {
             3,
             None,
             Some(Usage {
+                cache_creation_1h_tokens: None,
+                cache_creation_5m_tokens: None,
+                cache_creation_tokens: None,
                 prompt_tokens: 12,
                 completion_tokens: 2,
                 cached_tokens: None,
@@ -1841,12 +2172,18 @@ mod tests {
             ),
             (
                 2,
+                // #616: TabbyAPI's abort, told an overflow from its size.
                 Line::RequestFailed {
                     request: 7,
-                    reason: FailReason::Server,
-                    message: "busy".to_owned(),
-                    status: Some(503),
+                    reason: FailReason::ContextOverflow,
+                    message: "Chat completion aborted.".to_owned(),
+                    status: Some(500),
                     partial: None,
+                    overflow: Some(log::Overflow {
+                        prompt_tokens: 161_840,
+                        window: 163_840,
+                        inferred: true,
+                    }),
                 },
             ),
         ] {
@@ -1893,6 +2230,13 @@ mod tests {
         assert!(
             kinds.contains(&"cancelled") && kinds.contains(&"request.failed"),
             "{kinds:?}"
+        );
+        assert!(
+            projection.unspellable.iter().any(|item| item.why
+                == "a failed call (context_overflow, told from its size: a prompt of 161840 \
+                    tokens as sized, against a window of 163840): the record has no row for one"),
+            "{:?}",
+            projection.unspellable
         );
         // The unanswered request by its own seq and reason: every request
         // here is also named for its unrebuildable head, so a bare "request"
@@ -2310,6 +2654,8 @@ mod tests {
                 files: None,
                 shown: None,
                 recovered_from: None,
+                background: None,
+                timeout_ms: None,
             }
         };
         let mut events = vec![start()];
@@ -2396,6 +2742,8 @@ mod tests {
                 files: None,
                 shown: None,
                 recovered_from: None,
+                background: None,
+                timeout_ms: None,
             },
         );
         events.extend(turn);
@@ -2421,6 +2769,42 @@ mod tests {
         assert_eq!(named, vec![Some("ls -la (")]);
     }
 
+    /// #612: a seam that applied a prune names it on its row -- the pruned
+    /// call's row, its whole's sha256, the bytes it removed -- and the
+    /// projection reads the log's own fixture to say so.
+    #[test]
+    fn a_seam_row_names_each_prune_it_applied() {
+        let text = include_str!(
+            "../../formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl"
+        );
+        let lines = log::parse(text).expect("the fixture reads");
+        let projected =
+            project(&lines, &regime(), Some(Engine::Commit("e7051ef"))).expect("projected");
+        let rows: Vec<_> = projected
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Seam { pruned, .. } => Some(pruned.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [Some(vec![record::PrunedOutput {
+                tool_call: "t/6".to_owned(),
+                sha256: crate::digest::sha256_hex(b"line 1\nline 2\n"),
+                bytes: 14,
+            }])],
+            "{:#?}",
+            projected.unspellable
+        );
+        let tool = projected.events.iter().any(|event| {
+            matches!(event, Event::ToolCall { id, tool, .. } if id == "t/6" && tool == "bash")
+        });
+        assert!(tool, "the row it names is the pruned call's");
+        validates(&projected);
+    }
+
     /// A v5 session with two forks, projected and validated: turn 1's
     /// scoping fork settled `value` with three patches, a plain turn 2, and
     /// turn 3's read fork, declined.
@@ -2432,7 +2816,11 @@ mod tests {
             why,
             question: "what did the operator decide".to_owned(),
             view: None,
+            trigger: None,
+            role: None,
+            seat: None,
             ask: None,
+            hazard: None,
         };
         let call = |turn: u32, fork: u64| {
             [
@@ -2446,6 +2834,8 @@ mod tests {
                     max_tokens: None,
                 },
                 Line::Response {
+                    reasoning_signature: None,
+                    redacted: None,
                     to_request: fork + 1,
                     text: "{}".to_owned(),
                     finish_reason: Some("stop".to_owned()),
@@ -2457,7 +2847,8 @@ mod tests {
             ]
         };
         let patch = |fork: u64, id: &str| Line::Patch {
-            fork,
+            fork: Some(fork),
+            lane: None,
             op: log::PatchOp::Add,
             entry: log::PatchEntry {
                 id: id.to_owned(),
@@ -2474,6 +2865,9 @@ mod tests {
         events.push(Line::ForkSettled {
             fork: 8,
             outcome: log::ForkOutcome::Value,
+            prompt_tokens: None,
+            wall_ms: None,
+            refused: None,
         });
         events.extend(["d1", "d2", "d3"].map(|id| patch(8, id)));
         events.extend(answered(2, 17, Some(warm()), None));
@@ -2483,6 +2877,9 @@ mod tests {
         events.push(Line::ForkSettled {
             fork: 29,
             outcome: log::ForkOutcome::Decline,
+            prompt_tokens: None,
+            wall_ms: None,
+            refused: None,
         });
         let lines = numbered(events);
         let document: String = lines.iter().map(|line| log::render(line) + "\n").collect();
@@ -2601,6 +2998,8 @@ mod tests {
                 files: Some(vec![file.clone()]),
                 shown: None,
                 recovered_from: None,
+                background: None,
+                timeout_ms: None,
             },
         );
         events.extend(turn);

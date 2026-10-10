@@ -514,6 +514,9 @@ pub struct Ran {
     pub stderr_bytes: u64,
     /// Whether a stop ended it: its whole process group killed (#551).
     pub cancelled: bool,
+    /// Whether its timeout ended it (#613): its whole process group sent
+    /// `TERM`, then `KILL`.
+    pub timed_out: bool,
     /// What it printed, as bytes: what a file tool reads an image from
     /// (#557), which [`Ran::stdout`]'s lossy text cannot carry.
     pub raw_stdout: Vec<u8>,
@@ -773,6 +776,104 @@ impl Confinement {
         input: Option<&[u8]>,
         stop: &dyn Fn() -> bool,
     ) -> Result<Ran, NotRun> {
+        match self.run_inner(policy, worktree, argv, input, (stop, &|| None, None))? {
+            Finished::Ran(ran) | Finished::Promoted(ran, _) => Ok(ran),
+        }
+    }
+
+    /// [`Self::run_until`], promotable (#614): when `promote` hands back a
+    /// file, the call stops being waited on -- what it printed so far is
+    /// written to the file, and everything after goes there too -- and its
+    /// child is handed back running, still leading its process group.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run`].
+    pub fn run_promotable(
+        &self,
+        policy: &Policy,
+        worktree: &Path,
+        argv: &[String],
+        stop: &dyn Fn() -> bool,
+        (promote, timeout): (&dyn Fn() -> Option<std::fs::File>, Option<Limit<'_>>),
+    ) -> Result<Finished, NotRun> {
+        self.run_inner(policy, worktree, argv, None, (stop, promote, timeout))
+    }
+
+    /// `argv` started under this confinement in the background (#614): its
+    /// standard output and error both written to `output`, nothing on its
+    /// input, leading its own process group as every call does (#551), and
+    /// handed back running, with what ran and under what.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run`].
+    pub fn spawn_detached(
+        &self,
+        policy: &Policy,
+        worktree: &Path,
+        argv: &[String],
+        output: &std::fs::File,
+    ) -> Result<(Ran, std::process::Child), NotRun> {
+        if argv.is_empty() {
+            return Err(NotRun::Nothing);
+        }
+        self.check_worktree(policy, worktree)?;
+        let confined = self.compose(policy, worktree, argv);
+        let Some((program, rest)) = confined.split_first() else {
+            return Err(NotRun::Nothing);
+        };
+        let runner = |why: std::io::Error| NotRun::Runner {
+            said: format!("{program} could not be run: {why}"),
+        };
+        let child = spawned(|| {
+            let mut command = Command::new(program);
+            command.env_clear();
+            command.envs(passed(&policy.environment, std::env::vars_os()));
+            command
+                .args(rest)
+                .current_dir(worktree)
+                .stdin(Stdio::null())
+                .stdout(output.try_clone()?)
+                .stderr(output.try_clone()?);
+            match self {
+                Self::Sandbox(Backend::Seatbelt(runner)) => runner.spawn(&mut command),
+                Self::Unconfined | Self::Sandbox(Backend::Bubblewrap(_)) => {
+                    seatbelt::spawn_leading_a_group(&mut command)
+                }
+            }
+        })
+        .map_err(runner)?;
+        Ok((
+            Ran {
+                argv: argv.to_vec(),
+                policy: self.policy_of(&confined),
+                confined,
+                isolation: self.isolation(),
+                network: policy.network,
+                exit: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                cancelled: false,
+                timed_out: false,
+                raw_stdout: Vec::new(),
+            },
+            child,
+        ))
+    }
+
+    /// One call, run to its end, or promoted to the background (#614).
+    #[allow(clippy::too_many_lines)]
+    fn run_inner(
+        &self,
+        policy: &Policy,
+        worktree: &Path,
+        argv: &[String],
+        input: Option<&[u8]>,
+        (stop, promote, timeout): Hooks<'_>,
+    ) -> Result<Finished, NotRun> {
         // The CALLER's argv, not the composed one. Under `Sandbox` the composed
         // vector is never empty, so this guard only ever fired for
         // `Unconfined` -- and an empty command under the sandbox ran the runner
@@ -787,7 +888,7 @@ impl Confinement {
         // A stop already asked runs nothing (Pi and `OpenCode` both check
         // their abort signal before they start any work).
         if stop() {
-            return Ok(Ran {
+            return Ok(Finished::Ran(Ran {
                 argv: argv.to_vec(),
                 policy: self.policy_of(&confined),
                 confined,
@@ -799,8 +900,9 @@ impl Confinement {
                 stdout_bytes: 0,
                 stderr_bytes: 0,
                 cancelled: true,
+                timed_out: false,
                 raw_stdout: Vec::new(),
-            });
+            }));
         }
         let Some((program, rest)) = confined.split_first() else {
             return Err(NotRun::Nothing);
@@ -845,9 +947,10 @@ impl Confinement {
                 let _ = stdin.write_all(&input);
             });
         }
-        let output = collected(&mut child, stop).map_err(|why| NotRun::Runner {
-            said: format!("{program} could not be waited on: {why}"),
-        })?;
+        let output =
+            collected(&mut child, stop, promote, timeout).map_err(|why| NotRun::Runner {
+                said: format!("{program} could not be waited on: {why}"),
+            })?;
         if let Self::Sandbox(Backend::Seatbelt(runner)) = self {
             runner.forget_ended_groups();
         }
@@ -856,27 +959,71 @@ impl Confinement {
         // `bwrap` only. Seatbelt's profile was validated at open, so its exit
         // here is the command's own, 65 included.
         if let Self::Sandbox(Backend::Bubblewrap(runner)) = self
-            && let Some(said) = runner.setup_failure(&stderr, output.status.code())
+            && let Some(said) =
+                runner.setup_failure(&stderr, output.status.and_then(|status| status.code()))
         {
             return Err(NotRun::Runner { said });
         }
 
         let digest = self.policy_of(&confined);
-        Ok(Ran {
+        let ran = Ran {
             argv: argv.to_vec(),
             confined,
             isolation: self.isolation(),
             network: policy.network,
             policy: digest,
-            exit: output.status.code(),
+            exit: output.status.and_then(|status| status.code()),
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr,
             stdout_bytes: u64::try_from(output.stdout.len()).unwrap_or(u64::MAX),
             stderr_bytes: u64::try_from(output.stderr.len()).unwrap_or(u64::MAX),
             cancelled: output.cancelled,
+            timed_out: output.timed_out,
             raw_stdout: output.stdout,
+        };
+        Ok(if output.status.is_none() {
+            Finished::Promoted(ran, child)
+        } else {
+            Finished::Ran(ran)
         })
     }
+}
+
+/// A call's timeout (#613): how long it may run, and what to do a little
+/// before it is ended -- [`WARN_BEFORE`] ahead, when it runs that long.
+#[allow(missing_debug_implementations)]
+#[derive(Clone, Copy)]
+pub struct Limit<'a> {
+    /// How long it may run.
+    pub after: Duration,
+    /// Called once, [`WARN_BEFORE`] before the end.
+    pub warn: &'a dyn Fn(),
+}
+
+/// What watches a running call: a stop, a promotion (#614), a timeout
+/// (#613).
+type Hooks<'a> = (
+    &'a dyn Fn() -> bool,
+    &'a dyn Fn() -> Option<std::fs::File>,
+    Option<Limit<'a>>,
+);
+
+/// How long before a timeout its warning comes: Qwen Code's 15 seconds
+/// (`tools/shell.ts:1316-1318`).
+pub const WARN_BEFORE: Duration = Duration::from_secs(15);
+
+/// How long a timed-out group has between `TERM` and `KILL`: Qwen Code's
+/// 200 ms (`services/shellExecutionService.ts`).
+const TERM_GRACE: Duration = Duration::from_millis(200);
+
+/// How a promotable call ended (#614).
+#[derive(Debug)]
+pub enum Finished {
+    /// It ran to its end, or a stop ended it.
+    Ran(Ran),
+    /// It was promoted to the background: what it printed until then, and
+    /// its child, still running.
+    Promoted(Ran, std::process::Child),
 }
 
 /// How long the output a call's leader left in its pipes is read for once
@@ -891,7 +1038,10 @@ const POLL: Duration = Duration::from_millis(5);
 
 /// What a call printed and how it ended.
 struct Collected {
-    status: std::process::ExitStatus,
+    /// How the leader exited; `None` when the call was promoted (#614).
+    status: Option<std::process::ExitStatus>,
+    /// Whether its timeout ended it (#613).
+    timed_out: bool,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     cancelled: bool,
@@ -904,6 +1054,8 @@ struct Drained {
     kept: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
     keeping: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ended: std::sync::mpsc::Receiver<()>,
+    /// Where the stream goes once the call is promoted (#614).
+    sink: std::sync::Arc<std::sync::Mutex<Option<std::fs::File>>>,
 }
 
 impl Drained {
@@ -912,20 +1064,34 @@ impl Drained {
         let kept = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let keeping = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let (end, ended) = std::sync::mpsc::channel();
-        let (into, still) = (
+        let sink: std::sync::Arc<std::sync::Mutex<Option<std::fs::File>>> =
+            std::sync::Arc::default();
+        let (into, still, out) = (
             std::sync::Arc::clone(&kept),
             std::sync::Arc::clone(&keeping),
+            std::sync::Arc::clone(&sink),
         );
         std::thread::spawn(move || {
+            use std::io::Write as _;
             let mut chunk = [0_u8; 8192];
             loop {
                 match stream.read(&mut chunk) {
                     Ok(0) | Err(_) => break,
-                    Ok(read) if still.load(Ordering::SeqCst) => into
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .extend_from_slice(&chunk[..read]),
-                    Ok(_) => {}
+                    Ok(read) => {
+                        // The sink first, under its lock: a promotion swaps
+                        // it in holding that lock, so no chunk is lost or
+                        // written twice.
+                        let mut sink = out
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        if let Some(file) = sink.as_mut() {
+                            let _ = file.write_all(&chunk[..read]);
+                        } else if still.load(Ordering::SeqCst) {
+                            into.lock()
+                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                .extend_from_slice(&chunk[..read]);
+                        }
+                    }
                 }
             }
             let _ = end.send(());
@@ -934,7 +1100,27 @@ impl Drained {
             kept,
             keeping,
             ended,
+            sink,
         }
+    }
+
+    /// The stream from here on into `file` (#614): what was read so far is
+    /// written there first, and handed back.
+    fn redirect(&self, mut file: std::fs::File) -> Vec<u8> {
+        use std::io::Write as _;
+        let mut sink = self
+            .sink
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let so_far = std::mem::take(
+            &mut *self
+                .kept
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        );
+        let _ = file.write_all(&so_far);
+        *sink = Some(file);
+        so_far
     }
 
     /// What was read: all of it once the stream ended, or by `until`,
@@ -957,10 +1143,16 @@ impl Drained {
 /// `child` waited on by its leader: its output so far once the leader has
 /// exited, or, when `stop` is asked first, its whole process group killed
 /// and reaped (#551).
+#[allow(clippy::too_many_lines)]
 fn collected(
     child: &mut std::process::Child,
     stop: &dyn Fn() -> bool,
+    promote: &dyn Fn() -> Option<std::fs::File>,
+    timeout: Option<Limit<'_>>,
 ) -> std::io::Result<Collected> {
+    let started = Instant::now();
+    let mut warned = false;
+    let mut timed_out = false;
     let stdout = child.stdout.take().map(Drained::of);
     let stderr = child.stderr.take().map(Drained::of);
     let group = child.id();
@@ -980,11 +1172,60 @@ fn collected(
         if let Some(status) = child.try_wait()? {
             break status;
         }
+        // Its timeout (#613): the warning ahead of it, once; at it, the
+        // whole group sent `TERM`, then `KILL` after the grace.
+        if let Some(limit) = &timeout {
+            let ran = started.elapsed();
+            if !warned && limit.after > WARN_BEFORE && ran + WARN_BEFORE >= limit.after {
+                warned = true;
+                (limit.warn)();
+            }
+            if ran >= limit.after {
+                let target = format!("-{group}");
+                let _ = seatbelt::kill().args(["-TERM", "--", &target]).output();
+                let grace = Instant::now() + TERM_GRACE;
+                let mut ended = child.try_wait()?;
+                while ended.is_none() && Instant::now() < grace {
+                    std::thread::sleep(POLL);
+                    ended = child.try_wait()?;
+                }
+                if ended.is_none() {
+                    let _ = seatbelt::kill().args(["-KILL", "--", &target]).output();
+                    let _ = child.kill();
+                }
+                timed_out = true;
+                break match ended {
+                    Some(status) => status,
+                    None => child.wait()?,
+                };
+            }
+        }
+        // Promoted (#614): what was printed so far into the file, the rest
+        // after it, and the child left running.
+        if let Some(file) = promote() {
+            let stdout = stdout
+                .as_ref()
+                .map(|drained| file.try_clone().map(|file| drained.redirect(file)))
+                .transpose()?
+                .unwrap_or_default();
+            let stderr = stderr
+                .as_ref()
+                .map(|drained| drained.redirect(file))
+                .unwrap_or_default();
+            return Ok(Collected {
+                status: None,
+                stdout,
+                stderr,
+                cancelled: false,
+                timed_out: false,
+            });
+        }
         std::thread::sleep(POLL);
     };
     let until = Instant::now() + DRAIN;
     Ok(Collected {
-        status,
+        status: Some(status),
+        timed_out,
         stdout: stdout
             .map(|drained| drained.taken(until))
             .unwrap_or_default(),
@@ -1223,6 +1464,43 @@ mod tests {
 
     /// The same shape under the Mac's own Seatbelt, which T1 runs under: the
     /// call returns, the server survives it, and the session's end kills it.
+    /// A background command under Seatbelt (#614): started detached, its
+    /// output written to the file it was handed, running on until the
+    /// session's end kills its group. The Mac's row only, as below.
+    #[test]
+    fn under_seatbelt_a_detached_command_writes_its_file_and_ends_with_the_session() {
+        if Platform::here() != Platform::MacOs {
+            return;
+        }
+        let ground = Ground::make("seatbelt-detached");
+        let confinement = open_on(&Policy::merged_usr(), Platform::MacOs).expect("Seatbelt");
+        let path = ground.tree.join("job.output");
+        let file = std::fs::File::create(&path).expect("the output file");
+        let (ran, mut child) = confinement
+            .spawn_detached(
+                &Policy::merged_usr(),
+                &ground.tree,
+                &argv(&["/bin/sh", "-c", "echo up; /bin/sleep 30"]),
+                &file,
+            )
+            .expect("it started");
+        assert_eq!(ran.exit, None);
+        let group = child.id().to_string();
+        let up = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::fs::read_to_string(&path).unwrap_or_default() != "up\n" {
+            assert!(std::time::Instant::now() < up, "nothing written");
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(group_alive(&group), "it did not run on");
+        confinement.end_session();
+        let gone = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while group_alive(&group) && std::time::Instant::now() < gone {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!group_alive(&group), "the session's end left it running");
+        let _ = child.wait();
+    }
+
     /// On Linux `bwrap`'s pid namespace ends a server with its call, so this
     /// is the Mac's row only.
     #[test]
@@ -4065,6 +4343,7 @@ mod tests {
             stdout_bytes: 0,
             stderr_bytes: stderr.len() as u64,
             cancelled: false,
+            timed_out: false,
             raw_stdout: Vec::new(),
         }
     }

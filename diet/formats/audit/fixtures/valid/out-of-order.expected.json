@@ -1,0 +1,13 @@
+{
+  "lines": [
+    {
+      "n": 2,
+      "verdict": "keep"
+    },
+    {
+      "n": 1,
+      "note": "the cache flushes every ninety seconds",
+      "verdict": "update"
+    }
+  ]
+}
