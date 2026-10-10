@@ -607,7 +607,9 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             }
             .to_owned(),
         ),
-        ("tangent_closure".to_owned(), undeclared()),
+        // The operator opens and closes a tangent where there is working
+        // memory to scope (#22); an agent nominating is a later ask set.
+        ("tangent_closure".to_owned(), tangent_closure_lever(regimen)),
         ("capture_modality".to_owned(), undeclared()),
         ("interview_routing_and_cadence".to_owned(), warrant),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
@@ -636,6 +638,16 @@ fn render_budget_lever(regimen: &Regimen) -> String {
             format!("{}:{over}", budget.tokens)
         },
     )
+}
+
+/// The tangent closure lever's word (#22): `operator` where there is
+/// working memory to scope, else [`UNDECLARED`].
+fn tangent_closure_lever(regimen: &Regimen) -> String {
+    if crate::drive::session::interview_warrant(regimen).is_ok_and(|rules| !rules.is_empty()) {
+        "operator".to_owned()
+    } else {
+        UNDECLARED.to_owned()
+    }
 }
 
 /// The levers a regimen's commands set -- tool-output disposition, approval,
@@ -772,7 +784,8 @@ mod tests {
             "accel24-beellama-qwen27b-q4kxl"
         );
         assert_eq!(at(&floor, "tool_surface"), "bash");
-        assert_eq!(at(&floor, "tangent_closure"), UNDECLARED);
+        assert_eq!(at(&floor, "tangent_closure"), "operator");
+        assert_eq!(at(&floor, "capture_modality"), UNDECLARED);
         let line = draft("t1-session-one-qwen38.regimen.toml");
         assert_eq!(at(&line, "approval"), "none");
         assert_eq!(at(&line, "reasoning_state"), "on:effort:xhigh");
