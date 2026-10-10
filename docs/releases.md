@@ -17,19 +17,21 @@ The prototype's first milestone. Each piece of the harness shown working **once,
 
 **Floor:** the 3.8 EXL3 line, config r2, on linux-pc (`accel24-tabbyapi-exl3-qwen38-27b-3p00`, #497), driven through TabbyAPI (#496). The 3.6 is retired.
 
-**Main evidence:** T1 ([`trajectories/t1.md`](trajectories/t1.md)). T1 has no seam; a short session of its own is fine for that row (#493).
+**Evidence:** four agent-driven runs under `runs/`, each row's approved by the maintainer (2026-10-10). Finishing T1 ([`trajectories/t1.md`](trajectories/t1.md)) moved to v0.4.0: at `xhigh` its script does not fit the floor's window without a seam ([`2026-10-10-t1-run-3-agent-driven`](../runs/2026-10-10-t1-run-3-agent-driven)).
 
 | piece | shown when | evidence |
 | --- | --- | --- |
-| Ask | an ask streams (reasoning, then the answer) and settles; the log has the response row | — |
-| Tools, unprompted | the model runs a shell command under Seatbelt without being told to, reads a file outside the worktree (the Babylon Lite source), and writes or edits a file inside it | — |
-| Image | an attached screenshot PNG, and a reply that shows the model saw it | — |
-| Interview fork | a fork in the idle gap lands a patch that shows in the working-memory panel | — |
-| Seam | a declared seam renders, refills from working memory, and one ask after it settles | — |
-| Cancel and end | an in-flight call is cancelled; the session ends with confirm and serve exits | — |
-| Record | the log parses, the record is projected from it and names the engine that ran, the receipt renders, and the run directory is committed, digest-pinned and hygiene-scanned | — |
+| Ask | an ask streams (reasoning, then the answer) and settles; the log has the response row | [`2026-10-10-t1-run-3-agent-driven`](../runs/2026-10-10-t1-run-3-agent-driven), turns 1–2 |
+| Tools, unprompted | the model runs a shell command under Seatbelt without being told to, reads a file outside the worktree (the Babylon Lite source), and writes or edits a file inside it | [`2026-10-10-t1-run-3-agent-driven`](../runs/2026-10-10-t1-run-3-agent-driven): 117 shell commands under Seatbelt in serve's `--worktree`; the reference source read outside it; 10 writes and 25 edits inside it |
+| Image | an attached screenshot PNG, and a reply that shows the model saw it | [`2026-10-10-image-smoke-agent-driven`](../runs/2026-10-10-image-smoke-agent-driven): the model read a random number and colour, drawn on a page it never opened, off the screenshot alone |
+| Interview fork | a fork in the idle gap lands a patch that shows in the working-memory panel | [`2026-10-10-seam-smoke-run-1-agent-driven`](../runs/2026-10-10-seam-smoke-run-1-agent-driven): the v4 fork's patches after both scoping asks |
+| Seam | a declared seam renders, refills from working memory, and one ask after it settles | [`2026-10-10-seam-smoke-run-1-agent-driven`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) |
+| Cancel and end | an in-flight call is cancelled; the session ends with confirm and serve exits | [`2026-10-10-t1-run-3-agent-driven`](../runs/2026-10-10-t1-run-3-agent-driven), turn 3: a hung command cancelled, the turn settled `cancelled` |
+| Record | the log parses, the record is projected from it and names the engine that ran, the receipt renders, and the run directory is committed, digest-pinned and hygiene-scanned | [`2026-10-10-seam-smoke-run-3-agent-driven`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): 261 rows, 10 of 10 turn rows, `diet check-record` accepts it |
 
 A row's evidence is a run directory under `runs/`, or a line in one, filled from the recording: a driven session kept as evidence that a piece works, not a claim about the program, which belongs in `results/` (the maintainer, 2026-10-10). Its README says truthfully who drove the run, the maintainer or an agent. A row counts once the maintainer approves its evidence. The milestone is done when every row counts.
+
+**Done:** every row counts (the maintainer, 2026-10-10: "Agree to all"). The milestone closes when v0.1.0 is tagged.
 
 ## v0.2.0 — every lever live
 
@@ -41,7 +43,7 @@ The hosted API kind driven live (#555, #556): the first paid calls, the cache li
 
 ## v0.4.0 — the pieces together (T2)
 
-The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. This milestone and v0.5.0 predate the initiatives, and follow its lever milestones.
+The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. Finishing T1 moved here from v0.1.0 (the maintainer, 2026-10-10); how it runs, with a seam or without, is still the maintainer's to decide. This milestone and v0.5.0 predate the initiatives, and follow its lever milestones.
 
 ## v0.5.0 — T3, NetHack
 
@@ -58,3 +60,4 @@ Work that serves no open release waits in a `Later —` milestone named for the 
 | Later — claims publication | proofs of the log and record formats; the results linter | when claims are prepared for publication |
 | Later — substrate ladder | admission instruments and substrate work the loop does not need | with the ladder program |
 | Later — gate redesign | defects in the gate and its kept checks | with the gate redesign, after feature complete |
+| Later — lever candidates | levers proposed but not built: a find tool for working memory (#664), how far back a prune may reach (#665) | when a run shows the need, or the feature a candidate extends is turned on |

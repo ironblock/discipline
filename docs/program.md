@@ -82,7 +82,7 @@ The admission rule and its cell words are in `substrates/LADDER.md` (#143), deri
 ## 6. Unsettled
 
 - `[unsettled]` Compaction depth: is total ever worse than partial? (the 0-1-n sweep)
-- `[unsettled]` The seam's audit grammar and whether v0.1.0 needs it (#504)
+- `[unsettled]` The seam's audit grammar (#504); v0.1.0 was done without it
 - `[unsettled]` Whether `recompute` and `admission` stay as manual commands (#508)
 - `[unsettled]` The 3.8 registry entry's hazards line ("no /props or /slots… no draft_n") disagrees with TabbyAPI's source at `be74bf0` as read for #509 (outside this repository): a `/props` route without `build_info`, and `draft_n` in `timings` when a draft ran. `/v1/model` itself reports no version, commit or draft. Which is wrong is not established; the line is the maintainer's to correct.
 - `[unsettled]` A laptop rung (Splash): a candidate, unmeasured. (Strata is parked by the maintainer, `substrates/LADDER.md`.)
