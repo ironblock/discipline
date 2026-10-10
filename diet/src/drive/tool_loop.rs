@@ -2072,7 +2072,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(names(ToolSurface::Bash), ["bash"]);
         assert_eq!(
             names(ToolSurface::Standard),
-            ["bash", "read", "write", "edit"]
+            ["bash", "read", "write", "edit", "grep", "glob"]
         );
         assert_eq!(ToolSurface::Bash.read_tool(), None);
         assert_eq!(ToolSurface::Standard.read_tool().as_deref(), Some("read"));

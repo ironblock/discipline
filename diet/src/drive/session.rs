@@ -6450,7 +6450,9 @@ pub(in crate::drive) mod tests {
                 ("bash", false),
                 ("read", true),
                 ("write", true),
-                ("edit", true)
+                ("edit", true),
+                ("grep", true),
+                ("glob", true)
             ]
         );
         every_head_rebuilds(&log);
