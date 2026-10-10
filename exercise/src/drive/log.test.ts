@@ -309,6 +309,21 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(call?.kind === 'tool' && call.ruled).toEqual({ choice: 'continue', to: 'build' });
   });
 
+  it('folds the operator’s edit and flag, the model writes refused over that entry, and the seam’s account of them (#150, #655)', () => {
+    const session = fold(logOf('a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl'));
+    expect([...session.unknown.keys()]).toEqual([]);
+    const d2 = session.memory.find((e) => e.id === 'd2');
+    expect([d2?.lane, d2?.flag, d2?.refusedWrites]).toEqual([
+      'operator',
+      'is one team enough?',
+      [
+        { op: 'retire', by: 'self-capture' },
+        { op: 'supersede', by: 'fork 7' },
+      ],
+    ]);
+    expect(session.eras[1]?.seam).toMatchObject({ operatorChanges: [{ entry: 'd2', kind: 'edit' }, { entry: 'd2', kind: 'flag' }], unaddressed: ['d2'] });
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });
