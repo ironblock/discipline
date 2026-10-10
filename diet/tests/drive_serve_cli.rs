@@ -1783,6 +1783,38 @@ fn diet_drive_usage_names_the_serve_form() {
 }
 
 #[test]
+fn a_drive_server_refuses_an_interview_role_its_server_reports_no_template_for() {
+    // #599: a role but `user` runs only where the served template renders
+    // it; the canned server reports no template, so `system` is refused
+    // before anything binds, and `user` starts as before.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = |role: &str| {
+        let whole = std::fs::read_to_string(dev_loop()).expect("the dev loop's regimen");
+        let (before, sampler) = whole
+            .split_once("\n[sampler]\n")
+            .expect("the dev loop declares a sampler table last");
+        file_holding(
+            "regimen",
+            &format!(
+                "{before}\ninterview_warrant = [\"scoping\"]\ninterview_role = \"{role}\"\n[sampler]\n{sampler}"
+            ),
+        )
+    };
+    let system = regimen("system");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &system.0.to_string_lossy()]);
+    assert!(
+        code.is_some_and(|code| code != 0),
+        "refused: {code:?} {said}"
+    );
+    assert!(
+        said.contains("interview_role") && said.contains("system"),
+        "{said}"
+    );
+    assert!(said.contains("reports no chat template"), "{said}");
+}
+
+#[test]
 fn a_drive_server_refuses_a_record_without_a_regimen() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let path = std::env::temp_dir()

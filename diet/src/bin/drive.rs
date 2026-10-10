@@ -472,7 +472,33 @@ fn serve(args: &[String]) -> ExitCode {
     };
     // Each request's output cap is clamped to the room its prompt leaves in
     // this window (#588); the record's lever says whether it was.
-    let window = confirmed.as_ref().and_then(|(_, _, window)| *window);
+    let window = confirmed.as_ref().and_then(|confirmed| confirmed.window);
+    // The interview's role (#599): a role but `user` runs only where the
+    // served template renders it, refused before anything binds.
+    if let Some(role) = interview
+        .as_ref()
+        .map(|interview| interview.role)
+        .filter(|role| *role != diet::client::shape::Role::User)
+    {
+        let template = confirmed
+            .as_ref()
+            .and_then(|confirmed| confirmed.template.as_deref());
+        let refused = template.map_or_else(
+            || {
+                Err(format!(
+                    "the server reports no chat template, so a `{}` interview ask cannot be confirmed to render",
+                    role.tag()
+                ))
+            },
+            |template| diet::drive::template_roles::renders(template, role.tag()),
+        );
+        if let Err(why) = refused {
+            return fail(
+                EXIT_INPUT,
+                &format!("`interview_role = \"{}\"`: {why}", role.tag()),
+            );
+        }
+    }
     shape.limits.context_window = window.map(|(tokens, _)| tokens);
     if let Some(levers) = read_at_start.as_mut().map(|read| &mut read.levers) {
         levers
@@ -488,7 +514,7 @@ fn serve(args: &[String]) -> ExitCode {
     let claim = substrate.zip(engine.as_ref()).map(|(id, passed)| {
         let fields = confirmed
             .as_ref()
-            .map(|(fields, _, _)| fields.clone())
+            .map(|confirmed| confirmed.fields.clone())
             .unwrap_or_default();
         passed.claim_with(id, &registry_sha256, fields)
     });
@@ -548,7 +574,7 @@ fn serve(args: &[String]) -> ExitCode {
             substrate.map(|id| (id, registry_sha256.as_str())),
             engine
                 .as_ref()
-                .zip(confirmed.as_ref().map(|(_, warmed, _)| *warmed)),
+                .zip(confirmed.as_ref().map(|confirmed| confirmed.warmed)),
             log_path.as_deref().zip(running.log_held),
             record_file.as_deref().zip(running.record_held),
             unsent_budget,
@@ -788,6 +814,7 @@ fn serving_interview(
         seams,
         delivery,
         phases,
+        role: session::interview_role(&read),
     }))
 }
 
@@ -1361,13 +1388,18 @@ impl Warmed {
     }
 }
 
-/// What the start confirmed of a server: each served field, how it was
-/// warmed, and its context window and where that was read (#588).
-type Confirmed = (
-    Vec<diet::formats::log::ServedField>,
-    Warmed,
-    Option<(u64, &'static str)>,
-);
+/// What the start confirmed of a server.
+struct Confirmed {
+    /// Each served field, corroborated or declared.
+    fields: Vec<diet::formats::log::ServedField>,
+    /// How it was warmed.
+    warmed: Warmed,
+    /// Its context window, and where that was read (#588).
+    window: Option<(u64, &'static str)>,
+    /// The chat template it reports rendering with (#599), when it reports
+    /// one.
+    template: Option<String>,
+}
 
 /// What the start confirms of substrate `id`'s server beyond its engine
 /// (#509): each declared `served_*` field and the chat template's digest,
@@ -1390,7 +1422,12 @@ fn confirmations(
         identity.weights,
         diet::formats::record::Weights::Canned { .. }
     ) {
-        return Ok((Vec::new(), Warmed::NotApplicable, None));
+        return Ok(Confirmed {
+            fields: Vec::new(),
+            warmed: Warmed::NotApplicable,
+            window: None,
+            template: None,
+        });
     }
     // The window each request's output cap is clamped to (#588).
     let serving_context =
@@ -1399,7 +1436,12 @@ fn confirmations(
         let mut fields = served::corroborated(id, &identity, None)?;
         fields.extend(served::draft_corroborated(id, &identity, None)?);
         let window = served::window(&identity, None, serving_context);
-        return Ok((fields, Warmed::NotApplicable, window));
+        return Ok(Confirmed {
+            fields,
+            warmed: Warmed::NotApplicable,
+            window,
+            template: None,
+        });
     }
     let engine = Engine::of(&identity);
     let report = match (&passed.props, engine) {
@@ -1421,15 +1463,18 @@ fn confirmations(
         served::probe(transport, shape)?
     };
     fields.extend(served::draft_corroborated(id, &identity, timings.as_ref())?);
-    Ok((
+    Ok(Confirmed {
         fields,
-        if warms {
+        warmed: if warms {
             Warmed::ByEngine
         } else {
             Warmed::ByServe
         },
         window,
-    ))
+        template: report
+            .as_ref()
+            .and_then(|report| served::template_of(engine, report)),
+    })
 }
 
 fn announcement(

@@ -479,6 +479,8 @@ pub enum Event {
         why: log::Warrant,
         /// What it asks.
         question: String,
+        /// The role it asked in (#599).
+        role: Role,
     },
     /// How the fork ended: once per fork, after its call's last event.
     ForkSettled {
@@ -740,6 +742,26 @@ pub struct Interview {
     /// The regimen's phase graph (#563), read as the scripted drive reads
     /// it; empty when it declares none.
     pub phases: crate::seam::phase::PhaseGraph,
+    /// The role a fork's interview question is asked in (#599): `user`, the
+    /// default, or `system` or `developer` where the served template
+    /// renders it (serve checks at start).
+    pub role: Role,
+}
+
+/// The regimen key for the role the interview asks in (#599).
+pub const INTERVIEW_ROLE: &str = "interview_role";
+
+/// The interview role the regimen declares, leniently: `"system"` or
+/// `"developer"`, or else `user`.
+#[must_use]
+pub fn interview_role(regimen: &Regimen) -> Role {
+    match regimen.get(INTERVIEW_ROLE) {
+        Some(crate::formats::regimen::Value::String(word)) if word == "system" => Role::System,
+        Some(crate::formats::regimen::Value::String(word)) if word == "developer" => {
+            Role::Developer
+        }
+        _ => Role::User,
+    }
 }
 
 /// The rule that warrants a fork after `turn` settled `final`, and the
@@ -1307,6 +1329,10 @@ impl<S: Streaming + 'static> Session<S> {
         assert!(
             template.messages.iter().all(|m| m.role != Role::Tool),
             "a session's head holds no tool result"
+        );
+        assert!(
+            template.messages.iter().all(|m| m.role != Role::Developer),
+            "a session's head holds no developer message"
         );
         let trunk = template.messages.clone();
         let fork_delivery = interview.as_ref().map(|interview| interview.delivery);
@@ -2209,12 +2235,15 @@ pub fn line_of(logged: &Logged) -> log::Line {
             at,
             why,
             question,
+            role,
         } => log::Event::Fork {
             lane: log::Lane::Interview,
             of_turn: *of_turn,
             at: *at,
             why: *why,
             question: question.clone(),
+            // Absent is `user` (#599): a user-role fork's line is as before.
+            role: (*role != Role::User).then(|| role.tag().to_owned()),
         },
         Event::ForkSettled { fork, outcome } => log::Event::ForkSettled {
             fork: *fork,
@@ -2359,6 +2388,9 @@ fn gap_line(gap: &IdleGap) -> log::Event {
 fn role_of(role: Role) -> log::Role {
     match role {
         Role::Tool => unreachable!("a head holds no tool result: `open` asserts it"),
+        Role::Developer => {
+            unreachable!("a head holds no developer message, a fork's ask alone: `open` asserts it")
+        }
         Role::System => log::Role::System,
         Role::User => log::Role::User,
         Role::Assistant => log::Role::Assistant,
@@ -3608,16 +3640,19 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         turn_over(&shared.template, state);
         return None;
     };
+    let role = state
+        .interview
+        .as_ref()
+        .map_or(Role::User, |interview| interview.role);
     let mut shape = shared.template.clone();
     shape.messages.clone_from(&state.trunk);
-    shape
-        .messages
-        .push(Message::new(Role::User, question.clone()));
+    shape.messages.push(Message::new(role, question.clone()));
     let fork = state.push(Event::Forked {
         of_turn: turn,
         at,
         why,
         question,
+        role,
     });
     let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
     let request = state.push(Event::Requested {
@@ -5335,6 +5370,7 @@ pub(in crate::drive) mod tests {
                 at: 3,
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
+                role: Role::Developer,
             },
             Event::Requested {
                 turn: 1,
@@ -5637,6 +5673,7 @@ pub(in crate::drive) mod tests {
                 at: 3,
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
+                role: Some("developer".to_owned()),
             },
             log::Event::Request {
                 turn: 1,
@@ -7940,6 +7977,7 @@ pub(in crate::drive) mod tests {
             seams: crate::seam::policy::Served::default(),
             delivery: log::ForkDelivery::Seam,
             phases: crate::seam::phase::PhaseGraph::none(),
+            role: Role::User,
         }
     }
 
@@ -7971,6 +8009,7 @@ pub(in crate::drive) mod tests {
                     at,
                     why,
                     question,
+                    ..
                 } => Some((logged.seq, *of_turn, *at, *why, question.clone())),
                 _ => None,
             })
@@ -8380,6 +8419,55 @@ pub(in crate::drive) mod tests {
         assert_eq!(delivered[0].op, log::PatchOp::Supersede);
         assert_eq!(delivered[0].entry, "interview-t1-0");
         assert_eq!(delivered[0].template, "FORK_NOTE_ADVISORY");
+    }
+
+    /// #599: a fork's ask goes in the interview's role, and its `fork` line
+    /// names a role but `user`; under `user` the line is as before.
+    #[test]
+    fn a_forks_ask_goes_in_the_interview_role_and_its_line_names_it() {
+        for role in [Role::User, Role::Developer] {
+            let mut interview = interviewing(&[log::Warrant::Scoping]);
+            interview.role = role;
+            let session = Session::open_with(
+                Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED])]),
+                template(),
+                None,
+                None,
+                None,
+                Some(interview),
+            );
+            session
+                .ask_marked("what are we building?", None, true)
+                .expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+            let sent = session.shared.transport.sent();
+            let ask = sent
+                .last()
+                .and_then(|fork| fork.messages.last())
+                .expect("the fork's ask");
+            assert_eq!(ask.role, role);
+            let lines = whole_log(&session);
+            let named = lines.iter().find_map(|line| match &line.event {
+                log::Event::Fork { role, .. } => Some(role.clone()),
+                _ => None,
+            });
+            assert_eq!(
+                named.expect("a fork line"),
+                (role != Role::User).then(|| role.tag().to_owned())
+            );
+        }
+    }
+
+    /// #599: the role is read leniently, `user` by default.
+    #[test]
+    fn the_interview_role_is_read_leniently() {
+        let read = |text: &str| interview_role(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), Role::User);
+        assert_eq!(read("interview_role = \"system\"\n"), Role::System);
+        assert_eq!(read("interview_role = \"developer\"\n"), Role::Developer);
+        assert_eq!(read("interview_role = \"assistant\"\n"), Role::User);
     }
 
     #[test]

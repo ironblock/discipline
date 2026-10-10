@@ -1070,6 +1070,9 @@ pub enum Event {
         why: Warrant,
         /// What it asks.
         question: String,
+        /// The role it was asked in (v7, #599): `system` or `developer`;
+        /// absent is `user`.
+        role: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -2532,6 +2535,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             at: fields.count("at")?,
             why: fields.tag("why", Warrant::from_tag)?,
             question: fields.string("question")?,
+            role: fields.optional_string("role")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -3687,6 +3691,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("at", Count),
                 must_v5("why", Tag(Tags::Warrant)),
                 must_v5("question", Text),
+                may_v7("role", Text),
             ];
             F
         }
@@ -4399,12 +4404,16 @@ fn to_value(line: &Line) -> Value {
             at,
             why,
             question,
+            role,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
             put("at", count(*at));
             put("why", text(why.tag()));
             put("question", text(question));
+            if let Some(role) = role {
+                put("role", text(role));
+            }
             Kind::Fork
         }
         Event::ForkSettled { fork, outcome } => {
@@ -5502,6 +5511,7 @@ mod tests {
                 at: request,
                 why: Warrant::Scoping,
                 question: "what did the operator decide".to_owned(),
+                role: Some("developer".to_owned()),
             },
             Event::Request {
                 turn: 5,

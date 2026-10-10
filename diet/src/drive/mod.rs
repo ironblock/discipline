@@ -108,6 +108,7 @@ pub mod served;
 pub mod session;
 pub mod shell_gate;
 pub mod standard;
+pub mod template_roles;
 pub mod tool_loop;
 
 use std::cell::Cell;

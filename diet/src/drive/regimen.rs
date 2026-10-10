@@ -611,6 +611,12 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("archive_recall".to_owned(), "off".to_owned()),
         ("fork_input_view".to_owned(), "whole-warm-trunk".to_owned()),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
+        (
+            "interview_role".to_owned(),
+            crate::drive::session::interview_role(regimen)
+                .tag()
+                .to_owned(),
+        ),
         ("step_and_output_limits".to_owned(), limits),
         ("extraction_seat".to_owned(), "warm-model".to_owned()),
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),

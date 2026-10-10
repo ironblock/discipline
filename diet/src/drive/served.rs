@@ -149,6 +149,22 @@ pub fn window(
         })
 }
 
+/// The chat template `engine` reports rendering with (#599): llama.cpp's
+/// `/props` `chat_template`, `TabbyAPI`'s `/v1/model`
+/// `parameters.prompt_template_content`.
+#[must_use]
+pub fn template_of(engine: Engine, report: &serde_json::Value) -> Option<String> {
+    let at = match engine {
+        Engine::LlamaCpp => report.get("chat_template"),
+        Engine::TabbyApi => report
+            .get("parameters")
+            .and_then(|parameters| parameters.get("prompt_template_content")),
+    };
+    at.and_then(serde_json::Value::as_str)
+        .filter(|template| !template.is_empty())
+        .map(str::to_owned)
+}
+
 /// The engine's report on `field`, as text, when it makes one.
 fn reported(engine: Engine, field: &str, report: &serde_json::Value) -> Option<String> {
     // The template the engine renders with, by the digest of its text:
