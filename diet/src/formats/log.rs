@@ -124,7 +124,11 @@
 //! v7 `seam` may carry `tool_outputs`, the seam's tool-output state (#553),
 //! and, when it carried any, `outputs` -- the section of the refill after
 //! the render, as sent -- with `carried_outputs`, the outputs it carried,
-//! and `carried_output_bytes`, the section's bytes; absent, `evict`.
+//! and `carried_output_bytes`, the section's bytes; absent, `evict`. A
+//! v7 `seam` may carry `placement`, where the refill put the render (#597):
+//! `message`, a user message after the head, which is never changed;
+//! absent, `system`, appended to the head's system message, as every seam
+//! before #597 did.
 //!
 //! # A torn final line
 //!
@@ -213,6 +217,8 @@ vocabulary! {
         /// Forks' patches delivered at the tail of a trunk request (v7, the
         /// fork delivery lever).
         Delivered => "delivered",
+        /// Archived items recalled at the tail of a trunk request (v7, #566).
+        Recalled => "recalled",
     }
 }
 
@@ -282,6 +288,16 @@ vocabulary! {
 }
 
 vocabulary! {
+    /// Where a seam's refill put the render (v7, #597).
+    RenderPlacement {
+        /// Appended to the head's system message: every seam before #597.
+        System => "system",
+        /// A user message after the head, which stays as the session sent it.
+        Message => "message",
+    }
+}
+
+vocabulary! {
     /// What a seam's refill carries of the tool outputs it compacts away
     /// (v7, #553): those in the turns before the kept tail.
     SeamToolOutputs {
@@ -301,6 +317,15 @@ impl Default for SeamToolOutputs {
     /// `evict`: today's behaviour.
     fn default() -> Self {
         Self::Evict
+    }
+}
+
+vocabulary! {
+    /// How an archive recall matched (v7, #566): the `archive_recall`
+    /// lever's states that recall anything.
+    RecallState {
+        /// By the ask's anchors, matched whole.
+        Literal => "literal",
     }
 }
 
@@ -713,6 +738,19 @@ pub struct Unsent {
     pub budget_tokens: u64,
 }
 
+/// One item a recall carried (v7, #566): its archive key, the digest of its
+/// text, and its score -- under `literal`, how many of the ask's anchors it
+/// holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecalledItem {
+    /// The archive's key for it.
+    pub key: String,
+    /// The sha256 of its text.
+    pub sha256: String,
+    /// Its score.
+    pub score: u64,
+}
+
 /// One line of a delivered note (v7): the patch it delivers, by its entry
 /// and op, and the dogma template it was written with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1083,6 +1121,9 @@ pub enum Event {
         why: Warrant,
         /// What it asks.
         question: String,
+        /// What it saw of the trunk (v7, #567): `last_turn` or `last:N`;
+        /// absent is the whole trunk.
+        view: Option<String>,
         /// Which ask of its set it sent (v7, #595): the router kind's tag.
         ask: Option<String>,
     },
@@ -1118,6 +1159,18 @@ pub enum Event {
         /// Each line, in order: the patch it delivers and the template it
         /// was written with.
         lines: Vec<NoteLine>,
+    },
+    /// Archived items recalled (v7, #566): one note after turn `turn`'s
+    /// ask, at the tail of its first request, which stays on the trunk.
+    Recalled {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// How it matched.
+        recall: RecallState,
+        /// The note as sent.
+        text: String,
+        /// Each item it carries, in rank order.
+        items: Vec<RecalledItem>,
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
@@ -1160,7 +1213,27 @@ pub enum Event {
         carried_outputs: Option<u64>,
         /// The section's bytes (v7, #553).
         carried_output_bytes: Option<u64>,
+        /// Where the refill put the render (v7, #597). Absent is `system`.
+        placement: Option<RenderPlacement>,
+        /// The render's budget and what it did (v7, #565), on a seam whose
+        /// regimen declares one.
+        render_budget: Option<RenderBudget>,
     },
+}
+
+/// A seam's render budget and what it did (v7, #565): `render_budget_tokens`,
+/// `render_over_budget`, `render_tokens` and `render_reduced`, together or
+/// not at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderBudget {
+    /// The estimated tokens the render could run to.
+    pub tokens: u64,
+    /// What it did past them: `tier` or `elide`.
+    pub over: String,
+    /// The estimated tokens it ran to.
+    pub rendered: u64,
+    /// How many entries it shortened or elided.
+    pub reduced: u64,
 }
 
 /// A patch's entry (v5, #374): its id, its text, and its category when the
@@ -2536,6 +2609,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             at: fields.count("at")?,
             why: fields.tag("why", Warrant::from_tag)?,
             question: fields.string("question")?,
+            view: fields.optional_string("view")?,
             ask: fields.optional_string("ask")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
@@ -2564,6 +2638,12 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 supersedes,
             }
         }
+        Kind::Recalled => Event::Recalled {
+            turn: fields.turn("turn")?,
+            recall: fields.tag("recall", RecallState::from_tag)?,
+            text: fields.string("text")?,
+            items: fields.recalled_items("items")?,
+        },
         Kind::Delivered => Event::Delivered {
             turn: fields.turn("turn")?,
             framing: fields.tag("framing", Framing::from_tag)?,
@@ -2589,6 +2669,16 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             outputs: fields.optional_string("outputs")?,
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
+            placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
+            render_budget: match fields.optional_count("render_budget_tokens")? {
+                None => None,
+                Some(tokens) => Some(RenderBudget {
+                    tokens,
+                    over: fields.string("render_over_budget")?,
+                    rendered: fields.count("render_tokens")?,
+                    reduced: fields.count("render_reduced")?,
+                }),
+            },
         },
     };
     Ok(Line {
@@ -2999,6 +3089,8 @@ pub enum Tags {
     PatchOp,
     /// [`SeamReason`] (v6).
     SeamReason,
+    /// [`RecallState`] (v7).
+    RecallState,
     /// [`Framing`] (v7).
     Framing,
     /// [`ForkDelivery`] (v7).
@@ -3007,6 +3099,8 @@ pub enum Tags {
     ToolOutputState,
     /// [`SeamToolOutputs`] (v7).
     SeamToolOutputs,
+    /// [`RenderPlacement`] (v7).
+    RenderPlacement,
 }
 
 impl Tags {
@@ -3033,9 +3127,11 @@ impl Tags {
         Self::PatchOp,
         Self::SeamReason,
         Self::Framing,
+        Self::RecallState,
         Self::ForkDelivery,
         Self::ToolOutputState,
         Self::SeamToolOutputs,
+        Self::RenderPlacement,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -3063,9 +3159,11 @@ impl Tags {
             Self::PatchOp => "PatchOp",
             Self::SeamReason => "SeamReason",
             Self::Framing => "Framing",
+            Self::RecallState => "RecallState",
             Self::ForkDelivery => "ForkDelivery",
             Self::ToolOutputState => "ToolOutputState",
             Self::SeamToolOutputs => "SeamToolOutputs",
+            Self::RenderPlacement => "RenderPlacement",
         }
     }
 
@@ -3097,9 +3195,11 @@ impl Tags {
             Self::PatchOp => of(PatchOp::ALL, PatchOp::tag),
             Self::SeamReason => of(SeamReason::ALL, SeamReason::tag),
             Self::Framing => of(Framing::ALL, Framing::tag),
+            Self::RecallState => of(RecallState::ALL, RecallState::tag),
             Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
             Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
             Self::SeamToolOutputs => of(SeamToolOutputs::ALL, SeamToolOutputs::tag),
+            Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
         }
     }
 }
@@ -3136,6 +3236,9 @@ pub enum Holds {
     /// A `delivered` line's `lines` (v7): a non-empty list of objects of
     /// the keys [`DELIVERED_LINE`] declares.
     DeliveredLines,
+    /// A `recalled` line's `items` (v7): a non-empty list of objects of the
+    /// keys [`RECALLED_ITEM`] declares.
+    RecalledItems,
     /// A seam's `phase` (v7): an object of [`PHASE_MOVE`]'s keys.
     PhaseMove,
     /// A `session.start`'s `phase_transitions` (v7): a list of such objects.
@@ -3299,6 +3402,13 @@ pub const TEMPLATE_KWARGS: &[Field] = &[
     may_v7("preserve_thinking", Holds::Flag),
 ];
 
+/// The keys of each of a `recalled` line's `items`. Arrived in v7.
+pub const RECALLED_ITEM: &[Field] = &[
+    must_v7("key", Holds::Text),
+    must_v7("sha256", Holds::Digest),
+    must_v7("score", Holds::Count),
+];
+
 /// The keys of each of a `delivered` line's `lines`. Arrived in v7.
 pub const DELIVERED_LINE: &[Field] = &[
     must_v7("entry", Holds::Text),
@@ -3435,6 +3545,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::PhaseMove | Holds::PhaseMoves => Some(PHASE_MOVE),
         Holds::InstructionFiles => Some(INSTRUCTION_FILE),
         Holds::DeliveredLines => Some(DELIVERED_LINE),
+        Holds::RecalledItems => Some(RECALLED_ITEM),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
@@ -3452,7 +3563,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         Kind::Seam => 6,
-        Kind::Delivered => 7,
+        Kind::Delivered | Kind::Recalled => 7,
         _ => 0,
     }
 }
@@ -3685,6 +3796,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("at", Count),
                 must_v5("why", Tag(Tags::Warrant)),
                 must_v5("question", Text),
+                may_v7("view", Text),
                 may_v7("ask", Text),
             ];
             F
@@ -3722,6 +3834,20 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("outputs", Text),
                 may_v7("carried_outputs", Count),
                 may_v7("carried_output_bytes", Count),
+                may_v7("placement", Tag(Tags::RenderPlacement)),
+                may_v7("render_budget_tokens", Count),
+                may_v7("render_over_budget", Text),
+                may_v7("render_tokens", Count),
+                may_v7("render_reduced", Count),
+            ];
+            F
+        }
+        Kind::Recalled => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("recall", Tag(Tags::RecallState)),
+                must_v7("text", Text),
+                must_v7("items", Holds::RecalledItems),
             ];
             F
         }
@@ -3796,6 +3922,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::PhaseMoves => "PhaseMove[]".to_owned(),
         Holds::InstructionFiles => "InstructionFile[]".to_owned(),
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
+        Holds::RecalledItems => "RecalledItem[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
@@ -3897,6 +4024,7 @@ pub fn typescript() -> String {
         ("PhaseMove", PHASE_MOVE),
         ("InstructionFile", INSTRUCTION_FILE),
         ("NoteLine", DELIVERED_LINE),
+        ("RecalledItem", RECALLED_ITEM),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
@@ -4401,6 +4529,7 @@ fn to_value(line: &Line) -> Value {
             at,
             why,
             question,
+            view,
             ask,
         } => {
             put("lane", text(lane.tag()));
@@ -4408,6 +4537,9 @@ fn to_value(line: &Line) -> Value {
             put("at", count(*at));
             put("why", text(why.tag()));
             put("question", text(question));
+            if let Some(view) = view {
+                put("view", text(view));
+            }
             if let Some(ask) = ask {
                 put("ask", text(ask));
             }
@@ -4455,6 +4587,8 @@ fn to_value(line: &Line) -> Value {
             outputs,
             carried_outputs,
             carried_output_bytes,
+            placement,
+            render_budget,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             if let Some(moved) = phase {
@@ -4485,6 +4619,15 @@ fn to_value(line: &Line) -> Value {
             if let Some(n) = carried_output_bytes {
                 put("carried_output_bytes", count(*n));
             }
+            if let Some(placement) = placement {
+                put("placement", text(placement.tag()));
+            }
+            if let Some(budget) = render_budget {
+                put("render_budget_tokens", count(budget.tokens));
+                put("render_over_budget", text(&budget.over));
+                put("render_tokens", count(budget.rendered));
+                put("render_reduced", count(budget.reduced));
+            }
             Kind::Seam
         }
         Event::Delivered {
@@ -4512,6 +4655,32 @@ fn to_value(line: &Line) -> Value {
                 ),
             );
             Kind::Delivered
+        }
+        Event::Recalled {
+            turn,
+            recall,
+            text: note,
+            items,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("recall", text(recall.tag()));
+            put("text", text(note));
+            put(
+                "items",
+                Value::Array(
+                    items
+                        .iter()
+                        .map(|item| {
+                            Value::Object(BTreeMap::from([
+                                ("key".to_owned(), text(&item.key)),
+                                ("sha256".to_owned(), text(&item.sha256)),
+                                ("score".to_owned(), count(item.score)),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            );
+            Kind::Recalled
         }
     };
     put("kind", text(kind.tag()));
@@ -4849,6 +5018,37 @@ impl Fields<'_> {
 
     /// A `delivered` line's `lines` (v7): a non-empty list, each entry the
     /// keys of [`DELIVERED_LINE`] and nothing else.
+    fn recalled_items(&self, key: &str) -> Result<Vec<RecalledItem>, String> {
+        let Value::Array(entries) = self.get(key)? else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a recall carries at least one item"
+            ));
+        }
+        let mut items = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !RECALLED_ITEM.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            items.push(RecalledItem {
+                key: inner.string("key").map_err(at)?,
+                sha256: inner.digest("sha256").map_err(at)?,
+                score: inner.count("score").map_err(at)?,
+            });
+        }
+        Ok(items)
+    }
+
     fn delivered_lines(&self, key: &str) -> Result<Vec<NoteLine>, String> {
         let Value::Array(entries) = self.get(key)? else {
             return Err(format!("`{key}` is not a list"));
@@ -5505,6 +5705,7 @@ mod tests {
                 at: request,
                 why: Warrant::Scoping,
                 question: "what did the operator decide".to_owned(),
+                view: Some("last:2".to_owned()),
                 ask: Some("judgment".to_owned()),
             },
             Event::Request {
@@ -5594,6 +5795,7 @@ mod tests {
                 Holds::Files
                 | Holds::Served
                 | Holds::DeliveredLines
+                | Holds::RecalledItems
                 | Holds::PhaseMoves
                 | Holds::InstructionFiles,
                 Value::Array(entries),
@@ -5811,6 +6013,7 @@ mod tests {
             ("phase_transitions", PHASE_MOVE),
             ("instruction_files", INSTRUCTION_FILE),
             ("lines", DELIVERED_LINE),
+            ("items", RECALLED_ITEM),
             ("tool_call", TOOL_CALL_PIECE),
             ("approval", APPROVAL),
             ("files", RECORDED_FILE),
@@ -6706,7 +6909,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered"
+             fork.settled patch seam delivered recalled"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

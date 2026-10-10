@@ -47,9 +47,9 @@ pub const V4: AskSet = AskSet {
 /// Every set, in the order they were added.
 pub const SETS: &[&AskSet] = &[&V3, &V4];
 
-/// The set a served regimen that names none runs (#595: the maintainer
-/// approved v4).
-pub const DEFAULT: &AskSet = &V4;
+/// The set a served regimen that names none runs: v3, today's asks, by the
+/// maintainer's decision (2026-10-09); v4 is selectable beside it.
+pub const DEFAULT: &AskSet = &V3;
 
 /// The set named `name`, if there is one.
 #[must_use]
@@ -166,11 +166,11 @@ mod tests {
     }
 
     #[test]
-    fn sets_are_found_by_name_and_v4_is_the_default() {
+    fn sets_are_found_by_name_and_v3_is_the_default() {
         assert_eq!(set("v3"), Some(&V3));
         assert_eq!(set("v4"), Some(&V4));
         assert_eq!(set("v9"), None);
-        assert_eq!(DEFAULT, &V4);
+        assert_eq!(DEFAULT, &V3);
         assert_ne!(V3.digest(), V4.digest());
         assert_eq!(
             V3.priming(),

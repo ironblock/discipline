@@ -302,11 +302,16 @@ pub const FAMILIES: &[(&str, Family)] = &[
     ("run_command", Family::Shell),
     ("execute", Family::Shell),
     ("Read", Family::Read),
+    // The standard tool surface's (#557): `read`, `write`, `edit`; its
+    // `glob` and `grep` are named below.
+    ("read", Family::Read),
     ("read_file", Family::Read),
     ("cat_file", Family::Read),
     ("view_file", Family::Read),
     ("Edit", Family::Edit),
     ("Write", Family::Edit),
+    ("write", Family::Edit),
+    ("edit", Family::Edit),
     ("MultiEdit", Family::Edit),
     ("edit_file", Family::Edit),
     ("write_file", Family::Edit),

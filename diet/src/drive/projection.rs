@@ -389,8 +389,8 @@ struct Walk<'a> {
     recording: Option<std::path::PathBuf>,
     /// Each turn's attached files, from its `ask` line.
     ask_files: BTreeMap<u32, Vec<log::RecordedFile>>,
-    /// Each turn's delivered note (v7), from its `delivered` line.
-    notes: BTreeMap<u32, String>,
+    /// Each turn's notes after its ask (v7): its `delivered` and `recalled` lines.
+    notes: BTreeMap<u32, Vec<String>>,
     /// The tools the session's requests declared, rebuilt from
     /// `session.start`'s names (#472), or why they cannot be.
     tools: Result<Vec<ToolDefinition>, String>,
@@ -410,6 +410,9 @@ struct Walk<'a> {
     /// attachment could not be read back: every later head names it (#471's
     /// review, NB3).
     trunk_unrebuilt: Option<String>,
+    /// Whether the trunk carries a seam's refill message after the head
+    /// (#597): the turns start after it.
+    refilled: bool,
     /// Each lane but the trunk's last logged head digest (v5, #374): a live
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
@@ -551,6 +554,7 @@ impl<'a> Walk<'a> {
             cancelled_text: BTreeMap::new(),
             steps: BTreeMap::new(),
             trunk_unrebuilt: None,
+            refilled: false,
             side_heads: BTreeMap::new(),
         }
     }
@@ -636,8 +640,10 @@ impl<'a> Walk<'a> {
             Line::Seam { .. } => self.seam(line),
             // Forks' patches delivered (v7): the note follows its turn's ask
             // on the rebuilt trunk, as it does on the session's.
-            Line::Delivered { turn, text, .. } => {
-                self.notes.insert(*turn, text.clone());
+            // Archived items recalled (v7, #566): a note after it too, in
+            // the log's order.
+            Line::Delivered { turn, text, .. } | Line::Recalled { turn, text, .. } => {
+                self.notes.entry(*turn).or_default().push(text.clone());
             }
             // Facts the record has no row for at all, named once per kind.
             Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
@@ -822,6 +828,7 @@ impl<'a> Walk<'a> {
             render,
             tail_tokens,
             outputs,
+            placement,
             ..
         } = &line.event
         else {
@@ -830,7 +837,10 @@ impl<'a> Walk<'a> {
         let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
         // The tail the session kept after the refill (#552), cut from the
         // rebuilt trunk by the same function.
-        let turns = self.trunk.get(self.head.len()..).unwrap_or_default();
+        let turns = self
+            .trunk
+            .get(self.head.len() + usize::from(self.refilled)..)
+            .unwrap_or_default();
         let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
         let carried_turns = kept
             .iter()
@@ -845,7 +855,14 @@ impl<'a> Walk<'a> {
         let sent = outputs
             .as_ref()
             .map_or_else(|| render.clone(), |section| format!("{render}{section}"));
-        self.trunk = crate::seam::render::refill(&self.head, &sent);
+        // Where the seam put it (#597): a user message after the head, or --
+        // a seam logged before #597 -- appended to the system message.
+        self.refilled = *placement == Some(log::RenderPlacement::Message);
+        self.trunk = if self.refilled {
+            crate::seam::render::refill(&self.head, &sent)
+        } else {
+            crate::seam::render::refill_in_the_system_message(&self.head, &sent)
+        };
         self.trunk.extend(kept);
         // An attachment the old trunk carried and could not be read back is
         // not on the refilled one.
@@ -1016,7 +1033,7 @@ impl<'a> Walk<'a> {
     fn head_change(&mut self, seq: u64, turn: u32, logged: &str) {
         let mut messages = self.trunk.clone();
         let asked = self.user_message(turn);
-        let note = self.notes.get(&turn).cloned();
+        let notes = self.notes.get(&turn).cloned().unwrap_or_default();
         let unrebuilt = asked
             .as_ref()
             .err()
@@ -1031,7 +1048,7 @@ impl<'a> Walk<'a> {
                     .find_map(|step| step.unrebuilt.clone())
             });
         messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
-        if let Some(note) = note {
+        for note in notes {
             messages.push(Message::new(Role::User, note));
         }
         for step in self.steps.get(&turn).into_iter().flatten() {
@@ -1196,8 +1213,8 @@ impl<'a> Walk<'a> {
             )
         });
         self.trunk.push(asked);
-        if let Some(note) = self.notes.get(&turn) {
-            self.trunk.push(Message::new(Role::User, note.clone()));
+        for note in self.notes.get(&turn).cloned().unwrap_or_default() {
+            self.trunk.push(Message::new(Role::User, note));
         }
         let taken = self.steps.remove(&turn).unwrap_or_default();
         for step in taken.iter().take(steps) {
@@ -1666,6 +1683,8 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            placement: None,
+            render_budget: None,
         });
         let projection = project(
             &numbered(events),
@@ -1708,6 +1727,8 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            placement: None,
+            render_budget: None,
         });
         let projection = project(
             &numbered(events),
@@ -2357,6 +2378,7 @@ mod tests {
             at,
             why,
             question: "what did the operator decide".to_owned(),
+            view: None,
             ask: None,
         };
         let call = |turn: u32, fork: u64| {

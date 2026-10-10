@@ -66,7 +66,7 @@ one file per router ask kind, the fork-local imperative, and optionally a
 (never added later). Each file is pinned in `MANIFEST.tsv` as
 `fork-asks/<name>/<file>`, and a set's digest is `diet::dogma::digest` of its
 manifest lines, so it is recomputable from the manifest alone. A regimen picks
-a set with `fork_asks = "<name>"` (`v4` when it names none or names no set);
+a set with `fork_asks = "<name>"` (`v3` when it names none or names no set; the maintainer chose it as the default);
 the log's `session.start` names the set and its digest. **A set is never
 edited: a change adds a set**, and adding one is a dogma version bump like any
 other pin.
