@@ -2356,6 +2356,7 @@ mod tests {
             at,
             why,
             question: "what did the operator decide".to_owned(),
+            view: None,
         };
         let call = |turn: u32, fork: u64| {
             [

@@ -788,6 +788,7 @@ fn serving_interview(
         seams,
         delivery,
         phases,
+        view: session::fork_view(&read),
     }))
 }
 
