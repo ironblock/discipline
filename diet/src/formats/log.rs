@@ -598,6 +598,9 @@ pub struct TemplateKwargs {
     pub enable_thinking: Option<bool>,
     /// `reasoning_effort`: the level, in the template's own words.
     pub reasoning_effort: Option<String>,
+    /// `preserve_thinking`: whether earlier turns' reasoning renders in
+    /// history, as the substrate's model convention needs.
+    pub preserve_thinking: Option<bool>,
 }
 
 /// What a session's regime declares and its requests cannot carry (v7, R1).
@@ -714,6 +717,10 @@ pub enum Event {
         approvals_off: Option<bool>,
         /// The fork delivery lever's state (v7), for a session that forks.
         fork_delivery: Option<ForkDelivery>,
+        /// With thinking on and no `reasoning_effort` sent, the level the
+        /// chat template renders by default, as the registry declares it
+        /// (v7): what the model was asked for, named.
+        reasoning_effort_default: Option<String>,
     },
     /// An ask was admitted.
     Ask {
@@ -2150,6 +2157,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     off => off,
                 },
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
+                reasoning_effort_default: match object.get("reasoning_effort_default") {
+                    None => None,
+                    Some(_) => Some(fields.string("reasoning_effort_default")?),
+                },
             }
         }
         Kind::Ask => Event::Ask {
@@ -3053,6 +3064,7 @@ pub const RECORDED_FILE: &[Field] = &[
 pub const TEMPLATE_KWARGS: &[Field] = &[
     may_v7("enable_thinking", Holds::Flag),
     may_v7("reasoning_effort", Holds::Text),
+    may_v7("preserve_thinking", Holds::Flag),
 ];
 
 /// The keys of each of a `delivered` line's `lines`. Arrived in v7.
@@ -3270,6 +3282,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("unsent", Holds::Unsent),
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
+                may_v7("reasoning_effort_default", Text),
             ];
             F
         }
@@ -3708,8 +3721,12 @@ fn to_value(line: &Line) -> Value {
             unsent,
             approvals_off,
             fork_delivery,
+            reasoning_effort_default,
         } => {
             put("version", Value::Integer(*version));
+            if let Some(effort) = reasoning_effort_default {
+                put("reasoning_effort_default", text(effort));
+            }
             if let Some(delivery) = fork_delivery {
                 put("fork_delivery", text(delivery.tag()));
             }
@@ -3765,6 +3782,9 @@ fn to_value(line: &Line) -> Value {
                 }
                 if let Some(effort) = &kwargs.reasoning_effort {
                     object.insert("reasoning_effort".to_owned(), text(effort));
+                }
+                if let Some(preserve) = kwargs.preserve_thinking {
+                    object.insert("preserve_thinking".to_owned(), Value::Boolean(preserve));
                 }
                 put("template_kwargs", Value::Object(object));
             }
@@ -4666,6 +4686,7 @@ impl Fields<'_> {
                 None => None,
                 Some(_) => Some(inner.string("reasoning_effort").map_err(at)?),
             },
+            preserve_thinking: inner.optional_flag("preserve_thinking").map_err(at)?,
         };
         if kwargs == TemplateKwargs::default() {
             return Err(format!(
@@ -4756,6 +4777,7 @@ mod tests {
                 unsent: None,
                 approvals_off: None,
                 fork_delivery: None,
+                reasoning_effort_default: None,
             },
         }
     }

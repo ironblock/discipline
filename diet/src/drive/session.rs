@@ -241,6 +241,9 @@ pub enum Event {
         approvals_off: bool,
         /// The fork delivery lever's state, for a session that forks.
         fork_delivery: Option<log::ForkDelivery>,
+        /// The template's default level, when thinking is on and none is
+        /// sent.
+        reasoning_effort_default: Option<String>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -633,6 +636,16 @@ pub fn interview_warrant(regimen: &Regimen) -> Result<Vec<log::Warrant>, String>
         })
         .collect()
 }
+
+/// What a served session declares at start beside its template: the
+/// substrate claim, what its capture gap forks under, and what its log names
+/// that no request carries -- a budget declared and not sent, and the
+/// template's default level when none is sent.
+pub type Declared = (
+    Option<log::SubstrateClaim>,
+    Option<Interview>,
+    (Option<log::Unsent>, Option<String>),
+);
 
 /// What the capture gap runs under (#374): the rules that warrant its fork,
 /// and the working object the fork's patches are applied to.
@@ -1071,7 +1084,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// before any.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
-        Self::opened_as(transport, template, None, None, (None, None, None))
+        Self::opened_as(transport, template, None, None, (None, None, (None, None)))
     }
 
     /// [`Session::open`], declaring what serves it -- the dialect it speaks
@@ -1079,7 +1092,13 @@ impl<S: Streaming + 'static> Session<S> {
     /// `session.start` carries (#292).
     #[must_use]
     pub fn open_serving(transport: S, template: RequestShape, serving: Serving) -> Self {
-        Self::opened_as(transport, template, Some(serving), None, (None, None, None))
+        Self::opened_as(
+            transport,
+            template,
+            Some(serving),
+            None,
+            (None, None, (None, None)),
+        )
     }
 
     /// A session that runs the model's calls (#298): `template` declares the
@@ -1096,7 +1115,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             Some(tools),
-            (None, None, None),
+            (None, None, (None, None)),
         )
     }
 
@@ -1119,7 +1138,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             tools,
-            (claim, interview, None),
+            (claim, interview, (None, None)),
         )
     }
 
@@ -1131,11 +1150,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, unsent): (
-            Option<log::SubstrateClaim>,
-            Option<Interview>,
-            Option<log::Unsent>,
-        ),
+        (claim, interview, unsent): Declared,
     ) -> Self {
         Self::opened_as(
             transport,
@@ -1151,11 +1166,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, unsent): (
-            Option<log::SubstrateClaim>,
-            Option<Interview>,
-            Option<log::Unsent>,
-        ),
+        (claim, interview, (unsent, reasoning_effort_default)): Declared,
     ) -> Self {
         // A head is the trunk before any turn; a tool result answers a call
         // made in one, and the log's head has no word for it (`role_of`).
@@ -1220,6 +1231,7 @@ impl<S: Streaming + 'static> Session<S> {
             unsent,
             approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
             fork_delivery,
+            reasoning_effort_default,
         });
         Self {
             shared: Arc::new(Shared {
@@ -1735,6 +1747,10 @@ fn logged_kwargs(kwargs: &BTreeMap<String, Value>) -> Option<log::TemplateKwargs
             Some(Value::String(effort)) => Some(effort.clone()),
             _ => None,
         },
+        preserve_thinking: match kwargs.get("preserve_thinking") {
+            Some(Value::Boolean(preserve)) => Some(*preserve),
+            _ => None,
+        },
     };
     (logged != log::TemplateKwargs::default()).then_some(logged)
 }
@@ -1757,8 +1773,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             unsent,
             approvals_off,
             fork_delivery,
+            reasoning_effort_default,
         } => log::Event::SessionStart {
             fork_delivery: *fork_delivery,
+            reasoning_effort_default: reasoning_effort_default.clone(),
             // The approval lever's `none`: `true`, or nothing.
             approvals_off: approvals_off.then_some(true),
             unsent: unsent.clone(),
@@ -4228,6 +4246,7 @@ pub(in crate::drive) mod tests {
             unsent: None,
             approvals_off: false,
             fork_delivery: None,
+            reasoning_effort_default: None,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -4326,6 +4345,7 @@ pub(in crate::drive) mod tests {
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
                 approvals_off: true,
                 fork_delivery: Some(log::ForkDelivery::Advisory),
+                reasoning_effort_default: Some("xhigh".to_owned()),
             },
             Event::Asked {
                 turn: 1,
@@ -4585,10 +4605,12 @@ pub(in crate::drive) mod tests {
                 template_kwargs: Some(log::TemplateKwargs {
                     enable_thinking: Some(true),
                     reasoning_effort: Some("medium".to_owned()),
+                    preserve_thinking: None,
                 }),
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
                 approvals_off: Some(true),
                 fork_delivery: Some(log::ForkDelivery::Advisory),
+                reasoning_effort_default: Some("xhigh".to_owned()),
             },
             log::Event::Ask {
                 turn: 1,
@@ -6354,6 +6376,44 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .expect("an answer")
+    }
+
+    /// Qwen's convention (the reasoning ruling): a tool step's reasoning
+    /// goes back in the next step's request, on the assistant message that
+    /// made the call, unchanged -- what `preserve_thinking` renders.
+    #[test]
+    fn a_tool_steps_reasoning_goes_back_unchanged_in_the_next_step() {
+        let tree = scratch("reasoning-back");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![
+                    Step::Reasoning("next, B\n".to_owned()),
+                    bash("call-1", "touch b"),
+                ],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("go", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let sent = session.shared.transport.sent();
+        assert_eq!(sent.len(), 2);
+        let said = sent[1]
+            .messages
+            .iter()
+            .find(|message| message.role == Role::Assistant)
+            .expect("the step's assistant message");
+        assert_eq!(said.reasoning.as_deref(), Some("next, B\n"));
+        tidy(&[&tree]);
     }
 
     /// The fork delivery lever: patches waiting at the next ask are one

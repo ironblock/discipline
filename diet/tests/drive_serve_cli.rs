@@ -1106,6 +1106,41 @@ fn a_drive_server_given_a_base_url_asks_its_chat_completions() {
 }
 
 #[test]
+fn a_drive_server_sends_the_substrates_declared_template_kwargs() {
+    // The reasoning ruling: Qwen's convention keeps reasoning in history, so
+    // the floor's entry declares `preserve_thinking` and serve sends it on
+    // every request; with thinking on and no level, the log names the
+    // template's default.
+    let id = "accel24-tabbyapi-exl3-qwen38-27b-3p00";
+    let hardware = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("registered")
+        .hardware_fingerprint;
+    let regimen = file_holding(
+        "regimen",
+        &format!(
+            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"{id}\"\n\
+             substrate_reasoning = \"on\"\nsubstrate_hardware = \"{hardware}\"\n\
+             [sampler]\nseed = 7\n"
+        ),
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(vec![tabby_model_card(163_840), warm()]).expect("loopback");
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let _served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["template_kwargs"],
+        serde_json::json!({"enable_thinking": true, "preserve_thinking": true}),
+        "{start_line}"
+    );
+    assert_eq!(
+        start_line["reasoning_effort_default"], "xhigh",
+        "{start_line}"
+    );
+}
+
+#[test]
 fn a_drive_server_says_when_its_log_flag_emptied_a_file() {
     // Ruled on #230: the file is truncated, as the scripted path's output is,
     // and the announcement says so.

@@ -209,6 +209,7 @@ export interface Serving {
 export interface TemplateKwargs {
   enable_thinking?: boolean;
   reasoning_effort?: string;
+  preserve_thinking?: boolean;
 }
 
 export interface Unsent {
@@ -272,6 +273,7 @@ export type SessionStartLine = {
   unsent?: Unsent;
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
+  reasoning_effort_default?: string;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {

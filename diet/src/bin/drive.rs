@@ -318,12 +318,25 @@ fn serve(args: &[String]) -> ExitCode {
     // (R1): a clone of the trunk carries it.
     // A budget no template variable carries is recorded and announced as
     // unsent, never refused for being missing (duty of care).
+    // The substrate's model convention, as the registry declares it, goes
+    // with them: `preserve_thinking`, sent rather than left to a server's
+    // default, and the template's default level named when none is sent.
     let mut unsent_budget = None;
+    let mut effort_default = None;
     if let Some(regime) = regime.as_ref() {
-        match diet::drive::regimen::template_kwargs(&regime.substrates[0]) {
-            Ok((kwargs, unsent)) => {
-                shape.template_kwargs = kwargs;
-                unsent_budget = unsent;
+        let identity = diet::drive::registry::identity(
+            diet::drive::registry::REGISTRY,
+            &regime.substrates[0].id,
+        )
+        .ok();
+        match diet::drive::regimen::template_kwargs_declared(
+            &regime.substrates[0],
+            identity.as_ref(),
+        ) {
+            Ok(wire) => {
+                shape.template_kwargs = wire.kwargs;
+                unsent_budget = wire.unsent_budget;
+                effort_default = wire.reasoning_effort_default;
             }
             Err(why) => {
                 let path = regimen_file.as_deref().unwrap_or_default();
@@ -433,7 +446,14 @@ fn serve(args: &[String]) -> ExitCode {
         transport,
         (shape, dialect),
         tools,
-        (claim, interview, unsent_budget),
+        (
+            claim,
+            interview,
+            (
+                unsent_budget.map(|budget_tokens| diet::formats::log::Unsent { budget_tokens }),
+                effort_default.clone(),
+            ),
+        ),
     );
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
@@ -624,11 +644,7 @@ fn served_session(
     transport: HttpStream,
     (mut shape, dialect): (RequestShape, Dialect),
     tools: Option<Tools>,
-    (claim, interview, unsent_budget): (
-        Option<diet::formats::log::SubstrateClaim>,
-        Option<Interview>,
-        Option<u64>,
-    ),
+    declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
     // A session that runs commands declares the one tool they run through.
     if tools.is_some() {
@@ -642,11 +658,7 @@ fn served_session(
             dialect,
         }),
         tools,
-        (
-            claim,
-            interview,
-            unsent_budget.map(|budget_tokens| diet::formats::log::Unsent { budget_tokens }),
-        ),
+        declared,
     ))
 }
 
