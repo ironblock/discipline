@@ -1,0 +1,23 @@
+{
+  "lines": [
+    {
+      "n": 1,
+      "verdict": "keep"
+    },
+    {
+      "n": 2,
+      "note": "the parser drops blank lines before it tokenizes",
+      "verdict": "update"
+    },
+    {
+      "n": 3,
+      "reason": "superseded by what turn 4 found",
+      "verdict": "remove"
+    },
+    {
+      "n": 4,
+      "of": 2,
+      "verdict": "dup"
+    }
+  ]
+}

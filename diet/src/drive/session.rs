@@ -233,6 +233,8 @@ vocabulary! {
         /// A fork's single call off the trunk's warm tail, never appended to
         /// it (#374).
         Interview => "interview",
+        /// A seam's audit (#504): a fork's call, before the refill.
+        Audit => "audit",
     }
 }
 
@@ -532,6 +534,18 @@ pub enum Event {
         /// prefix there (#406).
         displaces: bool,
     },
+    /// A seam's audit (#504): a fork off the warm trunk on the `audit` lane,
+    /// the dogma's pinned ask after it, before the refill.
+    Audited {
+        /// The settled turn it follows.
+        of_turn: u32,
+        /// The sequence number of that turn's answered trunk request.
+        at: u64,
+        /// The pinned ask it put.
+        template: crate::dogma::Template,
+        /// The ask, filled.
+        question: String,
+    },
     /// How the fork ended: once per fork, after its call's last event.
     ForkSettled {
         /// The sequence number of its [`Event::Forked`].
@@ -583,6 +597,9 @@ pub enum Event {
         fired: Option<log::SeamFired>,
         /// The calls whose pruned results it replaced (#612), when any.
         pruned: Option<Vec<String>>,
+        /// The pre-warm's timings (#504), when the refilled trunk was sent
+        /// once and the call finished.
+        warm: Option<Timings>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -872,16 +889,20 @@ pub fn interview_warrant(regimen: &Regimen) -> Result<Vec<log::Warrant>, String>
     items
         .iter()
         .map(|item| match item {
-            regimen::Value::String(word) => log::Warrant::from_tag(word).ok_or_else(|| {
-                format!(
-                    "`{INTERVIEW_WARRANT}` names `{word}`, which is not a rule: {}",
-                    log::Warrant::ALL
-                        .iter()
-                        .map(|rule| rule.tag())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }),
+            regimen::Value::String(word) => log::Warrant::from_tag(word)
+                // A seam's audit is the seam's, never an interview's (#504).
+                .filter(|rule| *rule != log::Warrant::Seam)
+                .ok_or_else(|| {
+                    format!(
+                        "`{INTERVIEW_WARRANT}` names `{word}`, which is not a rule: {}",
+                        log::Warrant::ALL
+                            .iter()
+                            .filter(|rule| **rule != log::Warrant::Seam)
+                            .map(|rule| rule.tag())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                }),
             _ => Err(format!(
                 "`{INTERVIEW_WARRANT}` holds an item that is not a word"
             )),
@@ -1693,6 +1714,11 @@ struct State {
     /// The turn that last seamed and went again after an overflow (#617):
     /// once per turn.
     overflow_retried: Option<u32>,
+    /// A seam queued for its audit or pre-warm (#504), until [`seam_work`]
+    /// takes it.
+    seam_pending: Option<PendingSeam>,
+    /// The pre-warm in flight (#504), which an ask cancels.
+    warming: Option<Cancel>,
     /// The latest measured prompt (prefilled plus cached tokens) and the
     /// estimate of the request it measured: what the next request's prompt
     /// is sized from (#588).
@@ -1720,6 +1746,76 @@ struct State {
     /// Whether the trunk carries a seam's refill message after the head
     /// (#597): the turns start after it.
     refilled: bool,
+}
+
+impl State {
+    /// A session's state as it opens: awaiting, on `trunk`, in `phase`.
+    fn opening(
+        trunk: Vec<Message>,
+        phase: Option<String>,
+        interview: Option<Interview>,
+        tools: Option<&Tools>,
+    ) -> Self {
+        State {
+            settlement: Settlement::Awaiting,
+            trunk,
+            log: Vec::new(),
+            flight: None,
+            turns: 0,
+            turns_at_seam: 0,
+            trunk_tokens: None,
+            sent_estimate: None,
+            last_sized: None,
+            overflow_retried: None,
+            seam_pending: None,
+            warming: None,
+            measured_prompt: None,
+            step_tokens: None,
+            ran: Vec::new(),
+            opened_at: Instant::now(),
+            gap_open: None,
+            carried: None,
+            pending_gap: None,
+            phase,
+            tangent: None,
+            reminder: interview
+                .as_ref()
+                .and_then(|interview| interview.self_capture)
+                .map(crate::capture::tools::Reminder::on),
+            recorded_this_turn: false,
+            captures_this_turn: 0,
+            reminder_due: None,
+            undelivered: Vec::new(),
+            archive: super::archive::Archive::default(),
+            recovered: BTreeMap::new(),
+            sink: None,
+            allowed: tools
+                .as_ref()
+                .map(|t| t.allowed.clone())
+                .unwrap_or_default(),
+            counts: Counts {
+                preseeded: tools.map_or(0, |t| {
+                    t.allowed
+                        .iter()
+                        .filter(|e| e.scope == Scope::Preseeded)
+                        .count() as u64
+                }),
+                ..Counts::default()
+            },
+            waiting: None,
+            ending: false,
+            answered: None,
+            interview,
+            forking: None,
+            queued: std::collections::VecDeque::new(),
+            recording: tools.and_then(|t| t.recording.clone()),
+            pruned: Vec::new(),
+            refilled: false,
+            jobs: BTreeMap::new(),
+            notices: Vec::new(),
+            promotable: None,
+        }
+    }
 }
 
 /// A prompt waiting on the operator, and the answer when one arrives.
@@ -2236,63 +2332,7 @@ impl<S: Streaming + 'static> Session<S> {
             .map_or(0, |since| {
                 u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
             });
-        let mut state = State {
-            settlement: Settlement::Awaiting,
-            trunk,
-            log: Vec::new(),
-            flight: None,
-            turns: 0,
-            turns_at_seam: 0,
-            trunk_tokens: None,
-            sent_estimate: None,
-            last_sized: None,
-            overflow_retried: None,
-            measured_prompt: None,
-            step_tokens: None,
-            ran: Vec::new(),
-            opened_at: Instant::now(),
-            gap_open: None,
-            carried: None,
-            pending_gap: None,
-            phase: phase_at_open.clone(),
-            tangent: None,
-            reminder: interview
-                .as_ref()
-                .and_then(|interview| interview.self_capture)
-                .map(crate::capture::tools::Reminder::on),
-            recorded_this_turn: false,
-            captures_this_turn: 0,
-            reminder_due: None,
-            undelivered: Vec::new(),
-            archive: super::archive::Archive::default(),
-            recovered: BTreeMap::new(),
-            sink: None,
-            allowed: tools
-                .as_ref()
-                .map(|t| t.allowed.clone())
-                .unwrap_or_default(),
-            counts: Counts {
-                preseeded: tools.as_ref().map_or(0, |t| {
-                    t.allowed
-                        .iter()
-                        .filter(|e| e.scope == Scope::Preseeded)
-                        .count() as u64
-                }),
-                ..Counts::default()
-            },
-            waiting: None,
-            ending: false,
-            answered: None,
-            interview,
-            forking: None,
-            queued: std::collections::VecDeque::new(),
-            recording: tools.as_ref().and_then(|t| t.recording.clone()),
-            pruned: Vec::new(),
-            refilled: false,
-            jobs: BTreeMap::new(),
-            notices: Vec::new(),
-            promotable: None,
-        };
+        let mut state = State::opening(trunk, phase_at_open.clone(), interview, tools.as_ref());
         state.push(Event::Started {
             opened,
             model: template.model.clone(),
@@ -2404,6 +2444,17 @@ impl<S: Streaming + 'static> Session<S> {
         let super::attach::Attached { message, files } = attached;
         let mut state = self.shared.lock();
         state.carry(gap, CommandKind::Ask);
+        // A seam's pre-warm in flight is cancelled by an ask (#504): the
+        // ask's own request warms the same prefix. The seam stands, logged
+        // without the warm's timings, and the ask goes on once it is.
+        while let Some(warm) = state.warming.as_ref() {
+            warm.ask();
+            state = self
+                .shared
+                .changed
+                .wait(state)
+                .unwrap_or_else(PoisonError::into_inner);
+        }
         match state.settlement {
             Settlement::Awaiting => {}
             Settlement::Turn | Settlement::Capture => {
@@ -2494,6 +2545,9 @@ impl<S: Streaming + 'static> Session<S> {
                 // every ask (#120's first review).
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     call(&shared, &shape, &cancel, opening, turn, request);
+                    // A seam the turn's end made due, queued for its audit
+                    // or pre-warm (#504).
+                    seam_work(&shared);
                 }));
                 if let Err(payload) = outcome {
                     crashed(&shared, panic_message(payload.as_ref()));
@@ -2638,14 +2692,24 @@ impl<S: Streaming + 'static> Session<S> {
             return Err(Rejected::Refused(refused));
         }
         state.admit()?;
-        refill_trunk(
+        let queued = seam(
             &self.shared.template,
             &mut state,
-            (crate::seam::Reason::Operator, None),
+            crate::seam::Reason::Operator,
             to.map(str::to_owned),
         );
         drop(state);
         self.shared.changed.notify_all();
+        if queued {
+            // Its audit and pre-warm (#504), on a thread of their own.
+            let shared = Arc::clone(&self.shared);
+            let spawned = std::thread::Builder::new()
+                .name("diet-seam".to_owned())
+                .spawn(move || seam_work(&shared));
+            if spawned.is_err() {
+                seam_work(&self.shared);
+            }
+        }
         Ok(())
     }
 
@@ -3215,6 +3279,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             lane: match lane {
                 Lane::Trunk => log::Lane::Trunk,
                 Lane::Interview => log::Lane::Interview,
+                Lane::Audit => log::Lane::Audit,
             },
             head_sha256: Some(head_sha256.clone()),
             fork: *fork,
@@ -3465,6 +3530,25 @@ pub fn line_of(logged: &Logged) -> log::Line {
             ask: Some(ask.tag().to_owned()),
             hazard: displaces.then(|| DISPLACES_TRUNK_CACHE.to_owned()),
         },
+        Event::Audited {
+            of_turn,
+            at,
+            template,
+            question,
+        } => log::Event::Fork {
+            lane: log::Lane::Audit,
+            of_turn: *of_turn,
+            at: *at,
+            why: log::Warrant::Seam,
+            question: question.clone(),
+            view: None,
+            trigger: None,
+            role: None,
+            seat: None,
+            // The pinned ask it put, by its dogma name, lower case.
+            ask: Some(template.name().to_lowercase()),
+            hazard: None,
+        },
         Event::ForkSettled {
             fork,
             outcome,
@@ -3591,8 +3675,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             render_budget,
             fired,
             pruned,
+            warm,
         } => log::Event::Seam {
             fired: *fired,
+            warm: warm.as_ref().map(timings_line),
             phase: phase.clone(),
             at_turn: *at_turn,
             reason: match reason {
@@ -5323,9 +5409,21 @@ fn ended<S>(shared: &Shared<S>, id: &str, code: Option<i32>) {
 fn refill_trunk(
     template: &RequestShape,
     state: &mut State,
-    (reason, fired): (crate::seam::Reason, Option<log::SeamFired>),
+    seam: (crate::seam::Reason, Option<log::SeamFired>),
     to: Option<String>,
 ) {
+    let seamed = refilled(template, state, seam, to);
+    state.push(seamed);
+}
+
+/// [`refill_trunk`]'s refill, its line returned rather than logged, so a
+/// pre-warm's timings can join it (#504).
+fn refilled(
+    template: &RequestShape,
+    state: &mut State,
+    (reason, fired): (crate::seam::Reason, Option<log::SeamFired>),
+    to: Option<String>,
+) -> Event {
     // The move the graph allowed, made before the render, so the refill
     // names the phase the session is now in (#563).
     let phase = to.map(|to| log::PhaseMove {
@@ -5411,7 +5509,7 @@ fn refill_trunk(
     state.trunk_tokens = None;
     let pruned = prunes_applied(state);
     let at_turn = state.turns;
-    state.push(Event::Seamed {
+    Event::Seamed {
         at_turn,
         reason,
         prefix_hash_before,
@@ -5427,7 +5525,391 @@ fn refill_trunk(
         render_budget,
         fired,
         pruned,
+        warm: None,
+    }
+}
+
+/// A seam `reason` fired (#504): refilled now; or, when the regimen asks
+/// for its audit (and the dogma pins one for `reason`) or its pre-warm,
+/// queued for [`seam_work`], which makes those calls on a thread that can
+/// wait for them, the session in `capture` until it is done. `true` when it
+/// was queued.
+fn seam(
+    template: &RequestShape,
+    state: &mut State,
+    reason: crate::seam::Reason,
+    to: Option<String>,
+) -> bool {
+    let (audit, warm) = state
+        .interview
+        .as_ref()
+        .map_or((false, false), |interview| {
+            (
+                interview.seams.audit && crate::seam::pinned_ask(reason).is_some(),
+                interview.seams.warm && reason != crate::seam::Reason::Window,
+            )
+        });
+    if !audit && !warm {
+        refill_trunk(template, state, (reason, None), to);
+        return false;
+    }
+    state.seam_pending = Some(PendingSeam { reason, to });
+    state.move_to(Settlement::Capture);
+    true
+}
+
+/// A seam queued by [`seam`] (#504), done: its audit, when the regimen asks
+/// for one and there is a settled `final` turn to cut it from -- a side
+/// call off the warm trunk, the dogma's pinned ask after it, its answer read
+/// by `diet::formats::audit` and folded into working memory, logged as a
+/// fork on the `audit` lane; then the refill; then its pre-warm, when asked
+/// for -- the refilled trunk sent once with an output cap of one, which an
+/// ask cancels, its own request warming the same prefix; then the seam's
+/// line, with the warm's timings when it finished; then back to `awaiting`.
+/// Nothing when nothing is queued.
+fn seam_work<S: Streaming>(shared: &Shared<S>) {
+    let mut state = shared.lock();
+    let Some(PendingSeam { reason, to }) = state.seam_pending.take() else {
+        return;
+    };
+    if let Some(fired) = audit_fired(&shared.template, &mut state, reason) {
+        drop(state);
+        shared.changed.notify_all();
+        audited(shared, fired);
+        state = shared.lock();
+    }
+    let mut seamed = refilled(&shared.template, &mut state, (reason, None), to);
+    let warm = state
+        .interview
+        .as_ref()
+        .is_some_and(|interview| interview.seams.warm)
+        && reason != crate::seam::Reason::Window;
+    if warm {
+        let mut shape = shared.template.clone();
+        shape.messages.clone_from(&state.trunk);
+        shape.limits.max_output_tokens = 1;
+        let cancel = Cancel::new();
+        state.warming = Some(cancel.clone());
+        drop(state);
+        shared.changed.notify_all();
+        let deadline = Instant::now() + shared.template.limits.call;
+        let ended = shared
+            .transport
+            .stream(&shape, deadline, &cancel, &mut |_: Piece<'_>| {});
+        state = shared.lock();
+        state.warming = None;
+        if let (Ok(StreamEnded::Finished { timings, .. }), Event::Seamed { warm, .. }) =
+            (ended, &mut seamed)
+        {
+            *warm = timings;
+        }
+    }
+    // Back to `awaiting`, then the seam's line, under one lock: a seam is
+    // logged while the session awaits, and nothing comes between.
+    state.move_to(Settlement::Awaiting);
+    state.push(seamed);
+    if state.ending {
+        state.ending = false;
+        state.move_to(Settlement::Ended);
+    }
+    drop(state);
+    shared.changed.notify_all();
+}
+
+/// A seam's audit, fired (#504): its fork line and its request, when the
+/// regimen asks for one, the dogma pins an ask for `reason`, working memory
+/// holds an entry, and the latest turn settled `final` -- the audit is cut
+/// from that turn's warm trunk, as a fork is.
+fn audit_fired(
+    template: &RequestShape,
+    state: &mut State,
+    reason: crate::seam::Reason,
+) -> Option<AuditFired> {
+    let interview = state
+        .interview
+        .as_ref()
+        .filter(|interview| interview.seams.audit)?;
+    let items: Vec<(crate::object::EntryId, String)> = interview
+        .object
+        .live()
+        .map(|entry| (entry.id.clone(), entry.content.clone()))
+        .collect();
+    let ask = crate::seam::audit_ask(reason, &items)?;
+    let turn = state.turns;
+    let finished = state
+        .log
+        .iter()
+        .rev()
+        .find_map(|logged| match &logged.event {
+            Event::TurnSettled {
+                turn: settled,
+                reason,
+            } if *settled == turn => Some(*reason),
+            _ => None,
+        });
+    if finished != Some(SettleReason::Final) {
+        return None;
+    }
+    let at = state
+        .log
+        .iter()
+        .rev()
+        .find_map(|logged| match &logged.event {
+            Event::Requested {
+                turn: asked,
+                lane: Lane::Trunk,
+                ..
+            } if *asked == turn => Some(logged.seq),
+            _ => None,
+        })?;
+    let mut shape = template.clone();
+    shape.messages.clone_from(&state.trunk);
+    shape
+        .messages
+        .push(Message::new(Role::User, ask.text.clone()));
+    let fork = state.push(Event::Audited {
+        of_turn: turn,
+        at,
+        template: ask.template,
+        question: ask.text.clone(),
     });
+    let max_tokens = state.sized(&mut shape, template.limits.max_output_tokens);
+    let request = state.push(Event::Requested {
+        turn,
+        lane: Lane::Audit,
+        head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
+        fork: Some(fork),
+        max_tokens,
+    });
+    let cancel = Cancel::new();
+    state.flight = Some(Flight {
+        turn,
+        request,
+        cancel: cancel.clone(),
+    });
+    Some(AuditFired {
+        fork,
+        request,
+        shape,
+        cancel,
+        items: ask.items,
+    })
+}
+
+/// A side call's stream (#504): its text, reasoning and progress logged
+/// as they arrive, naming its request; a tool call it makes is neither run
+/// nor logged, only noted.
+fn aside<S: Streaming>(
+    shared: &Shared<S>,
+    shape: &RequestShape,
+    cancel: &Cancel,
+    request: u64,
+) -> Aside {
+    let deadline = Instant::now() + shared.template.limits.call;
+    let mut partial = String::new();
+    let mut reasoning = String::new();
+    let mut called = false;
+    let mut hosted = Hosted::default();
+    let result = shared
+        .transport
+        .stream(shape, deadline, cancel, &mut |piece: Piece<'_>| {
+            if hosted.took(&piece) {
+                return;
+            }
+            let event = match piece {
+                Piece::Text(piece) => {
+                    partial.push_str(piece);
+                    Event::Delta {
+                        request,
+                        text: piece.to_owned(),
+                    }
+                }
+                Piece::Reasoning(piece) => {
+                    reasoning.push_str(piece);
+                    Event::Reasoning {
+                        request,
+                        text: piece.to_owned(),
+                    }
+                }
+                Piece::Progress(frame) => Event::Progress {
+                    request,
+                    progress: frame,
+                },
+                Piece::ToolCall { .. } => {
+                    called = true;
+                    return;
+                }
+                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => return,
+            };
+            shared.lock().push(event);
+            shared.changed.notify_all();
+        });
+    Aside {
+        result,
+        partial,
+        reasoning,
+        called,
+        hosted,
+    }
+}
+
+/// What [`aside`] streamed.
+struct Aside {
+    result: Result<StreamEnded, TransportFailure>,
+    partial: String,
+    reasoning: String,
+    called: bool,
+    /// What a hosted API said beside the answer (#555).
+    hosted: Hosted,
+}
+
+/// A seam's audit call, made and settled (#504): its pieces streamed into
+/// the log on the `audit` lane; on an answer, read by `diet::formats::audit`
+/// against the ask's numbering -- one line per note, 1..n -- and folded:
+/// `UPDATE` supersedes the note, `REMOVE` and a dup retire it, `KEEP`
+/// leaves it. `value` when it changed something, `decline` when it kept
+/// everything, `unparseable` when the answer is not the ask's audit (or the
+/// call made a tool call); a cut, stopped or failed call folds nothing.
+fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
+    let AuditFired {
+        fork,
+        request,
+        shape,
+        cancel,
+        items,
+    } = fired;
+    let Aside {
+        result,
+        partial,
+        reasoning,
+        called,
+        hosted,
+    } = aside(shared, &shape, &cancel, request);
+    let mut state = shared.lock();
+    state.flight = None;
+    let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
+    let mut lines = Vec::new();
+    let outcome = match result {
+        Ok(StreamEnded::Finished {
+            finish_reason,
+            timings,
+        }) => {
+            let text = partial.clone();
+            let cut = capped(finish_reason.as_deref());
+            state.push(Event::Answered {
+                request,
+                text: partial,
+                finish_reason,
+                reasoning,
+                timings,
+                hosted,
+            });
+            if cancel.is_asked() {
+                log::ForkOutcome::Cancelled
+            } else if cut {
+                log::ForkOutcome::Truncated
+            } else if called {
+                log::ForkOutcome::Unparseable
+            } else {
+                let (outcome, patched) = audit_folded(&mut state, &text, &items, fork);
+                lines = patched;
+                outcome
+            }
+        }
+        Ok(StreamEnded::Cancelled) => {
+            state.push(Event::Cancelled { request, partial });
+            log::ForkOutcome::Cancelled
+        }
+        Ok(StreamEnded::Rejected {
+            status,
+            body,
+            class,
+        }) => {
+            let overflow = state.overflow(class == Some(Rejection::ContextOverflow));
+            state.push(Event::Rejected {
+                request,
+                status,
+                body,
+                overflow,
+                class,
+                partial,
+            });
+            log::ForkOutcome::Failed
+        }
+        Err(failure) => {
+            let overflow = state.failed_overflow(&failure);
+            state.push(Event::Failed {
+                request,
+                overflow,
+                failure,
+                partial,
+            });
+            log::ForkOutcome::Failed
+        }
+    };
+    state.push(Event::ForkSettled {
+        fork,
+        outcome,
+        prompt_tokens: None,
+        wall_ms: None,
+        refused: None,
+    });
+    for line in lines {
+        state.push(line);
+    }
+    drop(state);
+    shared.changed.notify_all();
+}
+
+/// An audit's answer `text`, folded (#504): its lines, which must number
+/// every one of `items` once; each `UPDATE` a supersession of its note,
+/// each `REMOVE` (a dup among them) a retirement, applied as a fork's
+/// patches are, the audit's fork `f/<fork>` their provenance.
+fn audit_folded(
+    state: &mut State,
+    text: &str,
+    items: &[crate::object::EntryId],
+    fork: u64,
+) -> (log::ForkOutcome, Vec<Event>) {
+    use crate::formats::audit::Judgment;
+    let Ok(lines) = crate::formats::audit::parse(text) else {
+        return (log::ForkOutcome::Unparseable, Vec::new());
+    };
+    if lines.len() != items.len() {
+        return (log::ForkOutcome::Unparseable, Vec::new());
+    }
+    let turn = state.turns;
+    let provenance = |index: u32| crate::object::Provenance {
+        turn,
+        lane: log::Lane::Audit.tag().to_owned(),
+        fork: Some(format!("f/{fork}")),
+        tangent: None,
+        index,
+    };
+    let patches: Vec<Patch> = lines
+        .iter()
+        .filter_map(|line| {
+            let target = items.get(usize::try_from(line.number).ok()? - 1)?.clone();
+            match &line.judgment {
+                Judgment::Keep => None,
+                Judgment::Update(note) => Some(Patch::Supersede {
+                    id: crate::object::EntryId::new(&format!("audit-{fork}-{}", line.number))
+                        .ok()?,
+                    content: note.clone(),
+                    voids: target,
+                    provenance: provenance(line.number),
+                }),
+                Judgment::Remove(_) | Judgment::DupOf(_) => Some(Patch::Retire {
+                    target,
+                    provenance: provenance(line.number),
+                }),
+            }
+        })
+        .collect();
+    if patches.is_empty() {
+        return (log::ForkOutcome::Decline, Vec::new());
+    }
+    applied(state, &patches, fork)
 }
 
 /// The automatic seam (#617), checked before every trunk request on
@@ -5785,7 +6267,7 @@ fn turn_over(template: &RequestShape, state: &mut State) {
                 })
         });
     if let Some(reason) = due {
-        refill_trunk(template, state, (reason, None), None);
+        seam(template, state, reason, None);
     }
 }
 
@@ -5805,6 +6287,25 @@ pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
         Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => u32::try_from(*n).ok(),
         _ => None,
     }
+}
+
+/// A seam queued for [`seam_work`] (#504): what fired it, and the phase it
+/// moves to.
+struct PendingSeam {
+    reason: crate::seam::Reason,
+    to: Option<String>,
+}
+
+/// A seam's audit, fired ([`audit_fired`], #504).
+struct AuditFired {
+    /// The sequence number of its fork line.
+    fork: u64,
+    /// The sequence number of its call's request.
+    request: u64,
+    shape: RequestShape,
+    cancel: Cancel,
+    /// The notes the ask numbered, in its order.
+    items: Vec<crate::object::EntryId>,
 }
 
 /// How a fork's call fits its server ([`State::fork_fit`], #406).
@@ -8473,6 +8974,7 @@ pub(in crate::drive) mod tests {
                 render_budget: None,
                 fired: None,
                 pruned: None,
+                warm: None,
             },
             Event::Recalled {
                 turn: 2,
@@ -8550,6 +9052,12 @@ pub(in crate::drive) mod tests {
                 turn: 2,
                 text: "Anything you meant to record?".to_owned(),
             },
+            Event::Audited {
+                of_turn: 1,
+                at: 3,
+                template: crate::dogma::Template::AuditQHuman,
+                question: "audit the notes".to_owned(),
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -8589,9 +9097,10 @@ pub(in crate::drive) mod tests {
                 Event::Notified { .. } => 32,
                 Event::TimeoutNear { .. } => 33,
                 Event::Skipped { .. } => 34,
+                Event::Audited { .. } => 35,
             });
         }
-        assert_eq!(kinds.len(), 35, "a variant has no sample");
+        assert_eq!(kinds.len(), 36, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -8892,6 +9401,7 @@ pub(in crate::drive) mod tests {
                 render_budget: None,
                 fired: None,
                 pruned: None,
+                warm: None,
             },
             log::Event::Recalled {
                 turn: 2,
@@ -8968,6 +9478,19 @@ pub(in crate::drive) mod tests {
             log::Event::Reminded {
                 turn: 2,
                 text: "Anything you meant to record?".to_owned(),
+            },
+            log::Event::Fork {
+                lane: log::Lane::Audit,
+                of_turn: 1,
+                at: 3,
+                why: log::Warrant::Seam,
+                question: "audit the notes".to_owned(),
+                view: None,
+                trigger: None,
+                role: None,
+                seat: None,
+                ask: Some("audit_q_human".to_owned()),
+                hazard: None,
             },
         ]
     }
@@ -9452,7 +9975,7 @@ pub(in crate::drive) mod tests {
         );
         assert_eq!(
             tags(&Lane::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
-            "trunk interview"
+            "trunk interview audit"
         );
     }
 
@@ -11648,6 +12171,215 @@ pub(in crate::drive) mod tests {
             capture: crate::dogma::asks::Modality::Fields,
             fork_tail: None,
         }
+    }
+
+    /// A session whose scoping fork leaves three decisions in working memory
+    /// and whose seams `shape_it` configures, playing `rest` after the turn
+    /// and its fork (#504); the log once the fork settled.
+    fn three_decisions_then(
+        shape_it: impl FnOnce(&mut crate::seam::policy::Served),
+        rest: Vec<Vec<Step>>,
+    ) -> Session<Canned> {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        shape_it(&mut interview.seams);
+        let mut acts = vec![deltas(&[SCOPED]), deltas(&[DECIDED])];
+        acts.extend(rest);
+        let session = Session::open_with(
+            Canned::new(acts),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        session
+    }
+
+    fn seamed(log: &[Logged]) -> bool {
+        log.iter()
+            .any(|logged| matches!(logged.event, Event::Seamed { .. }))
+            && log.last().is_some_and(|logged| {
+                !matches!(
+                    logged.event,
+                    Event::Settled {
+                        to: Settlement::Capture,
+                        ..
+                    }
+                )
+            })
+    }
+
+    /// #504: with the audit on, an operator's seam puts the dogma's pinned
+    /// ask over the three notes on the `audit` lane, off the warm trunk;
+    /// its answer -- one line per note -- folds before the refill: `KEEP`
+    /// leaves a note, `UPDATE` supersedes it, `REMOVE` retires it. The audit
+    /// is a fork line, a request, an answer, a settling and its patches, the
+    /// seam's line after them, and the log reads back and projects.
+    #[test]
+    fn an_audited_seam_folds_its_answer_before_the_refill() {
+        let session = three_decisions_then(
+            |seams| seams.audit = true,
+            vec![deltas(&[
+                "1. KEEP\n2. UPDATE: for the one team that files bugs\n3. REMOVE — they asked for logins after all\n",
+            ])],
+        );
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the seam", seamed);
+        let audited = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited {
+                    template, question, ..
+                } => Some((logged.seq, *template, question.clone())),
+                _ => None,
+            })
+            .expect("an audit");
+        assert_eq!(audited.1, crate::dogma::Template::AuditQHuman);
+        assert!(
+            audited.2.contains("1. decision: a tracker"),
+            "{}",
+            audited.2
+        );
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::Requested { lane: Lane::Audit, fork: Some(fork), .. } if fork == audited.0
+        )));
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::ForkSettled { fork, outcome: log::ForkOutcome::Value, .. } if fork == audited.0
+        )));
+        let seam_at = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Seamed { .. }))
+            .expect("the seam")
+            .seq;
+        assert!(audited.0 < seam_at);
+        let live: std::collections::BTreeSet<String> = session
+            .shared
+            .lock()
+            .interview
+            .as_ref()
+            .expect("memory")
+            .object
+            .live()
+            .map(|entry| entry.content.clone())
+            .collect();
+        assert_eq!(
+            live,
+            ["decision: a tracker", "for the one team that files bugs"]
+                .map(str::to_owned)
+                .into(),
+            "kept, updated, and the removed one gone"
+        );
+        // The refill renders what the audit left.
+        let trunk = session.trunk();
+        let refill = &trunk[template().messages.len()].content;
+        assert!(
+            refill.contains("for the one team that files bugs"),
+            "{refill}"
+        );
+        assert!(!refill.contains("no login"), "{refill}");
+        assert_eq!(session.settlement(), Settlement::Awaiting);
+        reads_whole(&session);
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+    }
+
+    /// #504: an answer that is not the ask's audit -- prose, or a line short
+    /// -- folds nothing and settles `unparseable`; the seam goes on.
+    #[test]
+    fn an_audit_answer_not_in_the_grammar_folds_nothing_and_the_seam_goes_on() {
+        for answer in ["All three look fine to me.", "1. KEEP\n2. KEEP\n"] {
+            let session = three_decisions_then(|seams| seams.audit = true, vec![deltas(&[answer])]);
+            session.declare_seam(None).expect("admitted");
+            let log = wait_until(&session, "the seam", seamed);
+            assert!(
+                log.iter().any(|logged| matches!(
+                    logged.event,
+                    Event::ForkSettled {
+                        outcome: log::ForkOutcome::Unparseable,
+                        ..
+                    }
+                )),
+                "{answer}"
+            );
+            let held = session.shared.lock();
+            assert_eq!(
+                held.interview
+                    .as_ref()
+                    .expect("memory")
+                    .object
+                    .live()
+                    .count(),
+                3
+            );
+            drop(held);
+            reads_whole(&session);
+        }
+    }
+
+    /// #504: with the pre-warm on, a seam sends its refilled trunk once with
+    /// an output cap of one, and its line carries the warm's timings.
+    #[test]
+    fn a_warmed_seam_sends_the_refilled_trunk_once_and_logs_its_timings() {
+        let session = three_decisions_then(
+            |seams| seams.warm = true,
+            vec![vec![
+                Step::Delta("x".to_owned()),
+                Step::Timings(Timings {
+                    prompt_n: Some(412),
+                    ..Timings::default()
+                }),
+            ]],
+        );
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the seam", seamed);
+        let warm = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Seamed { warm, .. } => Some(warm.clone()),
+                _ => None,
+            })
+            .expect("the seam");
+        assert_eq!(warm.and_then(|timings| timings.prompt_n), Some(412));
+        let sent = session.shared.transport.sent();
+        let warmed = sent.last().expect("the warm");
+        assert_eq!(warmed.limits.max_output_tokens, 1);
+        assert_eq!(warmed.messages, session.trunk());
+        reads_whole(&session);
+    }
+
+    /// #504: an ask while the warm is in flight cancels it: the seam stands,
+    /// logged without the warm's timings, and the ask is admitted.
+    #[test]
+    fn an_ask_cancels_the_warm_and_the_seam_stands() {
+        let gate = Gate::new();
+        let session = three_decisions_then(
+            |seams| seams.warm = true,
+            vec![vec![Step::Hold(gate.clone())], deltas(&["next answer"])],
+        );
+        session.declare_seam(None).expect("admitted");
+        assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
+        session
+            .ask("next", None)
+            .expect("admitted once the warm was cancelled");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        assert!(
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Seamed { warm: None, .. }))
+        );
+        reads_whole(&session);
     }
 
     /// The scope-boundary turn's answer: it states what it will do next.
@@ -14368,6 +15100,8 @@ pub(in crate::drive) mod tests {
                     outputs: state,
                     render_budget: None,
                     window_off: false,
+                    warm: false,
+                    audit: false,
                 },
                 ..interviewing(&[log::Warrant::Read])
             }),
@@ -14700,6 +15434,8 @@ pub(in crate::drive) mod tests {
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
+                warm: false,
+                audit: false,
             })),
         );
         session
@@ -14757,6 +15493,8 @@ pub(in crate::drive) mod tests {
                     outputs: log::SeamToolOutputs::Evict,
                     render_budget: None,
                     window_off: false,
+                    warm: false,
+                    audit: false,
                 })),
             )
         };
@@ -14829,6 +15567,8 @@ pub(in crate::drive) mod tests {
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
+                warm: false,
+                audit: false,
             })),
         );
         session
@@ -14861,6 +15601,8 @@ pub(in crate::drive) mod tests {
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
+                warm: false,
+                audit: false,
             })),
         );
         session
@@ -14904,6 +15646,8 @@ pub(in crate::drive) mod tests {
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
+                warm: false,
+                audit: false,
             })),
         );
         session
@@ -14949,6 +15693,8 @@ pub(in crate::drive) mod tests {
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
+                warm: false,
+                audit: false,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -14982,6 +15728,8 @@ pub(in crate::drive) mod tests {
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
+                warm: false,
+                audit: false,
             })),
         );
         session
@@ -15157,6 +15905,7 @@ pub(in crate::drive) mod tests {
                 render_budget: None,
                 fired: None,
                 pruned: None,
+                warm: None,
             }
         );
 

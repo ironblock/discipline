@@ -1940,6 +1940,7 @@ mod tests {
             render_budget: None,
             fired: None,
             pruned: None,
+            warm: None,
         });
         let projection = project(
             &numbered(events),
@@ -1986,6 +1987,7 @@ mod tests {
             render_budget: None,
             fired: None,
             pruned: None,
+            warm: None,
         });
         let projection = project(
             &numbered(events),

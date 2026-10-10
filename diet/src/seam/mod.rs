@@ -541,6 +541,38 @@ impl<R: Ratifier> Controller<R> {
     }
 }
 
+/// The audit ask a seam fired by `reason` puts over `items` (#504): the
+/// pinned template filled with the notes numbered 1..n, one line each, or
+/// `None` when the dogma pins no ask for `reason` or there is nothing to
+/// audit. The served session's audit and the controller's are the same ask.
+#[must_use]
+pub fn audit_ask(reason: Reason, items: &[(EntryId, String)]) -> Option<Ask> {
+    let template = pinned_ask(reason)?;
+    if items.is_empty() {
+        return None;
+    }
+    let numbered = items
+        .iter()
+        .enumerate()
+        .map(|(index, (_, content))| format!("{}. {}", index + 1, render::one_line(content)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let count = items.len().to_string();
+    let text = template
+        .fill(&[
+            (Hole::Category, AUDIT_CATEGORY),
+            (Hole::LineCount, &count),
+            (Hole::Items, &numbered),
+        ])
+        .ok()?;
+    Some(Ask {
+        reason,
+        template,
+        text,
+        items: items.iter().map(|(id, _)| id.clone()).collect(),
+    })
+}
+
 /// The dogma's audit ask for a trigger, where one is pinned.
 ///
 /// A table rather than a guess. The dogma pins an ask for a phase boundary

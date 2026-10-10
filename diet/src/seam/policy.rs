@@ -49,6 +49,23 @@ pub const SEAM_WINDOW: &str = "seam_window";
 /// `OpenCode` 2's `DEFAULT_BUFFER`, or the output cap when that is larger
 /// (`oc:packages/core/src/session/compaction.ts:12,236-240`).
 pub const WINDOW_RESERVE: u64 = 20_000;
+/// A seam's audit (#504): `"on"` (or `true`) puts the dogma's pinned audit
+/// ask over working memory before the refill and folds its answer; off by
+/// default.
+pub const SEAM_AUDIT: &str = "seam_audit";
+/// A seam's pre-warm (#504): `"on"` (or `true`) sends the refilled trunk
+/// once, with an output cap of one, so the next ask finds it cached; off by
+/// default, and never after a `window` seam, whose request warms it.
+pub const SEAM_WARM: &str = "seam_warm";
+
+/// Whether `regimen` turns `key` on: `"on"` or `true`.
+fn on(regimen: &Regimen, key: &str) -> bool {
+    match regimen.get(key) {
+        Some(Value::Boolean(on)) => *on,
+        Some(Value::String(word)) => word == "on",
+        _ => false,
+    }
+}
 
 /// The render budget (#565): estimated tokens the seam's render may run to.
 /// Read leniently: absent, or anything but a positive integer, is no budget.
@@ -279,6 +296,12 @@ pub struct Served {
     /// Whether the regimen turned the automatic seam off ([`SEAM_WINDOW`],
     /// #617): on by default, as Pi and `OpenCode` 2 both have it.
     pub window_off: bool,
+    /// Whether a seam puts the dogma's audit ask to the model before its
+    /// refill ([`SEAM_AUDIT`], #504).
+    pub audit: bool,
+    /// Whether a seam sends its refilled trunk once to warm the cache
+    /// ([`SEAM_WARM`], #504).
+    pub warm: bool,
 }
 
 /// The render budget `regimen` declares (#565), leniently: a positive
@@ -348,6 +371,8 @@ impl Served {
             tail_tokens,
             outputs: seam_tool_outputs(regimen),
             render_budget: render_budget(regimen),
+            audit: on(regimen, SEAM_AUDIT),
+            warm: on(regimen, SEAM_WARM),
             window_off: matches!(regimen.get(SEAM_WINDOW), Some(Value::String(word)) if word == "off")
                 || matches!(regimen.get(SEAM_WINDOW), Some(Value::Boolean(false))),
         })
@@ -463,6 +488,8 @@ mod tests {
                 outputs: crate::formats::log::SeamToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
+                warm: false,
+                audit: false,
             })
         );
         assert_eq!(
@@ -474,6 +501,8 @@ mod tests {
                 outputs: crate::formats::log::SeamToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
+                warm: false,
+                audit: false,
             })
         );
         for bad in ["0.0", "1.5", "-0.2", "\"half\""] {
@@ -508,6 +537,8 @@ mod tests {
             outputs: crate::formats::log::SeamToolOutputs::Evict,
             render_budget: None,
             window_off: false,
+            warm: false,
+            audit: false,
         };
         assert_eq!(policy.due(2, Some(999)), None);
         assert_eq!(policy.due(2, None), None);

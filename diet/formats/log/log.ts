@@ -50,6 +50,7 @@ export type State =
 export type Lane =
   | "trunk"
   | "interview"
+  | "audit"
 ;
 
 export type Command =
@@ -166,6 +167,7 @@ export type ApprovalScope =
 export type Warrant =
   | "read"
   | "scoping"
+  | "seam"
 ;
 
 export type ForkOutcome =
@@ -570,6 +572,7 @@ export type SeamLine = {
   prompt_tokens?: number;
   window?: number;
   pruned?: string[];
+  warm?: Timings;
 };
 
 export type DeliveredLine = {
