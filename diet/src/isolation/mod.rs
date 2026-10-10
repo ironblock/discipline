@@ -774,6 +774,23 @@ impl Confinement {
         }
 
         let confined = self.compose(policy, worktree, argv);
+        // A stop already asked runs nothing (Pi and `OpenCode` both check
+        // their abort signal before they start any work).
+        if stop() {
+            return Ok(Ran {
+                argv: argv.to_vec(),
+                policy: self.policy_of(&confined),
+                confined,
+                isolation: self.isolation(),
+                network: policy.network,
+                exit: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                cancelled: true,
+            });
+        }
         let Some((program, rest)) = confined.split_first() else {
             return Err(NotRun::Nothing);
         };
@@ -937,9 +954,9 @@ fn collected(
     let group = child.id();
     let mut cancelled = false;
     let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
+        // The stop first, each time round: a stop already asked when the
+        // child exits cancels it, as one asked before it started does
+        // (Pi and `OpenCode` check the abort before any work).
         if stop() {
             let _ = seatbelt::kill()
                 .args(["-KILL", "--", &format!("-{group}")])
@@ -947,6 +964,9 @@ fn collected(
             let _ = child.kill();
             cancelled = true;
             break child.wait()?;
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
         }
         std::thread::sleep(POLL);
     };
@@ -1241,6 +1261,24 @@ mod tests {
             !group_alive(&group),
             "the session's end left the server running"
         );
+    }
+
+    /// A stop already asked when a call starts runs nothing, and says it
+    /// was cancelled -- never the result of a command that raced it.
+    #[test]
+    fn a_stop_already_asked_runs_nothing_and_says_cancelled() {
+        let ground = Ground::make("stop-before");
+        let ran = Confinement::Unconfined
+            .run_until(
+                &Policy::unconfined(),
+                &ground.tree,
+                &argv(&["/usr/bin/touch", "marker"]),
+                &|| true,
+            )
+            .expect("not refused");
+        assert!(ran.cancelled, "{ran:?}");
+        assert_eq!(ran.exit, None);
+        assert!(!ground.tree.join("marker").exists(), "the command ran");
     }
 
     /// A stop kills a running call's whole process group -- its foreground
