@@ -224,6 +224,9 @@ export const refusalOf = registry<Refusal>({
   'not-live': { label: 'not taken: that entry is no longer live', level: 'quiet' },
   'no-proposal': { label: 'not taken: no phase proposal waits on a ruling', level: 'quiet' },
   'nothing-running': { label: 'not taken: no command is running to move', level: 'quiet' },
+  // The reconcile gate's (#150, #698).
+  'seam-held': { label: 'not taken: the seam is held until your changes are addressed -- edit, flag, refill again, or refill anyway', level: 'warn' },
+  'nothing-held': { label: 'not taken: no seam is held', level: 'quiet' },
   // A seam's phase the graph would not take (#563).
   'no-phase-graph': { label: 'not taken: this session declares no phases', level: 'quiet' },
   'not-a-phase': { label: 'not taken: that is not one of the session’s phases', level: 'warn' },

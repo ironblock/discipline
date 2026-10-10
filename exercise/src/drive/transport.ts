@@ -49,6 +49,8 @@ export type Command =
   | { readonly kind: 'ratify-phase'; readonly call: string; readonly choice: PhaseChoice }
   /** Move the running foreground command to the background (#614): it keeps running, and the turn goes on. */
   | { readonly kind: 'background' }
+  /** Refill a seam held for the operator over its unaddressed changes (#150's gate, #698). */
+  | { readonly kind: 'refill-anyway' }
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
   | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision };
 
@@ -132,6 +134,9 @@ export type Refusal = Open<
   | 'empty'
   | 'unknown-entry'
   | 'not-live'
+  /** `diet`'s gate (#150, #698): a seam is held for the operator, so asks wait; a refill-anyway with no seam held. */
+  | 'seam-held'
+  | 'nothing-held'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };

@@ -333,6 +333,17 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     ]);
   });
 
+  it('folds a seam held for the operator, and the refill that overrode it (#150’s gate, #698)', () => {
+    const log = logOf('a-v7-seam-held-for-the-operator-then-refilled-anyway.jsonl');
+    const atHold = log.findIndex((line) => line.kind === 'seam.held') + 1;
+    const held = fold(log.slice(0, atHold));
+    expect([...held.unknown.keys()]).toEqual([]);
+    expect(held.held).toEqual({ atTurn: 1, reason: 'operator', unaddressed: ['d2'] });
+    const refilled = fold(log);
+    expect(refilled.held).toBeUndefined();
+    expect(refilled.eras.find((era) => era.seam)?.seam?.refilledAnyway).toBe(true);
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });
