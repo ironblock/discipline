@@ -14,11 +14,35 @@ use std::fmt::Write as _;
 
 use super::digest;
 
+/// How a fork answers an ask (#610): in the fields the ask names, read by
+/// the interview grammar, or by calling the self-capture tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Modality {
+    /// Capitalized fields, parsed: every set before #610.
+    #[default]
+    Fields,
+    /// The self-capture contract's tool calls, grounded as the trunk's are.
+    Tools,
+}
+
+impl Modality {
+    /// The regimen's word for it.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Fields => "fields",
+            Self::Tools => "tools",
+        }
+    }
+}
+
 /// One named set of fork asks.
 #[derive(Debug, PartialEq, Eq)]
 pub struct AskSet {
     /// Its name: the directory under `diet/dogma/fork-asks/`.
     pub name: &'static str,
+    /// How its asks have the fork answer.
+    pub modality: Modality,
     /// Each file's stem and text, in manifest order.
     files: &'static [(&'static str, &'static str)],
 }
@@ -32,6 +56,7 @@ macro_rules! set_files {
 /// Today's router asks, moved into the dogma unchanged (#595 (c)).
 pub const V3: AskSet = AskSet {
     name: "v3",
+    modality: Modality::Fields,
     files: set_files!("v3": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
 };
@@ -40,6 +65,7 @@ pub const V3: AskSet = AskSet {
 /// SUPERSEDE (#595 (a), #562).
 pub const V4: AskSet = AskSet {
     name: "v4",
+    modality: Modality::Fields,
     files: set_files!("v4": "api_surface", "change", "finding", "generic", "imperative",
         "judgment", "outcome", "reminder"),
 };
