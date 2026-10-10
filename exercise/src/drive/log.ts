@@ -258,8 +258,10 @@ export interface Entry {
 /** A change to working memory, from the fork that produced it. */
 export interface Patch extends At {
   readonly kind: 'patch';
-  /** The `seq` of the `fork` that produced it. */
-  readonly fork: number;
+  /** The `seq` of the `fork` that produced it; absent for the trunk's own change, which names its `lane` (#627). */
+  readonly fork?: number;
+  /** The trunk's lane that made it, when no fork did (log v7, #627): today always `self-capture`. */
+  readonly lane?: string;
   readonly op: PatchOp;
   readonly entry: Entry;
   /** For `supersede`: the entry this one replaces. */
