@@ -1451,7 +1451,7 @@ pub fn output_cap(regimen: &Regimen) -> Result<OutputCap, String> {
 pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
     let output_cap = output_cap(regimen)?;
     let surface = tool_surface(regimen)?;
-    let max_steps = match regimen.get(LIMITS) {
+    let in_limits = match regimen.get(LIMITS) {
         None => None,
         Some(regimen::Value::Table(limits)) => match limits.get(MAX_STEPS) {
             None => None,
@@ -1466,6 +1466,8 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         },
         Some(_) => return Err(format!("`{LIMITS}` is not a table")),
     };
+    // The top-level key (#569), leniently, before `[limits]`.
+    let max_steps = crate::drive::regimen::top_level_max_steps(regimen).or(in_limits);
     let approval_policy = match regimen.get(APPROVAL_POLICY) {
         None => None,
         Some(regimen::Value::String(text)) => Some(text.clone()),

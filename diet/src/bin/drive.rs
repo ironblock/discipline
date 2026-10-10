@@ -104,8 +104,11 @@ fn serve_usage() -> String {
     out.push_str("the record could not spell, and FILE.product.txt, the working memory at\n");
     out.push_str("the end, whose sha256 is the summary's product_sha256; all three digests\n");
     out.push_str("are reported on stdout.\n");
-    out.push_str("--max-output-tokens defaults to 8192, room for a reasoning model's thinking\n");
-    out.push_str("(measured on the floor, #290); a turn that hits it is logged capped.\n");
+    out.push_str("--max-output-tokens beats the regimen's `max_output_tokens`, which beats the\n");
+    out.push_str(
+        "default, 64000 (the harness vote, #569); a turn that hits it is logged capped.\n",
+    );
+    out.push_str("The regimen's top-level `max_steps` beats its `[limits] max_steps`.\n");
     out.push_str("--log FILE writes the session's log there as each line is appended, the\n");
     out.push_str("same lines GET /events streams; nothing is written without it.\n");
     out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
@@ -124,7 +127,7 @@ fn serve_usage() -> String {
     out.push_str("that runs commands (it declares `allowed_commands`, the pre-seeded set) needs\n");
     out.push_str("it. Each command runs under the regimen's confinement, opened at start;\n");
     out.push_str("`isolation = \"vm\"` is refused, and `isolation = \"none\"` needs\n");
-    out.push_str("`[limits] max_steps`, and --auth-file is required: every route then asks for\n");
+    out.push_str("`max_steps`, and --auth-file is required: every route then asks for\n");
     out.push_str("it, and the file joins the session's secrets: under a sandbox no command\n");
     out.push_str("reads it, so none answers its own prompt. Under `isolation = \"none\"` a\n");
     out.push_str("command can read it, and nothing stops that (#436). A command no approval\n");
@@ -137,13 +140,6 @@ fn serve_usage() -> String {
     out.push_str("as FILE.receipt.json.\n");
     out
 }
-
-/// `serve`'s output cap when `--max-output-tokens` is not given: room for
-/// a reasoning model's thinking before its answer. Measured on the floor
-/// (#290, comment 5969377550): the rehearsal's three turns capped at 512
-/// finished at 3,561, 408 and 1,873 completion tokens at a cap of 4096,
-/// one sample each; 8192 leaves the largest more than twice its room.
-const SERVE_MAX_OUTPUT_TOKENS: u32 = 8192;
 
 /// What `serve`'s flags say.
 struct ServeArgs {
@@ -158,7 +154,8 @@ struct ServeArgs {
     listen: IpAddr,
     port: u16,
     allowed_origins: Vec<String>,
-    max_output_tokens: u32,
+    /// `--max-output-tokens`, when given: it beats the regimen's (#569).
+    max_output_tokens: Option<u32>,
     worktree: Option<String>,
 }
 
@@ -188,7 +185,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut listen = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
-    let mut max_output_tokens: u32 = SERVE_MAX_OUTPUT_TOKENS;
+    let mut max_output_tokens = None;
     let mut worktree = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
@@ -228,7 +225,10 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--port" {
             value.parse().map(|given| port = given).is_ok()
         } else if flag == "--max-output-tokens" {
-            value.parse().map(|given| max_output_tokens = given).is_ok()
+            value
+                .parse()
+                .map(|given| max_output_tokens = Some(given))
+                .is_ok()
         } else if flag == "--worktree" {
             // Absolute, as the gym's is resolved before anything runs: a
             // relative one would be resolved again inside a sandbox.
@@ -302,6 +302,11 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(read) => read.unzip(),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // The flag, else the regimen's, else the default (#569).
+    let (max_output_tokens, _) = read_at_start.as_ref().map_or_else(
+        || diet::drive::regimen::output_cap(max_output_tokens, None),
+        |read| read.output_cap,
+    );
     // The regimen's `[sampler]`, pinned on every request (#486): derived from
     // the regime's own `sampler_card`, so the record's claim and the wire's
     // pins are one value. Without a regimen, nothing is pinned, as before.
@@ -810,8 +815,9 @@ fn serving_tools(
         return Err((
             EXIT_INPUT,
             format!(
-                "{path} runs commands unconfined (`isolation = \"none\"`) with no `[{}] {}`: \
-                 nothing would bound the loop",
+                "{path} runs commands unconfined (`isolation = \"none\"`) with no `{}` (or \
+                 `[{}] {}`): nothing would bound the loop",
+                tool_loop::MAX_STEPS,
                 tool_loop::LIMITS,
                 tool_loop::MAX_STEPS
             ),
@@ -1107,6 +1113,8 @@ struct Running {
 struct ReadAtStart {
     regimen_sha256: String,
     levers: BTreeMap<String, String>,
+    /// The output cap the session runs at, and where it came from.
+    output_cap: (u32, &'static str),
 }
 
 /// Project the ended session, check the record reads back, and write it and
@@ -1423,11 +1431,12 @@ fn announcement(
 
 /// The regime the regimen at `path` declares, its substrate resolved from the
 /// registry this program was built with (#157 Q2), and what the record's
-/// `start` says of it: the sha256 of the bytes it was read from, and the
+/// `start` says of it: the sha256 of the bytes it was read from, the output
+/// cap (`flag`, `--max-output-tokens`, beating the regimen's), and the
 /// levers it sets.
 fn registered_regime(
     path: &str,
-    max_output_tokens: u32,
+    flag: Option<u32>,
 ) -> Result<(diet::formats::record::Regime, ReadAtStart), String> {
     let text =
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
@@ -1435,11 +1444,13 @@ fn registered_regime(
         regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
         .map(|regime| {
+            let output_cap = diet::drive::regimen::output_cap(flag, Some(&regimen));
             (
                 regime,
                 ReadAtStart {
                     regimen_sha256: diet::digest::sha256_hex(text.as_bytes()),
-                    levers: diet::drive::regimen::serve_levers(&regimen, max_output_tokens),
+                    levers: diet::drive::regimen::serve_levers(&regimen, output_cap),
+                    output_cap,
                 },
             )
         })

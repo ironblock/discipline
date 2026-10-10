@@ -438,12 +438,60 @@ fn sampled(value: &regimen::Value) -> Value {
     }
 }
 
+/// The regimen's key for the output cap (#569): the `max_tokens` every
+/// request carries, at the top level beside `tool_surface`.
+pub const MAX_OUTPUT_TOKENS: &str = "max_output_tokens";
+
+/// The output cap when neither `--max-output-tokens` nor the regimen names
+/// one (#569), by the harness vote: Pi sends a local model's `maxTokens`,
+/// 16,384 unless its definition says otherwise
+/// (`pi:packages/coding-agent/src/core/provider-composer.ts:243`), and
+/// `OpenCode` 2 sends none on the `OpenAI` chat protocol
+/// (`oc:packages/llm/src/protocols/openai-chat.ts:361`, `generation.maxTokens`,
+/// which its session runner never sets). They differ, so Qwen Code decides: a
+/// `qwen3.x` model's catalogued 64K output limit, clipped to its 64,000
+/// ceiling (`qc:packages/core/src/core/tokenLimits.ts:24,34,335,453-459`).
+pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 64_000;
+
+/// A positive integer at `key`, leniently: absent, or anything else, is
+/// `None`, as an unset setting is.
+fn positive(regimen: &Regimen, key: &str) -> Option<u32> {
+    match regimen.get(key) {
+        Some(regimen::Value::Integer(n)) if *n > 0 => Some(u32::try_from(*n).unwrap_or(u32::MAX)),
+        _ => None,
+    }
+}
+
+/// The output cap a session runs at, and where it came from: `flag`
+/// (`--max-output-tokens`) beats `regimen` ([`MAX_OUTPUT_TOKENS`]), which
+/// beats `default` ([`DEFAULT_MAX_OUTPUT_TOKENS`]). A regimen value that is
+/// not a positive integer is read as unset.
+#[must_use]
+pub fn output_cap(flag: Option<u32>, regimen: Option<&Regimen>) -> (u32, &'static str) {
+    if let Some(given) = flag {
+        return (given, "flag");
+    }
+    regimen
+        .and_then(|regimen| positive(regimen, MAX_OUTPUT_TOKENS))
+        .map_or((DEFAULT_MAX_OUTPUT_TOKENS, "default"), |cap| {
+            (cap, "regimen")
+        })
+}
+
+/// The step limit at the regimen's top level (#569), leniently: a positive
+/// integer, or `None`. `[limits] max_steps` is still read beneath it.
+#[must_use]
+pub fn top_level_max_steps(regimen: &Regimen) -> Option<u32> {
+    positive(regimen, crate::drive::tool_loop::MAX_STEPS)
+}
+
 /// The word a lever is written with when nothing says its state: the lever
 /// exists in docs/program.md §2, and this run cannot describe where it sat.
 pub const UNDECLARED: &str = "undeclared";
 
 /// The state of each lever (docs/program.md §2) a session `serve` runs
-/// under `regimen`, with `max_output_tokens` its output cap, sits at, by
+/// under `regimen`, with `output_cap` its output cap and where that came
+/// from ([`output_cap`]), sits at, by
 /// lever, in that table's words: best effort. A lever this build cannot
 /// describe is [`UNDECLARED`], never an error, and nothing reads a missing
 /// one as a fault (the maintainer, 2026-10-09: "best effort in the 'duty of
@@ -455,7 +503,7 @@ pub const UNDECLARED: &str = "undeclared";
 /// failed turn's commands stay on the trunk -- and are written as the build
 /// has them.
 #[must_use]
-pub fn serve_levers(regimen: &Regimen, max_output_tokens: u32) -> BTreeMap<String, String> {
+pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<String, String> {
     use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS, SEAM_TAIL_TOKENS};
     let word = |key: &str| match regimen.get(key) {
         Some(regimen::Value::String(word)) => word.clone(),
@@ -490,7 +538,7 @@ pub fn serve_levers(regimen: &Regimen, max_output_tokens: u32) -> BTreeMap<Strin
     {
         triggers.push("budget");
     }
-    let [disposition, approval, surface, limits] = command_levers(regimen, max_output_tokens);
+    let [disposition, approval, surface, limits] = command_levers(regimen, output_cap);
     let reasoning = match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
         (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
             match table.get("effort") {
@@ -537,7 +585,7 @@ pub fn serve_levers(regimen: &Regimen, max_output_tokens: u32) -> BTreeMap<Strin
 /// The levers a regimen's commands set -- tool-output disposition, approval,
 /// tool surface, step and output limits -- in [`serve_levers`]' words; the
 /// first three [`UNDECLARED`] when it runs none.
-fn command_levers(regimen: &Regimen, max_output_tokens: u32) -> [String; 4] {
+fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4] {
     use crate::drive::output::OutputCap;
     use crate::drive::tool_loop::{self, ToolSurface};
     let commands = tool_loop::declared(regimen).ok().flatten();
@@ -561,13 +609,16 @@ fn command_levers(regimen: &Regimen, max_output_tokens: u32) -> [String; 4] {
         Some(ToolSurface::Standard) => "standard".to_owned(),
         None => undeclared(),
     };
-    let limits = format!(
-        "max_steps:{}:output_cap:{max_output_tokens}",
-        commands
-            .as_ref()
-            .and_then(|declared| declared.max_steps)
-            .map_or_else(|| "none".to_owned(), |steps| steps.to_string())
-    );
+    // Each limit, then where it came from: a step limit has no flag, so it
+    // is the regimen's or the default's (none).
+    let steps = commands
+        .as_ref()
+        .and_then(|declared| declared.max_steps)
+        .map_or_else(
+            || "none:default".to_owned(),
+            |steps| format!("{steps}:regimen"),
+        );
+    let limits = format!("max_steps:{steps}:output_cap:{cap}:{cap_from}");
     [disposition, approval, surface, limits]
 }
 
@@ -576,11 +627,47 @@ mod tests {
     use super::{UNDECLARED, regime_of, serve_levers};
 
     #[test]
+    fn the_output_cap_is_the_flag_else_the_regimens_else_the_default_and_steps_read_top_level_first()
+     {
+        use super::{DEFAULT_MAX_OUTPUT_TOKENS, output_cap};
+        let read = |text: &str| regimen::parse(text).expect("a regimen");
+        let keyed = read("max_output_tokens = 32768\n");
+        assert_eq!(output_cap(Some(512), Some(&keyed)), (512, "flag"));
+        assert_eq!(output_cap(None, Some(&keyed)), (32_768, "regimen"));
+        assert_eq!(
+            output_cap(None, None),
+            (DEFAULT_MAX_OUTPUT_TOKENS, "default")
+        );
+        // Leniently: a value that is not a positive integer is unset.
+        for unset in ["max_output_tokens = 0\n", "max_output_tokens = \"lots\"\n"] {
+            assert_eq!(
+                output_cap(None, Some(&read(unset))),
+                (DEFAULT_MAX_OUTPUT_TOKENS, "default")
+            );
+        }
+        let both = read("approval = \"none\"\nmax_steps = 12\n[limits]\nmax_steps = 40\n");
+        let declared = crate::drive::tool_loop::declared(&both)
+            .expect("read")
+            .expect("runs commands");
+        assert_eq!(declared.max_steps, Some(12), "the top-level key first");
+        let levers = serve_levers(&both, (32_768, "regimen"));
+        assert_eq!(
+            levers.get("step_and_output_limits").map(String::as_str),
+            Some("max_steps:12:regimen:output_cap:32768:regimen")
+        );
+        let under = read("approval = \"none\"\n[limits]\nmax_steps = 40\n");
+        let declared = crate::drive::tool_loop::declared(&under)
+            .expect("read")
+            .expect("runs commands");
+        assert_eq!(declared.max_steps, Some(40), "`[limits]` beneath it");
+    }
+
+    #[test]
     fn t1s_draft_regimens_put_every_lever_at_a_word_and_undescribed_ones_at_undeclared() {
         let draft = |name: &str| {
             let path = format!("{}/../drafts/{name}", env!("CARGO_MANIFEST_DIR"));
             let text = std::fs::read_to_string(&path).expect("the draft");
-            serve_levers(&regimen::parse(&text).expect("a regimen"), 32_768)
+            serve_levers(&regimen::parse(&text).expect("a regimen"), (32_768, "flag"))
         };
         let floor = draft("t1-session-one.regimen.toml");
         let at = |levers: &std::collections::BTreeMap<String, String>, lever: &str| {
@@ -600,16 +687,19 @@ mod tests {
         assert_eq!(at(&line, "reasoning_state"), "on:effort:xhigh");
         assert_eq!(
             at(&line, "step_and_output_limits"),
-            "max_steps:none:output_cap:32768"
+            "max_steps:none:default:output_cap:32768:flag"
         );
         // A regimen that says nothing still gets a table, never an error.
-        let empty = serve_levers(&regimen::parse("").expect("an empty regimen"), 8192);
+        let empty = serve_levers(
+            &regimen::parse("").expect("an empty regimen"),
+            (8192, "default"),
+        );
         assert_eq!(at(&empty, "fork_warrant"), "none");
         assert_eq!(at(&empty, "isolation"), UNDECLARED);
         assert_eq!(at(&empty, "compaction_depth"), "total");
         let paced = serve_levers(
             &regimen::parse("seam_every_turns = 3\nseam_tail_tokens = 8000\n").expect("a regimen"),
-            8192,
+            (8192, "default"),
         );
         assert_eq!(at(&paced, "seam_trigger"), "operator-declared+cadence");
         assert_eq!(at(&paced, "compaction_depth"), "tail:8000");
