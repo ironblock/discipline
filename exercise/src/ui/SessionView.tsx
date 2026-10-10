@@ -620,6 +620,12 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                 foreground={session.eras.at(-1)?.nodes.some((n) => n.kind === 'tool' && n.running && n.tool === 'bash') ?? false}
                 // That command near its timeout (#613): the move asks itself.
                 {...(session.proposal ? { proposal: session.proposal } : {})}
+                // Nothing to seam (#685), as serve decides it: no turn has settled, or working memory holds no live entry.
+                {...(session.lastSettled === undefined
+                  ? { noSeam: 'no turn has settled yet' }
+                  : !session.memory.some((m) => m.state === 'live')
+                    ? { noSeam: 'working memory holds nothing yet' }
+                    : {})}
                 nearTimeout={session.eras.at(-1)?.nodes.some((n) => n.kind === 'tool' && n.running && n.tool === 'bash' && n.nearTimeout !== undefined) ?? false}
                 {...composer}
               />

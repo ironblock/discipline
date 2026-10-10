@@ -30,7 +30,7 @@ import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { TANGENT_OPEN } from '../drive/served/tangent.ts';
 import { SELF_CAPTURE } from '../drive/served/self-capture.ts';
-import { PHASE_PROPOSED, PHASE_RULED_CONTINUE } from '../drive/served/phase-proposal.ts';
+import { PHASE_PROPOSED, PHASE_PROPOSED_WITH_MEMORY, PHASE_RULED_CONTINUE } from '../drive/served/phase-proposal.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
@@ -745,9 +745,32 @@ export const ServedPhaseProposal: Story = {
     await expect(dock.querySelector('.ex-composer__proposal-move')?.textContent).toBe('plan → build');
     await expect(dock.querySelector('.ex-composer__proposal-reason')?.textContent).toBe('the spec is settled');
     await expect([...dock.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['seam', 'continue', 'stay']);
+    // Working memory holds nothing, so there is nothing to seam: serve would refuse it (#685).
+    const seam = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'seam')!;
+    await expect(seam.disabled).toBe(true);
+    await expect(dock.querySelector('.ex-composer__proposal-why')?.textContent).toBe('no seam: working memory holds nothing yet');
     posted.length = 0;
     await userEvent.click([...dock.querySelectorAll('button')].find((b) => b.textContent === 'continue')!);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'continue' }]));
+  },
+};
+
+/** `?drive` (#685): the same proposal with a live entry in working memory -- the seam is offered, and posts the ruling. */
+export const ServedPhaseProposalWithMemory: Story = {
+  name: '?drive: a phase proposal offers the seam when working memory has something to refill from',
+  args: { drive: true, web: posting(PHASE_PROPOSED_WITH_MEMORY.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const dock = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-composer__proposal');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    const seam = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'seam')!;
+    await expect(seam.disabled).toBe(false);
+    await expect(dock.querySelector('.ex-composer__proposal-why')).toBeNull();
+    posted.length = 0;
+    await userEvent.click(seam);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'seam' }]));
   },
 };
 

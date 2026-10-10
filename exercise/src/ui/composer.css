@@ -252,3 +252,9 @@
   gap: 0.5rem;
   justify-content: flex-end;
 }
+
+/* Why the proposal's seam is not offered (#685): nothing to refill from. */
+.ex-composer__proposal-why {
+  justify-self: end;
+  color: var(--ink-muted);
+}
