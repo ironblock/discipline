@@ -1,0 +1,22 @@
+{"approvals_off":true,"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":7}
+{"kind":"ask","seq":1,"t":5,"text":"list the files","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"delta","request":3,"seq":4,"t":20,"tool_call":{"arguments":"{\"command\":\"npm run dev\",\"is_background\":true}","id":"call-0","index":0,"name":"bash"}}
+{"kind":"delta","request":3,"seq":5,"t":25,"tool_call":{"arguments":"{\"command\":\"sleep 600\",\"is_background\":true}","id":"call-1","index":1,"name":"bash"}}
+{"finish_reason":"tool_calls","kind":"response","seq":6,"t":30,"text":"","to_request":3}
+{"approval":{"scope":"off"},"arguments":"{\"command\":\"npm run dev\",\"is_background\":true}","argv":["sh","-c","npm run dev"],"background":"bg_0123abcd","confined":["sh","-c","npm run dev"],"cwd":"/work/tree","id":"call-0","isolation":"sandbox","kind":"tool_call","name":"bash","network":"none","outcome":"ran","request":3,"seq":7,"shown":"Background shell started.\nid: bg_0123abcd","stderr":"","stderr_bytes":0,"stdout":"","stdout_bytes":0,"t":35,"turn":1}
+{"approval":{"scope":"off"},"arguments":"{\"command\":\"sleep 600\",\"is_background\":true}","argv":["sh","-c","sleep 600"],"background":"bg_4567cdef","confined":["sh","-c","sleep 600"],"cwd":"/work/tree","id":"call-1","isolation":"sandbox","kind":"tool_call","name":"bash","network":"none","outcome":"ran","request":3,"seq":8,"shown":"Background shell started.\nid: bg_4567cdef","stderr":"","stderr_bytes":0,"stdout":"","stdout_bytes":0,"t":40,"turn":1}
+{"kind":"request","lane":"trunk","seq":9,"t":45,"turn":1}
+{"kind":"response","seq":10,"t":50,"text":"the server is starting","to_request":9}
+{"kind":"turn.settled","reason":"final","seq":11,"t":55,"turn":1}
+{"from":"turn","kind":"settlement","seq":12,"t":60,"to":"awaiting"}
+{"exit":0,"files":[{"bytes":6,"media_type":"text/plain","path":"files/ed1a545bb85e55816bbf9566b028b2a0bc456b88f49f6f266c0401048824194b","sha256":"ed1a545bb85e55816bbf9566b028b2a0bc456b88f49f6f266c0401048824194b"}],"job":"bg_0123abcd","kind":"background.ended","seq":13,"status":"completed","t":65}
+{"job":"bg_4567cdef","kind":"background.ended","seq":14,"status":"cancelled","t":70}
+{"kind":"ask","seq":15,"t":75,"text":"is it up?","turn":2}
+{"from":"awaiting","kind":"settlement","seq":16,"t":80,"to":"turn"}
+{"kind":"notice","seq":17,"t":85,"text":"<task-notification>\n<task-id>bg_0123abcd</task-id>\n</task-notification>","turn":2}
+{"kind":"request","lane":"trunk","seq":18,"t":90,"turn":2}
+{"kind":"response","seq":19,"t":95,"text":"it finished","to_request":18}
+{"kind":"turn.settled","reason":"final","seq":20,"t":100,"turn":2}
+{"from":"turn","kind":"settlement","seq":21,"t":105,"to":"awaiting"}

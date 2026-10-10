@@ -96,6 +96,7 @@
 
 pub mod archive;
 pub mod attach;
+pub mod background;
 pub mod canned;
 pub mod engine;
 pub mod instructions;

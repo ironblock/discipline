@@ -237,6 +237,23 @@ vocabulary! {
         Capture => "capture",
         /// The self-capture reminder, as a note after an ask (v7, #609).
         Reminded => "reminded",
+        /// A background command ended (v7, #614).
+        BackgroundEnded => "background.ended",
+        /// What background commands that ended said, delivered after an
+        /// ask (v7, #614).
+        Notice => "notice",
+    }
+}
+
+vocabulary! {
+    /// How a background command ended (v7, #614): Qwen Code's words.
+    BackgroundStatus {
+        /// It exited 0.
+        Completed => "completed",
+        /// It exited otherwise, or a signal no stop sent ended it.
+        Failed => "failed",
+        /// A stop ended it: `task_stop`, or the session's end.
+        Cancelled => "cancelled",
     }
 }
 
@@ -427,6 +444,8 @@ vocabulary! {
         OpenTangent => "open-tangent",
         /// Close the open tangent (v7, #22).
         CloseTangent => "close-tangent",
+        /// Move the running command to the background (v7, #614).
+        Background => "background",
     }
 }
 
@@ -465,6 +484,8 @@ vocabulary! {
         /// A close whose dispositions name an entry the tangent did not
         /// create, or leave one it did unruled (v7, #22).
         NotTheScope => "not-the-scope",
+        /// A move to the background with no command running (v7, #614).
+        NothingRunning => "nothing-running",
     }
 }
 
@@ -1179,6 +1200,9 @@ pub enum Event {
         /// model wrote in its answer, when the call was not a native one.
         /// Absent for a streamed call.
         recovered_from: Option<String>,
+        /// The background job it started, or was moved into (v7, #614): a
+        /// `bash` call that `ran` only.
+        background: Option<String>,
     },
     /// A side call off the trunk's warm tail (v5, #374).
     Fork {
@@ -1265,6 +1289,27 @@ pub enum Event {
         text: String,
         /// Each item it carries, in rank order.
         items: Vec<RecalledItem>,
+    },
+    /// A background command ended (v7, #614): its job, how, its exit
+    /// status when it exited, and its output, kept whole by digest.
+    BackgroundEnded {
+        /// The job's id, as its `tool_call`'s `background` names it.
+        job: String,
+        /// How it ended.
+        status: BackgroundStatus,
+        /// Its exit status, when it exited.
+        exit: Option<u64>,
+        /// Its output, kept in the recording by digest.
+        files: Option<Vec<RecordedFile>>,
+    },
+    /// What ended background commands said, as one note after turn
+    /// `turn`'s ask, at the tail of its first request, which stays on the
+    /// trunk (v7, #614).
+    Notice {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
     },
     /// A tool result the model pruned (v7, #612), logged when the tool
     /// answered: a later seam carries `text` in its place.
@@ -2360,6 +2405,8 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
     let mut request_turns = BTreeMap::new();
     let mut calls = BTreeSet::new();
     let mut forks = Forks::default();
+    // Background jobs (v7, #614): each started by one `tool_call`, ended once.
+    let mut jobs: BTreeMap<String, bool> = BTreeMap::new();
     let mut claimed = false;
     let mut last_t = 0_u64;
     for (index, line) in lines.iter().enumerate() {
@@ -2496,6 +2543,18 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                     .map_err(|why| at(index, why))?;
                 forks.seamed = Some(*at_turn);
             }
+            Event::BackgroundEnded { job, .. } => match jobs.get_mut(job) {
+                None => {
+                    return Err(at(
+                        index,
+                        format!("`background.ended` names `{job}`, which no earlier call started"),
+                    ));
+                }
+                Some(true) => {
+                    return Err(at(index, format!("background job `{job}` ended twice")));
+                }
+                Some(ended) => *ended = true,
+            },
             Event::ToolCall {
                 request,
                 turn,
@@ -2504,8 +2563,17 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 network,
                 argv,
                 cwd,
+                background,
                 ..
             } => {
+                if let Some(job) = background
+                    && jobs.insert(job.clone(), false).is_some()
+                {
+                    return Err(at(
+                        index,
+                        format!("background job `{job}` was started by an earlier call"),
+                    ));
+                }
                 confinement_recorded(claimed, *isolation, *network)
                     .map_err(|why| at(index, why))?;
                 cwd_with_argv(declared, argv.is_some(), cwd.is_some())
@@ -2854,6 +2922,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 files: fields.optional_files("files")?,
                 shown: fields.optional_string("shown")?,
                 recovered_from: fields.optional_string("recovered_from")?,
+                background: fields.optional_string("background")?,
             }
         }
         Kind::Fork => Event::Fork {
@@ -2946,6 +3015,16 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 .optional_flag("prefix_intact")?
                 .ok_or("a `tangent.close` carries no `prefix_intact`")?,
             rolled_back: fields.count("rolled_back")?,
+        },
+        Kind::BackgroundEnded => Event::BackgroundEnded {
+            job: fields.string("job")?,
+            status: fields.tag("status", BackgroundStatus::from_tag)?,
+            exit: fields.optional_count("exit")?,
+            files: fields.optional_files("files")?,
+        },
+        Kind::Notice => Event::Notice {
+            turn: fields.turn("turn")?,
+            text: fields.string("text")?,
         },
         Kind::Pruned => Event::Pruned {
             turn: fields.turn("turn")?,
@@ -3361,6 +3440,14 @@ fn fits_its_outcome(
             ));
         }
     }
+    // A background job (v7, #614) is a command's: a `bash` call that ran.
+    if object.contains_key("background") && !(bash && outcome == ToolOutcome::Ran) {
+        return Err(
+            "a `tool_call` carries `background` and is not a `bash` call that `ran`: only a \
+             command runs in the background"
+                .to_owned(),
+        );
+    }
     // `cwd` follows `argv` (v4, ruled at 5982826236): forbidden wherever
     // `argv` is absent, so wherever `argv` is forbidden.
     if object.contains_key("cwd") && !object.contains_key("argv") {
@@ -3449,6 +3536,8 @@ pub enum Tags {
     SeamToolOutputs,
     /// [`RenderPlacement`] (v7).
     RenderPlacement,
+    /// [`BackgroundStatus`] (v7).
+    BackgroundStatus,
 }
 
 impl Tags {
@@ -3480,6 +3569,7 @@ impl Tags {
         Self::ToolOutputState,
         Self::SeamToolOutputs,
         Self::RenderPlacement,
+        Self::BackgroundStatus,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -3512,6 +3602,7 @@ impl Tags {
             Self::ToolOutputState => "ToolOutputState",
             Self::SeamToolOutputs => "SeamToolOutputs",
             Self::RenderPlacement => "RenderPlacement",
+            Self::BackgroundStatus => "BackgroundStatus",
         }
     }
 
@@ -3548,6 +3639,7 @@ impl Tags {
             Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
             Self::SeamToolOutputs => of(SeamToolOutputs::ALL, SeamToolOutputs::tag),
             Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
+            Self::BackgroundStatus => of(BackgroundStatus::ALL, BackgroundStatus::tag),
         }
     }
 }
@@ -3920,7 +4012,9 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::TangentOpen
         | Kind::TangentClose
         | Kind::Capture
-        | Kind::Reminded => 7,
+        | Kind::Reminded
+        | Kind::BackgroundEnded
+        | Kind::Notice => 7,
         _ => 0,
     }
 }
@@ -4169,6 +4263,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v4("files", Holds::Files),
                 may_v5("shown", Text),
                 may_v7("recovered_from", Text),
+                may_v7("background", Text),
             ];
             F
         }
@@ -4222,7 +4317,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
-        Kind::Reminded => {
+        // A note after an ask: the self-capture reminder (#609), background
+        // commands' notices (#614).
+        Kind::Reminded | Kind::Notice => {
             const F: &[Field] = &[must_v7("turn", Count), must_v7("text", Text)];
             F
         }
@@ -4281,6 +4378,15 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("sha256", Holds::Digest),
                 must_v7("bytes", Count),
                 must_v7("text", Text),
+            ];
+            F
+        }
+        Kind::BackgroundEnded => {
+            const F: &[Field] = &[
+                must_v7("job", Text),
+                must_v7("status", Tag(Tags::BackgroundStatus)),
+                may_v7("exit", Count),
+                may_v7("files", Holds::Files),
             ];
             F
         }
@@ -4929,6 +5035,7 @@ fn to_value(line: &Line) -> Value {
             files,
             shown,
             recovered_from,
+            background,
         } => {
             put("request", count(*request));
             put("turn", count(u64::from(*turn)));
@@ -4986,6 +5093,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(source) = recovered_from {
                 put("recovered_from", text(source));
+            }
+            if let Some(job) = background {
+                put("background", text(job));
             }
             Kind::ToolCall
         }
@@ -5226,6 +5336,27 @@ fn to_value(line: &Line) -> Value {
                 ),
             );
             Kind::Delivered
+        }
+        Event::BackgroundEnded {
+            job,
+            status,
+            exit,
+            files,
+        } => {
+            put("job", text(job));
+            put("status", text(status.tag()));
+            if let Some(exit) = exit {
+                put("exit", count(*exit));
+            }
+            if let Some(files) = files {
+                put("files", files_value(files));
+            }
+            Kind::BackgroundEnded
+        }
+        Event::Notice { turn, text: note } => {
+            put("turn", count(u64::from(*turn)));
+            put("text", text(note));
+            Kind::Notice
         }
         Event::Recalled {
             turn,
@@ -6261,6 +6392,7 @@ mod tests {
                 files: None,
                 shown: None,
                 recovered_from: None,
+                background: None,
             },
         ];
         // v5 (#374): a scoping turn answered and settled `final`, then the
@@ -6807,6 +6939,11 @@ mod tests {
                     // `op` is `supersede`: the reader's op rule, not the key
                     // beside it.
                     if kind == Kind::Patch && *absent == "supersedes" {
+                        continue;
+                    }
+                    // A background job is a `bash` call's that `ran` (v7,
+                    // #614): the reader's name and outcome rule.
+                    if kind == Kind::ToolCall && *absent == "background" {
                         continue;
                     }
                     // A stream's text comes with its byte count: added alone,
@@ -7584,7 +7721,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded"
+             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded background.ended notice"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -7593,7 +7730,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight seam-not-built nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

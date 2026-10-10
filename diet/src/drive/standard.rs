@@ -72,14 +72,14 @@ fn text(s: &str) -> Value {
     Value::String(s.to_owned())
 }
 
-fn property(kind: &str, description: &str) -> Value {
+pub(crate) fn property(kind: &str, description: &str) -> Value {
     Value::Object(BTreeMap::from([
         ("description".to_owned(), text(description)),
         ("type".to_owned(), text(kind)),
     ]))
 }
 
-fn definition(
+pub(crate) fn definition(
     name: &str,
     description: &str,
     properties: &[(&str, Value)],

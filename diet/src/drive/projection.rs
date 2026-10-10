@@ -486,11 +486,18 @@ fn kwargs_of(
 /// the check: a definition that differs from what was sent leaves the head
 /// unverified, never wrongly verified.
 fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
+    // Background commands (#614) were on exactly when `task_stop` was
+    // declared: `bash` then took `is_background`.
+    let background = names
+        .iter()
+        .any(|name| name == super::background::TASK_STOP);
     names
         .iter()
         .map(|name| {
             if name == super::tool_loop::BASH {
-                Ok(super::tool_loop::bash_tool())
+                Ok(super::tool_loop::bash_tool_with(background))
+            } else if name == super::background::TASK_STOP {
+                Ok(super::background::task_stop_tool())
             } else if let Some(tool) = super::standard::definitions()
                 .into_iter()
                 .chain([super::prune::definition()])
@@ -678,6 +685,7 @@ impl<'a> Walk<'a> {
             Line::IdleGap { .. } => log::Kind::IdleGap,
             Line::Refused { .. } => log::Kind::Refused,
             Line::Capture { .. } => log::Kind::Capture,
+            Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
             // The trunk's own self-capture patch (#609), fork-less.
             Line::Patch { .. } => log::Kind::Patch,
             _ => log::Kind::Progress,
@@ -770,16 +778,19 @@ impl<'a> Walk<'a> {
             // on the rebuilt trunk, as it does on the session's.
             // Archived items recalled (v7, #566): a note after it too, in
             // the log's order.
-            // The self-capture reminder (v7, #609): a note after it too.
+            // Background commands' notices (v7, #614), the self-capture
+            // reminder (v7, #609): notes after it too, in the log's order.
             Line::Delivered { turn, text, .. }
             | Line::Recalled { turn, text, .. }
-            | Line::Reminded { turn, text } => {
+            | Line::Reminded { turn, text }
+            | Line::Notice { turn, text } => {
                 self.notes.entry(*turn).or_default().push(text.clone());
             }
             // Facts the record has no row for at all, named once per kind.
             Line::IdleGap { .. }
             | Line::Refused { .. }
             | Line::Progress { .. }
+            | Line::BackgroundEnded { .. }
             | Line::Capture { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
@@ -2500,6 +2511,7 @@ mod tests {
                 files: None,
                 shown: None,
                 recovered_from: None,
+                background: None,
             }
         };
         let mut events = vec![start()];
@@ -2586,6 +2598,7 @@ mod tests {
                 files: None,
                 shown: None,
                 recovered_from: None,
+                background: None,
             },
         );
         events.extend(turn);
@@ -2835,6 +2848,7 @@ mod tests {
                 files: Some(vec![file.clone()]),
                 shown: None,
                 recovered_from: None,
+                background: None,
             },
         );
         events.extend(turn);
