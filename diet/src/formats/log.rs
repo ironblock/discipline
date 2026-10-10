@@ -540,6 +540,21 @@ vocabulary! {
     }
 }
 
+/// A context overflow's sizes (v7, #616): `prompt_tokens`, `window` and
+/// `inferred`, all three or none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Overflow {
+    /// The call's prompt, in tokens, as serve sized it: the latest measured
+    /// prompt plus the estimate of what was added since (#588).
+    pub prompt_tokens: u64,
+    /// The engine's context window, in tokens, as serve read it at start.
+    pub window: u64,
+    /// Whether the overflow was told from the sizes alone -- the prompt and
+    /// its output cap reached into the window's margin, and the server's
+    /// refusal named no kind -- rather than from the refusal's typed field.
+    pub inferred: bool,
+}
+
 vocabulary! {
     /// How a turn ended.
     SettleReason {
@@ -1041,6 +1056,9 @@ pub enum Event {
         status: Option<u16>,
         /// What arrived before it ended, when anything did.
         partial: Option<String>,
+        /// Its prompt against the context window, when its reason is
+        /// `context_overflow` and serve knew the window (v7, #616).
+        overflow: Option<Overflow>,
     },
     /// A turn is over.
     TurnSettled {
@@ -2656,6 +2674,37 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 ),
             },
             partial: fields.optional_string("partial")?,
+            overflow: {
+                let reason = fields.tag("reason", FailReason::from_tag)?;
+                match (
+                    fields.optional_count("prompt_tokens")?,
+                    fields.optional_count("window")?,
+                    fields.optional_flag("inferred")?,
+                ) {
+                    (None, None, None) => None,
+                    (Some(prompt_tokens), Some(window), Some(inferred))
+                        if reason == FailReason::ContextOverflow =>
+                    {
+                        Some(Overflow {
+                            prompt_tokens,
+                            window,
+                            inferred,
+                        })
+                    }
+                    (Some(_), Some(_), Some(_)) => {
+                        return Err(format!(
+                            "a `request.failed` whose reason is `{}` carries a context \
+                             overflow's sizes",
+                            reason.tag()
+                        ));
+                    }
+                    _ => {
+                        return Err("a `request.failed` carries `prompt_tokens`, `window` and \
+                                    `inferred` together or none of them"
+                            .to_owned());
+                    }
+                }
+            },
         },
         Kind::TurnSettled => Event::TurnSettled {
             turn: fields.turn("turn")?,
@@ -3911,6 +3960,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("message", Text),
                 may("status", Count),
                 may("partial", Text),
+                may_v7("prompt_tokens", Count),
+                may_v7("window", Count),
+                may_v7("inferred", Holds::Flag),
             ];
             F
         }
@@ -4098,6 +4150,8 @@ pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
 pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
     match kind {
         Kind::SessionStart => &["substrate", "registry_sha256"],
+        // A context overflow's sizes (v7, #616).
+        Kind::RequestFailed => &["prompt_tokens", "window", "inferred"],
         Kind::Fork => &["substrate", "model"],
         _ => &[],
     }
@@ -4626,9 +4680,15 @@ fn to_value(line: &Line) -> Value {
             message,
             status,
             partial,
+            overflow,
         } => {
             put("request", count(*request));
             put("reason", text(reason.tag()));
+            if let Some(overflow) = overflow {
+                put("prompt_tokens", count(overflow.prompt_tokens));
+                put("window", count(overflow.window));
+                put("inferred", Value::Boolean(overflow.inferred));
+            }
             put("message", text(message));
             if let Some(status) = status {
                 put("status", count(u64::from(*status)));
@@ -5843,6 +5903,7 @@ mod tests {
                 message: "busy".to_owned(),
                 status: Some(503),
                 partial: Some(String::new()),
+                overflow: None,
             },
             Event::TurnSettled {
                 turn: 2,
@@ -5944,6 +6005,11 @@ mod tests {
                 message: "request (262149 tokens) exceeds the available context size".to_owned(),
                 status: Some(400),
                 partial: None,
+                overflow: Some(Overflow {
+                    prompt_tokens: 161_840,
+                    window: 163_840,
+                    inferred: true,
+                }),
             },
             Event::TurnSettled {
                 turn: 4,
@@ -6560,7 +6626,9 @@ mod tests {
     /// `policy` beside an `isolation` that names no profile, or none beside
     /// one that does (ruled at #299, 5976386318 point 6); and a
     /// `bash` refusal's `reason` decides its `argv`
-    /// ([`argv_if_it_parsed`]), which runs only once the reason has parsed.
+    /// ([`argv_if_it_parsed`]), which runs only once the reason has parsed;
+    /// and a `request.failed` carries a context overflow's sizes only under
+    /// that reason (v7, #616).
     fn the_reader_reads_it_as(object: &BTreeMap<String, Value>, key: &str, tags: Tags) {
         let with = |tag: &str| {
             let mut changed = object.clone();
@@ -6577,6 +6645,8 @@ mod tests {
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
                         || (tags == Tags::PatchOp && why.contains("`supersedes`"))
+                        || (tags == Tags::FailReason
+                            && why.contains("carries a context overflow's sizes"))
                         || (tags == Tags::ToolOutputState
                             && why.contains("`tool_output` is `keep` and carries a limit"))
                 },

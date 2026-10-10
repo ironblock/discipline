@@ -419,7 +419,7 @@ export type RequestFailedLine = {
   message: string;
   status?: number;
   partial?: string;
-};
+} & ({ prompt_tokens: number; window: number; inferred: boolean } | { prompt_tokens?: never; window?: never; inferred?: never });
 
 export type TurnSettledLine = {
   seq: number;
