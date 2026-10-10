@@ -26,7 +26,7 @@ Three results, each its own directory, cited by digest from one admission record
 2. **The depth probe** in the rung's supported coding configuration, at fractions of its declared serving context.
 3. **The parity fire** of `extraction-acceptance-inverts` against #115's archived band.
 
-An admission belongs to one fingerprint: engine, weights, template, serving line and reasoning state. A change to any of them re-admits; an OS-only change is a new instance and does not ([5884256685](https://github.com/ironblock/discipline/issues/143#issuecomment-5884256685), [5925191280](https://github.com/ironblock/discipline/issues/143#issuecomment-5925191280)). Admission is to the ladder; eligibility is per claim, from the cells its pre-registration requires.
+An admission belongs to one fingerprint: engine, weights, template, serving line and reasoning state. A change to any of them re-admits; an operating-system, kernel or driver change does not re-admit, and since 2026-10-09 is not a new instance either (`README.md`, Bring-up; earlier: [5884256685](https://github.com/ironblock/discipline/issues/143#issuecomment-5884256685), [5925191280](https://github.com/ironblock/discipline/issues/143#issuecomment-5925191280)). Admission is to the ladder; eligibility is per claim, from the cells its pre-registration requires.
 
 Cell words: `pass`, `fail`, `n/a (reason)`, `unreported`, `unadjudicated`, and `baseline` for a rung's first canary draw. Only `fail` bars; `unadjudicated` waits on a re-run.
 
@@ -236,6 +236,7 @@ One line per ruling, oldest first. M is the maintainer; P is planning; D is Disp
 | 2026-10-04 | M | The top rung serves YaRN ×2 (`max_seq_len` 524,288) | [#401 5985333953](https://github.com/ironblock/discipline/issues/401#issuecomment-5985333953) |
 | 2026-10-04 | M | Ratified: TabbyAPI + ExLlamaV3 1.5.4 serving EXL3 plain `3.00bpw` + DFlash2 with the offloaded BF16 vision tower becomes `linux-pc`'s baseline, pending admission. An earlier relay that evening, ratifying the llama.cpp DFlash2 line, was retracted and deleted at the maintainer's instruction | [5985589548](https://github.com/ironblock/discipline/issues/393#issuecomment-5985589548) |
 | 2026-10-04 | M | The new line's four engine-specific cells: checkpoint restore `n/a (no slot-cache report on this engine)`; output invariance `n/a` under the hazard line; the parity fire's routing check replaced by the instance identity plus `/v1/model`'s id, under a fresh pre-registration; template digest and rendered effort read from the model directory | [#393 5986337117](https://github.com/ironblock/discipline/issues/393#issuecomment-5986337117) |
+| 2026-10-09 | M | Bring-up is four confirmations (up and reachable, the right model loaded, warmed up, the required settings); fingerprint check, canary and `verify-box` are not part of it; an OS, kernel or driver change is not a new instance and not drift (`README.md`, Bring-up) | relayed by Dispatch, in chat |
 
 ## Open questions
 
