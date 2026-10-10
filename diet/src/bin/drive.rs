@@ -831,6 +831,9 @@ fn served_session(
     })
 }
 
+/// An offboard seat, and the chat template its server reports.
+type Seated = (session::Offboard<HttpStream>, Option<String>);
+
 /// The offboard extraction seat the regime declares (#570), reached by
 /// `serve`'s seat flags: its server, checked against the registry's entry
 /// as the trunk's is -- its engine, then [`confirmations`]' model, settings
@@ -850,7 +853,7 @@ fn offboard_seat(
     trunk: &Endpoint,
     (dialect, shape): (&Dialect, &RequestShape),
     regimen: Option<&str>,
-) -> Result<Option<(session::Offboard<HttpStream>, Option<String>)>, String> {
+) -> Result<Option<Seated>, String> {
     let seat = regime.and_then(|regime| regime.substrates.get(1));
     let Some(seat) = seat else {
         return match (&given.endpoint, &given.model, &given.key_file) {
