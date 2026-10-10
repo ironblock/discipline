@@ -15369,6 +15369,8 @@ pub(in crate::drive) mod tests {
         let mut interview = interviewing(&[log::Warrant::Scoping]);
         interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
         interview.capture = crate::dogma::asks::Modality::Tools;
+        // The set written for the tools (#610).
+        interview.asks = &crate::dogma::asks::T1;
         let mut shape = template();
         declare_self_capture(&mut shape, Some(&interview));
         Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
@@ -15410,6 +15412,16 @@ pub(in crate::drive) mod tests {
         });
         reads_whole(&session);
         assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
+        // Asked in t1's words: the tools, not the fields.
+        let question = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Forked { question, .. } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("a fork");
+        assert!(question.contains("update_record"), "{question}");
+        assert!(!question.contains("Answer with the fields"), "{question}");
         let fork = log
             .iter()
             .find(|logged| matches!(logged.event, Event::Forked { .. }))

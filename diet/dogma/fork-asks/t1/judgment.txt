@@ -1,0 +1,4 @@
+{imperative}
+You said: "{intent}"
+The working record so far, one entry per line as its id, a tab, then the entry:{record}
+The turn has ended. What did you decide, and what do you intend next? Record each with update_record, under the field decision or plan. To replace a working-record entry, pass its id as supersedes; to say an entry is settled, call resolve_entry. If there is nothing to record, call nothing.

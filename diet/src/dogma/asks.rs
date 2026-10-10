@@ -70,8 +70,19 @@ pub const V4: AskSet = AskSet {
         "judgment", "outcome", "reminder"),
 };
 
+/// v4's asks answered through the self-capture tools (#610): each answer
+/// instruction names `update_record` (and, for judgment, `supersedes` and
+/// `resolve_entry`) in place of the fields; the maintainer's approval as
+/// drafted.
+pub const T1: AskSet = AskSet {
+    name: "t1",
+    modality: Modality::Tools,
+    files: set_files!("t1": "api_surface", "change", "finding", "generic", "imperative",
+        "judgment", "outcome", "reminder"),
+};
+
 /// Every set, in the order they were added.
-pub const SETS: &[&AskSet] = &[&V3, &V4];
+pub const SETS: &[&AskSet] = &[&V3, &V4, &T1];
 
 /// The set a served regimen that names none runs: v3, today's asks, by the
 /// maintainer's decision (2026-10-09); v4 is selectable beside it.
@@ -132,7 +143,7 @@ impl AskSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT, SETS, V3, V4, set};
+    use super::{DEFAULT, Modality, SETS, T1, V3, V4, set};
     use crate::dogma::MANIFEST;
     use std::collections::BTreeSet;
     use std::path::Path;
@@ -204,6 +215,26 @@ mod tests {
             "no priming ships until its wording is approved"
         );
         assert_eq!(V4.priming(), None);
+    }
+
+    /// t1 (#610): the tools set -- found by name, its modality `tools`, no
+    /// priming; v4's imperative unchanged and every other ask changed, each
+    /// asking for `update_record` and no longer naming a field to write.
+    #[test]
+    fn t1_asks_for_the_record_tools_where_v4_asks_for_fields() {
+        assert_eq!(set("t1"), Some(&T1));
+        assert_eq!(T1.modality, Modality::Tools);
+        assert_eq!(T1.priming(), None);
+        for (file, text) in V4.files() {
+            let t1 = T1.text(file).expect("the same files");
+            if *file == "imperative" {
+                assert_eq!(t1, *text);
+                continue;
+            }
+            assert_ne!(t1, *text, "{file}");
+            assert!(t1.contains("update_record"), "{file}: {t1}");
+            assert!(!t1.contains("Answer with the fields"), "{file}: {t1}");
+        }
     }
 
     /// v4 differs from v3 in the judgment ask alone.

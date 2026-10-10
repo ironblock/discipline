@@ -89,7 +89,11 @@ pub mod vocabulary;
 ///   `v4`, whose judgment ask shows the working record and asks for
 ///   SUPERSEDE, the maintainer's approval of (a) and (c). No template and no
 ///   set already pinned changed.
-pub const VERSION: u32 = 5;
+/// * 6, 2026-10-10: fork ask set `t1` joined (#610): v4's asks with each
+///   answer instruction asking for the self-capture tools instead of
+///   fields, its modality `tools`, the maintainer's approval as drafted ("Good
+///   starting point"). No template and no set already pinned changed.
+pub const VERSION: u32 = 6;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -99,7 +103,7 @@ pub const VERSION: u32 = 5;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "d5be2674cb792d62";
+pub const MANIFEST_DIGEST: &str = "0a854941d094d0b0";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
