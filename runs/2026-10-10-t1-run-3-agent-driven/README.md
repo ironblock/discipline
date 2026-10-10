@@ -22,8 +22,8 @@
 | T1 row | shown? | where |
 | --- | --- | --- |
 | Ask | yes | turns 1–2: reasoning, then an answer, settled `final` |
-| Tools, unprompted | yes | 117 bash calls under Seatbelt; reads of the reference source outside the worktree; 13 writes and 25 edits inside it; grep and glob |
-| Image | yes | turn 5: a PNG of the model's own game, named by path in the ask, attached and drawn. The model's reasoning describes the terrain it shows |
+| Tools, unprompted | yes | 117 bash calls under Seatbelt, each with serve's `--worktree` as its cwd; reads of the reference source outside the worktree; 10 writes and 25 edits that landed inside the worktree (3 more `write` calls were refused for malformed arguments, "params/content must be string"); grep and glob |
+| Image | **no** | turn 5 (step 7): the operator's PNG was attached (`ask.files`, 166,051 bytes, by digest). The engine aborted that request on the context window (break 1), so the turn settled `failed` and the model never answered. The Image row's evidence is `runs/2026-10-10-image-smoke-agent-driven` |
 | Interview fork | yes, off-content | after the operator's marked scope answer, the fork landed 2 patches about the session's directory and servers, not the operator's three scope decisions |
 | Cancel and end | yes | turn 3: a hung call was cancelled, and the turn settled `cancelled` 16 ms after the stop. Ended with confirm, and serve exited |
 | Record | partly | written, with no turn rows (see below) |
@@ -42,7 +42,7 @@ The model did not find the reference's own example. It asked no scope questions 
 2. **A hung command had no timeout.** `pnpm exec playwright install chromium` hung for 1h46m with no connection, until the operator's cancel ended it. The 79 finished steps were kept.
 3. **The record holds no turn rows.** On this engine, turn 1's `prefill_tokens` read "equality unmeasured", and turn rows must run from 1 without a gap. Usage on responses (#654) has fixed this since.
 4. **Model behaviour, as data:**
-   - it believed it could not write to the worktree, though every write landed;
+   - it said "The worktree root is outside my writable sandbox (EPERM on mkdir)". Its writes all landed in serve's `--worktree`, the session's working directory. The directory it could not write to was a different one: after the operator's turn-4 ask said "The project is in the worktree", the model read the repository checkout's path out of its own working directory's name. It listed that checkout and tried `mkdir` inside it, which Seatbelt refused. That path existed only because an agent drove the run from a scratch directory named after its checkout;
    - it left dev servers running, which serve's exit cleaned up.
 
 **Counts:** 137 requests, 160 tool calls, 1 fork, 2 patches. Settles: final, final, cancelled, final, failed, failed.
