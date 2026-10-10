@@ -1977,7 +1977,8 @@ mod tests {
         use journal::Ask;
 
         // One of every kind, then the per-row losses: a pinned sampler, a
-        // retry's reason, an unreported count and a capped answer.
+        // retry's reason, an unreported count (spelled absent since #645) and
+        // a capped answer.
         let mut journal = journal::Journal::new();
         for kind in EntryKind::ALL {
             journal.push(sample(*kind));
@@ -2020,13 +2021,10 @@ mod tests {
         let exempt_kinds: Vec<&str> = exempt.iter().map(|(kind, _)| *kind).collect();
         assert_eq!(
             exempt_kinds,
-            [
-                EntryKind::Issued.tag(),
-                EntryKind::Received.tag(),
-                EntryKind::TimedOut.tag()
-            ],
-            "exempt, each with its reason: issued versus arrived, an unreported \
-             count, the timeout projected to nothing -- {exempt:?}"
+            [EntryKind::Issued.tag(), EntryKind::TimedOut.tag()],
+            "exempt, each with its reason: issued versus arrived, the timeout \
+             projected to nothing -- an unreported count is absent since #645 \
+             -- {exempt:?}"
         );
         assert_eq!(
             probed, 12,

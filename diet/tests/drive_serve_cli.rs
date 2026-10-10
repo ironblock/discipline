@@ -1476,7 +1476,7 @@ fn the_start_and_summary_name_the_regimen_and_the_product(
     assert_eq!(std::fs::read(&product).expect("the product"), b"");
     assert_eq!(
         (
-            rows[4]["product_sha256"].as_str(),
+            rows[rows.len() - 1]["product_sha256"].as_str(),
             report["product_sha256"].as_str()
         ),
         (
@@ -1565,12 +1565,24 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
         })
         .collect();
     // The second request's head grew by the first turn's ask and answer,
-    // rebuilt from the log and named by client::head (ruled on #157).
+    // rebuilt from the log and named by client::head (ruled on #157). Every
+    // turn and response has its row (#645), counted by the server's usage.
     assert_eq!(
         kinds,
-        ["start", "request", "request", "prefix.changed", "summary"],
+        [
+            "start",
+            "turn",
+            "request",
+            "response",
+            "turn",
+            "request",
+            "prefix.changed",
+            "response",
+            "summary"
+        ],
         "{written}"
     );
+    assert!(written.contains(r#""prefill_from":"usage""#), "{written}");
     the_start_and_summary_name_the_regimen_and_the_product(&written, &report, &path);
     assert!(
         !written.contains(r#""reason":"unattributed""#),
@@ -1582,15 +1594,8 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
         .iter()
         .filter_map(|item| item["kind"].as_str())
         .collect();
-    assert_eq!(
-        named_kinds,
-        ["ask", "response", "ask", "response"],
-        "{named}"
-    );
-    assert!(
-        items[1]["text"].is_string(),
-        "the answer's text is kept: {named}"
-    );
+    // Nothing went unspelled: the server's usage counted every row (#645).
+    assert!(named_kinds.is_empty(), "{named}");
     let _ = std::fs::remove_file(&sidecar);
 }
 

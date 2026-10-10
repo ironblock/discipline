@@ -520,27 +520,15 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                     cache_creation_1h: None,
                     id: response_id(to_request),
                     to_request: to_request.clone(),
-                    // A count the server did not report is not zero. Zero is a
-                    // measurement; this is its absence, and the record has one
-                    // spelling for a count, so the absence is what is lost.
-                    output_tokens: output_tokens.unwrap_or_default(),
+                    // Unreported is absent, not zero (#645).
+                    output_tokens: *output_tokens,
+                    output_from: None,
                     text: None,
                     timings: timings_of
                         .get(to_request.as_str())
                         .and_then(|timings| spelled_timings(timings, &mut note)),
                 });
                 answered.insert(to_request.as_str());
-                if output_tokens.is_none() {
-                    note(
-                        EntryKind::Received,
-                        "a response whose token count the server did not report: \
-                         `response.output_tokens` is required and zero is a measurement",
-                        Ask::Exempt(
-                            "the key exists and is required; what is missing is a spelling \
-                             for its absence",
-                        ),
-                    );
-                }
                 if *capped {
                     note(
                         EntryKind::Received,

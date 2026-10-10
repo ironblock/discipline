@@ -92,6 +92,17 @@ pub(crate) use vocabulary;
 // ---------------------------------------------------------------------------
 
 vocabulary! {
+    /// What a count was read from (#645).
+    CountSource {
+        /// The server's `timings`, on an engine whose `usage` was measured
+        /// equal to it ([`crate::drive::projection::CITED`]).
+        Timings => "timings",
+        /// The server's own `usage`.
+        Usage => "usage",
+    }
+}
+
+vocabulary! {
     /// How a substrate's weights are identified.
     ///
     /// TWO WAYS, TYPED, because there are two and the difference decides what
@@ -1176,8 +1187,14 @@ pub enum Event {
     Turn {
         /// Its position in the session, from 1.
         index: u32,
-        /// How many tokens the prompt carried.
-        prefill_tokens: Count,
+        /// How many tokens the prompt carried; absent when the log could not
+        /// spell it (#645), the turn's row kept and the count named in the
+        /// sidecar.
+        prefill_tokens: Option<Count>,
+        /// What counted it (#645): `timings` on a cited engine, else the
+        /// server's own `usage`; absent with the count, or in a record
+        /// written before #645.
+        prefill_from: Option<CountSource>,
         /// The files the operator attached to the turn's ask, by reference:
         /// the log's `ask.files`, never inlined (#372, 5989411005).
         files: Option<Vec<log::RecordedFile>>,
@@ -1285,8 +1302,11 @@ pub enum Event {
         /// The request that produced it. Required: a response that cannot name
         /// its request is the failure this field exists for.
         to_request: String,
-        /// How many tokens came back.
-        output_tokens: Count,
+        /// How many tokens came back; absent when the log could not spell it
+        /// (#645), the row kept and the count named in the sidecar.
+        output_tokens: Option<Count>,
+        /// What counted it (#645), as for a turn's `prefill_from`.
+        output_from: Option<CountSource>,
         /// What came back, when the record keeps it. On the canonical lane
         /// this is the model's own prose for the turn; on an interview lane it
         /// is the answer. It may be empty: an answer of nothing at all is a
@@ -1511,8 +1531,10 @@ pub enum Summary {
     Drive {
         /// How many turns.
         turns: u32,
-        /// Prefill tokens across the session.
-        prefill_tokens_total: Count,
+        /// Prefill tokens across the session; absent exactly when some
+        /// turn's count went unspelled (#645), since no total of the rest
+        /// is the session's.
+        prefill_tokens_total: Option<Count>,
     },
     /// A re-derivation of a result that already exists.
     Recompute {
@@ -2474,7 +2496,8 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         },
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
-            prefill_tokens: take_u64(&mut members, of, "prefill_tokens")?,
+            prefill_tokens: take_count(&mut members, of, "prefill_tokens")?,
+            prefill_from: take_source(&mut members, of, "prefill_from")?,
             files: take_files(&mut members, of)?,
         },
         Kind::Request => Event::Request {
@@ -2491,7 +2514,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
         },
         Kind::PrefixChanged => prefix_changed(&mut members, of)?,
         Kind::Compaction => compaction(&mut members, of)?,
-        Kind::Response => response(&mut members, of)?,
+        Kind::Response => response_row(&mut members, of)?,
         Kind::Fork => Event::Fork {
             id: take_string(&mut members, of, "id")?,
             lane: take_string(&mut members, of, "lane")?,
@@ -2568,7 +2591,7 @@ fn summary(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Su
     Ok(match kind {
         SummaryKind::Drive => Summary::Drive {
             turns: take_u32(members, of, "turns")?,
-            prefill_tokens_total: take_u64(members, of, "prefill_tokens_total")?,
+            prefill_tokens_total: take_count(members, of, "prefill_tokens_total")?,
         },
         SummaryKind::Recompute => Summary::Recompute {
             targets_checked: take_u32(members, of, "targets_checked")?,
@@ -4079,22 +4102,6 @@ fn take_tool_output(
     }))
 }
 
-/// A `response` row: its request, its output, and a hosted API's cache
-/// counts where its usage reported them (#555).
-fn response(members: &mut BTreeMap<String, Value>, of: &'static str) -> Result<Event, ParseError> {
-    Ok(Event::Response {
-        id: take_string(members, of, "id")?,
-        to_request: take_string(members, of, "to_request")?,
-        output_tokens: take_u64(members, of, "output_tokens")?,
-        text: take_optional_text(members, of, "text")?,
-        timings: take_timings(members, of)?,
-        cache_read: take_optional_count(members, of, "cache_read")?,
-        cache_creation: take_optional_count(members, of, "cache_creation")?,
-        cache_creation_5m: take_optional_count(members, of, "cache_creation_5m")?,
-        cache_creation_1h: take_optional_count(members, of, "cache_creation_1h")?,
-    })
-}
-
 /// A fork row's `cache_read_share` (#555): absent, or a decimal from 0 to
 /// 1 -- the share of its responses' prompt tokens read from the cache.
 fn take_optional_share(
@@ -4166,6 +4173,66 @@ fn take_optional_pruned(
 }
 
 /// An optional non-negative integer.
+/// A count source (#645), when the row names one.
+fn take_source(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<CountSource>, ParseError> {
+    take_optional_string(members, of, field)?
+        .map(|word| {
+            CountSource::from_tag(&word).ok_or_else(|| {
+                ParseError::from(SchemaError::WrongType {
+                    of,
+                    field: field.to_owned(),
+                    want: "`timings` or `usage`",
+                })
+            })
+        })
+        .transpose()
+}
+
+/// A `response` row: its request, its output and what counted it (#645),
+/// and a hosted API's cache counts where its usage reported them (#555).
+fn response_row(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Event, ParseError> {
+    Ok(Event::Response {
+        id: take_string(members, of, "id")?,
+        to_request: take_string(members, of, "to_request")?,
+        output_tokens: take_count(members, of, "output_tokens")?,
+        output_from: take_source(members, of, "output_from")?,
+        text: take_optional_text(members, of, "text")?,
+        timings: take_timings(members, of)?,
+        cache_read: take_optional_count(members, of, "cache_read")?,
+        cache_creation: take_optional_count(members, of, "cache_creation")?,
+        cache_creation_5m: take_optional_count(members, of, "cache_creation_5m")?,
+        cache_creation_1h: take_optional_count(members, of, "cache_creation_1h")?,
+    })
+}
+
+/// An optional count, within the record's bound.
+fn take_count(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<Count>, ParseError> {
+    take_optional_count(members, of, field)?
+        .map(Count::new)
+        .transpose()
+        .map_err(|_| count_bound(of, field))
+}
+
+/// A count past the record's bound.
+fn count_bound(of: &'static str, field: &'static str) -> ParseError {
+    ParseError::from(SchemaError::WrongType {
+        of,
+        field: field.to_owned(),
+        want: "a count within the record's bound",
+    })
+}
+
 fn take_optional_count(
     members: &mut BTreeMap<String, Value>,
     of: &'static str,
@@ -4294,6 +4361,9 @@ struct Seen<'a> {
     turns: BTreeSet<u32>,
     next_turn: u32,
     prefill_tokens: Count,
+    /// Whether some turn's prefill went unspelled (#645): a drive summary's
+    /// total then cannot be checked.
+    prefill_unspelled: bool,
     /// What each request said about its own head, and what the request before
     /// it on the same lane said.
     ///
@@ -4384,7 +4454,10 @@ impl<'a> Seen<'a> {
                 }
                 self.turns.insert(*index);
                 self.next_turn += 1;
-                self.prefill_tokens = self.prefill_tokens.saturating_add(*prefill_tokens);
+                self.prefill_unspelled |= prefill_tokens.is_none();
+                self.prefill_tokens = self
+                    .prefill_tokens
+                    .saturating_add(prefill_tokens.unwrap_or_default());
             }
             Event::Request {
                 id,
@@ -4643,7 +4716,22 @@ impl<'a> Seen<'a> {
                     }
                     .into());
                 }
-                if *prefill_tokens_total != self.prefill_tokens {
+                // A total exactly when every turn was spelled (#645).
+                let total = match (prefill_tokens_total, self.prefill_unspelled) {
+                    (None, true) => None,
+                    (Some(total), false) => Some(*total),
+                    (said, _) => {
+                        return Err(StructureError::SummaryDisagrees {
+                            field: "prefill_tokens_total",
+                            says: said.map_or(0, Count::get),
+                            counted: self.prefill_tokens.get(),
+                        }
+                        .into());
+                    }
+                };
+                if let Some(prefill_tokens_total) = total
+                    && prefill_tokens_total != self.prefill_tokens
+                {
                     return Err(StructureError::SummaryDisagrees {
                         field: "prefill_tokens_total",
                         says: prefill_tokens_total.get(),
@@ -4995,10 +5083,15 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
         Event::Turn {
             index,
             prefill_tokens,
+            prefill_from,
             files,
         } => {
             members.put_u32("index", *index);
-            members.put_count("prefill_tokens", *prefill_tokens);
+            members.put_optional("prefill_tokens", prefill_tokens.map(integer));
+            members.put_optional(
+                "prefill_from",
+                prefill_from.map(|source| Value::String(source.tag().to_owned())),
+            );
             if let Some(files) = files {
                 members.put_optional("files", Some(files_value(files)));
             }
@@ -5040,6 +5133,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
         Event::Response {
             to_request,
             output_tokens,
+            output_from,
             text,
             timings,
             cache_read,
@@ -5049,7 +5143,11 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             ..
         } => {
             members.put_text("to_request", to_request);
-            members.put_count("output_tokens", *output_tokens);
+            members.put_optional("output_tokens", output_tokens.map(integer));
+            members.put_optional(
+                "output_from",
+                output_from.map(|source| Value::String(source.tag().to_owned())),
+            );
             members.put_optional("text", text.clone().map(Value::String));
             members.put_optional("timings", timings.as_ref().map(timings_value));
             let count =
@@ -5268,7 +5366,7 @@ fn summary_value(summary: &Summary, product_sha256: &str, members: &mut Members)
             prefill_tokens_total,
         } => {
             members.put_u32("turns", *turns);
-            members.put_count("prefill_tokens_total", *prefill_tokens_total);
+            members.put_optional("prefill_tokens_total", prefill_tokens_total.map(integer));
         }
         Summary::Recompute {
             targets_checked,
@@ -5916,6 +6014,44 @@ mod tests {
     // same object log v1 carries, with the server's own keys and the record's
     // exact decimal for a duration. Absent is never zero.
     const TIMED_REQUEST: &str = r#"{"record":"request","id":"r1","lane":"main","substrate":"local","head_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}"#;
+    /// A count the log could not spell is absent and the row kept (#645),
+    /// its source named where it was spelled; a drive summary then carries
+    /// no total, and one that claims a total over an unspelled turn is
+    /// refused.
+    #[test]
+    fn an_unspelled_count_is_absent_and_its_summary_has_no_total() {
+        let start = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"aaa9402664f1a41f40ebbc52c9993eb66aeb366602958fdfaa283b71e64db123","sampler_card":{"seed":0},"reasoning":"on"}]}}"#;
+        let rows = |summary: &str| {
+            format!(
+                "{start}\n{{\"record\":\"turn\",\"index\":1}}\n\
+                 {{\"record\":\"turn\",\"index\":2,\"prefill_tokens\":10,\"prefill_from\":\"usage\"}}\n\
+                 {{\"record\":\"summary\",\"kind\":\"drive\",\"turns\":2,{summary}\"product_sha256\":\"{}\"}}\n",
+                "a".repeat(64)
+            )
+        };
+        let read = parse(&rows("")).expect("absent counts read");
+        assert!(matches!(
+            &read.events[1],
+            Event::Turn {
+                prefill_tokens: None,
+                prefill_from: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &read.events[2],
+            Event::Turn {
+                prefill_from: Some(super::CountSource::Usage),
+                ..
+            }
+        ));
+        assert!(parse(&rows(r#""prefill_tokens_total":10,"#)).is_err());
+        assert!(parse(&format!(
+            "{start}\n{{\"record\":\"turn\",\"index\":1,\"prefill_tokens\":1,\"prefill_from\":\"guess\"}}\n"
+        ))
+        .is_err());
+    }
+
     const TIMED: &str = r#"{"record":"response","id":"a1","to_request":"r1","output_tokens":3,"timings":{"prompt_n":10,"cache_n":2,"prompt_ms":12.5,"predicted_n":3,"predicted_ms":40,"draft_n":3,"draft_n_accepted":2}}"#;
 
     fn timed(response: &str) -> String {

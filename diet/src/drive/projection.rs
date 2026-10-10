@@ -10,12 +10,14 @@
 //!
 //! A record's `response.output_tokens` and `turn.prefill_tokens` are
 //! derived from the server's `timings` (`predicted_n`; `prompt_n +
-//! cache_n`) ONLY for an engine in [`CITED`]: the engines on which the
-//! server's `usage` was measured equal to its `timings`, on every capture
-//! ([`MEASUREMENT`]). For any other engine they are unspellable --
-//! "equality unmeasured for this engine" -- and never a derived number. A
-//! response carrying `usage` (a dialect whose server reports no timings,
-//! log v2) gives `output_tokens` as the server's own `completion_tokens`.
+//! cache_n`) for an engine in [`CITED`]: the engines on which the server's
+//! `usage` was measured equal to its `timings`, on every capture
+//! ([`MEASUREMENT`]). For any other engine they are the server's own
+//! `usage` (`completion_tokens`; `prompt_tokens`) when the response carries
+//! it (#645), and never a number derived from timings nobody measured
+//! equal. Each count names what counted it (`output_from`,
+//! `prefill_from`). A count neither gives is absent, named in the sidecar,
+//! and its row is kept: no later row is lost with it (#645).
 //!
 //! # Head changes
 //!
@@ -37,7 +39,9 @@ use crate::client::shape::{
 };
 use crate::formats::log::{self, Event as Line, Lane};
 use crate::formats::record::json::Decimal;
-use crate::formats::record::{self, Count, Event, Execution, PrefixReason, Regime, Source};
+use crate::formats::record::{
+    self, Count, CountSource, Event, Execution, PrefixReason, Regime, Source,
+};
 
 use super::registry::Identity;
 
@@ -230,50 +234,60 @@ fn timings_of(timings: &log::Timings) -> Option<record::Timings> {
     })
 }
 
-/// A response's `output_tokens`, or why it has none: the server's own
-/// `usage` count when it sent one, else `predicted_n` on a cited engine.
+/// A response's `output_tokens` and what counted it, or why it has none
+/// (#645): `predicted_n` on a cited engine, else the server's own `usage`.
 fn output_tokens(
     usage: Option<&log::Usage>,
     timings: Option<&log::Timings>,
     engine: Option<Engine>,
-) -> Result<Count, &'static str> {
+) -> Result<(Count, CountSource), &'static str> {
+    let bounded = |n: u64| Count::new(n).map_err(|_| "a count past the record's bound");
+    if engine.is_some()
+        && let Some(predicted) = timings.and_then(|timings| timings.predicted_n)
+    {
+        return Ok((bounded(predicted)?, CountSource::Timings));
+    }
     if let Some(usage) = usage {
-        return Count::new(usage.completion_tokens).map_err(|_| "a count past the record's bound");
+        return Ok((bounded(usage.completion_tokens)?, CountSource::Usage));
     }
-    if engine.is_none() {
-        return Err("equality unmeasured for this engine");
-    }
-    let predicted = timings
-        .and_then(|timings| timings.predicted_n)
-        .ok_or("the server reported no predicted_n")?;
-    Count::new(predicted).map_err(|_| "a count past the record's bound")
+    Err(if engine.is_some() {
+        "the server reported no predicted_n and no usage"
+    } else {
+        "equality unmeasured for this engine, and the server reported no usage"
+    })
 }
 
-/// A turn's `prefill_tokens` from its trunk response's `timings`, on a
-/// cited engine: `prompt_n + cache_n`, both as the server reported them.
-/// A hosted API's response, which carries `usage` and no timings, says it
-/// directly: its whole prompt, uncached, read and written (#555).
+/// A turn's `prefill_tokens` and what counted it, or why it has none
+/// (#645): on a cited engine its trunk response's `prompt_n + cache_n`,
+/// both as the server reported them; else the server's own `usage`
+/// `prompt_tokens`, the cached share included. A hosted API's response,
+/// which carries `usage` and no timings, is counted the same way: its
+/// whole prompt, uncached, read and written (#555).
 fn prefill_tokens(
-    timings: Option<&log::Timings>,
     usage: Option<&log::Usage>,
+    timings: Option<&log::Timings>,
     engine: Option<Engine>,
-) -> Result<Count, &'static str> {
-    if let (None, Some(usage)) = (timings, usage)
-        && usage.cache_creation_tokens.is_some()
+) -> Result<(Count, CountSource), &'static str> {
+    if engine.is_some()
+        && let Some((Some(prompt), Some(cache))) =
+            timings.map(|timings| (timings.prompt_n, timings.cache_n))
     {
-        return Count::new(usage.prompt_tokens).map_err(|_| "a count past the record's bound");
+        return prompt
+            .checked_add(cache)
+            .and_then(|total| Count::new(total).ok())
+            .map(|count| (count, CountSource::Timings))
+            .ok_or("a count past the record's bound");
     }
-    if engine.is_none() {
-        return Err("equality unmeasured for this engine");
+    if let Some(usage) = usage {
+        return Count::new(usage.prompt_tokens)
+            .map(|count| (count, CountSource::Usage))
+            .map_err(|_| "a count past the record's bound");
     }
-    let timings = timings.ok_or("its trunk response carried no timings")?;
-    let (Some(prompt), Some(cache)) = (timings.prompt_n, timings.cache_n) else {
-        return Err("the server reported no prompt_n or no cache_n");
-    };
-    prompt
-        .checked_add(cache)
-        .and_then(|total| Count::new(total).ok())
-        .ok_or("a count past the record's bound")
+    Err(if engine.is_some() {
+        "its trunk response carried no prompt_n and cache_n, and no usage"
+    } else {
+        "equality unmeasured for this engine, and the server reported no usage"
+    })
 }
 
 /// The record `lines` project to, under `regime`, on `engine`.
@@ -373,9 +387,6 @@ struct Walk<'a> {
     engine: Option<Engine>,
     events: Vec<Event>,
     unspellable: Vec<Unspellable>,
-    /// Whether a turn row could not be spelled: turn rows run from 1
-    /// without a gap, so none after it can be either.
-    turns_broken: bool,
     /// The kinds with no row at all, named once each.
     named_kinds: BTreeSet<&'static str>,
     /// The model the session's requests name, from its first line.
@@ -608,7 +619,6 @@ impl<'a> Walk<'a> {
             engine,
             events: Vec::new(),
             unspellable: Vec::new(),
-            turns_broken: false,
             named_kinds: BTreeSet::new(),
             tangent_trunk: None,
             model: String::new(),
@@ -1195,54 +1205,24 @@ impl<'a> Walk<'a> {
                 _ => None,
             })
             .unwrap_or_default();
-        match (
-            self.turns_broken,
-            prefill_tokens(trunk_timings, trunk_usage, self.engine),
-        ) {
-            (false, Ok(prefill_tokens)) => {
-                self.events.push(Event::Turn {
-                    index: turn,
-                    prefill_tokens,
-                    files: files.cloned(),
-                });
-                return;
-            }
-            (false, Err(why)) => {
-                self.turns_broken = true;
-                self.name(
-                    seq,
-                    "ask",
-                    format!("turn {turn}'s prefill_tokens: {why}"),
-                    None,
-                );
-            }
-            (true, _) => self.name(
-                seq,
-                "ask",
-                format!(
-                    "turn {turn} follows a turn the record could not spell, and turn rows run \
-                     from 1 without a gap"
-                ),
-                None,
-            ),
-        }
-        // Not written on a row: the files the operator attached are named,
-        // so a reference the record could not hold is not lost.
-        if let Some(files) = files {
-            let named: Vec<String> = files
-                .iter()
-                .map(|file| format!("{} sha256 {}", file.path, file.sha256))
-                .collect();
+        // The turn keeps its row whatever its count (#645): a count the log
+        // cannot spell is named, and no later row is lost with it.
+        let counted = prefill_tokens(trunk_usage, trunk_timings, self.engine);
+        if let Err(why) = counted {
             self.name(
                 seq,
                 "ask",
-                format!(
-                    "turn {turn}'s attached files ({}), which have no turn row to ride on",
-                    named.join(", ")
-                ),
+                format!("turn {turn}'s prefill_tokens: {why}"),
                 None,
             );
         }
+        let (prefill_tokens, prefill_from) = counted.ok().unzip();
+        self.events.push(Event::Turn {
+            index: turn,
+            prefill_tokens,
+            prefill_from,
+            files: files.cloned(),
+        });
     }
 
     fn request(
@@ -1744,25 +1724,24 @@ impl<'a> Walk<'a> {
                 *cache_read_share = share;
             }
         }
-        match output_tokens(usage, timings, self.engine) {
-            Ok(output_tokens) => self.events.push(Event::Response {
-                cache_read: usage.and_then(|usage| usage.cached_tokens),
-                cache_creation: usage.and_then(|usage| usage.cache_creation_tokens),
-                cache_creation_5m: usage.and_then(|usage| usage.cache_creation_5m_tokens),
-                cache_creation_1h: usage.and_then(|usage| usage.cache_creation_1h_tokens),
-                id: format!("{}#response", request_id(to_request)),
-                to_request: request_id(to_request),
-                output_tokens,
-                text: Some(text.to_owned()),
-                timings: timings.and_then(timings_of),
-            }),
-            Err(why) => self.name(
-                seq,
-                "response",
-                format!("output_tokens: {why}"),
-                Some(text.to_owned()),
-            ),
+        // The response keeps its row whatever its count (#645).
+        let counted = output_tokens(usage, timings, self.engine);
+        if let Err(why) = counted {
+            self.name(seq, "response", format!("output_tokens: {why}"), None);
         }
+        let (output_tokens, output_from) = counted.ok().unzip();
+        self.events.push(Event::Response {
+            cache_read: usage.and_then(|usage| usage.cached_tokens),
+            cache_creation: usage.and_then(|usage| usage.cache_creation_tokens),
+            cache_creation_5m: usage.and_then(|usage| usage.cache_creation_5m_tokens),
+            cache_creation_1h: usage.and_then(|usage| usage.cache_creation_1h_tokens),
+            id: format!("{}#response", request_id(to_request)),
+            to_request: request_id(to_request),
+            output_tokens,
+            output_from,
+            text: Some(text.to_owned()),
+            timings: timings.and_then(timings_of),
+        });
     }
 }
 
@@ -1947,6 +1926,69 @@ mod tests {
         record::parse(&rendered).unwrap_or_else(|why| panic!("{why:?}\n{rendered}"));
     }
 
+    /// A TabbyAPI-shaped log (#645): each response carries the server's
+    /// `timings` and its `usage`. On an uncited engine every turn and
+    /// response is counted by `usage` and says so; on a cited one by
+    /// `timings`, as before; and nothing goes unspelled either way.
+    #[test]
+    fn a_response_with_usage_counts_every_row_on_an_uncited_engine() {
+        let mut lines = a_real_session_log_timed(Some(warm_client()));
+        for line in &mut lines {
+            if let Line::Response { usage, .. } = &mut line.event {
+                *usage = Some(log::Usage {
+                    prompt_tokens: 2647,
+                    completion_tokens: 904,
+                    cached_tokens: None,
+                    cache_creation_tokens: None,
+                    cache_creation_5m_tokens: None,
+                    cache_creation_1h_tokens: None,
+                });
+            }
+        }
+        let counted = |engine: Option<Engine>| {
+            let projection = project(&lines, &regime(), engine).expect("projected");
+            assert!(
+                projection.unspellable.is_empty(),
+                "{:?}",
+                projection.unspellable
+            );
+            validates(&projection);
+            projection
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Turn {
+                        prefill_tokens,
+                        prefill_from,
+                        ..
+                    } => Some(("turn", prefill_tokens.map(Count::get), *prefill_from)),
+                    Event::Response {
+                        output_tokens,
+                        output_from,
+                        ..
+                    } => Some(("response", output_tokens.map(Count::get), *output_from)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let by_usage = counted(None);
+        assert_eq!(by_usage.len(), 4, "{by_usage:?}");
+        assert!(
+            by_usage.iter().all(|(kind, count, from)| {
+                *from == Some(CountSource::Usage)
+                    && *count == Some(if *kind == "turn" { 2647 } else { 904 })
+            }),
+            "{by_usage:?}"
+        );
+        let by_timings = counted(Some(Engine::Commit("e7051ef")));
+        assert!(
+            by_timings
+                .iter()
+                .all(|(_, _, from)| *from == Some(CountSource::Timings)),
+            "{by_timings:?}"
+        );
+    }
+
     #[test]
     fn on_a_cited_engine_the_counts_derive_from_timings() {
         let projection = project(
@@ -1968,7 +2010,7 @@ mod tests {
                     index,
                     prefill_tokens,
                     ..
-                } => Some((*index, prefill_tokens.get())),
+                } => Some((*index, prefill_tokens.map_or(0, Count::get))),
                 _ => None,
             })
             .collect();
@@ -1981,7 +2023,7 @@ mod tests {
                     to_request,
                     output_tokens,
                     ..
-                } => Some((to_request.clone(), output_tokens.get())),
+                } => Some((to_request.clone(), output_tokens.map_or(0, Count::get))),
                 _ => None,
             })
             .collect();
@@ -2004,28 +2046,41 @@ mod tests {
             None,
         )
         .expect("projected");
-        assert!(
-            !projection
-                .events
-                .iter()
-                .any(|event| matches!(event, Event::Turn { .. } | Event::Response { .. })),
-            "never a derived number: {:?}",
+        // Every turn and response keeps its row (#645), its count absent:
+        // never a number derived from timings nobody measured equal.
+        let counts: Vec<(&str, Option<u64>)> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Turn { prefill_tokens, .. } => {
+                    Some(("turn", prefill_tokens.map(Count::get)))
+                }
+                Event::Response { output_tokens, .. } => {
+                    Some(("response", output_tokens.map(Count::get)))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                ("turn", None),
+                ("response", None),
+                ("turn", None),
+                ("response", None)
+            ],
+            "{:?}",
             projection.events
         );
-        let named: Vec<(&str, bool)> = projection
+        let named: Vec<&str> = projection
             .unspellable
             .iter()
-            .map(|item| (item.kind, item.text.is_some()))
+            .map(|item| item.kind)
             .collect();
         assert_eq!(
             named,
-            [
-                ("ask", false),
-                ("response", true),
-                ("ask", false),
-                ("response", true)
-            ],
-            "each turn and each response, the answer's text kept"
+            ["ask", "response", "ask", "response"],
+            "each count, named"
         );
         assert!(
             projection.unspellable[1]
@@ -2153,7 +2208,7 @@ mod tests {
         let projection = project(&numbered(events), &regime(), None).expect("projected");
         assert!(projection.events.iter().any(|event| matches!(
             event,
-            Event::Response { output_tokens, .. } if output_tokens.get() == 2
+            Event::Response { output_tokens, .. } if output_tokens.map_or(0, Count::get) == 2
         )));
         validates(&projection);
     }
@@ -2440,7 +2495,7 @@ mod tests {
                     index,
                     prefill_tokens,
                     ..
-                } => Some((*index, prefill_tokens.get())),
+                } => Some((*index, prefill_tokens.map_or(0, Count::get))),
                 _ => None,
             })
             .collect();

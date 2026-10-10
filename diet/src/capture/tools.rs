@@ -1782,7 +1782,8 @@ mod tests {
     fn a_row_that_is_not_a_tool_call_is_not_a_call() {
         let turn = Event::Turn {
             index: 1,
-            prefill_tokens: Count::new(10).expect("a small count"),
+            prefill_tokens: Some(Count::new(10).expect("a small count")),
+            prefill_from: None,
             files: None,
         };
         assert!(matches!(
@@ -2222,7 +2223,8 @@ mod tests {
             cache_creation_1h: None,
             id: id.to_owned(),
             to_request: to.to_owned(),
-            output_tokens: Count::new(1).expect("a small count"),
+            output_tokens: Some(Count::new(1).expect("a small count")),
+            output_from: None,
             text: Some(text.to_owned()),
             timings: None,
         }
@@ -2243,7 +2245,8 @@ mod tests {
     fn turn_row(index: u32) -> Event {
         Event::Turn {
             index,
-            prefill_tokens: Count::new(1).expect("a small count"),
+            prefill_tokens: Some(Count::new(1).expect("a small count")),
+            prefill_from: None,
             files: None,
         }
     }
