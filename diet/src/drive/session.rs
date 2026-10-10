@@ -1280,6 +1280,9 @@ struct State {
     /// The latest request's prompt as sized, its output cap, and the window
     /// it was sized against (#616): what tells an overflow from its size.
     last_sized: Option<(u64, u32, Option<u64>)>,
+    /// The turn that last seamed and went again after an overflow (#617):
+    /// once per turn.
+    overflow_retried: Option<u32>,
     /// The latest measured prompt (prefilled plus cached tokens) and the
     /// estimate of the request it measured: what the next request's prompt
     /// is sized from (#588).
@@ -1785,6 +1788,7 @@ impl<S: Streaming + 'static> Session<S> {
             trunk_tokens: None,
             sent_estimate: None,
             last_sized: None,
+            overflow_retried: None,
             measured_prompt: None,
             step_tokens: None,
             ran: Vec::new(),
@@ -1986,7 +1990,7 @@ impl<S: Streaming + 'static> Session<S> {
         // `request.failed` that cites a request that exists (#117, R2c
         // finding 21).
         // The automatic seam (#617), before the request is sized.
-        window_seam(&self.shared.template, &mut state, &mut shape);
+        window_seam(&self.shared.template, &mut state, &mut shape, false);
         let max_tokens = state.sized(&mut shape, self.shared.template.limits.max_output_tokens);
         let request = state.push(Event::Requested {
             turn,
@@ -3407,6 +3411,14 @@ fn step<S: Streaming>(
                 class,
                 partial,
             });
+            // #617: an overflow seams once and goes again.
+            if overflow.is_some()
+                && let Some(next) = retried(&shared.template, &mut state, shape, turn)
+            {
+                drop(state);
+                shared.changed.notify_all();
+                return Some(next);
+            }
             state.keep_ran_steps();
             state.push(Event::TurnSettled {
                 turn,
@@ -3423,6 +3435,14 @@ fn step<S: Streaming>(
                 failure,
                 partial,
             });
+            // #617: an overflow seams once and goes again.
+            if overflow.is_some()
+                && let Some(next) = retried(&shared.template, &mut state, shape, turn)
+            {
+                drop(state);
+                shared.changed.notify_all();
+                return Some(next);
+            }
             state.keep_ran_steps();
             state.push(Event::TurnSettled { turn, reason });
             state.move_to(Settlement::Awaiting);
@@ -3551,7 +3571,7 @@ fn run_calls<S: Streaming>(
     shape.messages.push(said);
     shape.messages.extend(results);
     // The automatic seam (#617), between the turn's steps too.
-    window_seam(&shared.template, &mut state, shape);
+    window_seam(&shared.template, &mut state, shape, false);
     let max_tokens = state.sized(shape, shared.template.limits.max_output_tokens);
     let next = state.push(Event::Requested {
         turn,
@@ -4408,32 +4428,37 @@ fn refill_trunk(
 /// ride after the refill as they rode after the trunk. Otherwise the request
 /// goes as it is, as Pi, `OpenCode` 2 and Qwen Code all send it when there is
 /// nothing to compact.
-fn window_seam(template: &RequestShape, state: &mut State, shape: &mut RequestShape) {
+fn window_seam(
+    template: &RequestShape,
+    state: &mut State,
+    shape: &mut RequestShape,
+    forced: bool,
+) -> bool {
     let Some(window) = shape.limits.context_window else {
-        return;
+        return false;
     };
     let Some(interview) = state.interview.as_ref() else {
-        return;
+        return false;
     };
     if interview.seams.window_off
         || state.tangent.is_some()
         || interview.object.live().next().is_none()
         || !shape.messages.starts_with(&state.trunk)
     {
-        return;
+        return false;
     }
     let turns = state
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
     if crate::seam::render::tail(turns, interview.seams.tail_tokens).len() == turns.len() {
-        return;
+        return false;
     }
     let prompt = state.prompt_of(shape);
     let reserve =
         u64::from(template.limits.max_output_tokens).max(crate::seam::policy::WINDOW_RESERVE);
-    if prompt <= window.saturating_sub(reserve) {
-        return;
+    if !forced && prompt <= window.saturating_sub(reserve) {
+        return false;
     }
     let own = shape.messages.split_off(state.trunk.len());
     refill_trunk(
@@ -4450,6 +4475,38 @@ fn window_seam(template: &RequestShape, state: &mut State, shape: &mut RequestSh
     );
     shape.messages.clone_from(&state.trunk);
     shape.messages.extend(own);
+    true
+}
+
+/// After a trunk request that overflowed the window (#616), the automatic
+/// seam once more and the request again (#617), as Pi, `OpenCode` 2 and Qwen
+/// Code each compact and retry once after an overflow: the seam forced,
+/// whatever the sizing said, and the same messages sent on the refilled
+/// trunk. Once per turn; and not when the seam has nothing to refill from
+/// or nothing to drop, when the turn fails as it would have. The next
+/// request's sequence number when it was sent.
+fn retried(
+    template: &RequestShape,
+    state: &mut State,
+    shape: &mut RequestShape,
+    turn: u32,
+) -> Option<u64> {
+    if state.overflow_retried == Some(turn) || !window_seam(template, state, shape, true) {
+        return None;
+    }
+    state.overflow_retried = Some(turn);
+    let max_tokens = state.sized(shape, template.limits.max_output_tokens);
+    let next = state.push(Event::Requested {
+        turn,
+        lane: Lane::Trunk,
+        head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
+        fork: None,
+        max_tokens,
+    });
+    if let Some(flight) = state.flight.as_mut() {
+        flight.request = next;
+    }
+    Some(next)
 }
 
 /// Each pruned result in a seam's kept tail replaced in place by its line
@@ -10697,6 +10754,88 @@ pub(in crate::drive) mod tests {
             "{:#?}",
             projected.events
         );
+    }
+
+    /// #617: a request the engine refuses as an overflow is seamed once
+    /// and sent again on the refilled trunk -- the refusal logged, then the
+    /// seam, then the same turn's request again -- and the turn goes on. A
+    /// second overflow fails the turn: once per turn. With nothing in
+    /// working memory there is nothing to seam, and it fails as before.
+    #[test]
+    fn an_overflow_seams_once_and_goes_again() {
+        const TYPED: &str = r#"{"error":{"code":400,"type":"exceed_context_size_error"}}"#;
+        let refused = || vec![Step::Reject(400, TYPED.to_owned())];
+        let turn_two = |session: &Session<Canned>| {
+            session
+                .ask("how are blank lines treated?", None)
+                .expect("accepted");
+            wait_until(session, "turn one", settled);
+            session.ask("second", None).expect("accepted");
+            let log = wait_until(session, "turn two", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+            });
+            reads_whole(session);
+            log
+        };
+        let settled_as = |log: &[Logged]| {
+            log.iter()
+                .rev()
+                .find_map(|logged| match &logged.event {
+                    Event::TurnSettled { turn: 2, reason } => Some(*reason),
+                    _ => None,
+                })
+                .expect("turn two settled")
+        };
+        let mut acts = two_turns_measuring(1_000);
+        acts.truncate(2);
+        acts.push(refused());
+        acts.push(deltas(&["after the seam"]));
+        let once = windowed(acts, 1_000_000, crate::seam::policy::Served::default());
+        let log = turn_two(&once);
+        assert_eq!(settled_as(&log), SettleReason::Final);
+        let seams = window_seams(&log);
+        assert_eq!(seams.len(), 1, "{log:#?}");
+        let (at, _, fired) = seams[0];
+        assert_eq!(fired.map(|fired| fired.window), Some(1_000_000));
+        let refused_at = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Rejected { .. }))
+            .expect("the refusal")
+            .seq;
+        let again = log
+            .iter()
+            .filter(|logged| matches!(logged.event, Event::Requested { turn: 2, .. }))
+            .map(|logged| logged.seq)
+            .max()
+            .expect("a request");
+        assert!(refused_at < at && at < again, "{log:#?}");
+        let lines: Vec<log::Line> = once.events_from(0).iter().map(line_of).collect();
+        super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+
+        let mut acts = two_turns_measuring(1_000);
+        acts.truncate(2);
+        acts.push(refused());
+        acts.push(refused());
+        let twice = windowed(acts, 1_000_000, crate::seam::policy::Served::default());
+        let log = turn_two(&twice);
+        assert_eq!(settled_as(&log), SettleReason::Failed);
+        assert_eq!(window_seams(&log).len(), 1);
+
+        let mut acts = two_turns_measuring(1_000);
+        acts.truncate(2);
+        acts[0][1] = record(
+            "call-1",
+            "fact",
+            "The cache is flushed every ninety seconds.",
+        );
+        acts.push(refused());
+        let empty = windowed(acts, 1_000_000, crate::seam::policy::Served::default());
+        let log = turn_two(&empty);
+        assert_eq!(settled_as(&log), SettleReason::Failed);
+        assert!(window_seams(&log).is_empty());
     }
 
     /// #617: with room in the window no seam fires; turned off by the
