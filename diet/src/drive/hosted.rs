@@ -11,7 +11,7 @@
 //! API behaves, so the entry declares the ones it is sent (`engine_betas`),
 //! and serve refuses to start when what it would send differs.
 
-use crate::client::anthropic::{Options, Thinking};
+use crate::client::anthropic::{Options, Thinking, Ttl, Ttls};
 use crate::client::shape::RequestShape;
 use crate::client::stream::{Bearer, HttpStream};
 use crate::drive::registry::Identity;
@@ -24,10 +24,13 @@ use crate::formats::record::{Budget, Reasoning, Substrate};
 /// Reasoning on with an entry that names no `thinking` convention; an
 /// adaptive model asked with no effort; a budget model asked with no
 /// token budget.
-pub fn options(substrate: &Substrate, identity: &Identity) -> Result<Options, String> {
+pub fn options(substrate: &Substrate, identity: &Identity, ttl: Ttls) -> Result<Options, String> {
     let on = matches!(substrate.reasoning, Reasoning::On | Reasoning::Suppressed);
     if !on {
-        return Ok(Options::default());
+        return Ok(Options {
+            ttl,
+            ..Options::default()
+        });
     }
     let id = &substrate.id;
     let control = substrate.reasoning_control.as_ref();
@@ -62,7 +65,41 @@ pub fn options(substrate: &Substrate, identity: &Identity) -> Result<Options, St
             ));
         }
     };
-    Ok(Options { thinking })
+    Ok(Options { thinking, ttl })
+}
+
+/// The regimen key for the cache-lifetime lever (#556).
+pub const CACHE_TTL: &str = "cache_ttl";
+
+/// The lifetimes `regimen`'s `cache_ttl` asks of each breakpoint (#556):
+/// `5m` (the default, all three harnesses'), `1h`, or `per-breakpoint` --
+/// Qwen Code's shape, the system and tools for an hour and the final user
+/// message's tail for five minutes, longer before shorter in the cache's
+/// tools, system, messages order.
+///
+/// # Errors
+///
+/// Any other value: a lifetime declared and not understood is never sent
+/// as another.
+pub fn cache_ttl(regimen: &crate::formats::regimen::Regimen) -> Result<Ttls, String> {
+    match regimen.get(CACHE_TTL) {
+        None => Ok(Ttls::default()),
+        Some(crate::formats::regimen::Value::String(word)) => match word.as_str() {
+            "5m" => Ok(Ttls::all(Ttl::FiveMinutes)),
+            "1h" => Ok(Ttls::all(Ttl::Hour)),
+            "per-breakpoint" => Ok(Ttls {
+                tools: Ttl::Hour,
+                system: Ttl::Hour,
+                tail: Ttl::FiveMinutes,
+            }),
+            other => Err(format!(
+                "`{CACHE_TTL} = \"{other}\"` is not \"5m\", \"1h\" or \"per-breakpoint\""
+            )),
+        },
+        Some(_) => Err(format!(
+            "`{CACHE_TTL}` is a word: \"5m\", \"1h\" or \"per-breakpoint\""
+        )),
+    }
 }
 
 /// The variable a hosted API's key is read from when no `--key-file` is
@@ -92,7 +129,7 @@ pub enum Key {
 pub fn transport(
     transport: HttpStream,
     (identity, substrate): (&Identity, &Substrate),
-    key: Key,
+    (key, ttl): (Key, Ttls),
     shape: &RequestShape,
 ) -> Result<HttpStream, String> {
     let id = &substrate.id;
@@ -114,7 +151,7 @@ pub fn transport(
             Bearer::new(&key).ok_or_else(|| format!("{ANTHROPIC_API_KEY} holds no usable key"))?,
         ),
     };
-    let options = options(substrate, identity)?;
+    let options = options(substrate, identity, ttl)?;
     betas_agree(id, identity, &options)?;
     crate::client::anthropic::body(shape, &options)
         .map_err(|why| format!("`{id}`'s requests: {why}"))?;
@@ -175,32 +212,40 @@ mod tests {
     #[test]
     fn thinking_follows_the_entrys_convention_and_the_regimens_reasoning() {
         let adaptive = entry("thinking = \"adaptive\"\n", "");
-        assert_eq!(options(&substrate(""), &adaptive), Ok(Options::default()));
+        assert_eq!(
+            options(&substrate(""), &adaptive, Ttls::default()),
+            Ok(Options::default())
+        );
         assert_eq!(
             options(
                 &substrate("[reasoning]\neffort = \"medium\"\nbudget_tokens = \"none\"\n"),
-                &adaptive
+                &adaptive,
+                Ttls::default()
             ),
             Ok(Options {
                 thinking: Thinking::Adaptive {
                     effort: Some("medium".to_owned())
-                }
+                },
+                ttl: Ttls::default(),
             })
         );
         let budget = entry("thinking = \"budget\"\n", "");
         assert_eq!(
             options(
                 &substrate("[reasoning]\neffort = \"high\"\nbudget_tokens = 16384\n"),
-                &budget
+                &budget,
+                Ttls::default()
             ),
             Ok(Options {
-                thinking: Thinking::Budget { tokens: 16_384 }
+                thinking: Thinking::Budget { tokens: 16_384 },
+                ttl: Ttls::default(),
             })
         );
         assert!(
             options(
                 &substrate("[reasoning]\neffort = \"high\"\nbudget_tokens = \"none\"\n"),
-                &budget
+                &budget,
+                Ttls::default()
             )
             .is_err(),
             "a budget model with no budget"
@@ -208,7 +253,8 @@ mod tests {
         assert!(
             options(
                 &substrate("[reasoning]\neffort = \"high\"\nbudget_tokens = \"none\"\n"),
-                &entry("", "")
+                &entry("", ""),
+                Ttls::default()
             )
             .is_err(),
             "no convention declared"
@@ -261,7 +307,8 @@ mod tests {
                 "passes ANTHROPIC_API_KEY on to the model's commands",
             ),
         ] {
-            let why = transport(plain(), (&identity, &on), key, &shape()).expect_err("refused");
+            let why = transport(plain(), (&identity, &on), (key, Ttls::default()), &shape())
+                .expect_err("refused");
             assert!(why.contains(refused), "{why}");
         }
 
@@ -269,7 +316,10 @@ mod tests {
         let hosted = transport(
             HttpStream::new(Endpoint::parse(&stub.url()).expect("an endpoint")),
             (&identity, &on),
-            Key::Environment(Some("sk-from-env".to_owned()), false),
+            (
+                Key::Environment(Some("sk-from-env".to_owned()), false),
+                Ttls::default(),
+            ),
             &shape(),
         )
         .expect("a hosted transport");
@@ -297,10 +347,35 @@ mod tests {
         );
     }
 
+    /// #556: the lever reads `5m`, `1h` and `per-breakpoint` (Qwen Code's
+    /// shape: system and tools for an hour, the tail for five minutes);
+    /// absent is five minutes, and any other word is refused.
+    #[test]
+    fn the_cache_ttl_lever_reads_its_three_words() {
+        let read =
+            |text: &str| cache_ttl(&crate::formats::regimen::parse(text).expect("a regimen"));
+        assert_eq!(read("arm = \"a\"\n"), Ok(Ttls::default()));
+        assert_eq!(
+            read("cache_ttl = \"5m\"\n"),
+            Ok(Ttls::all(Ttl::FiveMinutes))
+        );
+        assert_eq!(read("cache_ttl = \"1h\"\n"), Ok(Ttls::all(Ttl::Hour)));
+        assert_eq!(
+            read("cache_ttl = \"per-breakpoint\"\n"),
+            Ok(Ttls {
+                tools: Ttl::Hour,
+                system: Ttl::Hour,
+                tail: Ttl::FiveMinutes
+            })
+        );
+        assert!(read("cache_ttl = \"10m\"\n").is_err());
+    }
+
     #[test]
     fn the_betas_sent_are_the_betas_declared() {
         let thinking = Options {
             thinking: Thinking::Adaptive { effort: None },
+            ttl: Ttls::default(),
         };
         let declaring = entry("", &format!("engine_betas = \"{INTERLEAVED_THINKING}\"\n"));
         assert_eq!(betas_agree("h", &declaring, &thinking), Ok(()));

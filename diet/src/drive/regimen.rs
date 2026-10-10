@@ -656,7 +656,10 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ),
         ("approval".to_owned(), approval),
         ("reasoning_state".to_owned(), reasoning),
-        ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
+        (
+            "cache_lifetime".to_owned(),
+            cache_lifetime_lever(regimen, word),
+        ),
         ("substrate_rung".to_owned(), word("substrate")),
         ("tool_surface".to_owned(), surface),
         ("background_commands".to_owned(), background_lever(regimen)),
@@ -706,6 +709,16 @@ fn fork_input_view_lever(regimen: &Regimen) -> String {
             crate::drive::session::ForkView::Last(1).word()
         ),
         _ => crate::drive::session::fork_view(regimen).word(),
+    }
+}
+
+/// The cache lifetime lever's word: the regimen's `cache_ttl` -- what a
+/// hosted API's breakpoints ask for (#556) -- when it declares one, else
+/// its declared `substrate_cache_ttl` as before.
+fn cache_lifetime_lever(regimen: &Regimen, word: impl Fn(&str) -> String) -> String {
+    match regimen.get(crate::drive::hosted::CACHE_TTL) {
+        Some(regimen::Value::String(ttl)) => ttl.clone(),
+        _ => word(CACHE_TTL_KEY),
     }
 }
 

@@ -440,6 +440,26 @@ impl HttpStream {
         self
     }
 
+    /// This transport as a fork on the same server makes its calls, when that
+    /// differs (#556): a hosted API's fork never writes its own tail to the
+    /// cache for an hour, since nothing reuses it; its system and tools ask
+    /// as the trunk's do, so they read the trunk's entries. `None` when a
+    /// fork's calls are the trunk's.
+    #[must_use]
+    pub fn for_forks(&self) -> Option<Self> {
+        let Wire::Anthropic(options) = &self.wire else {
+            return None;
+        };
+        let ttl = options.ttl.for_a_fork();
+        (ttl != options.ttl).then(|| Self {
+            wire: Wire::Anthropic(super::anthropic::Options {
+                ttl,
+                ..options.clone()
+            }),
+            ..self.clone()
+        })
+    }
+
     /// The same, trusting `trust`'s roots for an `https` endpoint.
     #[must_use]
     pub fn with_trust(mut self, trust: super::tls::Trust) -> Self {
