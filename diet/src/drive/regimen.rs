@@ -228,6 +228,52 @@ pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, St
 pub fn template_kwargs(
     substrate: &Substrate,
 ) -> Result<(BTreeMap<String, Value>, Option<u64>), String> {
+    template_kwargs_declared(substrate, None).map(|wire| (wire.kwargs, wire.unsent_budget))
+}
+
+/// What a session sends its chat template, and what it records beside it.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TemplateWire {
+    /// The `chat_template_kwargs` every request carries.
+    pub kwargs: BTreeMap<String, Value>,
+    /// A token budget declared and not sent.
+    pub unsent_budget: Option<u64>,
+    /// With thinking on and no level sent, the level the template renders
+    /// by default, as the registry declares it.
+    pub reasoning_effort_default: Option<String>,
+}
+
+/// [`template_kwargs`], with what the substrate's registry entry declares
+/// its model's convention needs (`identity`): `preserve_thinking`, sent on
+/// every request when declared, and the template's default effort, named
+/// when thinking is on and no level is sent.
+///
+/// # Errors
+///
+/// As [`template_kwargs`].
+pub fn template_kwargs_declared(
+    substrate: &Substrate,
+    identity: Option<&crate::drive::registry::Identity>,
+) -> Result<TemplateWire, String> {
+    let (mut kwargs, unsent_budget) = reasoning_kwargs(substrate)?;
+    if let Some(preserve) = identity.and_then(|identity| identity.template_preserve_thinking) {
+        kwargs.insert("preserve_thinking".to_owned(), Value::Boolean(preserve));
+    }
+    let thinking_on = kwargs.get("enable_thinking") == Some(&Value::Boolean(true));
+    let reasoning_effort_default = identity
+        .and_then(|identity| identity.template_default_effort.clone())
+        .filter(|_| thinking_on && !kwargs.contains_key("reasoning_effort"));
+    Ok(TemplateWire {
+        kwargs,
+        unsent_budget,
+        reasoning_effort_default,
+    })
+}
+
+/// The regime's own reasoning state, as [`template_kwargs`] describes it.
+fn reasoning_kwargs(
+    substrate: &Substrate,
+) -> Result<(BTreeMap<String, Value>, Option<u64>), String> {
     let mut kwargs = BTreeMap::new();
     let thinking = match substrate.reasoning {
         Reasoning::Off => Some(false),
@@ -698,6 +744,56 @@ mod tests {
         // A budget no template carries is recorded as unsent, never refused.
         let capped = "[reasoning]\neffort = \"medium\"\nbudget_tokens = 512\n";
         assert_eq!(kwargs("on", capped), Ok((medium, Some(512))));
+    }
+
+    /// The substrate's model convention, declared in the registry, rides
+    /// with the regime's reasoning state: `preserve_thinking` on every
+    /// request, and the template's default level named when thinking is on
+    /// and none is sent.
+    #[test]
+    fn the_registrys_declared_kwargs_ride_with_the_reasoning_state() {
+        use crate::formats::record::json::Value;
+        use std::collections::BTreeMap;
+        let floor = crate::drive::registry::identity(
+            crate::drive::registry::REGISTRY,
+            "accel24-tabbyapi-exl3-qwen38-27b-3p00",
+        )
+        .expect("registered");
+        let wire = |reasoning: &str, table: &str| {
+            let text = format!(
+                "arm = \"a\"\ndogma_version = 0\nsubstrate = \"canned\"\n\
+                 substrate_reasoning = \"{reasoning}\"\nsubstrate_hardware = \"{}\"\n\
+                 {table}[sampler]\nseed = 7\n",
+                "a".repeat(64)
+            );
+            let regime =
+                regime_of(&regimen::parse(&text).expect("a regimen"), false).expect("a regime");
+            super::template_kwargs_declared(&regime.substrates[0], Some(&floor)).expect("sent")
+        };
+        let on = wire("on", "");
+        assert_eq!(
+            on.kwargs,
+            BTreeMap::from([
+                ("enable_thinking".to_owned(), Value::Boolean(true)),
+                ("preserve_thinking".to_owned(), Value::Boolean(true)),
+            ])
+        );
+        assert_eq!(on.reasoning_effort_default.as_deref(), Some("xhigh"));
+        let medium = wire(
+            "on",
+            "[reasoning]\neffort = \"medium\"\nbudget_tokens = \"none\"\n",
+        );
+        assert_eq!(medium.reasoning_effort_default, None);
+        assert_eq!(
+            medium.kwargs.get("reasoning_effort"),
+            Some(&Value::String("medium".to_owned()))
+        );
+        let off = wire("off", "");
+        assert_eq!(off.reasoning_effort_default, None);
+        assert_eq!(
+            off.kwargs.get("preserve_thinking"),
+            Some(&Value::Boolean(true))
+        );
     }
 
     /// #486: the pins are the record's card, setting for setting, and a

@@ -457,6 +457,9 @@ fn kwargs_of(
         if let Some(effort) = &kwargs.reasoning_effort {
             sent.insert("reasoning_effort".to_owned(), Value::String(effort.clone()));
         }
+        if let Some(preserve) = kwargs.preserve_thinking {
+            sent.insert("preserve_thinking".to_owned(), Value::Boolean(preserve));
+        }
     }
     sent
 }
@@ -1427,6 +1430,7 @@ mod tests {
             unsent: None,
             approvals_off: None,
             fork_delivery: None,
+            reasoning_effort_default: None,
             tool_output: None,
         }
     }

@@ -210,6 +210,9 @@ vocabulary! {
 }
 
 /// One thing that happened in a session.
+// `Started` is the large one, and it is built once per session, at open: the
+// size each other event carries for it is not worth a box per field.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// The session opened. Always the first event, at sequence number zero.
@@ -241,6 +244,9 @@ pub enum Event {
         approvals_off: bool,
         /// The fork delivery lever's state, for a session that forks.
         fork_delivery: Option<log::ForkDelivery>,
+        /// The template's default level, when thinking is on and none is
+        /// sent.
+        reasoning_effort_default: Option<String>,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -653,6 +659,16 @@ pub fn interview_warrant(regimen: &Regimen) -> Result<Vec<log::Warrant>, String>
         })
         .collect()
 }
+
+/// What a served session declares at start beside its template: the
+/// substrate claim, what its capture gap forks under, and what its log names
+/// that no request carries -- a budget declared and not sent, and the
+/// template's default level when none is sent.
+pub type Declared = (
+    Option<log::SubstrateClaim>,
+    Option<Interview>,
+    (Option<log::Unsent>, Option<String>),
+);
 
 /// What the capture gap runs under (#374): the rules that warrant its fork,
 /// and the working object the fork's patches are applied to.
@@ -1091,7 +1107,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// before any.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
-        Self::opened_as(transport, template, None, None, (None, None, None))
+        Self::opened_as(transport, template, None, None, (None, None, (None, None)))
     }
 
     /// [`Session::open`], declaring what serves it -- the dialect it speaks
@@ -1099,7 +1115,13 @@ impl<S: Streaming + 'static> Session<S> {
     /// `session.start` carries (#292).
     #[must_use]
     pub fn open_serving(transport: S, template: RequestShape, serving: Serving) -> Self {
-        Self::opened_as(transport, template, Some(serving), None, (None, None, None))
+        Self::opened_as(
+            transport,
+            template,
+            Some(serving),
+            None,
+            (None, None, (None, None)),
+        )
     }
 
     /// A session that runs the model's calls (#298): `template` declares the
@@ -1116,7 +1138,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             Some(tools),
-            (None, None, None),
+            (None, None, (None, None)),
         )
     }
 
@@ -1139,7 +1161,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             tools,
-            (claim, interview, None),
+            (claim, interview, (None, None)),
         )
     }
 
@@ -1151,11 +1173,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, unsent): (
-            Option<log::SubstrateClaim>,
-            Option<Interview>,
-            Option<log::Unsent>,
-        ),
+        (claim, interview, unsent): Declared,
     ) -> Self {
         Self::opened_as(
             transport,
@@ -1171,11 +1189,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, unsent): (
-            Option<log::SubstrateClaim>,
-            Option<Interview>,
-            Option<log::Unsent>,
-        ),
+        (claim, interview, (unsent, reasoning_effort_default)): Declared,
     ) -> Self {
         // A head is the trunk before any turn; a tool result answers a call
         // made in one, and the log's head has no word for it (`role_of`).
@@ -1240,6 +1254,7 @@ impl<S: Streaming + 'static> Session<S> {
             unsent,
             approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
             fork_delivery,
+            reasoning_effort_default,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
         });
         Self {
@@ -1756,6 +1771,10 @@ fn logged_kwargs(kwargs: &BTreeMap<String, Value>) -> Option<log::TemplateKwargs
             Some(Value::String(effort)) => Some(effort.clone()),
             _ => None,
         },
+        preserve_thinking: match kwargs.get("preserve_thinking") {
+            Some(Value::Boolean(preserve)) => Some(*preserve),
+            _ => None,
+        },
     };
     (logged != log::TemplateKwargs::default()).then_some(logged)
 }
@@ -1778,9 +1797,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             unsent,
             approvals_off,
             fork_delivery,
+            reasoning_effort_default,
             tool_output,
         } => log::Event::SessionStart {
             fork_delivery: *fork_delivery,
+            reasoning_effort_default: reasoning_effort_default.clone(),
             tool_output: tool_output.map(tool_output_of),
             // The approval lever's `none`: `true`, or nothing.
             approvals_off: approvals_off.then_some(true),
@@ -4476,6 +4497,7 @@ pub(in crate::drive) mod tests {
             unsent: None,
             approvals_off: false,
             fork_delivery: None,
+            reasoning_effort_default: None,
             tool_output: None,
         } = &log[0].event
         else {
@@ -4575,6 +4597,7 @@ pub(in crate::drive) mod tests {
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
                 approvals_off: true,
                 fork_delivery: Some(log::ForkDelivery::Advisory),
+                reasoning_effort_default: Some("xhigh".to_owned()),
                 tool_output: Some(crate::drive::output::OutputCap::DEFAULT),
             },
             Event::Asked {
@@ -4840,10 +4863,12 @@ pub(in crate::drive) mod tests {
                 template_kwargs: Some(log::TemplateKwargs {
                     enable_thinking: Some(true),
                     reasoning_effort: Some("medium".to_owned()),
+                    preserve_thinking: None,
                 }),
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
                 approvals_off: Some(true),
                 fork_delivery: Some(log::ForkDelivery::Advisory),
+                reasoning_effort_default: Some("xhigh".to_owned()),
                 tool_output: Some(log::ToolOutput {
                     state: log::ToolOutputState::Capped,
                     max_lines: Some(2000),
@@ -7210,6 +7235,44 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .expect("an answer")
+    }
+
+    /// Qwen's convention (the reasoning ruling): a tool step's reasoning
+    /// goes back in the next step's request, on the assistant message that
+    /// made the call, unchanged -- what `preserve_thinking` renders.
+    #[test]
+    fn a_tool_steps_reasoning_goes_back_unchanged_in_the_next_step() {
+        let tree = scratch("reasoning-back");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![
+                    Step::Reasoning("next, B\n".to_owned()),
+                    bash("call-1", "touch b"),
+                ],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("go", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let sent = session.shared.transport.sent();
+        assert_eq!(sent.len(), 2);
+        let said = sent[1]
+            .messages
+            .iter()
+            .find(|message| message.role == Role::Assistant)
+            .expect("the step's assistant message");
+        assert_eq!(said.reasoning.as_deref(), Some("next, B\n"));
+        tidy(&[&tree]);
     }
 
     /// The fork delivery lever: patches waiting at the next ask are one
