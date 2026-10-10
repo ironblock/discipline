@@ -98,6 +98,12 @@ impl Image {
     pub fn data_uri(&self) -> String {
         format!("data:{};base64,{}", self.media_type, self.base64)
     }
+
+    /// Its media type.
+    #[must_use]
+    pub fn media_type(&self) -> &str {
+        &self.media_type
+    }
 }
 
 /// Why [`attach`] refused bytes: they are not the file the log names.
@@ -336,6 +342,11 @@ pub struct Limits {
     /// How many retries may be attempted. Zero means the first attempt is the
     /// only attempt.
     pub retries: u8,
+    /// The server's context window, in tokens, when it is known (#588): the
+    /// engine's report, else the registry's declaration. With one, each
+    /// request's `max_output_tokens` is clamped to the room the prompt leaves
+    /// ([`crate::drive::session`]); with none, nothing is clamped.
+    pub context_window: Option<u64>,
 }
 
 /// How the server was configured to serve.
@@ -517,6 +528,9 @@ impl Dialect {
 pub struct ToolDefinition {
     /// What the tool calls itself. What a `tool_moved` delta names.
     pub name: String,
+    /// What the model is told the tool does, when the tool says (#557):
+    /// on the wire as the function's `description`, so the head covers it.
+    pub description: Option<String>,
     /// The parameters it declares.
     pub schema: crate::formats::record::json::Value,
 }
@@ -672,6 +686,7 @@ mod tests {
                 call: Duration::from_secs(1),
                 max_output_tokens: 16,
                 retries: 0,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

@@ -1,12 +1,12 @@
 # The dogma, pinned. <name>\t<fnv1a-64 hex>\t<bytes>
 # Regenerate deliberately; a mismatch fails `cargo test` by design.
 ADD_Q	4968b6d5549c98c7	376
+API_SURFACE	e0c16644d568653c	308
 AUDIT_GOAL_NOTE	250a00f6830ef647	173
 AUDIT_OPEN_NOTE	1b9435e246ed614e	159
 AUDIT_Q	34a8593453245e52	437
 AUDIT_Q_CADENCE	c987715be857fc19	511
 AUDIT_Q_HUMAN	2213e128c43255d5	467
-API_SURFACE	e0c16644d568653c	308
 CONSTRAINTS	2a60390c510b3c9b	330
 DECISIONS	21e084aa7ead36e2	408
 DOCTRINE	6ff2f984526c8071	358
@@ -14,9 +14,30 @@ DOC_READ	48a9736bb96cc33a	519
 EVIDENCE	f58c0f25e2b6b69c	521
 EXTRACT	5caf284daca5f4cd	309
 EXTRACT_MINIMAL	ceedfce527d531ac	344
+FORK_NOTE_ADVISORY	b60beb82c4354d6b	121
+FORK_NOTE_IMPERATIVE	7bf8ee07ad6d0db3	136
 GOTCHAS	eb01b60885a6ce3f	361
 NATIVE_GENERATE_PROMPT	9a79e42010355ca4	334
 OPEN_NEXT	b39d818de5088086	397
 RATIONALE	907cc0a084083c54	938
 SUPERSEDE	361484c54e8cab75	376
 TURN_BOUNDARY	c28112e37572cf28	508
+self-capture/c1/contract	70019e15b8dfcf10	1129
+self-capture/c1/reminder	d647fcc4a028d32e	29
+self-capture/c1/sweep	f30c90a6c82e2959	58
+fork-asks/v3/api_surface	f23f9b8e6012614e	354
+fork-asks/v3/change	dd3d2627552842f0	297
+fork-asks/v3/finding	5095cdcf72f94ec2	272
+fork-asks/v3/generic	4d3dad2ec5b820e0	259
+fork-asks/v3/imperative	cf7ae8f170047df5	29
+fork-asks/v3/judgment	8933a0d55ed1a3b4	211
+fork-asks/v3/outcome	827069e3bcd061e9	270
+fork-asks/v3/reminder	06c1d8f15ca37341	230
+fork-asks/v4/api_surface	f23f9b8e6012614e	354
+fork-asks/v4/change	dd3d2627552842f0	297
+fork-asks/v4/finding	5095cdcf72f94ec2	272
+fork-asks/v4/generic	4d3dad2ec5b820e0	259
+fork-asks/v4/imperative	cf7ae8f170047df5	29
+fork-asks/v4/judgment	00699d74ec8a9ec4	409
+fork-asks/v4/outcome	827069e3bcd061e9	270
+fork-asks/v4/reminder	06c1d8f15ca37341	230

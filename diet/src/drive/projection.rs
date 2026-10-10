@@ -306,6 +306,9 @@ pub fn project_in(
                 head,
                 tools,
                 template_kwargs,
+                fork_delivery,
+                tool_output,
+                levers,
                 ..
             },
         ..
@@ -335,6 +338,13 @@ pub fn project_in(
         regime: Box::new(regime.clone()),
         source: Source::Live,
         regimen_sha256: None,
+        // The fork delivery lever's state, as `session.start` names it.
+        fork_delivery: *fork_delivery,
+        // The tool output cap, as `session.start` names it (#554).
+        tool_output: *tool_output,
+        // Each lever's state, as `session.start` names it (#573): the
+        // record's start says what the log says.
+        levers: levers.clone(),
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -382,6 +392,8 @@ struct Walk<'a> {
     recording: Option<std::path::PathBuf>,
     /// Each turn's attached files, from its `ask` line.
     ask_files: BTreeMap<u32, Vec<log::RecordedFile>>,
+    /// Each turn's notes after its ask (v7): its `delivered` and `recalled` lines.
+    notes: BTreeMap<u32, Vec<String>>,
     /// The tools the session's requests declared, rebuilt from
     /// `session.start`'s names (#472), or why they cannot be.
     tools: Result<Vec<ToolDefinition>, String>,
@@ -391,6 +403,9 @@ struct Walk<'a> {
     /// The trunk requests that were tool steps: a `tool_call` line cites
     /// them.
     stepped: BTreeSet<u64>,
+    /// What each turn cancelled while generating had said, from its
+    /// `cancelled` line (#575).
+    cancelled_text: BTreeMap<u32, String>,
     /// Each turn's tool steps so far, in order: what the session sent after
     /// the ask, and what it put back on the trunk.
     steps: BTreeMap<u32, Vec<Step>>,
@@ -398,10 +413,16 @@ struct Walk<'a> {
     /// attachment could not be read back: every later head names it (#471's
     /// review, NB3).
     trunk_unrebuilt: Option<String>,
+    /// Whether the trunk carries a seam's refill message after the head
+    /// (#597): the turns start after it.
+    refilled: bool,
     /// Each lane but the trunk's last logged head digest (v5, #374): a live
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
     side_heads: BTreeMap<Lane, String>,
+    /// The trunk at an open tangent's fork point (v7, #22): what its close
+    /// rolls the rebuilt trunk back to, as the session's close does.
+    tangent_trunk: Option<Vec<Message>>,
 }
 
 /// One tool step of a turn (#472): what the model said, its calls, and what
@@ -411,9 +432,12 @@ struct Step {
     request: u64,
     /// The step's response: its text and reasoning.
     said: Message,
-    /// Its calls, in order, each with what it was shown, when it was shown
-    /// anything.
-    calls: Vec<(ToolCall, Option<String>)>,
+    /// Its calls, in order, each with the result message it was shown, when
+    /// it was shown anything: `read`'s images on it, read back (#557).
+    calls: Vec<(ToolCall, Option<Message>)>,
+    /// Why a result's image could not be read back, from the first that
+    /// could not: every head that carries the step names it (#557).
+    unrebuilt: Option<String>,
 }
 
 impl Step {
@@ -423,11 +447,7 @@ impl Step {
         let mut said = self.said.clone();
         said.tool_calls = self.calls.iter().map(|(call, _)| call.clone()).collect();
         let mut messages = vec![said];
-        messages.extend(self.calls.iter().filter_map(|(call, shown)| {
-            shown
-                .as_ref()
-                .map(|shown| Message::tool_result(call.id.clone(), shown.clone()))
-        }));
+        messages.extend(self.calls.iter().filter_map(|(_, shown)| shown.clone()));
         messages
     }
 }
@@ -446,6 +466,9 @@ fn kwargs_of(
         if let Some(effort) = &kwargs.reasoning_effort {
             sent.insert("reasoning_effort".to_owned(), Value::String(effort.clone()));
         }
+        if let Some(preserve) = kwargs.preserve_thinking {
+            sent.insert("preserve_thinking".to_owned(), Value::Boolean(preserve));
+        }
     }
     sent
 }
@@ -460,6 +483,18 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
         .map(|name| {
             if name == super::tool_loop::BASH {
                 Ok(super::tool_loop::bash_tool())
+            } else if let Some(tool) = super::standard::definitions()
+                .into_iter()
+                .find(|tool| tool.name == *name)
+            {
+                Ok(tool)
+            } else if let Some(tool) = crate::capture::tools::contract()
+                .ok()
+                .map(|contract| crate::capture::tools::definitions(&contract))
+                .and_then(|tools| tools.into_iter().find(|tool| tool.name == *name))
+            {
+                // Self-capture's tools (#609), as the pinned contract has them.
+                Ok(tool)
             } else {
                 Err(format!(
                     "the session declared `{name}`, a tool with no definition here"
@@ -467,6 +502,17 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
             }
         })
         .collect()
+}
+
+/// `tools` with `bash` as it was declared before its description (#558),
+/// when `tools` declares `bash`.
+fn earlier_bash(tools: &[ToolDefinition]) -> Option<Vec<ToolDefinition>> {
+    let at = tools
+        .iter()
+        .position(|tool| tool.name == super::tool_loop::BASH)?;
+    let mut earlier = tools.to_vec();
+    earlier[at] = super::tool_loop::bash_tool_before_its_description();
+    Some(earlier)
 }
 
 impl<'a> Walk<'a> {
@@ -504,6 +550,7 @@ impl<'a> Walk<'a> {
             unspellable: Vec::new(),
             turns_broken: false,
             named_kinds: BTreeSet::new(),
+            tangent_trunk: None,
             model: String::new(),
             trunk: Vec::new(),
             head: Vec::new(),
@@ -514,11 +561,14 @@ impl<'a> Walk<'a> {
             captures: BTreeMap::new(),
             recording: None,
             ask_files: BTreeMap::new(),
+            notes: BTreeMap::new(),
             tools: Ok(Vec::new()),
             template_kwargs: BTreeMap::new(),
             stepped,
+            cancelled_text: BTreeMap::new(),
             steps: BTreeMap::new(),
             trunk_unrebuilt: None,
+            refilled: false,
             side_heads: BTreeMap::new(),
         }
     }
@@ -530,6 +580,50 @@ impl<'a> Walk<'a> {
             why,
             text,
         });
+    }
+
+    /// A tangent's line (v7, #22): its open keeps the rebuilt trunk as the
+    /// fork point, its close restores it, and neither has a row.
+    fn tangent(&mut self, line: &log::Line) {
+        let opened = matches!(line.event, Line::TangentOpen { .. });
+        if opened {
+            self.tangent_trunk = Some(self.trunk.clone());
+        } else if let Some(fork_point) = self.tangent_trunk.take() {
+            self.trunk = fork_point;
+        }
+        let kind = if opened {
+            log::Kind::TangentOpen
+        } else {
+            log::Kind::TangentClose
+        }
+        .tag();
+        if self.named_kinds.insert(kind) {
+            self.name(
+                line.seq,
+                kind,
+                format!("the record has no row for a `{kind}` line"),
+                None,
+            );
+        }
+    }
+
+    /// A fact the record has no row for at all, named once per kind.
+    fn no_row(&mut self, line: &log::Line) {
+        let kind = match &line.event {
+            Line::IdleGap { .. } => log::Kind::IdleGap,
+            Line::Refused { .. } => log::Kind::Refused,
+            Line::Capture { .. } => log::Kind::Capture,
+            _ => log::Kind::Progress,
+        }
+        .tag();
+        if self.named_kinds.insert(kind) {
+            self.name(
+                line.seq,
+                kind,
+                format!("the record has no row for a `{kind}` line"),
+                None,
+            );
+        }
     }
 
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
@@ -577,12 +671,9 @@ impl<'a> Walk<'a> {
                     usage.as_ref(),
                 );
             }
-            Line::Cancelled { partial, .. } => self.name(
-                line.seq,
-                "cancelled",
-                "a cancelled call: the record has no row for one".to_owned(),
-                Some(partial.clone()),
-            ),
+            Line::Cancelled {
+                request, partial, ..
+            } => self.cancelled_call(line.seq, *request, partial),
             Line::RequestFailed {
                 reason, message, ..
             } => self.name(
@@ -604,26 +695,25 @@ impl<'a> Walk<'a> {
             // A seam (v6, #493): its row, and the trunk refilled exactly as
             // the session refills it, so the next request's head is rebuilt
             // and checked like any other.
-            Line::Seam {
-                at_turn, render, ..
-            } => self.seam(line.seq, *at_turn, render),
-            // Facts the record has no row for at all, named once per kind.
-            Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
-                let kind = match &line.event {
-                    Line::IdleGap { .. } => log::Kind::IdleGap,
-                    Line::Refused { .. } => log::Kind::Refused,
-                    _ => log::Kind::Progress,
-                }
-                .tag();
-                if self.named_kinds.insert(kind) {
-                    self.name(
-                        line.seq,
-                        kind,
-                        format!("the record has no row for a `{kind}` line"),
-                        None,
-                    );
-                }
+            Line::Seam { .. } => self.seam(line),
+            // A tangent (v7, #22): its close rolls the rebuilt trunk back to
+            // the fork point, as the session's does; neither line has a row.
+            Line::TangentOpen { .. } | Line::TangentClose { .. } => self.tangent(line),
+            // Forks' patches delivered (v7): the note follows its turn's ask
+            // on the rebuilt trunk, as it does on the session's.
+            // Archived items recalled (v7, #566): a note after it too, in
+            // the log's order.
+            // The self-capture reminder (v7, #609): a note after it too.
+            Line::Delivered { turn, text, .. }
+            | Line::Recalled { turn, text, .. }
+            | Line::Reminded { turn, text } => {
+                self.notes.entry(*turn).or_default().push(text.clone());
             }
+            // Facts the record has no row for at all, named once per kind.
+            Line::IdleGap { .. }
+            | Line::Refused { .. }
+            | Line::Progress { .. }
+            | Line::Capture { .. } => self.no_row(line),
             // A tool call (v3, #302): its row carries how it ran under the
             // log's own words, so the record says what confined it.
             Line::ToolCall { .. }
@@ -631,6 +721,15 @@ impl<'a> Walk<'a> {
                 reason: log::SettleReason::MaxSteps,
                 ..
             } => self.stepping(line),
+            // A turn that failed after a step keeps the steps that completed,
+            // as the session does (`State::keep_ran_steps`).
+            Line::TurnSettled {
+                turn,
+                reason:
+                    reason @ (log::SettleReason::Failed
+                    | log::SettleReason::Timeout
+                    | log::SettleReason::Cancelled),
+            } => self.cut_short(*turn, *reason),
             // Carried by the rows above: a delta by its response's text, a
             // settlement and a settled turn by the turn and response rows.
             Line::Delta { .. }
@@ -771,11 +870,52 @@ impl<'a> Walk<'a> {
     }
 
     /// A seam's row, `s/<seq>`, at the turn it follows, and the trunk
-    /// refilled from `render` through [`crate::seam::render::refill`]. The
+    /// refilled from `render` and the section of tool outputs it carried
+    /// through [`crate::seam::render::refill`]. The
     /// row is named rather than written when that turn has no row; the
     /// trunk is refilled either way, since the session's was.
-    fn seam(&mut self, seq: u64, at_turn: u32, render: &str) {
-        self.trunk = crate::seam::render::refill(&self.head, render);
+    fn seam(&mut self, line: &log::Line) {
+        let Line::Seam {
+            at_turn,
+            render,
+            tail_tokens,
+            outputs,
+            placement,
+            ..
+        } = &line.event
+        else {
+            return;
+        };
+        let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
+        // The tail the session kept after the refill (#552), cut from the
+        // rebuilt trunk by the same function.
+        let turns = self
+            .trunk
+            .get(self.head.len() + usize::from(self.refilled)..)
+            .unwrap_or_default();
+        let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+        let carried_turns = kept
+            .iter()
+            .filter(|message| message.role == Role::User)
+            .count() as u64;
+        let carried_tokens = kept
+            .iter()
+            .map(crate::seam::render::estimated_tokens)
+            .sum::<u64>();
+        // The section the seam carried of the outputs it compacted away
+        // (#553), after the render, as sent.
+        let sent = outputs
+            .as_ref()
+            .map_or_else(|| render.clone(), |section| format!("{render}{section}"));
+        // Where the seam put it (#597): a user message after the head, or --
+        // a seam logged before #597 -- appended to the system message.
+        self.refilled = *placement == Some(log::RenderPlacement::Message);
+        self.trunk = if self.refilled {
+            crate::seam::render::refill(&self.head, &sent)
+        } else {
+            crate::seam::render::refill_in_the_system_message(&self.head, &sent)
+        };
+        self.trunk.extend(kept);
         // An attachment the old trunk carried and could not be read back is
         // not on the refilled one.
         self.trunk_unrebuilt = None;
@@ -801,10 +941,14 @@ impl<'a> Walk<'a> {
             );
             return;
         };
+        let tailed = tail_tokens > 0;
         self.events.push(Event::Seam {
             id: format!("s/{seq}"),
             at_turn,
             rendered_bytes,
+            tail_tokens: tailed.then_some(tail_tokens),
+            carried_turns: tailed.then_some(carried_turns),
+            carried_tokens: tailed.then_some(carried_tokens),
         });
     }
 
@@ -941,34 +1085,55 @@ impl<'a> Walk<'a> {
     fn head_change(&mut self, seq: u64, turn: u32, logged: &str) {
         let mut messages = self.trunk.clone();
         let asked = self.user_message(turn);
+        let notes = self.notes.get(&turn).cloned().unwrap_or_default();
         let unrebuilt = asked
             .as_ref()
             .err()
             .map(|why| format!("turn {turn}'s attachment: {why}"))
             .or_else(|| self.tools.as_ref().err().cloned())
-            .or_else(|| self.trunk_unrebuilt.clone());
+            .or_else(|| self.trunk_unrebuilt.clone())
+            .or_else(|| {
+                self.steps
+                    .get(&turn)
+                    .into_iter()
+                    .flatten()
+                    .find_map(|step| step.unrebuilt.clone())
+            });
         messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
+        for note in notes {
+            messages.push(Message::new(Role::User, note));
+        }
         for step in self.steps.get(&turn).into_iter().flatten() {
             messages.extend(step.messages());
         }
-        let rebuilt = Head::of(&RequestShape {
-            model: self.model.clone(),
-            messages,
-            sampler: SamplerCard::empty(),
-            limits: Limits {
-                attempt: std::time::Duration::ZERO,
-                call: std::time::Duration::ZERO,
-                max_output_tokens: 0,
-                retries: 0,
-            },
-            grammar: None,
-            // From `session.start` (R1), and ASSERTED by the digest check
-            // below: a kwarg the log cannot carry leaves the head unverified.
-            template_kwargs: self.template_kwargs.clone(),
-            // The session's declared tools, from `session.start` (#472).
-            tools: self.tools.clone().unwrap_or_default(),
-        });
-        let verified = (rebuilt.digest() == logged).then_some(rebuilt);
+        let tools = self.tools.clone().unwrap_or_default();
+        let head = |tools: Vec<ToolDefinition>| {
+            Head::of(&RequestShape {
+                model: self.model.clone(),
+                messages: messages.clone(),
+                sampler: SamplerCard::empty(),
+                limits: Limits {
+                    attempt: std::time::Duration::ZERO,
+                    call: std::time::Duration::ZERO,
+                    max_output_tokens: 0,
+                    retries: 0,
+                    context_window: None,
+                },
+                grammar: None,
+                // From `session.start` (R1), and ASSERTED by the digest check
+                // below: a kwarg the log cannot carry leaves the head unverified.
+                template_kwargs: self.template_kwargs.clone(),
+                // The session's declared tools, from `session.start` (#472).
+                tools,
+            })
+        };
+        // A log written before `bash` carried its description (#558) sent
+        // the definition I0 captured: its heads rebuild with that one, and
+        // the digest still decides.
+        let verified = std::iter::once(tools.clone())
+            .chain(earlier_bash(&tools))
+            .map(head)
+            .find(|rebuilt| rebuilt.digest() == logged);
         // A head whose attachment could not be read back is never verified,
         // whatever the digest of what the rebuild could reach.
         let verified = verified.filter(|_| unrebuilt.is_none());
@@ -1076,6 +1241,7 @@ impl<'a> Walk<'a> {
                 request: to_request,
                 said,
                 calls: Vec::new(),
+                unrebuilt: None,
             });
             return;
         }
@@ -1099,8 +1265,15 @@ impl<'a> Walk<'a> {
             )
         });
         self.trunk.push(asked);
+        for note in self.notes.get(&turn).cloned().unwrap_or_default() {
+            self.trunk.push(Message::new(Role::User, note));
+        }
         let taken = self.steps.remove(&turn).unwrap_or_default();
         for step in taken.iter().take(steps) {
+            if let Some(why) = &step.unrebuilt {
+                self.trunk_unrebuilt
+                    .get_or_insert_with(|| format!("the trunk carries turn {turn}'s {why}"));
+            }
             self.trunk.extend(step.messages());
         }
     }
@@ -1136,6 +1309,75 @@ impl<'a> Walk<'a> {
         self.tool_call_line(line.seq, &line.event);
     }
 
+    /// A turn settled `failed` or `timeout`: the steps the turn went on from
+    /// -- every step but one whose request was the turn's last -- join the
+    /// trunk with its ask, as the session puts them there. None completed,
+    /// and nothing joins it.
+    fn failed_after_steps(&mut self, turn: u32) {
+        let last_request = self
+            .turn_of
+            .iter()
+            .filter(|(_, of)| **of == turn)
+            .map(|(request, _)| *request)
+            .max();
+        let steps = self.steps.get(&turn).map_or(0, Vec::len);
+        let unfinished = self
+            .steps
+            .get(&turn)
+            .and_then(|steps| steps.last())
+            .is_some_and(|step| Some(step.request) == last_request);
+        let completed = steps - usize::from(unfinished);
+        if completed == 0 {
+            self.steps.remove(&turn);
+            return;
+        }
+        self.onto_the_trunk(turn, completed);
+    }
+
+    /// A turn that settled short of an answer: what of it joins the trunk,
+    /// as the session puts it there (#541, #575).
+    fn cut_short(&mut self, turn: u32, reason: log::SettleReason) {
+        if reason == log::SettleReason::Cancelled {
+            self.cancelled_turn(turn);
+        } else {
+            self.failed_after_steps(turn);
+        }
+    }
+
+    /// A cancelled call: named, since the record has no row for one, and
+    /// its text kept for its turn's settling (#575).
+    fn cancelled_call(&mut self, seq: u64, request: u64, partial: &str) {
+        if let Some(turn) = self.turn_of.get(&request) {
+            self.cancelled_text.insert(*turn, partial.to_owned());
+        }
+        self.name(
+            seq,
+            "cancelled",
+            "a cancelled call: the record has no row for one".to_owned(),
+            Some(partial.to_owned()),
+        );
+    }
+
+    /// A turn settled `cancelled` (#575): every step it took joins the trunk
+    /// with its ask -- the one a cancel cut short has each call answered on
+    /// its line -- and then, when the cancel came while it was generating,
+    /// the text it had said. Nothing taken and nothing said, and nothing
+    /// joins it.
+    fn cancelled_turn(&mut self, turn: u32) {
+        let steps = self.steps.get(&turn).map_or(0, Vec::len);
+        let said = self
+            .cancelled_text
+            .remove(&turn)
+            .filter(|text| !text.is_empty());
+        if steps == 0 && said.is_none() {
+            return;
+        }
+        self.onto_the_trunk(turn, usize::MAX);
+        if let Some(text) = said {
+            self.trunk.push(Message::new(Role::Assistant, text));
+        }
+    }
+
     /// A `tool_call` line's call, onto its step (#472).
     fn step_call(&mut self, line: &Line) {
         let Line::ToolCall {
@@ -1145,25 +1387,81 @@ impl<'a> Walk<'a> {
             name,
             arguments,
             shown,
+            files,
+            recovered_from,
             ..
         } = line
         else {
             return;
         };
+        let result = shown
+            .as_ref()
+            .map(|shown| self.tool_result(id, shown, files.as_deref().unwrap_or_default()));
         if let Some(step) = self
             .steps
             .get_mut(turn)
             .and_then(|steps| steps.iter_mut().rfind(|step| step.request == *request))
         {
+            let (result, why) = match result {
+                Some((result, why)) => (Some(result), why),
+                None => (None, None),
+            };
+            if step.unrebuilt.is_none() {
+                step.unrebuilt = why.map(|why| format!("call {id}'s image: {why}"));
+            }
+            // A call recovered from the answer's text (#560): the session put
+            // what was left of the answer on the trunk, and so does this --
+            // the same recovery, once, at the step's first call.
+            if recovered_from.is_some()
+                && step.calls.is_empty()
+                && let Some(recovery) = crate::client::xml_fallback::try_recover(&step.said.content)
+            {
+                step.said.content = recovery.remaining;
+            }
             step.calls.push((
                 ToolCall {
                     id: id.clone(),
                     name: name.clone(),
                     arguments: arguments.clone(),
                 },
-                shown.clone(),
+                result,
             ));
         }
+    }
+
+    /// Call `id`'s result message as the session sent it: what it was shown,
+    /// and each image among the line's `files` -- `read`'s (#557), never a
+    /// capped output's whole -- read back from the recording and attached
+    /// through [`crate::client::attach`]; with why, when one could not be.
+    fn tool_result(
+        &self,
+        id: &str,
+        shown: &str,
+        files: &[log::RecordedFile],
+    ) -> (Message, Option<String>) {
+        let mut message = Message::tool_result(id.to_owned(), shown.to_owned());
+        for file in files
+            .iter()
+            .filter(|file| file.media_type.starts_with("image/"))
+        {
+            let Some(recording) = &self.recording else {
+                return (
+                    message,
+                    Some("no recording directory to read it back from".to_owned()),
+                );
+            };
+            let attached = std::fs::read(recording.join(&file.path))
+                .map_err(|why| format!("{}: {why}", file.path))
+                .and_then(|bytes| {
+                    crate::client::attach(message.clone(), file, &bytes)
+                        .map_err(|why| format!("{}: {why}", file.path))
+                });
+            match attached {
+                Ok(attached) => message = attached,
+                Err(why) => return (message, Some(why)),
+            }
+        }
+        (message, None)
     }
 
     fn response(
@@ -1237,6 +1535,16 @@ mod tests {
             tools: None,
             template_kwargs: None,
             unsent: None,
+            approvals_off: None,
+            fork_delivery: None,
+            reasoning_effort_default: None,
+            instruction_files: None,
+            levers: None,
+            tool_output: None,
+            phases: None,
+            phase_transitions: None,
+            opening_phase: None,
+            fork_asks: None,
         }
     }
 
@@ -1274,6 +1582,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: Some(head()),
                 fork: None,
+                max_tokens: None,
             },
             Line::Delta {
                 request,
@@ -1420,6 +1729,15 @@ mod tests {
             render: render.to_owned(),
             carried_entries: 1,
             carried_turns: 0,
+            tail_tokens: None,
+            carried_tokens: None,
+            phase: None,
+            tool_outputs: None,
+            outputs: None,
+            carried_outputs: None,
+            carried_output_bytes: None,
+            placement: None,
+            render_budget: None,
         });
         let projection = project(
             &numbered(events),
@@ -1436,6 +1754,55 @@ mod tests {
             "{:#?}",
             projection.events
         );
+        validates(&projection);
+    }
+
+    /// A seam that kept a tail (#552): its row names the depth and what
+    /// the projection's own cut of the rebuilt trunk kept -- the turn before
+    /// it, whole -- and the record validates.
+    #[test]
+    fn a_seam_that_kept_a_tail_names_its_depth_and_what_it_kept() {
+        let mut events = vec![start()];
+        events.extend(answered(1, 3, Some(warm()), None));
+        events.push(Line::Seam {
+            at_turn: 1,
+            reason: log::SeamReason::Operator,
+            prefix_hash_before: "a".repeat(64),
+            prefix_hash_after: "b".repeat(64),
+            frame: crate::seam::render::FRAME_VERSION.to_owned(),
+            render: "# working set\n".to_owned(),
+            carried_entries: 1,
+            carried_turns: 1,
+            tail_tokens: Some(10_000),
+            carried_tokens: Some(1),
+            phase: None,
+            tool_outputs: None,
+            outputs: None,
+            carried_outputs: None,
+            carried_output_bytes: None,
+            placement: None,
+            render_budget: None,
+        });
+        let projection = project(
+            &numbered(events),
+            &regime(),
+            Some(Engine::Commit("e7051ef")),
+        )
+        .expect("projected");
+        let row = projection
+            .events
+            .iter()
+            .find_map(|event| match event {
+                Event::Seam {
+                    tail_tokens,
+                    carried_turns,
+                    carried_tokens,
+                    ..
+                } => Some((*tail_tokens, *carried_turns, carried_tokens.is_some())),
+                _ => None,
+            })
+            .expect("a seam row");
+        assert_eq!(row, (Some(10_000), Some(1), true));
         validates(&projection);
     }
 
@@ -1499,6 +1866,7 @@ mod tests {
                     lane: Lane::Trunk,
                     head_sha256: Some(head()),
                     fork: None,
+                    max_tokens: None,
                 },
                 outcome,
             ]);
@@ -1508,6 +1876,7 @@ mod tests {
             lane: Lane::Trunk,
             head_sha256: Some(head()),
             fork: None,
+            max_tokens: None,
         });
         let events_len = events.len();
         let projection = project(
@@ -1557,6 +1926,7 @@ mod tests {
             lane: Lane::Trunk,
             head_sha256: None,
             fork: None,
+            max_tokens: None,
         };
         events.extend(turn);
         let refused = project(
@@ -1606,6 +1976,7 @@ mod tests {
                 call: std::time::Duration::from_secs(5),
                 max_output_tokens: 64,
                 retries: 0,
+                context_window: None,
             },
             grammar: None,
             template_kwargs,
@@ -1938,6 +2309,7 @@ mod tests {
                 approval: None,
                 files: None,
                 shown: None,
+                recovered_from: None,
             }
         };
         let mut events = vec![start()];
@@ -2023,6 +2395,7 @@ mod tests {
                 approval: None,
                 files: None,
                 shown: None,
+                recovered_from: None,
             },
         );
         events.extend(turn);
@@ -2058,6 +2431,8 @@ mod tests {
             at,
             why,
             question: "what did the operator decide".to_owned(),
+            view: None,
+            ask: None,
         };
         let call = |turn: u32, fork: u64| {
             [
@@ -2068,6 +2443,7 @@ mod tests {
                     lane: Lane::Interview,
                     head_sha256: Some(format!("{fork:064x}")),
                     fork: Some(fork),
+                    max_tokens: None,
                 },
                 Line::Response {
                     to_request: fork + 1,
@@ -2089,6 +2465,7 @@ mod tests {
                 category: Some("scope".to_owned()),
             },
             supersedes: None,
+            tangent: None,
         };
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
@@ -2223,6 +2600,7 @@ mod tests {
                 approval: None,
                 files: Some(vec![file.clone()]),
                 shown: None,
+                recovered_from: None,
             },
         );
         events.extend(turn);

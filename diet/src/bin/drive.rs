@@ -104,8 +104,11 @@ fn serve_usage() -> String {
     out.push_str("the record could not spell, and FILE.product.txt, the working memory at\n");
     out.push_str("the end, whose sha256 is the summary's product_sha256; all three digests\n");
     out.push_str("are reported on stdout.\n");
-    out.push_str("--max-output-tokens defaults to 8192, room for a reasoning model's thinking\n");
-    out.push_str("(measured on the floor, #290); a turn that hits it is logged capped.\n");
+    out.push_str("--max-output-tokens beats the regimen's `max_output_tokens`, which beats the\n");
+    out.push_str(
+        "default, 64000 (the harness vote, #569); a turn that hits it is logged capped.\n",
+    );
+    out.push_str("The regimen's top-level `max_steps` beats its `[limits] max_steps`.\n");
     out.push_str("--log FILE writes the session's log there as each line is appended, the\n");
     out.push_str("same lines GET /events streams; nothing is written without it.\n");
     out.push_str("--regimen names the regimen the session runs under; its substrate is\n");
@@ -117,12 +120,14 @@ fn serve_usage() -> String {
     out.push_str("A substrate whose entry declares engine_check = \"declared\" (an engine that\n");
     out.push_str("reports no build, TabbyAPI's) is not asked: its engine is the declared one,\n");
     out.push_str("and the client speaks the dialect its entry names (llama.cpp by default).\n");
+    out.push_str("--endpoint given as a base URL (no path, or /v1) is completed to its\n");
+    out.push_str("/v1/chat/completions; any other path is used as written.\n");
     out.push_str("--help prints this to stdout and exits 0; a usage error exits 2.\n");
     out.push_str("--worktree DIR, absolute, is where the model's commands run; a regimen\n");
     out.push_str("that runs commands (it declares `allowed_commands`, the pre-seeded set) needs\n");
     out.push_str("it. Each command runs under the regimen's confinement, opened at start;\n");
     out.push_str("`isolation = \"vm\"` is refused, and `isolation = \"none\"` needs\n");
-    out.push_str("`[limits] max_steps`, and --auth-file is required: every route then asks for\n");
+    out.push_str("`max_steps`, and --auth-file is required: every route then asks for\n");
     out.push_str("it, and the file joins the session's secrets: under a sandbox no command\n");
     out.push_str("reads it, so none answers its own prompt. Under `isolation = \"none\"` a\n");
     out.push_str("command can read it, and nothing stops that (#436). A command no approval\n");
@@ -135,13 +140,6 @@ fn serve_usage() -> String {
     out.push_str("as FILE.receipt.json.\n");
     out
 }
-
-/// `serve`'s output cap when `--max-output-tokens` is not given: room for
-/// a reasoning model's thinking before its answer. Measured on the floor
-/// (#290, comment 5969377550): the rehearsal's three turns capped at 512
-/// finished at 3,561, 408 and 1,873 completion tokens at a cap of 4096,
-/// one sample each; 8192 leaves the largest more than twice its room.
-const SERVE_MAX_OUTPUT_TOKENS: u32 = 8192;
 
 /// What `serve`'s flags say.
 struct ServeArgs {
@@ -156,7 +154,8 @@ struct ServeArgs {
     listen: IpAddr,
     port: u16,
     allowed_origins: Vec<String>,
-    max_output_tokens: u32,
+    /// `--max-output-tokens`, when given: it beats the regimen's (#569).
+    max_output_tokens: Option<u32>,
     worktree: Option<String>,
 }
 
@@ -186,7 +185,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut listen = IpAddr::V4(Ipv4Addr::LOCALHOST);
     let mut port: u16 = 0;
     let mut allowed_origins = Vec::new();
-    let mut max_output_tokens: u32 = SERVE_MAX_OUTPUT_TOKENS;
+    let mut max_output_tokens = None;
     let mut worktree = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
@@ -226,7 +225,10 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         } else if flag == "--port" {
             value.parse().map(|given| port = given).is_ok()
         } else if flag == "--max-output-tokens" {
-            value.parse().map(|given| max_output_tokens = given).is_ok()
+            value
+                .parse()
+                .map(|given| max_output_tokens = Some(given))
+                .is_ok()
         } else if flag == "--worktree" {
             // Absolute, as the gym's is resolved before anything runs: a
             // relative one would be resolved again inside a sandbox.
@@ -285,18 +287,26 @@ fn serve(args: &[String]) -> ExitCode {
         return ExitCode::from(EXIT_USAGE);
     };
     let endpoint = match Endpoint::parse(&endpoint) {
-        Ok(endpoint) => endpoint,
+        Ok(endpoint) => chat_endpoint(endpoint),
         Err(why) => return fail(EXIT_INPUT, &format!("{endpoint} is not an endpoint: {why}")),
     };
     let system = match std::fs::read_to_string(&head) {
         Ok(system) => system,
         Err(why) => return fail(EXIT_INPUT, &format!("{head} cannot be read: {why}")),
     };
-    let (regime, regimen_sha256) = match regimen_file.as_deref().map(registered_regime).transpose()
+    let (regime, mut read_at_start) = match regimen_file
+        .as_deref()
+        .map(|path| registered_regime(path, max_output_tokens))
+        .transpose()
     {
         Ok(read) => read.unzip(),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // The flag, else the regimen's, else the default (#569).
+    let (max_output_tokens, _) = read_at_start.as_ref().map_or_else(
+        || diet::drive::regimen::output_cap(max_output_tokens, None),
+        |read| read.output_cap,
+    );
     // The regimen's `[sampler]`, pinned on every request (#486): derived from
     // the regime's own `sampler_card`, so the record's claim and the wire's
     // pins are one value. Without a regimen, nothing is pinned, as before.
@@ -311,17 +321,58 @@ fn serve(args: &[String]) -> ExitCode {
             return fail(EXIT_USAGE, &format!("{path}: {why}"));
         }
     };
+    // The instruction files the worktree and its parents carry (#559), as
+    // the harnesses we compare against put them in the system prompt: on
+    // unless the regimen says `instruction_files = "off"`, and only where
+    // commands run, since that is the worktree the model works in.
+    let instructions = match (worktree.as_deref(), regimen_file.as_deref()) {
+        (Some(tree), Some(path)) => {
+            let on = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|text| regimen::parse(&text).ok())
+                .is_none_or(|read| diet::drive::instructions::enabled(&read));
+            if on {
+                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                diet::drive::instructions::discover(std::path::Path::new(tree), home.as_deref())
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    };
+    let system = diet::drive::instructions::into_system(&system, &instructions);
+    let instruction_files: Vec<_> = instructions
+        .iter()
+        .filter(|file| !file.content.trim().is_empty())
+        .map(|file| diet::formats::log::InstructionFile {
+            path: file.path.clone(),
+            sha256: file.sha256.clone(),
+        })
+        .collect();
     let mut shape = trunk(model, system, max_output_tokens, sampler);
     // The regime's reasoning state, on every request, the forks' included
     // (R1): a clone of the trunk carries it.
     // A budget no template variable carries is recorded and announced as
     // unsent, never refused for being missing (duty of care).
+    // The substrate's model convention, as the registry declares it, goes
+    // with them: `preserve_thinking`, sent rather than left to a server's
+    // default, and the template's default level named when none is sent.
     let mut unsent_budget = None;
+    let mut effort_default = None;
     if let Some(regime) = regime.as_ref() {
-        match diet::drive::regimen::template_kwargs(&regime.substrates[0]) {
-            Ok((kwargs, unsent)) => {
-                shape.template_kwargs = kwargs;
-                unsent_budget = unsent;
+        let identity = diet::drive::registry::identity(
+            diet::drive::registry::REGISTRY,
+            &regime.substrates[0].id,
+        )
+        .ok();
+        match diet::drive::regimen::template_kwargs_declared(
+            &regime.substrates[0],
+            identity.as_ref(),
+        ) {
+            Ok(wire) => {
+                shape.template_kwargs = wire.kwargs;
+                unsent_budget = wire.unsent_budget;
+                effort_default = wire.reasoning_effort_default;
             }
             Err(why) => {
                 let path = regimen_file.as_deref().unwrap_or_default();
@@ -361,6 +412,15 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(attaching) => attaching,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // Where a capped tool output is kept whole (#554): the recording's
+    // directory, absolute, since the pointer is read from the worktree.
+    let mut tools = tools;
+    if let Some(tools) = tools.as_mut() {
+        tools.recording = attaching
+            .recording
+            .as_ref()
+            .map(|dir| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone()));
+    }
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
@@ -399,10 +459,39 @@ fn serve(args: &[String]) -> ExitCode {
     // What the announcement prints and the log's `session.start` claims,
     // built once from the same values (#292): the substrate, the registry's
     // digest, and the engine the check passed.
-    let registry_sha256 = diet::drive::registry::registry_sha256();
-    let claim = substrate
+    // The rest of what the start confirms (#509): the right model, the
+    // settings, warmed -- each declared field corroborated or declared, a
+    // contradiction refused before anything binds.
+    let confirmed = match substrate
         .zip(engine.as_ref())
-        .map(|(id, passed)| passed.claim(id, &registry_sha256));
+        .map(|(id, passed)| confirmations(&transport, id, passed, &shape))
+        .transpose()
+    {
+        Ok(confirmed) => confirmed,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    // Each request's output cap is clamped to the room its prompt leaves in
+    // this window (#588); the record's lever says whether it was.
+    let window = confirmed.as_ref().and_then(|(_, _, window)| *window);
+    shape.limits.context_window = window.map(|(tokens, _)| tokens);
+    if let Some(levers) = read_at_start.as_mut().map(|read| &mut read.levers) {
+        levers
+            .entry("step_and_output_limits".to_owned())
+            .and_modify(|word| match window {
+                Some((tokens, from)) => {
+                    let _ = write!(word, ":clamped:{tokens}:{from}");
+                }
+                None => word.push_str(":unclamped"),
+            });
+    }
+    let registry_sha256 = diet::drive::registry::registry_sha256();
+    let claim = substrate.zip(engine.as_ref()).map(|(id, passed)| {
+        let fields = confirmed
+            .as_ref()
+            .map(|(fields, _, _)| fields.clone())
+            .unwrap_or_default();
+        passed.claim_with(id, &registry_sha256, fields)
+    });
     let log_path = log_file;
     let (log_file, record) = match outputs(log_path.as_deref(), record_file.as_deref()) {
         Ok(opened) => opened,
@@ -416,7 +505,17 @@ fn serve(args: &[String]) -> ExitCode {
         transport,
         (shape, dialect),
         tools,
-        (claim, interview, unsent_budget),
+        (
+            claim,
+            interview,
+            (
+                unsent_budget.map(|budget_tokens| diet::formats::log::Unsent { budget_tokens }),
+                effort_default.clone(),
+                instruction_files,
+                // #573: the start row's levers, from the same reading.
+                read_at_start.as_ref().map(|read| read.levers.clone()),
+            ),
+        ),
     );
     let opened = session.opened();
     let watching = std::sync::Arc::clone(&session);
@@ -438,7 +537,7 @@ fn serve(args: &[String]) -> ExitCode {
     ) {
         Ok(started) => Running {
             recording,
-            regimen_sha256,
+            read_at_start,
             ..started
         },
         Err(code) => return code,
@@ -449,7 +548,9 @@ fn serve(args: &[String]) -> ExitCode {
             &running.server.addr().to_string(),
             opened,
             substrate.map(|id| (id, registry_sha256.as_str())),
-            engine.as_ref(),
+            engine
+                .as_ref()
+                .zip(confirmed.as_ref().map(|(_, warmed, _)| *warmed)),
             log_path.as_deref().zip(running.log_held),
             record_file.as_deref().zip(running.record_held),
             unsent_budget,
@@ -474,7 +575,7 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
     if let Some((regime, (path, file))) = running.record {
         match written_record(
             session,
-            (&regime, running.regimen_sha256.as_deref()),
+            (&regime, running.read_at_start.as_ref()),
             (&path, file),
             running.recording.as_deref(),
         ) {
@@ -605,16 +706,16 @@ fn served_session(
     transport: HttpStream,
     (mut shape, dialect): (RequestShape, Dialect),
     tools: Option<Tools>,
-    (claim, interview, unsent_budget): (
-        Option<diet::formats::log::SubstrateClaim>,
-        Option<Interview>,
-        Option<u64>,
-    ),
+    declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
-    // A session that runs commands declares the one tool they run through.
-    if tools.is_some() {
-        shape.tools = vec![tool_loop::bash_tool()];
+    // A session that runs commands declares its surface's tools (#557):
+    // `bash` alone, or `bash` and the standard set.
+    if let Some(tools) = tools.as_ref() {
+        shape.tools = tools.surface.tools();
     }
+    // Self-capture's tools after them (#609), from the first request and
+    // never changed; with self-capture off the tools are as they were.
+    session::declare_self_capture(&mut shape, declared.1.as_ref());
     std::sync::Arc::new(Session::open_declaring(
         transport,
         shape,
@@ -623,11 +724,7 @@ fn served_session(
             dialect,
         }),
         tools,
-        (
-            claim,
-            interview,
-            unsent_budget.map(|budget_tokens| diet::formats::log::Unsent { budget_tokens }),
-        ),
+        declared,
     ))
 }
 
@@ -675,17 +772,37 @@ fn serving_interview(
     );
     let seams = diet::seam::policy::Served::from_regimen(&read, window)
         .map_err(|why| format!("{path}: {why}"))?;
+    let delivery = session::fork_delivery(&read).map_err(|why| format!("{path}: {why}"))?;
+    // The phase graph, by the scripted drive's own reader (#563).
+    let phases = diet::seam::policy::phase_graph(&read).map_err(|why| format!("{path}: {why}"))?;
+    if rules.is_empty() && !phases.is_empty() {
+        return Err(format!(
+            "{path} declares phases and no `interview_warrant`: nothing fills working \
+             memory, so no seam could ever move between them"
+        ));
+    }
     if rules.is_empty() && seams.declares_a_trigger() {
         return Err(format!(
             "{path} declares a seam trigger and no `interview_warrant`: nothing fills \
              working memory, so no seam could ever fire"
         ));
     }
-    Ok((!rules.is_empty()).then(|| Interview {
-        rules,
-        object: diet::object::WorkingObject::open(regime.clone()),
-        seams,
-    }))
+    // Self-capture (#609) keeps working memory too, forks or none.
+    let self_capture = session::self_capture(&read);
+    Ok(
+        (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
+            rules,
+            object: diet::object::WorkingObject::open(regime.clone()),
+            seams,
+            delivery,
+            phases,
+            // #566: how archived items are recalled; off unless declared.
+            recall: diet::drive::archive::Recall::of(&read),
+            view: session::fork_view(&read),
+            self_capture,
+            asks: session::fork_asks(&read),
+        }),
+    )
 }
 
 /// What `serve` runs the model's calls under, when the regimen at
@@ -764,8 +881,9 @@ fn serving_tools(
         return Err((
             EXIT_INPUT,
             format!(
-                "{path} runs commands unconfined (`isolation = \"none\"`) with no `[{}] {}`: \
-                 nothing would bound the loop",
+                "{path} runs commands unconfined (`isolation = \"none\"`) with no `{}` (or \
+                 `[{}] {}`): nothing would bound the loop",
+                tool_loop::MAX_STEPS,
                 tool_loop::LIMITS,
                 tool_loop::MAX_STEPS
             ),
@@ -838,6 +956,15 @@ fn serving_tools(
         allowed,
         store: Some(store),
         approval_policy: declared.approval_policy,
+        approvals_off: declared.approvals_off,
+        text_fallback: declared.text_fallback,
+        output_cap: declared.output_cap,
+        // Set once the recording's directory is known (`serve`).
+        recording: None,
+        // The read tool the surface offers, which a capped output's notice
+        // names (#554, #557).
+        read_tool: declared.surface.read_tool(),
+        surface: declared.surface,
     }))
 }
 
@@ -960,7 +1087,7 @@ fn started(
         record,
         receipt,
         recording: None,
-        regimen_sha256: None,
+        read_at_start: None,
     })
 }
 
@@ -1044,16 +1171,24 @@ struct Running {
     /// The recording's directory, which an attached file's copy was kept in
     /// and the projection reads it back from (#372).
     recording: Option<std::path::PathBuf>,
-    /// The sha256 of the regimen's bytes as serve read them at start, which
-    /// the record's `start` carries.
-    regimen_sha256: Option<String>,
+    /// What the record's `start` says of the regimen serve read at start.
+    read_at_start: Option<ReadAtStart>,
+}
+
+/// What the record's `start` says of the regimen, read once at start: the
+/// sha256 of its bytes, and each lever's state it puts the session at.
+struct ReadAtStart {
+    regimen_sha256: String,
+    levers: BTreeMap<String, String>,
+    /// The output cap the session runs at, and where it came from.
+    output_cap: (u32, &'static str),
 }
 
 /// Project the ended session, check the record reads back, and write it and
 /// its sidecar: the line `serve` reports once the session has ended.
 fn written_record(
     session: &Session<HttpStream>,
-    (regime, regimen_sha256): (&diet::formats::record::Regime, Option<&str>),
+    (regime, read_at_start): (&diet::formats::record::Regime, Option<&ReadAtStart>),
     (path, mut file): (&str, std::fs::File),
     recording: Option<&std::path::Path>,
 ) -> Result<String, String> {
@@ -1069,11 +1204,12 @@ fn written_record(
         .map(diet::drive::session::line_of)
         .collect();
     let mut projected = projection::project_in(&lines, regime, engine, recording)?;
-    if let Some(record::Event::Start {
-        regimen_sha256: at, ..
-    }) = projected.events.first_mut()
+    // The levers come from the log's `session.start` (#573), so the record
+    // and the log say the same.
+    if let (Some(record::Event::Start { regimen_sha256, .. }), Some(read)) =
+        (projected.events.first_mut(), read_at_start)
     {
-        *at = regimen_sha256.map(str::to_owned);
+        *regimen_sha256 = Some(read.regimen_sha256.clone());
     }
     // The summary: the turns and prefill the rows carry, and the product --
     // the working memory at the session's end, kept beside the record as
@@ -1150,12 +1286,28 @@ fn trunk(
             call: std::time::Duration::from_secs(180),
             max_output_tokens,
             retries: 0,
+            context_window: None,
         },
         grammar: None,
         template_kwargs: BTreeMap::new(),
         tools: Vec::new(),
     }
 }
+
+/// The chat endpoint a base URL names: an endpoint given with no path, or
+/// with only `/v1`, is the server's `/v1/chat/completions` -- the path every
+/// engine `serve` speaks to answers on. A server's bare base URL was a 404
+/// on the first request (#496's live turn). Any other path is the
+/// operator's, kept as written.
+fn chat_endpoint(mut endpoint: Endpoint) -> Endpoint {
+    if matches!(endpoint.path.as_str(), "/" | "/v1" | "/v1/") {
+        CHAT_COMPLETIONS.clone_into(&mut endpoint.path);
+    }
+    endpoint
+}
+
+/// The path [`chat_endpoint`] completes a base URL to.
+const CHAT_COMPLETIONS: &str = "/v1/chat/completions";
 
 /// The address `serve` may listen on: `listen`, refused when it is a
 /// wildcard, or off loopback with no credential (fail-closed, I7). A usage
@@ -1197,11 +1349,103 @@ fn listener(listen: IpAddr, port: u16) -> Result<std::net::TcpListener, ExitCode
 
 /// The first line `serve` prints: where it listens and when it opened, as
 /// JSON.
+/// Who warmed the server before `serve` announced itself (#509).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Warmed {
+    /// `serve`'s own probe request.
+    ByServe,
+    /// The engine, as its entry declares (`served_warmup = "true"`).
+    ByEngine,
+    /// Nothing: a canned server, or an API, which nothing warms.
+    NotApplicable,
+}
+
+impl Warmed {
+    fn tag(self) -> &'static str {
+        match self {
+            Self::ByServe => "serve",
+            Self::ByEngine => "the engine (declared)",
+            Self::NotApplicable => "n/a",
+        }
+    }
+}
+
+/// What the start confirmed of a server: each served field, how it was
+/// warmed, and its context window and where that was read (#588).
+type Confirmed = (
+    Vec<diet::formats::log::ServedField>,
+    Warmed,
+    Option<(u64, &'static str)>,
+);
+
+/// What the start confirms of substrate `id`'s server beyond its engine
+/// (#509): each declared `served_*` field and the chat template's digest,
+/// against the engine's report on itself; then, unless the engine warms
+/// itself, one probe request, which also corroborates a declared draft.
+/// A canned server confirms none of it: its acts are the whole of it.
+///
+/// # Errors
+///
+/// An unreachable server, a contradiction, or a refused probe.
+fn confirmations(
+    transport: &HttpStream,
+    id: &str,
+    passed: &diet::drive::engine::Passed,
+    shape: &RequestShape,
+) -> Result<Confirmed, String> {
+    use diet::drive::served::{self, Engine, ServerKind};
+    let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+    if matches!(
+        identity.weights,
+        diet::formats::record::Weights::Canned { .. }
+    ) {
+        return Ok((Vec::new(), Warmed::NotApplicable, None));
+    }
+    // The window each request's output cap is clamped to (#588).
+    let serving_context =
+        diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id);
+    if ServerKind::of(id, &identity)? == ServerKind::Api {
+        let mut fields = served::corroborated(id, &identity, None)?;
+        fields.extend(served::draft_corroborated(id, &identity, None)?);
+        let window = served::window(&identity, None, serving_context);
+        return Ok((fields, Warmed::NotApplicable, window));
+    }
+    let engine = Engine::of(&identity);
+    let report = match (&passed.props, engine) {
+        (Some(props), Engine::LlamaCpp) => serde_json::from_str(props).ok(),
+        _ => served::report_of(
+            engine.report_path(),
+            transport.get(
+                engine.report_path(),
+                std::time::Instant::now() + diet::drive::engine::PROPS_DEADLINE,
+            ),
+        )?,
+    };
+    let mut fields = served::corroborated(id, &identity, report.as_ref())?;
+    let window = served::window(&identity, report.as_ref(), serving_context);
+    let warms = served::warms_itself(&identity);
+    let timings = if warms && !identity.served.contains_key("draft") {
+        None
+    } else {
+        served::probe(transport, shape)?
+    };
+    fields.extend(served::draft_corroborated(id, &identity, timings.as_ref())?);
+    Ok((
+        fields,
+        if warms {
+            Warmed::ByEngine
+        } else {
+            Warmed::ByServe
+        },
+        window,
+    ))
+}
+
 fn announcement(
     listening: &str,
     opened: u64,
     substrate: Option<(&str, &str)>,
-    engine: Option<&diet::drive::engine::Passed>,
+    engine: Option<(&diet::drive::engine::Passed, Warmed)>,
     log: Option<(&str, bool)>,
     record: Option<(&str, bool)>,
     unsent_budget: Option<u64>,
@@ -1225,7 +1469,7 @@ fn announcement(
     // The `build_info` the engine check passed, as the server reported it,
     // and how: on both paths, so a reader never infers the path from a
     // missing field.
-    if let Some(engine) = engine {
+    if let Some((engine, warmed)) = engine {
         fields.insert(
             "engine_build".to_owned(),
             Value::String(engine.build_info.clone()),
@@ -1234,6 +1478,8 @@ fn announcement(
             "engine_identity".to_owned(),
             Value::String(engine.identity.tag().to_owned()),
         );
+        // Who warmed the server before this line (#509).
+        fields.insert("warmed".to_owned(), Value::String(warmed.tag().to_owned()));
     }
     // A budget the regime declares and no request carries (R1): said, so
     // the operator knows the cap is not in force.
@@ -1261,15 +1507,30 @@ fn announcement(
 }
 
 /// The regime the regimen at `path` declares, its substrate resolved from the
-/// registry this program was built with (#157 Q2), and the sha256 of the
-/// bytes it was read from.
-fn registered_regime(path: &str) -> Result<(diet::formats::record::Regime, String), String> {
+/// registry this program was built with (#157 Q2), and what the record's
+/// `start` says of it: the sha256 of the bytes it was read from, the output
+/// cap (`flag`, `--max-output-tokens`, beating the regimen's), and the
+/// levers it sets.
+fn registered_regime(
+    path: &str,
+    flag: Option<u32>,
+) -> Result<(diet::formats::record::Regime, ReadAtStart), String> {
     let text =
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let regimen =
         regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
     diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
-        .map(|regime| (regime, diet::digest::sha256_hex(text.as_bytes())))
+        .map(|regime| {
+            let output_cap = diet::drive::regimen::output_cap(flag, Some(&regimen));
+            (
+                regime,
+                ReadAtStart {
+                    regimen_sha256: diet::digest::sha256_hex(text.as_bytes()),
+                    levers: diet::drive::regimen::serve_levers(&regimen, output_cap),
+                    output_cap,
+                },
+            )
+        })
         .map_err(|why| format!("{path}: {why}"))
 }
 
@@ -1808,6 +2069,7 @@ fn shape(regime: &Regime) -> RequestShape {
             call: std::time::Duration::from_secs(180),
             max_output_tokens: 512,
             retries: 1,
+            context_window: None,
         },
         grammar: None,
         template_kwargs: std::collections::BTreeMap::new(),

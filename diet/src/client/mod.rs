@@ -89,6 +89,7 @@ pub mod stream;
 pub mod stub;
 pub mod transport;
 pub mod wire;
+pub mod xml_fallback;
 
 use std::time::{Duration, Instant};
 
@@ -841,6 +842,7 @@ mod tests {
                 call: Duration::from_millis(call_ms),
                 max_output_tokens: 128,
                 retries,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

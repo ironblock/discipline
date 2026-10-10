@@ -36,6 +36,11 @@ export interface SystemNode extends Provenance {
   readonly tokens?: number;
   /** Set when this system prompt is a render of working memory: the frame it was rendered with. */
   readonly render?: string;
+  /**
+   * Set when the render rode in a user message after the head, which stays as the session sent it (log v7's seam
+   * `placement`, #597): `text` is that message.
+   */
+  readonly placement?: 'message';
 }
 
 export interface UserNode extends Provenance {
@@ -48,11 +53,22 @@ export interface UserNode extends Provenance {
   /** Session time it finished: when it was asked. */
   readonly endedAt: number;
   /**
-   * Its turn ended without an answer: `diet` sends the model only finished turns (#29, Q12, keeping D13 for
-   * `cancelled`, `failed` and `timeout`), so from here on this is not in what the model reads (#289). The fact is the log's
-   * `turn.settled`, and this is its word. A capped turn is `failed` (#290, ruled 5969941559).
+   * Not in what the model reads from here on (#289): its turn failed or timed out before any step finished, or was
+   * cancelled before anything was said -- a failed or timed-out turn keeps its ask and every finished step on the trunk
+   * and loses only its last request (#541); a cancelled one keeps its ask, its steps and what it had said (#575). The fact
+   * is the log's `turn.settled`, and this is its word. A capped turn is `failed` (#290).
    */
   readonly outOfContext?: OffTrunk;
+  /**
+   * Forks' patches delivered after this ask (log v7's `delivered`, the fork delivery lever): the note the model was
+   * sent at the tail of the turn's first request, and its framing. Folded, not yet drawn.
+   */
+  readonly delivered?: { readonly framing: string; readonly text: string };
+  /**
+   * Archived items recalled after this ask (log v7's `recalled`, #566): the note the model was sent after the ask,
+   * and how it matched. Folded, not yet drawn.
+   */
+  readonly recalled?: { readonly recall: string; readonly text: string };
   /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
   readonly files?: readonly FileRef[];
   /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
@@ -62,7 +78,7 @@ export interface UserNode extends Provenance {
 export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled' | 'failed';
 
 /** The settle words that leave a turn off the trunk. */
-export type OffTrunk = 'cancelled' | 'failed' | 'timeout';
+export type OffTrunk = 'cancelled' | 'failed' | 'timeout' | 'rolled-back';
 
 /** Why a generation stopped: the response's `finish_reason` as llama.cpp spells it, or `cancelled` for a stopped call. */
 export type Stop = Open<'stop' | 'tool_calls' | 'length' | 'cancelled'>;
@@ -116,9 +132,10 @@ export interface AssistantNode extends Provenance, Generation {
   readonly id: string;
   readonly turn: number;
   /**
-   * Its turn ended without an answer: `diet` sends the model only finished turns (#29, Q12, keeping D13 for
-   * `cancelled`, `failed` and `timeout`), so from here on this is not in what the model reads (#289). The fact is the log's
-   * `turn.settled`, and this is its word. A capped turn is `failed` (#290, ruled 5969941559).
+   * Not in what the model reads from here on (#289): its turn failed or timed out before any step finished, or was
+   * cancelled before anything was said -- a failed or timed-out turn keeps its ask and every finished step on the trunk
+   * and loses only its last request (#541); a cancelled one keeps its ask, its steps and what it had said (#575). The fact
+   * is the log's `turn.settled`, and this is its word. A capped turn is `failed` (#290).
    */
   readonly outOfContext?: OffTrunk;
 }
@@ -235,7 +252,8 @@ export interface Era {
   readonly nodes: readonly TrunkNode[];
 }
 
-export type EntryState = 'live' | 'superseded' | 'retired';
+/** `parked`: set aside as its tangent's at the tangent's close (#608), out of the render and kept in the archive. */
+export type EntryState = 'live' | 'superseded' | 'retired' | 'parked';
 
 export interface MemoryEntry extends Provenance {
   readonly id: string;
@@ -252,6 +270,8 @@ export interface MemoryEntry extends Provenance {
   readonly landedAt: number;
   /** Landed since the last ask: what the operator has not seen yet. */
   readonly fresh: boolean;
+  /** The tangent it was born in (a patch's `tangent`, #608): what that tangent's close rules on. */
+  readonly tangent?: string;
 }
 
 export type SessionState = 'connecting' | 'awaiting' | 'turn' | 'capture' | 'ratify' | 'ended';
@@ -291,13 +311,21 @@ export interface Session {
   readonly opened: number;
   readonly arm: string;
   readonly model: string;
+  /** The lever states the session ran under, as its `session.start` declares them (#573); absent when undeclared. */
+  readonly levers: Levers;
   readonly slots: number;
   readonly trunkSlot: number;
   readonly phase: string;
+  /** The phases the logged graph allows a seam to move to from the current one (#563): none without a graph. */
+  readonly phaseMoves: readonly string[];
   readonly eras: readonly Era[];
   /** Branches keyed by the trunk node they came from. */
   readonly branches: ReadonlyMap<string, readonly Folded<BranchNode>[]>;
   readonly memory: readonly Folded<MemoryEntry>[];
+  /** The tangent open now (#608), and the live entries born in it: what its close must rule on, no more and no fewer. */
+  readonly tangent?: { readonly id: string; readonly entries: readonly string[] };
+  /** How many tangents the session has opened: the next one's id is `t/<this + 1>`. */
+  readonly tangentsOpened: number;
   /** What each slot is serving right now, and for which lane; absent when idle. */
   readonly occupancy: readonly (Holder | undefined)[];
   /** Session time of the last event. */
@@ -307,6 +335,29 @@ export interface Session {
   readonly unknown: ReadonlyMap<string, number>;
   /** The six numbers #31 measures a session on. */
   readonly receipt: Receipt;
+}
+
+/** The lever states a session declares on its first line (#573): only what the log says, never a default of the surface's. */
+export interface Levers {
+  /** `off` (log v7's `approvals_off`, #544), or `gate`: from v7 an absent field is the gate deciding. Undeclared before v7. */
+  readonly approvals?: 'off' | 'gate';
+  /** How a fork's result reaches the trunk (`fork_delivery`): `seam`, `advisory`, `imperative`, or a newer drive's word. */
+  readonly forkDelivery?: string;
+  /** The reasoning state on the wire (`template_kwargs`): thinking on or off, and the effort, as sent. */
+  readonly reasoning?: string;
+}
+
+export function leversOf(start: LineOf<'session.start'>): Levers {
+  const kwargs = start.template_kwargs;
+  const reasoning = [
+    kwargs?.enable_thinking === undefined ? undefined : `thinking ${kwargs.enable_thinking ? 'on' : 'off'}`,
+    kwargs?.reasoning_effort === undefined ? undefined : `effort ${kwargs.reasoning_effort}`,
+  ].filter((part): part is string => part !== undefined);
+  return {
+    ...(start.approvals_off === true ? { approvals: 'off' as const } : start.version >= 7 ? { approvals: 'gate' as const } : {}),
+    ...(start.fork_delivery !== undefined ? { forkDelivery: start.fork_delivery } : {}),
+    ...(reasoning.length > 0 ? { reasoning: reasoning.join(' · ') } : {}),
+  };
 }
 
 function brand<T>(value: T): Folded<T> {
@@ -401,9 +452,12 @@ export function fold(lines: readonly LogLine[]): Session {
       opened: 0,
       arm: '',
       model: '',
+      levers: {},
       slots: 0,
       trunkSlot: 0,
       phase: '',
+      tangentsOpened: 0,
+      phaseMoves: [],
       eras: [],
       gaps: [],
       branches: new Map(),
@@ -423,12 +477,19 @@ export function fold(lines: readonly LogLine[]): Session {
   // Builders, keyed by the `seq` later lines name.
   const generations = new Map<number, GenerationBuilder>();
   const asks = new Map<number, LineOf<'ask'>>();
+  const deliveries = new Map<number, LineOf<'delivered'>>();
+  const recalls = new Map<number, LineOf<'recalled'>>();
   const firstRequestOfTurn = new Map<number, number>();
   // Each call, keyed by the `seq` of its first fragment (or of its line, where none streamed); found by its request and index.
   const calls = new Map<number, { request: number; t: number; first?: LineOf<'delta'>; id?: string; name?: Tool; args: string; line?: LineOf<'tool_call'> }>();
   const callAt = new Map<string, number>();
   const forks = new Map<number, { fork: LineOf<'fork'>; request?: number; settled?: LineOf<'fork.settled'>; patches: LineOf<'patch'>[] }>();
   const entries = new Map<string, Mutable<Omit<MemoryEntry, 'fresh' | 'landedAt'>> & { seq: number }>();
+  // The tangent open now (#608), the turns asked inside each, and the turns a close rolled the trunk back over.
+  let openTangent: string | undefined;
+  let tangentsOpened = 0;
+  const tangentTurns = new Map<string, number[]>();
+  const rolledBack = new Set<number>();
 
   type Slot =
     | { kind: 'user'; turn: number }
@@ -454,11 +515,14 @@ export function fold(lines: readonly LogLine[]): Session {
   const unknown = new Map<string, number>();
   const settles = new Map<number, LineOf<'turn.settled'>>();
   const offTrunk = new Map<number, OffTrunk>();
+  // Each turn's trunk requests, in order: a failed or timed-out turn keeps every step a later request followed (#541).
+  const trunkRequestsOfTurn = new Map<number, number[]>();
   /** Turns whose latest trunk response hit the output cap. */
   const cappedTurns = new Set<number>();
   const gaps: Folded<GapNode>[] = [];
   let lastSettled: number | undefined;
-  let phase = start.phase ?? '';
+  // The phase it opens in: the graph's opening phase (log v7, #563), or a placed recording's own `phase`.
+  let phase = start.opening_phase ?? start.phase ?? '';
   let openTurn: number | undefined;
   let lastAskSeq = -1;
   // The state as the log says it, when it says it (`diet` logs every move; a script logs only the end).
@@ -494,6 +558,7 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       case 'ask':
         asks.set(e.turn, e);
+        if (openTangent !== undefined) tangentTurns.get(openTangent)?.push(e.turn);
         openTurn = e.turn;
         lastAskSeq = e.seq;
         era().slots.push({ kind: 'user', turn: e.turn });
@@ -502,6 +567,7 @@ export function fold(lines: readonly LogLine[]): Session {
         generations.set(e.seq, { request: e, deltas: [], frames: [] });
         if (e.lane === 'trunk') {
           if (!firstRequestOfTurn.has(e.turn)) firstRequestOfTurn.set(e.turn, e.seq);
+          trunkRequestsOfTurn.set(e.turn, [...(trunkRequestsOfTurn.get(e.turn) ?? []), e.seq]);
           // A later step on the trunk: the cap that matters is the latest step's.
           cappedTurns.delete(e.turn);
           era().slots.push({ kind: 'assistant', request: e.seq });
@@ -598,26 +664,58 @@ export function fold(lines: readonly LogLine[]): Session {
           if (replaced) entries.set(e.supersedes, { ...replaced, state: 'superseded', by: id(e.seq), seq: e.seq, from: [...replaced.from, e.seq] });
         }
         if (e.op === 'add' || e.op === 'supersede' || !old) {
-          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}) });
+          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}), ...(e.tangent !== undefined ? { tangent: e.tangent } : {}) });
           break;
         }
         // Any other op rewrites the entry, keeps its state, and is shown by name.
         entries.set(e.entry.id, { ...old, ...base, op: e.op, from: [...old.from, e.seq] });
         break;
       }
+      case 'delivered':
+        deliveries.set(e.turn, e);
+        break;
+      case 'recalled':
+        recalls.set(e.turn, e);
+        break;
       case 'seam': {
         if (e.phase) phase = e.phase.to;
+        // What the model was sent after the seam -- `diet`'s `seam::render::refill`, whose output the record's head
+        // check verifies: since #597 the head as it was and a user message carrying the render (and the tool outputs
+        // the seam carried, #553); before, the head's system message, a blank line, then the render.
+        const message = 'placement' in e && e.placement === 'message';
         const rendered: SystemNode = {
           kind: 'system',
           id: `system/${e.seq}`,
-          // What the model was sent after the seam: the head's system message, a blank line, then the render --
-          // `diet`'s `seam::render::refill`, whose output the record's head check verifies.
-          text: system ? `${system.content}\n\n${e.render}` : e.render,
+          text: message
+            ? `<summary>\n${e.render}${'outputs' in e && e.outputs !== undefined ? e.outputs : ''}\n</summary>`
+            : system
+              ? `${system.content}\n\n${e.render}`
+              : e.render,
+          ...(message ? { placement: 'message' as const } : {}),
           ...(e.render_tokens !== undefined ? { tokens: e.render_tokens } : {}),
           render: e.render_version !== undefined ? `v${e.render_version}` : (e.frame ?? 'frame not recorded'),
           ...provenance(e),
         };
         eras.push({ seam: e, system: rendered, slots: [] });
+        break;
+      }
+      case 'tangent.open':
+        openTangent = e.id;
+        tangentsOpened += 1;
+        tangentTurns.set(e.id, []);
+        break;
+      case 'tangent.close': {
+        // Dropped entries retire and parked ones are set aside -- the archive keeps both; the trunk returns to the open.
+        const rule = (ids: readonly string[], state: EntryState) => {
+          for (const entry of ids) {
+            const old = entries.get(entry);
+            if (old) entries.set(entry, { ...old, state, by: id(e.seq), seq: e.seq, from: [...old.from, e.seq] });
+          }
+        };
+        rule(e.dropped, 'retired');
+        rule(e.parked, 'parked');
+        for (const turn of tangentTurns.get(e.id) ?? []) rolledBack.add(turn);
+        if (openTangent === e.id) openTangent = undefined;
         break;
       }
       default: {
@@ -652,6 +750,27 @@ export function fold(lines: readonly LogLine[]): Session {
   let previousEraEnd: Timings | undefined;
   const builtEras: Era[] = eras.map((raw, index) => {
     const nodes: TrunkNode[] = raw.slots.map((slot): TrunkNode => {
+      /**
+       * Whether a turn's ask, or the answer of its request REQUEST, left the model's context (#289). A failed or
+       * timed-out one keeps its ask and every step a later request followed, as `diet` does since #541 -- only its last
+       * request, the failing step, leaves; one that failed on its first request keeps nothing. A cancelled one keeps its
+       * ask, every step, and what it had said when the cancel came, as `diet` does since #575: only a generation the
+       * cancel cut before it said anything leaves, and the ask with it when that was the turn's only request.
+       */
+      const outOf = (turn: number | undefined, request?: number): OffTrunk | undefined => {
+        // A tangent's close rolled the trunk back over every turn asked inside it (#608): ask and answers alike.
+        if (turn !== undefined && rolledBack.has(turn)) return 'rolled-back';
+        const why = turn !== undefined ? offTrunk.get(turn) : undefined;
+        if (why === undefined) return why;
+        const steps = trunkRequestsOfTurn.get(turn!) ?? [];
+        if (why === 'cancelled') {
+          const silent = (seq: number | undefined) => seq !== undefined && generations.get(seq)?.cancelled?.partial === '';
+          if (request === undefined) return steps.length <= 1 && silent(steps[0]) ? why : undefined;
+          return request === steps.at(-1) && silent(request) ? why : undefined;
+        }
+        if (request === undefined) return steps.length > 1 ? undefined : why;
+        return request === steps.at(-1) ? why : undefined;
+      };
       switch (slot.kind) {
         case 'user': {
           const ask = asks.get(slot.turn)!;
@@ -665,9 +784,15 @@ export function fold(lines: readonly LogLine[]): Session {
             text: ask.text,
             endedAt: ask.t,
             ...(timings ? { prefill: { fresh: timings.prompt_n, cached: timings.cache_n } } : {}),
-            ...(offTrunk.has(slot.turn) ? { outOfContext: offTrunk.get(slot.turn)! } : {}),
+            ...(outOf(slot.turn) ? { outOfContext: outOf(slot.turn)! } : {}),
             ...(ask.files && ask.files.length > 0 ? { files: ask.files } : {}),
             ...(ask.scoping === true ? { scoping: true as const } : {}),
+            ...(deliveries.has(slot.turn)
+              ? { delivered: { framing: deliveries.get(slot.turn)!.framing, text: deliveries.get(slot.turn)!.text } }
+              : {}),
+            ...(recalls.has(slot.turn)
+              ? { recalled: { recall: recalls.get(slot.turn)!.recall, text: recalls.get(slot.turn)!.text } }
+              : {}),
             ...provenance(ask, first?.response),
           });
         }
@@ -678,7 +803,7 @@ export function fold(lines: readonly LogLine[]): Session {
             id: id(g.request.seq),
             turn: g.request.turn,
             ...generation(g, trunkSlot),
-            ...(g.request.turn !== undefined && offTrunk.has(g.request.turn) ? { outOfContext: offTrunk.get(g.request.turn)! } : {}),
+            ...(outOf(g.request.turn, g.request.seq) ? { outOfContext: outOf(g.request.turn, g.request.seq)! } : {}),
             ...provenance(g.request, ...g.deltas.slice(0, 1), g.response, g.cancelled, g.failed),
           };
           return brand(node);
@@ -835,10 +960,16 @@ export function fold(lines: readonly LogLine[]): Session {
     gaps,
     opened: start.opened,
     arm: start.arm ?? '',
+    levers: leversOf(start),
     model: start.model,
     slots,
     trunkSlot,
     phase,
+    tangentsOpened,
+    ...(openTangent !== undefined
+      ? { tangent: { id: openTangent, entries: [...entries.values()].filter((x) => x.tangent === openTangent && x.state === 'live').map((x) => x.id) } }
+      : {}),
+    phaseMoves: (start.phase_transitions ?? []).filter((move) => move.from === phase).map((move) => move.to),
     eras: builtEras,
     branches,
     memory,

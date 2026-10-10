@@ -53,6 +53,7 @@
     display: none;
   }
   .ex-composer__attach,
+  .ex-composer__background,
   .ex-composer__scope,
   .ex-composer__send,
   .ex-composer__cancel {
@@ -60,6 +61,7 @@
   }
   .ex-composer__attach + .ex-composer__scope,
   .ex-composer__attach + .ex-composer__cancel,
+  .ex-composer__background + .ex-composer__cancel,
   .ex-composer__scope + .ex-composer__send {
     margin-left: 0;
   }
@@ -177,4 +179,46 @@
   padding: 0;
   border-radius: 50%;
   line-height: 1;
+}
+
+/* Ending a tangent (#608): its entries, each with keep, drop or park, then the close. */
+.ex-composer__tangent {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+
+.ex-composer__tangent legend {
+  padding: 0 0.3rem;
+  color: var(--ink-muted);
+}
+
+.ex-composer__tangent ul {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ex-composer__tangent li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem 0.8rem;
+}
+
+.ex-composer__tangent-entry {
+  color: var(--ink);
+  font: var(--size-aside) / 1.45 var(--font-memory);
+}
+
+.ex-composer__tangent-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
 }

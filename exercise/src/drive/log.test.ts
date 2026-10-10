@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
+import { TANGENT_CLOSED, TANGENT_OPEN } from './served/tangent.ts';
 import { needsOf } from './log.ts';
 
 /**
@@ -68,18 +69,53 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(era.nodes.map((n) => n.kind)).toEqual(['user', 'assistant']);
   });
 
+  it('a seam since #597 leaves the system prompt alone: the era opens on the user message carrying the render', () => {
+    const file = 'a-v7-seam-whose-refill-is-a-message.jsonl';
+    const line = logOf(file).find((l) => l.kind === 'seam');
+    const era = fold(logOf(file)).eras[1]!;
+    expect(era.system.placement).toBe('message');
+    expect(era.system.text).toBe(line?.kind === 'seam' ? `<summary>\n${line.render}\n</summary>` : undefined);
+  });
+
   it('folds a stopped call as cancelled, keeping what arrived', () => {
     const answer = fold(logOf('a-cancelled-turn.jsonl')).eras[0]?.nodes.find((n) => n.kind === 'assistant');
     expect(answer?.kind === 'assistant' && answer.progress).toBe('cancelled');
     expect(answer?.kind === 'assistant' && answer.text).toBe('Hel');
   });
 
-  it('marks a cancelled, failed or timed-out turn’s ask and answer as out of the model’s context, by its settle word, and an answered one’s not (#289)', () => {
+  it('keeps a cancelled turn that had said something in the model’s context, as diet now does (#575), and marks one cancelled before a word out', () => {
+    const marks = (log: LogLine[]) => (fold(log).eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, 'outOfContext' in n ? n.outOfContext : false]);
+    const said = logOf('a-cancelled-turn.jsonl');
+    expect(marks(said)).toEqual([['user', false], ['assistant', false]]);
+    const silent = said.map((line) => (line.kind === 'cancelled' ? { ...line, partial: '' } : line)) as LogLine[];
+    expect(marks(silent)).toEqual([['user', 'cancelled'], ['assistant', 'cancelled']]);
+  });
+
+  it('marks a failed or timed-out turn’s ask and answer as out of the model’s context, by its settle word, and an answered one’s not (#289)', () => {
     const marks = (file: string) => (fold(logOf(file)).eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, 'outOfContext' in n ? n.outOfContext : false]);
-    expect(marks('a-cancelled-turn.jsonl')).toEqual([['user', 'cancelled'], ['assistant', 'cancelled']]);
     expect(marks('a-turn-whose-connection-failed.jsonl')).toEqual([['user', 'failed'], ['assistant', 'failed']]);
     expect(marks('a-turn-that-ran-out-of-time.jsonl')).toEqual([['user', 'timeout'], ['assistant', 'timeout']]);
     expect(marks('an-answered-turn.jsonl')).toEqual([['user', false], ['assistant', false]]);
+  });
+
+  it('keeps a turn that failed after its tool steps on the trunk, as diet now does (#541): only its failing step is out of context', () => {
+    // diet's own turn of one call that ran, then a second request that failed: the step a later request followed stays.
+    const ran = logOf('a-v3-tool-call-that-ran.jsonl');
+    const at = ran.length;
+    const failedAfter: LogLine[] = [
+      ...ran,
+      { kind: 'request', lane: 'trunk', seq: at, t: 95, turn: 1 },
+      { kind: 'request.failed', reason: 'transport', message: 'could not connect: refused', request: at, seq: at + 1, t: 100 },
+      { kind: 'turn.settled', reason: 'failed', seq: at + 2, t: 105, turn: 1 },
+    ] as LogLine[];
+    const marks = (log: LogLine[]) => (fold(log).eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, 'outOfContext' in n ? n.outOfContext : false]);
+    expect(marks(failedAfter)).toEqual([
+      ['user', false],
+      ['assistant', false],
+      ['assistant', 'failed'],
+    ]);
+    // A turn that failed on its first request ran nothing and keeps nothing: ask and answer both out, as before.
+    expect(marks(logOf('a-turn-whose-connection-failed.jsonl'))).toEqual([['user', 'failed'], ['assistant', 'failed']]);
   });
 
   it('folds a reasoning delta as reasoning, not answer', () => {
@@ -119,6 +155,48 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
 
   it('needs nothing ahead of the format on any line diet writes: the gaps overlay outlines none of it (#503)', () => {
     for (const file of fixtures) for (const line of logOf(file)) expect(needsOf(line), `${file}: seq ${line.seq} (${line.kind})`).toEqual([]);
+  });
+
+  it('reads the lever states a session declares off its first line, and leaves out what it does not declare (#573)', () => {
+    const levers = (file: string) => fold(logOf(file)).levers;
+    expect(levers('a-v7-call-that-ran-with-approvals-off.jsonl')).toEqual({ approvals: 'off' });
+    expect(levers('a-v7-imperative-delivery-after-an-ask.jsonl')).toEqual({ approvals: 'gate', forkDelivery: 'imperative' });
+    expect(levers('a-v7-session-sending-thinking-off.jsonl')).toEqual({ approvals: 'gate', reasoning: 'thinking off' });
+    expect(levers('a-v7-session-sending-a-reasoning-effort.jsonl')).toEqual({ approvals: 'gate', reasoning: 'effort medium' });
+    // Before v7 the log has no approval lever to declare: undeclared, not assumed.
+    expect(levers('an-answered-turn.jsonl')).toEqual({});
+  });
+
+  it('folds a tangent: open, its entries are its own; closed, they are ruled on and its turns rolled back (#608)', () => {
+    const open = fold([...TANGENT_OPEN]);
+    expect(open.tangent).toEqual({ id: 't/1', entries: ['e1', 'e2'] });
+    expect(open.tangentsOpened).toBe(1);
+    const closed = fold([...TANGENT_CLOSED]);
+    expect(closed.tangent).toBeUndefined();
+    expect(closed.memory.map((e) => [e.id, e.state])).toEqual([
+      ['e1', 'live'],
+      ['e2', 'retired'],
+    ]);
+    // The turn asked inside the tangent left the trunk at its close; the one before it did not.
+    const marks = (closed.eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, n.turn, 'outOfContext' in n ? n.outOfContext : false]);
+    expect(marks).toEqual([
+      ['user', 1, false],
+      ['assistant', 1, false],
+      ['user', 2, 'rolled-back'],
+      ['assistant', 2, 'rolled-back'],
+    ]);
+  });
+
+  it('reads the phase graph off the first line, opens in its opening phase, and moves with each seam that moved (#563)', () => {
+    const log = logOf('a-v7-seam-that-moved-a-phase.jsonl');
+    const opened = fold(log.slice(0, 1));
+    expect(opened.phase).toBe('plan');
+    expect(opened.phaseMoves).toEqual(['build']);
+    const moved = fold(log);
+    expect(moved.phase).toBe('build');
+    expect(moved.phaseMoves).toEqual(['review']);
+    // A log with no graph offers no move.
+    expect(fold(logOf('an-answered-turn.jsonl')).phaseMoves).toEqual([]);
   });
 
   it('takes the state from the log: an ended session is ended', () => {

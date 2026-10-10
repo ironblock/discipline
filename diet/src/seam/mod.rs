@@ -62,6 +62,7 @@
 //! choosing. [`render::one_line`] is the fix, and it is the same escaping the
 //! audit ask needs so that `{n}` and the number of lines agree.
 
+pub mod outputs;
 pub mod phase;
 pub mod policy;
 pub mod render;
@@ -559,6 +560,148 @@ mod tests {
     use crate::formats::record::{Engine, Reasoning, Regime, Substrate, Weights};
     use crate::formats::regimen;
     use crate::object::{EntryId, Patch, Provenance, WorkingObject};
+
+    /// An object holding `entries` (id, content), each added at its own
+    /// turn in order, so the later an entry is listed the newer it is.
+    fn holding(entries: &[(&str, &str)]) -> WorkingObject {
+        let mut object = WorkingObject::open(regime());
+        for (turn, (id, content)) in (1_u32..).zip(entries) {
+            object
+                .apply(&Patch::Add {
+                    id: EntryId::new(id).expect("an id"),
+                    content: (*content).to_owned(),
+                    provenance: Provenance {
+                        turn,
+                        lane: "interview".to_owned(),
+                        fork: None,
+                        tangent: None,
+                        index: 0,
+                    },
+                })
+                .expect("applied");
+        }
+        object
+    }
+
+    fn budget(tokens: u64, over: render::OverBudget) -> render::Budget {
+        render::Budget { tokens, over }
+    }
+
+    const LONG: &str = "a decision that runs on well past the length a tiered entry keeps of its \
+                        first line, so that tiering it visibly shortens it\nand a second line";
+
+    /// #565: inside its budget, or with none, the render is the unbudgeted
+    /// render, byte for byte; two renders are the same bytes.
+    #[test]
+    fn a_render_inside_its_budget_is_the_unbudgeted_render_byte_for_byte() {
+        let object = holding(&[("a", LONG), ("b", "decision: b"), ("c", "constraint: c")]);
+        let plain = render::render(&object, None);
+        let roomy = render::rendered(
+            &object,
+            None,
+            Some(budget(1_000_000, render::OverBudget::Tier)),
+        );
+        assert_eq!(roomy.text, plain);
+        assert_eq!(roomy.reduced, 0);
+        assert_eq!(render::rendered(&object, None, None).text, plain);
+        assert_eq!(
+            render::rendered(&object, None, Some(budget(10, render::OverBudget::Elide))),
+            render::rendered(&object, None, Some(budget(10, render::OverBudget::Elide))),
+            "the same object, phase and budget give the same render"
+        );
+    }
+
+    /// #565: past its budget the oldest entries are reduced first, newest by
+    /// latest patch; the goal and the constraints never are; a count line
+    /// follows the working set; tier keeps a cut first line, elide the id.
+    #[test]
+    fn past_its_budget_the_oldest_entries_are_reduced_first_and_the_brief_never_is() {
+        let long = |id: &str| format!("{id}: {LONG}");
+        let object = holding(&[
+            ("old", &long("old")),
+            ("rule", "constraint: no login"),
+            ("mid", &long("mid")),
+            ("new", &long("new")),
+        ]);
+        let plain = render::render(&object, None);
+        let line = |id: &str| format!("{id}\t{}\n", long(id).replace('\n', "\\n"));
+        // Room for the header, the constraint and one long entry: the newest.
+        let without = plain.replace(&line("old"), "").replace(&line("mid"), "");
+        let room = (without.chars().count() as u64).div_ceil(4);
+        let tiered = render::rendered(&object, None, Some(budget(room, render::OverBudget::Tier)));
+        assert_eq!(tiered.reduced, 2, "{}", tiered.text);
+        assert!(tiered.text.contains(&line("new")), "the newest stays whole");
+        assert!(tiered.text.contains("rule\tconstraint: no login\n"));
+        let cut = |id: &str| {
+            long(id)
+                .chars()
+                .take(render::TIER_CHARS)
+                .collect::<String>()
+        };
+        assert!(
+            tiered.text.contains(&format!("old\t{}…\n", cut("old"))),
+            "{}",
+            tiered.text
+        );
+        assert!(
+            tiered.text.contains(&format!("mid\t{}…\n", cut("mid"))),
+            "{}",
+            tiered.text
+        );
+        assert!(
+            tiered.text.ends_with("2 older entries shortened\n"),
+            "{}",
+            tiered.text
+        );
+        let elided = render::rendered(&object, None, Some(budget(room, render::OverBudget::Elide)));
+        assert!(
+            elided.text.contains("\nold\n") && elided.text.contains("\nmid\n"),
+            "{}",
+            elided.text
+        );
+        assert!(elided.text.contains(&line("new")));
+        assert!(elided.text.contains("rule\tconstraint: no login\n"));
+        assert!(
+            elided.text.ends_with("2 older entries elided\n"),
+            "{}",
+            elided.text
+        );
+        // A budget the brief alone passes still renders the brief whole.
+        let tight = render::rendered(&object, None, Some(budget(1, render::OverBudget::Elide)));
+        assert!(tight.text.contains("rule\tconstraint: no login\n"));
+        assert_eq!(tight.reduced, 3);
+    }
+
+    /// #565: recency is an entry's latest patch, not its creation: an old
+    /// entry a later fork says again is newer than one recorded since.
+    #[test]
+    fn recency_is_the_latest_patch_not_the_creation() {
+        let first = format!("first: {LONG}");
+        let mut object = holding(&[("first", &first), ("second", &format!("second: {LONG}"))]);
+        // The same fact said again by a later fork: a merge, with a newer
+        // provenance on the older entry.
+        object
+            .apply(&Patch::Add {
+                id: EntryId::new("again").expect("an id"),
+                content: first.clone(),
+                provenance: Provenance {
+                    turn: 9,
+                    lane: "interview".to_owned(),
+                    fork: None,
+                    tangent: None,
+                    index: 0,
+                },
+            })
+            .expect("applied");
+        let plain = render::render(&object, None);
+        let room = (plain.chars().count() as u64).div_ceil(4) - 1;
+        let tiered = render::rendered(&object, None, Some(budget(room, render::OverBudget::Elide)));
+        assert!(
+            tiered.text.contains("\nsecond\n"),
+            "the stale one goes: {}",
+            tiered.text
+        );
+    }
 
     fn regime() -> Regime {
         Regime {

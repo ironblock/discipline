@@ -224,10 +224,17 @@ export class HttpTransport implements DriveTransport {
         return turn?.kind === 'ask' ? { kind: 'cancel', turn: turn.turn } : { refused: 'nothing-in-flight' };
       }
       case 'seam':
-        // v0's declare-seam takes no phase, and the composer offers none under `?drive`.
-        return { kind: 'declare-seam' };
+        // The phase to move to, when the operator picked one (log v7, #563); without one the session stays in its phase.
+        return { kind: 'declare-seam', ...(command.to !== undefined ? { phase: command.to } : {}) };
       case 'end':
         return { kind: 'end' };
+      // A tangent's open and close, as serve takes them (#608).
+      case 'open-tangent':
+        return { kind: 'open-tangent', id: command.id };
+      case 'close-tangent':
+        return { kind: 'close-tangent', dispositions: command.dispositions };
+      case 'background':
+        return { kind: 'background' };
     }
   }
 

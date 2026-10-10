@@ -132,7 +132,7 @@ export type SessionStart = V0.SessionStartLine & {
   readonly slots?: number;
   /** AHEAD (`slots`): the slot the trunk is pinned to. */
   readonly trunk_slot?: number;
-  /** AHEAD (`phases`): the phase the session opens in. */
+  /** AHEAD (`phases`): the phase the session opens in. `diet` writes it as `opening_phase` (v7, #563). */
   readonly phase?: string;
   /** AHEAD (`record`): the system prompt's size in tokens. */
   readonly system_tokens?: number;
@@ -265,7 +265,14 @@ export interface Patch extends At {
   /** For `supersede`: the entry this one replaces. */
   readonly supersedes?: string;
   readonly authority?: Authority;
+  /** The tangent open when it was made (log v7, #608): the entry is that tangent's, to be ruled on at its close. */
+  readonly tangent?: string;
 }
+
+/** The operator opened a tangent (log v7, #608): the trunk as it stood is the point a close rolls back to. */
+export type TangentOpen = V0.TangentOpenLine;
+/** The operator closed it: its entries kept, dropped or parked, and the trunk rolled back to where it opened. */
+export type TangentClose = V0.TangentCloseLine;
 
 /**
  * The one deliberate prefill event -- the trunk refilled from working memory (log v6, #493): the head, the render
@@ -276,15 +283,18 @@ export interface Patch extends At {
 export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'carried_turns'> &
   Partial<Pick<V0.SeamLine, 'frame' | 'carried_entries' | 'carried_turns'>> & {
     readonly reason: SeamReason;
-    /** AHEAD (`phases`): the phases it moved between. */
+    /** The phases it moved between (v7, #563). */
     readonly phase?: { readonly from: string; readonly to: string };
-    /** AHEAD (`pre-warm`): the render's size in tokens. */
-    readonly render_tokens?: number;
     /** AHEAD (`pre-warm`): the pre-warm -- the new prefix sent once so the next ask finds it cached. */
     readonly warm?: Timings;
     /** The surface's own older shape: the render's number, in a recording placed before v6. */
     readonly render_version?: number;
   };
+
+/** Forks' patches delivered after an ask (v7, the fork delivery lever). */
+export type Delivered = V0.DeliveredLine;
+/** Archived items recalled after an ask (v7, the archive recall lever, #566). */
+export type Recalled = V0.RecalledLine;
 
 export type LogLine =
   | SessionStart
@@ -304,7 +314,11 @@ export type LogLine =
   | Fork
   | ForkSettled
   | Patch
-  | Seam;
+  | Seam
+  | Delivered
+  | Recalled
+  | TangentOpen
+  | TangentClose;
 
 export type Kind = LogLine['kind'];
 
@@ -336,8 +350,9 @@ export function needsOf(line: LogLine): Need[] {
       if (AHEAD_LANES.has(line.lane)) out.push('lanes');
       break;
     case 'seam':
-      has('phases', line.phase);
-      has('pre-warm', line.render_tokens, line.warm);
+      // `phase` is the format's own since v7 (#563); `render_tokens`, the render's estimated size, since v7's render
+      // budget (#565), written beside the budget that produced it.
+      has('pre-warm', line.warm);
       break;
   }
   return out;

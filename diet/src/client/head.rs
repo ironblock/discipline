@@ -602,6 +602,7 @@ mod tests {
                 call: Duration::from_secs(1),
                 max_output_tokens: 64,
                 retries: 0,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: BTreeMap::new(),
@@ -611,6 +612,7 @@ mod tests {
     fn tool(name: &str, required: &str) -> ToolDefinition {
         ToolDefinition {
             name: name.to_owned(),
+            description: None,
             schema: Value::Object(BTreeMap::from([(
                 "required".to_owned(),
                 Value::String(required.to_owned()),

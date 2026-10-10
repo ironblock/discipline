@@ -27,6 +27,12 @@ export type Kind =
   | "fork.settled"
   | "patch"
   | "seam"
+  | "delivered"
+  | "recalled"
+  | "tangent.open"
+  | "tangent.close"
+  | "capture"
+  | "reminded"
 ;
 
 export type State =
@@ -46,6 +52,8 @@ export type Command =
   | "cancel"
   | "declare-seam"
   | "end"
+  | "open-tangent"
+  | "close-tangent"
 ;
 
 export type Refusal =
@@ -54,7 +62,15 @@ export type Refusal =
   | "nothing-in-flight"
   | "seam-not-built"
   | "nothing-to-seam"
+  | "no-phase-graph"
+  | "not-a-phase"
+  | "already-in-phase"
+  | "no-phase-edge"
   | "stale"
+  | "tangent-open"
+  | "no-tangent"
+  | "bad-tangent"
+  | "not-the-scope"
 ;
 
 export type FailReason =
@@ -136,6 +152,7 @@ export type ApprovalScope =
   | "session"
   | "workspace"
   | "preseeded"
+  | "off"
 ;
 
 export type Warrant =
@@ -167,6 +184,38 @@ export type SeamReason =
   | "cadence"
 ;
 
+export type Framing =
+  | "advisory"
+  | "imperative"
+;
+
+export type RecallState =
+  | "literal"
+;
+
+export type ForkDelivery =
+  | "seam"
+  | "advisory"
+  | "imperative"
+;
+
+export type ToolOutputState =
+  | "capped"
+  | "keep"
+;
+
+export type SeamToolOutputs =
+  | "evict"
+  | "reference"
+  | "salient"
+  | "keep"
+;
+
+export type RenderPlacement =
+  | "system"
+  | "message"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -196,10 +245,33 @@ export interface Serving {
 export interface TemplateKwargs {
   enable_thinking?: boolean;
   reasoning_effort?: string;
+  preserve_thinking?: boolean;
 }
 
 export interface Unsent {
   budget_tokens: number;
+}
+
+export interface PhaseMove {
+  from: string;
+  to: string;
+}
+
+export interface InstructionFile {
+  path: string;
+  sha256: string;
+}
+
+export interface NoteLine {
+  entry: string;
+  op: PatchOp;
+  template: string;
+}
+
+export interface RecalledItem {
+  key: string;
+  sha256: string;
+  score: number;
 }
 
 export interface ToolCallPiece {
@@ -251,6 +323,19 @@ export type SessionStartLine = {
   tools?: string[];
   template_kwargs?: TemplateKwargs;
   unsent?: Unsent;
+  approvals_off?: boolean;
+  fork_delivery?: ForkDelivery;
+  levers?: Record<string, string>;
+  fork_asks?: string;
+  fork_asks_digest?: string;
+  reasoning_effort_default?: string;
+  phases?: string[];
+  phase_transitions?: PhaseMove[];
+  opening_phase?: string;
+  instruction_files?: InstructionFile[];
+  tool_output?: ToolOutputState;
+  tool_output_max_lines?: number;
+  tool_output_max_bytes?: number;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {
@@ -279,6 +364,7 @@ export type RequestLine = {
   lane: Lane;
   head_sha256?: string;
   fork?: number;
+  max_tokens?: number;
 };
 
 export type RefusedLine = {
@@ -392,6 +478,7 @@ export type ToolCallLine = {
   approval?: Approval;
   files?: RecordedFile[];
   shown?: string;
+  recovered_from?: string;
 };
 
 export type ForkLine = {
@@ -403,6 +490,8 @@ export type ForkLine = {
   at: number;
   why: Warrant;
   question: string;
+  view?: string;
+  ask?: string;
 };
 
 export type ForkSettledLine = {
@@ -421,6 +510,7 @@ export type PatchLine = {
   op: PatchOp;
   entry: PatchEntry;
   supersedes?: string;
+  tangent?: string;
 };
 
 export type SeamLine = {
@@ -435,6 +525,80 @@ export type SeamLine = {
   render: string;
   carried_entries: number;
   carried_turns: number;
+  tail_tokens?: number;
+  carried_tokens?: number;
+  phase?: PhaseMove;
+  tool_outputs?: SeamToolOutputs;
+  outputs?: string;
+  carried_outputs?: number;
+  carried_output_bytes?: number;
+  placement?: RenderPlacement;
+  render_budget_tokens?: number;
+  render_over_budget?: string;
+  render_tokens?: number;
+  render_reduced?: number;
+};
+
+export type DeliveredLine = {
+  seq: number;
+  t: number;
+  kind: "delivered";
+  turn: number;
+  framing: Framing;
+  text: string;
+  lines: NoteLine[];
+};
+
+export type RecalledLine = {
+  seq: number;
+  t: number;
+  kind: "recalled";
+  turn: number;
+  recall: RecallState;
+  text: string;
+  items: RecalledItem[];
+};
+
+export type TangentOpenLine = {
+  seq: number;
+  t: number;
+  kind: "tangent.open";
+  id: string;
+  at_turn: number;
+  trunk_messages: number;
+};
+
+export type TangentCloseLine = {
+  seq: number;
+  t: number;
+  kind: "tangent.close";
+  id: string;
+  at_turn: number;
+  kept: string[];
+  dropped: string[];
+  parked: string[];
+  prefix_intact: boolean;
+  rolled_back: number;
+};
+
+export type CaptureLine = {
+  seq: number;
+  t: number;
+  kind: "capture";
+  request: number;
+  call: string;
+  tool: string;
+  outcome: string;
+  entries: string[];
+  why?: string;
+};
+
+export type RemindedLine = {
+  seq: number;
+  t: number;
+  kind: "reminded";
+  turn: number;
+  text: string;
 };
 
 export type LogLine =
@@ -456,4 +620,10 @@ export type LogLine =
   | ForkSettledLine
   | PatchLine
   | SeamLine
+  | DeliveredLine
+  | RecalledLine
+  | TangentOpenLine
+  | TangentCloseLine
+  | CaptureLine
+  | RemindedLine
 ;

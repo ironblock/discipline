@@ -94,16 +94,21 @@
 //! pair (design point 3) is not built: there is no rendered side to pair
 //! with.
 
+pub mod archive;
 pub mod attach;
 pub mod canned;
 pub mod engine;
+pub mod instructions;
+pub mod output;
 pub mod projection;
 pub mod regimen;
 pub mod registry;
 pub mod script;
 pub mod serve;
+pub mod served;
 pub mod session;
 pub mod shell_gate;
+pub mod standard;
 pub mod tool_loop;
 
 use std::cell::Cell;
@@ -823,6 +828,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         // rows as they happened. Nothing else in this crate may say `Live`.
         source: Source::Live,
         regimen_sha256: None,
+        fork_delivery: None,
+        tool_output: None,
+        levers: None,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();
@@ -1191,6 +1199,10 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 id: seam_ids.take(),
                 at_turn: index,
                 rendered_bytes,
+                // The scripted drive refills totally.
+                tail_tokens: None,
+                carried_turns: None,
+                carried_tokens: None,
             });
             seams.push(seam);
         }
@@ -1494,6 +1506,7 @@ mod tests {
                 // so nothing else changes: a retry that never happens costs
                 // nothing.
                 retries: 1,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

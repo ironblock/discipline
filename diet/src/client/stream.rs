@@ -430,9 +430,24 @@ impl HttpStream {
     /// Returns [`TransportFailure`] when no reply arrived. A status other
     /// than `200` is a reply, and is the caller's to judge.
     pub fn props(&self, deadline: Instant) -> Result<transport::HttpReply, TransportFailure> {
+        self.get("/props", deadline)
+    }
+
+    /// `GET path` at the root of the endpoint's host and port, with the
+    /// bearer when there is one: where an engine reports itself (`/props`,
+    /// `TabbyAPI`'s `/v1/model`, #509).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::props`].
+    pub fn get(
+        &self,
+        path: &str,
+        deadline: Instant,
+    ) -> Result<transport::HttpReply, TransportFailure> {
         let authorization = self.authorization();
         let request = format!(
-            "GET /props HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\n\
+            "GET {path} HTTP/1.1\r\nHost: {}:{}\r\nAccept: application/json\r\n\
              {authorization}Connection: close\r\n\r\n",
             self.endpoint.host, self.endpoint.port
         );
@@ -1189,6 +1204,7 @@ mod tests {
                 call: Duration::from_secs(1),
                 max_output_tokens: 16,
                 retries: 0,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

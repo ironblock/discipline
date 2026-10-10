@@ -240,6 +240,10 @@ pub fn head(shape: &RequestShape) -> String {
             }
             out.push_str("{\"type\":\"function\",\"function\":{\"name\":");
             string(&tool.name, &mut out);
+            if let Some(description) = &tool.description {
+                out.push_str(",\"description\":");
+                string(description, &mut out);
+            }
             out.push_str(",\"parameters\":");
             crate::formats::record::json::render(&tool.schema, &mut out);
             out.push_str("}}");
@@ -519,6 +523,7 @@ mod tests {
                 call: Duration::from_secs(1),
                 max_output_tokens: 64,
                 retries: 0,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

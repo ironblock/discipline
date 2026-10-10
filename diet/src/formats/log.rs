@@ -115,7 +115,20 @@
 //! every request of the session sends, as sent -- `enable_thinking` and
 //! `reasoning_effort` -- an object never empty -- and its `unsent`, what the
 //! regime declares and no request carries (`budget_tokens`), recorded rather
-//! than refused.
+//! than refused. And v7 adds the [`ApprovalScope`] `off` and a
+//! `session.start`'s `approvals_off`, `true` or absent: the approval lever's
+//! `none`, under which no gate decided a call and nothing prompted. A v7
+//! `seam` may carry `tail_tokens`, the compaction depth it ran at, and
+//! `carried_tokens`, the estimated tokens of the whole turns it kept after
+//! the refill (#552); absent, the total refill, and `carried_turns` 0. A
+//! v7 `seam` may carry `tool_outputs`, the seam's tool-output state (#553),
+//! and, when it carried any, `outputs` -- the section of the refill after
+//! the render, as sent -- with `carried_outputs`, the outputs it carried,
+//! and `carried_output_bytes`, the section's bytes; absent, `evict`. A
+//! v7 `seam` may carry `placement`, where the refill put the render (#597):
+//! `message`, a user message after the head, which is never changed;
+//! absent, `system`, appended to the head's system message, as every seam
+//! before #597 did.
 //!
 //! # A torn final line
 //!
@@ -201,19 +214,155 @@ vocabulary! {
         Patch => "patch",
         /// The trunk refilled from working memory (v6, #493).
         Seam => "seam",
+        /// Forks' patches delivered at the tail of a trunk request (v7, the
+        /// fork delivery lever).
+        Delivered => "delivered",
+        /// Archived items recalled at the tail of a trunk request (v7, #566).
+        Recalled => "recalled",
+        /// A tangent opened at the operator's word (v7, #22).
+        TangentOpen => "tangent.open",
+        /// A tangent closed: its entries disposed and the trunk rolled back
+        /// to the fork point (v7, #22).
+        TangentClose => "tangent.close",
+        /// A self-capture call the model elected, and what it wrote to
+        /// working memory (v7, #609).
+        Capture => "capture",
+        /// The self-capture reminder, as a note after an ask (v7, #609).
+        Reminded => "reminded",
     }
 }
 
 vocabulary! {
-    /// Why a seam fired (v6, #493): `seam::Reason`'s words. Only `operator`
-    /// is written today; the others are the controller's triggers, read so
-    /// that a session that fires them needs no new version.
+    /// The tool output disposition lever's arrival state (v7, #554): whether
+    /// what the model is shown of a tool's output is capped as it arrives.
+    ToolOutputState {
+        /// Capped at a line and a byte limit, the whole kept by digest.
+        Capped => "capped",
+        /// Kept whole: the cap turned off.
+        Keep => "keep",
+    }
+}
+
+/// The cap a session's tool outputs arrived under (v7, #554): on the wire,
+/// `tool_output` and, when capped, `tool_output_max_lines` and
+/// `tool_output_max_bytes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolOutput {
+    /// Capped or kept.
+    pub state: ToolOutputState,
+    /// The line limit, when capped.
+    pub max_lines: Option<u64>,
+    /// The byte limit, when capped.
+    pub max_bytes: Option<u64>,
+}
+
+/// A `session.start`'s cap on tool output, from its three flat keys: the
+/// limits present exactly when it is `capped`.
+fn tool_output(fields: &Fields<'_>) -> Result<Option<ToolOutput>, String> {
+    let state = fields.optional_tag("tool_output", ToolOutputState::from_tag)?;
+    let max_lines = fields.optional_count("tool_output_max_lines")?;
+    let max_bytes = fields.optional_count("tool_output_max_bytes")?;
+    let limited = max_lines.is_some() || max_bytes.is_some();
+    match state {
+        None if limited => Err(
+            "`tool_output_max_lines` or `tool_output_max_bytes` without `tool_output`".to_owned(),
+        ),
+        None => Ok(None),
+        Some(ToolOutputState::Capped) if max_lines.is_none() || max_bytes.is_none() => Err(
+            "`tool_output` is `capped` without both `tool_output_max_lines` and \
+             `tool_output_max_bytes`"
+                .to_owned(),
+        ),
+        Some(ToolOutputState::Keep) if limited => {
+            Err("`tool_output` is `keep` and carries a limit".to_owned())
+        }
+        Some(state) => Ok(Some(ToolOutput {
+            state,
+            max_lines,
+            max_bytes,
+        })),
+    }
+}
+
+vocabulary! {
+    /// The fork delivery lever's state (v7): how a fork's patches reach the
+    /// trunk.
+    ForkDelivery {
+        /// At the next seam's render only: today's behaviour, the default.
+        Seam => "seam",
+        /// As a note at the tail of the next trunk request, framed as advice.
+        Advisory => "advisory",
+        /// The same, framed as an instruction.
+        Imperative => "imperative",
+    }
+}
+
+vocabulary! {
+    /// Where a seam's refill put the render (v7, #597).
+    RenderPlacement {
+        /// Appended to the head's system message: every seam before #597.
+        System => "system",
+        /// A user message after the head, which stays as the session sent it.
+        Message => "message",
+    }
+}
+
+vocabulary! {
+    /// What a seam's refill carries of the tool outputs it compacts away
+    /// (v7, #553): those in the turns before the kept tail.
+    SeamToolOutputs {
+        /// Nothing: today's behaviour, the default.
+        Evict => "evict",
+        /// A line per output naming its tool, arguments, size and sha256,
+        /// the whole saved by digest in the recording.
+        Reference => "reference",
+        /// The verbatim excerpts the read fork quoted from each output.
+        Salient => "salient",
+        /// Each output as the trunk had it, after the cap.
+        Keep => "keep",
+    }
+}
+
+impl Default for SeamToolOutputs {
+    /// `evict`: today's behaviour.
+    fn default() -> Self {
+        Self::Evict
+    }
+}
+
+vocabulary! {
+    /// How an archive recall matched (v7, #566): the `archive_recall`
+    /// lever's states that recall anything.
+    RecallState {
+        /// By the ask's anchors, matched whole.
+        Literal => "literal",
+    }
+}
+
+vocabulary! {
+    /// How a fork's patches reach the trunk before a seam (v7): the fork
+    /// delivery lever's two mid-turn states, each a (b′) framing.
+    Framing {
+        /// "may be affected ... If it no longer holds, say so; otherwise
+        /// carry on."
+        Advisory => "advisory",
+        /// "is superseded ... Update it now".
+        Imperative => "imperative",
+    }
+}
+
+vocabulary! {
+    /// Why a seam fired (v6, #493): `seam::Reason`'s words. `serve` writes
+    /// `operator`, and `cadence` and `budget` when the regimen declares them
+    /// (#520); `phase` is read so that a session that fires it needs no new
+    /// version.
     SeamReason {
         /// The operator declared it.
         Operator => "operator",
         /// The phase graph ratified a transition.
         Phase => "phase",
-        /// The working set reached the declared byte count.
+        /// The declared budget was reached: the working set's byte count, or
+        /// a share of the context window (#520).
         Budget => "budget",
         /// The declared cadence came round.
         Cadence => "cadence",
@@ -259,6 +408,10 @@ vocabulary! {
         DeclareSeam => "declare-seam",
         /// The end.
         End => "end",
+        /// Open a tangent (v7, #22).
+        OpenTangent => "open-tangent",
+        /// Close the open tangent (v7, #22).
+        CloseTangent => "close-tangent",
     }
 }
 
@@ -276,8 +429,27 @@ vocabulary! {
         /// Nothing to refill from: no turn has settled, or working memory
         /// holds no entry (v6).
         NothingToSeam => "nothing-to-seam",
+        /// A seam asked to move to a phase under no phase graph (v7, #563).
+        NoPhaseGraph => "no-phase-graph",
+        /// A seam asked to move to a phase the graph does not declare (v7).
+        NotAPhase => "not-a-phase",
+        /// A seam asked to move to the phase the session is in (v7).
+        AlreadyInPhase => "already-in-phase",
+        /// A seam asked for a move the graph does not allow from the current
+        /// phase (v7).
+        NoPhaseEdge => "no-phase-edge",
         /// A stop named a turn older than the latest.
         Stale => "stale",
+        /// A seam, or a second tangent, while a tangent is open (v7, #22).
+        TangentOpen => "tangent-open",
+        /// A close with no tangent open (v7, #22).
+        NoTangent => "no-tangent",
+        /// A tangent asked of a session that keeps no working memory, or
+        /// under an id it cannot take (v7, #22).
+        BadTangent => "bad-tangent",
+        /// A close whose dispositions name an entry the tangent did not
+        /// create, or leave one it did unruled (v7, #22).
+        NotTheScope => "not-the-scope",
     }
 }
 
@@ -462,6 +634,8 @@ vocabulary! {
         Workspace => "workspace",
         /// The session started with it allowed: no prompt decided it.
         Preseeded => "preseeded",
+        /// Approvals were off (v7): no gate decided it and nothing prompted.
+        Off => "off",
     }
 }
 
@@ -529,6 +703,16 @@ pub enum Piece {
     },
 }
 
+/// The fork ask set a session asks in (v7, #595), by name and digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkAsks {
+    /// The set's name: `dogma::asks`' directory.
+    pub name: String,
+    /// The set's digest, recomputable from the dogma's manifest; best
+    /// effort, so a name read without one is kept.
+    pub digest: Option<String>,
+}
+
 /// What a `session.start` claims serves it (v3, #292): the regimen's
 /// substrate, the registry it was read from, and the engine the start-time
 /// check passed. Its four keys come together or not at all.
@@ -566,6 +750,9 @@ pub struct TemplateKwargs {
     pub enable_thinking: Option<bool>,
     /// `reasoning_effort`: the level, in the template's own words.
     pub reasoning_effort: Option<String>,
+    /// `preserve_thinking`: whether earlier turns' reasoning renders in
+    /// history, as the substrate's model convention needs.
+    pub preserve_thinking: Option<bool>,
 }
 
 /// What a session's regime declares and its requests cannot carry (v7, R1).
@@ -573,6 +760,51 @@ pub struct TemplateKwargs {
 pub struct Unsent {
     /// `[reasoning]`'s token budget: no chat template variable carries one.
     pub budget_tokens: u64,
+}
+
+/// One item a recall carried (v7, #566): its archive key, the digest of its
+/// text, and its score -- under `literal`, how many of the ask's anchors it
+/// holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecalledItem {
+    /// The archive's key for it.
+    pub key: String,
+    /// The sha256 of its text.
+    pub sha256: String,
+    /// Its score.
+    pub score: u64,
+}
+
+/// One line of a delivered note (v7): the patch it delivers, by its entry
+/// and op, and the dogma template it was written with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteLine {
+    /// The entry the line names: the voided one for a `supersede`, the
+    /// target for a `resolve`, `retire` or `park`.
+    pub entry: String,
+    /// The patch's op.
+    pub op: PatchOp,
+    /// The template's dogma name.
+    pub template: String,
+}
+
+/// A move between two phases of a phase graph (v7, #563): a seam's move, or
+/// one of the graph's allowed transitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseMove {
+    /// The phase moved from.
+    pub from: String,
+    /// The phase moved to.
+    pub to: String,
+}
+
+/// One instruction file a session's system prompt carries (v7, #559).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstructionFile {
+    /// Its path relative to the worktree: never absolute, never a home's.
+    pub path: String,
+    /// The sha256 of its bytes.
+    pub sha256: String,
 }
 
 /// One field of the served configuration (v7, #509).
@@ -664,6 +896,39 @@ pub enum Event {
         /// What the regime declares and no request carries (v7, R1): best
         /// effort in the duty-of-care sense, recorded rather than refused.
         unsent: Option<Unsent>,
+        /// Approvals were off for the session (v7, the approval lever's
+        /// `none`): `true`, or absent.
+        approvals_off: Option<bool>,
+        /// The fork delivery lever's state (v7), for a session that forks.
+        fork_delivery: Option<ForkDelivery>,
+        /// Each lever's state the session runs at (v7, #573), by lever, in
+        /// `docs/program.md` §2's words: the record's start row's `levers`,
+        /// from the same reading, so the two agree by construction.
+        levers: Option<BTreeMap<String, String>>,
+        /// The fork ask set a session that forks asks in (v7, #595): its name
+        /// and digest, `fork_asks` and `fork_asks_digest`.
+        fork_asks: Option<ForkAsks>,
+        /// With thinking on and no `reasoning_effort` sent, the level the
+        /// chat template renders by default, as the registry declares it
+        /// (v7): what the model was asked for, named.
+        reasoning_effort_default: Option<String>,
+        /// The phase graph a served session runs under (v7, #563): its
+        /// phases, in declared order, and the moves it allows; absent when it
+        /// declares none.
+        phases: Option<Vec<String>>,
+        /// The graph's allowed moves.
+        phase_transitions: Option<Vec<PhaseMove>>,
+        /// The phase the session opens in: the graph's first. Named so
+        /// because recordings placed in older versions carry a `phase` of
+        /// their own on this line.
+        opening_phase: Option<String>,
+        /// The instruction files the system prompt carries (v7, #559): each
+        /// by its path relative to the worktree and its digest. Their text
+        /// is in `head`.
+        instruction_files: Option<Vec<InstructionFile>>,
+        /// The cap tool outputs arrived under (v7, #554), when the session
+        /// runs tools.
+        tool_output: Option<ToolOutput>,
     },
     /// An ask was admitted.
     Ask {
@@ -698,6 +963,9 @@ pub enum Event {
         /// The `seq` of the fork it is the call of, on the `interview` lane
         /// (v5, #374).
         fork: Option<u64>,
+        /// The `max_tokens` it was sent with, after the output cap was
+        /// clamped to the room left in the context window (v7, #588).
+        max_tokens: Option<u64>,
     },
     /// A command was refused.
     Refused {
@@ -863,6 +1131,10 @@ pub enum Event {
         /// was given one (v5, #472): what the next step's head is rebuilt
         /// with.
         shown: Option<String>,
+        /// The text this call was recovered from (v7, #560): the block the
+        /// model wrote in its answer, when the call was not a native one.
+        /// Absent for a streamed call.
+        recovered_from: Option<String>,
     },
     /// A side call off the trunk's warm tail (v5, #374).
     Fork {
@@ -877,6 +1149,11 @@ pub enum Event {
         why: Warrant,
         /// What it asks.
         question: String,
+        /// What it saw of the trunk (v7, #567): `last_turn` or `last:N`;
+        /// absent is the whole trunk.
+        view: Option<String>,
+        /// Which ask of its set it sent (v7, #595): the router kind's tag.
+        ask: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -896,6 +1173,92 @@ pub enum Event {
         /// The id of the entry it replaces, exactly when `op` is
         /// `supersede`.
         supersedes: Option<String>,
+        /// The tangent it was made under (v7, #22), when one was open.
+        tangent: Option<String>,
+    },
+    /// Forks' patches delivered to the trunk (v7, the fork delivery lever):
+    /// one note at the tail of turn `turn`'s first request, after its ask,
+    /// which stays on the trunk.
+    Delivered {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The framing every line used.
+        framing: Framing,
+        /// The note as sent: one line per patch.
+        text: String,
+        /// Each line, in order: the patch it delivers and the template it
+        /// was written with.
+        lines: Vec<NoteLine>,
+    },
+    /// Archived items recalled (v7, #566): one note after turn `turn`'s
+    /// ask, at the tail of its first request, which stays on the trunk.
+    Recalled {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// How it matched.
+        recall: RecallState,
+        /// The note as sent.
+        text: String,
+        /// Each item it carries, in rank order.
+        items: Vec<RecalledItem>,
+    },
+    /// A tangent opened (v7, #22): its id, the turn it forks at, and how
+    /// many messages the trunk held there, the fork point a close rolls the
+    /// trunk back to.
+    TangentOpen {
+        /// The tangent's id, stamped into the provenance of every entry its
+        /// forks patch in.
+        id: String,
+        /// The turns settled when it opened.
+        at_turn: u32,
+        /// The trunk's messages at the fork point.
+        trunk_messages: u64,
+    },
+    /// A tangent closed (v7, #22): every entry it created kept, dropped to
+    /// the archive, or parked, and the trunk rolled back to the fork point.
+    TangentClose {
+        /// The tangent's id.
+        id: String,
+        /// The turns settled when it closed.
+        at_turn: u32,
+        /// The entries kept live.
+        kept: Vec<String>,
+        /// The entries retired to the archive.
+        dropped: Vec<String>,
+        /// The entries parked as the tangent's.
+        parked: Vec<String>,
+        /// Whether working memory's trunk entries rendered at close as they
+        /// did at the fork point (`object::tangent::Closed`).
+        prefix_intact: bool,
+        /// How many messages the rollback took off the trunk.
+        rolled_back: u64,
+    },
+    /// A self-capture call (v7, #609): the model elected one of the
+    /// contract's tools, and this is what it came to in working memory.
+    Capture {
+        /// The `seq` of the trunk `request` whose answer made the call.
+        request: u64,
+        /// The call's id.
+        call: String,
+        /// The tool.
+        tool: String,
+        /// What it came to: `recorded`, `dropped` (the groundedness gate
+        /// kept nothing), `resolved`, `judged` (a verdict that changes no
+        /// entry), `proposed` (advisory, writes nothing) or `refused` (the
+        /// contract or the object refused it).
+        outcome: String,
+        /// The entries it wrote or ruled on, by id.
+        entries: Vec<String>,
+        /// Why, when it was dropped or refused.
+        why: Option<String>,
+    },
+    /// The self-capture reminder (v7, #609): an advisory note after turn
+    /// `turn`'s ask, when the model had recorded nothing for the cadence.
+    Reminded {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
@@ -917,7 +1280,48 @@ pub enum Event {
         carried_entries: u64,
         /// How many turns of the old trunk the refill carried.
         carried_turns: u64,
+        /// The compaction depth the seam ran at (v7, #552): the estimated
+        /// tokens of recent whole turns it could keep. Absent is 0, the
+        /// total refill.
+        tail_tokens: Option<u64>,
+        /// The estimated tokens of the turns it kept (v7, #552), beside
+        /// `tail_tokens`.
+        carried_tokens: Option<u64>,
+        /// The phases it moved between (v7, #563), when the operator named
+        /// a move the graph allowed; absent when the session stayed in its
+        /// phase.
+        phase: Option<PhaseMove>,
+        /// What it carried of the tool outputs it compacted away (v7,
+        /// #553). Absent is `evict`.
+        tool_outputs: Option<SeamToolOutputs>,
+        /// The section of the refill after the render carrying them, as
+        /// sent (v7, #553): present exactly when it carried any.
+        outputs: Option<String>,
+        /// How many outputs the section carried (v7, #553).
+        carried_outputs: Option<u64>,
+        /// The section's bytes (v7, #553).
+        carried_output_bytes: Option<u64>,
+        /// Where the refill put the render (v7, #597). Absent is `system`.
+        placement: Option<RenderPlacement>,
+        /// The render's budget and what it did (v7, #565), on a seam whose
+        /// regimen declares one.
+        render_budget: Option<RenderBudget>,
     },
+}
+
+/// A seam's render budget and what it did (v7, #565): `render_budget_tokens`,
+/// `render_over_budget`, `render_tokens` and `render_reduced`, together or
+/// not at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderBudget {
+    /// The estimated tokens the render could run to.
+    pub tokens: u64,
+    /// What it did past them: `tier` or `elide`.
+    pub over: String,
+    /// The estimated tokens it ran to.
+    pub rendered: u64,
+    /// How many entries it shortened or elided.
+    pub reduced: u64,
 }
 
 /// A patch's entry (v5, #374): its id, its text, and its category when the
@@ -1790,6 +2194,26 @@ fn beyond(line: &Line, declared: i64) -> Option<String> {
         {
             return Some(why);
         }
+        // One object down: a tag that arrived after its object did (the
+        // approval scope `off`, v7).
+        if let (Some(inner_fields), Value::Object(inner)) = (object_fields(field.holds), value) {
+            for nested in inner_fields {
+                if let (Holds::Tag(tags), Some(Value::String(tag))) =
+                    (nested.holds, inner.get(nested.key))
+                    && let Some(why) = arrived(
+                        tag_introduced(tags, tag),
+                        format!(
+                            "`{}`'s `{}.{}` is `{tag}`",
+                            kind.tag(),
+                            field.key,
+                            nested.key
+                        ),
+                    )
+                {
+                    return Some(why);
+                }
+            }
+        }
     }
     None
 }
@@ -2055,6 +2479,52 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 } else {
                     None
                 },
+                approvals_off: match fields.optional_flag("approvals_off")? {
+                    Some(false) => {
+                        return Err(
+                            "`approvals_off` is `false`: only `true` is written, and absent is \
+                             the gate"
+                                .to_owned(),
+                        );
+                    }
+                    off => off,
+                },
+                fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
+                levers: fields.optional_words("levers")?,
+                fork_asks: match fields.optional_string("fork_asks")? {
+                    None => None,
+                    Some(name) => Some(ForkAsks {
+                        name,
+                        digest: fields.optional_string("fork_asks_digest")?,
+                    }),
+                },
+                reasoning_effort_default: match object.get("reasoning_effort_default") {
+                    None => None,
+                    Some(_) => Some(fields.string("reasoning_effort_default")?),
+                },
+                instruction_files: fields.instruction_files("instruction_files")?,
+                tool_output: tool_output(&fields)?,
+                phases: fields.optional_strings("phases")?,
+                phase_transitions: match object.get("phase_transitions") {
+                    None => None,
+                    Some(Value::Array(moves)) => Some(
+                        moves
+                            .iter()
+                            .enumerate()
+                            .map(|(index, entry)| match entry {
+                                Value::Object(entry) => Fields(entry)
+                                    .phase_move_of()
+                                    .map_err(|why| format!("`phase_transitions[{index}]`: {why}")),
+                                _ => Err(format!("`phase_transitions[{index}]` is not an object")),
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ),
+                    Some(_) => return Err("`phase_transitions` is not a list".to_owned()),
+                },
+                opening_phase: match object.get("opening_phase") {
+                    None => None,
+                    Some(_) => Some(fields.string("opening_phase")?),
+                },
             }
         }
         Kind::Ask => Event::Ask {
@@ -2081,6 +2551,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             lane: fields.tag("lane", Lane::from_tag)?,
             head_sha256: fields.optional_digest("head_sha256")?,
             fork: fields.optional_count("fork")?,
+            max_tokens: fields.optional_count("max_tokens")?,
         },
         Kind::Refused => Event::Refused {
             command: fields.tag("command", Command::from_tag)?,
@@ -2218,6 +2689,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 approval,
                 files: fields.optional_files("files")?,
                 shown: fields.optional_string("shown")?,
+                recovered_from: fields.optional_string("recovered_from")?,
             }
         }
         Kind::Fork => Event::Fork {
@@ -2226,6 +2698,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             at: fields.count("at")?,
             why: fields.tag("why", Warrant::from_tag)?,
             question: fields.string("question")?,
+            view: fields.optional_string("view")?,
+            ask: fields.optional_string("ask")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -2251,8 +2725,49 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 op,
                 entry: fields.entry("entry")?,
                 supersedes,
+                tangent: fields.optional_string("tangent")?,
             }
         }
+        Kind::Capture => Event::Capture {
+            request: fields.count("request")?,
+            call: fields.string("call")?,
+            tool: fields.string("tool")?,
+            outcome: fields.string("outcome")?,
+            entries: fields.optional_strings("entries")?.unwrap_or_default(),
+            why: fields.optional_string("why")?,
+        },
+        Kind::Reminded => Event::Reminded {
+            turn: fields.turn("turn")?,
+            text: fields.string("text")?,
+        },
+        Kind::TangentOpen => Event::TangentOpen {
+            id: fields.string("id")?,
+            at_turn: fields.turn("at_turn")?,
+            trunk_messages: fields.count("trunk_messages")?,
+        },
+        Kind::TangentClose => Event::TangentClose {
+            id: fields.string("id")?,
+            at_turn: fields.turn("at_turn")?,
+            kept: fields.optional_strings("kept")?.unwrap_or_default(),
+            dropped: fields.optional_strings("dropped")?.unwrap_or_default(),
+            parked: fields.optional_strings("parked")?.unwrap_or_default(),
+            prefix_intact: fields
+                .optional_flag("prefix_intact")?
+                .ok_or("a `tangent.close` carries no `prefix_intact`")?,
+            rolled_back: fields.count("rolled_back")?,
+        },
+        Kind::Recalled => Event::Recalled {
+            turn: fields.turn("turn")?,
+            recall: fields.tag("recall", RecallState::from_tag)?,
+            text: fields.string("text")?,
+            items: fields.recalled_items("items")?,
+        },
+        Kind::Delivered => Event::Delivered {
+            turn: fields.turn("turn")?,
+            framing: fields.tag("framing", Framing::from_tag)?,
+            text: fields.string("text")?,
+            lines: fields.delivered_lines("lines")?,
+        },
         Kind::Seam => Event::Seam {
             at_turn: fields.turn("at_turn")?,
             reason: fields.tag("reason", SeamReason::from_tag)?,
@@ -2262,6 +2777,26 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             render: fields.string("render")?,
             carried_entries: fields.count("carried_entries")?,
             carried_turns: fields.count("carried_turns")?,
+            tail_tokens: fields.optional_count("tail_tokens")?,
+            carried_tokens: fields.optional_count("carried_tokens")?,
+            phase: match object.get("phase") {
+                None => None,
+                Some(_) => Some(fields.phase_move("phase")?),
+            },
+            tool_outputs: fields.optional_tag("tool_outputs", SeamToolOutputs::from_tag)?,
+            outputs: fields.optional_string("outputs")?,
+            carried_outputs: fields.optional_count("carried_outputs")?,
+            carried_output_bytes: fields.optional_count("carried_output_bytes")?,
+            placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
+            render_budget: match fields.optional_count("render_budget_tokens")? {
+                None => None,
+                Some(tokens) => Some(RenderBudget {
+                    tokens,
+                    over: fields.string("render_over_budget")?,
+                    rendered: fields.count("render_tokens")?,
+                    reduced: fields.count("render_reduced")?,
+                }),
+            },
         },
     };
     Ok(Line {
@@ -2407,7 +2942,11 @@ fn argv_if_it_parsed(
 /// outcome.
 fn decided_as_its_scope_says(approval: &Approval, t: u64) -> Result<(), String> {
     let scope = approval.scope.tag();
-    let preseeded = approval.scope == ApprovalScope::Preseeded;
+    // Neither a pre-seed nor approvals off was decided by a prompt.
+    let preseeded = matches!(
+        approval.scope,
+        ApprovalScope::Preseeded | ApprovalScope::Off
+    );
     let prompted = !preseeded;
     if prompted && approval.why.is_none() {
         return Err(format!(
@@ -2415,7 +2954,9 @@ fn decided_as_its_scope_says(approval: &Approval, t: u64) -> Result<(), String> 
         ));
     }
     if !prompted && approval.why.is_some() {
-        return Err("a `preseeded` approval carries `why`: no prompt asked".to_owned());
+        return Err(format!(
+            "a `{scope}` approval carries `why`: no prompt asked"
+        ));
     }
     let Some(decided_at) = approval.decided_at else {
         if !preseeded {
@@ -2426,7 +2967,9 @@ fn decided_as_its_scope_says(approval: &Approval, t: u64) -> Result<(), String> 
         return Ok(());
     };
     if preseeded {
-        return Err("a `preseeded` approval carries `decided_at`: no prompt decided it".to_owned());
+        return Err(format!(
+            "a `{scope}` approval carries `decided_at`: no prompt decided it"
+        ));
     }
     if decided_at > t {
         return Err(format!(
@@ -2664,6 +3207,18 @@ pub enum Tags {
     PatchOp,
     /// [`SeamReason`] (v6).
     SeamReason,
+    /// [`RecallState`] (v7).
+    RecallState,
+    /// [`Framing`] (v7).
+    Framing,
+    /// [`ForkDelivery`] (v7).
+    ForkDelivery,
+    /// [`ToolOutputState`] (v7).
+    ToolOutputState,
+    /// [`SeamToolOutputs`] (v7).
+    SeamToolOutputs,
+    /// [`RenderPlacement`] (v7).
+    RenderPlacement,
 }
 
 impl Tags {
@@ -2689,6 +3244,12 @@ impl Tags {
         Self::ForkOutcome,
         Self::PatchOp,
         Self::SeamReason,
+        Self::Framing,
+        Self::RecallState,
+        Self::ForkDelivery,
+        Self::ToolOutputState,
+        Self::SeamToolOutputs,
+        Self::RenderPlacement,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -2715,6 +3276,12 @@ impl Tags {
             Self::ForkOutcome => "ForkOutcome",
             Self::PatchOp => "PatchOp",
             Self::SeamReason => "SeamReason",
+            Self::Framing => "Framing",
+            Self::RecallState => "RecallState",
+            Self::ForkDelivery => "ForkDelivery",
+            Self::ToolOutputState => "ToolOutputState",
+            Self::SeamToolOutputs => "SeamToolOutputs",
+            Self::RenderPlacement => "RenderPlacement",
         }
     }
 
@@ -2745,6 +3312,12 @@ impl Tags {
             Self::ForkOutcome => of(ForkOutcome::ALL, ForkOutcome::tag),
             Self::PatchOp => of(PatchOp::ALL, PatchOp::tag),
             Self::SeamReason => of(SeamReason::ALL, SeamReason::tag),
+            Self::Framing => of(Framing::ALL, Framing::tag),
+            Self::RecallState => of(RecallState::ALL, RecallState::tag),
+            Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
+            Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
+            Self::SeamToolOutputs => of(SeamToolOutputs::ALL, SeamToolOutputs::tag),
+            Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
         }
     }
 }
@@ -2778,6 +3351,19 @@ pub enum Holds {
     /// A `session.start`'s [`TemplateKwargs`] (v7): an object of the keys
     /// [`TEMPLATE_KWARGS`] declares.
     TemplateKwargs,
+    /// A `delivered` line's `lines` (v7): a non-empty list of objects of
+    /// the keys [`DELIVERED_LINE`] declares.
+    DeliveredLines,
+    /// A `recalled` line's `items` (v7): a non-empty list of objects of the
+    /// keys [`RECALLED_ITEM`] declares.
+    RecalledItems,
+    /// A seam's `phase` (v7): an object of [`PHASE_MOVE`]'s keys.
+    PhaseMove,
+    /// A `session.start`'s `phase_transitions` (v7): a list of such objects.
+    PhaseMoves,
+    /// A `session.start`'s `instruction_files` (v7): a non-empty list of
+    /// objects of the keys [`INSTRUCTION_FILE`] declares.
+    InstructionFiles,
     /// A `session.start`'s [`Unsent`] (v7): an object of the keys [`UNSENT`]
     /// declares.
     Unsent,
@@ -2789,6 +3375,9 @@ pub enum Holds {
     Serving,
     /// A list of text (v3).
     Strings,
+    /// An object of names to words (v7, #573): a `session.start`'s
+    /// `levers`, each lever's state in the program's words.
+    Words,
     /// A `delta`'s tool-call fragment: an object of the keys
     /// [`TOOL_CALL_PIECE`] declares (v3).
     ToolCallPiece,
@@ -2931,6 +3520,30 @@ pub const RECORDED_FILE: &[Field] = &[
 pub const TEMPLATE_KWARGS: &[Field] = &[
     may_v7("enable_thinking", Holds::Flag),
     may_v7("reasoning_effort", Holds::Text),
+    may_v7("preserve_thinking", Holds::Flag),
+];
+
+/// The keys of each of a `recalled` line's `items`. Arrived in v7.
+pub const RECALLED_ITEM: &[Field] = &[
+    must_v7("key", Holds::Text),
+    must_v7("sha256", Holds::Digest),
+    must_v7("score", Holds::Count),
+];
+
+/// The keys of each of a `delivered` line's `lines`. Arrived in v7.
+pub const DELIVERED_LINE: &[Field] = &[
+    must_v7("entry", Holds::Text),
+    must_v7("op", Holds::Tag(Tags::PatchOp)),
+    must_v7("template", Holds::Text),
+];
+
+/// The keys of a phase move (v7, #563): both, always.
+pub const PHASE_MOVE: &[Field] = &[must_v7("from", Holds::Text), must_v7("to", Holds::Text)];
+/// The keys of each of a `session.start`'s `instruction_files`. Arrived in
+/// v7.
+pub const INSTRUCTION_FILE: &[Field] = &[
+    must_v7("path", Holds::Text),
+    must_v7("sha256", Holds::Digest),
 ];
 
 /// The keys of a `session.start`'s `unsent`: what the regime declares and
@@ -3050,6 +3663,10 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Serving => Some(SERVING),
         Holds::TemplateKwargs => Some(TEMPLATE_KWARGS),
         Holds::Unsent => Some(UNSENT),
+        Holds::PhaseMove | Holds::PhaseMoves => Some(PHASE_MOVE),
+        Holds::InstructionFiles => Some(INSTRUCTION_FILE),
+        Holds::DeliveredLines => Some(DELIVERED_LINE),
+        Holds::RecalledItems => Some(RECALLED_ITEM),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
@@ -3067,6 +3684,12 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         Kind::Seam => 6,
+        Kind::Delivered
+        | Kind::Recalled
+        | Kind::TangentOpen
+        | Kind::TangentClose
+        | Kind::Capture
+        | Kind::Reminded => 7,
         _ => 0,
     }
 }
@@ -3086,6 +3709,38 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     }
     if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::NothingToSeam) {
         return 6;
+    }
+    let phase_refusal = tags == Tags::Refusal
+        && Refusal::from_tag(tag).is_some_and(|refusal| {
+            matches!(
+                refusal,
+                Refusal::NoPhaseGraph
+                    | Refusal::NotAPhase
+                    | Refusal::AlreadyInPhase
+                    | Refusal::NoPhaseEdge
+            )
+        });
+    if phase_refusal {
+        return 7;
+    }
+    let tangent_refusal = tags == Tags::Refusal
+        && Refusal::from_tag(tag).is_some_and(|refusal| {
+            matches!(
+                refusal,
+                Refusal::TangentOpen
+                    | Refusal::NoTangent
+                    | Refusal::BadTangent
+                    | Refusal::NotTheScope
+            )
+        });
+    let tangent_command = tags == Tags::Command
+        && Command::from_tag(tag)
+            .is_some_and(|command| matches!(command, Command::OpenTangent | Command::CloseTangent));
+    if tangent_refusal || tangent_command {
+        return 7;
+    }
+    if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
+        return 7;
     }
     let capped =
         tags == Tags::SettleReason && SettleReason::from_tag(tag) == Some(SettleReason::Capped);
@@ -3134,6 +3789,19 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v5("tools", Holds::Strings),
                 may_v7("template_kwargs", Holds::TemplateKwargs),
                 may_v7("unsent", Holds::Unsent),
+                may_v7("approvals_off", Holds::Flag),
+                may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
+                may_v7("levers", Holds::Words),
+                may_v7("fork_asks", Text),
+                may_v7("fork_asks_digest", Text),
+                may_v7("reasoning_effort_default", Text),
+                may_v7("phases", Holds::Strings),
+                may_v7("phase_transitions", Holds::PhaseMoves),
+                may_v7("opening_phase", Text),
+                may_v7("instruction_files", Holds::InstructionFiles),
+                may_v7("tool_output", Tag(Tags::ToolOutputState)),
+                may_v7("tool_output_max_lines", Holds::Count),
+                may_v7("tool_output_max_bytes", Holds::Count),
             ];
             F
         }
@@ -3156,6 +3824,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("lane", Tag(Tags::Lane)),
                 may_v2("head_sha256", Holds::Digest),
                 may_v5("fork", Count),
+                may_v7("max_tokens", Count),
             ];
             F
         }
@@ -3259,6 +3928,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v4("approval", Holds::Approval),
                 may_v4("files", Holds::Files),
                 may_v5("shown", Text),
+                may_v7("recovered_from", Text),
             ];
             F
         }
@@ -3269,6 +3939,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("at", Count),
                 must_v5("why", Tag(Tags::Warrant)),
                 must_v5("question", Text),
+                may_v7("view", Text),
+                may_v7("ask", Text),
             ];
             F
         }
@@ -3285,6 +3957,42 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("op", Tag(Tags::PatchOp)),
                 must_v5("entry", Holds::Entry),
                 may_v5("supersedes", Text),
+                may_v7("tangent", Text),
+            ];
+            F
+        }
+        Kind::Capture => {
+            const F: &[Field] = &[
+                must_v7("request", Count),
+                must_v7("call", Text),
+                must_v7("tool", Text),
+                must_v7("outcome", Text),
+                must_v7("entries", Holds::Strings),
+                may_v7("why", Text),
+            ];
+            F
+        }
+        Kind::Reminded => {
+            const F: &[Field] = &[must_v7("turn", Count), must_v7("text", Text)];
+            F
+        }
+        Kind::TangentOpen => {
+            const F: &[Field] = &[
+                must_v7("id", Text),
+                must_v7("at_turn", Count),
+                must_v7("trunk_messages", Count),
+            ];
+            F
+        }
+        Kind::TangentClose => {
+            const F: &[Field] = &[
+                must_v7("id", Text),
+                must_v7("at_turn", Count),
+                must_v7("kept", Holds::Strings),
+                must_v7("dropped", Holds::Strings),
+                must_v7("parked", Holds::Strings),
+                must_v7("prefix_intact", Holds::Flag),
+                must_v7("rolled_back", Count),
             ];
             F
         }
@@ -3298,6 +4006,36 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v6("render", Text),
                 must_v6("carried_entries", Count),
                 must_v6("carried_turns", Count),
+                may_v7("tail_tokens", Count),
+                may_v7("carried_tokens", Count),
+                may_v7("phase", Holds::PhaseMove),
+                may_v7("tool_outputs", Tag(Tags::SeamToolOutputs)),
+                may_v7("outputs", Text),
+                may_v7("carried_outputs", Count),
+                may_v7("carried_output_bytes", Count),
+                may_v7("placement", Tag(Tags::RenderPlacement)),
+                may_v7("render_budget_tokens", Count),
+                may_v7("render_over_budget", Text),
+                may_v7("render_tokens", Count),
+                may_v7("render_reduced", Count),
+            ];
+            F
+        }
+        Kind::Recalled => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("recall", Tag(Tags::RecallState)),
+                must_v7("text", Text),
+                must_v7("items", Holds::RecalledItems),
+            ];
+            F
+        }
+        Kind::Delivered => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("framing", Tag(Tags::Framing)),
+                must_v7("text", Text),
+                must_v7("lines", Holds::DeliveredLines),
             ];
             F
         }
@@ -3359,7 +4097,13 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Serving => "Serving".to_owned(),
         Holds::TemplateKwargs => "TemplateKwargs".to_owned(),
         Holds::Unsent => "Unsent".to_owned(),
+        Holds::PhaseMove => "PhaseMove".to_owned(),
+        Holds::PhaseMoves => "PhaseMove[]".to_owned(),
+        Holds::InstructionFiles => "InstructionFile[]".to_owned(),
+        Holds::DeliveredLines => "NoteLine[]".to_owned(),
+        Holds::RecalledItems => "RecalledItem[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
+        Holds::Words => "Record<string, string>".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
         Holds::Entry => "PatchEntry".to_owned(),
@@ -3457,6 +4201,10 @@ pub fn typescript() -> String {
         ("Serving", SERVING),
         ("TemplateKwargs", TEMPLATE_KWARGS),
         ("Unsent", UNSENT),
+        ("PhaseMove", PHASE_MOVE),
+        ("InstructionFile", INSTRUCTION_FILE),
+        ("NoteLine", DELIVERED_LINE),
+        ("RecalledItem", RECALLED_ITEM),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
@@ -3559,8 +4307,84 @@ fn to_value(line: &Line) -> Value {
             tools,
             template_kwargs,
             unsent,
+            approvals_off,
+            fork_delivery,
+            levers,
+            fork_asks,
+            reasoning_effort_default,
+            tool_output,
+            phases,
+            phase_transitions,
+            opening_phase,
+            instruction_files,
         } => {
             put("version", Value::Integer(*version));
+            if let Some(phases) = phases {
+                put(
+                    "phases",
+                    Value::Array(phases.iter().map(|name| text(name)).collect()),
+                );
+            }
+            if let Some(moves) = phase_transitions {
+                put(
+                    "phase_transitions",
+                    Value::Array(moves.iter().map(phase_move_value).collect()),
+                );
+            }
+            if let Some(phase) = opening_phase {
+                put("opening_phase", text(phase));
+            }
+            if let Some(asks) = fork_asks {
+                put("fork_asks", text(&asks.name));
+                if let Some(digest) = &asks.digest {
+                    put("fork_asks_digest", text(digest));
+                }
+            }
+            if let Some(effort) = reasoning_effort_default {
+                put("reasoning_effort_default", text(effort));
+            }
+            if let Some(files) = instruction_files {
+                put(
+                    "instruction_files",
+                    Value::Array(
+                        files
+                            .iter()
+                            .map(|file| {
+                                Value::Object(BTreeMap::from([
+                                    ("path".to_owned(), text(&file.path)),
+                                    ("sha256".to_owned(), text(&file.sha256)),
+                                ]))
+                            })
+                            .collect(),
+                    ),
+                );
+            }
+            if let Some(levers) = levers {
+                put(
+                    "levers",
+                    Value::Object(
+                        levers
+                            .iter()
+                            .map(|(lever, state)| (lever.clone(), text(state)))
+                            .collect(),
+                    ),
+                );
+            }
+            if let Some(delivery) = fork_delivery {
+                put("fork_delivery", text(delivery.tag()));
+            }
+            if let Some(cap) = tool_output {
+                put("tool_output", text(cap.state.tag()));
+                if let Some(lines) = cap.max_lines {
+                    put("tool_output_max_lines", count(lines));
+                }
+                if let Some(bytes) = cap.max_bytes {
+                    put("tool_output_max_bytes", count(bytes));
+                }
+            }
+            if let Some(off) = approvals_off {
+                put("approvals_off", Value::Boolean(*off));
+            }
             put("opened", count(*opened));
             put("model", text(model));
             put(
@@ -3611,6 +4435,9 @@ fn to_value(line: &Line) -> Value {
                 if let Some(effort) = &kwargs.reasoning_effort {
                     object.insert("reasoning_effort".to_owned(), text(effort));
                 }
+                if let Some(preserve) = kwargs.preserve_thinking {
+                    object.insert("preserve_thinking".to_owned(), Value::Boolean(preserve));
+                }
                 put("template_kwargs", Value::Object(object));
             }
             if let Some(unsent) = unsent {
@@ -3650,6 +4477,7 @@ fn to_value(line: &Line) -> Value {
             lane,
             head_sha256,
             fork,
+            max_tokens,
         } => {
             put("turn", count(u64::from(*turn)));
             put("lane", text(lane.tag()));
@@ -3658,6 +4486,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(fork) = fork {
                 put("fork", count(*fork));
+            }
+            if let Some(max_tokens) = max_tokens {
+                put("max_tokens", count(*max_tokens));
             }
             Kind::Request
         }
@@ -3823,6 +4654,7 @@ fn to_value(line: &Line) -> Value {
             approval,
             files,
             shown,
+            recovered_from,
         } => {
             put("request", count(*request));
             put("turn", count(u64::from(*turn)));
@@ -3878,6 +4710,9 @@ fn to_value(line: &Line) -> Value {
             if let Some(shown) = shown {
                 put("shown", text(shown));
             }
+            if let Some(source) = recovered_from {
+                put("recovered_from", text(source));
+            }
             Kind::ToolCall
         }
         Event::Fork {
@@ -3886,12 +4721,20 @@ fn to_value(line: &Line) -> Value {
             at,
             why,
             question,
+            view,
+            ask,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
             put("at", count(*at));
             put("why", text(why.tag()));
             put("question", text(question));
+            if let Some(view) = view {
+                put("view", text(view));
+            }
+            if let Some(ask) = ask {
+                put("ask", text(ask));
+            }
             Kind::Fork
         }
         Event::ForkSettled { fork, outcome } => {
@@ -3904,6 +4747,7 @@ fn to_value(line: &Line) -> Value {
             op,
             entry,
             supersedes,
+            tangent,
         } => {
             put("fork", count(*fork));
             put("op", text(op.tag()));
@@ -3918,7 +4762,65 @@ fn to_value(line: &Line) -> Value {
             if let Some(replaced) = supersedes {
                 put("supersedes", text(replaced));
             }
+            if let Some(tangent) = tangent {
+                put("tangent", text(tangent));
+            }
             Kind::Patch
+        }
+        Event::Capture {
+            request,
+            call,
+            tool,
+            outcome,
+            entries,
+            why,
+        } => {
+            put("request", count(*request));
+            put("call", text(call));
+            put("tool", text(tool));
+            put("outcome", text(outcome));
+            put(
+                "entries",
+                Value::Array(entries.iter().map(|id| text(id)).collect()),
+            );
+            if let Some(why) = why {
+                put("why", text(why));
+            }
+            Kind::Capture
+        }
+        Event::Reminded { turn, text: note } => {
+            put("turn", count(u64::from(*turn)));
+            put("text", text(note));
+            Kind::Reminded
+        }
+        Event::TangentOpen {
+            id,
+            at_turn,
+            trunk_messages,
+        } => {
+            put("id", text(id));
+            put("at_turn", count(u64::from(*at_turn)));
+            put("trunk_messages", count(*trunk_messages));
+            Kind::TangentOpen
+        }
+        Event::TangentClose {
+            id,
+            at_turn,
+            kept,
+            dropped,
+            parked,
+            prefix_intact,
+            rolled_back,
+        } => {
+            let list = |ids: &[String]| Value::Array(ids.iter().map(|id| text(id)).collect());
+            put("id", text(id));
+            put("at_turn", count(u64::from(*at_turn)));
+            put("kept", list(kept));
+            put("dropped", list(dropped));
+            put("parked", list(parked));
+            put("prefix_intact", Value::Boolean(*prefix_intact));
+            put("rolled_back", count(*rolled_back));
+            Kind::TangentClose
         }
         Event::Seam {
             at_turn,
@@ -3929,8 +4831,20 @@ fn to_value(line: &Line) -> Value {
             render,
             carried_entries,
             carried_turns,
+            tail_tokens,
+            carried_tokens,
+            phase,
+            tool_outputs,
+            outputs,
+            carried_outputs,
+            carried_output_bytes,
+            placement,
+            render_budget,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
+            if let Some(moved) = phase {
+                put("phase", phase_move_value(moved));
+            }
             put("reason", text(reason.tag()));
             put("prefix_hash_before", text(prefix_hash_before));
             put("prefix_hash_after", text(prefix_hash_after));
@@ -3938,11 +4852,98 @@ fn to_value(line: &Line) -> Value {
             put("render", text(render));
             put("carried_entries", count(*carried_entries));
             put("carried_turns", count(*carried_turns));
+            if let Some(tokens) = tail_tokens {
+                put("tail_tokens", count(*tokens));
+            }
+            if let Some(tokens) = carried_tokens {
+                put("carried_tokens", count(*tokens));
+            }
+            if let Some(state) = tool_outputs {
+                put("tool_outputs", text(state.tag()));
+            }
+            if let Some(section) = outputs {
+                put("outputs", text(section));
+            }
+            if let Some(n) = carried_outputs {
+                put("carried_outputs", count(*n));
+            }
+            if let Some(n) = carried_output_bytes {
+                put("carried_output_bytes", count(*n));
+            }
+            if let Some(placement) = placement {
+                put("placement", text(placement.tag()));
+            }
+            if let Some(budget) = render_budget {
+                put("render_budget_tokens", count(budget.tokens));
+                put("render_over_budget", text(&budget.over));
+                put("render_tokens", count(budget.rendered));
+                put("render_reduced", count(budget.reduced));
+            }
             Kind::Seam
+        }
+        Event::Delivered {
+            turn,
+            framing,
+            text: note,
+            lines,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("framing", text(framing.tag()));
+            put("text", text(note));
+            put(
+                "lines",
+                Value::Array(
+                    lines
+                        .iter()
+                        .map(|line| {
+                            Value::Object(BTreeMap::from([
+                                ("entry".to_owned(), text(&line.entry)),
+                                ("op".to_owned(), text(line.op.tag())),
+                                ("template".to_owned(), text(&line.template)),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            );
+            Kind::Delivered
+        }
+        Event::Recalled {
+            turn,
+            recall,
+            text: note,
+            items,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("recall", text(recall.tag()));
+            put("text", text(note));
+            put(
+                "items",
+                Value::Array(
+                    items
+                        .iter()
+                        .map(|item| {
+                            Value::Object(BTreeMap::from([
+                                ("key".to_owned(), text(&item.key)),
+                                ("sha256".to_owned(), text(&item.sha256)),
+                                ("score".to_owned(), count(item.score)),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            );
+            Kind::Recalled
         }
     };
     put("kind", text(kind.tag()));
     Value::Object(object)
+}
+
+/// A phase move as the log writes it.
+fn phase_move_value(moved: &PhaseMove) -> Value {
+    Value::Object(BTreeMap::from([
+        ("from".to_owned(), Value::String(moved.from.clone())),
+        ("to".to_owned(), Value::String(moved.to.clone())),
+    ]))
 }
 
 /// A claim's `served` as the log writes it: each [`SERVED_FIELD`] key, and
@@ -4147,6 +5148,22 @@ impl Fields<'_> {
     }
 
     /// A list of text, when carried (v3).
+    /// An object of names to words, when carried (v7, #573).
+    fn optional_words(&self, key: &str) -> Result<Option<BTreeMap<String, String>>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::Object(words)) => words
+                .iter()
+                .map(|(name, word)| match word {
+                    Value::String(word) => Ok((name.clone(), word.clone())),
+                    _ => Err(format!("`{key}`'s `{name}` is not a word")),
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .map(Some),
+            Some(_) => Err(format!("`{key}` is not an object")),
+        }
+    }
+
     fn optional_strings(&self, key: &str) -> Result<Option<Vec<String>>, String> {
         match self.0.get(key) {
             None => Ok(None),
@@ -4264,6 +5281,70 @@ impl Fields<'_> {
                     .to_owned(),
             ),
         }
+    }
+
+    /// A `delivered` line's `lines` (v7): a non-empty list, each entry the
+    /// keys of [`DELIVERED_LINE`] and nothing else.
+    fn recalled_items(&self, key: &str) -> Result<Vec<RecalledItem>, String> {
+        let Value::Array(entries) = self.get(key)? else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a recall carries at least one item"
+            ));
+        }
+        let mut items = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !RECALLED_ITEM.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            items.push(RecalledItem {
+                key: inner.string("key").map_err(at)?,
+                sha256: inner.digest("sha256").map_err(at)?,
+                score: inner.count("score").map_err(at)?,
+            });
+        }
+        Ok(items)
+    }
+
+    fn delivered_lines(&self, key: &str) -> Result<Vec<NoteLine>, String> {
+        let Value::Array(entries) = self.get(key)? else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a note delivers at least one line"
+            ));
+        }
+        let mut lines = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !DELIVERED_LINE.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            lines.push(NoteLine {
+                entry: inner.string("entry").map_err(at)?,
+                op: inner.tag("op", PatchOp::from_tag).map_err(at)?,
+                template: inner.string("template").map_err(at)?,
+            });
+        }
+        Ok(lines)
     }
 
     /// A claim's `served` (v7): a non-empty list, each entry the keys of
@@ -4452,6 +5533,7 @@ impl Fields<'_> {
                 None => None,
                 Some(_) => Some(inner.string("reasoning_effort").map_err(at)?),
             },
+            preserve_thinking: inner.optional_flag("preserve_thinking").map_err(at)?,
         };
         if kwargs == TemplateKwargs::default() {
             return Err(format!(
@@ -4459,6 +5541,70 @@ impl Fields<'_> {
             ));
         }
         Ok(kwargs)
+    }
+
+    /// A seam's `phase` (v7, #563).
+    fn phase_move(&self, key: &str) -> Result<PhaseMove, String> {
+        Fields(self.object(key, PHASE_MOVE)?)
+            .phase_move_of()
+            .map_err(|why| format!("`{key}`: {why}"))
+    }
+
+    /// These fields as a phase move: `from` and `to`, nothing else.
+    fn phase_move_of(&self) -> Result<PhaseMove, String> {
+        if let Some(extra) = self
+            .0
+            .keys()
+            .find(|key| !PHASE_MOVE.iter().any(|f| f.key == key.as_str()))
+        {
+            return Err(format!("carries `{extra}`"));
+        }
+        Ok(PhaseMove {
+            from: self.string("from")?,
+            to: self.string("to")?,
+        })
+    }
+
+    /// A `session.start`'s `instruction_files` (v7, #559), when carried: a
+    /// non-empty list of `{path, sha256}`, each path relative -- never
+    /// absolute, never a home's.
+    fn instruction_files(&self, key: &str) -> Result<Option<Vec<InstructionFile>>, String> {
+        let Some(value) = self.0.get(key) else {
+            return Ok(None);
+        };
+        let Value::Array(entries) = value else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a session that injected none carries no `{key}`"
+            ));
+        }
+        let mut files = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !INSTRUCTION_FILE.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            let path = inner.string("path").map_err(at)?;
+            if path.starts_with('/') || path.starts_with('~') || path.contains('\\') {
+                return Err(at(format!(
+                    "`path` is `{path}`: relative to the worktree, never absolute or a home's"
+                )));
+            }
+            files.push(InstructionFile {
+                path,
+                sha256: inner.digest("sha256").map_err(at)?,
+            });
+        }
+        Ok(Some(files))
     }
 
     /// A `session.start`'s `unsent` (v7, R1): an object of [`UNSENT`]'s keys.
@@ -4540,6 +5686,26 @@ mod tests {
                 tools: None,
                 template_kwargs: None,
                 unsent: None,
+                approvals_off: None,
+                fork_delivery: None,
+                reasoning_effort_default: None,
+                instruction_files: None,
+                levers: Some(BTreeMap::from([
+                    ("fork-asks".to_owned(), "v3".to_owned()),
+                    ("tangent-closure".to_owned(), "off".to_owned()),
+                ])),
+                tool_output: Some(ToolOutput {
+                    state: ToolOutputState::Capped,
+                    max_lines: Some(2000),
+                    max_bytes: Some(51_200),
+                }),
+                phases: None,
+                phase_transitions: None,
+                opening_phase: None,
+                fork_asks: Some(ForkAsks {
+                    name: "v4".to_owned(),
+                    digest: Some("0123456789abcdef".to_owned()),
+                }),
             },
         }
     }
@@ -4564,6 +5730,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::Delta {
                 request: 3,
@@ -4607,6 +5774,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::RequestFailed {
                 request: 13,
@@ -4647,6 +5815,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::Progress {
                 request: 20,
@@ -4706,6 +5875,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::RequestFailed {
                 request: 29,
@@ -4750,6 +5920,7 @@ mod tests {
                 }),
                 files: None,
                 shown: None,
+                recovered_from: None,
             },
         ];
         // v5 (#374): a scoping turn answered and settled `final`, then the
@@ -4780,6 +5951,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: None,
                 fork: None,
+                max_tokens: None,
             },
             Event::Response {
                 to_request: request,
@@ -4804,12 +5976,15 @@ mod tests {
                 at: request,
                 why: Warrant::Scoping,
                 question: "what did the operator decide".to_owned(),
+                view: Some("last:2".to_owned()),
+                ask: Some("judgment".to_owned()),
             },
             Event::Request {
                 turn: 5,
                 lane: Lane::Interview,
                 head_sha256: None,
                 fork: Some(fork),
+                max_tokens: Some(4000),
             },
             Event::Response {
                 to_request: fork + 1,
@@ -4833,6 +6008,7 @@ mod tests {
                     category: None,
                 },
                 supersedes: None,
+                tangent: Some("t/1".to_owned()),
             },
             Event::Patch {
                 fork,
@@ -4843,6 +6019,41 @@ mod tests {
                     category: Some("scope".to_owned()),
                 },
                 supersedes: Some("d1".to_owned()),
+                tangent: None,
+            },
+            Event::TangentOpen {
+                id: "t/1".to_owned(),
+                at_turn: 5,
+                trunk_messages: 11,
+            },
+            Event::TangentClose {
+                id: "t/1".to_owned(),
+                at_turn: 5,
+                kept: vec!["d2".to_owned()],
+                dropped: Vec::new(),
+                parked: Vec::new(),
+                prefix_intact: true,
+                rolled_back: 0,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-c".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "recorded".to_owned(),
+                entries: vec!["r3/call-c".to_owned()],
+                why: None,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-d".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "dropped".to_owned(),
+                entries: Vec::new(),
+                why: Some("the groundedness gate kept nothing of it".to_owned()),
+            },
+            Event::Reminded {
+                turn: 5,
+                text: "Anything you meant to record?".to_owned(),
             },
         ]);
         events
@@ -4868,6 +6079,7 @@ mod tests {
                 | Holds::Serving
                 | Holds::TemplateKwargs
                 | Holds::Unsent
+                | Holds::PhaseMove
                 | Holds::ToolCallPiece
                 | Holds::Approval
                 | Holds::Entry,
@@ -4886,7 +6098,15 @@ mod tests {
             (Holds::Text, Value::String(_)) | (Holds::Flag, Value::Boolean(_)) => true,
             (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
             (Holds::WorkingDirectory, Value::String(cwd)) => is_a_working_directory(cwd),
-            (Holds::Files | Holds::Served, Value::Array(entries)) => {
+            (
+                Holds::Files
+                | Holds::Served
+                | Holds::DeliveredLines
+                | Holds::RecalledItems
+                | Holds::PhaseMoves
+                | Holds::InstructionFiles,
+                Value::Array(entries),
+            ) => {
                 let declared = object_fields(holds).expect("a list of objects");
                 !entries.is_empty()
                     && entries.iter().all(|entry| match entry {
@@ -4905,6 +6125,9 @@ mod tests {
             }
             (Holds::Strings, Value::Array(items)) => {
                 items.iter().all(|item| matches!(item, Value::String(_)))
+            }
+            (Holds::Words, Value::Object(words)) => {
+                words.values().all(|word| matches!(word, Value::String(_)))
             }
             (Holds::Tag(tags), Value::String(tag)) => tags.tags().contains(&tag.as_str()),
             (Holds::Head, Value::Array(messages)) => messages.iter().all(|m| match m {
@@ -5096,6 +6319,11 @@ mod tests {
             ("serving", SERVING),
             ("template_kwargs", TEMPLATE_KWARGS),
             ("unsent", UNSENT),
+            ("phase", PHASE_MOVE),
+            ("phase_transitions", PHASE_MOVE),
+            ("instruction_files", INSTRUCTION_FILE),
+            ("lines", DELIVERED_LINE),
+            ("items", RECALLED_ITEM),
             ("tool_call", TOOL_CALL_PIECE),
             ("approval", APPROVAL),
             ("files", RECORDED_FILE),
@@ -5212,7 +6440,20 @@ mod tests {
                     // A claim's two forms are the reader's other refusal
                     // ([`Fields::claimed_engine`], v7): `served` or the older
                     // keys, never both.
-                    if object.contains_key("served") && ["engine_build"].contains(absent) {
+                    // Without a claim, `engine_build` alone is part of a claim
+                    // that is not there; beside `served` it is the other form.
+                    if ["engine_build"].contains(absent) {
+                        continue;
+                    }
+                    // A key of an all-or-none set, added alone, is the
+                    // reader's `all_or_none` refusal, not an exclusivity.
+                    if all_or_none(kind).contains(absent) {
+                        continue;
+                    }
+                    // A patch names the entry it replaces exactly when its
+                    // `op` is `supersede`: the reader's op rule, not the key
+                    // beside it.
+                    if kind == Kind::Patch && *absent == "supersedes" {
                         continue;
                     }
                     let mut both = object.clone();
@@ -5267,6 +6508,8 @@ mod tests {
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
                         || (tags == Tags::PatchOp && why.contains("`supersedes`"))
+                        || (tags == Tags::ToolOutputState
+                            && why.contains("`tool_output` is `keep` and carries a limit"))
                 },
                 |_| true,
             )
@@ -5417,15 +6660,59 @@ mod tests {
         assert_eq!(parse(&document), Ok(lines));
     }
 
+    /// A `session.start`'s cap (#554): `capped` with both limits, `keep`
+    /// with neither; anything else refused.
+    #[test]
+    fn a_tool_output_cap_carries_its_limits_exactly_when_capped() {
+        let start = |extra: &str| {
+            format!(
+                r#"{{"head":[],"kind":"session.start","model":"m","opened":1,"seq":0,"t":0,"version":7{extra}}}"#
+            )
+        };
+        assert!(
+            line(&start(
+                r#","tool_output":"capped","tool_output_max_bytes":10,"tool_output_max_lines":2"#
+            ))
+            .is_ok()
+        );
+        assert!(line(&start(r#","tool_output":"keep""#)).is_ok());
+        for (extra, says) in [
+            (
+                r#","tool_output":"capped","tool_output_max_lines":2"#,
+                "without both",
+            ),
+            (
+                r#","tool_output":"keep","tool_output_max_lines":2"#,
+                "carries a limit",
+            ),
+            (r#","tool_output_max_bytes":10"#, "without `tool_output`"),
+        ] {
+            let refused = line(&start(extra)).expect_err(extra);
+            assert!(refused.contains(says), "{extra}: {refused}");
+        }
+    }
+
     #[test]
     fn a_v0_log_carrying_what_arrived_in_v1_is_refused_and_line_reads_it() {
         // The whole-log reader scopes by the version `session.start` states;
         // the per-line reader, which a resuming reader uses, reads the union.
         let mut lines = every_event();
-        let Event::SessionStart { version, .. } = &mut lines[0].event else {
+        let Event::SessionStart {
+            version,
+            tool_output,
+            levers,
+            fork_asks,
+            ..
+        } = &mut lines[0].event
+        else {
             panic!("the first line opens the session");
         };
         *version = 0;
+        // A v7 key on the first line would be the one named; the check is of
+        // what arrived in v1, further down.
+        *tool_output = None;
+        *levers = None;
+        *fork_asks = None;
         let document: String = lines.iter().map(|line| render(line) + "\n").collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");
@@ -5535,20 +6822,20 @@ mod tests {
         };
         for scope in ApprovalScope::ALL {
             let tag = scope.tag();
-            if *scope == ApprovalScope::Preseeded {
+            if matches!(scope, ApprovalScope::Preseeded | ApprovalScope::Off) {
                 line(&call(&format!(r#"{{"scope":"{tag}"}}"#))).unwrap_or_else(|why| {
                     panic!("{tag} under {outcome}, without `decided_at` and `why`: {why}")
                 });
                 for decided_at in [0, 45, 46] {
                     refused_naming(
                         format!(r#"{{"decided_at":{decided_at},"scope":"{tag}"}}"#),
-                        "a `preseeded` approval carries `decided_at`",
+                        &format!("a `{tag}` approval carries `decided_at`"),
                         "a preseeded approval with `decided_at`",
                     );
                 }
                 refused_naming(
                     format!(r#"{{"scope":"{tag}","why":"not_approved"}}"#),
-                    "a `preseeded` approval carries `why`",
+                    &format!("a `{tag}` approval carries `why`"),
                     "a preseeded approval with `why`",
                 );
                 continue;
@@ -5926,7 +7213,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam"
+             fork.settled patch seam delivered recalled tangent.open tangent.close capture reminded"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -5934,7 +7221,8 @@ mod tests {
         );
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
-            "in-flight ended nothing-in-flight seam-not-built nothing-to-seam stale"
+            "in-flight ended nothing-in-flight seam-not-built nothing-to-seam no-phase-graph not-a-phase \
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -5950,7 +7238,7 @@ mod tests {
         );
         assert_eq!(
             tags(ApprovalScope::ALL.iter().map(|it| it.tag()).collect()),
-            "once session workspace preseeded"
+            "once session workspace preseeded off"
         );
         assert_eq!(
             tags(EngineIdentity::ALL.iter().map(|it| it.tag()).collect()),

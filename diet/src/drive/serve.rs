@@ -828,7 +828,7 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
-            Command::DeclareSeam => match self.session.declare_seam(gap) {
+            Command::DeclareSeam(to) => match self.session.declare_seam_to(gap, to.as_deref()) {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
@@ -836,6 +836,16 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
+            Command::OpenTangent(id) => match self.session.open_tangent(&id) {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
+            Command::CloseTangent(dispositions) => {
+                match self.session.close_tangent(&dispositions) {
+                    Ok(()) => (200, BTreeMap::new()),
+                    Err(rejection) => rejected(rejection),
+                }
+            }
         }
     }
 }
@@ -854,8 +864,13 @@ enum Command {
     /// The words, and the digests of the uploads it attaches (#513).
     Ask(String, Vec<String>),
     Cancel(u32),
-    DeclareSeam,
+    /// A seam, and the phase to move to when one is named (#563).
+    DeclareSeam(Option<String>),
     End,
+    /// Open a tangent under this id (#22).
+    OpenTangent(String),
+    /// Close the open tangent with these dispositions, by entry id (#22).
+    CloseTangent(BTreeMap<String, crate::object::tangent::Disposition>),
 }
 
 impl Command {
@@ -873,7 +888,11 @@ impl Command {
         let takes: &[&str] = match kind {
             CommandKind::Ask => &["kind", "text", "idle_gap", "scoping", "files"],
             CommandKind::Cancel => &["kind", "turn", "idle_gap"],
-            CommandKind::DeclareSeam | CommandKind::End => &["kind", "idle_gap"],
+            CommandKind::DeclareSeam => &["kind", "idle_gap", "phase"],
+            CommandKind::End => &["kind", "idle_gap"],
+            // No idle gap (#22): a tangent's open and close end none.
+            CommandKind::OpenTangent => &["kind", "id"],
+            CommandKind::CloseTangent => &["kind", "dispositions"],
         };
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
@@ -906,8 +925,31 @@ impl Command {
                 Some(Value::Integer(turn)) => u32::try_from(*turn).ok().map(Self::Cancel),
                 _ => None,
             },
-            CommandKind::DeclareSeam => Some(Self::DeclareSeam),
+            CommandKind::DeclareSeam => match object.get("phase") {
+                None => Some(Self::DeclareSeam(None)),
+                Some(Value::String(to)) => Some(Self::DeclareSeam(Some(to.clone()))),
+                Some(_) => None,
+            },
             CommandKind::End => Some(Self::End),
+            CommandKind::OpenTangent => match object.get("id") {
+                Some(Value::String(id)) => Some(Self::OpenTangent(id.clone())),
+                _ => None,
+            },
+            CommandKind::CloseTangent => match object.get("dispositions") {
+                Some(Value::Object(ruled)) => ruled
+                    .iter()
+                    .map(|(id, word)| match word {
+                        Value::String(word) => crate::object::tangent::Disposition::ALL
+                            .iter()
+                            .copied()
+                            .find(|disposition| disposition.tag() == word)
+                            .map(|disposition| (id.clone(), disposition)),
+                        _ => None,
+                    })
+                    .collect::<Option<BTreeMap<_, _>>>()
+                    .map(Self::CloseTangent),
+                _ => None,
+            },
         }?;
         Some(Posted {
             command,
@@ -1289,6 +1331,36 @@ mod tests {
         }
     }
 
+    /// #22: `open-tangent` takes an id, `close-tangent` a map of entry ids to
+    /// `keep`, `drop` or `park`; anything else, or an idle gap, is no command.
+    #[test]
+    fn the_tangent_commands_read_their_bodies_and_nothing_else() {
+        use crate::object::tangent::Disposition;
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"open-tangent","id":"t/1"}"#),
+            Some(Command::OpenTangent(id)) if id == "t/1"
+        ));
+        let Some(Command::CloseTangent(ruled)) =
+            read(r#"{"kind":"close-tangent","dispositions":{"a":"keep","b":"drop","c":"park"}}"#)
+        else {
+            panic!("a close");
+        };
+        assert_eq!(
+            ruled.values().copied().collect::<Vec<_>>(),
+            [Disposition::Keep, Disposition::Drop, Disposition::Park]
+        );
+        for refused in [
+            r#"{"kind":"close-tangent","dispositions":{"a":"forget"}}"#,
+            r#"{"kind":"open-tangent"}"#,
+            r#"{"kind":"open-tangent","id":"t","idle_gap":{}}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
     #[test]
     fn an_ask_over_http_streams_its_answer_to_a_reader_already_listening() {
         let (_session, server) = serve(Canned::new([deltas(&["Hel", "lo"])]), quick());
