@@ -591,7 +591,15 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("substrate_rung".to_owned(), word("substrate")),
         ("tool_surface".to_owned(), surface),
         ("tool_call_text_fallback".to_owned(), text_fallback),
-        ("instruction_files".to_owned(), "off".to_owned()),
+        (
+            "instruction_files".to_owned(),
+            if crate::drive::instructions::enabled(regimen) {
+                "on"
+            } else {
+                "off"
+            }
+            .to_owned(),
+        ),
         ("tangent_closure".to_owned(), undeclared()),
         ("capture_modality".to_owned(), undeclared()),
         ("interview_routing_and_cadence".to_owned(), warrant),

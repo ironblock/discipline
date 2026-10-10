@@ -230,6 +230,11 @@ export interface PhaseMove {
   to: string;
 }
 
+export interface InstructionFile {
+  path: string;
+  sha256: string;
+}
+
 export interface NoteLine {
   entry: string;
   op: PatchOp;
@@ -291,6 +296,7 @@ export type SessionStartLine = {
   phases?: string[];
   phase_transitions?: PhaseMove[];
   opening_phase?: string;
+  instruction_files?: InstructionFile[];
   tool_output?: ToolOutputState;
   tool_output_max_lines?: number;
   tool_output_max_bytes?: number;

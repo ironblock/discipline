@@ -321,6 +321,34 @@ fn serve(args: &[String]) -> ExitCode {
             return fail(EXIT_USAGE, &format!("{path}: {why}"));
         }
     };
+    // The instruction files the worktree and its parents carry (#559), as
+    // the harnesses we compare against put them in the system prompt: on
+    // unless the regimen says `instruction_files = "off"`, and only where
+    // commands run, since that is the worktree the model works in.
+    let instructions = match (worktree.as_deref(), regimen_file.as_deref()) {
+        (Some(tree), Some(path)) => {
+            let on = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|text| regimen::parse(&text).ok())
+                .is_none_or(|read| diet::drive::instructions::enabled(&read));
+            if on {
+                let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+                diet::drive::instructions::discover(std::path::Path::new(tree), home.as_deref())
+            } else {
+                Vec::new()
+            }
+        }
+        _ => Vec::new(),
+    };
+    let system = diet::drive::instructions::into_system(&system, &instructions);
+    let instruction_files: Vec<_> = instructions
+        .iter()
+        .filter(|file| !file.content.trim().is_empty())
+        .map(|file| diet::formats::log::InstructionFile {
+            path: file.path.clone(),
+            sha256: file.sha256.clone(),
+        })
+        .collect();
     let mut shape = trunk(model, system, max_output_tokens, sampler);
     // The regime's reasoning state, on every request, the forks' included
     // (R1): a clone of the trunk carries it.
@@ -483,6 +511,7 @@ fn serve(args: &[String]) -> ExitCode {
             (
                 unsent_budget.map(|budget_tokens| diet::formats::log::Unsent { budget_tokens }),
                 effort_default.clone(),
+                instruction_files,
             ),
         ),
     );

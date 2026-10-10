@@ -1998,6 +1998,77 @@ fn a_drive_server_opens_the_confinement_at_start_and_a_refusal_comes_before_any_
     assert!(stub.received().is_empty(), "no request reached the server");
 }
 
+/// #559: the worktree's `AGENTS.md`, from it up to its git root, goes into
+/// the system prompt in Qwen Code's wrapper, and `session.start` names each by
+/// its relative path and digest; `instruction_files = "off"` injects none.
+#[test]
+fn a_drive_server_puts_the_worktrees_agents_md_in_the_system_prompt() {
+    let repo = Dir::new("instructions-repo");
+    std::fs::create_dir_all(repo.0.join(".git")).expect("a git root");
+    std::fs::write(repo.0.join("AGENTS.md"), "Root rules.\n").expect("write");
+    let tree = repo.0.join("app");
+    std::fs::create_dir_all(&tree).expect("the worktree");
+    std::fs::write(tree.join("AGENTS.md"), "App rules.\n").expect("write");
+    let tree_path = tree.to_string_lossy().into_owned();
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    for (lever, injected) in [("", true), ("instruction_files = \"off\"\n", false)] {
+        let regimen = commands_regimen(
+            &format!("allowed_commands = []\n{lever}"),
+            "isolation = \"none\"",
+            "[limits]\nmax_steps = 4\n",
+        );
+        let path = regimen.0.to_string_lossy().into_owned();
+        let stub = Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info())
+            .expect("loopback");
+        let log_file = file_holding("log", "");
+        let logged = log_file.0.to_string_lossy().into_owned();
+        let _served = start(
+            &stub.url(),
+            &[
+                "--regimen",
+                &path,
+                "--worktree",
+                &tree_path,
+                "--auth-file",
+                &auth_path,
+                "--log",
+                &logged,
+            ],
+        );
+        let start_line = first_logged_line(&log_file.0);
+        let system = start_line["head"][0]["content"]
+            .as_str()
+            .unwrap_or_default()
+            .to_owned();
+        if injected {
+            assert!(
+                system.ends_with(
+                    "\n\n---\n\n--- Context from: ../AGENTS.md ---\nRoot rules.\n\
+                     --- End of Context from: ../AGENTS.md ---\n\n\
+                     --- Context from: AGENTS.md ---\nApp rules.\n\
+                     --- End of Context from: AGENTS.md ---"
+                ),
+                "{system}"
+            );
+            assert_eq!(
+                start_line["instruction_files"],
+                serde_json::json!([
+                    {"path": "../AGENTS.md", "sha256": diet::digest::sha256_hex(b"Root rules.\n")},
+                    {"path": "AGENTS.md", "sha256": diet::digest::sha256_hex(b"App rules.\n")},
+                ]),
+                "{start_line}"
+            );
+        } else {
+            assert!(!system.contains("Context from"), "{system}");
+            assert!(
+                start_line.get("instruction_files").is_none(),
+                "{start_line}"
+            );
+        }
+    }
+}
+
 /// A session that runs commands needs a credential, and its file is a
 /// secret no command reads (#298 review round 1, finding 1): with none,
 /// serve does not start; with one in a path the regimen declares writable,

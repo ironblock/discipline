@@ -256,6 +256,9 @@ pub enum Event {
         /// The template's default level, when thinking is on and none is
         /// sent.
         reasoning_effort_default: Option<String>,
+        /// The instruction files the system prompt carries (#559), by path
+        /// and digest: empty when none were injected.
+        instruction_files: Vec<log::InstructionFile>,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -689,7 +692,11 @@ pub fn interview_warrant(regimen: &Regimen) -> Result<Vec<log::Warrant>, String>
 pub type Declared = (
     Option<log::SubstrateClaim>,
     Option<Interview>,
-    (Option<log::Unsent>, Option<String>),
+    (
+        Option<log::Unsent>,
+        Option<String>,
+        Vec<log::InstructionFile>,
+    ),
 );
 
 /// What the capture gap runs under (#374): the rules that warrant its fork,
@@ -1177,7 +1184,13 @@ impl<S: Streaming + 'static> Session<S> {
     /// before any.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
-        Self::opened_as(transport, template, None, None, (None, None, (None, None)))
+        Self::opened_as(
+            transport,
+            template,
+            None,
+            None,
+            (None, None, (None, None, Vec::new())),
+        )
     }
 
     /// [`Session::open`], declaring what serves it -- the dialect it speaks
@@ -1190,7 +1203,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             Some(serving),
             None,
-            (None, None, (None, None)),
+            (None, None, (None, None, Vec::new())),
         )
     }
 
@@ -1208,7 +1221,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             Some(tools),
-            (None, None, (None, None)),
+            (None, None, (None, None, Vec::new())),
         )
     }
 
@@ -1231,7 +1244,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             tools,
-            (claim, interview, (None, None)),
+            (claim, interview, (None, None, Vec::new())),
         )
     }
 
@@ -1259,7 +1272,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, (unsent, reasoning_effort_default)): Declared,
+        (claim, interview, (unsent, reasoning_effort_default, instruction_files)): Declared,
     ) -> Self {
         // A head is the trunk before any turn; a tool result answers a call
         // made in one, and the log's head has no word for it (`role_of`).
@@ -1350,6 +1363,7 @@ impl<S: Streaming + 'static> Session<S> {
             approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
             fork_delivery,
             reasoning_effort_default,
+            instruction_files,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             phases,
         });
@@ -1932,11 +1946,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
             reasoning_effort_default,
             tool_output,
             phases,
+            instruction_files,
         } => log::Event::SessionStart {
             // #563: the graph, and the phase it opens in; nothing when none.
             phases: phases.as_ref().map(|(names, _, _)| names.clone()),
             phase_transitions: phases.as_ref().map(|(_, moves, _)| moves.clone()),
             opening_phase: phases.as_ref().map(|(_, _, first)| first.clone()),
+            // #559: by path and digest, their text in `head`; nothing when none.
+            instruction_files: Some(instruction_files.clone()).filter(|files| !files.is_empty()),
             fork_delivery: *fork_delivery,
             reasoning_effort_default: reasoning_effort_default.clone(),
             tool_output: tool_output.map(tool_output_of),
@@ -3580,6 +3597,17 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
     if patches.is_empty() {
         return (log::ForkOutcome::Decline, Vec::new());
     }
+    let Some(interview) = state.interview.as_ref() else {
+        return (log::ForkOutcome::Unparseable, Vec::new());
+    };
+    let patches = cited(patches, &interview.object);
+    applied(state, &patches, fork)
+}
+
+/// A fork's `patches`, applied to the working object (every op the format
+/// has, #562): one [`Event::Patched`] each, and each non-`add` op's entry
+/// held for the next ask's note when delivery is mid-turn (#550).
+fn applied(state: &mut State, patches: &[Patch], fork: u64) -> (log::ForkOutcome, Vec<Event>) {
     let Some(interview) = state.interview.as_mut() else {
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
@@ -3602,7 +3630,7 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
             Some((op, id.as_str().to_owned(), text))
         })
         .collect();
-    if interview.object.apply_turn(&patches).is_err() {
+    if interview.object.apply_turn(patches).is_err() {
         return (log::ForkOutcome::Unparseable, Vec::new());
     }
     let lines = patches
@@ -3611,6 +3639,53 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
         .collect();
     state.undelivered.extend(named);
     (log::ForkOutcome::Value, lines)
+}
+
+/// The prefix [`super::fold`] gives a `SUPERSEDE` field's entry: its kind's
+/// canonical tag.
+const SUPERSEDE_FIELD: &str = "supersede: ";
+
+/// `patches` with each `SUPERSEDE` field that cites a live entry of
+/// `object` made the supersession the format defines (#562): `SUPERSEDE:
+/// <id> <the entry that should stand>` voids `<id>`, linked, and records the
+/// rest under the field's own id. The seam's render shows each entry as
+/// `<id>\t<content>`, so the id is what a model that saw it can cite; quotes,
+/// backticks and brackets around it, and a colon or dash after it, are read
+/// past. A field that cites nothing live, or names no entry to stand, stays
+/// the addition [`super::fold`] made of it.
+fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
+    patches
+        .into_iter()
+        .map(|patch| {
+            let Patch::Add {
+                id,
+                content,
+                provenance,
+            } = &patch
+            else {
+                return patch;
+            };
+            let Some(field) = content.strip_prefix(SUPERSEDE_FIELD) else {
+                return patch;
+            };
+            let field = field.trim_start();
+            let (cited, rest) = field.split_once(char::is_whitespace).unwrap_or((field, ""));
+            let cited = cited.trim_matches(|c: char| "`'\"[]()<>*:,—-".contains(c));
+            let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || ":—-".contains(c));
+            let voids = match crate::object::EntryId::new(cited) {
+                Ok(voids) if !rest.is_empty() && object.live().any(|entry| entry.id == voids) => {
+                    voids
+                }
+                _ => return patch,
+            };
+            Patch::Supersede {
+                id: id.clone(),
+                content: rest.to_owned(),
+                voids,
+                provenance: provenance.clone(),
+            }
+        })
+        .collect()
 }
 
 /// One applied patch as its log line: its op, its entry -- the patch's own
@@ -4807,6 +4882,7 @@ pub(in crate::drive) mod tests {
             reasoning_effort_default: None,
             tool_output: None,
             phases: _,
+            instruction_files: _,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -4908,6 +4984,10 @@ pub(in crate::drive) mod tests {
                 reasoning_effort_default: Some("xhigh".to_owned()),
                 tool_output: Some(crate::drive::output::OutputCap::DEFAULT),
                 phases: None,
+                instruction_files: vec![log::InstructionFile {
+                    path: "AGENTS.md".to_owned(),
+                    sha256: "e".repeat(64),
+                }],
             },
             Event::Asked {
                 turn: 1,
@@ -5182,6 +5262,10 @@ pub(in crate::drive) mod tests {
                 approvals_off: Some(true),
                 fork_delivery: Some(log::ForkDelivery::Advisory),
                 reasoning_effort_default: Some("xhigh".to_owned()),
+                instruction_files: Some(vec![log::InstructionFile {
+                    path: "AGENTS.md".to_owned(),
+                    sha256: "e".repeat(64),
+                }]),
                 tool_output: Some(log::ToolOutput {
                     state: log::ToolOutputState::Capped,
                     max_lines: Some(2000),
@@ -7884,6 +7968,223 @@ pub(in crate::drive) mod tests {
 
     /// An `add` names no existing entry, and no measured sentence fits it:
     /// under a mid-turn delivery it is still carried at the seam only.
+    fn from_fork(index: u32) -> crate::object::Provenance {
+        crate::object::Provenance {
+            turn: 1,
+            lane: super::super::INTERVIEW.to_owned(),
+            fork: Some("f/9".to_owned()),
+            tangent: None,
+            index,
+        }
+    }
+
+    fn entry_id(id: &str) -> crate::object::EntryId {
+        crate::object::EntryId::new(id).expect("an id")
+    }
+
+    /// #562: a `SUPERSEDE` field citing a live entry's id is the format's
+    /// supersession; one citing nothing live, or naming nothing to stand,
+    /// stays the addition the fold made.
+    #[test]
+    fn a_supersede_field_citing_a_live_entry_voids_it_and_any_other_stays_an_add() {
+        let mut object = WorkingObject::open(regime());
+        object
+            .apply(&Patch::Add {
+                id: entry_id("interview-t1-0"),
+                content: "decision: a tracker".to_owned(),
+                provenance: from_fork(0),
+            })
+            .expect("applied");
+        for (answer, voids) in [
+            (
+                "SUPERSEDE: interview-t1-0 decision: a tracker for two teams\n",
+                Some("interview-t1-0"),
+            ),
+            (
+                "SUPERSEDE: `interview-t1-0`: decision: a tracker for two teams\n",
+                Some("interview-t1-0"),
+            ),
+            ("SUPERSEDE: interview-t9-9 decision: something else\n", None),
+            ("SUPERSEDE: interview-t1-0\n", None),
+        ] {
+            let (patches, _) = super::super::fold(answer, 2, super::super::INTERVIEW, Some("f/9"))
+                .expect("folded");
+            let patches = cited(patches, &object);
+            match (&patches[..], voids) {
+                (
+                    [
+                        Patch::Supersede {
+                            voids: got,
+                            content,
+                            ..
+                        },
+                    ],
+                    Some(want),
+                ) => {
+                    assert_eq!(got.as_str(), want, "{answer}");
+                    assert_eq!(content, "decision: a tracker for two teams", "{answer}");
+                }
+                ([Patch::Add { .. }], None) => {}
+                (other, _) => panic!("{answer}: {other:?}"),
+            }
+        }
+    }
+
+    /// #562: every op the format has, applied through serve's fork path:
+    /// the entry's state is the format's, a `patch` line is logged with the
+    /// op, and under mid-turn delivery each op but `add` is held for the
+    /// next ask's note.
+    #[test]
+    fn each_patch_op_a_fork_emits_applies_as_the_format_says_and_all_but_add_are_delivered() {
+        use crate::object::EntryState;
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.delivery = log::ForkDelivery::Advisory;
+        let session = Session::open_with(
+            Canned::new(Vec::<Vec<Step>>::new()),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        let mut state = session.shared.lock();
+        let seeds: Vec<Patch> = ["a", "b", "c", "d"]
+            .iter()
+            .enumerate()
+            .map(|(index, name)| Patch::Add {
+                id: entry_id(&format!("seed-{name}")),
+                content: format!("fact {name}"),
+                provenance: from_fork(u32::try_from(index).expect("small")),
+            })
+            .collect();
+        let (outcome, _) = applied(&mut state, &seeds, 1);
+        assert_eq!(outcome, log::ForkOutcome::Value);
+        assert!(state.undelivered.is_empty(), "an add waits for the seam");
+        let ops = vec![
+            Patch::Supersede {
+                id: entry_id("next-a"),
+                content: "fact a, corrected".to_owned(),
+                voids: entry_id("seed-a"),
+                provenance: from_fork(0),
+            },
+            Patch::Resolve {
+                target: entry_id("seed-b"),
+                provenance: from_fork(1),
+            },
+            Patch::Retire {
+                target: entry_id("seed-c"),
+                provenance: from_fork(2),
+            },
+            // A park is a tangent's ruling on its own fact (object.rs): the
+            // format refuses one with no tangent, below.
+            Patch::Park {
+                target: entry_id("seed-d"),
+                provenance: crate::object::Provenance {
+                    tangent: Some("t/1".to_owned()),
+                    ..from_fork(3)
+                },
+            },
+        ];
+        let untangled = Patch::Park {
+            target: entry_id("seed-d"),
+            provenance: from_fork(3),
+        };
+        assert_eq!(
+            applied(&mut state, std::slice::from_ref(&untangled), 3).0,
+            log::ForkOutcome::Unparseable,
+            "a park outside a tangent is refused, as the format says"
+        );
+        let (outcome, lines) = applied(&mut state, &ops, 2);
+        assert_eq!(outcome, log::ForkOutcome::Value);
+        let logged: Vec<log::PatchOp> = lines
+            .iter()
+            .filter_map(|event| match event {
+                Event::Patched { op, .. } => Some(*op),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            logged,
+            [
+                log::PatchOp::Supersede,
+                log::PatchOp::Resolve,
+                log::PatchOp::Retire,
+                log::PatchOp::Park
+            ]
+        );
+        let object = &state.interview.as_ref().expect("interviewing").object;
+        let state_of = |id: &str| object.entry(&entry_id(id)).expect("kept").state.clone();
+        assert!(matches!(state_of("seed-a"), EntryState::Voided { .. }));
+        assert_eq!(state_of("next-a"), EntryState::Live);
+        assert_eq!(state_of("seed-b"), EntryState::Resolved);
+        assert_eq!(state_of("seed-c"), EntryState::Retired);
+        assert_eq!(state_of("seed-d"), EntryState::Parked);
+        let held: Vec<&str> = state
+            .undelivered
+            .iter()
+            .map(|(_, id, _)| id.as_str())
+            .collect();
+        assert_eq!(held, ["seed-a", "seed-b", "seed-c", "seed-d"]);
+    }
+
+    /// #562's acceptance: a fork's `SUPERSEDE` citing an entry an earlier
+    /// fork recorded voids it, and under advisory delivery the next ask
+    /// carries the measured note naming that entry.
+    #[test]
+    fn a_forks_supersede_of_an_existing_entry_is_a_mid_turn_note_under_advisory_delivery() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.delivery = log::ForkDelivery::Advisory;
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&[SCOPED]),
+                deltas(&["SUPERSEDE: interview-t1-0 decision: a tracker for two teams\n"]),
+                deltas(&["next"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        for (turn, ask) in [(1, "what are we building?"), (2, "and who is it for?")] {
+            session.ask_marked(ask, None, true).expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && fork_outcomes(log).len() >= turn
+            });
+        }
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "turn three", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 3
+        });
+        reads_whole(&session);
+        assert!(log.iter().any(|l| matches!(
+            l.event,
+            Event::Patched {
+                op: log::PatchOp::Supersede,
+                ..
+            }
+        )));
+        let delivered: Vec<&log::NoteLine> = log
+            .iter()
+            .filter_map(|l| match &l.event {
+                Event::Delivered { turn: 3, lines, .. } => Some(lines),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(delivered.len(), 1, "{delivered:?}");
+        assert_eq!(delivered[0].op, log::PatchOp::Supersede);
+        assert_eq!(delivered[0].entry, "interview-t1-0");
+        assert_eq!(delivered[0].template, "FORK_NOTE_ADVISORY");
+    }
+
     #[test]
     fn a_forks_add_patches_are_not_delivered_mid_turn() {
         let mut interview = interviewing(&[log::Warrant::Scoping]);
