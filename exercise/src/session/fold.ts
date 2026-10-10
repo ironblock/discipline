@@ -48,9 +48,10 @@ export interface UserNode extends Provenance {
   /** Session time it finished: when it was asked. */
   readonly endedAt: number;
   /**
-   * Not in what the model reads from here on (#289): its turn was cancelled, or it failed or timed out before any step
-   * finished -- a failed or timed-out turn keeps its ask and every finished step on the trunk, and loses only its last
-   * request (#541). The fact is the log's `turn.settled`, and this is its word. A capped turn is `failed` (#290).
+   * Not in what the model reads from here on (#289): its turn failed or timed out before any step finished, or was
+   * cancelled before anything was said -- a failed or timed-out turn keeps its ask and every finished step on the trunk
+   * and loses only its last request (#541); a cancelled one keeps its ask, its steps and what it had said (#575). The fact
+   * is the log's `turn.settled`, and this is its word. A capped turn is `failed` (#290).
    */
   readonly outOfContext?: OffTrunk;
   /**
@@ -121,9 +122,10 @@ export interface AssistantNode extends Provenance, Generation {
   readonly id: string;
   readonly turn: number;
   /**
-   * Not in what the model reads from here on (#289): its turn was cancelled, or it failed or timed out before any step
-   * finished -- a failed or timed-out turn keeps its ask and every finished step on the trunk, and loses only its last
-   * request (#541). The fact is the log's `turn.settled`, and this is its word. A capped turn is `failed` (#290).
+   * Not in what the model reads from here on (#289): its turn failed or timed out before any step finished, or was
+   * cancelled before anything was said -- a failed or timed-out turn keeps its ask and every finished step on the trunk
+   * and loses only its last request (#541); a cancelled one keeps its ask, its steps and what it had said (#575). The fact
+   * is the log's `turn.settled`, and this is its word. A capped turn is `failed` (#290).
    */
   readonly outOfContext?: OffTrunk;
 }
@@ -691,14 +693,21 @@ export function fold(lines: readonly LogLine[]): Session {
   const builtEras: Era[] = eras.map((raw, index) => {
     const nodes: TrunkNode[] = raw.slots.map((slot): TrunkNode => {
       /**
-       * Whether a turn's ask, or the answer of its request REQUEST, left the model's context (#289). A cancelled turn
-       * leaves whole. A failed or timed-out one keeps its ask and every step a later request followed, as `diet` does
-       * since #541 -- only its last request, the failing step, leaves; one that failed on its first request keeps nothing.
+       * Whether a turn's ask, or the answer of its request REQUEST, left the model's context (#289). A failed or
+       * timed-out one keeps its ask and every step a later request followed, as `diet` does since #541 -- only its last
+       * request, the failing step, leaves; one that failed on its first request keeps nothing. A cancelled one keeps its
+       * ask, every step, and what it had said when the cancel came, as `diet` does since #575: only a generation the
+       * cancel cut before it said anything leaves, and the ask with it when that was the turn's only request.
        */
       const outOf = (turn: number | undefined, request?: number): OffTrunk | undefined => {
         const why = turn !== undefined ? offTrunk.get(turn) : undefined;
-        if (why === undefined || why === 'cancelled') return why;
+        if (why === undefined) return why;
         const steps = trunkRequestsOfTurn.get(turn!) ?? [];
+        if (why === 'cancelled') {
+          const silent = (seq: number | undefined) => seq !== undefined && generations.get(seq)?.cancelled?.partial === '';
+          if (request === undefined) return steps.length <= 1 && silent(steps[0]) ? why : undefined;
+          return request === steps.at(-1) && silent(request) ? why : undefined;
+        }
         if (request === undefined) return steps.length > 1 ? undefined : why;
         return request === steps.at(-1) ? why : undefined;
       };

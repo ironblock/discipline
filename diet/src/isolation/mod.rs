@@ -512,6 +512,11 @@ pub struct Ran {
     pub stdout_bytes: u64,
     /// The same, of standard error.
     pub stderr_bytes: u64,
+    /// Whether a stop ended it: its whole process group killed (#551).
+    pub cancelled: bool,
+    /// What it printed, as bytes: what a file tool reads an image from
+    /// (#557), which [`Ran::stdout`]'s lossy text cannot carry.
+    pub raw_stdout: Vec<u8>,
 }
 
 impl Ran {
@@ -700,14 +705,35 @@ impl Confinement {
     /// working tree, an empty command, or a runner that could not build the
     /// sandbox. A command that ran and failed is an `Ok` carrying its status.
     pub fn run(&self, policy: &Policy, worktree: &Path, argv: &[String]) -> Result<Ran, NotRun> {
-        // The CALLER's argv, not the composed one. Under `Sandbox` the composed
-        // vector is never empty, so this guard only ever fired for
-        // `Unconfined` -- and an empty command under the sandbox ran the runner
-        // with no command at all and banked sixty lines of its usage text as
-        // the command's standard error, at exit 1, as a successful `Ran`.
-        if argv.is_empty() {
-            return Err(NotRun::Nothing);
-        }
+        self.run_until(policy, worktree, argv, &|| false)
+    }
+
+    /// [`Self::run`], stopped when `stop` says so (#551).
+    ///
+    /// The call is waited on by its LEADER, not by its output's end: once
+    /// the command it ran has exited, what it printed so far is returned,
+    /// though a process it started in the background still holds its pipes
+    /// -- a server started with `&` keeps running, in the call's process
+    /// group, until a stop or the session's end. When `stop` is asked, the
+    /// call's whole process group is killed and the run returns
+    /// [`Ran::cancelled`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run`].
+    pub fn run_until(
+        &self,
+        policy: &Policy,
+        worktree: &Path,
+        argv: &[String],
+        stop: &dyn Fn() -> bool,
+    ) -> Result<Ran, NotRun> {
+        self.run_with_input(policy, worktree, argv, None, stop)
+    }
+
+    /// `worktree` as a command may run in: absolute, a directory, and --
+    /// under a sandbox -- holding no declared secret.
+    fn check_worktree(&self, policy: &Policy, worktree: &Path) -> Result<(), NotRun> {
         if !worktree.is_absolute() {
             return Err(NotRun::Worktree {
                 path: worktree.to_string_lossy().into_owned(),
@@ -729,13 +755,58 @@ impl Confinement {
                 secret: secret.to_string_lossy().into_owned(),
             });
         }
+        Ok(())
+    }
+
+    /// [`Self::run_until`], with `input` on the command's standard input
+    /// when there is one (#557: a file tool's write, fed to a confined
+    /// helper, so the kernel judges the path as it judges `bash`'s).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run`].
+    pub fn run_with_input(
+        &self,
+        policy: &Policy,
+        worktree: &Path,
+        argv: &[String],
+        input: Option<&[u8]>,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<Ran, NotRun> {
+        // The CALLER's argv, not the composed one. Under `Sandbox` the composed
+        // vector is never empty, so this guard only ever fired for
+        // `Unconfined` -- and an empty command under the sandbox ran the runner
+        // with no command at all and banked sixty lines of its usage text as
+        // the command's standard error, at exit 1, as a successful `Ran`.
+        if argv.is_empty() {
+            return Err(NotRun::Nothing);
+        }
+        self.check_worktree(policy, worktree)?;
 
         let confined = self.compose(policy, worktree, argv);
+        // A stop already asked runs nothing (Pi and `OpenCode` both check
+        // their abort signal before they start any work).
+        if stop() {
+            return Ok(Ran {
+                argv: argv.to_vec(),
+                policy: self.policy_of(&confined),
+                confined,
+                isolation: self.isolation(),
+                network: policy.network,
+                exit: None,
+                stdout: String::new(),
+                stderr: String::new(),
+                stdout_bytes: 0,
+                stderr_bytes: 0,
+                cancelled: true,
+                raw_stdout: Vec::new(),
+            });
+        }
         let Some((program, rest)) = confined.split_first() else {
             return Err(NotRun::Nothing);
         };
 
-        let output = output_of(|| {
+        let mut child = spawned(|| {
             let mut command = Command::new(program);
             // Only the variables the policy names, on every backend (#29,
             // planning 5981606817). Before this the command inherited the
@@ -745,18 +816,37 @@ impl Confinement {
             command
                 .args(rest)
                 .current_dir(worktree)
-                .stdin(Stdio::null())
+                .stdin(if input.is_some() {
+                    Stdio::piped()
+                } else {
+                    Stdio::null()
+                })
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
             match self {
                 // Its own process group, ended with the session (#299, F2).
-                Self::Sandbox(Backend::Seatbelt(runner)) => runner.spawn(&mut command)?,
-                Self::Unconfined | Self::Sandbox(Backend::Bubblewrap(_)) => command.spawn()?,
+                Self::Sandbox(Backend::Seatbelt(runner)) => runner.spawn(&mut command),
+                // Its own process group too, so a stop can kill all of it
+                // (#551).
+                Self::Unconfined | Self::Sandbox(Backend::Bubblewrap(_)) => {
+                    seatbelt::spawn_leading_a_group(&mut command)
+                }
             }
-            .wait_with_output()
         })
         .map_err(|why| NotRun::Runner {
             said: format!("{program} could not be run: {why}"),
+        })?;
+        if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+            let input = input.to_vec();
+            // On a thread of its own: a command that reads slowly, or not at
+            // all, must not hold the drive while it writes.
+            std::thread::spawn(move || {
+                use std::io::Write as _;
+                let _ = stdin.write_all(&input);
+            });
+        }
+        let output = collected(&mut child, stop).map_err(|why| NotRun::Runner {
+            said: format!("{program} could not be waited on: {why}"),
         })?;
         if let Self::Sandbox(Backend::Seatbelt(runner)) = self {
             runner.forget_ended_groups();
@@ -783,8 +873,126 @@ impl Confinement {
             stderr,
             stdout_bytes: u64::try_from(output.stdout.len()).unwrap_or(u64::MAX),
             stderr_bytes: u64::try_from(output.stderr.len()).unwrap_or(u64::MAX),
+            cancelled: output.cancelled,
+            raw_stdout: output.stdout,
         })
     }
+}
+
+/// How long the output a call's leader left in its pipes is read for once
+/// the leader has exited (#551). A command whose descendants are all gone
+/// reaches the end of its output at once; one that left a process holding
+/// its pipes returns this long after its leader's exit.
+const DRAIN: Duration = Duration::from_millis(200);
+
+/// How often a running call is looked at: whether its leader exited, and
+/// whether a stop was asked.
+const POLL: Duration = Duration::from_millis(5);
+
+/// What a call printed and how it ended.
+struct Collected {
+    status: std::process::ExitStatus,
+    stdout: Vec<u8>,
+    stderr: Vec<u8>,
+    cancelled: bool,
+}
+
+/// One of a call's output streams, read on a thread of its own into a
+/// buffer while the call is collected, and drained and discarded after, so
+/// a background writer never blocks on a full pipe nobody reads.
+struct Drained {
+    kept: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    keeping: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ended: std::sync::mpsc::Receiver<()>,
+}
+
+impl Drained {
+    fn of(mut stream: impl std::io::Read + Send + 'static) -> Self {
+        use std::sync::atomic::Ordering;
+        let kept = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let keeping = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let (end, ended) = std::sync::mpsc::channel();
+        let (into, still) = (
+            std::sync::Arc::clone(&kept),
+            std::sync::Arc::clone(&keeping),
+        );
+        std::thread::spawn(move || {
+            let mut chunk = [0_u8; 8192];
+            loop {
+                match stream.read(&mut chunk) {
+                    Ok(0) | Err(_) => break,
+                    Ok(read) if still.load(Ordering::SeqCst) => into
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .extend_from_slice(&chunk[..read]),
+                    Ok(_) => {}
+                }
+            }
+            let _ = end.send(());
+        });
+        Self {
+            kept,
+            keeping,
+            ended,
+        }
+    }
+
+    /// What was read: all of it once the stream ended, or by `until`,
+    /// whichever comes first. Nothing read after is kept.
+    fn taken(self, until: Instant) -> Vec<u8> {
+        let _ = self
+            .ended
+            .recv_timeout(until.saturating_duration_since(Instant::now()));
+        self.keeping
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        std::mem::take(
+            &mut *self
+                .kept
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+    }
+}
+
+/// `child` waited on by its leader: its output so far once the leader has
+/// exited, or, when `stop` is asked first, its whole process group killed
+/// and reaped (#551).
+fn collected(
+    child: &mut std::process::Child,
+    stop: &dyn Fn() -> bool,
+) -> std::io::Result<Collected> {
+    let stdout = child.stdout.take().map(Drained::of);
+    let stderr = child.stderr.take().map(Drained::of);
+    let group = child.id();
+    let mut cancelled = false;
+    let status = loop {
+        // The stop first, each time round: a stop already asked when the
+        // child exits cancels it, as one asked before it started does
+        // (Pi and `OpenCode` check the abort before any work).
+        if stop() {
+            let _ = seatbelt::kill()
+                .args(["-KILL", "--", &format!("-{group}")])
+                .output();
+            let _ = child.kill();
+            cancelled = true;
+            break child.wait()?;
+        }
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        std::thread::sleep(POLL);
+    };
+    let until = Instant::now() + DRAIN;
+    Ok(Collected {
+        status,
+        stdout: stdout
+            .map(|drained| drained.taken(until))
+            .unwrap_or_default(),
+        stderr: stderr
+            .map(|drained| drained.taken(until))
+            .unwrap_or_default(),
+        cancelled,
+    })
 }
 
 /// The variables of `parent` that `names` lists, in `names`' order: what a
@@ -847,6 +1055,12 @@ const BUSY_PATIENCE: Duration = Duration::from_millis(500);
 /// `spawn`'s output, retried while the program is busy being written, for
 /// at most [`BUSY_PATIENCE`].
 fn output_of(spawn: impl Fn() -> std::io::Result<Output>) -> std::io::Result<Output> {
+    spawned(spawn)
+}
+
+/// `spawn`'s result -- a child, or its output -- retried while the program
+/// is busy being written, for at most [`BUSY_PATIENCE`].
+fn spawned<T>(spawn: impl Fn() -> std::io::Result<T>) -> std::io::Result<T> {
     let give_up = Instant::now() + BUSY_PATIENCE;
     loop {
         match spawn() {
@@ -922,6 +1136,200 @@ mod tests {
                 let _ = fs::remove_dir_all(base);
             }
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // #551: a call returns when its command does, and a stop kills it
+    // -----------------------------------------------------------------------
+
+    /// Whether process group `group` still has a member.
+    fn group_alive(group: &str) -> bool {
+        process::Command::new("/bin/kill")
+            .args(["-0", "--", &format!("-{group}")])
+            .stderr(process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+    }
+
+    fn kill_group(group: &str) {
+        let _ = process::Command::new("/bin/kill")
+            .args(["-KILL", "--", &format!("-{group}")])
+            .stderr(process::Stdio::null())
+            .status();
+    }
+
+    /// `script` run unconfined in `tree` by `/bin/sh`, on a thread, with
+    /// `stop`: the run, or `None` when it did not return within `within`.
+    fn run_on_a_thread(
+        tree: &Path,
+        script: &str,
+        stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+        within: std::time::Duration,
+    ) -> Option<(Ran, std::time::Duration)> {
+        let (tree, script) = (tree.to_path_buf(), script.to_owned());
+        let (sent, ran) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let ran = Confinement::Unconfined
+                .run_until(
+                    &Policy::unconfined(),
+                    &tree,
+                    &argv(&["/bin/sh", "-c", &script]),
+                    &|| stop.load(std::sync::atomic::Ordering::SeqCst),
+                )
+                .expect("it ran");
+            let _ = sent.send((ran, started.elapsed()));
+        });
+        ran.recv_timeout(within).ok()
+    }
+
+    /// The smoke run's shape (#551): a list backgrounded with `&` holds the
+    /// call's pipes while its server runs. The call returns once its
+    /// foreground command exits, with what it printed, and the server keeps
+    /// running in the call's group.
+    #[test]
+    fn a_call_returns_when_its_command_exits_though_a_background_server_holds_its_pipes() {
+        let ground = Ground::make("background-holds-pipes");
+        let script = format!(
+            "echo $$; cd {} && /usr/bin/nohup /bin/sleep 30 > server.log 2>&1 & /bin/sleep 1; \
+             echo started",
+            ground.tree.display()
+        );
+        let never = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let Some((ran, took)) = run_on_a_thread(
+            &ground.tree,
+            &script,
+            never,
+            std::time::Duration::from_secs(15),
+        ) else {
+            panic!("the call did not return while its background server held its pipes");
+        };
+        let group = ran
+            .stdout
+            .lines()
+            .next()
+            .expect("the leader's pid")
+            .to_owned();
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+        assert_eq!(ran.exit, Some(0), "{ran:?}");
+        assert!(!ran.cancelled);
+        assert!(ran.stdout.ends_with("started\n"), "{:?}", ran.stdout);
+        assert!(
+            group_alive(&group),
+            "the background server was killed with the call"
+        );
+        kill_group(&group);
+    }
+
+    /// The same shape under the Mac's own Seatbelt, which T1 runs under: the
+    /// call returns, the server survives it, and the session's end kills it.
+    /// On Linux `bwrap`'s pid namespace ends a server with its call, so this
+    /// is the Mac's row only.
+    #[test]
+    fn under_seatbelt_a_backgrounded_server_survives_its_call_until_the_session_ends() {
+        if Platform::here() != Platform::MacOs {
+            return;
+        }
+        let ground = Ground::make("seatbelt-background");
+        let confinement = open_on(&Policy::merged_usr(), Platform::MacOs).expect("Seatbelt");
+        let (sent, ran) = std::sync::mpsc::channel();
+        let (tree, runner) = (ground.tree.clone(), confinement.clone());
+        // A LIST backgrounded, as the smoke run's was: its subshell holds the
+        // call's pipes while the server runs.
+        let script = format!(
+            "echo $$; cd {} && /usr/bin/nohup /bin/sleep 30 > server.log 2>&1 & /bin/sleep 1; \
+             echo started",
+            ground.tree.display()
+        );
+        std::thread::spawn(move || {
+            let started = std::time::Instant::now();
+            let ran = runner
+                .run(
+                    &Policy::merged_usr(),
+                    &tree,
+                    &argv(&["/bin/sh", "-c", &script]),
+                )
+                .expect("it ran");
+            let _ = sent.send((ran, started.elapsed()));
+        });
+        let (ran, took) = ran
+            .recv_timeout(std::time::Duration::from_secs(15))
+            .expect("the call returned while its background server held its pipes");
+        let group = ran
+            .stdout
+            .lines()
+            .next()
+            .expect("the leader's pid")
+            .to_owned();
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+        assert!(ran.stdout.ends_with("started\n"), "{:?}", ran.stdout);
+        assert!(group_alive(&group), "the server did not survive its call");
+        confinement.end_session();
+        let gone = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while group_alive(&group) && std::time::Instant::now() < gone {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            !group_alive(&group),
+            "the session's end left the server running"
+        );
+    }
+
+    /// A stop already asked when a call starts runs nothing, and says it
+    /// was cancelled -- never the result of a command that raced it.
+    #[test]
+    fn a_stop_already_asked_runs_nothing_and_says_cancelled() {
+        let ground = Ground::make("stop-before");
+        let ran = Confinement::Unconfined
+            .run_until(
+                &Policy::unconfined(),
+                &ground.tree,
+                &argv(&["/usr/bin/touch", "marker"]),
+                &|| true,
+            )
+            .expect("not refused");
+        assert!(ran.cancelled, "{ran:?}");
+        assert_eq!(ran.exit, None);
+        assert!(!ground.tree.join("marker").exists(), "the command ran");
+    }
+
+    /// A stop kills a running call's whole process group -- its foreground
+    /// command and what it started in the background -- and the run says it
+    /// was cancelled, with what it printed before.
+    #[test]
+    fn a_stop_kills_a_running_calls_whole_group_and_says_so() {
+        let ground = Ground::make("stop-kills-group");
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let asked = std::sync::Arc::clone(&stop);
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            asked.store(true, std::sync::atomic::Ordering::SeqCst);
+        });
+        let Some((ran, took)) = run_on_a_thread(
+            &ground.tree,
+            "echo $$; /bin/sleep 600 & /bin/sleep 600",
+            stop,
+            std::time::Duration::from_secs(15),
+        ) else {
+            panic!("the stop did not end the call");
+        };
+        let group = ran
+            .stdout
+            .lines()
+            .next()
+            .expect("the leader's pid")
+            .to_owned();
+        assert!(ran.cancelled, "{ran:?}");
+        assert!(took < std::time::Duration::from_secs(5), "{took:?}");
+        // The kill is asynchronous to the group's last member: give it a beat.
+        let gone = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while group_alive(&group) && std::time::Instant::now() < gone {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            !group_alive(&group),
+            "a member of the call's group survived the stop"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -3656,6 +4064,8 @@ mod tests {
             stderr: stderr.to_owned(),
             stdout_bytes: 0,
             stderr_bytes: stderr.len() as u64,
+            cancelled: false,
+            raw_stdout: Vec::new(),
         }
     }
 

@@ -74,9 +74,16 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(answer?.kind === 'assistant' && answer.text).toBe('Hel');
   });
 
-  it('marks a cancelled, failed or timed-out turn’s ask and answer as out of the model’s context, by its settle word, and an answered one’s not (#289)', () => {
+  it('keeps a cancelled turn that had said something in the model’s context, as diet now does (#575), and marks one cancelled before a word out', () => {
+    const marks = (log: LogLine[]) => (fold(log).eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, 'outOfContext' in n ? n.outOfContext : false]);
+    const said = logOf('a-cancelled-turn.jsonl');
+    expect(marks(said)).toEqual([['user', false], ['assistant', false]]);
+    const silent = said.map((line) => (line.kind === 'cancelled' ? { ...line, partial: '' } : line)) as LogLine[];
+    expect(marks(silent)).toEqual([['user', 'cancelled'], ['assistant', 'cancelled']]);
+  });
+
+  it('marks a failed or timed-out turn’s ask and answer as out of the model’s context, by its settle word, and an answered one’s not (#289)', () => {
     const marks = (file: string) => (fold(logOf(file)).eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, 'outOfContext' in n ? n.outOfContext : false]);
-    expect(marks('a-cancelled-turn.jsonl')).toEqual([['user', 'cancelled'], ['assistant', 'cancelled']]);
     expect(marks('a-turn-whose-connection-failed.jsonl')).toEqual([['user', 'failed'], ['assistant', 'failed']]);
     expect(marks('a-turn-that-ran-out-of-time.jsonl')).toEqual([['user', 'timeout'], ['assistant', 'timeout']]);
     expect(marks('an-answered-turn.jsonl')).toEqual([['user', false], ['assistant', false]]);

@@ -2253,6 +2253,7 @@ fn synthesized_record(
                 source: done.record.source().clone(),
                 regimen_sha256: done.record.regimen_sha256().map(str::to_owned),
                 fork_delivery: done.record.fork_delivery(),
+                tool_output: done.record.tool_output(),
             },
             Event::Claim {
                 id: "c1".to_owned(),
