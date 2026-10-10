@@ -555,9 +555,25 @@ pub enum Event {
         outputs: Option<(String, u64)>,
         /// The render's budget and what it did (#565), when declared.
         render_budget: Option<log::RenderBudget>,
+        /// The calls whose pruned results it replaced (#612), when any.
+        pruned: Option<Vec<String>>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
+    /// A tool result the model pruned (#612): logged when `prune_output`
+    /// answered; a later seam carries `text` in its place.
+    Pruned {
+        /// The turn the prune was called in.
+        turn: u32,
+        /// The call whose result it pruned.
+        call: String,
+        /// The sha256 of the result's whole, as saved.
+        sha256: String,
+        /// The bytes of the result the trunk carried.
+        bytes: u64,
+        /// Its reference line (#596).
+        text: String,
+    },
     /// Archived items recalled after an ask (#566): one note, which stays
     /// on the trunk.
     Recalled {
@@ -861,6 +877,9 @@ pub struct Interview {
     /// How a fork answers (#610): in fields, the default, or through the
     /// self-capture tools.
     pub capture: crate::dogma::asks::Modality,
+    /// Whether the model is offered `prune_output`, and when its prunes
+    /// are applied (#612); `None`, the default, offers nothing.
+    pub prune: Option<super::prune::PruneSeam>,
 }
 
 /// `shape`'s tools with self-capture's after them, when `interview` has it
@@ -912,6 +931,30 @@ pub fn self_capture(regimen: &Regimen) -> Option<crate::capture::tools::Cadence>
             .and_then(|n| Cadence::every(n).ok())
             .unwrap_or(Cadence::DEFAULT),
     )
+}
+
+/// A tool result the model pruned (#612), until a seam replaces it and
+/// after, so a later seam still carries its line.
+#[derive(Debug, Clone)]
+struct Prune {
+    /// The call whose result it is.
+    call: String,
+    /// What the trunk carried as that result.
+    shown: String,
+    /// Its reference line, which a seam carries in its place.
+    text: String,
+    /// Whether a seam has replaced it yet.
+    applied: bool,
+}
+
+impl Prune {
+    /// Whether `message` is the result it prunes, as the trunk carried it
+    /// or as a seam already replaced it.
+    fn is(&self, message: &Message) -> bool {
+        message.role == Role::Tool
+            && message.tool_call_id.as_deref() == Some(self.call.as_str())
+            && (message.content == self.shown || message.content == self.text)
+    }
 }
 
 /// What a fork sees of the trunk (#567).
@@ -1250,6 +1293,8 @@ struct State {
     /// The recording directory, when the session keeps one: where a seam's
     /// `reference` saves an output's whole (#553).
     recording: Option<std::path::PathBuf>,
+    /// The results the model pruned (#612), in the order it pruned them.
+    pruned: Vec<Prune>,
     /// Whether the trunk carries a seam's refill message after the head
     /// (#597): the turns start after it.
     refilled: bool,
@@ -1772,6 +1817,7 @@ impl<S: Streaming + 'static> Session<S> {
             interview,
             forking: None,
             recording: tools.as_ref().and_then(|t| t.recording.clone()),
+            pruned: Vec::new(),
             refilled: false,
         };
         state.push(Event::Started {
@@ -2937,6 +2983,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tool_outputs,
             outputs,
             render_budget,
+            pruned,
         } => log::Event::Seam {
             phase: phase.clone(),
             at_turn: *at_turn,
@@ -2945,6 +2992,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 crate::seam::Reason::Phase => log::SeamReason::Phase,
                 crate::seam::Reason::Budget => log::SeamReason::Budget,
                 crate::seam::Reason::Cadence => log::SeamReason::Cadence,
+                crate::seam::Reason::Prune => log::SeamReason::Prune,
             },
             prefix_hash_before: prefix_hash_before.clone(),
             prefix_hash_after: prefix_hash_after.clone(),
@@ -2965,6 +3013,20 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // A user message after the head (#597).
             placement: Some(log::RenderPlacement::Message),
             render_budget: render_budget.clone(),
+            pruned: pruned.clone(),
+        },
+        Event::Pruned {
+            turn,
+            call,
+            sha256,
+            bytes,
+            text,
+        } => log::Event::Pruned {
+            turn: *turn,
+            call: call.clone(),
+            sha256: sha256.clone(),
+            bytes: *bytes,
+            text: text.clone(),
         },
     };
     log::Line {
@@ -3871,6 +3933,95 @@ fn standard_call(
     }
 }
 
+/// `prune_output` (#612): the most recent earlier call whose string
+/// argument is the one named, pruned -- its whole saved by digest, its
+/// reference line kept for the seam that replaces it -- and the answer
+/// saying when. A name no call matches, a result already pruned, or one a
+/// seam already compacted away is answered with what is wrong, as a
+/// standard tool answers an error.
+fn prune_call<S>(
+    shared: &Shared<S>,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> (ToolLine, Option<String>) {
+    let line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+    let Some(named) = super::prune::target_of(&call.arguments) else {
+        return (line, Some(super::prune::unmatched("")));
+    };
+    let mut state = shared.lock();
+    let target = state
+        .log
+        .iter()
+        .rev()
+        .find_map(|logged| match &logged.event {
+            Event::ToolCalled(target)
+                if target.name != super::prune::PRUNE_OUTPUT
+                    && target.outcome == log::ToolOutcome::Ran
+                    && super::prune::names(&target.arguments, &named) =>
+            {
+                Some((target.as_ref().clone(), target.shown.clone()?))
+            }
+            _ => None,
+        });
+    let Some((target, shown)) = target else {
+        return (line, Some(super::prune::unmatched(&named)));
+    };
+    if state
+        .pruned
+        .iter()
+        .any(|prune| prune.call == target.id && prune.shown == shown)
+    {
+        return (line, Some(super::prune::ALREADY_PRUNED.to_owned()));
+    }
+    // On the trunk: a step of this turn's, or a result a seam has not
+    // compacted away.
+    let on_trunk = target.request == request
+        || state.trunk.iter().chain(&state.ran).any(|message| {
+            message.role == Role::Tool
+                && message.tool_call_id.as_deref() == Some(target.id.as_str())
+                && message.content == shown
+        });
+    if !on_trunk {
+        return (line, Some(super::prune::ALREADY_COMPACTED.to_owned()));
+    }
+    let saved = saved_whole(
+        &shown,
+        target.files.first().cloned(),
+        state.recording.as_deref(),
+    );
+    let text = crate::seam::outputs::reference_line(&crate::seam::outputs::Output {
+        turn: target.turn,
+        name: target.name.clone(),
+        arguments: target.arguments.clone(),
+        shown: shown.clone(),
+        images: Vec::new(),
+        saved: Some(saved.clone()),
+        excerpts: Vec::new(),
+        pruned: None,
+    });
+    state.push(Event::Pruned {
+        turn,
+        call: target.id.clone(),
+        sha256: saved.sha256,
+        bytes: shown.len() as u64,
+        text: text.clone(),
+    });
+    state.pruned.push(Prune {
+        call: target.id,
+        shown,
+        text,
+        applied: false,
+    });
+    let seam = state
+        .interview
+        .as_ref()
+        .and_then(|interview| interview.prune)
+        .unwrap_or_default();
+    drop(state);
+    shared.changed.notify_all();
+    (line, Some(seam.answer().to_owned()))
+}
+
 /// One call, to its line and what the model is shown of it (`None` when
 /// nothing goes back: an undeclared tool, the step limit, a stop).
 #[allow(clippy::too_many_lines)]
@@ -3891,6 +4042,14 @@ fn one_call<S: Streaming>(
         .tools
         .iter()
         .any(|tool| tool.name == call.name);
+    // `prune_output` (#612): answered from the session's own log, run
+    // under no confinement, since it runs nothing.
+    if declared && call.name == super::prune::PRUNE_OUTPUT {
+        if last {
+            return (refused(log::ToolRefusal::MaxSteps), None);
+        }
+        return prune_call(shared, (turn, request), call);
+    }
     // Self-capture (#609): the contract's tools write working memory and
     // nothing else, so no gate, no confinement and no approval decide them.
     if declared && crate::capture::tools::CaptureTool::from_tag(&call.name).is_some() {
@@ -4177,6 +4336,8 @@ fn refill_trunk(
     // before the kept tail, which stays as it sat.
     let tool_outputs = interview.seams.outputs;
     let compacted = &turns[..turns.len() - kept.len()];
+    let mut kept = kept;
+    replaced_in_tail(&mut kept, &state.pruned);
     // The archive (#566): what this seam drops from the trunk, and every
     // working-memory entry no longer live, for a recall to find later.
     let archived = archived_at_seam(compacted, &interview.object, state.turns);
@@ -4186,7 +4347,7 @@ fn refill_trunk(
             &state.log,
             compacted,
             tool_outputs,
-            state.recording.as_deref(),
+            (state.recording.as_deref(), &state.pruned),
         ),
     );
     let sent = outputs
@@ -4202,6 +4363,7 @@ fn refill_trunk(
     }
     state.turns_at_seam = state.turns;
     state.trunk_tokens = None;
+    let pruned = prunes_applied(state);
     let at_turn = state.turns;
     state.push(Event::Seamed {
         at_turn,
@@ -4217,7 +4379,34 @@ fn refill_trunk(
         tool_outputs,
         outputs,
         render_budget,
+        pruned,
     });
+}
+
+/// Each pruned result in a seam's kept tail replaced in place by its line
+/// (#612): the tool message stays, answering its call.
+fn replaced_in_tail(kept: &mut [Message], pruned: &[Prune]) {
+    for message in kept {
+        if let Some(prune) = pruned.iter().find(|prune| prune.is(message)) {
+            message.content.clone_from(&prune.text);
+            message.images.clear();
+        }
+    }
+}
+
+/// The prunes a seam applies -- every one since the last (#612) -- marked
+/// applied, so none is due any more; `None` when there were none.
+fn prunes_applied(state: &mut State) -> Option<Vec<String>> {
+    let applied: Vec<String> = state
+        .pruned
+        .iter_mut()
+        .filter(|prune| !prune.applied)
+        .map(|prune| {
+            prune.applied = true;
+            prune.call.clone()
+        })
+        .collect();
+    (!applied.is_empty()).then_some(applied)
 }
 
 /// What a seam at `at_turn` archives (#566): each message of `compacted`,
@@ -4272,7 +4461,7 @@ fn compacted_outputs(
     log: &[Logged],
     compacted: &[Message],
     state: log::SeamToolOutputs,
-    recording: Option<&std::path::Path>,
+    (recording, pruned): (Option<&std::path::Path>, &[Prune]),
 ) -> Vec<crate::seam::outputs::Output> {
     use crate::seam::outputs::Output;
     let lines: Vec<&ToolLine> = log
@@ -4300,6 +4489,27 @@ fn compacted_outputs(
         else {
             continue;
         };
+        // A pruned result is its line, whatever was shown (#612): one an
+        // earlier seam already replaced in the tail has no line to match.
+        if let Some(prune) = pruned.iter().find(|prune| prune.is(message)) {
+            if let Some(at) = lines.iter().skip(cursor).position(|line| {
+                line.id == call.id && line.shown.as_deref() == Some(message.content.as_str())
+            }) {
+                cursor += at + 1;
+            }
+            files.push(None);
+            outputs.push(Output {
+                turn: 0,
+                name: call.name.clone(),
+                arguments: call.arguments.clone(),
+                shown: String::new(),
+                images: Vec::new(),
+                saved: None,
+                excerpts: Vec::new(),
+                pruned: Some(prune.text.clone()),
+            });
+            continue;
+        }
         let Some(at) = lines.iter().skip(cursor).position(|line| {
             line.id == call.id && line.shown.as_deref() == Some(message.content.as_str())
         }) else {
@@ -4320,10 +4530,15 @@ fn compacted_outputs(
                 .collect(),
             saved: None,
             excerpts: Vec::new(),
+            pruned: None,
         });
     }
     if state == log::SeamToolOutputs::Reference {
-        for (output, file) in outputs.iter_mut().zip(files) {
+        for (output, file) in outputs
+            .iter_mut()
+            .zip(files)
+            .filter(|(output, _)| output.pruned.is_none())
+        {
             output.saved = Some(saved_whole(&output.shown, file, recording));
         }
     }
@@ -4331,7 +4546,10 @@ fn compacted_outputs(
         for (turn, excerpt) in read_excerpts(log) {
             let quoted = excerpt.trim();
             if let Some(output) = outputs.iter_mut().find(|output| {
-                output.turn == turn && !quoted.is_empty() && output.shown.contains(quoted)
+                output.pruned.is_none()
+                    && output.turn == turn
+                    && !quoted.is_empty()
+                    && output.shown.contains(quoted)
             }) {
                 output.excerpts.push(quoted.to_owned());
             }
@@ -4420,6 +4638,13 @@ fn turn_over(template: &RequestShape, state: &mut State) {
             interview
                 .seams
                 .due(state.turns - state.turns_at_seam, state.trunk_tokens)
+                // A prune applied as its turn settles (#612): deferred, as
+                // any derived seam is, while it cannot fire.
+                .or_else(|| {
+                    (state.pruned.iter().any(|prune| !prune.applied)
+                        && interview.prune == Some(super::prune::PruneSeam::TurnEnd))
+                    .then_some(crate::seam::Reason::Prune)
+                })
         });
     if let Some(reason) = due {
         refill_trunk(template, state, reason, None);
@@ -6619,6 +6844,7 @@ pub(in crate::drive) mod tests {
                 tool_outputs: log::SeamToolOutputs::Evict,
                 outputs: None,
                 render_budget: None,
+                pruned: None,
             },
             Event::Recalled {
                 turn: 2,
@@ -6629,6 +6855,13 @@ pub(in crate::drive) mod tests {
                     sha256: "f".repeat(64),
                     score: 2,
                 }],
+            },
+            Event::Pruned {
+                turn: 2,
+                call: "call-1".to_owned(),
+                sha256: "e".repeat(64),
+                bytes: 300_000,
+                text: "- turn 1: bash args={} : 300000 bytes".to_owned(),
             },
             Event::Delivered {
                 turn: 2,
@@ -6699,11 +6932,12 @@ pub(in crate::drive) mod tests {
                 Event::Recalled { .. } => 25,
                 Event::TangentOpened { .. } => 26,
                 Event::TangentClosed { .. } => 27,
-                Event::Captured { .. } => 28,
-                Event::Reminded { .. } => 29,
+                Event::Pruned { .. } => 28,
+                Event::Captured { .. } => 29,
+                Event::Reminded { .. } => 30,
             });
         }
-        assert_eq!(kinds.len(), 30, "a variant has no sample");
+        assert_eq!(kinds.len(), 31, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -6989,6 +7223,7 @@ pub(in crate::drive) mod tests {
                 carried_output_bytes: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
+                pruned: None,
             },
             log::Event::Recalled {
                 turn: 2,
@@ -6999,6 +7234,13 @@ pub(in crate::drive) mod tests {
                     sha256: "f".repeat(64),
                     score: 2,
                 }],
+            },
+            log::Event::Pruned {
+                turn: 2,
+                call: "call-1".to_owned(),
+                sha256: "e".repeat(64),
+                bytes: 300_000,
+                text: "- turn 1: bash args={} : 300000 bytes".to_owned(),
             },
             log::Event::Delivered {
                 turn: 2,
@@ -9298,6 +9540,7 @@ pub(in crate::drive) mod tests {
             phases: crate::seam::phase::PhaseGraph::none(),
             recall: super::super::archive::Recall::Off,
             view: None,
+            prune: None,
             self_capture: None,
             asks: &crate::dogma::asks::V3,
             capture: crate::dogma::asks::Modality::Fields,
@@ -10950,6 +11193,251 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// A `prune_output` call naming `call`.
+    fn prune_step(id: &str, call: &str) -> Step {
+        Step::call(
+            0,
+            id,
+            super::super::prune::PRUNE_OUTPUT,
+            &serde_json::json!({ "call": call }).to_string(),
+        )
+    }
+
+    /// A session that runs `cat` and `echo`, offers `prune_output` applied
+    /// under `prune`, keeps a tail of `tail_tokens`, and plays `acts`; its
+    /// tree holds a sizeable `notes.md`.
+    fn pruning(
+        tree: &Path,
+        prune: super::super::prune::PruneSeam,
+        tail_tokens: u64,
+        acts: Vec<Vec<Step>>,
+    ) -> Session<Canned> {
+        let notes: String = (0..80)
+            .map(|n| format!("note line {n}\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        std::fs::write(tree.join("notes.md"), notes).expect("the notes");
+        let mut shape = looping();
+        shape.tools.push(super::super::prune::definition());
+        Session::open_with(
+            Canned::new(acts),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                tree,
+                &["cat", "echo"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(Interview {
+                seams: crate::seam::policy::Served {
+                    tail_tokens,
+                    ..crate::seam::policy::Served::default()
+                },
+                prune: Some(prune),
+                ..interviewing(&[log::Warrant::Scoping])
+            }),
+        )
+    }
+
+    /// What each call was shown, by its id, in call order.
+    fn shown_by_id(log: &[Logged]) -> Vec<(String, String)> {
+        lines(log)
+            .into_iter()
+            .map(|line| (line.id, line.shown.unwrap_or_default()))
+            .collect()
+    }
+
+    /// The `pruned` lines: each call and its text.
+    fn prunes_in(log: &[Logged]) -> Vec<(String, u64, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Pruned {
+                    call, bytes, text, ..
+                } => Some((call.clone(), *bytes, text.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The seam lines' `pruned`.
+    fn seam_prunes(log: &[Logged]) -> Vec<Option<Vec<String>>> {
+        log.iter()
+            .filter_map(|logged| match line_of(logged).event {
+                log::Event::Seam { pruned, .. } => Some(pruned),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #612, `turn_end`: the tool answers at once and the trunk keeps the
+    /// result through the turn -- the prefix rule -- then a seam derived as
+    /// the turn settles replaces it, in the kept tail, by its reference
+    /// line; the next request carries the line, and the projection rebuilds
+    /// every head.
+    #[test]
+    fn a_pruned_result_is_replaced_by_its_line_at_the_seam_its_turn_end_derives() {
+        let tree = scratch("t612-turn-end");
+        let session = pruning(
+            &tree,
+            super::super::prune::PruneSeam::TurnEnd,
+            100_000,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![prune_step("call-2", "cat notes.md")],
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["after"]),
+            ],
+        );
+        session
+            .ask_marked("read the notes", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the prune's seam", |log| {
+            !seams_in(log).is_empty()
+        });
+        let notes = std::fs::read_to_string(tree.join("notes.md")).expect("the notes");
+        let shown = shown_by_id(&log);
+        assert_eq!(shown[0], ("call-1".to_owned(), notes.clone()));
+        assert_eq!(
+            shown[1],
+            (
+                "call-2".to_owned(),
+                "pruned; replaced when this turn ends".to_owned()
+            )
+        );
+        let prunes = prunes_in(&log);
+        let [(call, bytes, text)] = prunes.as_slice() else {
+            panic!("one prune: {prunes:?}");
+        };
+        assert_eq!((call.as_str(), *bytes), ("call-1", notes.len() as u64));
+        assert!(
+            text.starts_with("- turn 1: bash args={\"command\":\"cat notes.md\"}: ")
+                && text.contains(&crate::digest::sha256_hex(notes.as_bytes())),
+            "{text}"
+        );
+        // The prefix rule: the step after the prune still carried it whole.
+        let sent = session.shared.transport.sent();
+        assert!(
+            sent[2].messages.iter().any(|m| m.content == notes),
+            "the trunk was rewritten mid-turn"
+        );
+        assert_eq!(seams_in(&log), [(1, log::SeamReason::Prune)]);
+        assert_eq!(seam_prunes(&log), [Some(vec!["call-1".to_owned()])]);
+        // In the kept tail, in place: the tool message answers its call.
+        let trunk = session.trunk();
+        let result = trunk
+            .iter()
+            .find(|m| m.tool_call_id.as_deref() == Some("call-1"))
+            .expect("call-1's result stays, replaced");
+        assert_eq!(&result.content, text);
+        assert!(!trunk.iter().any(|m| m.content == notes));
+
+        session.ask("and now?", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        let sent = session.shared.transport.sent();
+        let last = &sent.last().expect("turn two's request").messages;
+        assert!(last.iter().any(|m| &m.content == text));
+        assert!(!last.iter().any(|m| m.content == notes));
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let named: Vec<String> = projected
+            .unspellable
+            .iter()
+            .filter(|u| u.kind == "request")
+            .map(|u| u.why.clone())
+            .collect();
+        assert_eq!(named, Vec::<String>::new());
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
+    /// #612, `next` (the default): no seam is derived for a prune; the
+    /// operator's seam applies it, a total refill carrying its line in the
+    /// section under `evict`, as reference. The tool answers a name no call
+    /// matches, a result already pruned, and one a seam compacted away with
+    /// what is wrong.
+    #[test]
+    fn a_pruned_result_waits_for_the_next_seam_and_the_tool_says_what_it_cannot_prune() {
+        let tree = scratch("t612-next");
+        let session = pruning(
+            &tree,
+            super::super::prune::PruneSeam::Next,
+            0,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![bash("call-5", "echo hi")],
+                vec![prune_step("call-2", "cat notes.md")],
+                vec![prune_step("call-3", "nope")],
+                vec![prune_step("call-6", "cat notes.md")],
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                vec![prune_step("call-4", "echo hi")],
+                deltas(&["ok"]),
+            ],
+        );
+        session
+            .ask_marked("read the notes", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert!(seams_in(&log).is_empty(), "no seam is derived under `next`");
+        session.declare_seam(None).expect("a seam");
+        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        assert_eq!(seam_prunes(&log), [Some(vec!["call-1".to_owned()])]);
+        let (state, section, ..) = seam_outputs_of(&log);
+        assert_eq!(state, Some(log::SeamToolOutputs::Evict));
+        let section = section.expect("a section carrying the pruned result");
+        let [(_, _, text)] = prunes_in(&log).try_into().expect("one prune");
+        assert!(
+            section.contains("listed as reference only") && section.ends_with(&text),
+            "{section}"
+        );
+        assert_eq!(
+            section.matches("- turn").count(),
+            1,
+            "only the pruned one: {section}"
+        );
+
+        session.ask("tidy", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        let shown: Vec<String> = shown_by_id(&log)
+            .into_iter()
+            .filter(|(id, _)| ["call-2", "call-3", "call-6", "call-4"].contains(&id.as_str()))
+            .map(|(_, shown)| shown)
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "pruned; replaced at the next context compaction",
+                "prune_output: no earlier call matches `nope`",
+                super::super::prune::ALREADY_PRUNED,
+                super::super::prune::ALREADY_COMPACTED,
+            ]
+        );
+        assert_eq!(prunes_in(&log).len(), 1, "a refused prune logs none");
+        reads_whole(&session);
+        tidy(&[&tree]);
+    }
+
     /// A session whose first turn reads `notes.md` and draws a read fork
     /// quoting `line two`, whose second runs `echo tail`, and which seams
     /// every `every` turns at `tail_tokens` under `state` (#553).
@@ -11772,6 +12260,7 @@ pub(in crate::drive) mod tests {
                 carried_output_bytes: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
+                pruned: None,
             }
         );
 

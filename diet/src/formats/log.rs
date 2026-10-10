@@ -219,6 +219,9 @@ vocabulary! {
         Delivered => "delivered",
         /// Archived items recalled at the tail of a trunk request (v7, #566).
         Recalled => "recalled",
+        /// A tool result the model pruned, replaced at a later seam (v7,
+        /// #612).
+        Pruned => "pruned",
         /// A tangent opened at the operator's word (v7, #22).
         TangentOpen => "tangent.open",
         /// A tangent closed: its entries disposed and the trunk rolled back
@@ -366,6 +369,9 @@ vocabulary! {
         Budget => "budget",
         /// The declared cadence came round.
         Cadence => "cadence",
+        /// The model pruned a tool result, applied as its turn settled (v7,
+        /// #612).
+        Prune => "prune",
     }
 }
 
@@ -1243,6 +1249,21 @@ pub enum Event {
         /// Each item it carries, in rank order.
         items: Vec<RecalledItem>,
     },
+    /// A tool result the model pruned (v7, #612), logged when the tool
+    /// answered: a later seam carries `text` in its place.
+    Pruned {
+        /// The turn the prune was called in.
+        turn: u32,
+        /// The id of the call whose result it pruned.
+        call: String,
+        /// The sha256 of that result's whole, as saved.
+        sha256: String,
+        /// The bytes of the result the trunk carried, which the seam
+        /// removes.
+        bytes: u64,
+        /// The reference line the seam carries in its place (#596).
+        text: String,
+    },
     /// A tangent opened (v7, #22): its id, the turn it forks at, and how
     /// many messages the trunk held there, the fork point a close rolls the
     /// trunk back to.
@@ -1351,6 +1372,9 @@ pub enum Event {
         /// The render's budget and what it did (v7, #565), on a seam whose
         /// regimen declares one.
         render_budget: Option<RenderBudget>,
+        /// The calls whose results the model pruned that this seam replaced
+        /// with their `pruned` lines' text (v7, #612).
+        pruned: Option<Vec<String>>,
     },
 }
 
@@ -2860,6 +2884,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 .ok_or("a `tangent.close` carries no `prefix_intact`")?,
             rolled_back: fields.count("rolled_back")?,
         },
+        Kind::Pruned => Event::Pruned {
+            turn: fields.turn("turn")?,
+            call: fields.string("call")?,
+            sha256: fields.digest("sha256")?,
+            bytes: fields.count("bytes")?,
+            text: fields.string("text")?,
+        },
         Kind::Recalled => Event::Recalled {
             turn: fields.turn("turn")?,
             recall: fields.tag("recall", RecallState::from_tag)?,
@@ -2892,6 +2923,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
             placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
+            pruned: fields.optional_strings("pruned")?,
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -3790,6 +3822,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Seam => 6,
         Kind::Delivered
         | Kind::Recalled
+        | Kind::Pruned
         | Kind::TangentOpen
         | Kind::TangentClose
         | Kind::Capture
@@ -3844,6 +3877,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
         return 7;
     }
     if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
+        return 7;
+    }
+    if tags == Tags::SeamReason && SeamReason::from_tag(tag) == Some(SeamReason::Prune) {
         return 7;
     }
     let capped =
@@ -4133,6 +4169,17 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("render_over_budget", Text),
                 may_v7("render_tokens", Count),
                 may_v7("render_reduced", Count),
+                may_v7("pruned", Holds::Strings),
+            ];
+            F
+        }
+        Kind::Pruned => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("call", Text),
+                must_v7("sha256", Holds::Digest),
+                must_v7("bytes", Count),
+                must_v7("text", Text),
             ];
             F
         }
@@ -4992,6 +5039,7 @@ fn to_value(line: &Line) -> Value {
             carried_output_bytes,
             placement,
             render_budget,
+            pruned,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             if let Some(moved) = phase {
@@ -5030,6 +5078,12 @@ fn to_value(line: &Line) -> Value {
                 put("render_over_budget", text(&budget.over));
                 put("render_tokens", count(budget.rendered));
                 put("render_reduced", count(budget.reduced));
+            }
+            if let Some(calls) = pruned {
+                put(
+                    "pruned",
+                    Value::Array(calls.iter().map(|call| text(call)).collect()),
+                );
             }
             Kind::Seam
         }
@@ -5084,6 +5138,20 @@ fn to_value(line: &Line) -> Value {
                 ),
             );
             Kind::Recalled
+        }
+        Event::Pruned {
+            turn,
+            call,
+            sha256,
+            bytes,
+            text: line,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("call", text(call));
+            put("sha256", text(sha256));
+            put("bytes", count(*bytes));
+            put("text", text(line));
+            Kind::Pruned
         }
     };
     put("kind", text(kind.tag()));
@@ -6625,6 +6693,13 @@ mod tests {
                     if kind == Kind::Patch && *absent == "supersedes" {
                         continue;
                     }
+                    // A stream's text comes with its byte count: added alone,
+                    // it is that pairing's refusal, not an exclusivity -- met
+                    // by a call that ran no command (#612's `prune_output`,
+                    // the standard tools), which writes `shown` and no stream.
+                    if kind == Kind::ToolCall && ["stdout", "stderr"].contains(absent) {
+                        continue;
+                    }
                     // A key of an exactly-one set beside a line that already
                     // carries another of it is that rule's refusal, whatever
                     // key `present` is.
@@ -7392,7 +7467,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled tangent.open tangent.close capture reminded"
+             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -7441,7 +7516,7 @@ mod tests {
         );
         assert_eq!(
             tags(SeamReason::ALL.iter().map(|it| it.tag()).collect()),
-            "operator phase budget cadence"
+            "operator phase budget cadence prune"
         );
     }
 

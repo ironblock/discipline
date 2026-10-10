@@ -648,6 +648,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         Some(regimen::Value::String(state)) if state == "off" || state == "on" => state.clone(),
         Some(_) => undeclared(),
     };
+    let pruning = crate::drive::prune::lever(regimen);
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers.join("+")),
@@ -691,6 +692,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("extraction_seat".to_owned(), Seat::lever(regimen)),
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
         ("subagent".to_owned(), "harness".to_owned()),
+        ("model_pruning".to_owned(), pruning),
     ])
 }
 

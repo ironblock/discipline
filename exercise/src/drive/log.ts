@@ -301,6 +301,8 @@ export type Reminded = V0.RemindedLine;
 export type Capture = V0.CaptureLine;
 /** Archived items recalled after an ask (v7, the archive recall lever, #566). */
 export type Recalled = V0.RecalledLine;
+/** A tool result the model pruned, replaced at a later seam (v7, `prune_output`, #612). */
+export type Pruned = V0.PrunedLine;
 
 export type LogLine =
   | SessionStart
@@ -326,7 +328,8 @@ export type LogLine =
   | Reminded
   | Capture
   | TangentOpen
-  | TangentClose;
+  | TangentClose
+  | Pruned;
 
 export type Kind = LogLine['kind'];
 

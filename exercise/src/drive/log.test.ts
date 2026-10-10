@@ -55,6 +55,18 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(answer?.kind === 'assistant' && answer.text).toBe(response?.kind === 'response' ? response.text : undefined);
   });
 
+  it('carries a prune on the turn that made it (v7, #612)', () => {
+    const file = 'a-v7-prune-applied-at-the-turns-seam.jsonl';
+    const line = logOf(file).find((l) => l.kind === 'pruned');
+    const user = fold(logOf(file))
+      .eras.flatMap((era) => era.nodes)
+      .find((n) => n.kind === 'user');
+    expect(line?.kind).toBe('pruned');
+    expect(user?.kind === 'user' && user.pruned).toEqual(
+      line?.kind === 'pruned' ? [{ call: line.call, bytes: line.bytes, text: line.text }] : undefined,
+    );
+  });
+
   it("opens a second era at a served seam (v6, #493): its system prompt is the head's and the render, and it says what it carried", () => {
     const file = 'a-v6-seam-the-operator-declared.jsonl';
     const line = logOf(file).find((l) => l.kind === 'seam');
