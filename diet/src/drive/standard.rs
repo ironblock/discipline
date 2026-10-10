@@ -24,7 +24,7 @@
 //!   stating rules this surface does not enforce removed.
 //!
 //! **Containment:** every tool runs as a helper command through the
-//! session's own confinement ([`Confinement::run_with_input`]), so the
+//! session's own confinement ([`crate::isolation::Confinement::run_with_input`]), so the
 //! kernel judges each path as it judges a `bash` command's. No approval
 //! gate decides them (the approval layer is frozen); a cancel stops them as
 //! it stops `bash`.
