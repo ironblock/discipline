@@ -4946,7 +4946,7 @@ fn capture_outcome(
 }
 
 /// What the model saw by turn `turn`, as the groundedness gate reads it
-/// (#609): that turn's trunk prose and non-capture tool output as the
+/// (#609): that turn's ask, trunk prose and non-capture tool output as the
 /// source, every earlier turn's as the session prefix -- from the log, as
 /// `capture::tools::Seen::of_turn` reads a record.
 fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
@@ -4964,6 +4964,8 @@ fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
     };
     for logged in log {
         match &logged.event {
+            // The operator's ask: the model saw it (#609, run 3).
+            Event::Asked { turn: at, text, .. } => file(*at, text),
             Event::Requested {
                 turn: at,
                 lane: Lane::Trunk,
@@ -15299,6 +15301,29 @@ pub(in crate::drive) mod tests {
         let shown = lines(&log)[0].shown.clone();
         assert_eq!(shown, Some(format!("recorded: {entry}")));
         reads_whole(&session);
+    }
+
+    /// #609, run 3: the operator's ask is what the model saw too, so a fact
+    /// quoted from it grounds -- the gate's source counts the turn's ask.
+    #[test]
+    fn a_fact_quoted_from_the_operators_ask_is_grounded() {
+        let session = self_capturing(
+            vec![
+                vec![
+                    Step::Delta("Noted.".to_owned()),
+                    record("call-1", "fact", "the dev server must use port 5180"),
+                ],
+                deltas(&["done"]),
+            ],
+            3,
+        );
+        session
+            .ask("Remember: the dev server must use port 5180", None)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let recorded = captures(&log);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].0, "recorded", "{recorded:?}");
     }
 
     /// #609: content the model never saw is dropped by the groundedness
