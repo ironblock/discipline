@@ -654,6 +654,16 @@ pub enum Piece {
     },
 }
 
+/// The fork ask set a session asks in (v7, #595), by name and digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkAsks {
+    /// The set's name: `dogma::asks`' directory.
+    pub name: String,
+    /// The set's digest, recomputable from the dogma's manifest; best
+    /// effort, so a name read without one is kept.
+    pub digest: Option<String>,
+}
+
 /// What a `session.start` claims serves it (v3, #292): the regimen's
 /// substrate, the registry it was read from, and the engine the start-time
 /// check passed. Its four keys come together or not at all.
@@ -829,6 +839,9 @@ pub enum Event {
         approvals_off: Option<bool>,
         /// The fork delivery lever's state (v7), for a session that forks.
         fork_delivery: Option<ForkDelivery>,
+        /// The fork ask set a session that forks asks in (v7, #595): its name
+        /// and digest, `fork_asks` and `fork_asks_digest`.
+        fork_asks: Option<ForkAsks>,
         /// With thinking on and no `reasoning_effort` sent, the level the
         /// chat template renders by default, as the registry declares it
         /// (v7): what the model was asked for, named.
@@ -1070,6 +1083,8 @@ pub enum Event {
         why: Warrant,
         /// What it asks.
         question: String,
+        /// Which ask of its set it sent (v7, #595): the router kind's tag.
+        ask: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -2314,6 +2329,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     off => off,
                 },
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
+                fork_asks: match fields.optional_string("fork_asks")? {
+                    None => None,
+                    Some(name) => Some(ForkAsks {
+                        name,
+                        digest: fields.optional_string("fork_asks_digest")?,
+                    }),
+                },
                 reasoning_effort_default: match object.get("reasoning_effort_default") {
                     None => None,
                     Some(_) => Some(fields.string("reasoning_effort_default")?),
@@ -2514,6 +2536,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             at: fields.count("at")?,
             why: fields.tag("why", Warrant::from_tag)?,
             question: fields.string("question")?,
+            ask: fields.optional_string("ask")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -3515,6 +3538,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("unsent", Holds::Unsent),
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
+                may_v7("fork_asks", Text),
+                may_v7("fork_asks_digest", Text),
                 may_v7("reasoning_effort_default", Text),
                 may_v7("phases", Holds::Strings),
                 may_v7("phase_transitions", Holds::PhaseMoves),
@@ -3660,6 +3685,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("at", Count),
                 must_v5("why", Tag(Tags::Warrant)),
                 must_v5("question", Text),
+                may_v7("ask", Text),
             ];
             F
         }
@@ -3975,6 +4001,7 @@ fn to_value(line: &Line) -> Value {
             unsent,
             approvals_off,
             fork_delivery,
+            fork_asks,
             reasoning_effort_default,
             tool_output,
             phases,
@@ -3997,6 +4024,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(phase) = opening_phase {
                 put("opening_phase", text(phase));
+            }
+            if let Some(asks) = fork_asks {
+                put("fork_asks", text(&asks.name));
+                if let Some(digest) = &asks.digest {
+                    put("fork_asks_digest", text(digest));
+                }
             }
             if let Some(effort) = reasoning_effort_default {
                 put("reasoning_effort_default", text(effort));
@@ -4368,12 +4401,16 @@ fn to_value(line: &Line) -> Value {
             at,
             why,
             question,
+            ask,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
             put("at", count(*at));
             put("why", text(why.tag()));
             put("question", text(question));
+            if let Some(ask) = ask {
+                put("ask", text(ask));
+            }
             Kind::Fork
         }
         Event::ForkSettled { fork, outcome } => {
@@ -5194,6 +5231,10 @@ mod tests {
                 phases: None,
                 phase_transitions: None,
                 opening_phase: None,
+                fork_asks: Some(ForkAsks {
+                    name: "v4".to_owned(),
+                    digest: Some("0123456789abcdef".to_owned()),
+                }),
             },
         }
     }
@@ -5464,6 +5505,7 @@ mod tests {
                 at: request,
                 why: Warrant::Scoping,
                 question: "what did the operator decide".to_owned(),
+                ask: Some("judgment".to_owned()),
             },
             Event::Request {
                 turn: 5,
@@ -5895,6 +5937,20 @@ mod tests {
                     if all_or_none(kind).contains(absent) {
                         continue;
                     }
+                    // A claim's keys come together or not at all (v3, #292):
+                    // one alone is refused for its missing siblings, not for
+                    // the key beside it.
+                    if !object.contains_key("substrate")
+                        && [
+                            "substrate",
+                            "registry_sha256",
+                            "engine_build",
+                            "engine_identity",
+                        ]
+                        .contains(absent)
+                    {
+                        continue;
+                    }
                     let mut both = object.clone();
                     both.insert((*absent).to_owned(), Value::String("x".to_owned()));
                     let mut rendered = String::new();
@@ -6139,6 +6195,7 @@ mod tests {
         let Event::SessionStart {
             version,
             tool_output,
+            fork_asks,
             ..
         } = &mut lines[0].event
         else {
@@ -6148,6 +6205,7 @@ mod tests {
         // A v7 key on the first line would be the one named; the check is of
         // what arrived in v1, further down.
         *tool_output = None;
+        *fork_asks = None;
         let document: String = lines.iter().map(|line| render(line) + "\n").collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");

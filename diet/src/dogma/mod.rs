@@ -50,6 +50,7 @@
 use std::error::Error;
 use std::fmt;
 
+pub mod asks;
 pub mod vocabulary;
 
 /// The version of the dogma this crate carries.
@@ -79,7 +80,12 @@ pub mod vocabulary;
 ///   verbatim from `results/2026-09-27-false-nomination-edit-rate/plan.json`
 ///   (identical in its 2026-09-29 sibling), so the measured rates transfer.
 ///   No earlier template changed.
-pub const VERSION: u32 = 3;
+/// * 4, 2026-10-09: the fork asks joined as named sets (#595,
+///   [`asks`]): the router's asks moved in unchanged as set `v3`, and set
+///   `v4`, whose judgment ask shows the working record and asks for
+///   SUPERSEDE, the maintainer's approval of (a) and (c). No template and no
+///   set already pinned changed.
+pub const VERSION: u32 = 4;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -89,7 +95,7 @@ pub const VERSION: u32 = 3;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "8074321fc2e6e509";
+pub const MANIFEST_DIGEST: &str = "7fc903b826b049b1";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -680,6 +686,8 @@ mod tests {
         MANIFEST
             .lines()
             .filter(|line| !line.starts_with('#') && !line.trim().is_empty())
+            // The fork ask sets' lines, held by `asks`' own test.
+            .filter(|line| !line.starts_with("fork-asks/"))
             .map(|line| {
                 let mut fields = line.split('\t');
                 let name = fields.next().expect("a manifest line starts with a name");

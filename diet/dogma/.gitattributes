@@ -1,3 +1,4 @@
 templates/*.txt -text
 MANIFEST.tsv -text
 operating-points.toml -text
+fork-asks/*/*.txt -text

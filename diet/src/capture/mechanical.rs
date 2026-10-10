@@ -2526,16 +2526,28 @@ mod tests {
     /// that the test reads the tree it was built from and not a path nobody
     /// else has.
     fn asks_dir() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("src/capture/router/asks")
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("dogma/fork-asks")
     }
 
+    /// Every set's ask files (#595), the imperative and priming aside.
     fn templates() -> Vec<PathBuf> {
         let dir = asks_dir();
         let mut found: Vec<PathBuf> = std::fs::read_dir(&dir)
             .unwrap_or_else(|err| panic!("{}: {err}", dir.display()))
             .filter_map(Result::ok)
+            .flat_map(|set| {
+                std::fs::read_dir(set.path())
+                    .expect("a set")
+                    .filter_map(Result::ok)
+            })
             .map(|entry| entry.path())
             .filter(|path| path.extension().is_some_and(|ext| ext == "txt"))
+            .filter(|path| {
+                !matches!(
+                    path.file_stem().and_then(|s| s.to_str()),
+                    Some("imperative" | "priming")
+                )
+            })
             .collect();
         found.sort();
         assert!(

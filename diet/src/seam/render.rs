@@ -86,6 +86,21 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
     out
 }
 
+/// The working record's live entries, one `<id>\t<content>` line each, as
+/// the render's working set writes them: what an ask that shows the record
+/// carries (#595).
+#[must_use]
+pub fn entries(object: &WorkingObject) -> String {
+    let mut lines = String::new();
+    for entry in object.live() {
+        lines.push_str(&one_line(entry.id.as_str()));
+        lines.push('\t');
+        lines.push_str(&one_line(&entry.content));
+        lines.push('\n');
+    }
+    lines
+}
+
 /// The trunk a served session continues from after a seam (#493): its
 /// `head`, with `render` after the head's standing instruction, and nothing
 /// of the old trunk.
