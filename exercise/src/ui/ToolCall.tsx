@@ -150,6 +150,12 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       {node.stderr ? <pre className="ex-tool__output ex-tool__stderr">{node.stderr}</pre> : null}
       {node.files ? <FileResults files={node.files} /> : null}
       {/* What a self-capture call did to working memory (#619): its outcome, and the entries it wrote or why not. */}
+      {/* A call run in the background (#614): its job, and how the job ended once it has. */}
+      {node.background ? (
+        <p className="ex-background" data-status={node.background.status} title="run in the background: the turn went on while it ran">
+          {[`background ${node.background.job}`, ...(node.background.status !== undefined ? [node.background.status] : ['running']), ...(node.background.exit !== undefined ? [`exit ${node.background.exit}`] : [])].join(' · ')}
+        </p>
+      ) : null}
       {node.capture ? (
         <p className="ex-capture" data-outcome={node.capture.outcome} title="self-capture: what this call did to working memory">
           {['self-capture', '·', node.capture.outcome, ...node.capture.entries, ...(node.capture.why !== undefined ? [`· ${node.capture.why}`] : [])].join(' ')}

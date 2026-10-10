@@ -252,6 +252,20 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(session.memory.map((e) => [e.id, e.text, e.state, e.lane])).toEqual([['r3/call-1/fact', 'The parser drops blank lines before it tokenizes.', 'live', 'self-capture']]);
   });
 
+  it('folds a call moved to the background with its job and how it ended, the harness’s notice, and a fork’s trigger (#614, #620)', () => {
+    const session = fold(logOf('a-v7-call-started-in-the-background.jsonl'));
+    expect([...session.unknown.keys()]).toEqual([]);
+    const calls = session.eras[0]?.nodes.filter((n) => n.kind === 'tool') ?? [];
+    expect(calls.map((c) => c.kind === 'tool' && c.background)).toEqual([
+      { job: 'bg_0123abcd', status: 'completed', exit: 0 },
+      { job: 'bg_4567cdef', status: 'cancelled' },
+    ]);
+    const asked = session.eras[0]?.nodes.find((n) => n.kind === 'user' && n.turn === 2);
+    expect(asked?.kind === 'user' && asked.noticed).toBe('<task-notification>\n<task-id>bg_0123abcd</task-id>\n</task-notification>');
+    const triggers = [...fold(logOf('a-v7-gap-with-two-triggered-forks.jsonl')).branches.values()].flat().map((b) => b.trigger);
+    expect(triggers).toEqual(['call:document-read:c1', 'turn_end']);
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });

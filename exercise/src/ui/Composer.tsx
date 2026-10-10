@@ -27,6 +27,8 @@ export interface ComposerProps {
   readonly tangent?: { readonly open?: { readonly id: string; readonly entries: readonly { readonly id: string; readonly text: string }[] }; readonly next: string };
   /** A bash command runs in the foreground now (#614): it can be moved to the background, and the turn goes on. */
   readonly foreground?: boolean;
+  /** That command is near its timeout (#613): the move to the background asks itself, before the timeout kills it. */
+  readonly nearTimeout?: boolean;
 }
 
 const DISPOSITIONS: readonly Disposition[] = ['keep', 'drop', 'park'];
@@ -51,7 +53,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -315,11 +317,16 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
           <button
             type="button"
             className="ex-composer__background"
+            data-urgent={nearTimeout ? '' : undefined}
             disabled={!dispatch || link !== 'live'}
-            title="move the running command to the background: it keeps running, its output is kept, and the turn goes on"
+            title={
+              nearTimeout
+                ? 'the running command is near its timeout: move it to the background and it keeps running; leave it and the timeout stops it'
+                : 'move the running command to the background: it keeps running, its output is kept, and the turn goes on'
+            }
             onClick={() => run({ kind: 'background' })}
           >
-            move to background
+            {nearTimeout ? 'move to background?' : 'move to background'}
           </button>
         ) : null}
         {running ? (

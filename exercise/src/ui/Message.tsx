@@ -101,6 +101,7 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
       {node.delivered ? <HarnessNote note="delivered" label={`harness · fork delivery · ${node.delivered.framing}`} text={node.delivered.text} /> : null}
       {node.recalled ? <HarnessNote note="recalled" label={`harness · recall · ${node.recalled.recall}`} text={node.recalled.text} /> : null}
       {node.reminded ? <HarnessNote note="reminded" label="harness · self-capture reminder" text={node.reminded} /> : null}
+      {node.noticed ? <HarnessNote note="notice" label="harness · notice" text={node.noticed} /> : null}
     </Block>
   );
 }
