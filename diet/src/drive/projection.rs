@@ -417,6 +417,9 @@ struct Walk<'a> {
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
     side_heads: BTreeMap<Lane, String>,
+    /// The trunk at an open tangent's fork point (v7, #22): what its close
+    /// rolls the rebuilt trunk back to, as the session's close does.
+    tangent_trunk: Option<Vec<Message>>,
 }
 
 /// One tool step of a turn (#472): what the model said, its calls, and what
@@ -537,6 +540,7 @@ impl<'a> Walk<'a> {
             unspellable: Vec::new(),
             turns_broken: false,
             named_kinds: BTreeSet::new(),
+            tangent_trunk: None,
             model: String::new(),
             trunk: Vec::new(),
             head: Vec::new(),
@@ -566,6 +570,31 @@ impl<'a> Walk<'a> {
             why,
             text,
         });
+    }
+
+    /// A tangent's line (v7, #22): its open keeps the rebuilt trunk as the
+    /// fork point, its close restores it, and neither has a row.
+    fn tangent(&mut self, line: &log::Line) {
+        let opened = matches!(line.event, Line::TangentOpen { .. });
+        if opened {
+            self.tangent_trunk = Some(self.trunk.clone());
+        } else if let Some(fork_point) = self.tangent_trunk.take() {
+            self.trunk = fork_point;
+        }
+        let kind = if opened {
+            log::Kind::TangentOpen
+        } else {
+            log::Kind::TangentClose
+        }
+        .tag();
+        if self.named_kinds.insert(kind) {
+            self.name(
+                line.seq,
+                kind,
+                format!("the record has no row for a `{kind}` line"),
+                None,
+            );
+        }
     }
 
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
@@ -638,6 +667,9 @@ impl<'a> Walk<'a> {
             // the session refills it, so the next request's head is rebuilt
             // and checked like any other.
             Line::Seam { .. } => self.seam(line),
+            // A tangent (v7, #22): its close rolls the rebuilt trunk back to
+            // the fork point, as the session's does; neither line has a row.
+            Line::TangentOpen { .. } | Line::TangentClose { .. } => self.tangent(line),
             // Forks' patches delivered (v7): the note follows its turn's ask
             // on the rebuilt trunk, as it does on the session's.
             // Archived items recalled (v7, #566): a note after it too, in
@@ -2410,6 +2442,7 @@ mod tests {
                 category: Some("scope".to_owned()),
             },
             supersedes: None,
+            tangent: None,
         };
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));

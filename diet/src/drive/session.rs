@@ -102,6 +102,10 @@ vocabulary! {
         DeclareSeam => "declare-seam",
         /// End the session.
         End => "end",
+        /// Open a tangent (#22).
+        OpenTangent => "open-tangent",
+        /// Close the open tangent (#22).
+        CloseTangent => "close-tangent",
     }
 }
 
@@ -130,6 +134,16 @@ vocabulary! {
         /// that turn settled and must not stop the next (the admission
         /// counter ruled on #117).
         Stale => "stale",
+        /// A seam, or a second tangent, while a tangent is open (#22).
+        TangentOpen => "tangent-open",
+        /// A close with no tangent open (#22).
+        NoTangent => "no-tangent",
+        /// A tangent asked of a session that keeps no working memory, or
+        /// under an id it cannot take (#22).
+        BadTangent => "bad-tangent",
+        /// A close whose dispositions are not exactly the tangent's entries
+        /// (#22).
+        NotTheScope => "not-the-scope",
     }
 }
 
@@ -558,6 +572,35 @@ pub enum Event {
         entry: log::PatchEntry,
         /// The id of the entry it replaced, exactly when `op` is `supersede`.
         supersedes: Option<String>,
+        /// The tangent it was made under (#22), when one was open.
+        tangent: Option<String>,
+    },
+    /// A tangent opened (#22).
+    TangentOpened {
+        /// Its id.
+        id: String,
+        /// The turns settled when it opened.
+        at_turn: u32,
+        /// The trunk's messages at the fork point.
+        trunk_messages: u64,
+    },
+    /// A tangent closed (#22): its entries disposed and the trunk rolled
+    /// back to the fork point.
+    TangentClosed {
+        /// Its id.
+        id: String,
+        /// The turns settled when it closed.
+        at_turn: u32,
+        /// The entries kept, dropped and parked, by id.
+        kept: Vec<String>,
+        /// Dropped to the archive.
+        dropped: Vec<String>,
+        /// Parked as the tangent's.
+        parked: Vec<String>,
+        /// Whether working memory's trunk entries rendered as at the fork.
+        prefix_intact: bool,
+        /// Messages the rollback took off the trunk.
+        rolled_back: u64,
     },
 }
 
@@ -981,6 +1024,9 @@ struct State {
     /// The phase the session is in, under a phase graph (#563): the graph's
     /// first at open, then where each seam's move took it.
     phase: Option<String>,
+    /// The open tangent (#22), and the trunk at its fork point, which its
+    /// close restores.
+    tangent: Option<(crate::object::tangent::Tangent, Vec<Message>)>,
     /// Patches waiting to be delivered at the next trunk request, under a
     /// mid-turn fork delivery: each op and the entry text its line names.
     undelivered: Vec<(log::PatchOp, String, String)>,
@@ -1205,6 +1251,9 @@ impl State {
                 CommandKind::Cancel => GapEnd::Cancel,
                 CommandKind::DeclareSeam => GapEnd::Seam,
                 CommandKind::End => GapEnd::End,
+                CommandKind::OpenTangent | CommandKind::CloseTangent => {
+                    unreachable!("a tangent command carries no idle gap: it takes none")
+                }
             };
             if gap.ended_by != ends {
                 return Err(Rejected::BadGap(GapError::EndedByAnotherCommand {
@@ -1460,6 +1509,7 @@ impl<S: Streaming + 'static> Session<S> {
             carried: None,
             pending_gap: None,
             phase: phase_at_open.clone(),
+            tangent: None,
             undelivered: Vec::new(),
             archive: super::archive::Archive::default(),
             recovered: BTreeMap::new(),
@@ -1745,6 +1795,9 @@ impl<S: Streaming + 'static> Session<S> {
             // Nothing to refill from: no turn yet, no working object, or an
             // empty one -- a refill from an empty object would drop every
             // turn and carry nothing in their place.
+            // A seam while a tangent is open would replace the trunk its
+            // close restores (#22).
+            Settlement::Awaiting if state.tangent.is_some() => Some(Refusal::TangentOpen),
             Settlement::Awaiting
                 if state.turns == 0
                     || state
@@ -1786,6 +1839,140 @@ impl<S: Streaming + 'static> Session<S> {
             crate::seam::Reason::Operator,
             to.map(str::to_owned),
         );
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Open a tangent under `id` (#22): the trunk as it stands is the fork
+    /// point, kept for the close to restore; every entry a fork patches in
+    /// until the close carries `id` in its provenance.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`];
+    /// [`Refusal::TangentOpen`] with one already open; [`Refusal::BadTangent`]
+    /// when the session keeps no working memory, or `id` is blank or names a
+    /// tangent the object already holds entries from.
+    pub fn open_tangent(&self, id: &str) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if state.tangent.is_some() => Some(Refusal::TangentOpen),
+            Settlement::Awaiting => None,
+        };
+        let opened = match because {
+            Some(because) => Err(because),
+            None => state
+                .interview
+                .as_ref()
+                .ok_or(Refusal::BadTangent)
+                .and_then(|interview| {
+                    crate::object::tangent::Tangent::open(&interview.object, id, state.turns)
+                        .map_err(|_| Refusal::BadTangent)
+                }),
+        };
+        let tangent = match opened {
+            Ok(tangent) => tangent,
+            Err(because) => {
+                let refused = state.refuse(CommandKind::OpenTangent, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+        };
+        let at_turn = state.turns;
+        let trunk_messages = state.trunk.len() as u64;
+        let fork_point = state.trunk.clone();
+        state.tangent = Some((tangent, fork_point));
+        state.push(Event::TangentOpened {
+            id: id.to_owned(),
+            at_turn,
+            trunk_messages,
+        });
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Close the open tangent (#22): `dispositions` rules on every entry it
+    /// created -- kept live, dropped to the archive, or parked as the
+    /// tangent's -- through `object::tangent::Tangent::close`, and the trunk
+    /// is restored to the fork point.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`];
+    /// [`Refusal::NoTangent`] with none open; [`Refusal::NotTheScope`] when
+    /// the map names an entry the tangent did not create or leaves one it
+    /// did unruled. A refused close changes nothing.
+    pub fn close_tangent(
+        &self,
+        dispositions: &BTreeMap<String, crate::object::tangent::Disposition>,
+    ) -> Result<(), Rejected> {
+        use crate::object::tangent::Disposition;
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if state.tangent.is_none() => Some(Refusal::NoTangent),
+            Settlement::Awaiting => None,
+        };
+        let map: Option<BTreeMap<crate::object::EntryId, Disposition>> = dispositions
+            .iter()
+            .map(|(id, disposition)| {
+                crate::object::EntryId::new(id)
+                    .ok()
+                    .map(|id| (id, *disposition))
+            })
+            .collect();
+        let at_turn = state.turns;
+        let closed = match (because, map) {
+            (Some(because), _) => Err(because),
+            (None, None) => Err(Refusal::NotTheScope),
+            (None, Some(map)) => {
+                let state = &mut *state;
+                match (state.tangent.as_ref(), state.interview.as_mut()) {
+                    (Some((tangent, _)), Some(interview)) => tangent
+                        .close(&mut interview.object, at_turn, &map)
+                        .map_err(|_| Refusal::NotTheScope),
+                    _ => Err(Refusal::NoTangent),
+                }
+            }
+        };
+        let closed = match closed {
+            Ok(closed) => closed,
+            Err(because) => {
+                let refused = state.refuse(CommandKind::CloseTangent, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+        };
+        let Some((tangent, fork_point)) = state.tangent.take() else {
+            unreachable!("a close that applied had a tangent open");
+        };
+        let rolled_back = state.trunk.len().saturating_sub(fork_point.len()) as u64;
+        state.trunk = fork_point;
+        // What was measured of the trunk the rollback removed no longer holds.
+        state.trunk_tokens = None;
+        let ruled = |wanted: Disposition| {
+            dispositions
+                .iter()
+                .filter(|(_, disposition)| **disposition == wanted)
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>()
+        };
+        state.push(Event::TangentClosed {
+            id: tangent.id().to_owned(),
+            at_turn,
+            kept: ruled(Disposition::Keep),
+            dropped: ruled(Disposition::Drop),
+            parked: ruled(Disposition::Park),
+            prefix_intact: closed.prefix_intact,
+            rolled_back,
+        });
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
@@ -2385,11 +2572,39 @@ pub fn line_of(logged: &Logged) -> log::Line {
             op,
             entry,
             supersedes,
+            tangent,
         } => log::Event::Patch {
             fork: *fork,
             op: *op,
             entry: entry.clone(),
             supersedes: supersedes.clone(),
+            tangent: tangent.clone(),
+        },
+        Event::TangentOpened {
+            id,
+            at_turn,
+            trunk_messages,
+        } => log::Event::TangentOpen {
+            id: id.clone(),
+            at_turn: *at_turn,
+            trunk_messages: *trunk_messages,
+        },
+        Event::TangentClosed {
+            id,
+            at_turn,
+            kept,
+            dropped,
+            parked,
+            prefix_intact,
+            rolled_back,
+        } => log::Event::TangentClose {
+            id: id.clone(),
+            at_turn: *at_turn,
+            kept: kept.clone(),
+            dropped: dropped.clone(),
+            parked: parked.clone(),
+            prefix_intact: *prefix_intact,
+            rolled_back: *rolled_back,
         },
         Event::Seamed {
             at_turn,
@@ -2522,6 +2737,8 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::Cancel => log::Command::Cancel,
         CommandKind::DeclareSeam => log::Command::DeclareSeam,
         CommandKind::End => log::Command::End,
+        CommandKind::OpenTangent => log::Command::OpenTangent,
+        CommandKind::CloseTangent => log::Command::CloseTangent,
     }
 }
 
@@ -2536,6 +2753,10 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::AlreadyInPhase => log::Refusal::AlreadyInPhase,
         Refusal::NoPhaseEdge => log::Refusal::NoPhaseEdge,
         Refusal::Stale => log::Refusal::Stale,
+        Refusal::TangentOpen => log::Refusal::TangentOpen,
+        Refusal::NoTangent => log::Refusal::NoTangent,
+        Refusal::BadTangent => log::Refusal::BadTangent,
+        Refusal::NotTheScope => log::Refusal::NotTheScope,
     }
 }
 
@@ -3662,12 +3883,18 @@ fn turn_over(template: &RequestShape, state: &mut State) {
     if state.settlement != Settlement::Awaiting {
         return;
     }
-    let due = state.interview.as_ref().and_then(|interview| {
-        interview.object.live().next()?;
-        interview
-            .seams
-            .due(state.turns - state.turns_at_seam, state.trunk_tokens)
-    });
+    // No derived seam while a tangent is open (#22): its close restores the
+    // fork point's trunk, which a refill would have replaced.
+    let due = state
+        .interview
+        .as_ref()
+        .filter(|_| state.tangent.is_none())
+        .and_then(|interview| {
+            interview.object.live().next()?;
+            interview
+                .seams
+                .due(state.turns - state.turns_at_seam, state.trunk_tokens)
+        });
     if let Some(reason) = due {
         refill_trunk(template, state, reason, None);
     }
@@ -3996,6 +4223,25 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
     let patches = cited(patches, &interview.object);
+    // Made under an open tangent (#22): stamped with it from birth, so its
+    // close finds them by provenance and never by recency.
+    let patches: Vec<Patch> = match state.tangent.as_ref() {
+        None => patches,
+        Some((tangent, _)) => patches
+            .into_iter()
+            .map(|mut patch| {
+                let at = match &mut patch {
+                    Patch::Add { provenance, .. }
+                    | Patch::Supersede { provenance, .. }
+                    | Patch::Resolve { provenance, .. }
+                    | Patch::Retire { provenance, .. }
+                    | Patch::Park { provenance, .. } => provenance,
+                };
+                at.tangent = Some(tangent.id().to_owned());
+                patch
+            })
+            .collect(),
+    };
     applied(state, &patches, fork)
 }
 
@@ -4115,6 +4361,7 @@ fn patched(fork: u64, patch: &Patch, object: &WorkingObject) -> Event {
             category: None,
         },
         supersedes,
+        tangent: patch.provenance().tangent.clone(),
     }
 }
 
@@ -5563,6 +5810,7 @@ pub(in crate::drive) mod tests {
                     category: None,
                 },
                 supersedes: None,
+                tangent: Some("t/1".to_owned()),
             },
             Event::Seamed {
                 at_turn: 1,
@@ -5599,6 +5847,20 @@ pub(in crate::drive) mod tests {
                     template: "FORK_NOTE_ADVISORY".to_owned(),
                 }],
             },
+            Event::TangentOpened {
+                id: "t/1".to_owned(),
+                at_turn: 1,
+                trunk_messages: 3,
+            },
+            Event::TangentClosed {
+                id: "t/1".to_owned(),
+                at_turn: 2,
+                kept: vec!["interview-t2-0".to_owned()],
+                dropped: Vec::new(),
+                parked: vec!["interview-t2-1".to_owned()],
+                prefix_intact: true,
+                rolled_back: 2,
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -5629,9 +5891,11 @@ pub(in crate::drive) mod tests {
                 Event::Seamed { .. } => 23,
                 Event::Delivered { .. } => 24,
                 Event::Recalled { .. } => 25,
+                Event::TangentOpened { .. } => 26,
+                Event::TangentClosed { .. } => 27,
             });
         }
-        assert_eq!(kinds.len(), 26, "a variant has no sample");
+        assert_eq!(kinds.len(), 28, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -5877,6 +6141,7 @@ pub(in crate::drive) mod tests {
                     category: None,
                 },
                 supersedes: None,
+                tangent: Some("t/1".to_owned()),
             },
             log::Event::Seam {
                 at_turn: 1,
@@ -5916,6 +6181,20 @@ pub(in crate::drive) mod tests {
                     op: log::PatchOp::Retire,
                     template: "FORK_NOTE_ADVISORY".to_owned(),
                 }],
+            },
+            log::Event::TangentOpen {
+                id: "t/1".to_owned(),
+                at_turn: 1,
+                trunk_messages: 3,
+            },
+            log::Event::TangentClose {
+                id: "t/1".to_owned(),
+                at_turn: 2,
+                kept: vec!["interview-t2-0".to_owned()],
+                dropped: Vec::new(),
+                parked: vec!["interview-t2-1".to_owned()],
+                prefix_intact: true,
+                rolled_back: 2,
             },
         ]
     }
@@ -6376,12 +6655,12 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "ask cancel declare-seam end"
+            "ask cancel declare-seam end open-tangent close-tangent"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope"
         );
         assert_eq!(
             tags(
@@ -8728,6 +9007,174 @@ pub(in crate::drive) mod tests {
                 (view != ForkView::Trunk).then(|| view.word())
             );
         }
+    }
+
+    /// A session whose first scoping turn records three trunk decisions,
+    /// then opens tangent `t/1`, whose scoping turn's fork records four.
+    fn a_tangent_with_four_entries() -> (Session<Canned>, Vec<Message>) {
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&[SCOPED]),
+                deltas(&["DECISION: one\nDECISION: two\nDECISION: three\nDECISION: four\n"]),
+                deltas(&["back on the trunk"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the first fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 1
+        });
+        let fork_point = session.trunk();
+        session.open_tangent("t/1").expect("opened");
+        session
+            .ask_marked("what if we tried it another way?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the tangent's fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        (session, fork_point)
+    }
+
+    /// #22: closing four tangent entries KEEP, DROP, PARK, KEEP leaves the
+    /// two kept in the render, keeps all four in the object, and restores
+    /// the trunk to the fork point byte for byte; the close is logged.
+    #[test]
+    fn closing_a_tangent_disposes_its_entries_and_rolls_the_trunk_back() {
+        use crate::object::tangent::Disposition;
+        let (session, fork_point) = a_tangent_with_four_entries();
+        assert_ne!(
+            session.trunk(),
+            fork_point,
+            "the tangent's turn is on the trunk"
+        );
+        let ruled = BTreeMap::from([
+            ("interview-t2-0".to_owned(), Disposition::Keep),
+            ("interview-t2-1".to_owned(), Disposition::Drop),
+            ("interview-t2-2".to_owned(), Disposition::Park),
+            ("interview-t2-3".to_owned(), Disposition::Keep),
+        ]);
+        session.close_tangent(&ruled).expect("closed");
+        assert_eq!(session.trunk(), fork_point, "rolled back to the fork point");
+        let held = session.shared.lock();
+        let object = &held.interview.as_ref().expect("interviewing").object;
+        let render = crate::seam::render::render(object, None);
+        for kept in [
+            "interview-t2-0\tdecision: one",
+            "interview-t2-3\tdecision: four",
+        ] {
+            assert!(render.contains(kept), "{render}");
+        }
+        for gone in ["decision: two", "decision: three"] {
+            assert!(!render.contains(gone), "{render}");
+        }
+        assert_eq!(
+            object
+                .entries()
+                .filter(|e| e.id.as_str().starts_with("interview-t2-"))
+                .count(),
+            4,
+            "the archive keeps everything"
+        );
+        drop(held);
+        let lines = whole_log(&session);
+        let closed = lines.iter().find_map(|line| match &line.event {
+            log::Event::TangentClose {
+                kept,
+                dropped,
+                parked,
+                rolled_back,
+                ..
+            } => Some((kept.clone(), dropped.clone(), parked.clone(), *rolled_back)),
+            _ => None,
+        });
+        let (kept, dropped, parked, rolled_back) = closed.expect("a tangent.close line");
+        assert_eq!(kept, ["interview-t2-0", "interview-t2-3"]);
+        assert_eq!((dropped.len(), parked.len()), (1, 1));
+        assert_eq!(rolled_back, 2, "the tangent's ask and answer");
+        assert!(lines.iter().any(|line| matches!(
+            &line.event,
+            log::Event::Patch { tangent: Some(t), .. } if t == "t/1"
+        )));
+    }
+
+    /// #22: the record's projection rolls its rebuilt trunk back at the
+    /// close as the session does, so the next trunk request's head is
+    /// rebuilt from the log and verified.
+    #[test]
+    fn the_trunk_request_after_a_close_is_rebuilt_from_the_log() {
+        use crate::object::tangent::Disposition;
+        let (session, _) = a_tangent_with_four_entries();
+        let ruled: BTreeMap<String, Disposition> = (0..4)
+            .map(|i| (format!("interview-t2-{i}"), Disposition::Keep))
+            .collect();
+        session.close_tangent(&ruled).expect("closed");
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "the turn after the close", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 3
+        });
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let named: Vec<String> = projected
+            .unspellable
+            .iter()
+            .filter(|u| u.kind == "request")
+            .map(|u| u.why.clone())
+            .collect();
+        assert_eq!(named, Vec::<String>::new());
+    }
+
+    /// #22: scope is provenance, never recency -- a close naming an entry
+    /// born outside the tangent is refused, and changes nothing.
+    #[test]
+    fn a_close_naming_an_entry_born_outside_the_tangent_is_refused() {
+        use crate::object::tangent::Disposition;
+        let (session, _) = a_tangent_with_four_entries();
+        let mut ruled: BTreeMap<String, Disposition> = (0..4)
+            .map(|i| (format!("interview-t2-{i}"), Disposition::Keep))
+            .collect();
+        ruled.insert("interview-t1-0".to_owned(), Disposition::Drop);
+        let trunk = session.trunk();
+        let refused = session.close_tangent(&ruled).expect_err("refused");
+        assert!(
+            matches!(refused, Rejected::Refused(Refusal::NotTheScope)),
+            "{refused:?}"
+        );
+        assert_eq!(session.trunk(), trunk, "nothing rolled back");
+        let missing: BTreeMap<String, Disposition> =
+            BTreeMap::from([("interview-t2-0".to_owned(), Disposition::Keep)]);
+        assert!(matches!(
+            session.close_tangent(&missing),
+            Err(Rejected::Refused(Refusal::NotTheScope))
+        ));
+    }
+
+    /// #22: a seam while a tangent is open is refused `tangent-open`, as is
+    /// a second tangent.
+    #[test]
+    fn a_seam_or_a_second_tangent_while_one_is_open_is_refused() {
+        let (session, _) = a_tangent_with_four_entries();
+        assert!(matches!(
+            session.declare_seam(None),
+            Err(Rejected::Refused(Refusal::TangentOpen))
+        ));
+        assert!(matches!(
+            session.open_tangent("t/2"),
+            Err(Rejected::Refused(Refusal::TangentOpen))
+        ));
     }
 
     #[test]
