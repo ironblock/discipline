@@ -705,6 +705,20 @@ pub enum Event {
         /// the capture tools (#610).
         fork: Option<u64>,
     },
+    /// A fork screened out of the gap (#611): the turn's own self-capture
+    /// already recorded what it would ask.
+    Skipped {
+        /// The settled turn it would have followed.
+        of_turn: u32,
+        /// What would have fired it (#564).
+        trigger: String,
+        /// The ask it would have sent (#595).
+        ask: AskKind,
+        /// The self-capture call that recorded it.
+        call: String,
+        /// The field that call recorded under.
+        field: String,
+    },
     /// The self-capture reminder, as a note after turn `turn`'s ask (#609).
     Reminded {
         /// The turn.
@@ -962,6 +976,9 @@ pub struct Interview {
     /// The output size, in bytes, a read must reach to fork (#564); `None`,
     /// the default, gates nothing.
     pub threshold_bytes: Option<u64>,
+    /// Whether a fork the turn's own self-capture already recorded is
+    /// skipped (#611); off, the default.
+    pub skip_self_recorded: bool,
     /// Self-capture (#609): the contract's tools offered from the first
     /// request, and the cadence of silent turns its reminder fires after;
     /// `None` when off.
@@ -1033,6 +1050,21 @@ pub fn interview_cadence(regimen: &Regimen) -> Cadence {
     .into_iter()
     .find(|cadence| cadence.word() == word)
     .unwrap_or_default()
+}
+
+/// The regimen key for skipping a fork the turn's self-capture already
+/// recorded (#611).
+pub const INTERVIEW_SKIP_SELF_RECORDED: &str = "interview_skip_self_recorded";
+
+/// Whether the regimen skips self-recorded forks, leniently: `true` or
+/// `"on"`; anything else is off.
+#[must_use]
+pub fn interview_skip_self_recorded(regimen: &Regimen) -> bool {
+    match regimen.get(INTERVIEW_SKIP_SELF_RECORDED) {
+        Some(crate::formats::regimen::Value::Boolean(on)) => *on,
+        Some(crate::formats::regimen::Value::String(word)) => word == "on",
+        _ => false,
+    }
 }
 
 /// The threshold the regimen declares, leniently: a positive whole number of
@@ -1373,11 +1405,117 @@ fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Ve
 }
 
 /// The forks the cadence chose, screened before any fires: where a routing
-/// state skips one, it is dropped here and the record says why. The first
-/// such state is #611's -- a fork the turn's own self-capture already
-/// covered -- and it lands with #609; until then every fork fires.
-fn screened(firings: Vec<Firing>) -> Vec<Firing> {
-    firings
+/// state skips one, it is dropped here, and a `fork.skipped` line says why.
+///
+/// #611's state, when on: a fork is skipped when the turn's own
+/// self-capture already recorded what it would ask -- an `update_record`
+/// the turn made, recorded, under a field the fork's ask asks for (its
+/// `fields X, Y and Z`, read off the ask as sent), and, for a fork a call
+/// fired, made after that call. No ask is changed and no text added.
+fn screened(
+    interview: &Interview,
+    log: &[Logged],
+    turn: u32,
+    firings: Vec<Firing>,
+) -> (Vec<Firing>, Vec<Event>) {
+    if !interview.skip_self_recorded {
+        return (firings, Vec::new());
+    }
+    let recorded = self_recorded(log, turn);
+    let mut skips = Vec::new();
+    let kept = firings
+        .into_iter()
+        .filter(|firing| {
+            let after = firing
+                .trigger
+                .strip_prefix("call:")
+                .and_then(|rest| rest.split_once(':'))
+                .and_then(|(_, id)| {
+                    log.iter().rposition(|logged| {
+                        matches!(&logged.event, Event::ToolCalled(line)
+                            if line.turn == turn && line.id == id)
+                    })
+                })
+                .unwrap_or(0);
+            let asked = asked_fields(&firing.question);
+            let Some((call, field)) = recorded
+                .iter()
+                .find(|(at, _, field)| *at > after && asked.contains(field))
+                .map(|(_, call, field)| (call.clone(), field.clone()))
+            else {
+                return true;
+            };
+            skips.push(Event::Skipped {
+                of_turn: turn,
+                trigger: firing.trigger.clone(),
+                ask: firing.ask,
+                call,
+                field,
+            });
+            false
+        })
+        .collect();
+    (kept, skips)
+}
+
+/// What `turn`'s own self-capture recorded (#609): each `update_record`
+/// the trunk made that came to `recorded`, with where its `capture` line
+/// sits in the log, its call's id, and its field.
+fn self_recorded(log: &[Logged], turn: u32) -> Vec<(usize, String, String)> {
+    let records = crate::capture::tools::CaptureTool::UpdateRecord.tag();
+    log.iter()
+        .enumerate()
+        .filter_map(|(at, logged)| {
+            let Event::Captured {
+                request,
+                call,
+                tool,
+                outcome,
+                fork: None,
+                ..
+            } = &logged.event
+            else {
+                return None;
+            };
+            if tool != records || outcome != "recorded" {
+                return None;
+            }
+            let field = log.iter().find_map(|logged| match &logged.event {
+                Event::ToolCalled(line)
+                    if line.turn == turn && line.request == *request && line.id == *call =>
+                {
+                    serde_json::from_str::<serde_json::Value>(&line.arguments)
+                        .ok()?
+                        .get("field")?
+                        .as_str()
+                        .map(str::to_owned)
+                }
+                _ => None,
+            })?;
+            Some((at, call.clone(), field))
+        })
+        .collect()
+}
+
+/// The fields an ask asks for, read off its words: the `fields X, Y and Z`
+/// (or `field X`) every router ask names its answer with, lower-cased to
+/// the contract's spelling. None when it names none.
+fn asked_fields(question: &str) -> Vec<String> {
+    let Some(at) = question
+        .find("fields ")
+        .map(|at| at + 7)
+        .or_else(|| question.find("field ").map(|at| at + 6))
+    else {
+        return Vec::new();
+    };
+    let named = &question[at..];
+    let end = named.find([';', '.', '\n']).unwrap_or(named.len());
+    named[..end]
+        .split([',', ' '])
+        .filter(|word| !word.is_empty() && *word != "and")
+        .take_while(|word| word.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+        .map(str::to_ascii_lowercase)
+        .collect()
 }
 
 /// The calls of `turn` that `ran`, in order, each classed by the router: a
@@ -3477,6 +3615,19 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entries: entries.clone(),
             why: why.clone(),
             fork: *fork,
+        },
+        Event::Skipped {
+            of_turn,
+            trigger,
+            ask,
+            call,
+            field,
+        } => log::Event::ForkSkipped {
+            of_turn: *of_turn,
+            trigger: trigger.clone(),
+            ask: ask.tag().to_owned(),
+            call: call.clone(),
+            field: field.clone(),
         },
         Event::Reminded { turn, text } => log::Event::Reminded {
             turn: *turn,
@@ -6379,13 +6530,30 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
             _ => None,
         })
         .unwrap_or_default();
+    let mut skipped = Vec::new();
     let mut fired: std::collections::VecDeque<Firing> = state
         .interview
         .as_ref()
         .filter(|_| !state.ending)
-        .map(|interview| screened(firings(interview, &state.log, turn, answer)))
+        .map(|interview| {
+            let (kept, skips) = screened(
+                interview,
+                &state.log,
+                turn,
+                firings(interview, &state.log, turn, answer),
+            );
+            (kept, skips)
+        })
+        .map(|(kept, skips)| {
+            skipped.extend(skips);
+            kept
+        })
         .unwrap_or_default()
         .into();
+    // Each fork screened out (#611), before the gap fires any.
+    for skip in std::mem::take(&mut skipped) {
+        state.push(skip);
+    }
     let Some(first) = fired.pop_front() else {
         turn_over(&shared.template, state);
         return None;
@@ -8660,6 +8828,13 @@ pub(in crate::drive) mod tests {
                 call: "call-a".to_owned(),
                 timeout_ms: 120_000,
             },
+            Event::Skipped {
+                of_turn: 1,
+                trigger: "turn_end".to_owned(),
+                ask: AskKind::Judgment,
+                call: "call-c".to_owned(),
+                field: "decision".to_owned(),
+            },
             Event::Captured {
                 request: 3,
                 call: "call-c".to_owned(),
@@ -8717,10 +8892,11 @@ pub(in crate::drive) mod tests {
                 Event::BackgroundEnded { .. } => 31,
                 Event::Notified { .. } => 32,
                 Event::TimeoutNear { .. } => 33,
-                Event::Audited { .. } => 34,
+                Event::Skipped { .. } => 34,
+                Event::Audited { .. } => 35,
             });
         }
-        assert_eq!(kinds.len(), 35, "a variant has no sample");
+        assert_eq!(kinds.len(), 36, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -9078,6 +9254,13 @@ pub(in crate::drive) mod tests {
                 request: 3,
                 call: "call-a".to_owned(),
                 timeout_ms: 120_000,
+            },
+            log::Event::ForkSkipped {
+                of_turn: 1,
+                trigger: "turn_end".to_owned(),
+                ask: "judgment".to_owned(),
+                call: "call-c".to_owned(),
+                field: "decision".to_owned(),
             },
             log::Event::Capture {
                 request: 3,
@@ -11777,6 +11960,7 @@ pub(in crate::drive) mod tests {
             view: None,
             cadence: Cadence::Gap,
             threshold_bytes: None,
+            skip_self_recorded: false,
             prune: None,
             self_capture: None,
             asks: &crate::dogma::asks::V3,
@@ -13543,6 +13727,164 @@ pub(in crate::drive) mod tests {
         );
         let empty = windowed(acts, 100_000, crate::seam::policy::Served::default());
         assert_eq!(run(empty), 0);
+    }
+
+    /// Each fork screened out (#611): its trigger, ask, the capture call
+    /// that recorded it, and its field.
+    fn skips(log: &[Logged]) -> Vec<(String, AskKind, String, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Skipped {
+                    trigger,
+                    ask,
+                    call,
+                    field,
+                    ..
+                } => Some((trigger.clone(), *ask, call.clone(), field.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A session with both warrants, self-capture on, and #611's skip as
+    /// `skip`, its `bash` running `cat`, playing `acts`.
+    fn skipping(tree: &Path, skip: bool, acts: Vec<Vec<Step>>) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        let mut interview = interviewing(&[log::Warrant::Scoping, log::Warrant::Read]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.skip_self_recorded = skip;
+        let mut shape = looping();
+        declare_self_capture(&mut shape, Some(&interview));
+        let mut tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["cat"],
+            None,
+            Decider::Decline,
+        );
+        tools.approvals_off = true;
+        Session::open_with(
+            Canned::new(acts),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interview),
+        )
+    }
+
+    /// The fields an ask asks for (#611), read off the ask set's words.
+    #[test]
+    fn an_asks_fields_are_read_off_its_words() {
+        let ask = |kind: AskKind| {
+            router::Ask { kind, intent: None }.render_in(
+                &crate::dogma::asks::V3,
+                &Facts::default(),
+                None,
+            )
+        };
+        assert_eq!(asked_fields(&ask(AskKind::Judgment)), ["decision", "plan"]);
+        assert_eq!(
+            asked_fields(&ask(AskKind::Finding)),
+            ["learned", "evidence", "stuck"]
+        );
+        assert_eq!(
+            asked_fields(&ask(AskKind::ApiSurface)),
+            ["api_surface", "learned", "stuck"]
+        );
+        assert!(asked_fields("say anything").is_empty());
+    }
+
+    /// A marked turn whose model recorded a decision itself (#611): its
+    /// judgment fork is skipped and the log names the capture call; with
+    /// the skip off, the fork fires.
+    #[test]
+    fn a_judgment_fork_the_turn_recorded_itself_is_skipped() {
+        let tree = scratch("skip-judgment");
+        let acts = |forks: usize| {
+            let mut acts = vec![
+                vec![
+                    Step::Delta(SCOPED.to_owned()),
+                    record("call-1", "decision", "a tracker for one team"),
+                ],
+                deltas(&["Next, I will sketch the schema."]),
+            ];
+            acts.extend((0..forks).map(|_| deltas(&[DECIDED])));
+            acts
+        };
+        let session = skipping(&tree, true, acts(0));
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert_eq!(
+            skips(&log),
+            [(
+                "turn_end".to_owned(),
+                AskKind::Judgment,
+                "call-1".to_owned(),
+                "decision".to_owned()
+            )]
+        );
+        assert!(forks(&log).is_empty());
+        reads_whole(&session);
+        let session = skipping(&tree, false, acts(1));
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert!(skips(&log).is_empty());
+        assert_eq!(forks(&log).len(), 1);
+        tidy(&[&tree]);
+    }
+
+    /// A read fork (#611) is skipped only by what the turn recorded after
+    /// the read: a `learned` recorded before the read leaves its fork to
+    /// fire.
+    #[test]
+    fn a_read_fork_is_skipped_only_by_a_record_made_after_the_read() {
+        let tree = scratch("skip-read");
+        let session = skipping(
+            &tree,
+            true,
+            vec![
+                vec![bash("call-1", "cat notes.md")],
+                vec![record("call-2", "learned", "the note says a note")],
+                deltas(&["It says a note."]),
+            ],
+        );
+        session.ask("read the notes", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert_eq!(
+            skips(&log),
+            [(
+                "call:document-read:call-1".to_owned(),
+                AskKind::Finding,
+                "call-2".to_owned(),
+                "learned".to_owned()
+            )]
+        );
+        assert!(forks(&log).is_empty());
+        reads_whole(&session);
+        let session = skipping(
+            &tree,
+            true,
+            vec![
+                vec![record("call-1", "learned", "notes exist")],
+                vec![bash("call-2", "cat notes.md")],
+                deltas(&["It says a note."]),
+                deltas(&["LEARNED: the note says a note\n"]),
+            ],
+        );
+        session.ask("read the notes", None).expect("accepted");
+        let log = wait_until(&session, "the fork", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert!(skips(&log).is_empty());
+        assert_eq!(forks(&log).len(), 1);
+        tidy(&[&tree]);
     }
 
     fn record(id: &str, field: &str, content: &str) -> Step {

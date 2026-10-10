@@ -1070,6 +1070,8 @@ fn serving_interview(
             // #564: when a fork fires, and on what; one per gap unless declared.
             cadence: session::interview_cadence(&read),
             threshold_bytes: session::interview_threshold_bytes(&read),
+            // #611: off unless declared.
+            skip_self_recorded: session::interview_skip_self_recorded(&read),
             role: session::interview_role(&read),
             // #612: whether the model may prune its tool results; off unless
             // declared.
