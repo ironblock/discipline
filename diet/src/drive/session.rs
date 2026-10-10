@@ -2046,10 +2046,10 @@ impl State {
         let text = super::archive::note(&found);
         let items = found
             .iter()
-            .map(|(item, score)| log::RecalledItem {
-                key: item.key.clone(),
-                sha256: item.sha256(),
-                score: *score,
+            .map(|found| log::RecalledItem {
+                key: found.item.key.clone(),
+                sha256: found.item.sha256(),
+                score: found.score,
             })
             .collect();
         self.push(Event::Recalled {
