@@ -533,6 +533,28 @@ export const ServedNoLeverTable: Story = {
   },
 };
 
+/** diet's v5 forks with the first moved offboard (#615) -- WRITTEN HERE: no diet fixture has an offboard fork yet. */
+const offboardForks = (() => {
+  const lines = forks.trimEnd().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+  const first = lines.find((l) => l['kind'] === 'fork')!;
+  return lines
+    .map((l) => (l === first ? { ...l, substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b' } : l['kind'] === 'fork.settled' && l['fork'] === first['seq'] ? { ...l, prompt_tokens: 1820, wall_ms: 4300 } : l))
+    .map((l) => JSON.stringify(l))
+    .join('\n');
+})();
+
+/** `?drive` (#570): an offboard fork names its seat on its branch, with its prefill and wall time; a warm one does not. */
+export const ServedOffboardFork: Story = {
+  name: '?drive: an offboard fork names its seat, prefill and wall time',
+  args: { drive: true, web: serving(offboardForks) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-lane .ex-branch')).toHaveLength(2));
+    const [offboard, warm] = [...canvasElement.querySelectorAll<HTMLElement>('.ex-lane .ex-branch')];
+    await expect(offboard?.querySelector('.ex-branch__seat')?.textContent).toBe('mac-pro-llamacpp-qwen3-4b · 1.8k tok · 4.3 s');
+    await expect(warm?.querySelector('.ex-branch__seat')).toBeNull();
+  },
+};
+
 /** `?drive`, log v7 (#627): a self-captured entry in the working-memory panel, marked with the lane that wrote it. */
 export const ServedSelfCapturedEntry: Story = {
   name: '?drive: a self-captured entry in working memory, marked self-capture',

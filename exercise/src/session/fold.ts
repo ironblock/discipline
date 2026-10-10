@@ -233,6 +233,8 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly question: string;
   /** AHEAD (`slots`): prefix tokens shared with the trunk; `diet`'s fork line does not say. */
   readonly prefixTokens?: number;
+  /** The offboard seat it ran on (#615): the registry's id and model, with its cold prefill and wall time. Absent when warm. */
+  readonly seat?: { readonly substrate: string; readonly model: string; readonly promptTokens?: number; readonly wallMs?: number };
   readonly outcome?: ForkOutcome;
   readonly patches: readonly Folded<PatchNode>[];
 }
@@ -945,6 +947,16 @@ export function fold(lines: readonly LogLine[]): Session {
       why: fork.why,
       question: fork.question,
       ...(fork.prefix_tokens !== undefined ? { prefixTokens: fork.prefix_tokens } : {}),
+      ...(fork.substrate !== undefined && fork.model !== undefined
+        ? {
+            seat: {
+              substrate: fork.substrate,
+              model: fork.model,
+              ...(settled?.prompt_tokens !== undefined ? { promptTokens: settled.prompt_tokens } : {}),
+              ...(settled?.wall_ms !== undefined ? { wallMs: settled.wall_ms } : {}),
+            },
+          }
+        : {}),
       // A side call has finished when it settles, after its patches -- not at its response.
       ...(g ? unended(generation(g, slot)) : {}),
       ...(settled ? { outcome: settled.outcome, endedAt: settled.t } : {}),
