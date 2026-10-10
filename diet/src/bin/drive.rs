@@ -717,6 +717,7 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
     // The log was written as each line was appended; the record is written
     // here, once, after `ended` and before the server stops -- in order, on
     // this thread, so nothing races the exit (#315's second review).
+    let mut record_refused = false;
     if let Some((regime, (path, file))) = running.record {
         match written_record(
             session,
@@ -724,11 +725,14 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
             (&path, file),
             running.recording.as_deref(),
         ) {
-            Ok(report) => {
+            Ok((report, refused)) => {
                 let _ = std::io::Write::write_all(
                     &mut std::io::stdout().lock(),
                     format!("{report}\n").as_bytes(),
                 );
+                // Refused, the rows were kept and the line says where; the
+                // exit still says the record was not written (#645).
+                record_refused = refused;
             }
             Err(why) => {
                 return fail(
@@ -760,6 +764,9 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
     }
     session.end_commands();
     running.server.finish(std::time::Duration::from_secs(5));
+    if record_refused {
+        return ExitCode::from(EXIT_OUTPUT);
+    }
     ExitCode::SUCCESS
 }
 
@@ -1536,9 +1543,9 @@ fn written_record(
     (regime, read_at_start): (&diet::formats::record::Regime, Option<&ReadAtStart>),
     (path, mut file): (&str, std::fs::File),
     recording: Option<&std::path::Path>,
-) -> Result<String, String> {
+) -> Result<(String, bool), String> {
     use diet::drive::projection;
-    use diet::formats::record::{self, Record};
+    use diet::formats::record;
     let engine =
         diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
             .ok()
@@ -1585,23 +1592,33 @@ fn written_record(
     });
     let product_path = format!("{path}.product.txt");
     std::fs::write(&product_path, &product).map_err(|why| format!("{product_path}: {why}"))?;
-    let text = record::render(&Record {
-        events: projected.events.clone(),
-    });
-    record::parse(&text)
-        .map_err(|why| format!("the projected record does not read back: {why:?}"))?;
-    let sidecar = projection::sidecar(&projected) + "\n";
-    let sidecar_path = format!("{path}.unspellable.json");
-    file.set_len(0)
-        .and_then(|()| std::io::Write::write_all(&mut file, text.as_bytes()))
-        .map_err(|why| format!("{path}: {why}"))?;
-    std::fs::write(&sidecar_path, &sidecar).map_err(|why| format!("{sidecar_path}: {why}"))?;
-    let mut report = BTreeMap::from([
-        ("record".to_owned(), Value::String(path.to_owned())),
-        (
-            "record_sha256".to_owned(),
-            Value::String(diet::digest::sha256_hex(text.as_bytes())),
-        ),
+    // Read back through the repairs the table allows; refused, the rows are
+    // kept beside the record and the line says so (#645).
+    let (kept, sidecar_path, sidecar) = projection::kept(&mut projected, path, &mut file)?;
+    let refused = matches!(kept, projection::Kept::Refused { .. });
+    let mut report = match kept {
+        projection::Kept::Record(text) => BTreeMap::from([
+            ("record".to_owned(), Value::String(path.to_owned())),
+            (
+                "record_sha256".to_owned(),
+                Value::String(diet::digest::sha256_hex(text.as_bytes())),
+            ),
+        ]),
+        projection::Kept::Refused {
+            path: kept_at,
+            rows,
+            refusal,
+        } => BTreeMap::from([
+            ("record".to_owned(), Value::String(path.to_owned())),
+            ("record_refused".to_owned(), Value::String(refusal)),
+            ("refused".to_owned(), Value::String(kept_at)),
+            (
+                "refused_sha256".to_owned(),
+                Value::String(diet::digest::sha256_hex(rows.as_bytes())),
+            ),
+        ]),
+    };
+    report.extend([
         ("sidecar".to_owned(), Value::String(sidecar_path)),
         (
             "sidecar_sha256".to_owned(),
@@ -1618,7 +1635,7 @@ fn written_record(
     }
     let mut out = String::new();
     json::render(&Value::Object(report), &mut out);
-    Ok(out)
+    Ok((out, refused))
 }
 
 /// The session's trunk: the system message and the sampler pins, and
