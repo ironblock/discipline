@@ -51,8 +51,19 @@ fn every_committed_runs_log_record_and_regimen_still_read() {
         if regimen_file.is_file() {
             read += 1;
             let text = std::fs::read_to_string(&regimen_file).expect("the regimen");
-            if let Err(why) = regimen::parse(&text) {
-                failures.push(format!("{name}/regimen.toml: {why}"));
+            match regimen::parse(&text) {
+                Err(why) => failures.push(format!("{name}/regimen.toml: {why}")),
+                // What it bound under an old name, it still says under the
+                // new one.
+                Ok(read) => {
+                    for (old, new) in regimen::RENAMED_KEYS {
+                        let bound = read.iter().find(|(key, _)| key == old).map(|(_, v)| v);
+                        if bound.is_some() && read.get(new) != bound {
+                            failures
+                                .push(format!("{name}/regimen.toml: `{old}` not read as `{new}`"));
+                        }
+                    }
+                }
             }
         }
     }
