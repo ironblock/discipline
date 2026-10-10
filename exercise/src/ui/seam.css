@@ -46,3 +46,37 @@
 .ex-seam__operator {
   color: var(--warn);
 }
+
+/* The background commands still running at this seam (#614): a row under the rule, one line per job. */
+.ex-seam:has(.ex-seam__background) {
+  flex-wrap: wrap;
+}
+
+.ex-seam__background {
+  flex: 1 0 100%;
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  justify-items: center;
+}
+
+.ex-seam__job {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.25rem 0.75rem;
+  max-width: 100%;
+}
+
+.ex-seam__job-command,
+.ex-seam__job-output {
+  font: var(--size-tool) / 1.4 var(--font-tool);
+  overflow-wrap: anywhere;
+}
+
+.ex-seam__job-since,
+.ex-seam__job-output {
+  color: var(--ink-muted);
+}

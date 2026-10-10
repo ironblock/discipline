@@ -61,6 +61,19 @@ export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
         </span>
       </div>
       <span className="ex-seam__rule" aria-hidden="true" />
+      {/* The background commands still running, as the refill listed them after its summary (#614). */}
+      {node.background && node.background.length > 0 ? (
+        <ul className="ex-seam__background" aria-label="background commands still running at this seam">
+          {node.background.map((job) => (
+            <li key={job.id} className="ex-seam__job" data-job={job.id}>
+              <span className="ex-seam__job-id">{job.id}</span>
+              <code className="ex-seam__job-command">{job.command}</code>
+              <span className="ex-seam__job-since">{job.since}</span>
+              <span className="ex-seam__job-output" title="the job's output file">{job.output}</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }
