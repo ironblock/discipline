@@ -1,0 +1,54 @@
+{
+  "calls": {
+    "s0": {
+      "class": "search",
+      "routing": "silent"
+    },
+    "s1": {
+      "class": "document-read",
+      "routing": "fork:finding"
+    },
+    "s2": {
+      "class": "source-read",
+      "routing": "fork:api_surface"
+    },
+    "s3": {
+      "class": "edit",
+      "routing": "fork:change"
+    },
+    "s4": {
+      "class": "edit",
+      "routing": "fork:change"
+    }
+  },
+  "unclassified": [],
+  "judgment_asks": 1,
+  "forks": 5,
+  "naive_forks": 6,
+  "per_class": {
+    "document-read": {
+      "seen": 1,
+      "forked": 1,
+      "deferred": 0,
+      "silent": 0
+    },
+    "edit": {
+      "seen": 2,
+      "forked": 2,
+      "deferred": 0,
+      "silent": 0
+    },
+    "search": {
+      "seen": 1,
+      "forked": 0,
+      "deferred": 0,
+      "silent": 1
+    },
+    "source-read": {
+      "seen": 1,
+      "forked": 1,
+      "deferred": 0,
+      "silent": 0
+    }
+  }
+}

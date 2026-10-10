@@ -906,15 +906,29 @@ fn warranted(
         if line.turn != turn || line.outcome != log::ToolOutcome::Ran {
             return None;
         }
-        let command = tool_loop::command_of(&line.arguments)?;
+        // `bash`'s command, or a standard tool's own string arguments
+        // (#557): its `path` is what the router classes a read by.
+        let command = tool_loop::command_of(&line.arguments);
+        let args: BTreeMap<String, Value> = match &command {
+            Some(command) => {
+                BTreeMap::from([("command".to_owned(), Value::String(command.clone()))])
+            }
+            None => {
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&line.arguments)
+                    .ok()?
+                    .into_iter()
+                    .filter_map(|(key, value)| match value {
+                        serde_json::Value::String(text) => Some((key, Value::String(text))),
+                        _ => None,
+                    })
+                    .collect()
+            }
+        };
         let decided = table.observe(&RecordEvent::ToolCall {
             id: line.id.clone(),
             at_turn: turn,
             tool: line.name.clone(),
-            args: Some(BTreeMap::from([(
-                "command".to_owned(),
-                Value::String(command.clone()),
-            )])),
+            args: Some(args),
             exit: None,
             output: None,
             exec: None,
@@ -925,7 +939,8 @@ fn warranted(
         };
         READS.contains(&class).then_some((kind, command))
     })?;
-    Some((log::Warrant::Read, ask(read.0, Some(read.1))))
+    // A standard tool ran no command: the ask's `last_command` line drops.
+    Some((log::Warrant::Read, ask(read.0, read.1)))
 }
 
 /// The router's classes that are a read under rule (a).
@@ -1063,6 +1078,9 @@ struct State {
     /// The recording directory, when the session keeps one: where a seam's
     /// `reference` saves an output's whole (#553).
     recording: Option<std::path::PathBuf>,
+    /// Whether the trunk carries a seam's refill message after the head
+    /// (#597): the turns start after it.
+    refilled: bool,
 }
 
 /// A prompt waiting on the operator, and the answer when one arrives.
@@ -1515,6 +1533,7 @@ impl<S: Streaming + 'static> Session<S> {
             interview,
             forking: None,
             recording: tools.as_ref().and_then(|t| t.recording.clone()),
+            refilled: false,
         };
         state.push(Event::Started {
             opened,
@@ -2626,6 +2645,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             outputs: outputs.as_ref().map(|(text, _)| text.clone()),
             carried_outputs: outputs.as_ref().map(|(_, n)| *n),
             carried_output_bytes: outputs.as_ref().map(|(text, _)| text.len() as u64),
+            // A user message after the head (#597).
+            placement: Some(log::RenderPlacement::Message),
             render_budget: render_budget.clone(),
         },
     };
@@ -3615,7 +3636,7 @@ fn refill_trunk(
     let tail_tokens = interview.seams.tail_tokens;
     let turns = state
         .trunk
-        .get(template.messages.len()..)
+        .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
     let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
     let carried_turns = kept
@@ -3646,6 +3667,7 @@ fn refill_trunk(
         .as_ref()
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
     let mut refilled = crate::seam::render::refill(&template.messages, &sent);
+    state.refilled = true;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
@@ -6137,6 +6159,7 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
             },
             log::Event::Recalled {
@@ -9647,14 +9670,103 @@ pub(in crate::drive) mod tests {
             seam_outputs_of(&log),
             (Some(log::SeamToolOutputs::Evict), None, None, None)
         );
+        let head = template().messages.len();
         assert!(
-            !sent.messages[0]
+            !sent.messages[head]
                 .content
                 .contains(crate::seam::outputs::HEADER)
         );
-        // Nothing of turn 1 after the refill: the next ask follows the head.
-        assert_eq!(sent.messages[template().messages.len()].content, "go on");
+        // Nothing of turn 1 after the refill: the next ask follows it.
+        assert_eq!(sent.messages[head + 1].content, "go on");
         every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// After a seam the system message is the session's first, byte for
+    /// byte, and the render rides in a user message after it (#597). A log
+    /// written before #597 -- its seam with no `placement`, its heads hashed
+    /// over the render in the system message -- still rebuilds every head,
+    /// and the digest still decides: the wrong placement verifies nothing.
+    #[test]
+    fn the_system_message_survives_a_seam_and_a_log_from_before_597_still_rebuilds() {
+        let tree = scratch("seam-placement");
+        let session = seaming_outputs(&tree, log::SeamToolOutputs::Evict, (1, 0), None);
+        let (log, _) = through_the_seam(&session, 1);
+        let head = template().messages.len();
+        let sent = session.shared.transport.sent();
+        let after: Vec<&RequestShape> = sent
+            .iter()
+            .filter(|shape| {
+                shape.messages.len() > head
+                    && shape.messages[head].content.starts_with("<summary>\n")
+            })
+            .collect();
+        assert!(!after.is_empty(), "a request after the seam");
+        for shape in &after {
+            assert_eq!(
+                shape.messages[..head],
+                template().messages[..],
+                "never mutated"
+            );
+        }
+        every_head_rebuilds(&log);
+
+        // The same session as a build before #597 sent it: the render
+        // appended to the system message, no refill message.
+        let digest =
+            |shape: &RequestShape| crate::client::head::Head::of(shape).digest().to_owned();
+        let old: BTreeMap<String, String> = after
+            .iter()
+            .map(|shape| {
+                let mut before = (*shape).clone();
+                let refill = before.messages.remove(head);
+                let render = refill
+                    .content
+                    .strip_prefix("<summary>\n")
+                    .and_then(|text| text.strip_suffix("\n</summary>"))
+                    .expect("the refill's wrapper");
+                before.messages[0].content.push_str("\n\n");
+                before.messages[0].content.push_str(render);
+                (digest(shape), digest(&before))
+            })
+            .collect();
+        let rewritten = |placement: Option<log::RenderPlacement>| -> Vec<log::Line> {
+            log.iter()
+                .map(line_of)
+                .map(|mut line| {
+                    match &mut line.event {
+                        log::Event::Seam { placement: at, .. } => *at = placement,
+                        log::Event::Request {
+                            head_sha256: Some(sha),
+                            ..
+                        } => {
+                            if let Some(before) = old.get(sha.as_str()) {
+                                sha.clone_from(before);
+                            }
+                        }
+                        _ => {}
+                    }
+                    line
+                })
+                .collect()
+        };
+        let unrebuilt = |lines: &[log::Line]| -> usize {
+            crate::drive::projection::project(lines, &regime(), None)
+                .expect("projected")
+                .unspellable
+                .iter()
+                .filter(|named| named.why.contains("could not be rebuilt"))
+                .count()
+        };
+        assert_eq!(
+            unrebuilt(&rewritten(None)),
+            0,
+            "a log from before #597 rebuilds"
+        );
+        assert!(
+            unrebuilt(&rewritten(Some(log::RenderPlacement::Message))) > 0,
+            "the wrong placement verifies nothing"
+        );
         tidy(&[&tree]);
     }
 
@@ -9680,12 +9792,20 @@ pub(in crate::drive) mod tests {
                  [Tool result]: {notes}"
             )
         );
-        assert!(sent.messages[0].content.ends_with(&section));
+        // The system message as the session sent it first (#597), the
+        // refill after it.
+        let head = template().messages.len();
+        assert_eq!(sent.messages[..head], template().messages[..]);
+        assert!(
+            sent.messages[head]
+                .content
+                .ends_with(&format!("{section}\n</summary>"))
+        );
         assert!(
             !section.contains("echo tail"),
             "the kept tail is not carried"
         );
-        let tail: Vec<&Message> = sent.messages[template().messages.len()..].iter().collect();
+        let tail: Vec<&Message> = sent.messages[head + 1..].iter().collect();
         assert_eq!(tail[0].content, "echo something");
         assert_eq!(tail[2].role, Role::Tool);
         assert_eq!(
@@ -9728,7 +9848,12 @@ pub(in crate::drive) mod tests {
             "{section}"
         );
         assert_eq!(std::fs::read_to_string(&saved).expect("saved whole"), notes);
-        assert!(sent.messages[0].content.ends_with(&section));
+        let head = template().messages.len();
+        assert!(
+            sent.messages[head]
+                .content
+                .ends_with(&format!("{section}\n</summary>"))
+        );
         every_head_rebuilds(&log);
         tidy(&[&tree, &recording]);
     }
@@ -9750,7 +9875,12 @@ pub(in crate::drive) mod tests {
              before context was compacted, in call order:\n\n- turn 1: bash \
              args={\"command\":\"cat notes.md\"}\n[Tool result excerpt]: line two\n"
         );
-        assert!(sent.messages[0].content.ends_with(&section));
+        let head = template().messages.len();
+        assert!(
+            sent.messages[head]
+                .content
+                .ends_with(&format!("{section}\n</summary>"))
+        );
         every_head_rebuilds(&log);
         tidy(&[&tree]);
     }
@@ -9876,7 +10006,8 @@ pub(in crate::drive) mod tests {
             Message::new(Role::Assistant, SCOPED),
         ];
         assert_eq!(trunk[trunk.len() - 2..], kept[..], "{trunk:#?}");
-        assert_eq!(trunk.len(), template().messages.len() + 2);
+        // The head, the refill message (#597), then the tail.
+        assert_eq!(trunk.len(), template().messages.len() + 3);
         let seam = log
             .iter()
             .find_map(|logged| match line_of(logged).event {
@@ -9908,7 +10039,7 @@ pub(in crate::drive) mod tests {
             .ask_marked("what are we building?", None, true)
             .expect("accepted");
         wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
-        assert_eq!(session.trunk().len(), template().messages.len());
+        assert_eq!(session.trunk().len(), template().messages.len() + 1);
     }
 
     /// A budget: the trunk call reports 18 prefilled, 160 reused and 66
@@ -10252,6 +10383,7 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
             }
         );
@@ -10530,6 +10662,49 @@ pub(in crate::drive) mod tests {
         assert_eq!(found[0].4, question);
         assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
         assert_eq!(patches(&log).len(), 1);
+        tidy(&[&tree]);
+    }
+
+    /// On the standard surface (#557) a `read` of a document fires the
+    /// read fork as `cat` does: the router classes it by its `path`, and the
+    /// ask, with no command to quote, drops its `last_command` line.
+    #[test]
+    fn a_standard_read_of_a_document_fires_a_read_fork() {
+        let tree = scratch("standard-read-fork");
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        let session = Session::open_with(
+            Canned::new([
+                vec![Step::call(0, "call-1", "read", r#"{"path":"notes.md"}"#)],
+                deltas(&["It says a note."]),
+                deltas(&["LEARNED: the note says a note\n"]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interviewing(&[log::Warrant::Read])),
+        );
+        session.ask("read the notes", None).expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        let question = router::Ask {
+            kind: AskKind::Finding,
+            intent: None,
+        }
+        .render(&Facts::default());
+        let found = forks(&log);
+        assert_eq!(found.len(), 1, "{log:#?}");
+        assert_eq!(found[0].3, log::Warrant::Read);
+        assert_eq!(found[0].4, question);
+        assert!(!question.contains("You last ran"));
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
         tidy(&[&tree]);
     }
 

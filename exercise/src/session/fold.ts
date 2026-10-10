@@ -36,6 +36,11 @@ export interface SystemNode extends Provenance {
   readonly tokens?: number;
   /** Set when this system prompt is a render of working memory: the frame it was rendered with. */
   readonly render?: string;
+  /**
+   * Set when the render rode in a user message after the head, which stays as the session sent it (log v7's seam
+   * `placement`, #597): `text` is that message.
+   */
+  readonly placement?: 'message';
 }
 
 export interface UserNode extends Provenance {
@@ -656,12 +661,19 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       case 'seam': {
         if (e.phase) phase = e.phase.to;
+        // What the model was sent after the seam -- `diet`'s `seam::render::refill`, whose output the record's head
+        // check verifies: since #597 the head as it was and a user message carrying the render (and the tool outputs
+        // the seam carried, #553); before, the head's system message, a blank line, then the render.
+        const message = 'placement' in e && e.placement === 'message';
         const rendered: SystemNode = {
           kind: 'system',
           id: `system/${e.seq}`,
-          // What the model was sent after the seam: the head's system message, a blank line, then the render --
-          // `diet`'s `seam::render::refill`, whose output the record's head check verifies.
-          text: system ? `${system.content}\n\n${e.render}` : e.render,
+          text: message
+            ? `<summary>\n${e.render}${'outputs' in e && e.outputs !== undefined ? e.outputs : ''}\n</summary>`
+            : system
+              ? `${system.content}\n\n${e.render}`
+              : e.render,
+          ...(message ? { placement: 'message' as const } : {}),
           ...(e.render_tokens !== undefined ? { tokens: e.render_tokens } : {}),
           render: e.render_version !== undefined ? `v${e.render_version}` : (e.frame ?? 'frame not recorded'),
           ...provenance(e),
