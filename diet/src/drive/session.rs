@@ -6141,7 +6141,14 @@ fn audit_fired(
         .live()
         .map(|entry| (entry.id.clone(), entry.content.clone()))
         .collect();
-    let ask = crate::seam::audit_ask(reason, &items)?;
+    // #610: a session whose forks answer through the record tools audits
+    // through them too, in the tools-route set.
+    let tools = interview.capture == crate::dogma::asks::Modality::Tools;
+    let ask = if tools {
+        crate::seam::audit_ask_tools(reason, &items, crate::dogma::audits::DEFAULT)?
+    } else {
+        crate::seam::audit_ask(reason, &items)?
+    };
     let turn = state.turns;
     let finished = state
         .log
@@ -6195,27 +6202,31 @@ fn audit_fired(
         cancel: cancel.clone(),
     });
     Some(AuditFired {
+        turn,
         fork,
         request,
         shape,
         cancel,
         items: ask.items,
+        tools,
     })
 }
 
 /// A side call's stream (#504): its text, reasoning and progress logged
-/// as they arrive, naming its request; a tool call it makes is neither run
-/// nor logged, only noted.
+/// as they arrive, naming its request; a tool call it makes is only noted,
+/// unless `tools`, when its pieces are logged and gathered for the record
+/// tools (#610).
 fn aside<S: Streaming>(
     shared: &Shared<S>,
     shape: &RequestShape,
     cancel: &Cancel,
-    request: u64,
+    (request, tools): (u64, bool),
 ) -> Aside {
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
     let mut reasoning = String::new();
     let mut called = false;
+    let mut calls = Calls::default();
     let mut hosted = Hosted::default();
     let result = shared
         .transport
@@ -6242,6 +6253,21 @@ fn aside<S: Streaming>(
                     request,
                     progress: frame,
                 },
+                Piece::ToolCall {
+                    index,
+                    id,
+                    name,
+                    arguments,
+                } if tools => {
+                    calls.piece(index, id, name, arguments);
+                    Event::ToolCallPiece {
+                        request,
+                        index,
+                        id: id.map(str::to_owned),
+                        name: name.map(str::to_owned),
+                        arguments: arguments.to_owned(),
+                    }
+                }
                 Piece::ToolCall { .. } => {
                     called = true;
                     return;
@@ -6256,6 +6282,7 @@ fn aside<S: Streaming>(
         partial,
         reasoning,
         called,
+        calls: calls.into_calls(),
         hosted,
     }
 }
@@ -6266,6 +6293,8 @@ struct Aside {
     partial: String,
     reasoning: String,
     called: bool,
+    /// The record tools' calls, when it was asked to answer through them.
+    calls: Vec<Call>,
     /// What a hosted API said beside the answer (#555).
     hosted: Hosted,
 }
@@ -6279,19 +6308,22 @@ struct Aside {
 /// call made a tool call); a cut, stopped or failed call folds nothing.
 fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
     let AuditFired {
+        turn,
         fork,
         request,
         shape,
         cancel,
         items,
+        tools,
     } = fired;
     let Aside {
         result,
         partial,
         reasoning,
         called,
+        calls,
         hosted,
-    } = aside(shared, &shape, &cancel, request);
+    } = aside(shared, &shape, &cancel, (request, tools));
     let mut state = shared.lock();
     state.flight = None;
     let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
@@ -6315,6 +6347,13 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
                 log::ForkOutcome::Cancelled
             } else if cut {
                 log::ForkOutcome::Truncated
+            } else if tools {
+                // #610: each record-tool call run as a fork's is, its
+                // patches the audit's (lane `audit`).
+                let (outcome, patched) =
+                    captured_in(&mut state, &calls, (turn, request), (fork, Lane::Audit));
+                lines = patched;
+                outcome
             } else if called {
                 log::ForkOutcome::Unparseable
             } else {
@@ -6805,6 +6844,8 @@ struct PendingSeam {
 
 /// A seam's audit, fired ([`audit_fired`], #504).
 struct AuditFired {
+    /// The turn it audits after.
+    turn: u32,
     /// The sequence number of its fork line.
     fork: u64,
     /// The sequence number of its call's request.
@@ -6813,6 +6854,8 @@ struct AuditFired {
     cancel: Cancel,
     /// The notes the ask numbered, in its order.
     items: Vec<crate::object::EntryId>,
+    /// Whether it is answered through the record tools (#610), not in lines.
+    tools: bool,
 }
 
 vocabulary! {
@@ -7461,6 +7504,17 @@ fn captured(
     (turn, request): (u32, u64),
     fork: u64,
 ) -> (log::ForkOutcome, Vec<Event>) {
+    captured_in(state, calls, (turn, request), (fork, Lane::Interview))
+}
+
+/// [`captured`], its patches on `lane`: `interview` for a fork's, `audit`
+/// for a seam's audit's (#610).
+fn captured_in(
+    state: &mut State,
+    calls: &[Call],
+    (turn, request): (u32, u64),
+    (fork, lane): (u64, Lane),
+) -> (log::ForkOutcome, Vec<Event>) {
     use crate::capture::tools::CaptureTool;
     let mut lines = Vec::new();
     let mut wrote = false;
@@ -7482,7 +7536,7 @@ fn captured(
             Ok(mut patches) => {
                 for patch in &mut patches {
                     let at = provenance_of(patch);
-                    super::INTERVIEW.clone_into(&mut at.lane);
+                    lane.tag().clone_into(&mut at.lane);
                     at.fork = Some(format!("f/{fork}"));
                 }
                 let entries = entries_of(&patches);
@@ -13321,6 +13375,86 @@ pub(in crate::drive) mod tests {
         );
         assert!(!refill.contains("no login"), "{refill}");
         assert_eq!(session.settlement(), Settlement::Awaiting);
+        reads_whole(&session);
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+    }
+
+    /// #610: a session whose forks answer through the record tools audits
+    /// through them too: the tools-route set's ask lists each note as
+    /// `<id>\t<note>` and names the tools; a `resolve_entry` call settles
+    /// its note, on the `audit` lane, before the refill; and the log reads
+    /// back and projects.
+    #[test]
+    fn a_tools_route_audit_lists_ids_and_settles_through_the_record_tools() {
+        // The fork's first decision's id, as the fold names it.
+        let settled_id = "interview-t1-0".to_owned();
+        let session = three_decisions_then(
+            |seams| seams.audit = true,
+            vec![vec![
+                Step::Delta("Settling one.".to_owned()),
+                Step::call(
+                    0,
+                    "call-a",
+                    "resolve_entry",
+                    &serde_json::json!({ "entry": settled_id, "verdict": "done" }).to_string(),
+                ),
+            ]],
+        );
+        let entries = live_entries(&session);
+        assert!(
+            entries.iter().any(|(id, _)| *id == settled_id),
+            "{entries:?}"
+        );
+        {
+            let mut state = session.shared.lock();
+            let interview = state.interview.as_mut().expect("memory");
+            interview.capture = crate::dogma::asks::Modality::Tools;
+            interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        }
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the seam", seamed);
+        let (fork, question) = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited { question, .. } => Some((logged.seq, question.clone())),
+                _ => None,
+            })
+            .expect("an audit");
+        let listing = entries
+            .iter()
+            .map(|(id, content)| format!("{id}\t{content}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(
+            question,
+            crate::dogma::audits::T1
+                .fill(
+                    crate::dogma::Template::AuditQHuman,
+                    crate::seam::AUDIT_CATEGORY,
+                    &listing
+                )
+                .expect("the ask")
+        );
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Captured { tool, outcome, fork: Some(at), .. }
+                if tool == "resolve_entry" && outcome == "resolved" && *at == fork
+        )));
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::ForkSettled { fork: at, outcome: log::ForkOutcome::Value, .. } if at == fork
+        )));
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Patched { fork: Some(at), op: log::PatchOp::Resolve, .. } if *at == fork
+        )));
+        let live: Vec<String> = live_entries(&session)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        assert!(!live.contains(&settled_id), "{live:?}");
+        assert_eq!(live.len(), 2);
         reads_whole(&session);
         let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
         super::super::projection::project(&lines, &regime(), None).expect("the log projects");
