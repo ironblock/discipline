@@ -714,6 +714,10 @@ export function fold(lines: readonly LogLine[]): Session {
       // folded into no node yet.
       case 'background.ended':
         break;
+      // A call near its timeout (#613): the surface's warning to draw, which the model never sees; folded into no
+      // node yet.
+      case 'timeout.near':
+        break;
       case 'pruned':
         prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
         break;

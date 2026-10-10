@@ -285,6 +285,9 @@ pub enum Event {
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
+        /// A `bash` call's default timeout, in milliseconds, 0 for none
+        /// (#613), when the session runs commands.
+        bash_timeout_ms: Option<u64>,
         /// The phase graph it runs under, as the log names it (#563): its
         /// phases and allowed moves, and the phase it opens in; `None` when
         /// the regimen declares none.
@@ -524,6 +527,10 @@ pub enum Event {
         seat: Option<log::ForkSeat>,
         /// Which ask of its set it sent (#595).
         ask: AskKind,
+        /// Whether it is sent to the trunk's own server with a prompt that
+        /// is not the trunk's prefix, and so may displace the trunk's cached
+        /// prefix there (#406).
+        displaces: bool,
     },
     /// How the fork ended: once per fork, after its call's last event.
     ForkSettled {
@@ -536,6 +543,8 @@ pub enum Event {
         prompt_tokens: Option<u64>,
         /// An offboard fork's call, wall time, in milliseconds (#570).
         wall_ms: Option<u64>,
+        /// Why a fork settled `refused` was never sent (#406): `pool`.
+        refused: Option<String>,
     },
     /// A seam fired, and the trunk was refilled from working memory (#493):
     /// the head with the working object rendered after it, and no turn of
@@ -593,6 +602,16 @@ pub enum Event {
     },
     /// Archived items recalled after an ask (#566): one note, which stays
     /// on the trunk.
+    /// A running `bash` call near its timeout (#613): for the surface's
+    /// warning, never sent to the model.
+    TimeoutNear {
+        /// The request whose response carried the call.
+        request: u64,
+        /// The call's id.
+        call: String,
+        /// Its timeout, in milliseconds.
+        timeout_ms: u64,
+    },
     /// A background command ended (#614): its job, how, its exit status,
     /// and its output kept by digest.
     BackgroundEnded {
@@ -758,6 +777,8 @@ pub struct ToolLine {
     pub recovered_from: Option<String>,
     /// The background job it started, or was moved into (#614).
     pub background: Option<String>,
+    /// The timeout that ended it, in milliseconds (#613).
+    pub timeout_ms: Option<u64>,
 }
 
 impl ToolLine {
@@ -786,6 +807,7 @@ impl ToolLine {
             images: Vec::new(),
             recovered_from: None,
             background: None,
+            timeout_ms: None,
         }
     }
 }
@@ -926,6 +948,9 @@ pub struct Interview {
     /// How a fork answers (#610): in fields, the default, or through the
     /// self-capture tools.
     pub capture: crate::dogma::asks::Modality,
+    /// The output cap a fork's call is clamped from (#406): the regimen's
+    /// `fork_tail_tokens`, or `None`, the session's.
+    pub fork_tail: Option<u32>,
     /// Whether the model is offered `prune_output`, and when its prunes
     /// are applied (#612); `None`, the default, offers nothing.
     pub prune: Option<super::prune::PruneSeam>,
@@ -1577,8 +1602,14 @@ impl State {
     /// was added since; with none to go on, or a prompt that shrank (a seam),
     /// the whole estimate plus [`ESTIMATE_PAD`].
     fn sized(&mut self, shape: &mut RequestShape, ceiling: u32) -> u32 {
-        let estimate = estimate_of(shape);
         let prompt = self.prompt_of(shape);
+        self.sized_at(shape, ceiling, prompt)
+    }
+
+    /// [`State::sized`], for a request whose prompt is `prompt` (#406: a
+    /// fork's, which is not always the trunk's).
+    fn sized_at(&mut self, shape: &mut RequestShape, ceiling: u32, prompt: u64) -> u32 {
+        let estimate = estimate_of(shape);
         self.sent_estimate = Some(estimate);
         let cap = clamped(ceiling, shape.limits.context_window, prompt);
         shape.limits.max_output_tokens = cap;
@@ -1609,6 +1640,31 @@ impl State {
         match failure {
             TransportFailure::Timeout { .. } => None,
             _ => self.overflow(false),
+        }
+    }
+
+    /// How a fork's call on `shape` fits (#406). Its prompt: on the trunk's
+    /// server and the trunk's prefix, sized as the trunk's is, from the
+    /// trunk's measurement; otherwise the trunk's measurement says nothing
+    /// of it, and its estimate is all there is. Whether it may displace the
+    /// trunk's cache: on the trunk's server, off its prefix. Whether it is
+    /// refused unsent: its window leaves less than the clamp's floor (or
+    /// `ceiling`, its tail, if that is less), the room the trunk's own clamp
+    /// never goes below (#588).
+    fn fork_fit(&self, shape: &RequestShape, offboard: bool, ceiling: u32) -> ForkFit {
+        let before_the_ask = &shape.messages[..shape.messages.len() - 1];
+        let on_the_trunks_prefix = self.trunk.starts_with(before_the_ask);
+        let prompt = if !offboard && on_the_trunks_prefix {
+            self.prompt_of(shape)
+        } else {
+            estimate_of(shape)
+        };
+        ForkFit {
+            prompt,
+            displaces: !offboard && !on_the_trunks_prefix,
+            refused: shape.limits.context_window.is_some_and(|window| {
+                window.saturating_sub(prompt) < u64::from(ceiling).min(CLAMP_FLOOR)
+            }),
         }
     }
 
@@ -2119,6 +2175,7 @@ impl<S: Streaming + 'static> Session<S> {
             instruction_files,
             levers,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
+            bash_timeout_ms: bash_timeout_of(tools.as_ref(), &template),
             phases,
         });
         Self::sharing(Shared {
@@ -2945,10 +3002,12 @@ pub fn line_of(logged: &Logged) -> log::Line {
             fork_asks,
             reasoning_effort_default,
             tool_output,
+            bash_timeout_ms,
             phases,
             instruction_files,
             levers,
         } => log::Event::SessionStart {
+            bash_timeout_ms: *bash_timeout_ms,
             levers: levers.clone(),
             // #563: the graph, and the phase it opens in; nothing when none.
             phases: phases.as_ref().map(|(names, _, _)| names.clone()),
@@ -3186,6 +3245,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 images: _,
                 recovered_from,
                 background,
+                timeout_ms,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -3209,8 +3269,18 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 shown,
                 recovered_from,
                 background,
+                timeout_ms,
             }
         }
+        Event::TimeoutNear {
+            request,
+            call,
+            timeout_ms,
+        } => log::Event::TimeoutNear {
+            request: *request,
+            call: call.clone(),
+            timeout_ms: *timeout_ms,
+        },
         Event::BackgroundEnded {
             job,
             status,
@@ -3240,6 +3310,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             role,
             seat,
             ask,
+            displaces,
         } => log::Event::Fork {
             lane: log::Lane::Interview,
             of_turn: *of_turn,
@@ -3254,17 +3325,20 @@ pub fn line_of(logged: &Logged) -> log::Line {
             role: (*role != Role::User).then(|| role.tag().to_owned()),
             seat: seat.clone(),
             ask: Some(ask.tag().to_owned()),
+            hazard: displaces.then(|| DISPLACES_TRUNK_CACHE.to_owned()),
         },
         Event::ForkSettled {
             fork,
             outcome,
             prompt_tokens,
             wall_ms,
+            refused,
         } => log::Event::ForkSettled {
             fork: *fork,
             outcome: *outcome,
             prompt_tokens: *prompt_tokens,
             wall_ms: *wall_ms,
+            refused: refused.clone(),
         },
         Event::Recalled {
             turn,
@@ -4505,6 +4579,12 @@ fn one_call<S: Streaming>(
     };
     // In the background (#614): one bare trailing `&` comes off, as Qwen
     // Code takes it off, before the gate judges the command.
+    // Its timeout (#613): its own, or the session's default; refused in
+    // Qwen Code's words when it is not one.
+    let timeout = match tool_loop::timeout_of(&call.arguments) {
+        Ok(own) => own.or(tools.timeout_ms),
+        Err(why) => return (refused(log::ToolRefusal::Unparsable), Some(why.to_owned())),
+    };
     let background = tools.background && tool_loop::background_of(&call.arguments);
     let command = if background {
         super::background::without_trailing_amp(&command)
@@ -4644,28 +4724,41 @@ fn one_call<S: Streaming>(
         shared.lock().promotable = Some(Arc::clone(&slot));
         slot
     });
-    // A stop reaches a running call: its whole process group is killed, and
-    // the turn settles `cancelled` (#551).
-    let finished = match &slot {
-        Some(slot) => tools.confinement.run_promotable(
-            &tools.policy,
-            &tools.worktree,
-            &run,
-            &|| cancel.is_asked(),
-            &|| {
-                slot.lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .as_ref()
-                    .and_then(|job: &super::background::Job| {
-                        std::fs::File::create(&job.output).ok()
-                    })
-            },
-        ),
-        None => tools
-            .confinement
-            .run_until(&tools.policy, &tools.worktree, &run, &|| cancel.is_asked())
-            .map(crate::isolation::Finished::Ran),
+    // Near its timeout, a line for the surface's warning (#613).
+    let warn = || {
+        if let Some(ms) = timeout {
+            shared.lock().push(Event::TimeoutNear {
+                request,
+                call: call.id.clone(),
+                timeout_ms: ms,
+            });
+            shared.changed.notify_all();
+        }
     };
+    // A stop reaches a running call: its whole process group is killed, and
+    // the turn settles `cancelled` (#551). Its timeout ends it alone (#613).
+    let finished = tools.confinement.run_promotable(
+        &tools.policy,
+        &tools.worktree,
+        &run,
+        &|| cancel.is_asked(),
+        (
+            &|| {
+                slot.as_ref().and_then(|slot| {
+                    slot.lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .as_ref()
+                        .and_then(|job: &super::background::Job| {
+                            std::fs::File::create(&job.output).ok()
+                        })
+                })
+            },
+            timeout.map(|ms| crate::isolation::Limit {
+                after: Duration::from_millis(ms),
+                warn: &warn,
+            }),
+        ),
+    );
     if slot.is_some() {
         shared.lock().promotable = None;
     }
@@ -4679,6 +4772,9 @@ fn one_call<S: Streaming>(
         Err(not_run) => Err(not_run),
     };
     match finished {
+        Ok(ran) if ran.timed_out && !ran.cancelled => {
+            timed_out(tools, line, &ran, timeout.unwrap_or_default())
+        }
         Ok(ran) if ran.cancelled => {
             // A cancelled line carries no streams (the log format's rule);
             // what the command printed before the cancel reaches the log as
@@ -4850,6 +4946,63 @@ fn promoted_call<S>(
     });
     line.background = Some(job.id.clone());
     register(shared, job, child);
+    (line, Some(shown))
+}
+
+/// The default timeout `session.start` names (#613), 0 for none: where the
+/// declared `bash` takes `timeout`, what the projection rebuilds its
+/// definition from.
+fn bash_timeout_of(tools: Option<&Tools>, template: &RequestShape) -> Option<u64> {
+    tools
+        .filter(|_| declares_timeout(template))
+        .map(|tools| tools.timeout_ms.unwrap_or(0))
+}
+
+/// Whether `template`'s `bash` takes `timeout` (#613).
+fn declares_timeout(template: &RequestShape) -> bool {
+    template.tools.iter().any(|tool| {
+        tool.name == BASH
+            && matches!(&tool.schema, Value::Object(schema)
+                if matches!(schema.get("properties"), Some(Value::Object(properties))
+                    if properties.contains_key("timeout")))
+    })
+}
+
+/// A call its timeout ended (#613): what it printed on its line, and Qwen
+/// Code's answer (`tools/shell.ts:2973-2989`) -- the timeout, then what it
+/// printed before it, or that it printed nothing -- under the cap.
+fn timed_out(
+    tools: &Tools,
+    mut line: ToolLine,
+    ran: &crate::isolation::Ran,
+    ms: u64,
+) -> (ToolLine, Option<String>) {
+    line.confined = Some(ran.confined.clone());
+    line.isolation = Some(isolation_word(ran.isolation));
+    line.network = Some(network_word(ran.network));
+    line.exit = ran.exit.and_then(|code| u64::try_from(code).ok());
+    line.stdout = Some(log::Output {
+        text: ran.stdout.clone(),
+        bytes: ran.stdout_bytes,
+    });
+    line.stderr = Some(log::Output {
+        text: ran.stderr.clone(),
+        bytes: ran.stderr_bytes,
+    });
+    line.timeout_ms = Some(ms);
+    let printed = ran.as_the_model_sees_it();
+    let said = if printed.is_empty() {
+        format!(
+            "Command timed out after {ms}ms before it could complete. There was no output before \
+             it timed out."
+        )
+    } else {
+        format!(
+            "Command timed out after {ms}ms before it could complete. Below is the output before \
+             it timed out:\n{printed}"
+        )
+    };
+    let shown = shown_capped(tools, &said, &mut line);
     (line, Some(shown))
 }
 
@@ -5485,6 +5638,41 @@ fn turn_over(template: &RequestShape, state: &mut State) {
     }
 }
 
+/// The least output the clamp leaves a request when its window has it
+/// (#588): Qwen Code's 4,000.
+pub const CLAMP_FLOOR: u64 = 4_000;
+
+/// The regimen key for a fork's tail (#406): the output cap a fork's call
+/// is clamped from, in place of the session's.
+pub const FORK_TAIL_TOKENS: &str = "fork_tail_tokens";
+
+/// The fork tail the regimen declares (#406), leniently: a positive whole
+/// number, or else none, the session's output cap.
+#[must_use]
+pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
+    match regimen.get(FORK_TAIL_TOKENS) {
+        Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => u32::try_from(*n).ok(),
+        _ => None,
+    }
+}
+
+/// How a fork's call fits its server ([`State::fork_fit`], #406).
+struct ForkFit {
+    /// Its prompt, as sized.
+    prompt: u64,
+    /// Whether it may displace the trunk's cached prefix.
+    displaces: bool,
+    /// Whether it is refused unsent, `pool`.
+    refused: bool,
+}
+
+/// Why a fork that would not fit its window was never sent (#406).
+const REFUSED_POOL: &str = "pool";
+
+/// The hazard a fork line names when its call, on the trunk's own server,
+/// does not share the trunk's prefix (#406).
+const DISPLACES_TRUNK_CACHE: &str = "may-displace-trunk-cache";
+
 /// The share of a `window` the output cap's sizing keeps clear of a
 /// prompt's estimate (#588): 5% of it, or 10,000 tokens if that is more.
 fn margin(window: i128) -> i128 {
@@ -5536,7 +5724,7 @@ pub fn clamped(ceiling: u32, window: Option<u64>, prompt: u64) -> u32 {
     let window = i128::from(window);
     let prompt = i128::from(prompt);
     let room = window - prompt - margin(window);
-    let floor = (window - prompt).clamp(1, 4_000);
+    let floor = (window - prompt).clamp(1, i128::from(CLAMP_FLOOR));
     let cap = i128::from(ceiling).min(room.max(floor));
     u32::try_from(cap).unwrap_or(ceiling)
 }
@@ -5701,13 +5889,36 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         turn_over(&shared.template, state);
         return None;
     };
+    fired.push_front(first);
     state.queued = fired.into_iter().map(|firing| (turn, at, firing)).collect();
-    Some(fire(shared, state, turn, at, first))
+    let next = fire_next(shared, state);
+    if next.is_none() {
+        turn_over(&shared.template, state);
+    }
+    next
+}
+
+/// The gap's next queued fork that is sent (#564, #406): a fork refused
+/// unsent for the pool settles at once, and the one after it fires. `None`
+/// when none is left.
+fn fire_next<S>(shared: &Shared<S>, state: &mut State) -> Option<Fired> {
+    while let Some((turn, at, firing)) = state.queued.pop_front() {
+        if let Some(fired) = fire(shared, state, turn, at, firing) {
+            return Some(fired);
+        }
+    }
+    None
 }
 
 /// One of the gap's forks, fired: born off the warm trunk -- what the view
 /// shows of it, then the question -- and never appended to it.
-fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Firing) -> Fired {
+fn fire<S>(
+    shared: &Shared<S>,
+    state: &mut State,
+    turn: u32,
+    at: u64,
+    firing: Firing,
+) -> Option<Fired> {
     let Firing {
         why,
         ask,
@@ -5740,6 +5951,18 @@ fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Fi
             model: seat.model.clone(),
         }
     });
+    // Its tail: the output cap, or the regimen's, clamped as the trunk's is
+    // (#588); refused unsent when its window leaves less than the floor.
+    let ceiling = state
+        .interview
+        .as_ref()
+        .and_then(|interview| interview.fork_tail)
+        .unwrap_or(shared.template.limits.max_output_tokens);
+    let ForkFit {
+        prompt,
+        displaces,
+        refused,
+    } = state.fork_fit(&shape, seat.is_some(), ceiling);
     let fork = state.push(Event::Forked {
         of_turn: turn,
         at,
@@ -5750,8 +5973,19 @@ fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Fi
         ask,
         role,
         seat,
+        displaces,
     });
-    let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
+    if refused {
+        state.push(Event::ForkSettled {
+            fork,
+            outcome: log::ForkOutcome::Refused,
+            prompt_tokens: None,
+            wall_ms: None,
+            refused: Some(REFUSED_POOL.to_owned()),
+        });
+        return None;
+    }
+    let max_tokens = state.sized_at(&mut shape, ceiling, prompt);
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Interview,
@@ -5766,13 +6000,13 @@ fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Fi
         cancel: cancel.clone(),
     });
     state.forking = Some(fork);
-    Fired {
+    Some(Fired {
         turn,
         fork,
         request,
         shape,
         cancel,
-    }
+    })
 }
 
 /// The gap's fork, on the turn's own thread: its one call streamed into the
@@ -5963,6 +6197,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
         outcome,
         prompt_tokens,
         wall_ms,
+        refused: None,
     });
     for patch in patches {
         state.push(patch);
@@ -5971,10 +6206,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
     if outcome == log::ForkOutcome::Cancelled || state.ending {
         state.queued.clear();
     }
-    let next = state
-        .queued
-        .pop_front()
-        .map(|(turn, at, firing)| fire(shared, &mut state, turn, at, firing));
+    let next = fire_next(shared, &mut state);
     if next.is_none() {
         turn_over(&shared.template, &mut state);
     }
@@ -6293,6 +6525,7 @@ fn crashed_fork(template: &RequestShape, state: &mut State, why: String) {
             outcome: log::ForkOutcome::Failed,
             prompt_tokens: None,
             wall_ms: None,
+            refused: None,
         });
     }
     turn_over(template, state);
@@ -7618,6 +7851,7 @@ pub(in crate::drive) mod tests {
     fn one_of_every_event() -> Vec<Logged> {
         let events = vec![
             Event::Started {
+                bash_timeout_ms: None,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
                 head: vec![Message::new(Role::System, HEAD)],
@@ -7808,6 +8042,7 @@ pub(in crate::drive) mod tests {
                 images: Vec::new(),
                 recovered_from: None,
                 background: None,
+                timeout_ms: None,
             })),
             Event::Forked {
                 of_turn: 1,
@@ -7822,6 +8057,7 @@ pub(in crate::drive) mod tests {
                     model: "small".to_owned(),
                 }),
                 ask: AskKind::Judgment,
+                displaces: false,
             },
             Event::Requested {
                 turn: 1,
@@ -7835,6 +8071,7 @@ pub(in crate::drive) mod tests {
                 outcome: log::ForkOutcome::Value,
                 prompt_tokens: Some(281),
                 wall_ms: Some(480),
+                refused: None,
             },
             Event::Patched {
                 fork: Some(20),
@@ -7916,6 +8153,11 @@ pub(in crate::drive) mod tests {
                 turn: 2,
                 text: "<task-notification>\n</task-notification>".to_owned(),
             },
+            Event::TimeoutNear {
+                request: 3,
+                call: "call-a".to_owned(),
+                timeout_ms: 120_000,
+            },
             Event::Captured {
                 request: 3,
                 call: "call-c".to_owned(),
@@ -7966,9 +8208,10 @@ pub(in crate::drive) mod tests {
                 Event::Reminded { .. } => 30,
                 Event::BackgroundEnded { .. } => 31,
                 Event::Notified { .. } => 32,
+                Event::TimeoutNear { .. } => 33,
             });
         }
-        assert_eq!(kinds.len(), 33, "a variant has no sample");
+        assert_eq!(kinds.len(), 34, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -7986,6 +8229,7 @@ pub(in crate::drive) mod tests {
     fn the_lines_of_every_event() -> Vec<log::Event> {
         vec![
             log::Event::SessionStart {
+                bash_timeout_ms: None,
                 version: log::VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -8204,6 +8448,7 @@ pub(in crate::drive) mod tests {
                 shown: None,
                 recovered_from: None,
                 background: None,
+                timeout_ms: None,
             },
             log::Event::Fork {
                 lane: log::Lane::Interview,
@@ -8219,6 +8464,7 @@ pub(in crate::drive) mod tests {
                     model: "small".to_owned(),
                 }),
                 ask: Some("judgment".to_owned()),
+                hazard: None,
             },
             log::Event::Request {
                 turn: 1,
@@ -8232,6 +8478,7 @@ pub(in crate::drive) mod tests {
                 outcome: log::ForkOutcome::Value,
                 prompt_tokens: Some(281),
                 wall_ms: Some(480),
+                refused: None,
             },
             log::Event::Patch {
                 fork: Some(20),
@@ -8316,6 +8563,11 @@ pub(in crate::drive) mod tests {
             log::Event::Notice {
                 turn: 2,
                 text: "<task-notification>\n</task-notification>".to_owned(),
+            },
+            log::Event::TimeoutNear {
+                request: 3,
+                call: "call-a".to_owned(),
+                timeout_ms: 120_000,
             },
             log::Event::Capture {
                 request: 3,
@@ -8877,6 +9129,7 @@ pub(in crate::drive) mod tests {
             read_tool: None,
             surface: tool_loop::ToolSurface::Bash,
             background: false,
+            timeout_ms: None,
         }
     }
 
@@ -8894,6 +9147,158 @@ pub(in crate::drive) mod tests {
             "bash",
             &format!("{{\"command\":{}}}", serde_json::Value::from(command)),
         )
+    }
+
+    /// A session whose calls time out after `default` ms (#613), approvals
+    /// off, its `bash` declared with `timeout`, playing `replies`.
+    fn timing(tree: &Path, default: Option<u64>, replies: Vec<Vec<Step>>) -> Session<Canned> {
+        let mut tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["sleep", "echo", "ls"],
+            None,
+            Decider::Decline,
+        );
+        tools.approvals_off = true;
+        tools.timeout_ms = default;
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Bash.tools_timed(false, default);
+        Session::open_looping(Canned::new(replies), shape, None, tools)
+    }
+
+    /// A call its default timeout ends (#613): its group killed, the call
+    /// answered with Qwen Code's words and what it printed, and the turn
+    /// goes on to its answer; every head rebuilds from the log.
+    #[test]
+    fn a_call_at_its_timeout_is_ended_answered_and_the_turn_goes_on() {
+        let tree = scratch("timeout-default");
+        let session = timing(
+            &tree,
+            Some(500),
+            vec![
+                vec![bash("call-1", "echo early; sleep 30")],
+                deltas(&["it hung"]),
+            ],
+        );
+        let asked = Instant::now();
+        session.ask("install it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(
+            asked.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            asked.elapsed()
+        );
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        let line = lines(&log).remove(0);
+        assert_eq!(line.outcome, log::ToolOutcome::Ran);
+        assert_eq!(line.timeout_ms, Some(500));
+        assert_eq!(
+            line.shown.as_deref(),
+            Some(
+                "Command timed out after 500ms before it could complete. Below is the output \
+                 before it timed out:\nearly\n"
+            )
+        );
+        let Event::Started {
+            bash_timeout_ms, ..
+        } = &log[0].event
+        else {
+            panic!("the log opens with the session");
+        };
+        assert_eq!(*bash_timeout_ms, Some(500));
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// A call's own `timeout` (#613) wins over a session with none, and one
+    /// out of range is refused in Qwen Code's words.
+    #[test]
+    fn a_calls_own_timeout_ends_it_and_a_bad_one_is_refused() {
+        let tree = scratch("timeout-own");
+        let session = timing(
+            &tree,
+            None,
+            vec![
+                vec![Step::call(
+                    0,
+                    "call-1",
+                    "bash",
+                    r#"{"command":"sleep 30","timeout":300}"#,
+                )],
+                vec![Step::call(
+                    0,
+                    "call-2",
+                    "bash",
+                    r#"{"command":"ls","timeout":700000}"#,
+                )],
+                deltas(&["done"]),
+            ],
+        );
+        session.ask("try", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let written = lines(&log);
+        assert_eq!(written[0].timeout_ms, Some(300));
+        assert_eq!(
+            written[0].shown.as_deref(),
+            Some(
+                "Command timed out after 300ms before it could complete. There was no output \
+                 before it timed out."
+            )
+        );
+        assert_eq!(written[1].outcome, log::ToolOutcome::Refused);
+        assert_eq!(
+            written[1].shown.as_deref(),
+            Some("Timeout cannot exceed 600000ms (10 minutes).")
+        );
+        let Event::Started {
+            bash_timeout_ms, ..
+        } = &log[0].event
+        else {
+            panic!("the log opens with the session");
+        };
+        assert_eq!(*bash_timeout_ms, Some(0), "none, declared");
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// Fifteen seconds before its timeout (#613), a running call's
+    /// `timeout.near` line is logged for the surface, never the model.
+    #[test]
+    fn a_call_near_its_timeout_is_logged_for_the_surface() {
+        let tree = scratch("timeout-near");
+        let session = timing(
+            &tree,
+            Some(15_200),
+            vec![vec![bash("call-1", "sleep 30")], deltas(&["stopped"])],
+        );
+        session.ask("wait", None).expect("accepted");
+        let log = wait_until(&session, "the warning", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::TimeoutNear { .. }))
+        });
+        let near = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::TimeoutNear {
+                    call, timeout_ms, ..
+                } => Some((call.clone(), *timeout_ms)),
+                _ => None,
+            })
+            .expect("the warning");
+        assert_eq!(near, ("call-1".to_owned(), 15_200));
+        session.cancel(1, None).expect("cancelled");
+        wait_until(&session, "the turn", settled);
+        let sent = session.shared.transport.sent();
+        assert!(
+            sent.iter()
+                .flat_map(|shape| &shape.messages)
+                .all(|message| !message.content.contains("time out")),
+            "the warning never reaches the model"
+        );
+        reads_whole(&session);
+        tidy(&[&tree]);
     }
 
     /// A session whose `bash` runs in the background on request (#614),
@@ -10853,6 +11258,7 @@ pub(in crate::drive) mod tests {
             self_capture: None,
             asks: &crate::dogma::asks::V3,
             capture: crate::dogma::asks::Modality::Fields,
+            fork_tail: None,
         }
     }
 
@@ -11611,6 +12017,107 @@ pub(in crate::drive) mod tests {
     /// #570: a seated session's fork is made to the seat, naming its model,
     /// shown the last turn when the regimen does not say, and its line names
     /// the seat; the trunk's server sees only the trunk.
+    /// A scoping session over a `window`-token context, its interview
+    /// shaped by `shape_it`, playing an earlier turn, the scoped turn and
+    /// its fork's answer; the log once the fork settled (#406).
+    fn forked_over(
+        window: u64,
+        shape_it: impl FnOnce(&mut Interview),
+    ) -> (Session<Canned>, Vec<Logged>) {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        shape_it(&mut interview);
+        let mut shape = template();
+        shape.limits.context_window = Some(window);
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&["first answer"]),
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.ask("an earlier turn", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        (session, log)
+    }
+
+    /// The fork's request's output cap, when it was sent.
+    fn fork_cap(log: &[Logged]) -> Option<u32> {
+        log.iter().find_map(|logged| match &logged.event {
+            Event::Requested {
+                lane: Lane::Interview,
+                max_tokens,
+                ..
+            } => Some(*max_tokens),
+            _ => None,
+        })
+    }
+
+    /// #406: a fork whose prompt leaves its window less than the clamp's
+    /// floor is never sent -- `refused`, `pool` -- and the session goes on;
+    /// one with room is sent with the output cap, clamped as the trunk's is.
+    #[test]
+    fn a_fork_that_would_not_fit_its_window_is_refused_unsent() {
+        let (session, log) = forked_over(1_000, |_| {});
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Refused]);
+        assert_eq!(fork_cap(&log), None, "never sent");
+        assert_eq!(
+            session.shared.transport.sent().len(),
+            2,
+            "the trunk's two turns only"
+        );
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::ForkSettled { refused: Some(why), .. } if why == "pool"
+        )));
+        assert_eq!(session.settlement(), Settlement::Awaiting);
+        reads_whole(&session);
+        let (_, log) = forked_over(1_000_000, |_| {});
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
+        assert_eq!(fork_cap(&log), Some(template().limits.max_output_tokens));
+    }
+
+    /// #406: `fork_tail_tokens` is the cap a fork is clamped from.
+    #[test]
+    fn a_forks_tail_is_the_regimens_when_it_declares_one() {
+        let (_, log) = forked_over(1_000_000, |interview| interview.fork_tail = Some(48));
+        assert_eq!(fork_cap(&log), Some(48));
+    }
+
+    /// #406: a fork on the trunk's own server whose view is not the trunk's
+    /// prefix says it may displace the trunk's cache; one on the whole
+    /// trunk does not.
+    #[test]
+    fn a_fork_off_the_trunks_prefix_on_its_server_names_the_hazard() {
+        let hazard = |log: &[Logged]| {
+            log.iter().find_map(|logged| match &logged.event {
+                Event::Forked { displaces, .. } => Some(*displaces),
+                _ => None,
+            })
+        };
+        let (session, log) = forked_over(1_000_000, |interview| {
+            interview.view = Some(ForkView::Last(1));
+        });
+        assert_eq!(hazard(&log), Some(true));
+        let lines = whole_log(&session);
+        assert!(lines.iter().any(|line| matches!(
+            &line.event,
+            log::Event::Fork { hazard: Some(h), .. } if h == "may-displace-trunk-cache"
+        )));
+        let (_, log) = forked_over(1_000_000, |_| {});
+        assert_eq!(hazard(&log), Some(false));
+    }
+
     #[test]
     fn a_seated_fork_runs_on_its_seat_and_says_so() {
         let session = Session::open_with(
@@ -11652,6 +12159,12 @@ pub(in crate::drive) mod tests {
             .expect("one fork request, to the seat");
         assert_eq!(fork.model, "small");
         assert_eq!(fork.limits.context_window, Some(8192));
+        // #406: sized from its own estimate, not the trunk's padded one, so
+        // an 8,192-token seat leaves it the session's whole output cap.
+        assert_eq!(
+            fork.limits.max_output_tokens,
+            template().limits.max_output_tokens
+        );
         // Undeclared, offboard: the head and the last turn, then the ask.
         let trunk = session.trunk();
         let head = template().messages.len();

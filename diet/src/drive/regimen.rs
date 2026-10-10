@@ -661,6 +661,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("substrate_rung".to_owned(), word("substrate")),
         ("tool_surface".to_owned(), surface),
         ("background_commands".to_owned(), background_lever(regimen)),
+        ("bash_timeout".to_owned(), timeout_lever(regimen)),
         ("tool_call_text_fallback".to_owned(), text_fallback),
         (
             "instruction_files".to_owned(),
@@ -679,7 +680,10 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             cadence_lever(regimen),
         ),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
-        ("fork_memory_share".to_owned(), undeclared()),
+        (
+            "fork_memory_share".to_owned(),
+            fork_memory_share_lever(regimen),
+        ),
         ("fork_input_view".to_owned(), fork_input_view_lever(regimen)),
         ("fork_asks".to_owned(), fork_asks_lever(regimen)),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
@@ -746,6 +750,22 @@ fn tangent_closure_lever(regimen: &Regimen) -> String {
     }
 }
 
+/// The bash timeout lever (#613): the default in milliseconds, `off` for
+/// none; undeclared where the regimen runs no commands.
+fn timeout_lever(regimen: &Regimen) -> String {
+    crate::drive::tool_loop::declared(regimen)
+        .ok()
+        .flatten()
+        .map_or_else(
+            || UNDECLARED.to_owned(),
+            |declared| {
+                declared
+                    .timeout_ms
+                    .map_or_else(|| "off".to_owned(), |ms| format!("{ms}ms"))
+            },
+        )
+}
+
 /// The background commands lever (#614): on unless the regimen turns them
 /// off; undeclared where it runs no commands.
 fn background_lever(regimen: &Regimen) -> String {
@@ -807,6 +827,16 @@ fn seam_triggers(regimen: &Regimen) -> String {
         triggers.push("window");
     }
     triggers.join("+")
+}
+
+/// The fork memory share lever's word (#406): the tail a fork's call is
+/// clamped from, `tail:output-cap` or the regimen's `tail:<tokens>`; a fork
+/// that would not fit its window is refused unsent either way.
+fn fork_memory_share_lever(regimen: &Regimen) -> String {
+    crate::drive::session::fork_tail(regimen).map_or_else(
+        || "tail:output-cap".to_owned(),
+        |tokens| format!("tail:{tokens}"),
+    )
 }
 
 /// The capture modality lever's word (#610): how a fork answers, `fields`
@@ -969,6 +999,25 @@ mod tests {
             lever("approval = \"none\"\nbackground_commands = \"off\"\n"),
             "off"
         );
+        assert_eq!(lever(""), UNDECLARED);
+    }
+
+    /// The default timeout (#613): 120000 ms unless the regimen says, 0
+    /// for none, and undeclared where it runs no commands.
+    #[test]
+    fn the_bash_timeout_lever_names_the_default_or_off() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("bash_timeout")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever("approval = \"none\"\n"), "120000ms");
+        assert_eq!(
+            lever("approval = \"none\"\nbash_timeout_ms = 30000\n"),
+            "30000ms"
+        );
+        assert_eq!(lever("approval = \"none\"\nbash_timeout_ms = 0\n"), "off");
         assert_eq!(lever(""), UNDECLARED);
     }
 

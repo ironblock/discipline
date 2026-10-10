@@ -806,7 +806,9 @@ fn served_session(
     // `bash` alone, or `bash` and the standard set; then `prune_output`
     // when the regimen offers it (#612).
     if let Some(tools) = tools.as_ref() {
-        shape.tools = tools.surface.tools_with(tools.background);
+        shape.tools = tools
+            .surface
+            .tools_timed(tools.background, tools.timeout_ms);
         if declared
             .1
             .as_ref()
@@ -1072,6 +1074,8 @@ fn serving_interview(
             // #612: whether the model may prune its tool results; off unless
             // declared.
             prune: diet::drive::prune::of(&read),
+            // #406: a fork's tail; the output cap unless declared.
+            fork_tail: session::fork_tail(&read),
         }),
     )
 }
@@ -1238,6 +1242,8 @@ fn serving_tools(
         surface: declared.surface,
         // #614: on unless the regimen turns it off.
         background: declared.background,
+        // #613: the regimen's default timeout, 120000 ms unless it says.
+        timeout_ms: declared.timeout_ms,
     }))
 }
 
