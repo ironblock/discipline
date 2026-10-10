@@ -494,6 +494,7 @@ export type ForkLine = {
   why: Warrant;
   question: string;
   view?: string;
+  role?: string;
   ask?: string;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 

@@ -679,6 +679,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("fork_input_view".to_owned(), fork_input_view_lever(regimen)),
         ("fork_asks".to_owned(), fork_asks_lever(regimen)),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
+        ("interview_role".to_owned(), interview_role_lever(regimen)),
         ("step_and_output_limits".to_owned(), limits),
         ("extraction_seat".to_owned(), Seat::lever(regimen)),
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
@@ -729,6 +730,13 @@ fn tangent_closure_lever(regimen: &Regimen) -> String {
     } else {
         UNDECLARED.to_owned()
     }
+}
+
+/// The interview role lever's word (#599): the role the regimen asks in.
+fn interview_role_lever(regimen: &Regimen) -> String {
+    crate::drive::session::interview_role(regimen)
+        .tag()
+        .to_owned()
 }
 
 /// The self-capture lever's word (#609): `off`, or `on:every:<n>` with the

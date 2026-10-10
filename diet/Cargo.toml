@@ -15,6 +15,8 @@ name = "diet"
 path = "src/bin/diet.rs"
 
 [dependencies]
+minijinja = "2.5.0"
+minijinja-contrib = { version = "2.5.0", features = ["pycompat"] }
 pest = "2.9"
 pest_derive = "2.9"
 # A real JSON reader for a FOREIGN format. The record's own value space is a

@@ -505,6 +505,8 @@ pub enum Event {
         question: String,
         /// What it saw of the trunk (#567).
         view: ForkView,
+        /// The role it asked in (#599).
+        role: Role,
         /// The offboard seat its call ran on (#570); `None` is warm.
         seat: Option<log::ForkSeat>,
         /// Which ask of its set it sent (#595).
@@ -864,6 +866,10 @@ pub struct Interview {
     /// The regimen's phase graph (#563), read as the scripted drive reads
     /// it; empty when it declares none.
     pub phases: crate::seam::phase::PhaseGraph,
+    /// The role a fork's interview question is asked in (#599): `user`, the
+    /// default, or `system` or `developer` where the served template
+    /// renders it (serve checks at start).
+    pub role: Role,
     /// The ask set its forks ask in (#595).
     pub asks: &'static crate::dogma::asks::AskSet,
     /// How archived items are recalled at an ask (#566): off, the default.
@@ -1012,6 +1018,22 @@ fn viewed(trunk: &[Message], head: usize, view: ForkView) -> Vec<Message> {
     let head = head.min(trunk.len());
     let turns = crate::seam::render::last_turns(&trunk[head..], n as usize);
     trunk[..head].iter().chain(turns).cloned().collect()
+}
+
+/// The regimen key for the role the interview asks in (#599).
+pub const INTERVIEW_ROLE: &str = "interview_role";
+
+/// The interview role the regimen declares, leniently: `"system"` or
+/// `"developer"`, or else `user`.
+#[must_use]
+pub fn interview_role(regimen: &Regimen) -> Role {
+    match regimen.get(INTERVIEW_ROLE) {
+        Some(crate::formats::regimen::Value::String(word)) if word == "system" => Role::System,
+        Some(crate::formats::regimen::Value::String(word)) if word == "developer" => {
+            Role::Developer
+        }
+        _ => Role::User,
+    }
 }
 
 /// The regimen key for the fork ask set (#595).
@@ -1762,12 +1784,7 @@ impl<S: Streaming + 'static> Session<S> {
         tools: Option<Tools>,
         (claim, interview, (unsent, reasoning_effort_default, instruction_files, levers)): Declared,
     ) -> Self {
-        // A head is the trunk before any turn; a tool result answers a call
-        // made in one, and the log's head has no word for it (`role_of`).
-        assert!(
-            template.messages.iter().all(|m| m.role != Role::Tool),
-            "a session's head holds no tool result"
-        );
+        a_head(&template.messages);
         let trunk = template.messages.clone();
         let fork_delivery = interview.as_ref().map(|interview| interview.delivery);
         let phases = phases_of(interview.as_ref());
@@ -2873,6 +2890,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             why,
             question,
             view,
+            role,
             seat,
             ask,
         } => log::Event::Fork {
@@ -2884,6 +2902,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // Absent is the tail (#568): a tail fork's line is as before.
             // Absent is the whole trunk (#567).
             view: (*view != ForkView::Trunk).then(|| view.word()),
+            // Absent is `user` (#599): a user-role fork's line is as before.
+            role: (*role != Role::User).then(|| role.tag().to_owned()),
             seat: seat.clone(),
             ask: Some(ask.tag().to_owned()),
         },
@@ -3128,6 +3148,9 @@ fn gap_line(gap: &IdleGap) -> log::Event {
 fn role_of(role: Role) -> log::Role {
     match role {
         Role::Tool => unreachable!("a head holds no tool result: `open` asserts it"),
+        Role::Developer => {
+            unreachable!("a head holds no developer message, a fork's ask alone: `open` asserts it")
+        }
         Role::System => log::Role::System,
         Role::User => log::Role::User,
         Role::Assistant => log::Role::Assistant,
@@ -4783,6 +4806,22 @@ fn margin(window: i128) -> i128 {
     (window * 5 / 100).max(10_000)
 }
 
+/// That `messages` can open a session: a head is the trunk before any
+/// turn; a tool result answers a call made in one, and the log's head has
+/// no word for it or for a developer message (`role_of`).
+///
+/// # Panics
+///
+/// When it holds either.
+fn a_head(messages: &[Message]) {
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.role != Role::Tool && m.role != Role::Developer),
+        "a session's head holds no tool result and no developer message"
+    );
+}
+
 /// The estimated tokens of `shape`'s messages (#588).
 fn estimate_of(shape: &RequestShape) -> u64 {
     shape
@@ -4927,6 +4966,10 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         turn_over(&shared.template, state);
         return None;
     };
+    let role = state
+        .interview
+        .as_ref()
+        .map_or(Role::User, |interview| interview.role);
     let mut shape = shared.template.clone();
     let declared = state
         .interview
@@ -4940,9 +4983,7 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         ForkView::Trunk
     });
     shape.messages = viewed(&state.trunk, shared.template.messages.len(), view);
-    shape
-        .messages
-        .push(Message::new(Role::User, question.clone()));
+    shape.messages.push(Message::new(role, question.clone()));
     let seat = shared.seat.as_ref().map(|seat| {
         shape.model.clone_from(&seat.model);
         shape.limits.context_window = seat.context_window;
@@ -4957,6 +4998,7 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         why,
         question,
         view,
+        role,
         seat,
         ask: kind,
     });
@@ -6934,6 +6976,7 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
                 view: ForkView::Last(2),
+                role: Role::Developer,
                 seat: Some(log::ForkSeat {
                     substrate: "cpu-seat".to_owned(),
                     model: "small".to_owned(),
@@ -7310,6 +7353,7 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
                 view: Some("last:2".to_owned()),
+                role: Some("developer".to_owned()),
                 seat: Some(log::ForkSeat {
                     substrate: "cpu-seat".to_owned(),
                     model: "small".to_owned(),
@@ -9676,6 +9720,7 @@ pub(in crate::drive) mod tests {
             delivery: log::ForkDelivery::Seam,
             phases: crate::seam::phase::PhaseGraph::none(),
             recall: super::super::archive::Recall::Off,
+            role: Role::User,
             view: None,
             prune: None,
             self_capture: None,
@@ -10428,6 +10473,55 @@ pub(in crate::drive) mod tests {
         assert_eq!(read("fork_asks = \"v4\"\n"), "v4");
         assert_eq!(read("fork_asks = \"no-such-set\"\n"), "v3");
         assert_eq!(read("fork_asks = 3\n"), "v3");
+    }
+
+    /// #599: a fork's ask goes in the interview's role, and its `fork` line
+    /// names a role but `user`; under `user` the line is as before.
+    #[test]
+    fn a_forks_ask_goes_in_the_interview_role_and_its_line_names_it() {
+        for role in [Role::User, Role::Developer] {
+            let mut interview = interviewing(&[log::Warrant::Scoping]);
+            interview.role = role;
+            let session = Session::open_with(
+                Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED])]),
+                template(),
+                None,
+                None,
+                None,
+                Some(interview),
+            );
+            session
+                .ask_marked("what are we building?", None, true)
+                .expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+            let sent = session.shared.transport.sent();
+            let ask = sent
+                .last()
+                .and_then(|fork| fork.messages.last())
+                .expect("the fork's ask");
+            assert_eq!(ask.role, role);
+            let lines = whole_log(&session);
+            let named = lines.iter().find_map(|line| match &line.event {
+                log::Event::Fork { role, .. } => Some(role.clone()),
+                _ => None,
+            });
+            assert_eq!(
+                named.expect("a fork line"),
+                (role != Role::User).then(|| role.tag().to_owned())
+            );
+        }
+    }
+
+    /// #599: the role is read leniently, `user` by default.
+    #[test]
+    fn the_interview_role_is_read_leniently() {
+        let read = |text: &str| interview_role(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), Role::User);
+        assert_eq!(read("interview_role = \"system\"\n"), Role::System);
+        assert_eq!(read("interview_role = \"developer\"\n"), Role::Developer);
+        assert_eq!(read("interview_role = \"assistant\"\n"), Role::User);
     }
 
     /// A session whose first scoping turn records three trunk decisions,

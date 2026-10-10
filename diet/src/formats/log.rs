@@ -1191,6 +1191,9 @@ pub enum Event {
         /// What it saw of the trunk (v7, #567): `last_turn` or `last:N`;
         /// absent is the whole trunk.
         view: Option<String>,
+        /// The role it was asked in (v7, #599): `system` or `developer`;
+        /// absent is `user`.
+        role: Option<String>,
         /// Where its call ran (v7, #570): an offboard seat's substrate and
         /// model, together; absent is the trunk's own server, warm.
         seat: Option<ForkSeat>,
@@ -2829,6 +2832,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             why: fields.tag("why", Warrant::from_tag)?,
             question: fields.string("question")?,
             view: fields.optional_string("view")?,
+            role: fields.optional_string("role")?,
             // Built only when its two keys are carried ([`all_or_none`]).
             seat: match (
                 fields.optional_string("substrate")?,
@@ -4144,6 +4148,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("why", Tag(Tags::Warrant)),
                 must_v5("question", Text),
                 may_v7("view", Text),
+                may_v7("role", Text),
                 may_v7("substrate", Text),
                 may_v7("model", Text),
                 may_v7("ask", Text),
@@ -4958,6 +4963,7 @@ fn to_value(line: &Line) -> Value {
             why,
             question,
             view,
+            role,
             seat,
             ask,
         } => {
@@ -4968,6 +4974,9 @@ fn to_value(line: &Line) -> Value {
             put("question", text(question));
             if let Some(view) = view {
                 put("view", text(view));
+            }
+            if let Some(role) = role {
+                put("role", text(role));
             }
             if let Some(seat) = seat {
                 put("substrate", text(&seat.substrate));
@@ -6271,6 +6280,7 @@ mod tests {
                 why: Warrant::Scoping,
                 question: "what did the operator decide".to_owned(),
                 view: Some("last:2".to_owned()),
+                role: Some("developer".to_owned()),
                 seat: Some(ForkSeat {
                     substrate: "cpu-seat".to_owned(),
                     model: "small".to_owned(),
