@@ -711,6 +711,9 @@ fn served_session(
     if let Some(tools) = tools.as_ref() {
         shape.tools = tools.surface.tools();
     }
+    // Self-capture's tools after them (#609), from the first request and
+    // never changed; with self-capture off the tools are as they were.
+    session::declare_self_capture(&mut shape, declared.1.as_ref());
     std::sync::Arc::new(Session::open_declaring(
         transport,
         shape,
@@ -782,17 +785,22 @@ fn serving_interview(
              working memory, so no seam could ever fire"
         ));
     }
-    Ok((!rules.is_empty()).then(|| Interview {
-        rules,
-        object: diet::object::WorkingObject::open(regime.clone()),
-        seams,
-        delivery,
-        phases,
-        // #566: how archived items are recalled; off unless declared.
-        recall: diet::drive::archive::Recall::of(&read),
-        view: session::fork_view(&read),
-        asks: session::fork_asks(&read),
-    }))
+    // Self-capture (#609) keeps working memory too, forks or none.
+    let self_capture = session::self_capture(&read);
+    Ok(
+        (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
+            rules,
+            object: diet::object::WorkingObject::open(regime.clone()),
+            seams,
+            delivery,
+            phases,
+            // #566: how archived items are recalled; off unless declared.
+            recall: diet::drive::archive::Recall::of(&read),
+            view: session::fork_view(&read),
+            self_capture,
+            asks: session::fork_asks(&read),
+        }),
+    )
 }
 
 /// What `serve` runs the model's calls under, when the regimen at

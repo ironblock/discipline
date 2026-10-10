@@ -5,6 +5,7 @@ import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
 import approvalsOff from '../../../diet/formats/log/fixtures/valid/a-v7-call-that-ran-with-approvals-off.jsonl?raw';
+import phaseMoved from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-moved-a-phase.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -310,8 +311,8 @@ export const AttachAScreenshot: Story = {
 };
 
 /**
- * `?drive`: `diet`'s drive declares no phases, and its declare-seam takes none -- so the composer offers no move,
- * says so, and its refill sends the bare declare-seam serve takes.
+ * `?drive`: a log that declares no phase graph -- so the composer offers no move, says so, and its refill sends a
+ * declare-seam naming no phase.
  */
 export const ServedRefillNamesNoPhase: Story = {
   name: '?drive: refill offers no phase, since the drive declares none',
@@ -361,5 +362,23 @@ export const ServedApprovalsUndeclared: Story = {
     const approvals = canvasElement.querySelector<HTMLElement>('.ex-header__lever[data-lever="approvals"]');
     await expect(approvals?.textContent).toBe('approvals undeclared');
     await expect(approvals?.dataset['undeclared']).toBe('');
+  },
+};
+
+/**
+ * `?drive`, log v7 (#563): a session with a phase graph. The composer names the phase the log says it is in, offers
+ * exactly the moves the graph allows from there, and its refill sends the phase picked.
+ */
+export const ServedPhaseGraph: Story = {
+  name: '?drive: refill offers the moves the logged phase graph allows, and sends the one picked',
+  args: { drive: true, web: posting(phaseMoved) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
+    const select = canvasElement.querySelector<HTMLSelectElement>('select[aria-label="move to"]');
+    await expect([...(select?.options ?? [])].map((o) => o.value)).toEqual(['review']);
+    posted.length = 0;
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'refill')!);
+    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-seam']));
+    await expect((posted[0] as { phase?: string }).phase).toBe('review');
   },
 };

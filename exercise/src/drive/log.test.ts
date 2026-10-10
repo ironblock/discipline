@@ -166,6 +166,18 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(levers('an-answered-turn.jsonl')).toEqual({});
   });
 
+  it('reads the phase graph off the first line, opens in its opening phase, and moves with each seam that moved (#563)', () => {
+    const log = logOf('a-v7-seam-that-moved-a-phase.jsonl');
+    const opened = fold(log.slice(0, 1));
+    expect(opened.phase).toBe('plan');
+    expect(opened.phaseMoves).toEqual(['build']);
+    const moved = fold(log);
+    expect(moved.phase).toBe('build');
+    expect(moved.phaseMoves).toEqual(['review']);
+    // A log with no graph offers no move.
+    expect(fold(logOf('an-answered-turn.jsonl')).phaseMoves).toEqual([]);
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });

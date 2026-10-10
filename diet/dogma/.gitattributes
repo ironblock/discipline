@@ -1,4 +1,6 @@
 templates/*.txt -text
 MANIFEST.tsv -text
 operating-points.toml -text
+self-capture/*/*.txt -text
+self-capture/*/*.jsonl -text
 fork-asks/*/*.txt -text
