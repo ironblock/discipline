@@ -228,6 +228,8 @@ export class HttpTransport implements DriveTransport {
         return { kind: 'declare-seam', ...(command.to !== undefined ? { phase: command.to } : {}) };
       case 'end':
         return { kind: 'end' };
+      case 'background':
+        return { kind: 'background' };
     }
   }
 

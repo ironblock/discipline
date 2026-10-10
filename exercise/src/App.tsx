@@ -54,7 +54,8 @@ export function App({
   const gap = useIdleGap(session);
   const dispatch = async (command: Command) => {
     // An answer to a prompt comes mid-turn: no gap is open, and it ends none.
-    if (command.kind === 'approve') return transport.dispatch(command);
+    // Moving a command to the background (#614) comes mid-turn too.
+    if (command.kind === 'approve' || command.kind === 'background') return transport.dispatch(command);
     // A command's kind is the word for what it ends the gap with (the format's `GapEnd`): ask, seam, cancel, end.
     const idleGap = gap.carry(command.kind);
     const ack = await transport.dispatch(command, idleGap ? { idle_gap: idleGap } : undefined);

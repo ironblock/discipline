@@ -20,6 +20,8 @@ export interface ComposerProps {
   readonly hint?: string | undefined;
   /** Where the operator's PNGs go ahead of the ask that names them. Absent: nothing can be attached. */
   readonly upload?: (bytes: Uint8Array) => Promise<Uploaded>;
+  /** A bash command runs in the foreground now (#614): it can be moved to the background, and the turn goes on. */
+  readonly foreground?: boolean;
 }
 
 /** A PNG the drive has taken, waiting for the ask that names it: its digest, and a picture of it for the chip. */
@@ -42,7 +44,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, foreground = false }: ComposerProps) {
   const [draft, setDraft] = useState('');
   // The operator's attachments (#372): uploaded as they are added, named by digest on the next ask, cleared once taken.
   const [attached, setAttached] = useState<readonly Attached[]>([]);
@@ -244,6 +246,17 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
               attach
             </button>
           </>
+        ) : null}
+        {running && foreground ? (
+          <button
+            type="button"
+            className="ex-composer__background"
+            disabled={!dispatch || link !== 'live'}
+            title="move the running command to the background: it keeps running, its output is kept, and the turn goes on"
+            onClick={() => run({ kind: 'background' })}
+          >
+            move to background
+          </button>
         ) : null}
         {running ? (
           <button type="button" className="ex-composer__cancel" disabled={!dispatch} onClick={() => run({ kind: 'cancel' })}>

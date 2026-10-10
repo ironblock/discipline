@@ -37,6 +37,8 @@ export type Command =
   | { readonly kind: 'seam'; readonly to?: string }
   /** End the session: nothing more is asked of it (#289). */
   | { readonly kind: 'end' }
+  /** Move the running foreground command to the background (#614): it keeps running, and the turn goes on. */
+  | { readonly kind: 'background' }
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
   | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision };
 
@@ -101,6 +103,8 @@ export type Refusal = Open<
   | 'too-large'
   /** An ask naming a digest this session was never sent. */
   | 'not-uploaded'
+  /** A move to the background with no command running in the foreground (#614). */
+  | 'nothing-running'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };

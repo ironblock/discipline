@@ -53,6 +53,7 @@
     display: none;
   }
   .ex-composer__attach,
+  .ex-composer__background,
   .ex-composer__scope,
   .ex-composer__send,
   .ex-composer__cancel {
@@ -60,6 +61,7 @@
   }
   .ex-composer__attach + .ex-composer__scope,
   .ex-composer__attach + .ex-composer__cancel,
+  .ex-composer__background + .ex-composer__cancel,
   .ex-composer__scope + .ex-composer__send {
     margin-left: 0;
   }
