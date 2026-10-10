@@ -6,7 +6,7 @@ import { barHeight, rowsOf } from './condensed.ts';
 import { edgeOf, readingOf, warmOf, writingOf } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
 import { useNow } from './surface.tsx';
-import { tokens } from './format.ts';
+import { took, tokens } from './format.ts';
 import { alarmOf, failOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
 
@@ -41,6 +41,15 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         {...(writing ? { output: <Flowing flow={writing} title="tokens written" /> } : {})}
         alarm={outcome ? alarmOf(outcome.level) : undefined}
         stats={[
+          // An offboard seat (#615): where it ran, and what reading the trunk cold cost there. A warm fork names none.
+          node.seat && {
+            value: (
+              <span className="ex-branch__seat">
+                {[node.seat.substrate, ...(node.seat.promptTokens !== undefined ? [`${tokens(node.seat.promptTokens)} tok`] : []), ...(node.seat.wallMs !== undefined ? [took(node.seat.wallMs)] : [])].join(' · ')}
+              </span>
+            ),
+            title: `ran offboard on ${node.seat.substrate} (${node.seat.model}), reading the trunk cold`,
+          },
           node.patches.length > 0 && { value: <PatchSummary patches={node.patches} />, title: 'patches it landed in working memory, by op' },
           pending && {
             value: (

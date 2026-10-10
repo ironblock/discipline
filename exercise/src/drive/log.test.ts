@@ -222,6 +222,18 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(fold(logOf('an-answered-turn.jsonl')).levers.table).toBeUndefined();
   });
 
+  it('folds an offboard fork’s seat onto its branch, with its prefill and wall time, and a warm fork’s as before (#570, #615)', () => {
+    // diet's v5 forks, the first one moved offboard -- WRITTEN HERE: no diet fixture has an offboard fork yet.
+    const file = 'a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl';
+    const log = logOf(file);
+    const first = log.find((l) => l.kind === 'fork')!;
+    const offboard = log.map((l) =>
+      l === first ? { ...l, substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b' } : l.kind === 'fork.settled' && l.fork === first.seq ? { ...l, prompt_tokens: 1820, wall_ms: 4300 } : l,
+    ) as LogLine[];
+    const branches = [...fold(offboard).branches.values()].flat();
+    expect(branches.map((b) => b.seat)).toEqual([{ substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b', promptTokens: 1820, wallMs: 4300 }, undefined]);
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });

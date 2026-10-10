@@ -238,6 +238,9 @@ export interface Fork extends At {
   readonly question: string;
   /** AHEAD (`slots`): prefix tokens shared with the trunk, the warm tail it forked from. `diet`'s fork line does not say. */
   readonly prefix_tokens?: number;
+  /** An offboard seat's registry id, when the fork ran off the warm trunk (log v7, #615); with the model it served. */
+  readonly substrate?: string;
+  readonly model?: string;
 }
 
 /** How a fork ended. */
@@ -246,6 +249,10 @@ export interface ForkSettled extends At {
   /** The `seq` of the `fork`. */
   readonly fork: number;
   readonly outcome: ForkOutcome;
+  /** An offboard fork's prompt as it read it cold (#615): its prefill, in tokens. */
+  readonly prompt_tokens?: number;
+  /** An offboard fork's wall time, from its request to its settle (#615). */
+  readonly wall_ms?: number;
 }
 
 export interface Entry {
