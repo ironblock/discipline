@@ -812,7 +812,8 @@ impl<'a> Walk<'a> {
     }
 
     /// A seam's row, `s/<seq>`, at the turn it follows, and the trunk
-    /// refilled from `render` through [`crate::seam::render::refill`]. The
+    /// refilled from `render` and the section of tool outputs it carried
+    /// through [`crate::seam::render::refill`]. The
     /// row is named rather than written when that turn has no row; the
     /// trunk is refilled either way, since the session's was.
     fn seam(&mut self, line: &log::Line) {
@@ -820,6 +821,7 @@ impl<'a> Walk<'a> {
             at_turn,
             render,
             tail_tokens,
+            outputs,
             ..
         } = &line.event
         else {
@@ -838,7 +840,12 @@ impl<'a> Walk<'a> {
             .iter()
             .map(crate::seam::render::estimated_tokens)
             .sum::<u64>();
-        self.trunk = crate::seam::render::refill(&self.head, render);
+        // The section the seam carried of the outputs it compacted away
+        // (#553), after the render, as sent.
+        let sent = outputs
+            .as_ref()
+            .map_or_else(|| render.clone(), |section| format!("{render}{section}"));
+        self.trunk = crate::seam::render::refill(&self.head, &sent);
         self.trunk.extend(kept);
         // An attachment the old trunk carried and could not be read back is
         // not on the refilled one.
@@ -1650,6 +1657,10 @@ mod tests {
             carried_turns: 0,
             tail_tokens: None,
             carried_tokens: None,
+            tool_outputs: None,
+            outputs: None,
+            carried_outputs: None,
+            carried_output_bytes: None,
         });
         let projection = project(
             &numbered(events),
@@ -1687,6 +1698,10 @@ mod tests {
             carried_turns: 1,
             tail_tokens: Some(10_000),
             carried_tokens: Some(1),
+            tool_outputs: None,
+            outputs: None,
+            carried_outputs: None,
+            carried_output_bytes: None,
         });
         let projection = project(
             &numbered(events),
