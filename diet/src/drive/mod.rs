@@ -97,6 +97,7 @@
 pub mod attach;
 pub mod canned;
 pub mod engine;
+pub mod instructions;
 pub mod output;
 pub mod projection;
 pub mod regimen;

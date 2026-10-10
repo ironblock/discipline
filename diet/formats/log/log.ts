@@ -221,6 +221,11 @@ export interface Unsent {
   budget_tokens: number;
 }
 
+export interface InstructionFile {
+  path: string;
+  sha256: string;
+}
+
 export interface NoteLine {
   entry: string;
   op: PatchOp;
@@ -279,6 +284,7 @@ export type SessionStartLine = {
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
   reasoning_effort_default?: string;
+  instruction_files?: InstructionFile[];
   tool_output?: ToolOutputState;
   tool_output_max_lines?: number;
   tool_output_max_bytes?: number;
