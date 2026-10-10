@@ -457,6 +457,13 @@ pub fn serve_levers(regimen: &Regimen, max_output_tokens: u32) -> BTreeMap<Strin
     };
     let delivery = crate::drive::session::fork_delivery(regimen)
         .map_or_else(|_| undeclared(), |delivery| delivery.tag().to_owned());
+    // #560: whether a call written as text is recovered. `off` by default,
+    // as Pi and `OpenCode` 2 have it; a value serve refuses is undeclared.
+    let text_fallback = match regimen.get(crate::drive::tool_loop::TOOL_CALL_TEXT_FALLBACK) {
+        None => "off".to_owned(),
+        Some(regimen::Value::String(state)) if state == "off" || state == "on" => state.clone(),
+        Some(_) => undeclared(),
+    };
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers.join("+")),
@@ -472,6 +479,7 @@ pub fn serve_levers(regimen: &Regimen, max_output_tokens: u32) -> BTreeMap<Strin
         ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
         ("substrate_rung".to_owned(), word("substrate")),
         ("tool_surface".to_owned(), surface),
+        ("tool_call_text_fallback".to_owned(), text_fallback),
         ("instruction_files".to_owned(), "off".to_owned()),
         ("tangent_closure".to_owned(), undeclared()),
         ("capture_modality".to_owned(), undeclared()),

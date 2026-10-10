@@ -48,6 +48,12 @@ pub const ALLOWED_COMMANDS: &str = "allowed_commands";
 /// the gate decides as it always has.
 pub const APPROVAL: &str = "approval";
 
+/// The regimen key for reading a tool call the model writes as text (#560):
+/// `"on"` recovers one, Qwen Code's way, when a turn makes no native call;
+/// `"off"`, the default, reads such a turn as an answer, as Pi and
+/// `OpenCode` 2 do (`docs/harness-baseline.md`).
+pub const TOOL_CALL_TEXT_FALLBACK: &str = "tool_call_text_fallback";
+
 /// The regimen's stance, a sentence carried into the receipt (#29
 /// 5981606817).
 pub const APPROVAL_POLICY: &str = "approval_policy";
@@ -1346,6 +1352,9 @@ pub struct Declared {
     pub approval_policy: Option<String>,
     /// `approval = "none"`: no gate decision, no prompt.
     pub approvals_off: bool,
+    /// `tool_call_text_fallback = "on"`: a call written as text is
+    /// recovered when a turn makes no native call (#560).
+    pub text_fallback: bool,
     /// `[tool_output]`: the cap on what the model is shown of a tool's
     /// output (#554), the convention's default when the table is absent.
     pub output_cap: OutputCap,
@@ -1481,6 +1490,16 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             ));
         }
     };
+    let text_fallback = match regimen.get(TOOL_CALL_TEXT_FALLBACK) {
+        None => false,
+        Some(regimen::Value::String(state)) if state == "off" => false,
+        Some(regimen::Value::String(state)) if state == "on" => true,
+        Some(_) => {
+            return Err(format!(
+                "`{TOOL_CALL_TEXT_FALLBACK}` takes \"off\" (the default) or \"on\""
+            ));
+        }
+    };
     let Some(value) = regimen.get(ALLOWED_COMMANDS) else {
         // Approvals off runs commands with no allow set to seed.
         return Ok(approvals_off.then(|| Declared {
@@ -1488,6 +1507,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             max_steps,
             approval_policy,
             approvals_off,
+            text_fallback,
             output_cap,
             surface,
         }));
@@ -1511,6 +1531,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         max_steps,
         approval_policy,
         approvals_off,
+        text_fallback,
         output_cap,
         surface,
     }))
@@ -1869,6 +1890,9 @@ pub struct Tools {
     /// Approvals off (`approval = "none"`): every command runs with no gate
     /// decision and no prompt, under the same confinement.
     pub approvals_off: bool,
+    /// Whether a call the model writes as text is recovered when a turn
+    /// makes no native call (#560).
+    pub text_fallback: bool,
     /// The cap on what the model is shown of a tool's output (#554).
     pub output_cap: OutputCap,
     /// The recording's directory, where a capped output is kept whole;
@@ -2974,6 +2998,7 @@ pub(in crate::drive) mod tests {
                 max_steps: Some(4),
                 approval_policy: Some("ask".to_owned()),
                 approvals_off: false,
+                text_fallback: false,
                 output_cap: OutputCap::DEFAULT,
                 surface: ToolSurface::Bash,
             }))
@@ -2986,11 +3011,18 @@ pub(in crate::drive) mod tests {
                 max_steps: None,
                 approval_policy: None,
                 approvals_off: true,
+                text_fallback: false,
                 output_cap: OutputCap::DEFAULT,
                 surface: ToolSurface::Bash,
             }))
         );
         assert!(read("approval = \"ask\"\n").is_err());
+        // #560: the text fallback, `off` unless declared `on`.
+        let on = read("approval = \"none\"\ntool_call_text_fallback = \"on\"\n")
+            .expect("declared")
+            .expect("runs commands");
+        assert!(on.text_fallback);
+        assert!(read("approval = \"none\"\ntool_call_text_fallback = \"yes\"\n").is_err());
         assert!(read("allowed_commands = \"ls\"\n").is_err());
         assert!(read("allowed_commands = [\"\"]\n").is_err());
         assert!(read("allowed_commands = []\n[limits]\nmax_steps = 0\n").is_err());
