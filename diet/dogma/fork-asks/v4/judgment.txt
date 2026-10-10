@@ -1,0 +1,4 @@
+{imperative}
+You said: "{intent}"
+The working record so far, one entry per line as its id, a tab, then the entry:{record}
+The turn has ended. What did you decide, and what do you intend next? Answer with the fields DECISION, PLAN and SUPERSEDE, one per line. SUPERSEDE cites the id of a working-record entry this turn replaces, then the entry that should stand; write NONE for a field with nothing to record.

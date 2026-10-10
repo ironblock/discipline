@@ -267,12 +267,17 @@ pub enum Event {
         approvals_off: bool,
         /// The fork delivery lever's state, for a session that forks.
         fork_delivery: Option<log::ForkDelivery>,
+        /// The ask set a session that forks asks in (#595).
+        fork_asks: Option<&'static crate::dogma::asks::AskSet>,
         /// The template's default level, when thinking is on and none is
         /// sent.
         reasoning_effort_default: Option<String>,
         /// The instruction files the system prompt carries (#559), by path
         /// and digest: empty when none were injected.
         instruction_files: Vec<log::InstructionFile>,
+        /// Each lever's state, as the record's start row names them (#573):
+        /// `serve_levers`' one reading, when a regimen was read.
+        levers: Option<BTreeMap<String, String>>,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -497,6 +502,8 @@ pub enum Event {
         view: ForkView,
         /// The offboard seat its call ran on (#570); `None` is warm.
         seat: Option<log::ForkSeat>,
+        /// Which ask of its set it sent (#595).
+        ask: AskKind,
     },
     /// How the fork ended: once per fork, after its call's last event.
     ForkSettled {
@@ -789,6 +796,7 @@ pub type Declared = (
         Option<log::Unsent>,
         Option<String>,
         Vec<log::InstructionFile>,
+        Option<BTreeMap<String, String>>,
     ),
 );
 
@@ -826,6 +834,8 @@ pub struct Interview {
     /// The regimen's phase graph (#563), read as the scripted drive reads
     /// it; empty when it declares none.
     pub phases: crate::seam::phase::PhaseGraph,
+    /// The ask set its forks ask in (#595).
+    pub asks: &'static crate::dogma::asks::AskSet,
     /// How archived items are recalled at an ask (#566): off, the default.
     pub recall: super::archive::Recall,
     /// What a fork sees of the trunk (#567): all of it, or its last whole
@@ -944,6 +954,21 @@ fn viewed(trunk: &[Message], head: usize, view: ForkView) -> Vec<Message> {
     trunk[..head].iter().chain(turns).cloned().collect()
 }
 
+/// The regimen key for the fork ask set (#595).
+pub const FORK_ASKS: &str = "fork_asks";
+
+/// The ask set the regimen names, leniently: a set by its name, or else
+/// [`crate::dogma::asks::DEFAULT`].
+#[must_use]
+pub fn fork_asks(regimen: &Regimen) -> &'static crate::dogma::asks::AskSet {
+    match regimen.get(FORK_ASKS) {
+        Some(crate::formats::regimen::Value::String(name)) => {
+            crate::dogma::asks::set(name).unwrap_or(crate::dogma::asks::DEFAULT)
+        }
+        _ => crate::dogma::asks::DEFAULT,
+    }
+}
+
 /// The rule that warrants a fork after `turn` settled `final`, and the
 /// question it asks, or `None` (#374, the predicate ruled at 5985110649).
 ///
@@ -957,28 +982,37 @@ fn viewed(trunk: &[Message], head: usize, view: ForkView) -> Vec<Message> {
 /// Both quote back what the trunk last said it was about to do, as the
 /// router does. Scoping is checked first: it is the operator's own mark.
 fn warranted(
-    rules: &[log::Warrant],
+    interview: &Interview,
     log: &[Logged],
     turn: u32,
     answer: &str,
-) -> Option<(log::Warrant, String)> {
+) -> Option<(log::Warrant, AskKind, String)> {
+    let rules = &interview.rules;
     let intent = router::stated_intent(answer);
+    // The working record, for an ask in a set that shows it (#595).
+    let record = crate::seam::render::entries(&interview.object);
     let ask = |kind: AskKind, last_command: Option<String>| {
-        router::Ask {
+        let text = router::Ask {
             kind,
             intent: intent.clone(),
         }
-        .render(&Facts {
-            cwd: None,
-            last_edited: None,
-            last_command,
-        })
+        .render_in(
+            interview.asks,
+            &Facts {
+                cwd: None,
+                last_edited: None,
+                last_command,
+            },
+            Some(&record),
+        );
+        (kind, text)
     };
     let scoping = log.iter().any(|logged| {
         matches!(&logged.event, Event::Asked { turn: asked, scoping: true, .. } if *asked == turn)
     });
     if scoping && rules.contains(&log::Warrant::Scoping) {
-        return Some((log::Warrant::Scoping, ask(AskKind::Judgment, None)));
+        let (kind, text) = ask(AskKind::Judgment, None);
+        return Some((log::Warrant::Scoping, kind, text));
     }
     if !rules.contains(&log::Warrant::Read) {
         return None;
@@ -1025,7 +1059,8 @@ fn warranted(
         READS.contains(&class).then_some((kind, command))
     })?;
     // A standard tool ran no command: the ask's `last_command` line drops.
-    Some((log::Warrant::Read, ask(read.0, read.1)))
+    let (kind, text) = ask(read.0, read.1);
+    Some((log::Warrant::Read, kind, text))
 }
 
 /// The router's classes that are a read under rule (a).
@@ -1517,7 +1552,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             None,
             None,
-            (None, None, (None, None, Vec::new())),
+            (None, None, (None, None, Vec::new(), None)),
         )
     }
 
@@ -1531,7 +1566,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             Some(serving),
             None,
-            (None, None, (None, None, Vec::new())),
+            (None, None, (None, None, Vec::new(), None)),
         )
     }
 
@@ -1549,7 +1584,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             Some(tools),
-            (None, None, (None, None, Vec::new())),
+            (None, None, (None, None, Vec::new(), None)),
         )
     }
 
@@ -1572,7 +1607,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             tools,
-            (claim, interview, (None, None, Vec::new())),
+            (claim, interview, (None, None, Vec::new(), None)),
         )
     }
 
@@ -1600,7 +1635,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, (unsent, reasoning_effort_default, instruction_files)): Declared,
+        (claim, interview, (unsent, reasoning_effort_default, instruction_files, levers)): Declared,
     ) -> Self {
         // A head is the trunk before any turn; a tool result answers a call
         // made in one, and the log's head has no word for it (`role_of`).
@@ -1612,6 +1647,7 @@ impl<S: Streaming + 'static> Session<S> {
         let fork_delivery = interview.as_ref().map(|interview| interview.delivery);
         let phases = phases_of(interview.as_ref());
         let phase_at_open = phases.as_ref().map(|(_, _, first)| first.clone());
+        let fork_asks = interview.as_ref().map(|interview| interview.asks);
         let opened = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| {
@@ -1682,8 +1718,10 @@ impl<S: Streaming + 'static> Session<S> {
             unsent,
             approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
             fork_delivery,
+            fork_asks,
             reasoning_effort_default,
             instruction_files,
+            levers,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             phases,
         });
@@ -2435,15 +2473,22 @@ pub fn line_of(logged: &Logged) -> log::Line {
             unsent,
             approvals_off,
             fork_delivery,
+            fork_asks,
             reasoning_effort_default,
             tool_output,
             phases,
             instruction_files,
+            levers,
         } => log::Event::SessionStart {
+            levers: levers.clone(),
             // #563: the graph, and the phase it opens in; nothing when none.
             phases: phases.as_ref().map(|(names, _, _)| names.clone()),
             phase_transitions: phases.as_ref().map(|(_, moves, _)| moves.clone()),
             opening_phase: phases.as_ref().map(|(_, _, first)| first.clone()),
+            fork_asks: fork_asks.map(|set| log::ForkAsks {
+                name: set.name.to_owned(),
+                digest: Some(set.digest()),
+            }),
             // #559: by path and digest, their text in `head`; nothing when none.
             instruction_files: Some(instruction_files.clone()).filter(|files| !files.is_empty()),
             fork_delivery: *fork_delivery,
@@ -2693,6 +2738,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             question,
             view,
             seat,
+            ask,
         } => log::Event::Fork {
             lane: log::Lane::Interview,
             of_turn: *of_turn,
@@ -2703,6 +2749,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // Absent is the whole trunk (#567).
             view: (*view != ForkView::Trunk).then(|| view.word()),
             seat: seat.clone(),
+            ask: Some(ask.tag().to_owned()),
         },
         Event::ForkSettled {
             fork,
@@ -4365,8 +4412,8 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         .interview
         .as_ref()
         .filter(|_| !state.ending)
-        .and_then(|interview| warranted(&interview.rules, &state.log, turn, answer));
-    let Some((why, question)) = fired else {
+        .and_then(|interview| warranted(interview, &state.log, turn, answer));
+    let Some((why, kind, question)) = fired else {
         turn_over(&shared.template, state);
         return None;
     };
@@ -4401,6 +4448,7 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         question,
         view,
         seat,
+        ask: kind,
     });
     let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
     let request = state.push(Event::Requested {
@@ -5896,6 +5944,8 @@ pub(in crate::drive) mod tests {
             tool_output: None,
             phases: _,
             instruction_files: _,
+            levers: None,
+            ..
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -6001,6 +6051,11 @@ pub(in crate::drive) mod tests {
                     path: "AGENTS.md".to_owned(),
                     sha256: "e".repeat(64),
                 }],
+                levers: Some(BTreeMap::from([(
+                    "fork-asks".to_owned(),
+                    "v3".to_owned(),
+                )])),
+                fork_asks: Some(&crate::dogma::asks::V4),
             },
             Event::Asked {
                 turn: 1,
@@ -6164,6 +6219,7 @@ pub(in crate::drive) mod tests {
                     substrate: "cpu-seat".to_owned(),
                     model: "small".to_owned(),
                 }),
+                ask: AskKind::Judgment,
             },
             Event::Requested {
                 turn: 1,
@@ -6331,6 +6387,10 @@ pub(in crate::drive) mod tests {
                     path: "AGENTS.md".to_owned(),
                     sha256: "e".repeat(64),
                 }]),
+                levers: Some(BTreeMap::from([(
+                    "fork-asks".to_owned(),
+                    "v3".to_owned(),
+                )])),
                 tool_output: Some(log::ToolOutput {
                     state: log::ToolOutputState::Capped,
                     max_lines: Some(2000),
@@ -6339,6 +6399,10 @@ pub(in crate::drive) mod tests {
                 phases: None,
                 phase_transitions: None,
                 opening_phase: None,
+                fork_asks: Some(log::ForkAsks {
+                    name: "v4".to_owned(),
+                    digest: Some(crate::dogma::asks::V4.digest()),
+                }),
             },
             log::Event::Ask {
                 turn: 1,
@@ -6515,6 +6579,7 @@ pub(in crate::drive) mod tests {
                     substrate: "cpu-seat".to_owned(),
                     model: "small".to_owned(),
                 }),
+                ask: Some("judgment".to_owned()),
             },
             log::Event::Request {
                 turn: 1,
@@ -8861,6 +8926,7 @@ pub(in crate::drive) mod tests {
             recall: super::super::archive::Recall::Off,
             view: None,
             self_capture: None,
+            asks: &crate::dogma::asks::V3,
         }
     }
 
@@ -9508,6 +9574,106 @@ pub(in crate::drive) mod tests {
             matches!(cost, Some((None, Some(_)))),
             "an offboard fork's cost: {cost:?}"
         );
+    }
+
+    /// #595: under ask set v4 the scoping fork's judgment ask shows the
+    /// working record as `<id>\t<entry>` lines and asks for SUPERSEDE; a
+    /// fork citing an entry voids it, and its `patch` line carries the cited
+    /// id and the entry that replaces it, so a blind judge can grade it from
+    /// the log. `session.start` names the set and its digest, and each fork
+    /// line names the ask it sent.
+    #[test]
+    fn under_ask_set_v4_a_fork_sees_the_record_and_its_supersede_is_gradable_from_the_log() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.asks = &crate::dogma::asks::V4;
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&[SCOPED]),
+                deltas(&[
+                    "DECISION: NONE\nPLAN: NONE\nSUPERSEDE: interview-t1-0 decision: a tracker for two teams\n",
+                ]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        for (turn, ask) in [(1, "what are we building?"), (2, "and who is it for?")] {
+            session.ask_marked(ask, None, true).expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && fork_outcomes(log).len() >= turn
+            });
+        }
+        let lines = whole_log(&session);
+        let Some(log::Event::SessionStart { fork_asks, .. }) = lines.first().map(|l| &l.event)
+        else {
+            panic!("the log opens with session.start");
+        };
+        assert_eq!(
+            fork_asks.as_ref(),
+            Some(&log::ForkAsks {
+                name: "v4".to_owned(),
+                digest: Some(crate::dogma::asks::V4.digest()),
+            })
+        );
+        let forks: Vec<(String, Option<String>)> = lines
+            .iter()
+            .filter_map(|l| match &l.event {
+                log::Event::Fork { question, ask, .. } => Some((question.clone(), ask.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(forks.len(), 2);
+        assert!(
+            forks
+                .iter()
+                .all(|(_, ask)| ask.as_deref() == Some("judgment"))
+        );
+        // The first fork had no record to show; the second shows the first's.
+        assert!(
+            !forks[0].0.contains("The working record so far"),
+            "{}",
+            forks[0].0
+        );
+        assert!(forks[1].0.contains("SUPERSEDE"), "{}", forks[1].0);
+        assert!(
+            forks[1]
+                .0
+                .contains("\ninterview-t1-0\tdecision: a tracker\n"),
+            "the record, as the render writes it: {}",
+            forks[1].0
+        );
+        let superseded = lines.iter().find_map(|l| match &l.event {
+            log::Event::Patch {
+                op: log::PatchOp::Supersede,
+                entry,
+                supersedes,
+                ..
+            } => Some((entry.text.clone(), supersedes.clone())),
+            _ => None,
+        });
+        assert_eq!(
+            superseded,
+            Some((
+                "decision: a tracker for two teams".to_owned(),
+                Some("interview-t1-0".to_owned())
+            )),
+            "the patch line names the cited id and the entry that replaces it"
+        );
+    }
+
+    /// #595: the set is read from the regimen leniently, v3 by default.
+    #[test]
+    fn the_fork_ask_set_is_read_leniently_and_defaults_to_v3() {
+        let read = |text: &str| fork_asks(&regimen::parse(text).expect("a regimen")).name;
+        assert_eq!(read(""), "v3");
+        assert_eq!(read("fork_asks = \"v3\"\n"), "v3");
+        assert_eq!(read("fork_asks = \"v4\"\n"), "v4");
+        assert_eq!(read("fork_asks = \"no-such-set\"\n"), "v3");
+        assert_eq!(read("fork_asks = 3\n"), "v3");
     }
 
     /// A session whose first scoping turn records three trunk decisions,

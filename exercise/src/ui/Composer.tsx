@@ -25,6 +25,8 @@ export interface ComposerProps {
   readonly tangents?: boolean;
   /** The tangent open now and the live entries born in it, with their text; and the id the next one opens as. */
   readonly tangent?: { readonly open?: { readonly id: string; readonly entries: readonly { readonly id: string; readonly text: string }[] }; readonly next: string };
+  /** A bash command runs in the foreground now (#614): it can be moved to the background, and the turn goes on. */
+  readonly foreground?: boolean;
 }
 
 const DISPOSITIONS: readonly Disposition[] = ['keep', 'drop', 'park'];
@@ -49,7 +51,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -308,6 +310,17 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
               attach
             </button>
           </>
+        ) : null}
+        {running && foreground ? (
+          <button
+            type="button"
+            className="ex-composer__background"
+            disabled={!dispatch || link !== 'live'}
+            title="move the running command to the background: it keeps running, its output is kept, and the turn goes on"
+            onClick={() => run({ kind: 'background' })}
+          >
+            move to background
+          </button>
         ) : null}
         {running ? (
           <button type="button" className="ex-composer__cancel" disabled={!dispatch} onClick={() => run({ kind: 'cancel' })}>

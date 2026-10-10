@@ -714,6 +714,16 @@ pub struct ForkSeat {
     pub model: String,
 }
 
+/// The fork ask set a session asks in (v7, #595), by name and digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkAsks {
+    /// The set's name: `dogma::asks`' directory.
+    pub name: String,
+    /// The set's digest, recomputable from the dogma's manifest; best
+    /// effort, so a name read without one is kept.
+    pub digest: Option<String>,
+}
+
 /// What a `session.start` claims serves it (v3, #292): the regimen's
 /// substrate, the registry it was read from, and the engine the start-time
 /// check passed. Its four keys come together or not at all.
@@ -902,6 +912,13 @@ pub enum Event {
         approvals_off: Option<bool>,
         /// The fork delivery lever's state (v7), for a session that forks.
         fork_delivery: Option<ForkDelivery>,
+        /// Each lever's state the session runs at (v7, #573), by lever, in
+        /// `docs/program.md` §2's words: the record's start row's `levers`,
+        /// from the same reading, so the two agree by construction.
+        levers: Option<BTreeMap<String, String>>,
+        /// The fork ask set a session that forks asks in (v7, #595): its name
+        /// and digest, `fork_asks` and `fork_asks_digest`.
+        fork_asks: Option<ForkAsks>,
         /// With thinking on and no `reasoning_effort` sent, the level the
         /// chat template renders by default, as the registry declares it
         /// (v7): what the model was asked for, named.
@@ -1149,6 +1166,8 @@ pub enum Event {
         /// Where its call ran (v7, #570): an offboard seat's substrate and
         /// model, together; absent is the trunk's own server, warm.
         seat: Option<ForkSeat>,
+        /// Which ask of its set it sent (v7, #595): the router kind's tag.
+        ask: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -2491,6 +2510,14 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     off => off,
                 },
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
+                levers: fields.optional_words("levers")?,
+                fork_asks: match fields.optional_string("fork_asks")? {
+                    None => None,
+                    Some(name) => Some(ForkAsks {
+                        name,
+                        digest: fields.optional_string("fork_asks_digest")?,
+                    }),
+                },
                 reasoning_effort_default: match object.get("reasoning_effort_default") {
                     None => None,
                     Some(_) => Some(fields.string("reasoning_effort_default")?),
@@ -2700,6 +2727,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 (Some(substrate), Some(model)) => Some(ForkSeat { substrate, model }),
                 _ => None,
             },
+            ask: fields.optional_string("ask")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -3377,6 +3405,9 @@ pub enum Holds {
     Serving,
     /// A list of text (v3).
     Strings,
+    /// An object of names to words (v7, #573): a `session.start`'s
+    /// `levers`, each lever's state in the program's words.
+    Words,
     /// A `delta`'s tool-call fragment: an object of the keys
     /// [`TOOL_CALL_PIECE`] declares (v3).
     ToolCallPiece,
@@ -3790,6 +3821,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("unsent", Holds::Unsent),
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
+                may_v7("levers", Holds::Words),
+                may_v7("fork_asks", Text),
+                may_v7("fork_asks_digest", Text),
                 may_v7("reasoning_effort_default", Text),
                 may_v7("phases", Holds::Strings),
                 may_v7("phase_transitions", Holds::PhaseMoves),
@@ -3938,6 +3972,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("view", Text),
                 may_v7("substrate", Text),
                 may_v7("model", Text),
+                may_v7("ask", Text),
             ];
             F
         }
@@ -4103,6 +4138,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::RecalledItems => "RecalledItem[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
+        Holds::Words => "Record<string, string>".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
         Holds::Entry => "PatchEntry".to_owned(),
@@ -4308,6 +4344,8 @@ fn to_value(line: &Line) -> Value {
             unsent,
             approvals_off,
             fork_delivery,
+            levers,
+            fork_asks,
             reasoning_effort_default,
             tool_output,
             phases,
@@ -4331,6 +4369,12 @@ fn to_value(line: &Line) -> Value {
             if let Some(phase) = opening_phase {
                 put("opening_phase", text(phase));
             }
+            if let Some(asks) = fork_asks {
+                put("fork_asks", text(&asks.name));
+                if let Some(digest) = &asks.digest {
+                    put("fork_asks_digest", text(digest));
+                }
+            }
             if let Some(effort) = reasoning_effort_default {
                 put("reasoning_effort_default", text(effort));
             }
@@ -4346,6 +4390,17 @@ fn to_value(line: &Line) -> Value {
                                     ("sha256".to_owned(), text(&file.sha256)),
                                 ]))
                             })
+                            .collect(),
+                    ),
+                );
+            }
+            if let Some(levers) = levers {
+                put(
+                    "levers",
+                    Value::Object(
+                        levers
+                            .iter()
+                            .map(|(lever, state)| (lever.clone(), text(state)))
                             .collect(),
                     ),
                 );
@@ -4703,6 +4758,7 @@ fn to_value(line: &Line) -> Value {
             question,
             view,
             seat,
+            ask,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -4715,6 +4771,9 @@ fn to_value(line: &Line) -> Value {
             if let Some(seat) = seat {
                 put("substrate", text(&seat.substrate));
                 put("model", text(&seat.model));
+            }
+            if let Some(ask) = ask {
+                put("ask", text(ask));
             }
             Kind::Fork
         }
@@ -5140,6 +5199,22 @@ impl Fields<'_> {
     }
 
     /// A list of text, when carried (v3).
+    /// An object of names to words, when carried (v7, #573).
+    fn optional_words(&self, key: &str) -> Result<Option<BTreeMap<String, String>>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::Object(words)) => words
+                .iter()
+                .map(|(name, word)| match word {
+                    Value::String(word) => Ok((name.clone(), word.clone())),
+                    _ => Err(format!("`{key}`'s `{name}` is not a word")),
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .map(Some),
+            Some(_) => Err(format!("`{key}` is not an object")),
+        }
+    }
+
     fn optional_strings(&self, key: &str) -> Result<Option<Vec<String>>, String> {
         match self.0.get(key) {
             None => Ok(None),
@@ -5666,6 +5741,10 @@ mod tests {
                 fork_delivery: None,
                 reasoning_effort_default: None,
                 instruction_files: None,
+                levers: Some(BTreeMap::from([
+                    ("fork-asks".to_owned(), "v3".to_owned()),
+                    ("tangent-closure".to_owned(), "off".to_owned()),
+                ])),
                 tool_output: Some(ToolOutput {
                     state: ToolOutputState::Capped,
                     max_lines: Some(2000),
@@ -5674,6 +5753,10 @@ mod tests {
                 phases: None,
                 phase_transitions: None,
                 opening_phase: None,
+                fork_asks: Some(ForkAsks {
+                    name: "v4".to_owned(),
+                    digest: Some("0123456789abcdef".to_owned()),
+                }),
             },
         }
     }
@@ -5949,6 +6032,7 @@ mod tests {
                     substrate: "cpu-seat".to_owned(),
                     model: "small".to_owned(),
                 }),
+                ask: Some("judgment".to_owned()),
             },
             Event::Request {
                 turn: 5,
@@ -6098,6 +6182,9 @@ mod tests {
             }
             (Holds::Strings, Value::Array(items)) => {
                 items.iter().all(|item| matches!(item, Value::String(_)))
+            }
+            (Holds::Words, Value::Object(words)) => {
+                words.values().all(|word| matches!(word, Value::String(_)))
             }
             (Holds::Tag(tags), Value::String(tag)) => tags.tags().contains(&tag.as_str()),
             (Holds::Head, Value::Array(messages)) => messages.iter().all(|m| match m {
@@ -6670,6 +6757,8 @@ mod tests {
         let Event::SessionStart {
             version,
             tool_output,
+            levers,
+            fork_asks,
             ..
         } = &mut lines[0].event
         else {
@@ -6679,6 +6768,8 @@ mod tests {
         // A v7 key on the first line would be the one named; the check is of
         // what arrived in v1, further down.
         *tool_output = None;
+        *levers = None;
+        *fork_asks = None;
         let document: String = lines.iter().map(|line| render(line) + "\n").collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");
