@@ -1603,6 +1603,10 @@ pub enum Event {
         /// Of those, the entries the model's answer did not address (v7,
         /// #150): carried to the next seam.
         unaddressed: Option<Vec<String>>,
+        /// The newest turn's estimated tokens, when a tail was asked for
+        /// (`tail_tokens` above 0) and kept no turn (v7, #693): what did not
+        /// fit, for the operator's warning.
+        newest_turn_tokens: Option<u64>,
     },
 }
 
@@ -3321,6 +3325,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 Some(_) => Some(fields.operator_changes("operator_changes")?),
             },
             unaddressed: fields.optional_strings("unaddressed")?,
+            newest_turn_tokens: fields.optional_count("newest_turn_tokens")?,
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -4699,6 +4704,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("pruned", Holds::Strings),
                 may_v7("operator_changes", Holds::OperatorChanges),
                 may_v7("unaddressed", Holds::Strings),
+                may_v7("newest_turn_tokens", Count),
                 may_v7("warm", Holds::Timings),
             ];
             F
@@ -5691,6 +5697,7 @@ fn to_value(line: &Line) -> Value {
             pruned,
             operator_changes,
             unaddressed,
+            newest_turn_tokens,
             warm,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
@@ -5771,6 +5778,9 @@ fn to_value(line: &Line) -> Value {
                     "unaddressed",
                     Value::Array(entries.iter().map(|entry| text(entry)).collect()),
                 );
+            }
+            if let Some(tokens) = newest_turn_tokens {
+                put("newest_turn_tokens", count(*tokens));
             }
             Kind::Seam
         }

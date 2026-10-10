@@ -402,6 +402,17 @@ pub fn tail(turns: &[Message], budget: u64) -> &[Message] {
     &turns[start..]
 }
 
+/// The estimated tokens of the newest whole turn of `turns` -- from its
+/// last user message on, as [`tail`] measures one -- or `None` when it holds
+/// no turn (#693): what a tail that kept nothing could not fit.
+#[must_use]
+pub fn newest_turn_tokens(turns: &[Message]) -> Option<u64> {
+    let start = turns
+        .iter()
+        .rposition(|message| message.role == Role::User)?;
+    Some(turns[start..].iter().map(estimated_tokens).sum())
+}
+
 /// The last `n` whole turns of `turns` (#567), each starting at its user
 /// message as [`tail`]'s do, so no call is parted from its result; all of
 /// them when there are fewer, none when `n` is 0.
