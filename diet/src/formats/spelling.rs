@@ -124,3 +124,99 @@ pub fn declared(object: &BTreeMap<String, Value>) -> Option<i64> {
         _ => None,
     }
 }
+
+/// The record version whose spelling is `meditation`: the first a record's
+/// `start` names. A start naming none is version 1.
+pub const RECORD_RESPELLED_IN: i64 = 2;
+
+/// A record's respelled positions, as [`LOG`]'s: the row's kind (as v2
+/// spells it; `None` for the `record` key itself), the key, the words.
+const RECORD: &[(Option<&str>, &str, &str, &str)] = &[
+    (None, "record", "seam", "meditation"),
+    (Some("start"), "fork_delivery", "seam", "meditation"),
+];
+
+/// The version a record's row declares: its `start`'s `version`, or 1.
+#[must_use]
+pub fn record_declared(row: &BTreeMap<String, Value>) -> i64 {
+    match row.get("version") {
+        Some(Value::Integer(version)) => *version,
+        _ => 1,
+    }
+}
+
+/// The words at a record row's respelled positions, as [`positions`].
+fn record_positions(
+    row: &BTreeMap<String, Value>,
+) -> impl Iterator<Item = (&'static str, &str, &'static str, &'static str)> + '_ {
+    let kind = match row.get("record") {
+        Some(Value::String(kind)) if kind == "seam" => Some("meditation"),
+        Some(Value::String(kind)) => Some(kind.as_str()),
+        _ => None,
+    };
+    RECORD.iter().filter_map(move |(on, key, old, new)| {
+        if on.is_some() && *on != kind {
+            return None;
+        }
+        match row.get(*key) {
+            Some(Value::String(word)) if word == old || word == new => {
+                Some((*key, word.as_str(), *old, *new))
+            }
+            _ => None,
+        }
+    })
+}
+
+/// `row`, of a record declaring `declared`, in the current spelling.
+///
+/// # Errors
+///
+/// A word in the other version's spelling.
+pub fn record_to_current(row: &mut BTreeMap<String, Value>, declared: i64) -> Result<(), String> {
+    let mut respelled = Vec::new();
+    for (key, word, old, new) in record_positions(row) {
+        if declared < RECORD_RESPELLED_IN {
+            if word == new {
+                return Err(format!(
+                    "`{key}` is `{new}`, version {RECORD_RESPELLED_IN}'s spelling: a record of \
+                     version {declared} says `{old}`"
+                ));
+            }
+            respelled.push((key, new));
+        } else if word == old {
+            return Err(format!(
+                "`{key}` is `{old}`, the spelling before version {RECORD_RESPELLED_IN}: a record \
+                 of version {declared} says `{new}`"
+            ));
+        }
+    }
+    for (key, new) in respelled {
+        row.insert(key.to_owned(), Value::String(new.to_owned()));
+    }
+    Ok(())
+}
+
+/// `row`, in the current spelling, written as a record of `declared` spells
+/// it.
+pub fn record_to_declared(row: &mut BTreeMap<String, Value>, declared: i64) {
+    if declared >= RECORD_RESPELLED_IN {
+        return;
+    }
+    let back: Vec<(&str, &str)> = record_positions(row)
+        .filter(|(_, word, _, new)| word == new)
+        .map(|(key, _, old, _)| (key, old))
+        .collect();
+    for (key, old) in back {
+        row.insert(key.to_owned(), Value::String(old.to_owned()));
+    }
+}
+
+/// A record kind's tag as a record of `declared` spells it.
+#[must_use]
+pub fn record_kind_as(tag: &'static str, declared: i64) -> &'static str {
+    if declared < RECORD_RESPELLED_IN && tag == "meditation" {
+        "seam"
+    } else {
+        tag
+    }
+}

@@ -536,6 +536,8 @@ pub fn project_in(
         // Each lever's state, as `session.start` names it (#573): the
         // record's start says what the log says.
         levers: levers.clone(),
+        // #583: the version this crate writes, spelling it `meditation`.
+        version: Some(crate::formats::record::VERSION),
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -2041,10 +2043,8 @@ mod tests {
     fn the_operator_edits_runs_log_projects_to_a_record_that_reads_back() {
         const LOG: &str =
             include_str!("../../../runs/2026-10-10-operator-edits-agent-driven/session.log");
-        let lines: Vec<log::Line> = LOG
-            .lines()
-            .map(|text| log::line(text).expect("the run's log reads"))
-            .collect();
+        // Read whole, in the spelling its version declares (#583).
+        let lines: Vec<log::Line> = log::parse(LOG).expect("the run's log reads");
         let events = project(&lines, &regime(), None)
             .expect("the run's log projects")
             .events;

@@ -36,12 +36,19 @@ use std::error::Error;
 use std::fmt;
 
 use pest::Parser as _;
-use pest::iterators::Pair;
 use pest_derive::Parser;
 
 use json::{Decimal, Value, ValueError};
 
 use crate::formats::log;
+use crate::formats::spelling;
+
+/// The version this module writes, as a record's `start` names it (#583):
+/// the first that names one, spelling the boundary `meditation`.
+pub const VERSION: i64 = 2;
+
+/// Every version this module reads: 1, a start naming none, and 2.
+pub const READS: &[i64] = &[1, 2];
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
@@ -1182,6 +1189,9 @@ pub enum Event {
         /// lever, in that table's words; `undeclared` where nothing said.
         /// Best effort: absent, partial or `undeclared`, it is never refused.
         levers: Option<BTreeMap<String, String>>,
+        /// The record's version (#583): [`VERSION`] for one this crate
+        /// writes; absent, version 1, which spells the boundary `seam`.
+        version: Option<i64>,
     },
     /// A turn happened.
     Turn {
@@ -1623,6 +1633,15 @@ pub struct Record {
 }
 
 impl Record {
+    /// The record's version (#583): its start's, or 1 when it names none.
+    #[must_use]
+    pub fn version(&self) -> i64 {
+        match self.events.first() {
+            Some(Event::Start { version, .. }) => version.unwrap_or(1),
+            _ => unreachable!("validate() refuses a record whose first event is not a start"),
+        }
+    }
+
     /// The regime every event in this record ran under.
     ///
     /// Read from the required `start` event rather than stored beside it, so
@@ -2404,6 +2423,10 @@ pub fn parse(input: &str) -> Result<Record, ParseError> {
         .ok_or(ParseError::Schema(SchemaError::NoKind))?;
 
     let mut events = Vec::new();
+    // The version the first row declares (#583): each row is read in its
+    // spelling. A record whose first row is no start is refused by
+    // `validate`.
+    let mut declared = None;
     for line in document.into_inner() {
         if line.as_rule() != Rule::event_line {
             continue; // a blank line
@@ -2414,7 +2437,11 @@ pub fn parse(input: &str) -> Result<Record, ParseError> {
             .ok_or(ParseError::Value(ValueError::Shape(
                 "a line with no object",
             )))?;
-        events.push(event(&object)?);
+        let mut members = json::object(&object)?;
+        let version = *declared.get_or_insert_with(|| spelling::record_declared(&members));
+        spelling::record_to_current(&mut members, version)
+            .map_err(|why| SchemaError::Inconsistent { of: "row", why })?;
+        events.push(event(members)?);
     }
 
     validate(&events)?;
@@ -2467,9 +2494,23 @@ fn nesting_depth(input: &str) -> usize {
     deepest
 }
 
-/// One row.
-fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
-    let mut members = json::object(object)?;
+/// A start's `version` (#583): one this reader reads, or none.
+fn take_version(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<i64>, ParseError> {
+    match take_optional_integer(members, of, "version")? {
+        Some(version) if !READS.contains(&version) => Err(SchemaError::Inconsistent {
+            of,
+            why: format!("version {version}, where this reader reads {READS:?}"),
+        }
+        .into()),
+        version => Ok(version),
+    }
+}
+
+/// One row, in the current spelling.
+fn event(mut members: BTreeMap<String, Value>) -> Result<Event, ParseError> {
     let tag = match members.remove("record") {
         Some(Value::String(tag)) => tag,
         Some(_) => {
@@ -2498,6 +2539,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             )?,
             tool_output: take_tool_output(&mut members, of)?,
             levers: levers(&mut members),
+            version: take_version(&mut members, of)?,
         },
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
@@ -5031,10 +5073,18 @@ fn link(
 pub fn render(record: &Record) -> String {
     let mut out = String::new();
     for event in &record.events {
-        json::render(&Value::Object(event_value(event)), &mut out);
+        json::render(&Value::Object(row_value(event, record.version())), &mut out);
         out.push('\n');
     }
     out
+}
+
+/// A row as a record of `version` writes it (#583): its spelling the
+/// version's.
+fn row_value(event: &Event, version: i64) -> BTreeMap<String, Value> {
+    let mut row = event_value(event);
+    spelling::record_to_declared(&mut row, version);
+    row
 }
 
 /// The whole record as the value space: its regime, and its events.
@@ -5052,7 +5102,7 @@ pub fn to_value(record: &Record) -> Value {
                 record
                     .events
                     .iter()
-                    .map(|event| Value::Object(event_value(event)))
+                    .map(|event| Value::Object(row_value(event, record.version())))
                     .collect(),
             ),
         ),
@@ -5125,8 +5175,10 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             fork_delivery,
             tool_output,
             levers,
+            version,
         } => {
             members.put("regime", regime_value(regime));
+            members.put_optional("version", version.map(Value::Integer));
             if let Some(cap) = tool_output {
                 members.put("tool_output", Value::String(cap.state.tag().to_owned()));
                 members.put_optional(
@@ -5863,7 +5915,10 @@ pub fn project(source: &str) -> Result<Value, String> {
                         parsed
                             .kinds()
                             .iter()
-                            .map(|kind| Value::String(kind.tag().to_owned()))
+                            .map(|kind| {
+                                let tag = spelling::record_kind_as(kind.tag(), parsed.version());
+                                Value::String(tag.to_owned())
+                            })
                             .collect(),
                     ),
                 ),
@@ -5885,6 +5940,53 @@ mod tests {
         PrefixReason, Reasoning, Regime, SchemaError, StructureError, Verdict, Weights,
         WeightsKind, delta, delta_value, objects, parse, reason_of, regime_value, render,
     };
+
+    /// The committed full-session record: unversioned, so version 1, with a
+    /// `seam` row.
+    fn v1_record() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("formats/record/fixtures/valid/full-session.jsonl"),
+        )
+        .expect("the fixture")
+    }
+
+    /// #583: a record whose start names no version is version 1 and spells
+    /// the boundary `seam`; one spelling it `meditation` is refused, and one
+    /// declaring version 2 spells it `meditation` and refuses `seam`.
+    #[test]
+    fn a_records_version_decides_how_it_spells_the_boundary() {
+        let v1 = v1_record();
+        assert!(v1.contains(r#""record":"seam""#));
+        let read = parse(&v1).expect("version 1 reads as written");
+        assert_eq!(read.version(), 1);
+        let written = render(&read);
+        assert!(
+            written.contains(r#""record":"seam""#),
+            "and writes back in its words"
+        );
+        assert!(!written.contains(r#""version""#));
+        let in_v2_words = v1.replace(r#""record":"seam""#, r#""record":"meditation""#);
+        let refused = parse(&in_v2_words).expect_err("v2's word in a v1 record");
+        assert!(refused.to_string().contains("`meditation`"), "{refused}");
+        let v2_old = v1.replacen(
+            r#""record":"start","#,
+            r#""record":"start","version":2,"#,
+            1,
+        );
+        assert_ne!(v2_old, v1);
+        let refused = parse(&v2_old).expect_err("v1's word in a v2 record");
+        assert!(refused.to_string().contains("`seam`"), "{refused}");
+        let v2 = v2_old.replace(r#""record":"seam""#, r#""record":"meditation""#);
+        let read = parse(&v2).expect("version 2 in its own words");
+        assert!(render(&read).contains(r#""record":"meditation""#));
+        let v3 = v1.replacen(
+            r#""record":"start","#,
+            r#""record":"start","version":3,"#,
+            1,
+        );
+        assert!(parse(&v3).is_err(), "a version this reader does not read");
+    }
 
     /// A `start` line whose regime is complete, as every record needs one.
     const START: &str = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;
