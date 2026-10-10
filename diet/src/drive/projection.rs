@@ -678,6 +678,8 @@ impl<'a> Walk<'a> {
             Line::IdleGap { .. } => log::Kind::IdleGap,
             Line::Refused { .. } => log::Kind::Refused,
             Line::Capture { .. } => log::Kind::Capture,
+            // The trunk's own self-capture patch (#609), fork-less.
+            Line::Patch { .. } => log::Kind::Patch,
             _ => log::Kind::Progress,
         }
         .tag();
@@ -1700,6 +1702,34 @@ mod tests {
             predicted_n: Some(66),
             ..Timings::default()
         }
+    }
+
+    /// #609: a trunk self-capture's `patch` line -- no fork -- has no record
+    /// row and is named as the `patch` line it is, never as `progress`.
+    #[test]
+    fn a_trunk_patch_is_named_a_patch_line() {
+        let mut events = vec![start()];
+        events.extend(answered(1, 3, None, None));
+        events.push(Line::Patch {
+            fork: None,
+            lane: Some("self-capture".to_owned()),
+            op: log::PatchOp::Add,
+            entry: log::PatchEntry {
+                id: "r3/call-1/fact".to_owned(),
+                text: "Hello".to_owned(),
+                category: None,
+            },
+            supersedes: None,
+            tangent: None,
+        });
+        let projection = project(&numbered(events), &regime(), None).expect("projected");
+        let kinds: Vec<&str> = projection
+            .unspellable
+            .iter()
+            .map(|item| item.kind)
+            .collect();
+        assert!(kinds.contains(&"patch"), "{kinds:?}");
+        assert!(!kinds.contains(&"progress"), "{kinds:?}");
     }
 
     /// One answered turn, its request at `request`.
