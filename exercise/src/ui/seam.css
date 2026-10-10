@@ -85,3 +85,8 @@
 .ex-seam__anyway {
   color: var(--warn);
 }
+
+/* A compaction tail that kept no turn (#693). */
+.ex-seam__zero {
+  color: var(--warn);
+}

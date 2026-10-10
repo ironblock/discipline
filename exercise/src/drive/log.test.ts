@@ -344,6 +344,14 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(refilled.eras.find((era) => era.seam)?.seam?.refilledAnyway).toBe(true);
   });
 
+  it('folds a tail that kept no turn as its warning’s two sizes, and a tail that kept one as none (#693)', () => {
+    const none = fold(logOf('a-v7-seam-whose-tail-kept-no-turn.jsonl'));
+    expect([...none.unknown.keys()]).toEqual([]);
+    expect(none.eras.find((era) => era.seam)?.seam?.zeroTurns).toEqual({ newest: 27, budget: 20 });
+    const kept = fold(logOf('a-v7-seam-that-kept-a-tail.jsonl'));
+    expect(kept.eras.find((era) => era.seam)?.seam?.zeroTurns).toBeUndefined();
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });

@@ -284,6 +284,8 @@ export interface SeamNode extends Provenance {
   /** What the operator changed in working memory since the last seam (log v7, #150), and the flags this seam left open. */
   readonly operatorChanges?: readonly { readonly entry: string; readonly kind: string }[];
   readonly unaddressed?: readonly string[];
+  /** A compaction tail that kept no turn (log v7, #693): the newest turn's size, and the tail's budget it was over. */
+  readonly zeroTurns?: { readonly newest: number; readonly budget: number };
   /** The operator refilled it anyway over changes the reconcile left unaddressed (log v7, #150's gate). */
   readonly refilledAnyway?: true;
   /** The background commands still running at this seam (log v7, #614), as the refill listed them after its summary. */
@@ -1071,6 +1073,9 @@ export function fold(lines: readonly LogLine[]): Session {
           ...(seamLine.unaddressed !== undefined && seamLine.unaddressed.length > 0 ? { unaddressed: seamLine.unaddressed } : {}),
           ...(seamLine.background !== undefined ? { background: backgroundListed(seamLine.background) } : {}),
           ...(seamLine.refilled_anyway ? { refilledAnyway: true as const } : {}),
+          ...(seamLine.newest_turn_tokens !== undefined && seamLine.tail_tokens !== undefined
+            ? { zeroTurns: { newest: seamLine.newest_turn_tokens, budget: seamLine.tail_tokens } }
+            : {}),
           ...provenance(seamLine),
         })
       : undefined;
