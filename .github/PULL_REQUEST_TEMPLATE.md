@@ -23,9 +23,16 @@
 
 ## Review
 
-<!-- An adversarial review of the head, by an instance that did not write the
-     change: a link to it on this thread, and what became of each finding --
-     fixed (the commit), answered (why not), or deferred (the issue). -->
+<!-- A review of the head by an instance that did not write the change: does
+     it work, and does it break anything that worked? A link to it on this
+     thread, and what became of each finding: fixed (the commit), answered
+     (why not), or deferred (the issue). -->
+
+## Program documents
+
+<!-- docs/AGENTS.md: if this lands evidence for a row of docs/releases.md, or
+     makes a line of docs/ false, update that line here. If it changes a thesis
+     line, name it and say where the maintainer approved it. -->
 
 ## Known defects
 
