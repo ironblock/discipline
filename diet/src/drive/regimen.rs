@@ -728,10 +728,16 @@ fn render_budget_lever(regimen: &Regimen) -> String {
 /// the read fork's output threshold when one is declared.
 fn cadence_lever(regimen: &Regimen) -> String {
     let cadence = crate::drive::session::interview_cadence(regimen).word();
-    crate::drive::session::interview_threshold_bytes(regimen).map_or_else(
-        || cadence.to_owned(),
-        |bytes| format!("{cadence}:threshold:{bytes}-bytes"),
-    )
+    let threshold = crate::drive::session::interview_threshold_bytes(regimen)
+        .map(|bytes| format!(":threshold:{bytes}-bytes"))
+        .unwrap_or_default();
+    // #611: forks the turn's self-capture already recorded, skipped.
+    let skip = if crate::drive::session::interview_skip_self_recorded(regimen) {
+        ":skip-self-recorded"
+    } else {
+        ""
+    };
+    format!("{cadence}{threshold}{skip}")
 }
 
 /// The fork ask set lever's word (#595): the set's name and digest.
@@ -946,6 +952,12 @@ mod tests {
             lever("interview_cadence = \"per_class\"\ninterview_threshold_bytes = 3000\n"),
             "per_class:threshold:3000-bytes"
         );
+        // #611, off unless declared.
+        assert_eq!(
+            lever("interview_skip_self_recorded = true\n"),
+            "gap:skip-self-recorded"
+        );
+        assert_eq!(lever("interview_skip_self_recorded = \"maybe\"\n"), "gap");
     }
 
     /// The tool-output disposition names the cap on arrival and, beside

@@ -728,6 +728,9 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'timeout.near':
         nearTimeouts.set(`${e.request}/${e.call}`, e);
         break;
+      // A fork screened out of its gap (#611): no branch to draw; folded into no node yet.
+      case 'fork.skipped':
+        break;
       case 'pruned':
         prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
         break;

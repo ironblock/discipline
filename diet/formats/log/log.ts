@@ -37,6 +37,7 @@ export type Kind =
   | "background.ended"
   | "notice"
   | "timeout.near"
+  | "fork.skipped"
 ;
 
 export type State =
@@ -672,6 +673,17 @@ export type TimeoutNearLine = {
   timeout_ms: number;
 };
 
+export type ForkSkippedLine = {
+  seq: number;
+  t: number;
+  kind: "fork.skipped";
+  of_turn: number;
+  trigger: string;
+  ask: string;
+  call: string;
+  field: string;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -701,4 +713,5 @@ export type LogLine =
   | BackgroundEndedLine
   | NoticeLine
   | TimeoutNearLine
+  | ForkSkippedLine
 ;
