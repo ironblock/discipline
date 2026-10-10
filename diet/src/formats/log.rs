@@ -129,7 +129,9 @@
 //! v7 `seam` may carry `placement`, where the refill put the render (#597):
 //! `message`, a user message after the head, which is never changed;
 //! absent, `system`, appended to the head's system message, as every seam
-//! before #597 did.
+//! before #597 did. A v7 `seam` may carry `background`, the list of each
+//! background command still running (#614), as sent after the summary in
+//! the refill's message: present exactly when one was running.
 //!
 //! A v7 `fork` may carry `trigger`, what fired it under the interview
 //! cadence (#564): `turn_end`, or `call:<class>:<id>`. Forks that carry one
@@ -1573,6 +1575,10 @@ pub enum Event {
         carried_outputs: Option<u64>,
         /// The section's bytes (v7, #553).
         carried_output_bytes: Option<u64>,
+        /// The list of each background command still running, as sent
+        /// after the summary in the refill's message (v7, #614): present
+        /// exactly when one was running.
+        background: Option<String>,
         /// Where the refill put the render (v7, #597). Absent is `system`.
         placement: Option<RenderPlacement>,
         /// The render's budget and what it did (v7, #565), on a seam whose
@@ -3298,6 +3304,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             outputs: fields.optional_string("outputs")?,
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
+            background: fields.optional_string("background")?,
             placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
             pruned: fields.optional_strings("pruned")?,
             operator_changes: match object.get("operator_changes") {
@@ -4669,6 +4676,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("outputs", Text),
                 may_v7("carried_outputs", Count),
                 may_v7("carried_output_bytes", Count),
+                may_v7("background", Text),
                 may_v7("placement", Tag(Tags::RenderPlacement)),
                 may_v7("render_budget_tokens", Count),
                 may_v7("render_over_budget", Text),
@@ -5660,6 +5668,7 @@ fn to_value(line: &Line) -> Value {
             outputs,
             carried_outputs,
             carried_output_bytes,
+            background,
             placement,
             render_budget,
             fired,
@@ -5703,6 +5712,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(n) = carried_output_bytes {
                 put("carried_output_bytes", count(*n));
+            }
+            if let Some(section) = background {
+                put("background", text(section));
             }
             if let Some(placement) = placement {
                 put("placement", text(placement.tag()));

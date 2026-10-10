@@ -609,6 +609,9 @@ pub enum Event {
         /// The section after the render carrying them, when it carried any,
         /// and how many it carried.
         outputs: Option<(String, u64)>,
+        /// The list of each background command still running (#614), as
+        /// sent after the summary.
+        background: Option<String>,
         /// The render's budget and what it did (#565), when declared.
         render_budget: Option<log::RenderBudget>,
         /// The prompt that fired it and the window, on a `window` seam (#617).
@@ -3353,6 +3356,7 @@ impl<S: Streaming + 'static> Session<S> {
                 status: super::background::Status::Running,
                 exit: None,
                 stopping: false,
+                listed: None,
             });
             Ok(id)
         });
@@ -3984,6 +3988,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             phase,
             tool_outputs,
             outputs,
+            background,
             render_budget,
             fired,
             pruned,
@@ -4019,6 +4024,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             outputs: outputs.as_ref().map(|(text, _)| text.clone()),
             carried_outputs: outputs.as_ref().map(|(_, n)| *n),
             carried_output_bytes: outputs.as_ref().map(|(text, _)| text.len() as u64),
+            background: background.clone(),
             // A user message after the head (#597).
             placement: Some(log::RenderPlacement::Message),
             render_budget: render_budget.clone(),
@@ -5509,6 +5515,7 @@ fn background_call<S>(
                 status: super::background::Status::Running,
                 exit: None,
                 stopping: false,
+                listed: None,
             };
             let shown = super::background::started(&job);
             line.confined = Some(ran.confined.clone());
@@ -5874,7 +5881,12 @@ fn refilled(
     let sent = outputs
         .as_ref()
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
-    let mut refilled = crate::seam::render::refill(&template.messages, &sent);
+    // Each background command still running (#614), after the summary in
+    // the refill's message, as Qwen Code places its list: the refill
+    // compacts away the call that started it.
+    let background = super::background::running_at_seam(state.jobs.values_mut());
+    let mut refilled =
+        crate::seam::render::refill_with(&template.messages, &sent, background.as_deref());
     state.refilled = true;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
@@ -5900,6 +5912,7 @@ fn refilled(
         phase,
         tool_outputs,
         outputs,
+        background,
         render_budget,
         fired,
         pruned,
@@ -9770,6 +9783,7 @@ pub(in crate::drive) mod tests {
                 phase: None,
                 tool_outputs: log::SeamToolOutputs::Evict,
                 outputs: None,
+                background: None,
                 render_budget: None,
                 fired: None,
                 pruned: None,
@@ -10221,6 +10235,7 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                background: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
                 fired: None,
@@ -13123,6 +13138,97 @@ pub(in crate::drive) mod tests {
                     }
                 )
             })
+    }
+
+    /// A background command still running at a seam (#614) is listed after
+    /// the refill's outputs -- its id, its command and its output file --
+    /// with whether it printed anything since it started, then since the
+    /// last seam that listed it; a job no longer running is not listed, and
+    /// every head rebuilds from the seam's `background`.
+    #[test]
+    fn a_seam_lists_each_background_command_still_running() {
+        let dir = scratch("bg-seam");
+        let session = three_decisions_then(|_| {}, Vec::new());
+        let output = dir.join("shell-bg_0123abcd.output");
+        std::fs::write(&output, "").expect("the output file");
+        let job = |id: &str, status| super::super::background::Job {
+            id: id.to_owned(),
+            command: "python3 -m http.server 8765\n  --directory docs".to_owned(),
+            cwd: ".".to_owned(),
+            pid: 0,
+            output: output.clone(),
+            status_file: dir.join(format!("shell-{id}.status")),
+            status,
+            exit: None,
+            stopping: false,
+            listed: None,
+        };
+        {
+            let mut state = session.shared.lock();
+            let running = job("bg_0123abcd", super::super::background::Status::Running);
+            let ended = job("bg_ffffffff", super::super::background::Status::Completed);
+            state.jobs.insert(running.id.clone(), running);
+            state.jobs.insert(ended.id.clone(), ended);
+        }
+        let backgrounds = |log: &[Logged]| -> Vec<Option<String>> {
+            log.iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::Seamed { background, .. } => Some(background.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let row = |since: &str| {
+            format!(
+                "\n\n<background-tasks>\nThe following background commands were running at \
+                 compaction. The summary above does not include their state. Use `task_stop` to \
+                 stop one; do not assume they finished.\n- [running, {since}] bg_0123abcd: \
+                 python3 -m http.server 8765 --directory docs\n  output file: {}\n\
+                 </background-tasks>",
+                output.display()
+            )
+        };
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the first seam", |log| {
+            backgrounds(log).len() == 1
+        });
+        assert_eq!(backgrounds(&log), [Some(row("no output since it started"))]);
+        let head = template().messages.len();
+        let refill = session.shared.lock().trunk[head].content.clone();
+        assert!(
+            refill.ends_with(&row("no output since it started")),
+            "{refill}"
+        );
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the second seam", |log| {
+            backgrounds(log).len() == 2
+        });
+        assert_eq!(
+            backgrounds(&log)[1],
+            Some(row("no new output since the last compaction"))
+        );
+        std::fs::write(&output, "Serving HTTP on :: port 8765\n").expect("its output");
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the third seam", |log| {
+            backgrounds(log).len() == 3
+        });
+        assert_eq!(
+            backgrounds(&log)[2],
+            Some(row("new output since the last compaction"))
+        );
+        session.shared.lock().jobs.clear();
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the fourth seam", |log| {
+            backgrounds(log).len() == 4
+        });
+        assert_eq!(
+            backgrounds(&log)[3],
+            None,
+            "nothing running, nothing listed"
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&dir]);
     }
 
     /// #504: with the audit on, an operator's seam puts the dogma's pinned
@@ -17200,6 +17306,7 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                background: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
                 fired: None,
