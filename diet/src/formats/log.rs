@@ -229,6 +229,11 @@ vocabulary! {
         /// A tangent closed: its entries disposed and the trunk rolled back
         /// to the fork point (v7, #22).
         TangentClose => "tangent.close",
+        /// A self-capture call the model elected, and what it wrote to
+        /// working memory (v7, #609).
+        Capture => "capture",
+        /// The self-capture reminder, as a note after an ask (v7, #609).
+        Reminded => "reminded",
     }
 }
 
@@ -703,6 +708,16 @@ pub enum Piece {
     },
 }
 
+/// The fork ask set a session asks in (v7, #595), by name and digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkAsks {
+    /// The set's name: `dogma::asks`' directory.
+    pub name: String,
+    /// The set's digest, recomputable from the dogma's manifest; best
+    /// effort, so a name read without one is kept.
+    pub digest: Option<String>,
+}
+
 /// What a `session.start` claims serves it (v3, #292): the regimen's
 /// substrate, the registry it was read from, and the engine the start-time
 /// check passed. Its four keys come together or not at all.
@@ -891,6 +906,13 @@ pub enum Event {
         approvals_off: Option<bool>,
         /// The fork delivery lever's state (v7), for a session that forks.
         fork_delivery: Option<ForkDelivery>,
+        /// Each lever's state the session runs at (v7, #573), by lever, in
+        /// `docs/program.md` §2's words: the record's start row's `levers`,
+        /// from the same reading, so the two agree by construction.
+        levers: Option<BTreeMap<String, String>>,
+        /// The fork ask set a session that forks asks in (v7, #595): its name
+        /// and digest, `fork_asks` and `fork_asks_digest`.
+        fork_asks: Option<ForkAsks>,
         /// With thinking on and no `reasoning_effort` sent, the level the
         /// chat template renders by default, as the registry declares it
         /// (v7): what the model was asked for, named.
@@ -1140,6 +1162,8 @@ pub enum Event {
         /// id. A gap may hold several forks that carry one, each after the
         /// last settled; absent (a log before #564), the gap's only fork.
         trigger: Option<String>,
+        /// Which ask of its set it sent (v7, #595): the router kind's tag.
+        ask: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -1218,6 +1242,37 @@ pub enum Event {
         prefix_intact: bool,
         /// How many messages the rollback took off the trunk.
         rolled_back: u64,
+    },
+    /// A self-capture call (v7, #609): the model elected one of the
+    /// contract's tools, and this is what it came to in working memory.
+    Capture {
+        /// The `seq` of the `request` whose answer made the call: the
+        /// trunk's, or with `fork` the interview fork's.
+        request: u64,
+        /// The call's id.
+        call: String,
+        /// The tool.
+        tool: String,
+        /// What it came to: `recorded`, `dropped` (the groundedness gate
+        /// kept nothing), `resolved`, `judged` (a verdict that changes no
+        /// entry), `proposed` (advisory, writes nothing) or `refused` (the
+        /// contract or the object refused it).
+        outcome: String,
+        /// The entries it wrote or ruled on, by id.
+        entries: Vec<String>,
+        /// Why, when it was dropped or refused.
+        why: Option<String>,
+        /// The interview fork that made the call (#610), when a fork
+        /// answered through the capture tools; absent for the trunk's own.
+        fork: Option<u64>,
+    },
+    /// The self-capture reminder (v7, #609): an advisory note after turn
+    /// `turn`'s ask, when the model had recorded nothing for the cadence.
+    Reminded {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
@@ -2470,6 +2525,14 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     off => off,
                 },
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
+                levers: fields.optional_words("levers")?,
+                fork_asks: match fields.optional_string("fork_asks")? {
+                    None => None,
+                    Some(name) => Some(ForkAsks {
+                        name,
+                        digest: fields.optional_string("fork_asks_digest")?,
+                    }),
+                },
                 reasoning_effort_default: match object.get("reasoning_effort_default") {
                     None => None,
                     Some(_) => Some(fields.string("reasoning_effort_default")?),
@@ -2672,6 +2735,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             question: fields.string("question")?,
             view: fields.optional_string("view")?,
             trigger: fields.optional_string("trigger")?,
+            ask: fields.optional_string("ask")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -2700,6 +2764,19 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 tangent: fields.optional_string("tangent")?,
             }
         }
+        Kind::Capture => Event::Capture {
+            request: fields.count("request")?,
+            call: fields.string("call")?,
+            tool: fields.string("tool")?,
+            outcome: fields.string("outcome")?,
+            entries: fields.optional_strings("entries")?.unwrap_or_default(),
+            why: fields.optional_string("why")?,
+            fork: fields.optional_count("fork")?,
+        },
+        Kind::Reminded => Event::Reminded {
+            turn: fields.turn("turn")?,
+            text: fields.string("text")?,
+        },
         Kind::TangentOpen => Event::TangentOpen {
             id: fields.string("id")?,
             at_turn: fields.turn("at_turn")?,
@@ -3335,6 +3412,9 @@ pub enum Holds {
     Serving,
     /// A list of text (v3).
     Strings,
+    /// An object of names to words (v7, #573): a `session.start`'s
+    /// `levers`, each lever's state in the program's words.
+    Words,
     /// A `delta`'s tool-call fragment: an object of the keys
     /// [`TOOL_CALL_PIECE`] declares (v3).
     ToolCallPiece,
@@ -3641,7 +3721,12 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         Kind::Seam => 6,
-        Kind::Delivered | Kind::Recalled | Kind::TangentOpen | Kind::TangentClose => 7,
+        Kind::Delivered
+        | Kind::Recalled
+        | Kind::TangentOpen
+        | Kind::TangentClose
+        | Kind::Capture
+        | Kind::Reminded => 7,
         _ => 0,
     }
 }
@@ -3743,6 +3828,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("unsent", Holds::Unsent),
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
+                may_v7("levers", Holds::Words),
+                may_v7("fork_asks", Text),
+                may_v7("fork_asks_digest", Text),
                 may_v7("reasoning_effort_default", Text),
                 may_v7("phases", Holds::Strings),
                 may_v7("phase_transitions", Holds::PhaseMoves),
@@ -3890,6 +3978,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("question", Text),
                 may_v7("view", Text),
                 may_v7("trigger", Text),
+                may_v7("ask", Text),
             ];
             F
         }
@@ -3908,6 +3997,22 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v5("supersedes", Text),
                 may_v7("tangent", Text),
             ];
+            F
+        }
+        Kind::Capture => {
+            const F: &[Field] = &[
+                must_v7("request", Count),
+                must_v7("call", Text),
+                must_v7("tool", Text),
+                must_v7("outcome", Text),
+                must_v7("entries", Holds::Strings),
+                may_v7("why", Text),
+                may_v7("fork", Count),
+            ];
+            F
+        }
+        Kind::Reminded => {
+            const F: &[Field] = &[must_v7("turn", Count), must_v7("text", Text)];
             F
         }
         Kind::TangentOpen => {
@@ -4037,6 +4142,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::RecalledItems => "RecalledItem[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
+        Holds::Words => "Record<string, string>".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
         Holds::Entry => "PatchEntry".to_owned(),
@@ -4242,6 +4348,8 @@ fn to_value(line: &Line) -> Value {
             unsent,
             approvals_off,
             fork_delivery,
+            levers,
+            fork_asks,
             reasoning_effort_default,
             tool_output,
             phases,
@@ -4265,6 +4373,12 @@ fn to_value(line: &Line) -> Value {
             if let Some(phase) = opening_phase {
                 put("opening_phase", text(phase));
             }
+            if let Some(asks) = fork_asks {
+                put("fork_asks", text(&asks.name));
+                if let Some(digest) = &asks.digest {
+                    put("fork_asks_digest", text(digest));
+                }
+            }
             if let Some(effort) = reasoning_effort_default {
                 put("reasoning_effort_default", text(effort));
             }
@@ -4280,6 +4394,17 @@ fn to_value(line: &Line) -> Value {
                                     ("sha256".to_owned(), text(&file.sha256)),
                                 ]))
                             })
+                            .collect(),
+                    ),
+                );
+            }
+            if let Some(levers) = levers {
+                put(
+                    "levers",
+                    Value::Object(
+                        levers
+                            .iter()
+                            .map(|(lever, state)| (lever.clone(), text(state)))
                             .collect(),
                     ),
                 );
@@ -4637,6 +4762,7 @@ fn to_value(line: &Line) -> Value {
             question,
             view,
             trigger,
+            ask,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -4648,6 +4774,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(trigger) = trigger {
                 put("trigger", text(trigger));
+            }
+            if let Some(ask) = ask {
+                put("ask", text(ask));
             }
             Kind::Fork
         }
@@ -4680,6 +4809,36 @@ fn to_value(line: &Line) -> Value {
                 put("tangent", text(tangent));
             }
             Kind::Patch
+        }
+        Event::Capture {
+            request,
+            call,
+            tool,
+            outcome,
+            entries,
+            why,
+            fork,
+        } => {
+            put("request", count(*request));
+            put("call", text(call));
+            put("tool", text(tool));
+            put("outcome", text(outcome));
+            put(
+                "entries",
+                Value::Array(entries.iter().map(|id| text(id)).collect()),
+            );
+            if let Some(why) = why {
+                put("why", text(why));
+            }
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
+            }
+            Kind::Capture
+        }
+        Event::Reminded { turn, text: note } => {
+            put("turn", count(u64::from(*turn)));
+            put("text", text(note));
+            Kind::Reminded
         }
         Event::TangentOpen {
             id,
@@ -5036,6 +5195,22 @@ impl Fields<'_> {
     }
 
     /// A list of text, when carried (v3).
+    /// An object of names to words, when carried (v7, #573).
+    fn optional_words(&self, key: &str) -> Result<Option<BTreeMap<String, String>>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::Object(words)) => words
+                .iter()
+                .map(|(name, word)| match word {
+                    Value::String(word) => Ok((name.clone(), word.clone())),
+                    _ => Err(format!("`{key}`'s `{name}` is not a word")),
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .map(Some),
+            Some(_) => Err(format!("`{key}` is not an object")),
+        }
+    }
+
     fn optional_strings(&self, key: &str) -> Result<Option<Vec<String>>, String> {
         match self.0.get(key) {
             None => Ok(None),
@@ -5562,6 +5737,10 @@ mod tests {
                 fork_delivery: None,
                 reasoning_effort_default: None,
                 instruction_files: None,
+                levers: Some(BTreeMap::from([
+                    ("fork-asks".to_owned(), "v3".to_owned()),
+                    ("tangent-closure".to_owned(), "off".to_owned()),
+                ])),
                 tool_output: Some(ToolOutput {
                     state: ToolOutputState::Capped,
                     max_lines: Some(2000),
@@ -5570,6 +5749,10 @@ mod tests {
                 phases: None,
                 phase_transitions: None,
                 opening_phase: None,
+                fork_asks: Some(ForkAsks {
+                    name: "v4".to_owned(),
+                    digest: Some("0123456789abcdef".to_owned()),
+                }),
             },
         }
     }
@@ -5842,6 +6025,7 @@ mod tests {
                 question: "what did the operator decide".to_owned(),
                 view: Some("last:2".to_owned()),
                 trigger: Some("turn_end".to_owned()),
+                ask: Some("judgment".to_owned()),
             },
             Event::Request {
                 turn: 5,
@@ -5898,6 +6082,28 @@ mod tests {
                 parked: Vec::new(),
                 prefix_intact: true,
                 rolled_back: 0,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-c".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "recorded".to_owned(),
+                entries: vec!["r3/call-c".to_owned()],
+                why: None,
+                fork: None,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-d".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "dropped".to_owned(),
+                entries: Vec::new(),
+                why: Some("the groundedness gate kept nothing of it".to_owned()),
+                fork: Some(7),
+            },
+            Event::Reminded {
+                turn: 5,
+                text: "Anything you meant to record?".to_owned(),
             },
         ]);
         events
@@ -5969,6 +6175,9 @@ mod tests {
             }
             (Holds::Strings, Value::Array(items)) => {
                 items.iter().all(|item| matches!(item, Value::String(_)))
+            }
+            (Holds::Words, Value::Object(words)) => {
+                words.values().all(|word| matches!(word, Value::String(_)))
             }
             (Holds::Tag(tags), Value::String(tag)) => tags.tags().contains(&tag.as_str()),
             (Holds::Head, Value::Array(messages)) => messages.iter().all(|m| match m {
@@ -6541,6 +6750,8 @@ mod tests {
         let Event::SessionStart {
             version,
             tool_output,
+            levers,
+            fork_asks,
             ..
         } = &mut lines[0].event
         else {
@@ -6550,6 +6761,8 @@ mod tests {
         // A v7 key on the first line would be the one named; the check is of
         // what arrived in v1, further down.
         *tool_output = None;
+        *levers = None;
+        *fork_asks = None;
         let document: String = lines.iter().map(|line| render(line) + "\n").collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");
@@ -7050,7 +7263,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled tangent.open tangent.close"
+             fork.settled patch seam delivered recalled tangent.open tangent.close capture reminded"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

@@ -39,3 +39,10 @@
 .ex-call-outcome[data-level='bad'] { color: var(--bad); }
 .ex-confinement { color: var(--ink-faint); }
 .ex-tool__stderr { color: var(--ink-faint); }
+
+/* What a self-capture call did to working memory (#619). */
+.ex-capture {
+  margin: 0.35rem 0 0;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}

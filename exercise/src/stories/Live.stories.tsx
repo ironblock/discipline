@@ -5,6 +5,11 @@ import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
 import approvalsOff from '../../../diet/formats/log/fixtures/valid/a-v7-call-that-ran-with-approvals-off.jsonl?raw';
+import phaseMoved from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-moved-a-phase.jsonl?raw';
+import deliveredNote from '../../../diet/formats/log/fixtures/valid/a-v7-imperative-delivery-after-an-ask.jsonl?raw';
+import recalledNote from '../../../diet/formats/log/fixtures/valid/a-v7-recall-after-an-ask.jsonl?raw';
+import refillMessage from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-refill-is-a-message.jsonl?raw';
+import leversDeclared from '../../../diet/formats/log/fixtures/valid/a-v7-session-declaring-its-levers.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -12,6 +17,8 @@ import { App } from '../App.tsx';
 import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
+import { TANGENT_OPEN } from '../drive/served/tangent.ts';
+import { SELF_CAPTURE } from '../drive/served/self-capture.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
@@ -310,8 +317,8 @@ export const AttachAScreenshot: Story = {
 };
 
 /**
- * `?drive`: `diet`'s drive declares no phases, and its declare-seam takes none -- so the composer offers no move,
- * says so, and its refill sends the bare declare-seam serve takes.
+ * `?drive`: a log that declares no phase graph -- so the composer offers no move, says so, and its refill sends a
+ * declare-seam naming no phase.
  */
 export const ServedRefillNamesNoPhase: Story = {
   name: '?drive: refill offers no phase, since the drive declares none',
@@ -361,5 +368,166 @@ export const ServedApprovalsUndeclared: Story = {
     const approvals = canvasElement.querySelector<HTMLElement>('.ex-header__lever[data-lever="approvals"]');
     await expect(approvals?.textContent).toBe('approvals undeclared');
     await expect(approvals?.dataset['undeclared']).toBe('');
+  },
+};
+
+/** A served log, from lines the surface holds: one per line, as `serving` streams it. */
+const jsonl = (lines: readonly unknown[]) => lines.map((l) => JSON.stringify(l)).join('\n');
+
+/** `?drive` (#608): with no tangent open, the composer offers to open one, as `t/1`. */
+export const ServedOpenTangent: Story = {
+  name: '?drive: open a tangent',
+  args: { drive: true, web: posting(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    posted.length = 0;
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'open tangent')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'open-tangent', id: 't/1' }]));
+  },
+};
+
+/** `?drive` (#608): a tangent open with two entries of its own -- end it, keeping one and dropping the other. */
+export const ServedEndTangent: Story = {
+  name: '?drive: end a tangent, ruling on each of its entries',
+  args: { drive: true, web: posting(jsonl(TANGENT_OPEN)) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'end tangent…')!);
+    const panel = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('fieldset[aria-label="end tangent t/1"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect([...panel.querySelectorAll('li')].map((li) => li.dataset['entry'])).toEqual(['e1', 'e2']);
+    await userEvent.click(panel.querySelector('li[data-entry="e2"] input[value="drop"]')!);
+    posted.length = 0;
+    await userEvent.click([...panel.querySelectorAll('button')].find((b) => b.textContent === 'close tangent')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'close-tangent', dispositions: { e1: 'keep', e2: 'drop' } }]));
+  },
+};
+
+/**
+ * `?drive`, log v7 (#563): a session with a phase graph. The composer names the phase the log says it is in, offers
+ * exactly the moves the graph allows from there, and its refill sends the phase picked.
+ */
+export const ServedPhaseGraph: Story = {
+  name: '?drive: refill offers the moves the logged phase graph allows, and sends the one picked',
+  args: { drive: true, web: posting(phaseMoved) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
+    const select = canvasElement.querySelector<HTMLSelectElement>('select[aria-label="move to"]');
+    await expect([...(select?.options ?? [])].map((o) => o.value)).toEqual(['review']);
+    posted.length = 0;
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'refill')!);
+    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-seam']));
+    await expect((posted[0] as { phase?: string }).phase).toBe('review');
+  },
+};
+
+/** diet's call that ran, cut before its outcome line: a log mid-call, the bash command still running in the foreground. */
+const callRunning = toolCallRan.trimEnd().split('\n').filter((line) => !line.includes('"kind":"tool_call"')).join('\n');
+
+/** `?drive` (#614): while a bash call runs in the foreground, the composer offers to move it to the background. */
+export const ServedMoveToBackground: Story = {
+  name: '?drive: move a running command to the background',
+  args: { drive: true, web: posting(callRunning) },
+  play: async ({ canvasElement }) => {
+    const move = await waitFor(async () => {
+      const found = [...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'move to background');
+      await expect(found).toBeDefined();
+      return found!;
+    });
+    posted.length = 0;
+    await userEvent.click(move);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'background' }]));
+  },
+};
+
+/** And with the call answered, nothing runs in the foreground: there is nothing to move. */
+export const ServedNothingToBackground: Story = {
+  name: '?drive: with no command running, nothing to move to the background',
+  args: { drive: true, web: posting(toolCallRan) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="tool"]').length).toBe(1));
+    await expect([...canvasElement.querySelectorAll('button')].some((b) => b.textContent === 'move to background')).toBe(false);
+  },
+};
+
+/** The harness's note on an ask, as drawn: under the operator's words, named as the harness's, never as theirs. */
+const harnessNote = async (root: HTMLElement, note: string) =>
+  waitFor(async () => {
+    const found = root.querySelector<HTMLElement>(`.ex-trunk .ex-harness-note[data-note="${note}"]`);
+    await expect(found).not.toBeNull();
+    return found!;
+  });
+
+/** `?drive`, log v7 (#574): the fork-delivery note sent after turn 2's ask, drawn as the harness's. */
+export const ServedDeliveredNote: Story = {
+  name: '?drive: the fork-delivery note after an ask, marked as the harness’s',
+  args: { drive: true, web: serving(deliveredNote) },
+  play: async ({ canvasElement }) => {
+    const note = await harnessNote(canvasElement, 'delivered');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · fork delivery · imperative');
+    await expect(note.textContent).toContain('Working record');
+  },
+};
+
+/** `?drive`, log v7 (#574): archive recall's note, drawn as the harness's. */
+export const ServedRecalledNote: Story = {
+  name: '?drive: the recall note after an ask, marked as the harness’s',
+  args: { drive: true, web: serving(recalledNote) },
+  play: async ({ canvasElement }) => {
+    const note = await harnessNote(canvasElement, 'recalled');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · recall · literal');
+  },
+};
+
+/** `?drive` (#574): self-capture's reminder note, and its call on the trunk with what it recorded. */
+export const ServedSelfCapture: Story = {
+  name: '?drive: self-capture’s reminder and its recorded call',
+  args: { drive: true, web: serving(SELF_CAPTURE.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const note = await harnessNote(canvasElement, 'reminded');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · self-capture reminder');
+    const call = canvasElement.querySelector<HTMLElement>('.ex-trunk [data-tone="tool"]');
+    await expect(call?.querySelector('.ex-capture')?.textContent).toBe('self-capture · recorded r10/c1/fact');
+  },
+};
+
+/** `?drive`, log v7 (#604): the seam's refill sent as a user message -- the harness's summary, not the operator's ask. */
+export const ServedRefillSummary: Story = {
+  name: '?drive: the seam’s refill message is labelled as the harness’s summary',
+  args: { drive: true, web: serving(refillMessage) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="system"]').length).toBeGreaterThan(1));
+    const labels = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="system"] .ex-block__label')].map((l) => l.textContent ?? '');
+    await expect(labels.some((l) => l.startsWith('harness summary'))).toBe(true);
+    await expect(labels.some((l) => l.startsWith('user'))).toBe(false);
+  },
+};
+
+/** `?drive` (#573): a session.start with the whole lever table -- the header lists every lever and its state, as given. */
+export const ServedLeverTable: Story = {
+  name: '?drive: the header lists every lever the session declares',
+  args: { drive: true, web: serving(leversDeclared) },
+  play: async ({ canvasElement }) => {
+    const table = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLDetailsElement>('.ex-header__levers');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    const start = JSON.parse(leversDeclared.split('\n')[0]!) as { levers: Record<string, string> };
+    const rows = [...table.querySelectorAll<HTMLElement>('[data-lever-row]')].map((row) => [row.dataset['leverRow'], row.querySelector('dd')?.textContent]);
+    await expect(rows).toEqual(Object.entries(start.levers));
+  },
+};
+
+/** A log from before the table (#623) has none to list: the header keeps its three, and offers no table. */
+export const ServedNoLeverTable: Story = {
+  name: '?drive: a log without the lever table offers none',
+  args: { drive: true, web: serving(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await expect(canvasElement.querySelector('.ex-header__levers')).toBeNull();
   },
 };

@@ -214,29 +214,27 @@ impl AskKind {
         Self::ALL.iter().copied().find(|kind| kind.tag() == text)
     }
 
-    /// The ask's template, compiled in from `asks/<tag>.txt`.
-    ///
-    /// One `include_str!` per kind, so a kind without a template does not
-    /// compile rather than rendering as nothing at run time.
+    /// The ask's template in ask set `v3` (#595): today's asks, which the
+    /// router and the scripted drive ask in.
     #[must_use]
     pub fn template(self) -> &'static str {
-        match self {
-            Self::Generic => include_str!("asks/generic.txt"),
-            Self::ApiSurface => include_str!("asks/api_surface.txt"),
-            Self::Outcome => include_str!("asks/outcome.txt"),
-            Self::Change => include_str!("asks/change.txt"),
-            Self::Finding => include_str!("asks/finding.txt"),
-            Self::Reminder => include_str!("asks/reminder.txt"),
-            Self::Judgment => include_str!("asks/judgment.txt"),
-        }
+        self.template_in(&crate::dogma::asks::V3)
+    }
+
+    /// The ask's template in `set` (#595). Every set carries every kind,
+    /// which `dogma::asks`' tests hold.
+    #[must_use]
+    pub fn template_in(self, set: &crate::dogma::asks::AskSet) -> &'static str {
+        set.text(self.tag())
+            .unwrap_or_else(|| unreachable!("ask set {} has no {} ask", set.name, self.tag()))
     }
 }
 
-/// The fork-local imperative, version 1. Versioned as data because the
-/// wording is load-bearing: one sentence raised engagement by 22 points in a
-/// 630-call experiment, and which of its clauses does the work is an open
-/// ablation.
-pub const IMPERATIVE: &str = include_str!("imperative.txt");
+/// The fork-local imperative, as ask set `v3` carries it. Versioned as data
+/// because the wording is load-bearing: one sentence raised engagement by 22
+/// points in a 630-call experiment, and which of its clauses does the work is
+/// an open ablation.
+pub const IMPERATIVE: &str = include_str!("../../../dogma/fork-asks/v3/imperative.txt");
 
 /// A tool family: what kind of thing a tool does, whatever a harness calls it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -722,9 +720,33 @@ impl Ask {
     /// value is dropped whole, so an ask never says `You said: ""`.
     #[must_use]
     pub fn render(&self, facts: &Facts) -> String {
+        self.render_in(&crate::dogma::asks::V3, facts, None)
+    }
+
+    /// [`Ask::render`] in ask set `set` (#595), with `record`, the working
+    /// record's live entries as the seam's render writes them (`<id>\t<entry>`
+    /// lines), for a template that shows it: its `{record}` line is dropped
+    /// whole when the record is empty or not given.
+    #[must_use]
+    pub fn render_in(
+        &self,
+        set: &crate::dogma::asks::AskSet,
+        facts: &Facts,
+        record: Option<&str>,
+    ) -> String {
+        let imperative = set.text("imperative").unwrap_or(IMPERATIVE);
+        let record = record.filter(|record| !record.is_empty());
         let mut out = String::new();
-        for line in self.kind.template().lines() {
-            let line = line.replace("{imperative}", IMPERATIVE.trim());
+        for line in self.kind.template_in(set).lines() {
+            let line = line.replace("{imperative}", imperative.trim());
+            let line = if line.contains("{record}") {
+                match record {
+                    Some(record) => line.replace("{record}", &format!("\n{}", record.trim_end())),
+                    None => continue,
+                }
+            } else {
+                line
+            };
             let line = if line.contains("{intent}") {
                 match self.intent.as_deref() {
                     Some(intent) => line.replace("{intent}", intent),
@@ -1244,6 +1266,32 @@ mod tests {
         for family in Family::ALL {
             assert_eq!(Family::from_tag(family.tag()), Some(*family));
         }
+    }
+
+    /// #595: set v3 renders the asks as they were; set v4's judgment ask
+    /// shows the record's lines after its heading when there is one, drops
+    /// that line whole when there is none, and asks for SUPERSEDE.
+    #[test]
+    fn set_v4s_judgment_ask_shows_the_record_and_asks_for_supersede() {
+        use crate::dogma::asks::{V3, V4};
+        let ask = Ask {
+            kind: AskKind::Judgment,
+            intent: Some("sketch the schema".to_owned()),
+        };
+        let facts = Facts::default();
+        assert_eq!(
+            ask.render_in(&V3, &facts, Some("a\tb\n")),
+            ask.render(&facts)
+        );
+        let shown = ask.render_in(&V4, &facts, Some("d1\tdecision: a tracker\n"));
+        assert!(
+            shown.contains("then the entry:\nd1\tdecision: a tracker\nThe turn has ended."),
+            "{shown}"
+        );
+        assert!(shown.contains("DECISION, PLAN and SUPERSEDE"), "{shown}");
+        let empty = ask.render_in(&V4, &facts, Some(""));
+        assert!(!empty.contains("working record"), "{empty}");
+        assert_eq!(empty, ask.render_in(&V4, &facts, None));
     }
 
     #[test]

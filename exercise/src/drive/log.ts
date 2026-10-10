@@ -265,7 +265,14 @@ export interface Patch extends At {
   /** For `supersede`: the entry this one replaces. */
   readonly supersedes?: string;
   readonly authority?: Authority;
+  /** The tangent open when it was made (log v7, #608): the entry is that tangent's, to be ruled on at its close. */
+  readonly tangent?: string;
 }
+
+/** The operator opened a tangent (log v7, #608): the trunk as it stood is the point a close rolls back to. */
+export type TangentOpen = V0.TangentOpenLine;
+/** The operator closed it: its entries kept, dropped or parked, and the trunk rolled back to where it opened. */
+export type TangentClose = V0.TangentCloseLine;
 
 /**
  * The one deliberate prefill event -- the trunk refilled from working memory (log v6, #493): the head, the render
@@ -286,6 +293,10 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
 
 /** Forks' patches delivered after an ask (v7, the fork delivery lever). */
 export type Delivered = V0.DeliveredLine;
+/** Self-capture's reminder, a note after an ask (v7, #619): the harness's words, not the operator's. */
+export type Reminded = V0.RemindedLine;
+/** What a self-capture call did (v7, #619), logged beside its `tool_call` line: its outcome and the entries it wrote. */
+export type Capture = V0.CaptureLine;
 /** Archived items recalled after an ask (v7, the archive recall lever, #566). */
 export type Recalled = V0.RecalledLine;
 
@@ -309,7 +320,11 @@ export type LogLine =
   | Patch
   | Seam
   | Delivered
-  | Recalled;
+  | Recalled
+  | Reminded
+  | Capture
+  | TangentOpen
+  | TangentClose;
 
 export type Kind = LogLine['kind'];
 
