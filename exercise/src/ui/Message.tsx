@@ -101,6 +101,7 @@ export function UserMessage({ node }: { readonly node: Folded<UserNode> }) {
       {node.delivered ? <HarnessNote note="delivered" label={`harness · fork delivery · ${node.delivered.framing}`} text={node.delivered.text} /> : null}
       {node.recalled ? <HarnessNote note="recalled" label={`harness · recall · ${node.recalled.recall}`} text={node.recalled.text} /> : null}
       {node.reminded ? <HarnessNote note="reminded" label="harness · self-capture reminder" text={node.reminded} /> : null}
+      {node.noticed ? <HarnessNote note="notice" label="harness · notice" text={node.noticed} /> : null}
     </Block>
   );
 }
@@ -236,6 +237,12 @@ function AssistantBody({
         // What failed is the footer's to name; here, what the server said.
         <p className="ex-failed" role="alert" title={failOf(node.failure.reason).label}>
           {node.failure.message}
+        </p>
+      ) : null}
+      {/* An overflow's sizes (#628), and who told it: the engine, or serve from the prompt's size. */}
+      {node.failure?.overflow ? (
+        <p className="ex-overflow">
+          {`${tokens(node.failure.overflow.promptTokens)} tok against a ${tokens(node.failure.overflow.window)} window · ${node.failure.overflow.inferred ? 'serve inferred it from the prompt’s size' : 'the engine reported it'}`}
         </p>
       ) : null}
     </>

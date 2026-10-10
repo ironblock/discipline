@@ -240,6 +240,10 @@ export interface Fork extends At {
   /** An offboard seat's registry id, when the fork ran off the warm trunk (log v7, #615); with the model it served. */
   readonly substrate?: string;
   readonly model?: string;
+  /** What triggered it (log v7, #620): `turn_end`, or `call:<class>:<id>` for a call that warranted it mid-turn. */
+  readonly trigger?: string;
+  /** A hazard it was sent knowing (log v7, #637): `may-displace-trunk-cache` when its slot may evict the trunk's cache. */
+  readonly hazard?: string;
 }
 
 /** How a fork ended. */
@@ -252,6 +256,8 @@ export interface ForkSettled extends At {
   readonly prompt_tokens?: number;
   /** An offboard fork's wall time, from its request to its settle (#615). */
   readonly wall_ms?: number;
+  /** Why it was never sent, when its outcome is `refused` (log v7, #637): `pool` when the slots had no room for it. */
+  readonly refused?: string;
 }
 
 export interface Entry {

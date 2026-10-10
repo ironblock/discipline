@@ -618,6 +618,8 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                 }}
                 // A bash call running in the foreground (#614): what "move to background" moves.
                 foreground={session.eras.at(-1)?.nodes.some((n) => n.kind === 'tool' && n.running && n.tool === 'bash') ?? false}
+                // That command near its timeout (#613): the move asks itself.
+                nearTimeout={session.eras.at(-1)?.nodes.some((n) => n.kind === 'tool' && n.running && n.tool === 'bash' && n.nearTimeout !== undefined) ?? false}
                 {...composer}
               />
             </div>

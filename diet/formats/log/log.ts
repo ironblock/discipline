@@ -86,6 +86,7 @@ export type FailReason =
   | "transport"
   | "crashed"
   | "context_overflow"
+  | "refusal"
 ;
 
 export type SettleReason =
@@ -252,6 +253,9 @@ export interface Usage {
   prompt_tokens: number;
   completion_tokens: number;
   cached_tokens?: number;
+  cache_creation_tokens?: number;
+  cache_creation_5m_tokens?: number;
+  cache_creation_1h_tokens?: number;
 }
 
 export interface Serving {
@@ -417,6 +421,8 @@ export type ResponseLine = {
   finish_reason?: string;
   reasoning?: string;
   capped?: boolean;
+  reasoning_signature?: string;
+  redacted?: string[];
 } & ({ timings?: Timings; usage?: never } | { usage?: Usage; timings?: never });
 
 export type CancelledLine = {

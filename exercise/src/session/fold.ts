@@ -116,7 +116,12 @@ export interface Generation {
   /** Request to response, wall clock. */
   readonly wallMs?: number;
   /** Why no response will come: the request failed. */
-  readonly failure?: { readonly reason: FailReason; readonly message: string };
+  readonly failure?: {
+    readonly reason: FailReason;
+    readonly message: string;
+    /** An overflow's sizes (log v7, #628): the prompt as sized, the window, and whether serve inferred it from the size. */
+    readonly overflow?: { readonly promptTokens: number; readonly window: number; readonly inferred: boolean };
+  };
   /** Where a running request is, from its progress frames; absent once it has answered. */
   readonly meter?: Meter;
 }
@@ -196,6 +201,12 @@ export interface ToolNode extends Provenance {
   readonly refusal?: ToolRefusal;
   /** What a self-capture call did (log v7's `capture`, #619): its outcome, the entries it wrote, and why when it did not. */
   readonly capture?: { readonly outcome: string; readonly entries: readonly string[]; readonly why?: string };
+  /** The background job it started (the call's `background`, #614), and how the job ended once it has (`background.ended`). */
+  readonly background?: { readonly job: string; readonly status?: string; readonly exit?: number };
+  /** The model pruned its output (log v7's `pruned`, #630): the bytes, and whether a seam has since replaced it by its pointer. */
+  readonly pruned?: { readonly bytes: number; readonly replaced: boolean };
+  /** Running, it is near its timeout (log v7's `timeout.near`, #613): its timeout, and when the warning came. */
+  readonly nearTimeout?: { readonly timeoutMs: number; readonly at: number };
   /** The policy it failed under: the Seatbelt profile's sha256. */
   readonly policy?: string;
   readonly ms?: number;
@@ -240,7 +251,13 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly prefixTokens?: number;
   /** The offboard seat it ran on (#615): the registry's id and model, with its cold prefill and wall time. Absent when warm. */
   readonly seat?: { readonly substrate: string; readonly model: string; readonly promptTokens?: number; readonly wallMs?: number };
+  /** What triggered it (#620): `turn_end`, or `call:<class>:<id>`. */
+  readonly trigger?: string;
   readonly outcome?: ForkOutcome;
+  /** Why it was never sent, when refused (#637): `pool` -- the slots had no room for it. */
+  readonly refused?: string;
+  /** A hazard it was sent knowing (#637): `may-displace-trunk-cache`. */
+  readonly hazard?: string;
   readonly patches: readonly Folded<PatchNode>[];
 }
 
@@ -258,6 +275,8 @@ export interface SeamNode extends Provenance {
   readonly warm?: Timings;
   /** What the refill carried (log v6): working-memory entries, and turns of the old trunk. */
   readonly carried?: { readonly entries: number; readonly turns: number };
+  /** An automatic seam's size (log v7, #633): the prompt it was fired at, and the window that fired it. */
+  readonly size?: { readonly promptTokens: number; readonly window: number };
 }
 
 export interface Era {
@@ -432,7 +451,17 @@ function generation(g: GenerationBuilder, unnamed: number): Generation {
     // A stopped call's timings are not a measurement, and v0 gives it none: what the frames said stands.
     ...(response?.timings ? { timings: response.timings } : {}),
     ...(response?.calls_from ? { callsFrom: response.calls_from } : {}),
-    ...(failed && !response ? { failure: { reason: failed.reason, message: failed.message } } : {}),
+    ...(failed && !response
+      ? {
+          failure: {
+            reason: failed.reason,
+            message: failed.message,
+            ...(failed.prompt_tokens !== undefined && failed.window !== undefined && failed.inferred !== undefined
+              ? { overflow: { promptTokens: failed.prompt_tokens, window: failed.window, inferred: failed.inferred } }
+              : {}),
+          },
+        }
+      : {}),
     ...(!response && !failed && g.frames.length > 0 ? { meter: meterOf(g.frames) } : {}),
   };
 }
@@ -504,7 +533,12 @@ export function fold(lines: readonly LogLine[]): Session {
   const deliveries = new Map<number, LineOf<'delivered'>>();
   const recalls = new Map<number, LineOf<'recalled'>>();
   const notices = new Map<number, LineOf<'notice'>>();
+  // Background jobs' ends, by job (#614); calls warned near their timeout, by `<request>/<call id>` (#613).
+  const backgroundEnds = new Map<string, LineOf<'background.ended'>>();
+  const nearTimeouts = new Map<string, LineOf<'timeout.near'>>();
   const prunes = new Map<number, LineOf<'pruned'>[]>();
+  // The calls whose output a seam replaced by its pointer (#630): every seam's `pruned`.
+  const replacedBySeam = new Set<string>();
   const reminders = new Map<number, LineOf<'reminded'>>();
   // Self-capture's outcomes, by the call they belong to: `<request>/<call id>`.
   const captures = new Map<string, LineOf<'capture'>>();
@@ -710,13 +744,14 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'notice':
         notices.set(e.turn, e);
         break;
-      // A background job's end (#614): what it said reaches the model as the next ask's notice; the end itself is
-      // folded into no node yet.
+      // A background job's end (#614): onto the call that started it; what it said reaches the model as the next ask's
+      // notice.
       case 'background.ended':
+        backgroundEnds.set(e.job, e);
         break;
-      // A call near its timeout (#613): the surface's warning to draw, which the model never sees; folded into no
-      // node yet.
+      // A call near its timeout (#613): the surface's warning, which the model never sees -- onto the running call.
       case 'timeout.near':
+        nearTimeouts.set(`${e.request}/${e.call}`, e);
         break;
       case 'pruned':
         prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
@@ -728,6 +763,7 @@ export function fold(lines: readonly LogLine[]): Session {
         captures.set(`${e.request}/${e.call}`, e);
         break;
       case 'seam': {
+        for (const call of e.pruned ?? []) replacedBySeam.add(call);
         if (e.phase) phase = e.phase.to;
         // What the model was sent after the seam -- `diet`'s `seam::render::refill`, whose output the record's head
         // check verifies: since #597 the head as it was and a user message carrying the render (and the tool outputs
@@ -880,6 +916,9 @@ export function fold(lines: readonly LogLine[]): Session {
             call: c.id !== undefined ? { request: c.request, id: c.id } : undefined,
             startedAt,
             running: line === undefined && !notBegun.has(slot.call) && !unanswered.has(slot.call),
+            ...(line === undefined && c.id !== undefined && nearTimeouts.has(`${c.request}/${c.id}`)
+              ? { nearTimeout: { timeoutMs: nearTimeouts.get(`${c.request}/${c.id}`)!.timeout_ms, at: nearTimeouts.get(`${c.request}/${c.id}`)!.t } }
+              : {}),
             ...(line === undefined && unanswered.has(slot.call) ? { writing: true as const } : line === undefined && notBegun.has(slot.call) ? { waiting: true as const } : {}),
             ...(line
               ? {
@@ -895,6 +934,16 @@ export function fold(lines: readonly LogLine[]): Session {
                   ...(line.stdout !== undefined ? { output: line.stdout } : {}),
                   ...(line.stderr ? { stderr: line.stderr } : {}),
                   ...(line.reason !== undefined ? { refusal: line.reason } : {}),
+                  ...(() => {
+                    const cut = [...prunes.values()].flat().find((p) => p.call === line.id);
+                    return cut ? { pruned: { bytes: cut.bytes, replaced: replacedBySeam.has(line.id) } } : {};
+                  })(),
+                  ...(line.background !== undefined
+                    ? (() => {
+                        const ended = backgroundEnds.get(line.background);
+                        return { background: { job: line.background, ...(ended ? { status: ended.status } : {}), ...(ended?.exit !== undefined ? { exit: ended.exit } : {}) } };
+                      })()
+                    : {}),
                   ...(captures.has(`${c.request}/${line.id}`)
                     ? (() => {
                         const k = captures.get(`${c.request}/${line.id}`)!;
@@ -935,6 +984,7 @@ export function fold(lines: readonly LogLine[]): Session {
             ? { carried: { entries: seamLine.carried_entries, turns: seamLine.carried_turns } }
             : {}),
           ...(seamLine.warm ? { warm: seamLine.warm } : {}),
+          ...(seamLine.prompt_tokens !== undefined && seamLine.window !== undefined ? { size: { promptTokens: seamLine.prompt_tokens, window: seamLine.window } } : {}),
           ...provenance(seamLine),
         })
       : undefined;
@@ -965,6 +1015,7 @@ export function fold(lines: readonly LogLine[]): Session {
       why: fork.why,
       question: fork.question,
       ...(fork.prefix_tokens !== undefined ? { prefixTokens: fork.prefix_tokens } : {}),
+      ...(fork.trigger !== undefined ? { trigger: fork.trigger } : {}),
       ...(fork.substrate !== undefined && fork.model !== undefined
         ? {
             seat: {
@@ -978,6 +1029,8 @@ export function fold(lines: readonly LogLine[]): Session {
       // A side call has finished when it settles, after its patches -- not at its response.
       ...(g ? unended(generation(g, slot)) : {}),
       ...(settled ? { outcome: settled.outcome, endedAt: settled.t } : {}),
+      ...(settled?.refused !== undefined ? { refused: settled.refused } : {}),
+      ...(fork.hazard !== undefined ? { hazard: fork.hazard } : {}),
       patches: patches.map((p) =>
         brand<PatchNode>({
           id: id(p.seq),

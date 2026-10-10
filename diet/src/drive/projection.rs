@@ -1785,6 +1785,8 @@ mod tests {
                 piece: log::Piece::Text("Hello".to_owned()),
             },
             Line::Response {
+                reasoning_signature: None,
+                redacted: None,
                 to_request: request,
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
@@ -2016,6 +2018,9 @@ mod tests {
             3,
             None,
             Some(Usage {
+                cache_creation_1h_tokens: None,
+                cache_creation_5m_tokens: None,
+                cache_creation_tokens: None,
                 prompt_tokens: 12,
                 completion_tokens: 2,
                 cached_tokens: None,
@@ -2705,6 +2710,8 @@ mod tests {
                     max_tokens: None,
                 },
                 Line::Response {
+                    reasoning_signature: None,
+                    redacted: None,
                     to_request: fork + 1,
                     text: "{}".to_owned(),
                     finish_reason: Some("stop".to_owned()),

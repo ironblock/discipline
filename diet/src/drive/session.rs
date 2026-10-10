@@ -389,6 +389,8 @@ pub enum Event {
         reasoning: Option<String>,
         /// What the server measured of the call, as it reported it.
         timings: Option<Timings>,
+        /// What a hosted API said beside the answer (#555).
+        hosted: Hosted,
     },
     /// The call hit its output cap (a `finish_reason` in the client's
     /// [`crate::client::CAPPED_FINISH_REASONS`], `length` among them): what it
@@ -407,6 +409,8 @@ pub enum Event {
         reasoning: Option<String>,
         /// What the server measured of the call, as it reported it.
         timings: Option<Timings>,
+        /// What a hosted API said beside it (#555).
+        hosted: Hosted,
     },
     /// The turn was stopped. Neither its ask nor `partial` is on the trunk.
     Cancelled {
@@ -496,6 +500,8 @@ pub enum Event {
         reasoning: Option<String>,
         /// What the server measured of the call.
         timings: Option<Timings>,
+        /// What a hosted API said beside the calls (#555).
+        hosted: Hosted,
     },
     /// What became of one call the model made: its `tool_call` line, one per
     /// call (log v3, v4).
@@ -3171,6 +3177,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             finish_reason,
             reasoning,
             timings,
+            hosted,
         }
         | Event::Called {
             request,
@@ -3178,17 +3185,19 @@ pub fn line_of(logged: &Logged) -> log::Line {
             finish_reason,
             reasoning,
             timings,
+            hosted,
         } => log::Event::Response {
             to_request: *request,
             text: text.clone(),
             finish_reason: finish_reason.clone(),
             reasoning: reasoning.clone(),
             timings: timings.as_ref().map(timings_line),
-            // v2's keys, written by the session once it carries them
-            // (`usage` for a dialect with no timings); `capped` is written
-            // only by a capped call, below.
-            usage: None,
+            // `usage` for a dialect with no timings: a hosted API's (#555);
+            // `capped` is written only by a capped call, below.
+            usage: hosted.usage.clone(),
             capped: None,
+            reasoning_signature: hosted.signature.clone(),
+            redacted: (!hosted.redacted.is_empty()).then(|| hosted.redacted.clone()),
         },
         Event::Capped {
             request,
@@ -3196,14 +3205,17 @@ pub fn line_of(logged: &Logged) -> log::Line {
             finish_reason,
             reasoning,
             timings,
+            hosted,
         } => log::Event::Response {
             to_request: *request,
             text: text.clone(),
             finish_reason: finish_reason.clone(),
             reasoning: reasoning.clone(),
             timings: timings.as_ref().map(timings_line),
-            usage: None,
+            usage: hosted.usage.clone(),
             capped: Some(true),
+            reasoning_signature: hosted.signature.clone(),
+            redacted: (!hosted.redacted.is_empty()).then(|| hosted.redacted.clone()),
         },
         Event::Progress { request, progress } => log::Event::Progress {
             request: *request,
@@ -3229,6 +3241,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
         } => log::Event::RequestFailed {
             request: *request,
             reason: match (class, overflow) {
+                (Some(Rejection::Refusal), _) => log::FailReason::Refusal,
                 (Some(Rejection::ContextOverflow), _) | (None, Some(_)) => {
                     log::FailReason::ContextOverflow
                 }
@@ -3753,9 +3766,13 @@ fn step<S: Streaming>(
     let mut partial = String::new();
     let mut reasoning = String::new();
     let mut calls = Calls::default();
+    let mut hosted = Hosted::default();
     let result = shared
         .transport
         .stream(shape, deadline, cancel, &mut |piece: Piece<'_>| {
+            if hosted.took(&piece) {
+                return;
+            }
             let event = match piece {
                 Piece::Text(text) => {
                     partial.push_str(text);
@@ -3772,6 +3789,7 @@ fn step<S: Streaming>(
                     }
                 }
                 Piece::Progress(progress) => Event::Progress { request, progress },
+                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => return,
                 // Each fragment as the server sent it, and assembled beside
                 // the log: never answer text (#298 T11).
                 Piece::ToolCall {
@@ -3837,7 +3855,7 @@ fn step<S: Streaming>(
                 std::mem::take(exchange),
                 (request, turn),
                 (partial, reasoning),
-                (finish_reason, timings),
+                (finish_reason, timings, hosted),
             ) {
                 forked = gap(shared, &mut state, turn, request);
             }
@@ -3860,6 +3878,7 @@ fn step<S: Streaming>(
                 said_text.unwrap_or_else(|| partial.clone()),
             );
             said.reasoning.clone_from(&reasoning);
+            hosted.onto(&mut said);
             said.tool_calls = calls
                 .iter()
                 .map(|call| ToolCall {
@@ -3875,6 +3894,7 @@ fn step<S: Streaming>(
                 finish_reason,
                 reasoning,
                 timings,
+                hosted,
             });
             drop(state);
             shared.changed.notify_all();
@@ -6226,7 +6246,7 @@ fn settle_finished(
     exchange: Vec<Message>,
     (request, turn): (u64, u32),
     (partial, reasoning): (String, String),
-    (finish_reason, timings): (Option<String>, Option<Timings>),
+    (finish_reason, timings, hosted): (Option<String>, Option<Timings>, Hosted),
 ) -> bool {
     if finish_reason
         .as_deref()
@@ -6238,6 +6258,7 @@ fn settle_finished(
             finish_reason,
             reasoning: (!reasoning.is_empty()).then_some(reasoning),
             timings,
+            hosted,
         });
         state.keep_ran_steps();
         state.push(Event::TurnSettled {
@@ -6257,6 +6278,7 @@ fn settle_finished(
     let reasoning = (!reasoning.is_empty()).then_some(reasoning);
     let mut answer = Message::new(Role::Assistant, partial.clone());
     answer.reasoning.clone_from(&reasoning);
+    hosted.onto(&mut answer);
     state.trunk.push(answer);
     state.trunk_tokens = timings.as_ref().and_then(trunk_tokens_of);
     state.push(Event::Answered {
@@ -6265,6 +6287,7 @@ fn settle_finished(
         finish_reason,
         reasoning,
         timings,
+        hosted,
     });
     state.push(Event::TurnSettled {
         turn,
@@ -6272,6 +6295,51 @@ fn settle_finished(
     });
     state.move_to(Settlement::Capture);
     true
+}
+
+/// What a hosted API says beside an answer (#555): the signature on its
+/// thinking, the thinking it redacted, and its token counts with the
+/// cache's reads and writes. Empty from a server we run.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Hosted {
+    /// The thinking's signature.
+    pub signature: Option<String>,
+    /// Each redacted block's data.
+    pub redacted: Vec<String>,
+    /// The counts, as the log's `usage` writes them.
+    pub usage: Option<log::Usage>,
+}
+
+impl Hosted {
+    /// Whether `piece` is one of these, taken.
+    fn took(&mut self, piece: &Piece<'_>) -> bool {
+        match piece {
+            Piece::Signature(signature) => {
+                self.signature
+                    .get_or_insert_with(String::new)
+                    .push_str(signature);
+            }
+            Piece::Redacted(data) => self.redacted.push((*data).to_owned()),
+            Piece::Usage(usage) => {
+                self.usage = usage.prompt_tokens().map(|prompt_tokens| log::Usage {
+                    prompt_tokens,
+                    completion_tokens: usage.output_tokens.unwrap_or(0),
+                    cached_tokens: usage.cache_read_input_tokens,
+                    cache_creation_tokens: usage.cache_creation_input_tokens,
+                    cache_creation_5m_tokens: usage.ephemeral_5m_input_tokens,
+                    cache_creation_1h_tokens: usage.ephemeral_1h_input_tokens,
+                });
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    /// The signature and redacted thinking onto the message that goes back.
+    fn onto(&self, message: &mut Message) {
+        message.reasoning_signature.clone_from(&self.signature);
+        message.redacted.clone_from(&self.redacted);
+    }
 }
 
 /// A fork fired in the capture gap, and what its call needs.
@@ -6478,7 +6546,11 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
         .as_ref()
         .map_or(&shared.transport, |seat| &seat.transport);
     let began = Instant::now();
+    let mut hosted = Hosted::default();
     let result = transport.stream(&shape, deadline, &cancel, &mut |piece: Piece<'_>| {
+        if hosted.took(&piece) {
+            return;
+        }
         // The fork's own pieces, each naming its call's request.
         let event = match piece {
             Piece::Text(piece) => {
@@ -6514,6 +6586,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
                 called = true;
                 return;
             }
+            Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => return,
         };
         shared.lock().push(event);
         shared.changed.notify_all();
@@ -6539,6 +6612,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
                     finish_reason,
                     reasoning,
                     timings,
+                    hosted,
                 }
             } else {
                 Event::Answered {
@@ -6547,6 +6621,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
                     finish_reason,
                     reasoning,
                     timings,
+                    hosted,
                 }
             });
             if cancel.is_asked() {
@@ -7086,6 +7161,7 @@ pub(in crate::drive) mod tests {
                     text: "!".to_owned()
                 },
                 Event::Answered {
+                    hosted: Hosted::default(),
                     request: 3,
                     text: "Hello!".to_owned(),
                     finish_reason: Some("stop".to_owned()),
@@ -7402,7 +7478,7 @@ pub(in crate::drive) mod tests {
     }
 
     /// The session's whole log so far, as the log format reads it.
-    fn whole_log(session: &Session<Canned>) -> Vec<log::Line> {
+    fn whole_log<S: Streaming>(session: &Session<S>) -> Vec<log::Line> {
         let document: String = session
             .events_from(0)
             .iter()
@@ -7694,6 +7770,64 @@ pub(in crate::drive) mod tests {
             session.ask("again", None).is_ok(),
             "a crashed turn left the session refusing asks"
         );
+    }
+
+    /// #555: an answer over Anthropic's Messages API goes onto the trunk
+    /// with its thinking's signature, to go back verbatim, and its response
+    /// line carries the signature and the usage: the prompt in all, the
+    /// cache's reads, and its writes by lifetime. The log reads back.
+    #[test]
+    fn a_hosted_answer_keeps_its_signature_and_logs_its_cache_counts() {
+        use crate::client::anthropic::tests::{a_signed_answer, streamed};
+        use crate::client::stream::HttpStream;
+        use crate::client::stub::Stub;
+        use crate::client::transport::Endpoint;
+
+        let stub = Stub::serving(vec![streamed(&a_signed_answer())]).expect("loopback");
+        let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("an endpoint"))
+            .with_anthropic(crate::client::anthropic::Options::default());
+        let session = Session::open(transport, template());
+        session.ask("finish it", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        let trunk = session.trunk();
+        let answer = trunk.last().expect("the answer");
+        assert_eq!(
+            (
+                answer.content.as_str(),
+                answer.reasoning.as_deref(),
+                answer.reasoning_signature.as_deref()
+            ),
+            ("Done.", Some("brief"), Some("sig-xyz"))
+        );
+        let lines = whole_log(&session);
+        let response = lines
+            .iter()
+            .find_map(|line| match &line.event {
+                log::Event::Response {
+                    usage,
+                    reasoning_signature,
+                    timings,
+                    ..
+                } => Some((usage.clone(), reasoning_signature.clone(), timings.clone())),
+                _ => None,
+            })
+            .expect("a response line");
+        assert_eq!(
+            response,
+            (
+                Some(log::Usage {
+                    prompt_tokens: 9 + 2048 + 64,
+                    completion_tokens: 30,
+                    cached_tokens: Some(2048),
+                    cache_creation_tokens: Some(64),
+                    cache_creation_5m_tokens: Some(64),
+                    cache_creation_1h_tokens: Some(0),
+                }),
+                Some("sig-xyz".to_owned()),
+                None
+            )
+        );
+        reads_whole(&session);
     }
 
     #[test]
@@ -8282,6 +8416,7 @@ pub(in crate::drive) mod tests {
             },
             Event::StopAsked { turn: 1 },
             Event::Answered {
+                hosted: Hosted::default(),
                 request: 3,
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
@@ -8301,6 +8436,7 @@ pub(in crate::drive) mod tests {
                 partial: "Hel".to_owned(),
             },
             Event::Capped {
+                hosted: Hosted::default(),
                 request: 3,
                 text: String::new(),
                 finish_reason: Some("length".to_owned()),
@@ -8357,6 +8493,7 @@ pub(in crate::drive) mod tests {
                 arguments: "{\"command\":".to_owned(),
             },
             Event::Called {
+                hosted: Hosted::default(),
                 request: 3,
                 text: String::new(),
                 finish_reason: Some("tool_calls".to_owned()),
@@ -8675,6 +8812,8 @@ pub(in crate::drive) mod tests {
             },
             log::Event::StopAsked { turn: 1 },
             log::Event::Response {
+                reasoning_signature: None,
+                redacted: None,
                 to_request: 3,
                 text: "Hello".to_owned(),
                 finish_reason: Some("stop".to_owned()),
@@ -8697,6 +8836,8 @@ pub(in crate::drive) mod tests {
                 reasoning: None,
             },
             log::Event::Response {
+                reasoning_signature: None,
+                redacted: None,
                 to_request: 3,
                 text: String::new(),
                 finish_reason: Some("length".to_owned()),
@@ -8764,6 +8905,8 @@ pub(in crate::drive) mod tests {
                 },
             },
             log::Event::Response {
+                reasoning_signature: None,
+                redacted: None,
                 to_request: 3,
                 text: String::new(),
                 finish_reason: Some("tool_calls".to_owned()),

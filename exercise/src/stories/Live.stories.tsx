@@ -11,6 +11,12 @@ import recalledNote from '../../../diet/formats/log/fixtures/valid/a-v7-recall-a
 import refillMessage from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-refill-is-a-message.jsonl?raw';
 import leversDeclared from '../../../diet/formats/log/fixtures/valid/a-v7-session-declaring-its-levers.jsonl?raw';
 import selfCapturePatch from '../../../diet/formats/log/fixtures/valid/a-v7-self-capture-patch-named-by-its-lane.jsonl?raw';
+import overflowInferred from '../../../diet/formats/log/fixtures/valid/a-v7-overflow-told-from-the-prompts-size.jsonl?raw';
+import windowSeam from '../../../diet/formats/log/fixtures/valid/a-v7-window-seam-under-the-turn-it-makes-fit.jsonl?raw';
+import pruneSeam from '../../../diet/formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl?raw';
+import poolRefused from '../../../diet/formats/log/fixtures/valid/a-v7-fork-refused-for-the-pool-and-one-that-may-displace-the-trunk-cache.jsonl?raw';
+import backgroundCalls from '../../../diet/formats/log/fixtures/valid/a-v7-call-started-in-the-background.jsonl?raw';
+import triggeredForks from '../../../diet/formats/log/fixtures/valid/a-v7-gap-with-two-triggered-forks.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -567,5 +573,111 @@ export const ServedSelfCapturedEntry: Story = {
     });
     await expect(entry.querySelector('.ex-memory__lane')?.textContent).toBe('self-capture');
     await expect(entry.querySelector('.ex-memory__text')?.textContent).toContain('The parser drops blank lines');
+  },
+};
+
+/** `?drive`, log v7 (#628): an overflow says so with its sizes, and that serve told it from the prompt's size. */
+export const ServedOverflowInferred: Story = {
+  name: '?drive: an overflow names its sizes and who told it',
+  args: { drive: true, web: serving(overflowInferred) },
+  play: async ({ canvasElement }) => {
+    const overflow = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-trunk .ex-overflow');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(overflow.textContent).toBe('161.8k tok against a 163.8k window · serve inferred it from the prompt’s size');
+  },
+};
+
+/** `?drive`, log v7 (#633): an automatic seam where it fell -- between the ask and its answer -- with the size that fired it. */
+export const ServedWindowSeam: Story = {
+  name: '?drive: an automatic window seam where it falls, with the size that fired it',
+  args: { drive: true, web: serving(windowSeam) },
+  play: async ({ canvasElement }) => {
+    const seam = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-seam[data-reason="window"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(seam.querySelector('.ex-seam__size')?.textContent).toBe('automatic · 150k of a 163.8k window');
+    // Where it fell: after turn 2's ask, before its answer.
+    const order = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="user"], .ex-trunk .ex-seam, .ex-trunk [data-tone="assistant"]')].map((n) =>
+      n.classList.contains('ex-seam') ? 'seam' : (n as HTMLElement).dataset['tone'],
+    );
+    await expect(order.slice(-3)).toEqual(['user', 'seam', 'assistant']);
+  },
+};
+
+/** `?drive`, log v7 (#630): the model prunes a call's output, and the seam replaces it with its pointer. */
+export const ServedPrunedOutput: Story = {
+  name: '?drive: a pruned output, replaced by its pointer at the seam',
+  args: { drive: true, web: serving(pruneSeam) },
+  play: async ({ canvasElement }) => {
+    const mark = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-trunk .ex-pruned');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(mark.textContent).toBe('pruned by the model (14 B) · replaced by its pointer at the seam');
+  },
+};
+
+/** `?drive`, log v7 (#637): a fork refused for the pool, never sent, and the cache hazard it would have carried. */
+export const ServedForkRefusedForPool: Story = {
+  name: '?drive: a fork refused for the pool, and its cache hazard',
+  args: { drive: true, web: serving(poolRefused) },
+  play: async ({ canvasElement }) => {
+    const branch = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-lane .ex-branch');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(branch.querySelector('.ex-branch__outcome')?.textContent).toBe('refused · pool · never sent');
+    await expect(branch.querySelector('.ex-branch__hazard')?.textContent).toBe('may displace the trunk’s cache');
+  },
+};
+
+/** `?drive`, log v7 (#614): calls run in the background name their job and how it ended; the harness's notice after an ask. */
+export const ServedBackgroundCalls: Story = {
+  name: '?drive: background calls, how their jobs ended, and the notice after an ask',
+  args: { drive: true, web: serving(backgroundCalls) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk .ex-background')).toHaveLength(2));
+    const jobs = [...canvasElement.querySelectorAll('.ex-trunk .ex-background')].map((b) => b.textContent);
+    await expect(jobs).toEqual(['background bg_0123abcd · completed · exit 0', 'background bg_4567cdef · cancelled']);
+    const note = await harnessNote(canvasElement, 'notice');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · notice');
+  },
+};
+
+/** `?drive`, log v7 (#620): what triggered each fork, on its branch. */
+export const ServedForkTriggers: Story = {
+  name: '?drive: each fork names what triggered it',
+  args: { drive: true, web: serving(triggeredForks) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-lane .ex-branch')).toHaveLength(2));
+    const triggers = [...canvasElement.querySelectorAll('.ex-lane .ex-branch')].map((b) => b.querySelector('.ex-branch__trigger')?.textContent);
+    await expect(triggers).toEqual(['call:document-read:c1', 'turn_end']);
+  },
+};
+
+/** The same call, still running, warned near its timeout (#613) -- the line serve logs 15 s before it times out. */
+const callNearTimeout = `${callRunning}\n${JSON.stringify({ seq: 18, t: 90, kind: 'timeout.near', request: 3, call: '7GJeYs3ux1SaqFVPB5ee2AExFLbsukd7', timeout_ms: 120000 })}`;
+
+/** `?drive` (#613): near its timeout, the running command's move asks itself -- "move to background?" -- and posts the move. */
+export const ServedNearTimeout: Story = {
+  name: '?drive: a command near its timeout offers "move to background?"',
+  args: { drive: true, web: posting(callNearTimeout) },
+  play: async ({ canvasElement }) => {
+    const move = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLButtonElement>('.ex-composer__background[data-urgent]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(move.textContent).toBe('move to background?');
+    posted.length = 0;
+    await userEvent.click(move);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'background' }]));
   },
 };

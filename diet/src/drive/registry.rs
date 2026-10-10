@@ -191,6 +191,13 @@ pub struct Identity {
     /// we neither control nor see into -- is to come; nearly every field
     /// under it would be declared, and nothing warms it.
     pub server_kind: Option<String>,
+    /// How a hosted model is asked to think (#555): `adaptive` (effort) or
+    /// `budget` (tokens), as its provider's convention for it is.
+    pub thinking: Option<String>,
+    /// The beta headers a hosted API is sent, each by name (#555): they
+    /// change its behaviour, so the entry declares them beside the version
+    /// `engine_identity` names.
+    pub engine_betas: Vec<String>,
     /// The served configuration the entry declares, by the engine's own
     /// name for each field: every `served_<field>` key, prefix removed
     /// (#509). What the engine reports is compared against these.
@@ -220,13 +227,18 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
             .cloned()
             .ok_or_else(|| format!("the registry's `[{table_name}]` has no one-line `{key}`"))
     };
-    let canned = table.strings.get("weights_kind").map(String::as_str) == Some("canned");
-    let weights = if canned {
-        Weights::Canned {
+    let weights = match table.strings.get("weights_kind").map(String::as_str) {
+        Some("canned") => Weights::Canned {
             acts_sha256: field("weights_acts_sha256")?,
-        }
-    } else {
-        weight_set(id, table, field("weights_main"))?
+        },
+        // Behind an endpoint (#555): who serves it, what they call it, and
+        // the version they publish or the date it was observed.
+        Some("hosted") => Weights::Hosted {
+            provider: field("weights_provider")?,
+            model_id: field("weights_model_id")?,
+            version_or_date_observed: field("weights_version_or_date_observed")?,
+        },
+        _ => weight_set(id, table, field("weights_main"))?,
     };
     let equipment = field("equipment")?;
     let hardware_fingerprint = tables
@@ -261,6 +273,28 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
         },
         template_default_effort: table.strings.get("template_default_effort").cloned(),
         server_kind: table.strings.get("server_kind").cloned(),
+        engine_betas: table
+            .strings
+            .get("engine_betas")
+            .map(|betas| {
+                betas
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|beta| !beta.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        thinking: match table.strings.get("thinking").map(String::as_str) {
+            None => None,
+            Some(way @ ("adaptive" | "budget")) => Some(way.to_owned()),
+            Some(other) => {
+                return Err(format!(
+                    "the registry's `thinking` for `{id}` is \"{other}\", not \"adaptive\" or \
+                     \"budget\": the entry is malformed"
+                ));
+            }
+        },
         served: table
             .strings
             .iter()
@@ -444,6 +478,47 @@ mod tests {
                 ),
                 projector: None,
             })
+        );
+    }
+
+    /// #555: a hosted entry's weights are who serves them, what they call
+    /// the model and the version or date observed; `thinking` is read as
+    /// `adaptive` or `budget`, and any other word refused.
+    #[test]
+    fn a_hosted_entry_resolves_to_hosted_weights_and_its_thinking() {
+        let registry = |thinking: &str| {
+            format!(
+                "[equipment.api]\nhardware_fingerprint = \"{}\"\n\
+                 [substrate.h]\nequipment = \"api\"\nengine_name = \"anthropic-messages\"\n\
+                 engine_identity = \"2023-06-01\"\nserver_kind = \"api\"\n\
+                 weights_kind = \"hosted\"\nweights_provider = \"anthropic\"\n\
+                 weights_model_id = \"a-model\"\n\
+                 weights_version_or_date_observed = \"2026-10-10\"\n\
+                 engine_betas = \"interleaved-thinking-2025-05-14\"\n{thinking}",
+                "a".repeat(64)
+            )
+        };
+        let found = identity(&registry("thinking = \"adaptive\"\n"), "h").expect("hosted");
+        assert_eq!(
+            found.weights,
+            Weights::Hosted {
+                provider: "anthropic".to_owned(),
+                model_id: "a-model".to_owned(),
+                version_or_date_observed: "2026-10-10".to_owned(),
+            }
+        );
+        assert_eq!(found.thinking.as_deref(), Some("adaptive"));
+        assert_eq!(found.engine_betas, ["interleaved-thinking-2025-05-14"]);
+        assert_eq!(identity(&registry(""), "h").expect("hosted").thinking, None);
+        let refused = identity(&registry("thinking = \"loud\"\n"), "h").expect_err("a stray word");
+        assert!(
+            refused.contains("not \"adaptive\" or \"budget\""),
+            "{refused}"
+        );
+        let partial = registry("").replace("weights_model_id = \"a-model\"\n", "");
+        assert!(
+            identity(&partial, "h").is_err(),
+            "a hosted entry names its model"
         );
     }
 

@@ -69,6 +69,14 @@ hardware_fields = ["model_identifier", "cpu", "memory", "gpu", "architecture"]
 # place of a sentinel string in a field defined as a registry digest.
 hardware_fields = ["serves", "acts_sha256"]
 
+[entry_type.hosted-api]
+# A hosted API is equipment we neither own nor see into (#555): a provider's
+# endpoint. ITS FINGERPRINT IS OF THE ENDPOINT, NOT OF HARDWARE -- who serves
+# and where -- because that is all of it a record can name; the hardware
+# behind it is the provider's, and may change under the same name. Ruled by
+# Dispatch on #555 (2026-10-10), as `canned-server` was on #68.
+hardware_fields = ["provider", "api_host"]
+
 [entry_type.apple-silicon-laptop]
 hardware_fields = [
   "chip", "memory", "storage", "gpu_wired_memory_limit_mb",
@@ -885,7 +893,7 @@ serving_context = 524288
 serving_slots = 4
 serving_context_is = "max_seq_len 524,288 (YaRN x2 over the native 262,144) over one paged KV pool of 606,208 tokens (cache_size) shared by up to four concurrent requests (max_batch_size), the analogue of --kv-unified; read off the config (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/configs/config-post-yarn.yml, #401)"
 under_pressure = "400-upfront"
-under_pressure_is = "TabbyAPI refuses up front only a job whose first-round reservation (prompt plus one chunk, or the whole completion when max_tokens is at most chunk_size) exceeds the whole cache_size, with HTTP 400 context_length_exceeded (an SSE error event when streaming); every smaller job goes into the one paged pool, where queueing for free pages and evicting unreferenced prefix pages are ExLlamaV3's, unread here; any other exception mid-stream is the catch-all \"Chat completion aborted. Please check the server console.\" (tabbyAPI common/errors.py:48-79, endpoints/OAI/utils/chat_completion.py:953-955 at be74bf0)"
+under_pressure_is = "TabbyAPI refuses up front only a job whose first-round reservation (prompt plus one chunk, or the whole completion when max_tokens is at most chunk_size) exceeds the whole cache_size, with HTTP 400 context_length_exceeded (an SSE error event when streaming); every smaller job goes into the one paged pool, where ExLlamaV3 refuses a job that cannot reserve its pages rather than queueing or evicting for it (observed on the floor in T1 run 3: \"Job requires 641 pages (only 640 available) and cannot be enqueued\", a 161,282-token prompt with max_tokens 32,768 against 640 pages of 256, read off its server log, #406); any other exception mid-stream is the catch-all \"Chat completion aborted. Please check the server console.\" (tabbyAPI common/errors.py:48-79, endpoints/OAI/utils/chat_completion.py:953-955 at be74bf0)"
 under_pressure_source = "read from source, unconfirmed (#406, 2026-10-10): no measurement on this host; the inference seat confirms it"
 serving_flags = "config.yml: backend exllamav3, max_seq_len 524288, cache_size 606208, cache_mode 8,8, max_batch_size 4, chunk_size 2048, ngram_ram true, reasoning true, draft_mode mtp with 3 draft tokens, auth required (substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/configs/config-post-yarn.yml; the live file sha256 b5db18d5..., three non-serving values redacted per substrates/measurements/2026-10-04-ada48-exllamav3-1.5.4-yarn2/configs/config-redaction.diff; the 2026-10-03 instance served from substrates/measurements/2026-10-03-ada48-tabbyapi/config-redacted.yml)"
 admission = "no admission word: parity is not a bar on the 3.8 line (the maintainer, #393 6000878147; the redesign is #491); the r2 window's parity word was inconclusive as measured, and its fire ran clean (substrates/measurements/2026-10-05-accel24-tabbyapi-exl3-27b-r2/); the ratified config's window was void, the engine OOM in seat A (substrates/admission/accel24-tabbyapi-exl3-qwen38-27b-3p00/6a96d5696231/parity-void-2026-10-05/)"
@@ -993,7 +1001,7 @@ serving_context = 163840
 serving_slots = 2
 serving_context_is = "one paged KV pool of 163,840 tokens (cache_size, equal to max_seq_len) shared by up to two concurrent requests (max_batch_size), read off the r2 config"
 under_pressure = "400-upfront"
-under_pressure_is = "TabbyAPI refuses up front only a job whose first-round reservation (prompt plus one chunk, or the whole completion when max_tokens is at most chunk_size) exceeds the whole cache_size, with HTTP 400 context_length_exceeded (an SSE error event when streaming); every smaller job goes into the one paged pool, where queueing for free pages and evicting unreferenced prefix pages are ExLlamaV3's, unread here; any other exception mid-stream is the catch-all \"Chat completion aborted. Please check the server console.\" (tabbyAPI common/errors.py:48-79, endpoints/OAI/utils/chat_completion.py:953-955 at be74bf0)"
+under_pressure_is = "TabbyAPI refuses up front only a job whose first-round reservation (prompt plus one chunk, or the whole completion when max_tokens is at most chunk_size) exceeds the whole cache_size, with HTTP 400 context_length_exceeded (an SSE error event when streaming); every smaller job goes into the one paged pool, where ExLlamaV3 refuses a job that cannot reserve its pages rather than queueing or evicting for it (observed on the floor in T1 run 3: \"Job requires 641 pages (only 640 available) and cannot be enqueued\", a 161,282-token prompt with max_tokens 32,768 against 640 pages of 256, read off its server log, #406); any other exception mid-stream is the catch-all \"Chat completion aborted. Please check the server console.\" (tabbyAPI common/errors.py:48-79, endpoints/OAI/utils/chat_completion.py:953-955 at be74bf0)"
 under_pressure_source = "read from source, unconfirmed (#406, 2026-10-10): no measurement on this host; the inference seat confirms it"
 serving_flags = "config-floor.yml (retune r2): backend exllamav3, max_seq_len 163840, cache_size 163840, cache_mode 8,8, max_batch_size 2, chunk_size 2048, warmup true, sampling override_preset qwen38_thinking, reasoning true, vision true with the tower offloaded, template_vars_default preserve_thinking true, draft_mode model with draft_cache_mode 8,8, auth disabled (substrates/measurements/2026-10-05-accel24-tabbyapi-exl3-27b-r2/config-redacted.yml; the live file sha256 1e17c49d..., three non-serving lines redacted per config-redaction.diff)"
 admission = "unadmitted: no admission cell has run on this line; admission is the three results on #143 (the behavioural fingerprint, the canary from its own baseline draw, the parity fire), unchanged by the component identity (#337, 5975255706); the window's rulings are #393 5986337117"
