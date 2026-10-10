@@ -1,0 +1,8 @@
+We've reached a scheduled checkpoint (a cadence fired — this is not necessarily a phase boundary), so I want to audit our working notes ({category}). The operator changed some of them since the last boundary: a note marked [edited by the operator] is their correction, and a note marked [flagged: …] carries their concern. For each note below, reply with EXACTLY one line, each starting with its number:
+<n>. KEEP
+or <n>. UPDATE: <the corrected one-line note>
+or <n>. REMOVE — <one-clause reason>
+or <n>. REMOVE — dup of #<k>  (when it duplicates another note here)
+Address every marked note: KEEP an edited note — it stands as the operator wrote it — and UPDATE or REMOVE any note of yours it makes wrong; KEEP a flagged note if the concern does not hold, or UPDATE or REMOVE it if it does. Judge against everything that has actually happened in this session. Output {n} lines and nothing else.
+
+{items}

@@ -102,7 +102,13 @@ pub mod vocabulary;
 ///   and one instruction naming the record tools, the maintainer's wording,
 ///   asked by a session whose forks answer through the tools. No template and
 ///   no set already pinned changed.
-pub const VERSION: u32 = 8;
+/// * 9, 2026-10-10: the audit asks' reconciling variants joined (#150):
+///   `AUDIT_Q_RECONCILE`, `AUDIT_Q_CADENCE_RECONCILE` and
+///   `AUDIT_Q_HUMAN_RECONCILE`, each its ask with one sentence saying what
+///   the operator's markers mean and one asking for each marked note to be
+///   addressed, the maintainer's approval of the drafted wording. No
+///   template already pinned changed.
+pub const VERSION: u32 = 9;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -112,7 +118,7 @@ pub const VERSION: u32 = 8;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "86ecd636e6fa48ab";
+pub const MANIFEST_DIGEST: &str = "a1a60a121f483469";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -315,6 +321,12 @@ pub enum Template {
     AuditQCadence,
     /// Audit the working notes at a boundary the operator declared.
     AuditQHuman,
+    /// [`Self::AuditQ`], with operator changes to address (#150).
+    AuditQReconcile,
+    /// [`Self::AuditQCadence`], with operator changes to address (#150).
+    AuditQCadenceReconcile,
+    /// [`Self::AuditQHuman`], with operator changes to address (#150).
+    AuditQHumanReconcile,
     /// Audit rider: the goal must state the current mission.
     AuditGoalNote,
     /// Audit rider: an answered question is updated, not dropped.
@@ -348,6 +360,9 @@ impl Template {
         Self::AuditQ,
         Self::AuditQCadence,
         Self::AuditQHuman,
+        Self::AuditQReconcile,
+        Self::AuditQCadenceReconcile,
+        Self::AuditQHumanReconcile,
         Self::AuditGoalNote,
         Self::AuditOpenNote,
         Self::AddQ,
@@ -377,6 +392,9 @@ impl Template {
             Self::AuditQ => "AUDIT_Q",
             Self::AuditQCadence => "AUDIT_Q_CADENCE",
             Self::AuditQHuman => "AUDIT_Q_HUMAN",
+            Self::AuditQReconcile => "AUDIT_Q_RECONCILE",
+            Self::AuditQCadenceReconcile => "AUDIT_Q_CADENCE_RECONCILE",
+            Self::AuditQHumanReconcile => "AUDIT_Q_HUMAN_RECONCILE",
             Self::AuditGoalNote => "AUDIT_GOAL_NOTE",
             Self::AuditOpenNote => "AUDIT_OPEN_NOTE",
             Self::AddQ => "ADD_Q",
@@ -415,6 +433,13 @@ impl Template {
             Self::AuditQ => include_str!("../../dogma/templates/AUDIT_Q.txt"),
             Self::AuditQCadence => include_str!("../../dogma/templates/AUDIT_Q_CADENCE.txt"),
             Self::AuditQHuman => include_str!("../../dogma/templates/AUDIT_Q_HUMAN.txt"),
+            Self::AuditQReconcile => include_str!("../../dogma/templates/AUDIT_Q_RECONCILE.txt"),
+            Self::AuditQCadenceReconcile => {
+                include_str!("../../dogma/templates/AUDIT_Q_CADENCE_RECONCILE.txt")
+            }
+            Self::AuditQHumanReconcile => {
+                include_str!("../../dogma/templates/AUDIT_Q_HUMAN_RECONCILE.txt")
+            }
             Self::AuditGoalNote => include_str!("../../dogma/templates/AUDIT_GOAL_NOTE.txt"),
             Self::AuditOpenNote => include_str!("../../dogma/templates/AUDIT_OPEN_NOTE.txt"),
             Self::AddQ => include_str!("../../dogma/templates/ADD_Q.txt"),
@@ -450,6 +475,9 @@ impl Template {
             | Self::AuditQ
             | Self::AuditQCadence
             | Self::AuditQHuman
+            | Self::AuditQReconcile
+            | Self::AuditQCadenceReconcile
+            | Self::AuditQHumanReconcile
             | Self::AuditGoalNote
             | Self::AuditOpenNote
             | Self::AddQ => Site::Fork,
@@ -471,9 +499,12 @@ impl Template {
             Self::ExtractMinimal => &[Hole::Source],
             Self::Supersede => &[Hole::OldEntry, Hole::NewQuote],
             Self::ForkNoteAdvisory | Self::ForkNoteImperative => &[Hole::Entry],
-            Self::AuditQ | Self::AuditQCadence | Self::AuditQHuman => {
-                &[Hole::Category, Hole::LineCount, Hole::Items]
-            }
+            Self::AuditQ
+            | Self::AuditQCadence
+            | Self::AuditQHuman
+            | Self::AuditQReconcile
+            | Self::AuditQCadenceReconcile
+            | Self::AuditQHumanReconcile => &[Hole::Category, Hole::LineCount, Hole::Items],
             Self::TurnBoundary
             | Self::Extract
             | Self::Gotchas
