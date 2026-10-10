@@ -203,6 +203,34 @@ vocabulary! {
         Patch => "patch",
         /// The trunk refilled from working memory (v6, #493).
         Seam => "seam",
+        /// Forks' patches delivered at the tail of a trunk request (v7, the
+        /// fork delivery lever).
+        Delivered => "delivered",
+    }
+}
+
+vocabulary! {
+    /// The fork delivery lever's state (v7): how a fork's patches reach the
+    /// trunk.
+    ForkDelivery {
+        /// At the next seam's render only: today's behaviour, the default.
+        Seam => "seam",
+        /// As a note at the tail of the next trunk request, framed as advice.
+        Advisory => "advisory",
+        /// The same, framed as an instruction.
+        Imperative => "imperative",
+    }
+}
+
+vocabulary! {
+    /// How a fork's patches reach the trunk before a seam (v7): the fork
+    /// delivery lever's two mid-turn states, each a (b′) framing.
+    Framing {
+        /// "may be affected ... If it no longer holds, say so; otherwise
+        /// carry on."
+        Advisory => "advisory",
+        /// "is superseded ... Update it now".
+        Imperative => "imperative",
     }
 }
 
@@ -579,6 +607,19 @@ pub struct Unsent {
     pub budget_tokens: u64,
 }
 
+/// One line of a delivered note (v7): the patch it delivers, by its entry
+/// and op, and the dogma template it was written with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteLine {
+    /// The entry the line names: the voided one for a `supersede`, the
+    /// target for a `resolve`, `retire` or `park`.
+    pub entry: String,
+    /// The patch's op.
+    pub op: PatchOp,
+    /// The template's dogma name.
+    pub template: String,
+}
+
 /// One field of the served configuration (v7, #509).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServedField {
@@ -671,6 +712,8 @@ pub enum Event {
         /// Approvals were off for the session (v7, the approval lever's
         /// `none`): `true`, or absent.
         approvals_off: Option<bool>,
+        /// The fork delivery lever's state (v7), for a session that forks.
+        fork_delivery: Option<ForkDelivery>,
     },
     /// An ask was admitted.
     Ask {
@@ -903,6 +946,20 @@ pub enum Event {
         /// The id of the entry it replaces, exactly when `op` is
         /// `supersede`.
         supersedes: Option<String>,
+    },
+    /// Forks' patches delivered to the trunk (v7, the fork delivery lever):
+    /// one note at the tail of turn `turn`'s first request, after its ask,
+    /// which stays on the trunk.
+    Delivered {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The framing every line used.
+        framing: Framing,
+        /// The note as sent: one line per patch.
+        text: String,
+        /// Each line, in order: the patch it delivers and the template it
+        /// was written with.
+        lines: Vec<NoteLine>,
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
@@ -2092,6 +2149,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     }
                     off => off,
                 },
+                fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
             }
         }
         Kind::Ask => Event::Ask {
@@ -2290,6 +2348,12 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 supersedes,
             }
         }
+        Kind::Delivered => Event::Delivered {
+            turn: fields.turn("turn")?,
+            framing: fields.tag("framing", Framing::from_tag)?,
+            text: fields.string("text")?,
+            lines: fields.delivered_lines("lines")?,
+        },
         Kind::Seam => Event::Seam {
             at_turn: fields.turn("at_turn")?,
             reason: fields.tag("reason", SeamReason::from_tag)?,
@@ -2709,6 +2773,10 @@ pub enum Tags {
     PatchOp,
     /// [`SeamReason`] (v6).
     SeamReason,
+    /// [`Framing`] (v7).
+    Framing,
+    /// [`ForkDelivery`] (v7).
+    ForkDelivery,
 }
 
 impl Tags {
@@ -2734,6 +2802,8 @@ impl Tags {
         Self::ForkOutcome,
         Self::PatchOp,
         Self::SeamReason,
+        Self::Framing,
+        Self::ForkDelivery,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -2760,6 +2830,8 @@ impl Tags {
             Self::ForkOutcome => "ForkOutcome",
             Self::PatchOp => "PatchOp",
             Self::SeamReason => "SeamReason",
+            Self::Framing => "Framing",
+            Self::ForkDelivery => "ForkDelivery",
         }
     }
 
@@ -2790,6 +2862,8 @@ impl Tags {
             Self::ForkOutcome => of(ForkOutcome::ALL, ForkOutcome::tag),
             Self::PatchOp => of(PatchOp::ALL, PatchOp::tag),
             Self::SeamReason => of(SeamReason::ALL, SeamReason::tag),
+            Self::Framing => of(Framing::ALL, Framing::tag),
+            Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
         }
     }
 }
@@ -2823,6 +2897,9 @@ pub enum Holds {
     /// A `session.start`'s [`TemplateKwargs`] (v7): an object of the keys
     /// [`TEMPLATE_KWARGS`] declares.
     TemplateKwargs,
+    /// A `delivered` line's `lines` (v7): a non-empty list of objects of
+    /// the keys [`DELIVERED_LINE`] declares.
+    DeliveredLines,
     /// A `session.start`'s [`Unsent`] (v7): an object of the keys [`UNSENT`]
     /// declares.
     Unsent,
@@ -2978,6 +3055,13 @@ pub const TEMPLATE_KWARGS: &[Field] = &[
     may_v7("reasoning_effort", Holds::Text),
 ];
 
+/// The keys of each of a `delivered` line's `lines`. Arrived in v7.
+pub const DELIVERED_LINE: &[Field] = &[
+    must_v7("entry", Holds::Text),
+    must_v7("op", Holds::Tag(Tags::PatchOp)),
+    must_v7("template", Holds::Text),
+];
+
 /// The keys of a `session.start`'s `unsent`: what the regime declares and
 /// no request carries. Arrived in v7.
 pub const UNSENT: &[Field] = &[must_v7("budget_tokens", Holds::Count)];
@@ -3095,6 +3179,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Serving => Some(SERVING),
         Holds::TemplateKwargs => Some(TEMPLATE_KWARGS),
         Holds::Unsent => Some(UNSENT),
+        Holds::DeliveredLines => Some(DELIVERED_LINE),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
@@ -3112,6 +3197,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         Kind::Seam => 6,
+        Kind::Delivered => 7,
         _ => 0,
     }
 }
@@ -3183,6 +3269,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("template_kwargs", Holds::TemplateKwargs),
                 may_v7("unsent", Holds::Unsent),
                 may_v7("approvals_off", Holds::Flag),
+                may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
             ];
             F
         }
@@ -3350,6 +3437,15 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
+        Kind::Delivered => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("framing", Tag(Tags::Framing)),
+                must_v7("text", Text),
+                must_v7("lines", Holds::DeliveredLines),
+            ];
+            F
+        }
     }
 }
 
@@ -3408,6 +3504,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Serving => "Serving".to_owned(),
         Holds::TemplateKwargs => "TemplateKwargs".to_owned(),
         Holds::Unsent => "Unsent".to_owned(),
+        Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
@@ -3506,6 +3603,7 @@ pub fn typescript() -> String {
         ("Serving", SERVING),
         ("TemplateKwargs", TEMPLATE_KWARGS),
         ("Unsent", UNSENT),
+        ("NoteLine", DELIVERED_LINE),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
@@ -3609,8 +3707,12 @@ fn to_value(line: &Line) -> Value {
             template_kwargs,
             unsent,
             approvals_off,
+            fork_delivery,
         } => {
             put("version", Value::Integer(*version));
+            if let Some(delivery) = fork_delivery {
+                put("fork_delivery", text(delivery.tag()));
+            }
             if let Some(off) = approvals_off {
                 put("approvals_off", Value::Boolean(*off));
             }
@@ -3993,6 +4095,32 @@ fn to_value(line: &Line) -> Value {
             put("carried_turns", count(*carried_turns));
             Kind::Seam
         }
+        Event::Delivered {
+            turn,
+            framing,
+            text: note,
+            lines,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("framing", text(framing.tag()));
+            put("text", text(note));
+            put(
+                "lines",
+                Value::Array(
+                    lines
+                        .iter()
+                        .map(|line| {
+                            Value::Object(BTreeMap::from([
+                                ("entry".to_owned(), text(&line.entry)),
+                                ("op".to_owned(), text(line.op.tag())),
+                                ("template".to_owned(), text(&line.template)),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            );
+            Kind::Delivered
+        }
     };
     put("kind", text(kind.tag()));
     Value::Object(object)
@@ -4319,6 +4447,39 @@ impl Fields<'_> {
         }
     }
 
+    /// A `delivered` line's `lines` (v7): a non-empty list, each entry the
+    /// keys of [`DELIVERED_LINE`] and nothing else.
+    fn delivered_lines(&self, key: &str) -> Result<Vec<NoteLine>, String> {
+        let Value::Array(entries) = self.get(key)? else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a note delivers at least one line"
+            ));
+        }
+        let mut lines = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !DELIVERED_LINE.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            lines.push(NoteLine {
+                entry: inner.string("entry").map_err(at)?,
+                op: inner.tag("op", PatchOp::from_tag).map_err(at)?,
+                template: inner.string("template").map_err(at)?,
+            });
+        }
+        Ok(lines)
+    }
+
     /// A claim's `served` (v7): a non-empty list, each entry the keys of
     /// [`SERVED_FIELD`] and nothing else, `reported` under `corroborated`
     /// only, and no field named twice.
@@ -4594,6 +4755,7 @@ mod tests {
                 template_kwargs: None,
                 unsent: None,
                 approvals_off: None,
+                fork_delivery: None,
             },
         }
     }
@@ -4940,7 +5102,7 @@ mod tests {
             (Holds::Text, Value::String(_)) | (Holds::Flag, Value::Boolean(_)) => true,
             (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
             (Holds::WorkingDirectory, Value::String(cwd)) => is_a_working_directory(cwd),
-            (Holds::Files | Holds::Served, Value::Array(entries)) => {
+            (Holds::Files | Holds::Served | Holds::DeliveredLines, Value::Array(entries)) => {
                 let declared = object_fields(holds).expect("a list of objects");
                 !entries.is_empty()
                     && entries.iter().all(|entry| match entry {
@@ -5150,6 +5312,7 @@ mod tests {
             ("serving", SERVING),
             ("template_kwargs", TEMPLATE_KWARGS),
             ("unsent", UNSENT),
+            ("lines", DELIVERED_LINE),
             ("tool_call", TOOL_CALL_PIECE),
             ("approval", APPROVAL),
             ("files", RECORDED_FILE),
@@ -5980,7 +6143,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam"
+             fork.settled patch seam delivered"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

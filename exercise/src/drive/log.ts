@@ -286,6 +286,9 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
     readonly render_version?: number;
   };
 
+/** Forks' patches delivered after an ask (v7, the fork delivery lever). */
+export type Delivered = V0.DeliveredLine;
+
 export type LogLine =
   | SessionStart
   | Ask
@@ -304,7 +307,8 @@ export type LogLine =
   | Fork
   | ForkSettled
   | Patch
-  | Seam;
+  | Seam
+  | Delivered;
 
 export type Kind = LogLine['kind'];
 

@@ -1146,6 +1146,10 @@ pub enum Event {
         /// is the one the run used when the two digests agree. Optional: a
         /// record adapted from another harness had no regimen file.
         regimen_sha256: Option<String>,
+        /// The fork delivery lever's state the session ran under (`seam`,
+        /// `advisory`, `imperative`), as its log's `session.start` names it.
+        /// Optional: a session that never forks names none.
+        fork_delivery: Option<log::ForkDelivery>,
     },
     /// A turn happened.
     Turn {
@@ -1570,6 +1574,16 @@ impl Record {
         match self.events.first() {
             Some(Event::Start { regimen_sha256, .. }) => regimen_sha256.as_deref(),
             _ => unreachable!("validate() refuses a record whose first event is not a start"),
+        }
+    }
+
+    /// The fork delivery lever's state the session ran under, when its
+    /// start names one.
+    #[must_use]
+    pub fn fork_delivery(&self) -> Option<log::ForkDelivery> {
+        match self.events.first() {
+            Some(Event::Start { fork_delivery, .. }) => *fork_delivery,
+            _ => None,
         }
     }
 
@@ -2387,6 +2401,12 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             regime: Box::new(regime(&mut take_object(&mut members, of, "regime")?, of)?),
             source: source(&mut members, of)?,
             regimen_sha256: take_optional_digest(&mut members, of, "regimen_sha256")?,
+            fork_delivery: take_optional_word(
+                &mut members,
+                of,
+                "fork_delivery",
+                log::ForkDelivery::from_tag,
+            )?,
         },
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
@@ -4707,10 +4727,15 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             regime,
             source,
             regimen_sha256,
+            fork_delivery,
         } => {
             members.put("regime", regime_value(regime));
             members.put("source", source_value(source));
             members.put_optional("regimen_sha256", regimen_sha256.clone().map(Value::String));
+            members.put_optional(
+                "fork_delivery",
+                fork_delivery.map(|delivery| Value::String(delivery.tag().to_owned())),
+            );
         }
         Event::Turn {
             index,

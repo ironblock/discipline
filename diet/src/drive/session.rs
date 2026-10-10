@@ -239,6 +239,8 @@ pub enum Event {
         unsent: Option<log::Unsent>,
         /// Whether approvals were off: the approval lever's `none`.
         approvals_off: bool,
+        /// The fork delivery lever's state, for a session that forks.
+        fork_delivery: Option<log::ForkDelivery>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -475,6 +477,18 @@ pub enum Event {
         /// How many entries the render carried.
         carried_entries: u64,
     },
+    /// Forks' patches delivered at the tail of a trunk request, after its
+    /// ask (the fork delivery lever): the note stays on the trunk.
+    Delivered {
+        /// The turn whose first request carried it.
+        turn: u32,
+        /// The framing every line used.
+        framing: log::Framing,
+        /// The note as sent: one line per patch.
+        text: String,
+        /// Each line's patch and template.
+        lines: Vec<log::NoteLine>,
+    },
     /// One entry the fork's answer patched into the session's working
     /// object, after the fork settled `value`.
     Patched {
@@ -564,6 +578,29 @@ impl ToolLine {
 /// Absent or empty, no fork ever fires.
 pub const INTERVIEW_WARRANT: &str = "interview_warrant";
 
+/// The regimen key for the fork delivery lever.
+pub const FORK_DELIVERY: &str = "fork_delivery";
+
+/// The fork delivery lever's state the regimen declares: `seam` (the
+/// default, today's behaviour), `advisory` or `imperative`.
+///
+/// # Errors
+///
+/// A value that is none of the three.
+pub fn fork_delivery(regimen: &Regimen) -> Result<log::ForkDelivery, String> {
+    match regimen.get(FORK_DELIVERY) {
+        None => Ok(log::ForkDelivery::Seam),
+        Some(crate::formats::regimen::Value::String(state)) => log::ForkDelivery::from_tag(state)
+            .ok_or_else(|| {
+                format!(
+                    "`{FORK_DELIVERY}` is \"{state}\": it takes \"seam\", \"advisory\" or \
+                     \"imperative\""
+                )
+            }),
+        Some(_) => Err(format!("`{FORK_DELIVERY}` is not a string")),
+    }
+}
+
 /// The rules `regimen` enables under [`INTERVIEW_WARRANT`], in the order it
 /// lists them; empty when it lists none.
 ///
@@ -607,6 +644,9 @@ pub struct Interview {
     pub object: WorkingObject,
     /// When derived seams fire: the regimen's cadence and budget.
     pub seams: crate::seam::policy::Served,
+    /// How a fork's patches reach the trunk: at the seam (`seam`, the
+    /// default), or as a note at the tail of the next trunk request.
+    pub delivery: log::ForkDelivery,
 }
 
 /// The rule that warrants a fork after `turn` settled `final`, and the
@@ -756,6 +796,9 @@ struct State {
     /// A checked gap waiting for its admitted command's outcome: the next
     /// event pushed, under the same lock.
     pending_gap: Option<IdleGap>,
+    /// Patches waiting to be delivered at the next trunk request, under a
+    /// mid-turn fork delivery: each op and the entry text its line names.
+    undelivered: Vec<(log::PatchOp, String, String)>,
     /// Where each event is written as it is appended (see
     /// [`Session::write_through`]).
     sink: Option<Sink>,
@@ -842,6 +885,52 @@ impl State {
     ///
     /// [`Rejected::BadGap`] when the carried gap cannot be logged: then the
     /// command is not carried out and nothing is logged.
+    /// The note delivering every patch waiting since the last trunk
+    /// request, logged as turn `turn`'s `delivered` line, or `None` when
+    /// none waits. One line per patch, each the (b′) sentence of the
+    /// session's framing, pinned in the dogma.
+    fn deliver(&mut self, turn: u32) -> Option<Message> {
+        let delivery = self.interview.as_ref()?.delivery;
+        let (framing, template) = match delivery {
+            log::ForkDelivery::Seam => return None,
+            log::ForkDelivery::Advisory => (
+                log::Framing::Advisory,
+                crate::dogma::Template::ForkNoteAdvisory,
+            ),
+            log::ForkDelivery::Imperative => (
+                log::Framing::Imperative,
+                crate::dogma::Template::ForkNoteImperative,
+            ),
+        };
+        if self.undelivered.is_empty() {
+            return None;
+        }
+        let mut written = Vec::new();
+        let mut lines = Vec::new();
+        for (op, id, text) in std::mem::take(&mut self.undelivered) {
+            let Ok(line) = template.fill(&[(crate::dogma::Hole::Entry, text.as_str())]) else {
+                continue;
+            };
+            written.push(line);
+            lines.push(log::NoteLine {
+                entry: id,
+                op,
+                template: template.name().to_owned(),
+            });
+        }
+        if written.is_empty() {
+            return None;
+        }
+        let text = written.join("\n");
+        self.push(Event::Delivered {
+            turn,
+            framing,
+            text: text.clone(),
+            lines,
+        });
+        Some(Message::new(Role::User, text))
+    }
+
     fn admit(&mut self) -> Result<(), Rejected> {
         if let Some((gap, command)) = self.carried.take() {
             let ends = match command {
@@ -1075,6 +1164,7 @@ impl<S: Streaming + 'static> Session<S> {
             "a session's head holds no tool result"
         );
         let trunk = template.messages.clone();
+        let fork_delivery = interview.as_ref().map(|interview| interview.delivery);
         let opened = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| {
@@ -1094,6 +1184,7 @@ impl<S: Streaming + 'static> Session<S> {
             gap_open: None,
             carried: None,
             pending_gap: None,
+            undelivered: Vec::new(),
             sink: None,
             allowed: tools
                 .as_ref()
@@ -1128,6 +1219,7 @@ impl<S: Streaming + 'static> Session<S> {
             template_kwargs: template.template_kwargs.clone(),
             unsent,
             approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
+            fork_delivery,
         });
         Self {
             shared: Arc::new(Shared {
@@ -1219,6 +1311,13 @@ impl<S: Streaming + 'static> Session<S> {
         let mut shape = self.shared.template.clone();
         shape.messages.clone_from(&state.trunk);
         shape.messages.push(message.clone());
+        // The fork delivery lever: what forks patched since the last
+        // request, as one note after the ask; it joins the trunk with it.
+        let mut opening = vec![message];
+        if let Some(note) = state.deliver(turn) {
+            shape.messages.push(note.clone());
+            opening.push(note);
+        }
         // Pushed here, under the lock that admits the ask, and never on the
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
@@ -1239,7 +1338,6 @@ impl<S: Streaming + 'static> Session<S> {
         self.shared.changed.notify_all();
 
         let shared = Arc::clone(&self.shared);
-        let ask = message;
         let spawned = std::thread::Builder::new()
             .name("diet-turn".to_owned())
             .spawn(move || {
@@ -1248,7 +1346,7 @@ impl<S: Streaming + 'static> Session<S> {
                 // say why -- or the session sits in `turn` for good, refusing
                 // every ask (#120's first review).
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    call(&shared, &shape, &cancel, ask, turn, request);
+                    call(&shared, &shape, &cancel, opening, turn, request);
                 }));
                 if let Err(payload) = outcome {
                     crashed(&shared, panic_message(payload.as_ref()));
@@ -1658,7 +1756,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             template_kwargs,
             unsent,
             approvals_off,
+            fork_delivery,
         } => log::Event::SessionStart {
+            fork_delivery: *fork_delivery,
             // The approval lever's `none`: `true`, or nothing.
             approvals_off: approvals_off.then_some(true),
             unsent: unsent.clone(),
@@ -1906,6 +2006,17 @@ pub fn line_of(logged: &Logged) -> log::Line {
             fork: *fork,
             outcome: *outcome,
         },
+        Event::Delivered {
+            turn,
+            framing,
+            text,
+            lines,
+        } => log::Event::Delivered {
+            turn: *turn,
+            framing: *framing,
+            text: text.clone(),
+            lines: lines.clone(),
+        },
         Event::Patched {
             fork,
             op,
@@ -2066,7 +2177,7 @@ fn call<S: Streaming>(
     shared: &Shared<S>,
     shape: &RequestShape,
     cancel: &Cancel,
-    ask: Message,
+    opening: Vec<Message>,
     turn: u32,
     request: u64,
 ) {
@@ -2078,7 +2189,7 @@ fn call<S: Streaming>(
     // `max_steps` (Q12); settling `failed` or `timeout` after a step, the
     // steps that completed join it (`State::keep_ran_steps`); cancelled,
     // never (D13).
-    let mut exchange = vec![ask];
+    let mut exchange = opening;
     shared.lock().ran.clear();
     while let Some(next) = step(
         shared,
@@ -2980,6 +3091,25 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
     let Some(interview) = state.interview.as_mut() else {
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
+    // The entry each delivered line names, read before the patches apply:
+    // a supersede's voided entry, a verdict's target. An `add` names none
+    // and is carried at the seam only (no measured sentence fits it).
+    let delivering = interview.delivery != log::ForkDelivery::Seam;
+    let named: Vec<(log::PatchOp, String, String)> = patches
+        .iter()
+        .filter(|_| delivering)
+        .filter_map(|patch| {
+            let (op, id) = match patch {
+                Patch::Add { .. } => return None,
+                Patch::Supersede { voids, .. } => (log::PatchOp::Supersede, voids),
+                Patch::Resolve { target, .. } => (log::PatchOp::Resolve, target),
+                Patch::Retire { target, .. } => (log::PatchOp::Retire, target),
+                Patch::Park { target, .. } => (log::PatchOp::Park, target),
+            };
+            let text = interview.object.entry(id)?.content.clone();
+            Some((op, id.as_str().to_owned(), text))
+        })
+        .collect();
     if interview.object.apply_turn(&patches).is_err() {
         return (log::ForkOutcome::Unparseable, Vec::new());
     }
@@ -2987,6 +3117,7 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
         .iter()
         .map(|patch| patched(fork, patch, &interview.object))
         .collect();
+    state.undelivered.extend(named);
     (log::ForkOutcome::Value, lines)
 }
 
@@ -4096,6 +4227,7 @@ pub(in crate::drive) mod tests {
             template_kwargs: _,
             unsent: None,
             approvals_off: false,
+            fork_delivery: None,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -4193,6 +4325,7 @@ pub(in crate::drive) mod tests {
                 ]),
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
                 approvals_off: true,
+                fork_delivery: Some(log::ForkDelivery::Advisory),
             },
             Event::Asked {
                 turn: 1,
@@ -4376,6 +4509,16 @@ pub(in crate::drive) mod tests {
                 render: "# regime\n".to_owned(),
                 carried_entries: 1,
             },
+            Event::Delivered {
+                turn: 2,
+                framing: log::Framing::Advisory,
+                text: "Working record note: the entry \"decision: keep it\" may be affected by this step. If it no longer holds, say so; otherwise carry on.".to_owned(),
+                lines: vec![log::NoteLine {
+                    entry: "interview-t1-0".to_owned(),
+                    op: log::PatchOp::Retire,
+                    template: "FORK_NOTE_ADVISORY".to_owned(),
+                }],
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -4404,9 +4547,10 @@ pub(in crate::drive) mod tests {
                 Event::ForkSettled { .. } => 21,
                 Event::Patched { .. } => 22,
                 Event::Seamed { .. } => 23,
+                Event::Delivered { .. } => 24,
             });
         }
-        assert_eq!(kinds.len(), 24, "a variant has no sample");
+        assert_eq!(kinds.len(), 25, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -4444,6 +4588,7 @@ pub(in crate::drive) mod tests {
                 }),
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
                 approvals_off: Some(true),
+                fork_delivery: Some(log::ForkDelivery::Advisory),
             },
             log::Event::Ask {
                 turn: 1,
@@ -4643,6 +4788,16 @@ pub(in crate::drive) mod tests {
                 render: "# regime\n".to_owned(),
                 carried_entries: 1,
                 carried_turns: 0,
+            },
+            log::Event::Delivered {
+                turn: 2,
+                framing: log::Framing::Advisory,
+                text: "Working record note: the entry \"decision: keep it\" may be affected by this step. If it no longer holds, say so; otherwise carry on.".to_owned(),
+                lines: vec![log::NoteLine {
+                    entry: "interview-t1-0".to_owned(),
+                    op: log::PatchOp::Retire,
+                    template: "FORK_NOTE_ADVISORY".to_owned(),
+                }],
             },
         ]
     }
@@ -6135,6 +6290,7 @@ pub(in crate::drive) mod tests {
             rules: rules.to_vec(),
             object: WorkingObject::open(regime()),
             seams: crate::seam::policy::Served::default(),
+            delivery: log::ForkDelivery::Seam,
         }
     }
 
@@ -6198,6 +6354,169 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .expect("an answer")
+    }
+
+    /// The fork delivery lever: patches waiting at the next ask are one
+    /// note after it, each line the (b′) sentence of the session's framing,
+    /// logged as `delivered`; the note stays on the trunk for the turns
+    /// after. Under `seam`, nothing is delivered.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn a_delivered_note_follows_the_ask_and_stays_on_the_trunk() {
+        for (delivery, template_name) in [
+            (log::ForkDelivery::Advisory, "FORK_NOTE_ADVISORY"),
+            (log::ForkDelivery::Imperative, "FORK_NOTE_IMPERATIVE"),
+            (log::ForkDelivery::Seam, ""),
+        ] {
+            let mut interview = interviewing(&[]);
+            interview.delivery = delivery;
+            let session = Session::open_with(
+                Canned::new([deltas(&["one"]), deltas(&["two"])]),
+                template(),
+                None,
+                None,
+                None,
+                Some(interview),
+            );
+            session.shared.lock().undelivered = vec![
+                (
+                    log::PatchOp::Supersede,
+                    "e-1".to_owned(),
+                    "the schema is per-team".to_owned(),
+                ),
+                (
+                    log::PatchOp::Retire,
+                    "e-2".to_owned(),
+                    "no login".to_owned(),
+                ),
+            ];
+            session.ask("go", None).expect("accepted");
+            wait_until(&session, "turn one", settled);
+            session.ask("again", None).expect("accepted");
+            let log = wait_until(&session, "turn two", |log| {
+                settled(log)
+                    && log
+                        .iter()
+                        .filter(|l| matches!(l.event, Event::Answered { .. }))
+                        .count()
+                        == 2
+            });
+            reads_whole(&session);
+            let sent = session.shared.transport.sent();
+            let delivered: Vec<&Event> = log
+                .iter()
+                .map(|logged| &logged.event)
+                .filter(|event| matches!(event, Event::Delivered { .. }))
+                .collect();
+            if delivery == log::ForkDelivery::Seam {
+                assert!(delivered.is_empty(), "{delivered:?}");
+                assert_eq!(sent[0].messages.last(), Some(&user("go")));
+                continue;
+            }
+            let template = if delivery == log::ForkDelivery::Advisory {
+                crate::dogma::Template::ForkNoteAdvisory
+            } else {
+                crate::dogma::Template::ForkNoteImperative
+            };
+            let line = |entry: &str| {
+                template
+                    .fill(&[(crate::dogma::Hole::Entry, entry)])
+                    .expect("one hole")
+            };
+            let note = format!("{}\n{}", line("the schema is per-team"), line("no login"));
+            // The first request: the ask, then the note at the tail.
+            let first = &sent[0].messages;
+            assert_eq!(&first[first.len() - 2..], &[user("go"), user(&note)]);
+            // The second: the note stayed on the trunk after its ask.
+            let second = &sent[1].messages;
+            assert!(
+                second
+                    .windows(2)
+                    .any(|pair| pair == [user("go"), user(&note)]),
+                "{second:#?}"
+            );
+            assert_eq!(second.last(), Some(&user("again")));
+            // The projection rebuilds both heads with the note, from the log.
+            let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+            let projected =
+                crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+            // And the record names the state.
+            assert!(matches!(
+                projected.events.first(),
+                Some(crate::formats::record::Event::Start { fork_delivery: Some(named), .. })
+                    if *named == delivery
+            ));
+            assert!(
+                !projected
+                    .unspellable
+                    .iter()
+                    .any(|item| item.why.contains("rebuilt")),
+                "{:?}",
+                projected.unspellable
+            );
+            let [
+                Event::Delivered {
+                    turn, text, lines, ..
+                },
+            ] = delivered.as_slice()
+            else {
+                panic!("one delivery: {delivered:?}");
+            };
+            assert_eq!((*turn, text.as_str()), (1, note.as_str()));
+            assert_eq!(
+                lines
+                    .iter()
+                    .map(|l| (l.entry.as_str(), l.op, l.template.as_str()))
+                    .collect::<Vec<_>>(),
+                [
+                    ("e-1", log::PatchOp::Supersede, template_name),
+                    ("e-2", log::PatchOp::Retire, template_name),
+                ]
+            );
+        }
+    }
+
+    /// An `add` names no existing entry, and no measured sentence fits it:
+    /// under a mid-turn delivery it is still carried at the seam only.
+    #[test]
+    fn a_forks_add_patches_are_not_delivered_mid_turn() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.delivery = log::ForkDelivery::Imperative;
+        let session = Session::open_with(
+            Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED]), deltas(&["next"])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 2
+        });
+        reads_whole(&session);
+        assert!(log.iter().any(|l| matches!(
+            l.event,
+            Event::Patched {
+                op: log::PatchOp::Add,
+                ..
+            }
+        )));
+        assert!(
+            !log.iter()
+                .any(|l| matches!(l.event, Event::Delivered { .. }))
+        );
     }
 
     /// The definition of done's first line: the scope-boundary gap (an ask the operator

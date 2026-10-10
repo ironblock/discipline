@@ -306,6 +306,7 @@ pub fn project_in(
                 head,
                 tools,
                 template_kwargs,
+                fork_delivery,
                 ..
             },
         ..
@@ -335,6 +336,8 @@ pub fn project_in(
         regime: Box::new(regime.clone()),
         source: Source::Live,
         regimen_sha256: None,
+        // The fork delivery lever's state, as `session.start` names it.
+        fork_delivery: *fork_delivery,
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -382,6 +385,8 @@ struct Walk<'a> {
     recording: Option<std::path::PathBuf>,
     /// Each turn's attached files, from its `ask` line.
     ask_files: BTreeMap<u32, Vec<log::RecordedFile>>,
+    /// Each turn's delivered note (v7), from its `delivered` line.
+    notes: BTreeMap<u32, String>,
     /// The tools the session's requests declared, rebuilt from
     /// `session.start`'s names (#472), or why they cannot be.
     tools: Result<Vec<ToolDefinition>, String>,
@@ -514,6 +519,7 @@ impl<'a> Walk<'a> {
             captures: BTreeMap::new(),
             recording: None,
             ask_files: BTreeMap::new(),
+            notes: BTreeMap::new(),
             tools: Ok(Vec::new()),
             template_kwargs: BTreeMap::new(),
             stepped,
@@ -607,6 +613,11 @@ impl<'a> Walk<'a> {
             Line::Seam {
                 at_turn, render, ..
             } => self.seam(line.seq, *at_turn, render),
+            // Forks' patches delivered (v7): the note follows its turn's ask
+            // on the rebuilt trunk, as it does on the session's.
+            Line::Delivered { turn, text, .. } => {
+                self.notes.insert(*turn, text.clone());
+            }
             // Facts the record has no row for at all, named once per kind.
             Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
                 let kind = match &line.event {
@@ -947,6 +958,7 @@ impl<'a> Walk<'a> {
     fn head_change(&mut self, seq: u64, turn: u32, logged: &str) {
         let mut messages = self.trunk.clone();
         let asked = self.user_message(turn);
+        let note = self.notes.get(&turn).cloned();
         let unrebuilt = asked
             .as_ref()
             .err()
@@ -954,6 +966,9 @@ impl<'a> Walk<'a> {
             .or_else(|| self.tools.as_ref().err().cloned())
             .or_else(|| self.trunk_unrebuilt.clone());
         messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
+        if let Some(note) = note {
+            messages.push(Message::new(Role::User, note));
+        }
         for step in self.steps.get(&turn).into_iter().flatten() {
             messages.extend(step.messages());
         }
@@ -1105,6 +1120,9 @@ impl<'a> Walk<'a> {
             )
         });
         self.trunk.push(asked);
+        if let Some(note) = self.notes.get(&turn) {
+            self.trunk.push(Message::new(Role::User, note.clone()));
+        }
         let taken = self.steps.remove(&turn).unwrap_or_default();
         for step in taken.iter().take(steps) {
             self.trunk.extend(step.messages());
@@ -1269,6 +1287,7 @@ mod tests {
             template_kwargs: None,
             unsent: None,
             approvals_off: None,
+            fork_delivery: None,
         }
     }
 

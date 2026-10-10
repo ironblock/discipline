@@ -824,6 +824,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         // rows as they happened. Nothing else in this crate may say `Live`.
         source: Source::Live,
         regimen_sha256: None,
+        fork_delivery: None,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();

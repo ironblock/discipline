@@ -27,6 +27,7 @@ export type Kind =
   | "fork.settled"
   | "patch"
   | "seam"
+  | "delivered"
 ;
 
 export type State =
@@ -168,6 +169,17 @@ export type SeamReason =
   | "cadence"
 ;
 
+export type Framing =
+  | "advisory"
+  | "imperative"
+;
+
+export type ForkDelivery =
+  | "seam"
+  | "advisory"
+  | "imperative"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -201,6 +213,12 @@ export interface TemplateKwargs {
 
 export interface Unsent {
   budget_tokens: number;
+}
+
+export interface NoteLine {
+  entry: string;
+  op: PatchOp;
+  template: string;
 }
 
 export interface ToolCallPiece {
@@ -253,6 +271,7 @@ export type SessionStartLine = {
   template_kwargs?: TemplateKwargs;
   unsent?: Unsent;
   approvals_off?: boolean;
+  fork_delivery?: ForkDelivery;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {
@@ -439,6 +458,16 @@ export type SeamLine = {
   carried_turns: number;
 };
 
+export type DeliveredLine = {
+  seq: number;
+  t: number;
+  kind: "delivered";
+  turn: number;
+  framing: Framing;
+  text: string;
+  lines: NoteLine[];
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -458,4 +487,5 @@ export type LogLine =
   | ForkSettledLine
   | PatchLine
   | SeamLine
+  | DeliveredLine
 ;
