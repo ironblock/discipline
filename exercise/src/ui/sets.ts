@@ -207,4 +207,9 @@ export const refusalOf = registry<Refusal>({
   'not-a-png': { label: 'not attached: the file is not a PNG', level: 'warn' },
   'too-large': { label: 'not attached: the file is over the drive\'s size cap', level: 'warn' },
   'not-uploaded': { label: 'not taken: an attachment never reached the drive', level: 'bad' },
+  // A tangent's (#608).
+  'tangent-open': { label: 'not taken: a tangent is open -- end it first', level: 'warn' },
+  'no-tangent': { label: 'not taken: no tangent is open', level: 'quiet' },
+  'bad-tangent': { label: 'not taken: a tangent needs working memory, and a new id', level: 'warn' },
+  'not-the-scope': { label: 'not taken: rule on exactly the tangent’s entries', level: 'warn' },
 });

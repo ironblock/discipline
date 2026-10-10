@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
+import { TANGENT_CLOSED, TANGENT_OPEN } from './served/tangent.ts';
 import { needsOf } from './log.ts';
 
 /**
@@ -164,6 +165,26 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(levers('a-v7-session-sending-a-reasoning-effort.jsonl')).toEqual({ approvals: 'gate', reasoning: 'effort medium' });
     // Before v7 the log has no approval lever to declare: undeclared, not assumed.
     expect(levers('an-answered-turn.jsonl')).toEqual({});
+  });
+
+  it('folds a tangent: open, its entries are its own; closed, they are ruled on and its turns rolled back (#608)', () => {
+    const open = fold([...TANGENT_OPEN]);
+    expect(open.tangent).toEqual({ id: 't/1', entries: ['e1', 'e2'] });
+    expect(open.tangentsOpened).toBe(1);
+    const closed = fold([...TANGENT_CLOSED]);
+    expect(closed.tangent).toBeUndefined();
+    expect(closed.memory.map((e) => [e.id, e.state])).toEqual([
+      ['e1', 'live'],
+      ['e2', 'retired'],
+    ]);
+    // The turn asked inside the tangent left the trunk at its close; the one before it did not.
+    const marks = (closed.eras[0]?.nodes ?? []).filter((n) => n.kind === 'user' || n.kind === 'assistant').map((n) => [n.kind, n.turn, 'outOfContext' in n ? n.outOfContext : false]);
+    expect(marks).toEqual([
+      ['user', 1, false],
+      ['assistant', 1, false],
+      ['user', 2, 'rolled-back'],
+      ['assistant', 2, 'rolled-back'],
+    ]);
   });
 
   it('takes the state from the log: an ended session is ended', () => {

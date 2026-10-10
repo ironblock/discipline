@@ -605,7 +605,19 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
             {/* The composer: its own width from the trunk's left edge, whatever the lanes (--composer-width). */}
             <div className="ex-session__composer" data-waiting={approving.waiting ? '' : undefined}>
               {approving.waiting && approving.decide ? <ApprovalPrompt key={`${approving.waiting.request}/${approving.waiting.id}`} prompt={approving.waiting} decide={approving.decide} /> : null}
-              <Composer key={session.phase} state={session.state} link={link} phase={session.phase} {...composer} />
+              <Composer
+                key={session.phase}
+                state={session.state}
+                link={link}
+                phase={session.phase}
+                tangent={{
+                  next: `t/${session.tangentsOpened + 1}`,
+                  ...(session.tangent
+                    ? { open: { id: session.tangent.id, entries: session.tangent.entries.map((entry) => ({ id: entry, text: session.memory.find((m) => m.id === entry)?.text ?? entry })) } }
+                    : {}),
+                }}
+                {...composer}
+              />
             </div>
           </div>
           <aside className="ex-session__memory" data-open={drawer && drawerOpen ? '' : undefined}>

@@ -63,7 +63,9 @@ export function SystemMessage({ node }: { readonly node: Folded<SystemNode> }) {
 const outOfContext = (why: OffTrunk) => ({
   value: <span className="ex-context-out">not in the model's context</span>,
   title:
-    why === 'cancelled'
+    why === 'rolled-back'
+      ? 'this turn was inside a tangent the operator closed: the trunk was rolled back to before it, and the model will not read it again (#608)'
+      : why === 'cancelled'
       ? 'this turn was cancelled before it said anything: the drive keeps nothing of it, and the model will not read this ask or its answer (#575)'
       : 'this turn ended without an answer: the drive keeps its ask and the steps it finished, and leaves this one out (#541)',
 });

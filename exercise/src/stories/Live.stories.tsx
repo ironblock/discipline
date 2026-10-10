@@ -12,6 +12,7 @@ import { App } from '../App.tsx';
 import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
+import { TANGENT_OPEN } from '../drive/served/tangent.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
@@ -361,5 +362,40 @@ export const ServedApprovalsUndeclared: Story = {
     const approvals = canvasElement.querySelector<HTMLElement>('.ex-header__lever[data-lever="approvals"]');
     await expect(approvals?.textContent).toBe('approvals undeclared');
     await expect(approvals?.dataset['undeclared']).toBe('');
+  },
+};
+
+/** A served log, from lines the surface holds: one per line, as `serving` streams it. */
+const jsonl = (lines: readonly unknown[]) => lines.map((l) => JSON.stringify(l)).join('\n');
+
+/** `?drive` (#608): with no tangent open, the composer offers to open one, as `t/1`. */
+export const ServedOpenTangent: Story = {
+  name: '?drive: open a tangent',
+  args: { drive: true, web: posting(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    posted.length = 0;
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'open tangent')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'open-tangent', id: 't/1' }]));
+  },
+};
+
+/** `?drive` (#608): a tangent open with two entries of its own -- end it, keeping one and dropping the other. */
+export const ServedEndTangent: Story = {
+  name: '?drive: end a tangent, ruling on each of its entries',
+  args: { drive: true, web: posting(jsonl(TANGENT_OPEN)) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'end tangent…')!);
+    const panel = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('fieldset[aria-label="end tangent t/1"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect([...panel.querySelectorAll('li')].map((li) => li.dataset['entry'])).toEqual(['e1', 'e2']);
+    await userEvent.click(panel.querySelector('li[data-entry="e2"] input[value="drop"]')!);
+    posted.length = 0;
+    await userEvent.click([...panel.querySelectorAll('button')].find((b) => b.textContent === 'close tangent')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'close-tangent', dispositions: { e1: 'keep', e2: 'drop' } }]));
   },
 };
