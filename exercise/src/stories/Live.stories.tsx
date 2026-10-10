@@ -4,6 +4,7 @@ import { expect, userEvent, waitFor } from 'storybook/test';
 import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
+import approvalsOff from '../../../diet/formats/log/fixtures/valid/a-v7-call-that-ran-with-approvals-off.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -333,5 +334,32 @@ export const CannedRefillOffersPhases: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
     await expect(canvasElement.querySelector('select[aria-label="move to"]')).not.toBeNull();
+  },
+};
+
+/**
+ * `?drive`, log v7 (#544): a session run with approvals off. The header says so for the whole session, and the
+ * call says so on itself -- every command ran with no gate decision and no prompt, the sandbox still confining it.
+ */
+export const ServedApprovalsOff: Story = {
+  name: '?drive: a session with approvals off says so, and so does each call (v7)',
+  args: { drive: true, web: serving(approvalsOff) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="tool"]').length).toBeGreaterThan(0));
+    await expect(canvasElement.querySelector('.ex-header__lever[data-lever="approvals"]')?.textContent).toBe('approvals off');
+    const call = canvasElement.querySelector('.ex-trunk [data-tone="tool"]') as HTMLElement;
+    await expect(call.textContent).toContain('approvals off');
+  },
+};
+
+/** A log from before the lever was declared (v3) says nothing about it: the header says so, rather than assume the gate. */
+export const ServedApprovalsUndeclared: Story = {
+  name: '?drive: a log that does not declare the approval lever shows it undeclared',
+  args: { drive: true, web: serving(toolCallRan) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="tool"]').length).toBeGreaterThan(0));
+    const approvals = canvasElement.querySelector<HTMLElement>('.ex-header__lever[data-lever="approvals"]');
+    await expect(approvals?.textContent).toBe('approvals undeclared');
+    await expect(approvals?.dataset['undeclared']).toBe('');
   },
 };
