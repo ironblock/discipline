@@ -194,6 +194,10 @@ pub struct Identity {
     /// How a hosted model is asked to think (#555): `adaptive` (effort) or
     /// `budget` (tokens), as its provider's convention for it is.
     pub thinking: Option<String>,
+    /// The beta headers a hosted API is sent, each by name (#555): they
+    /// change its behaviour, so the entry declares them beside the version
+    /// `engine_identity` names.
+    pub engine_betas: Vec<String>,
     /// The served configuration the entry declares, by the engine's own
     /// name for each field: every `served_<field>` key, prefix removed
     /// (#509). What the engine reports is compared against these.
@@ -269,6 +273,18 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
         },
         template_default_effort: table.strings.get("template_default_effort").cloned(),
         server_kind: table.strings.get("server_kind").cloned(),
+        engine_betas: table
+            .strings
+            .get("engine_betas")
+            .map(|betas| {
+                betas
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|beta| !beta.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
         thinking: match table.strings.get("thinking").map(String::as_str) {
             None => None,
             Some(way @ ("adaptive" | "budget")) => Some(way.to_owned()),
@@ -477,7 +493,8 @@ mod tests {
                  engine_identity = \"2023-06-01\"\nserver_kind = \"api\"\n\
                  weights_kind = \"hosted\"\nweights_provider = \"anthropic\"\n\
                  weights_model_id = \"a-model\"\n\
-                 weights_version_or_date_observed = \"2026-10-10\"\n{thinking}",
+                 weights_version_or_date_observed = \"2026-10-10\"\n\
+                 engine_betas = \"interleaved-thinking-2025-05-14\"\n{thinking}",
                 "a".repeat(64)
             )
         };
@@ -491,6 +508,7 @@ mod tests {
             }
         );
         assert_eq!(found.thinking.as_deref(), Some("adaptive"));
+        assert_eq!(found.engine_betas, ["interleaved-thinking-2025-05-14"]);
         assert_eq!(identity(&registry(""), "h").expect("hosted").thinking, None);
         let refused = identity(&registry("thinking = \"loud\"\n"), "h").expect_err("a stray word");
         assert!(

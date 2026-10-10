@@ -69,6 +69,14 @@ hardware_fields = ["model_identifier", "cpu", "memory", "gpu", "architecture"]
 # place of a sentinel string in a field defined as a registry digest.
 hardware_fields = ["serves", "acts_sha256"]
 
+[entry_type.hosted-api]
+# A hosted API is equipment we neither own nor see into (#555): a provider's
+# endpoint. ITS FINGERPRINT IS OF THE ENDPOINT, NOT OF HARDWARE -- who serves
+# and where -- because that is all of it a record can name; the hardware
+# behind it is the provider's, and may change under the same name. Ruled by
+# Dispatch on #555 (2026-10-10), as `canned-server` was on #68.
+hardware_fields = ["provider", "api_host"]
+
 [entry_type.apple-silicon-laptop]
 hardware_fields = [
   "chip", "memory", "storage", "gpu_wired_memory_limit_mb",
