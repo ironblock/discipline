@@ -601,17 +601,16 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("tool_call_text_fallback".to_owned(), text_fallback),
         (
             "instruction_files".to_owned(),
-            if crate::drive::instructions::enabled(regimen) {
-                "on"
-            } else {
-                "off"
-            }
-            .to_owned(),
+            instruction_files_lever(regimen),
         ),
         // The operator opens and closes a tangent where there is working
         // memory to scope (#22); an agent nominating is a later ask set.
         ("tangent_closure".to_owned(), tangent_closure_lever(regimen)),
-        ("capture_modality".to_owned(), undeclared()),
+        ("self_capture".to_owned(), self_capture_lever(regimen)),
+        (
+            "capture_modality".to_owned(),
+            capture_modality_lever(regimen),
+        ),
         ("interview_routing_and_cadence".to_owned(), warrant),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         ("fork_memory_share".to_owned(), undeclared()),
@@ -619,6 +618,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             "fork_input_view".to_owned(),
             crate::drive::session::fork_view(regimen).word(),
         ),
+        ("fork_asks".to_owned(), fork_asks_lever(regimen)),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
         ("step_and_output_limits".to_owned(), limits),
         ("extraction_seat".to_owned(), "warm-model".to_owned()),
@@ -642,6 +642,12 @@ fn render_budget_lever(regimen: &Regimen) -> String {
     )
 }
 
+/// The fork ask set lever's word (#595): the set's name and digest.
+fn fork_asks_lever(regimen: &Regimen) -> String {
+    let set = crate::drive::session::fork_asks(regimen);
+    format!("{}:{}", set.name, set.digest())
+}
+
 /// The tangent closure lever's word (#22): `operator` where there is
 /// working memory to scope, else [`UNDECLARED`].
 fn tangent_closure_lever(regimen: &Regimen) -> String {
@@ -650,6 +656,34 @@ fn tangent_closure_lever(regimen: &Regimen) -> String {
     } else {
         UNDECLARED.to_owned()
     }
+}
+
+/// The self-capture lever's word (#609): `off`, or `on:every:<n>` with the
+/// reminder's cadence of silent turns.
+fn self_capture_lever(regimen: &Regimen) -> String {
+    crate::drive::session::self_capture(regimen).map_or_else(
+        || "off".to_owned(),
+        |cadence| format!("on:every:{}", cadence.interval()),
+    )
+}
+
+/// The instruction files lever's word: `on` or `off`.
+fn instruction_files_lever(regimen: &Regimen) -> String {
+    if crate::drive::instructions::enabled(regimen) {
+        "on"
+    } else {
+        "off"
+    }
+    .to_owned()
+}
+
+/// The capture modality lever's word (#610): how a fork answers, `fields`
+/// or `tools`; [`UNDECLARED`] for a word serve refuses at start.
+fn capture_modality_lever(regimen: &Regimen) -> String {
+    crate::drive::session::capture_modality(regimen).map_or_else(
+        |_| UNDECLARED.to_owned(),
+        |modality| modality.word().to_owned(),
+    )
 }
 
 /// The levers a regimen's commands set -- tool-output disposition, approval,
@@ -787,7 +821,7 @@ mod tests {
         );
         assert_eq!(at(&floor, "tool_surface"), "bash");
         assert_eq!(at(&floor, "tangent_closure"), "operator");
-        assert_eq!(at(&floor, "capture_modality"), UNDECLARED);
+        assert_eq!(at(&floor, "capture_modality"), "fields");
         let line = draft("t1-session-one-qwen38.regimen.toml");
         assert_eq!(at(&line, "approval"), "none");
         assert_eq!(at(&line, "reasoning_state"), "on:effort:xhigh");

@@ -74,6 +74,8 @@ export interface UserNode extends Provenance {
    * removes, and the reference line it carries instead. Folded, not yet drawn.
    */
   readonly pruned?: readonly { readonly call: string; readonly bytes: number; readonly text: string }[];
+  /** Self-capture's reminder after this ask (log v7's `reminded`, #619): a note the model was sent, the harness's words. */
+  readonly reminded?: string;
   /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
   readonly files?: readonly FileRef[];
   /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
@@ -83,7 +85,7 @@ export interface UserNode extends Provenance {
 export type Progress = 'prefill' | 'streaming' | 'done' | 'cancelled' | 'failed';
 
 /** The settle words that leave a turn off the trunk. */
-export type OffTrunk = 'cancelled' | 'failed' | 'timeout';
+export type OffTrunk = 'cancelled' | 'failed' | 'timeout' | 'rolled-back';
 
 /** Why a generation stopped: the response's `finish_reason` as llama.cpp spells it, or `cancelled` for a stopped call. */
 export type Stop = Open<'stop' | 'tool_calls' | 'length' | 'cancelled'>;
@@ -187,6 +189,8 @@ export interface ToolNode extends Provenance {
   readonly stderr?: string;
   /** Why the drive refused it. */
   readonly refusal?: ToolRefusal;
+  /** What a self-capture call did (log v7's `capture`, #619): its outcome, the entries it wrote, and why when it did not. */
+  readonly capture?: { readonly outcome: string; readonly entries: readonly string[]; readonly why?: string };
   /** The policy it failed under: the Seatbelt profile's sha256. */
   readonly policy?: string;
   readonly ms?: number;
@@ -257,7 +261,8 @@ export interface Era {
   readonly nodes: readonly TrunkNode[];
 }
 
-export type EntryState = 'live' | 'superseded' | 'retired';
+/** `parked`: set aside as its tangent's at the tangent's close (#608), out of the render and kept in the archive. */
+export type EntryState = 'live' | 'superseded' | 'retired' | 'parked';
 
 export interface MemoryEntry extends Provenance {
   readonly id: string;
@@ -274,6 +279,8 @@ export interface MemoryEntry extends Provenance {
   readonly landedAt: number;
   /** Landed since the last ask: what the operator has not seen yet. */
   readonly fresh: boolean;
+  /** The tangent it was born in (a patch's `tangent`, #608): what that tangent's close rules on. */
+  readonly tangent?: string;
 }
 
 export type SessionState = 'connecting' | 'awaiting' | 'turn' | 'capture' | 'ratify' | 'ended';
@@ -318,10 +325,16 @@ export interface Session {
   readonly slots: number;
   readonly trunkSlot: number;
   readonly phase: string;
+  /** The phases the logged graph allows a seam to move to from the current one (#563): none without a graph. */
+  readonly phaseMoves: readonly string[];
   readonly eras: readonly Era[];
   /** Branches keyed by the trunk node they came from. */
   readonly branches: ReadonlyMap<string, readonly Folded<BranchNode>[]>;
   readonly memory: readonly Folded<MemoryEntry>[];
+  /** The tangent open now (#608), and the live entries born in it: what its close must rule on, no more and no fewer. */
+  readonly tangent?: { readonly id: string; readonly entries: readonly string[] };
+  /** How many tangents the session has opened: the next one's id is `t/<this + 1>`. */
+  readonly tangentsOpened: number;
   /** What each slot is serving right now, and for which lane; absent when idle. */
   readonly occupancy: readonly (Holder | undefined)[];
   /** Session time of the last event. */
@@ -341,6 +354,11 @@ export interface Levers {
   readonly forkDelivery?: string;
   /** The reasoning state on the wire (`template_kwargs`): thinking on or off, and the effort, as sent. */
   readonly reasoning?: string;
+  /**
+   * Every lever's state, as `session.start`'s `levers` declares it (#623): the record's start row, read from the log.
+   * Words, shown as given, `undeclared` among them. Absent from a log written before it.
+   */
+  readonly table?: Readonly<Record<string, string>>;
 }
 
 export function leversOf(start: LineOf<'session.start'>): Levers {
@@ -353,6 +371,7 @@ export function leversOf(start: LineOf<'session.start'>): Levers {
     ...(start.approvals_off === true ? { approvals: 'off' as const } : start.version >= 7 ? { approvals: 'gate' as const } : {}),
     ...(start.fork_delivery !== undefined ? { forkDelivery: start.fork_delivery } : {}),
     ...(reasoning.length > 0 ? { reasoning: reasoning.join(' · ') } : {}),
+    ...(start.levers !== undefined ? { table: start.levers } : {}),
   };
 }
 
@@ -452,6 +471,8 @@ export function fold(lines: readonly LogLine[]): Session {
       slots: 0,
       trunkSlot: 0,
       phase: '',
+      tangentsOpened: 0,
+      phaseMoves: [],
       eras: [],
       gaps: [],
       branches: new Map(),
@@ -474,12 +495,20 @@ export function fold(lines: readonly LogLine[]): Session {
   const deliveries = new Map<number, LineOf<'delivered'>>();
   const recalls = new Map<number, LineOf<'recalled'>>();
   const prunes = new Map<number, LineOf<'pruned'>[]>();
+  const reminders = new Map<number, LineOf<'reminded'>>();
+  // Self-capture's outcomes, by the call they belong to: `<request>/<call id>`.
+  const captures = new Map<string, LineOf<'capture'>>();
   const firstRequestOfTurn = new Map<number, number>();
   // Each call, keyed by the `seq` of its first fragment (or of its line, where none streamed); found by its request and index.
   const calls = new Map<number, { request: number; t: number; first?: LineOf<'delta'>; id?: string; name?: Tool; args: string; line?: LineOf<'tool_call'> }>();
   const callAt = new Map<string, number>();
   const forks = new Map<number, { fork: LineOf<'fork'>; request?: number; settled?: LineOf<'fork.settled'>; patches: LineOf<'patch'>[] }>();
   const entries = new Map<string, Mutable<Omit<MemoryEntry, 'fresh' | 'landedAt'>> & { seq: number }>();
+  // The tangent open now (#608), the turns asked inside each, and the turns a close rolled the trunk back over.
+  let openTangent: string | undefined;
+  let tangentsOpened = 0;
+  const tangentTurns = new Map<string, number[]>();
+  const rolledBack = new Set<number>();
 
   type Slot =
     | { kind: 'user'; turn: number }
@@ -511,7 +540,8 @@ export function fold(lines: readonly LogLine[]): Session {
   const cappedTurns = new Set<number>();
   const gaps: Folded<GapNode>[] = [];
   let lastSettled: number | undefined;
-  let phase = start.phase ?? '';
+  // The phase it opens in: the graph's opening phase (log v7, #563), or a placed recording's own `phase`.
+  let phase = start.opening_phase ?? start.phase ?? '';
   let openTurn: number | undefined;
   let lastAskSeq = -1;
   // The state as the log says it, when it says it (`diet` logs every move; a script logs only the end).
@@ -547,6 +577,7 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       case 'ask':
         asks.set(e.turn, e);
+        if (openTangent !== undefined) tangentTurns.get(openTangent)?.push(e.turn);
         openTurn = e.turn;
         lastAskSeq = e.seq;
         era().slots.push({ kind: 'user', turn: e.turn });
@@ -652,7 +683,7 @@ export function fold(lines: readonly LogLine[]): Session {
           if (replaced) entries.set(e.supersedes, { ...replaced, state: 'superseded', by: id(e.seq), seq: e.seq, from: [...replaced.from, e.seq] });
         }
         if (e.op === 'add' || e.op === 'supersede' || !old) {
-          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}) });
+          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}), ...(e.tangent !== undefined ? { tangent: e.tangent } : {}) });
           break;
         }
         // Any other op rewrites the entry, keeps its state, and is shown by name.
@@ -667,6 +698,12 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       case 'pruned':
         prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
+        break;
+      case 'reminded':
+        reminders.set(e.turn, e);
+        break;
+      case 'capture':
+        captures.set(`${e.request}/${e.call}`, e);
         break;
       case 'seam': {
         if (e.phase) phase = e.phase.to;
@@ -688,6 +725,25 @@ export function fold(lines: readonly LogLine[]): Session {
           ...provenance(e),
         };
         eras.push({ seam: e, system: rendered, slots: [] });
+        break;
+      }
+      case 'tangent.open':
+        openTangent = e.id;
+        tangentsOpened += 1;
+        tangentTurns.set(e.id, []);
+        break;
+      case 'tangent.close': {
+        // Dropped entries retire and parked ones are set aside -- the archive keeps both; the trunk returns to the open.
+        const rule = (ids: readonly string[], state: EntryState) => {
+          for (const entry of ids) {
+            const old = entries.get(entry);
+            if (old) entries.set(entry, { ...old, state, by: id(e.seq), seq: e.seq, from: [...old.from, e.seq] });
+          }
+        };
+        rule(e.dropped, 'retired');
+        rule(e.parked, 'parked');
+        for (const turn of tangentTurns.get(e.id) ?? []) rolledBack.add(turn);
+        if (openTangent === e.id) openTangent = undefined;
         break;
       }
       default: {
@@ -730,6 +786,8 @@ export function fold(lines: readonly LogLine[]): Session {
        * cancel cut before it said anything leaves, and the ask with it when that was the turn's only request.
        */
       const outOf = (turn: number | undefined, request?: number): OffTrunk | undefined => {
+        // A tangent's close rolled the trunk back over every turn asked inside it (#608): ask and answers alike.
+        if (turn !== undefined && rolledBack.has(turn)) return 'rolled-back';
         const why = turn !== undefined ? offTrunk.get(turn) : undefined;
         if (why === undefined) return why;
         const steps = trunkRequestsOfTurn.get(turn!) ?? [];
@@ -766,6 +824,7 @@ export function fold(lines: readonly LogLine[]): Session {
             ...(prunes.has(slot.turn)
               ? { pruned: prunes.get(slot.turn)!.map(({ call, bytes, text }) => ({ call, bytes, text })) }
               : {}),
+            ...(reminders.has(slot.turn) ? { reminded: reminders.get(slot.turn)!.text } : {}),
             ...provenance(ask, first?.response),
           });
         }
@@ -813,6 +872,12 @@ export function fold(lines: readonly LogLine[]): Session {
                   ...(line.stdout !== undefined ? { output: line.stdout } : {}),
                   ...(line.stderr ? { stderr: line.stderr } : {}),
                   ...(line.reason !== undefined ? { refusal: line.reason } : {}),
+                  ...(captures.has(`${c.request}/${line.id}`)
+                    ? (() => {
+                        const k = captures.get(`${c.request}/${line.id}`)!;
+                        return { capture: { outcome: k.outcome, entries: k.entries, ...(k.why !== undefined ? { why: k.why } : {}) } };
+                      })()
+                    : {}),
                   ...(line.policy !== undefined ? { policy: line.policy } : {}),
                 }
               : {}),
@@ -938,6 +1003,11 @@ export function fold(lines: readonly LogLine[]): Session {
     slots,
     trunkSlot,
     phase,
+    tangentsOpened,
+    ...(openTangent !== undefined
+      ? { tangent: { id: openTangent, entries: [...entries.values()].filter((x) => x.tangent === openTangent && x.state === 'live').map((x) => x.id) } }
+      : {}),
+    phaseMoves: (start.phase_transitions ?? []).filter((move) => move.from === phase).map((move) => move.to),
     eras: builtEras,
     branches,
     memory,

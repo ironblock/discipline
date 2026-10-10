@@ -149,6 +149,12 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       {printed.length > 0 ? <pre className="ex-tool__output">{open ? output : printed.slice(0, PEEK).join('\n')}</pre> : null}
       {node.stderr ? <pre className="ex-tool__output ex-tool__stderr">{node.stderr}</pre> : null}
       {node.files ? <FileResults files={node.files} /> : null}
+      {/* What a self-capture call did to working memory (#619): its outcome, and the entries it wrote or why not. */}
+      {node.capture ? (
+        <p className="ex-capture" data-outcome={node.capture.outcome} title="self-capture: what this call did to working memory">
+          {['self-capture', '·', node.capture.outcome, ...node.capture.entries, ...(node.capture.why !== undefined ? [`· ${node.capture.why}`] : [])].join(' ')}
+        </p>
+      ) : null}
       {hidden > 0 ? (
         <button type="button" className="ex-more" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? 'less' : `${count(hidden)} more ${hidden === 1 ? 'line' : 'lines'}`}

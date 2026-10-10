@@ -32,6 +32,8 @@ export type Kind =
   | "pruned"
   | "tangent.open"
   | "tangent.close"
+  | "capture"
+  | "reminded"
 ;
 
 export type State =
@@ -325,6 +327,9 @@ export type SessionStartLine = {
   unsent?: Unsent;
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
+  levers?: Record<string, string>;
+  fork_asks?: string;
+  fork_asks_digest?: string;
   reasoning_effort_default?: string;
   phases?: string[];
   phase_transitions?: PhaseMove[];
@@ -488,6 +493,7 @@ export type ForkLine = {
   why: Warrant;
   question: string;
   view?: string;
+  ask?: string;
 };
 
 export type ForkSettledLine = {
@@ -589,6 +595,27 @@ export type TangentCloseLine = {
   rolled_back: number;
 };
 
+export type CaptureLine = {
+  seq: number;
+  t: number;
+  kind: "capture";
+  request: number;
+  call: string;
+  tool: string;
+  outcome: string;
+  entries: string[];
+  why?: string;
+  fork?: number;
+};
+
+export type RemindedLine = {
+  seq: number;
+  t: number;
+  kind: "reminded";
+  turn: number;
+  text: string;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -613,4 +640,6 @@ export type LogLine =
   | PrunedLine
   | TangentOpenLine
   | TangentCloseLine
+  | CaptureLine
+  | RemindedLine
 ;

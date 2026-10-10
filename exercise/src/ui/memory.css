@@ -124,3 +124,9 @@
   color: var(--ink-faint);
   white-space: nowrap;
 }
+
+/* Parked at its tangent's close (#608): set aside, kept in the archive, not struck -- it may come back. */
+.ex-memory__entry[data-state='parked'] .ex-memory__text {
+  color: var(--ink-faint);
+  font-style: italic;
+}

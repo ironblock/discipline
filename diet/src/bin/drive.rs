@@ -521,6 +521,8 @@ fn serve(args: &[String]) -> ExitCode {
                 unsent_budget.map(|budget_tokens| diet::formats::log::Unsent { budget_tokens }),
                 effort_default.clone(),
                 instruction_files,
+                // #573: the start row's levers, from the same reading.
+                read_at_start.as_ref().map(|read| read.levers.clone()),
             ),
         ),
     );
@@ -728,6 +730,9 @@ fn served_session(
             shape.tools.push(diet::drive::prune::definition());
         }
     }
+    // Self-capture's tools after them (#609), from the first request and
+    // never changed; with self-capture off the tools are as they were.
+    session::declare_self_capture(&mut shape, declared.1.as_ref());
     std::sync::Arc::new(Session::open_declaring(
         transport,
         shape,
@@ -793,31 +798,63 @@ fn serving_interview(
              memory, so no seam could ever move between them"
         ));
     }
-    if rules.is_empty() && diet::drive::prune::of(&read).is_some() {
-        return Err(format!(
-            "{path} declares `model_pruning = \"on\"` and no `interview_warrant`: nothing \
-             fills working memory, so no seam could ever replace a pruned result"
-        ));
-    }
     if rules.is_empty() && seams.declares_a_trigger() {
         return Err(format!(
             "{path} declares a seam trigger and no `interview_warrant`: nothing fills \
              working memory, so no seam could ever fire"
         ));
     }
-    Ok((!rules.is_empty()).then(|| Interview {
-        rules,
-        object: diet::object::WorkingObject::open(regime.clone()),
-        seams,
-        delivery,
-        phases,
-        // #566: how archived items are recalled; off unless declared.
-        recall: diet::drive::archive::Recall::of(&read),
-        view: session::fork_view(&read),
-        // #612: whether the model may prune its tool results; off unless
-        // declared.
-        prune: diet::drive::prune::of(&read),
-    }))
+    // Self-capture (#609) keeps working memory too, forks or none.
+    let self_capture = session::self_capture(&read);
+    // #610: a fork answers through the capture tools only where it is asked
+    // to, in a set written for them, and where self-capture declares them.
+    let capture = session::capture_modality(&read).map_err(|why| format!("{path}: {why}"))?;
+    let asks = session::fork_asks(&read);
+    if rules.is_empty() && self_capture.is_none() && diet::drive::prune::of(&read).is_some() {
+        return Err(format!(
+            "{path} declares `model_pruning = \"on\"` and neither an `interview_warrant` nor \
+             self-capture: nothing fills working memory, so no seam could ever replace a \
+             pruned result"
+        ));
+    }
+    if capture == diet::dogma::asks::Modality::Tools {
+        let refused = if rules.is_empty() {
+            Some("no `interview_warrant`, so no fork ever answers".to_owned())
+        } else if self_capture.is_none() {
+            Some("self-capture off, so no fork is offered the capture tools".to_owned())
+        } else if asks.modality != capture {
+            Some(format!(
+                "the ask set `{}`, whose asks have a fork answer in fields",
+                asks.name
+            ))
+        } else {
+            None
+        };
+        if let Some(why) = refused {
+            return Err(format!(
+                "{path} declares `{}` = \"tools\" with {why}",
+                session::CAPTURE_MODALITY
+            ));
+        }
+    }
+    Ok(
+        (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
+            rules,
+            object: diet::object::WorkingObject::open(regime.clone()),
+            seams,
+            delivery,
+            phases,
+            // #566: how archived items are recalled; off unless declared.
+            recall: diet::drive::archive::Recall::of(&read),
+            view: session::fork_view(&read),
+            self_capture,
+            asks,
+            capture,
+            // #612: whether the model may prune its tool results; off unless
+            // declared.
+            prune: diet::drive::prune::of(&read),
+        }),
+    )
 }
 
 /// What `serve` runs the model's calls under, when the regimen at
@@ -1219,17 +1256,12 @@ fn written_record(
         .map(diet::drive::session::line_of)
         .collect();
     let mut projected = projection::project_in(&lines, regime, engine, recording)?;
-    if let (
-        Some(record::Event::Start {
-            regimen_sha256,
-            levers,
-            ..
-        }),
-        Some(read),
-    ) = (projected.events.first_mut(), read_at_start)
+    // The levers come from the log's `session.start` (#573), so the record
+    // and the log say the same.
+    if let (Some(record::Event::Start { regimen_sha256, .. }), Some(read)) =
+        (projected.events.first_mut(), read_at_start)
     {
         *regimen_sha256 = Some(read.regimen_sha256.clone());
-        *levers = Some(read.levers.clone());
     }
     // The summary: the turns and prefill the rows carry, and the product --
     // the working memory at the session's end, kept beside the record as

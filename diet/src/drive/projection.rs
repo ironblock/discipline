@@ -308,6 +308,7 @@ pub fn project_in(
                 template_kwargs,
                 fork_delivery,
                 tool_output,
+                levers,
                 ..
             },
         ..
@@ -341,7 +342,9 @@ pub fn project_in(
         fork_delivery: *fork_delivery,
         // The tool output cap, as `session.start` names it (#554).
         tool_output: *tool_output,
-        levers: None,
+        // Each lever's state, as `session.start` names it (#573): the
+        // record's start says what the log says.
+        levers: levers.clone(),
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -491,6 +494,13 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
                 .find(|tool| tool.name == *name)
             {
                 Ok(tool)
+            } else if let Some(tool) = crate::capture::tools::contract()
+                .ok()
+                .map(|contract| crate::capture::tools::definitions(&contract))
+                .and_then(|tools| tools.into_iter().find(|tool| tool.name == *name))
+            {
+                // Self-capture's tools (#609), as the pinned contract has them.
+                Ok(tool)
             } else {
                 Err(format!(
                     "the session declared `{name}`, a tool with no definition here"
@@ -625,6 +635,25 @@ impl<'a> Walk<'a> {
         }
     }
 
+    /// A fact the record has no row for at all, named once per kind.
+    fn no_row(&mut self, line: &log::Line) {
+        let kind = match &line.event {
+            Line::IdleGap { .. } => log::Kind::IdleGap,
+            Line::Refused { .. } => log::Kind::Refused,
+            Line::Capture { .. } => log::Kind::Capture,
+            _ => log::Kind::Progress,
+        }
+        .tag();
+        if self.named_kinds.insert(kind) {
+            self.name(
+                line.seq,
+                kind,
+                format!("the record has no row for a `{kind}` line"),
+                None,
+            );
+        }
+    }
+
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
             // A prune (v7, #612): applied to the trunk by the seam that
@@ -705,26 +734,17 @@ impl<'a> Walk<'a> {
             // on the rebuilt trunk, as it does on the session's.
             // Archived items recalled (v7, #566): a note after it too, in
             // the log's order.
-            Line::Delivered { turn, text, .. } | Line::Recalled { turn, text, .. } => {
+            // The self-capture reminder (v7, #609): a note after it too.
+            Line::Delivered { turn, text, .. }
+            | Line::Recalled { turn, text, .. }
+            | Line::Reminded { turn, text } => {
                 self.notes.entry(*turn).or_default().push(text.clone());
             }
             // Facts the record has no row for at all, named once per kind.
-            Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
-                let kind = match &line.event {
-                    Line::IdleGap { .. } => log::Kind::IdleGap,
-                    Line::Refused { .. } => log::Kind::Refused,
-                    _ => log::Kind::Progress,
-                }
-                .tag();
-                if self.named_kinds.insert(kind) {
-                    self.name(
-                        line.seq,
-                        kind,
-                        format!("the record has no row for a `{kind}` line"),
-                        None,
-                    );
-                }
-            }
+            Line::IdleGap { .. }
+            | Line::Refused { .. }
+            | Line::Progress { .. }
+            | Line::Capture { .. } => self.no_row(line),
             // A tool call (v3, #302): its row carries how it ran under the
             // log's own words, so the record says what confined it.
             Line::ToolCall { .. }
@@ -1601,10 +1621,12 @@ mod tests {
             fork_delivery: None,
             reasoning_effort_default: None,
             instruction_files: None,
+            levers: None,
             tool_output: None,
             phases: None,
             phase_transitions: None,
             opening_phase: None,
+            fork_asks: None,
         }
     }
 
@@ -2530,6 +2552,7 @@ mod tests {
             why,
             question: "what did the operator decide".to_owned(),
             view: None,
+            ask: None,
         };
         let call = |turn: u32, fork: u64| {
             [
