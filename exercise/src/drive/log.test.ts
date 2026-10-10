@@ -281,6 +281,12 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(triggers).toEqual(['call:document-read:c1', 'turn_end']);
   });
 
+  it('folds a seam’s audit on its own lane: the entries it kept, updated and removed (#646)', () => {
+    const [audit] = [...fold(logOf('a-v7-seam-audited-on-its-lane-and-warmed.jsonl')).branches.values()].flat().filter((b) => b.lane === 'audit');
+    expect(audit?.outcome).toBe('value');
+    expect(audit?.audit).toEqual({ kept: [], updated: ['d1'], removed: [] });
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });

@@ -59,7 +59,7 @@ type Story = StoryObj<typeof meta>;
 
 const TRUNK_TONES: readonly Tone[] = ['system', 'user', 'assistant', 'tool'];
 /** Every lane the registry knows, and one it does not. */
-const LANES = ['interview', 'ratify', 'extraction', 'tangent'] as const;
+const LANES = ['interview', 'ratify', 'extraction', 'audit', 'tangent'] as const;
 
 /** The session event: every fill, with and without a body. The footer is what the harness measured. */
 export const BlockTones: Story = {

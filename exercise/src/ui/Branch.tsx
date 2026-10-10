@@ -43,6 +43,11 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         stats={[
           // An offboard seat (#615): where it ran, and what reading the trunk cold cost there. A warm fork names none.
           // What triggered it (#620): the turn's end, or a call that warranted it mid-turn.
+          // A seam's audit (#646): what it did to working memory -- kept, updated, removed.
+          node.audit && {
+            value: <span className="ex-branch__audit">{`kept ${node.audit.kept.length} · updated ${node.audit.updated.length} · removed ${node.audit.removed.length}`}</span>,
+            title: [`kept: ${node.audit.kept.join(', ') || 'none'}`, `updated: ${node.audit.updated.join(', ') || 'none'}`, `removed: ${node.audit.removed.join(', ') || 'none'}`].join('\n'),
+          },
           node.trigger !== undefined && { value: <span className="ex-branch__trigger">{node.trigger}</span>, title: 'what triggered this fork' },
           // A hazard it was sent knowing (#637).
           node.hazard !== undefined && { value: <span className="ex-branch__hazard" data-level={hazardOf(node.hazard).level}>{hazardOf(node.hazard).label}</span>, title: `a hazard this fork was sent knowing: ${node.hazard}` },
