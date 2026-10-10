@@ -17,10 +17,12 @@ import pruneSeam from '../../../diet/formats/log/fixtures/valid/a-v7-prune-appli
 import poolRefused from '../../../diet/formats/log/fixtures/valid/a-v7-fork-refused-for-the-pool-and-one-that-may-displace-the-trunk-cache.jsonl?raw';
 import backgroundCalls from '../../../diet/formats/log/fixtures/valid/a-v7-call-started-in-the-background.jsonl?raw';
 import triggeredForks from '../../../diet/formats/log/fixtures/valid/a-v7-gap-with-two-triggered-forks.jsonl?raw';
+import auditedSeam from '../../../diet/formats/log/fixtures/valid/a-v7-seam-audited-on-its-lane-and-warmed.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
+import { outcomeOf } from '../ui/sets.ts';
 import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
@@ -679,5 +681,50 @@ export const ServedNearTimeout: Story = {
     posted.length = 0;
     await userEvent.click(move);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'background' }]));
+  },
+};
+
+/** The audit branch, once drawn in its lane. */
+const auditBranch = (root: HTMLElement) =>
+  waitFor(async () => {
+    const found = root.querySelector<HTMLElement>('.ex-lane .ex-branch[data-lane="audit"]');
+    await expect(found).not.toBeNull();
+    return found!;
+  });
+
+/** `?drive`, log v7 (#646): a seam's audit runs in its own lane, coloured as itself, and says what it did to working memory. */
+export const ServedSeamAudit: Story = {
+  name: '?drive: a seam’s audit in its own lane, with what it kept, updated and removed',
+  args: { drive: true, web: serving(auditedSeam) },
+  play: async ({ canvasElement }) => {
+    const branch = await auditBranch(canvasElement);
+    await expect(branch.querySelector('.ex-branch__audit')?.textContent).toBe('kept 0 · updated 1 · removed 0');
+    // Its own lane colours, not the neutral fallback an unknown lane gets.
+    const block = branch.querySelector<HTMLElement>('.ex-block');
+    await expect(block?.style.getPropertyValue('--lane-ink')).toBe('var(--ink-audit)');
+  },
+};
+
+/** The same audit answered in words the grammar cannot read: drawn as unparseable, with nothing changed. */
+export const ServedSeamAuditUnparseable: Story = {
+  name: '?drive: a seam’s audit the grammar could not read',
+  args: {
+    drive: true,
+    web: serving(
+      auditedSeam
+        .trimEnd()
+        .split('\n')
+        .filter((l) => !(l.includes('"kind":"patch"') && l.includes('"fork":8')))
+        .map((l, i) => {
+          const e = JSON.parse(l) as Record<string, unknown>;
+          return JSON.stringify({ ...(e['kind'] === 'fork.settled' ? { ...e, outcome: 'unparseable' } : e), seq: i });
+        })
+        .join('\n'),
+    ),
+  },
+  play: async ({ canvasElement }) => {
+    const branch = await auditBranch(canvasElement);
+    await expect(branch.querySelector('.ex-branch__outcome')?.textContent).toBe(outcomeOf('unparseable').label);
+    await expect(branch.querySelector('.ex-branch__audit')).toBeNull();
   },
 };

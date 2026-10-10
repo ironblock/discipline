@@ -43,6 +43,9 @@
   --lamp-interview: var(--lamp-diet-asks);
   --lamp-ratify: var(--lamp-diet-decides);
   --lamp-extraction: var(--lamp-diet-reads);
+  /* A seam's audit (#646): its own lamp, apart from the forks that ask, decide and read. */
+  --lamp-diet-audits: #e8a33d;
+  --lamp-audit: var(--lamp-diet-audits);
 
   /* Surfaces */
   --page: #131415;
@@ -74,6 +77,8 @@
   --ink-ratify: color-mix(in oklab, var(--lamp-diet-decides) 60%, white);
   --fill-extraction: color-mix(in oklab, var(--lamp-diet-reads) 8%, transparent);
   --ink-extraction: color-mix(in oklab, var(--lamp-diet-reads) 55%, white);
+  --fill-audit: color-mix(in oklab, var(--lamp-diet-audits) 8%, transparent);
+  --ink-audit: color-mix(in oklab, var(--lamp-diet-audits) 55%, white);
   /* A lane the surface does not know: neutral, named by its label. */
   --fill-lane: #1d1f22;
   --ink-lane: #aab0b8;

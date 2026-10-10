@@ -39,7 +39,7 @@ function registry<K extends string>(known: Readonly<Record<string, Omit<Drawn, '
 // ------------------------------------------------------------------ lanes
 
 /** Lanes with colour tokens of their own (`--fill-<lane>`, `--ink-<lane>`). */
-const LANES: ReadonlySet<string> = new Set(['interview', 'ratify', 'extraction']);
+const LANES: ReadonlySet<string> = new Set(['interview', 'ratify', 'extraction', 'audit']);
 
 /**
  * A lane's colours, as custom properties for whatever draws it -- a bar, a
