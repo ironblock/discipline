@@ -126,10 +126,11 @@ impl Archive {
     }
 
     /// The [`TOP`] items holding the most of `query`'s anchors, each with how
-    /// many it holds; ties to the most recently archived. Empty when the
-    /// query has no anchor or no item holds one.
+    /// many it holds and where its text first holds one; ties to the most
+    /// recently archived. Empty when the query has no anchor or no item
+    /// holds one.
     #[must_use]
-    pub fn literal(&self, query: &str) -> Vec<(&Item, u64)> {
+    pub fn literal(&self, query: &str) -> Vec<Found<'_>> {
         let anchors = literal::anchors(query);
         if anchors.is_empty() {
             return Vec::new();
@@ -154,16 +155,41 @@ impl Archive {
         scored
             .into_iter()
             .take(TOP)
-            .map(|(_, item, held)| (item, held))
+            .map(|(_, item, score)| Found {
+                item,
+                score,
+                at: anchors
+                    .iter()
+                    .flat_map(|anchor| literal::find(&anchor.text, &item.text))
+                    .map(|hit| hit.offset)
+                    .min(),
+            })
             .collect()
     }
 }
 
+/// An item a literal recall found (#566).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Found<'a> {
+    /// The item.
+    pub item: &'a Item,
+    /// How many of the query's anchors it holds.
+    pub score: u64,
+    /// The byte offset in its text of the first anchor it holds there;
+    /// `None` when it holds them only in its title.
+    pub at: Option<usize>,
+}
+
 /// The note a recall sends: Qwen Code's "Relevant memory" block, each item
-/// under its title and key, its text truncated past [`MAX_BODY_CHARS`],
-/// wrapped as a system reminder. Empty for no items.
+/// under its title and key, wrapped as a system reminder; empty for no
+/// items. A text past [`MAX_BODY_CHARS`] is cut to a window of that many
+/// characters around its first match -- a quarter of it before, so the
+/// match keeps its lead-in -- each elided end marked `[…]`. Cut from the
+/// start, the match could fall outside what was sent (seam smoke run 2:
+/// the matched definition was cut off, and the model rightly said it could
+/// not confirm it existed).
 #[must_use]
-pub fn note(items: &[(&Item, u64)]) -> String {
+pub fn note(items: &[Found<'_>]) -> String {
     if items.is_empty() {
         return String::new();
     }
@@ -175,15 +201,16 @@ pub fn note(items: &[(&Item, u64)]) -> String {
             .to_owned(),
         String::new(),
     ];
-    for (item, _) in items {
+    for found in items {
+        let item = found.item;
+        let lead = item.text.len() - item.text.trim_start().len();
         let text = item.text.trim();
         let body = if text.chars().count() <= MAX_BODY_CHARS {
             text.to_owned()
         } else {
-            let cut: String = text.chars().take(MAX_BODY_CHARS).collect();
             format!(
                 "{}\n\n> NOTE: Relevant memory truncated for prompt budget.",
-                cut.trim_end()
+                window(text, found.at.map(|at| at.saturating_sub(lead)))
             )
         };
         lines.push(format!("### {} ({})", item.title, item.key));
@@ -194,6 +221,27 @@ pub fn note(items: &[(&Item, u64)]) -> String {
     format!(
         "<system-reminder>\n{}\n</system-reminder>",
         lines.join("\n")
+    )
+}
+
+/// [`MAX_BODY_CHARS`] characters of `text` around the byte offset `at` --
+/// from the start when there is none -- a quarter of them before it, the
+/// window kept inside the text, each end that elides text marked `[…]`.
+fn window(text: &str, at: Option<usize>) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let at = at
+        .filter(|at| text.is_char_boundary(*at))
+        .map_or(0, |at| text[..at].chars().count());
+    let start = at
+        .saturating_sub(MAX_BODY_CHARS / 4)
+        .min(chars.len().saturating_sub(MAX_BODY_CHARS));
+    let end = (start + MAX_BODY_CHARS).min(chars.len());
+    let cut: String = chars[start..end].iter().collect();
+    format!(
+        "{}{}{}",
+        if start > 0 { "[…] " } else { "" },
+        cut.trim(),
+        if end < chars.len() { " […]" } else { "" }
     )
 }
 
@@ -227,7 +275,7 @@ mod tests {
         let hits: Vec<(&str, u64)> = archive
             .literal("where is parse_regimen in src/regimen.rs")
             .into_iter()
-            .map(|(item, held)| (item.key.as_str(), held))
+            .map(|found| (found.item.key.as_str(), found.score))
             .collect();
         assert_eq!(hits, [("a", 2), ("e", 1), ("d", 1)]);
         assert!(
@@ -245,19 +293,68 @@ mod tests {
             " we chose parse_regimen \n",
         );
         let second = item("entry/e-1", "a retired entry", &long);
-        let text = note(&[(&first, 1), (&second, 1)]);
+        let found = |item, score| Found {
+            item,
+            score,
+            at: None,
+        };
+        let text = note(&[found(&first, 1), found(&second, 1)]);
         assert_eq!(
             text,
             format!(
                 "<system-reminder>\n## Relevant memory\n\nUse the following memories only when \
                  they are directly relevant to the current request. Verify file/function claims \
                  before relying on them.\n\n### an answer (seam-2/message-1)\n\nwe chose \
-                 parse_regimen\n\n### a retired entry (entry/e-1)\n\n{}\n\n> NOTE: Relevant memory \
+                 parse_regimen\n\n### a retired entry (entry/e-1)\n\n{} […]\n\n> NOTE: Relevant memory \
                  truncated for prompt budget.\n\n</system-reminder>",
                 "x".repeat(MAX_BODY_CHARS)
             )
         );
         assert_eq!(note(&[]), "");
+    }
+
+    /// #566, seam smoke run 2: a match past the first [`MAX_BODY_CHARS`]
+    /// characters is in the note -- a window around it, a quarter before,
+    /// both elided ends marked -- not cut off with the rest.
+    #[test]
+    fn a_long_items_note_keeps_the_window_around_its_match() {
+        let before = "a".repeat(MAX_BODY_CHARS * 2);
+        let after = "z".repeat(MAX_BODY_CHARS);
+        let mut archive = Archive::default();
+        archive.push(item(
+            "seam-1/message-3",
+            "a tool result",
+            &format!(
+                "{before} fn local_path(root: &Path) -> PathBuf {{ root.join(\"x\") }} {after}"
+            ),
+        ));
+        let found = archive.literal("does local_path exist?");
+        let [hit] = found.as_slice() else {
+            panic!("one item: {found:?}");
+        };
+        assert_eq!(hit.at, Some(MAX_BODY_CHARS * 2 + 4));
+        let text = note(&found);
+        assert!(
+            text.contains("fn local_path(root: &Path) -> PathBuf"),
+            "{text}"
+        );
+        let body = text
+            .split("\n\n")
+            .find(|part| part.contains("local_path"))
+            .expect("the body");
+        assert!(
+            body.starts_with("[…] a") && body.ends_with("z […]"),
+            "{body}"
+        );
+        let kept = body.trim_start_matches("[…] ").trim_end_matches(" […]");
+        assert!(
+            kept.chars().count() <= MAX_BODY_CHARS,
+            "{}",
+            kept.chars().count()
+        );
+        // The anchor itself sits a quarter of the window in.
+        let lead = kept.find("local_path").expect("the match");
+        assert_eq!(kept[..lead].chars().count(), MAX_BODY_CHARS / 4);
     }
 
     #[test]
