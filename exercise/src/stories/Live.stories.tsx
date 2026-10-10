@@ -6,6 +6,7 @@ import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-c
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
 import approvalsOff from '../../../diet/formats/log/fixtures/valid/a-v7-call-that-ran-with-approvals-off.jsonl?raw';
 import phaseMoved from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-moved-a-phase.jsonl?raw';
+import leversDeclared from '../../../diet/formats/log/fixtures/valid/a-v7-session-declaring-its-levers.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -445,5 +446,31 @@ export const ServedNothingToBackground: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="tool"]').length).toBe(1));
     await expect([...canvasElement.querySelectorAll('button')].some((b) => b.textContent === 'move to background')).toBe(false);
+  },
+};
+
+/** `?drive` (#573): a session.start with the whole lever table -- the header lists every lever and its state, as given. */
+export const ServedLeverTable: Story = {
+  name: '?drive: the header lists every lever the session declares',
+  args: { drive: true, web: serving(leversDeclared) },
+  play: async ({ canvasElement }) => {
+    const table = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLDetailsElement>('.ex-header__levers');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    const start = JSON.parse(leversDeclared.split('\n')[0]!) as { levers: Record<string, string> };
+    const rows = [...table.querySelectorAll<HTMLElement>('[data-lever-row]')].map((row) => [row.dataset['leverRow'], row.querySelector('dd')?.textContent]);
+    await expect(rows).toEqual(Object.entries(start.levers));
+  },
+};
+
+/** A log from before the table (#623) has none to list: the header keeps its three, and offers no table. */
+export const ServedNoLeverTable: Story = {
+  name: '?drive: a log without the lever table offers none',
+  args: { drive: true, web: serving(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await expect(canvasElement.querySelector('.ex-header__levers')).toBeNull();
   },
 };
