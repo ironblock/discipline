@@ -95,7 +95,9 @@ pub fn parse(input: &str) -> Result<Vec<Line>, ParseError> {
             .as_str()
             .parse::<u32>()
             .map_err(|_| ParseError::Numbering("a number past u32".to_owned()))?;
-        let verdict = inner.next().ok_or(ParseError::Shape("a line with no verdict"))?;
+        let verdict = inner
+            .next()
+            .ok_or(ParseError::Shape("a line with no verdict"))?;
         let text = |pair: pest::iterators::Pair<'_, Rule>| {
             pair.into_inner()
                 .last()
@@ -157,10 +159,8 @@ pub fn project(source: &str) -> Result<Value, String> {
             lines
                 .into_iter()
                 .map(|line| {
-                    let mut members = BTreeMap::from([(
-                        "n".to_owned(),
-                        Value::Integer(i64::from(line.number)),
-                    )]);
+                    let mut members =
+                        BTreeMap::from([("n".to_owned(), Value::Integer(i64::from(line.number)))]);
                     let (verdict, detail) = match line.judgment {
                         Judgment::Keep => ("keep", None),
                         Judgment::Update(note) => ("update", Some(("note", Value::String(note)))),
