@@ -481,6 +481,28 @@ mod tests {
         );
     }
 
+    /// #555: the maintainer's two hosted rungs resolve from the registry as
+    /// Anthropic's models, by their API ids, observed 2026-10-10, thinking
+    /// adaptively with the interleaved-thinking beta, served as an API.
+    #[test]
+    fn the_hosted_rungs_are_haiku_5_5_and_sonnet_5_5_thinking_adaptively() {
+        for model in ["claude-haiku-5-5", "claude-sonnet-5-5"] {
+            let found = identity(REGISTRY, &format!("anthropic-{model}")).expect("registered");
+            assert_eq!(
+                found.weights,
+                Weights::Hosted {
+                    provider: "Anthropic".to_owned(),
+                    model_id: model.to_owned(),
+                    version_or_date_observed: "2026-10-10".to_owned(),
+                },
+                "{model}"
+            );
+            assert_eq!(found.thinking.as_deref(), Some("adaptive"), "{model}");
+            assert_eq!(found.engine_betas, ["interleaved-thinking-2025-05-14"]);
+            assert_eq!(found.server_kind.as_deref(), Some("api"), "{model}");
+        }
+    }
+
     /// #555: a hosted entry's weights are who serves them, what they call
     /// the model and the version or date observed; `thinking` is read as
     /// `adaptive` or `budget`, and any other word refused.

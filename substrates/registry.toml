@@ -307,6 +307,16 @@ measured_by = "computed as check-fingerprints.py's digest_of over the hosted-api
 provider = "diet-drive stub"
 api_host = "localhost"
 
+[equipment.anthropic-api]
+display_name = "Anthropic's Messages API"
+entry_type = "hosted-api"
+hardware_fingerprint = "24a1117b0a8112dbcd56ec38eb21cb44bf8124400d6233af927ecadc1db1b13e"
+role = "a hosted provider's endpoint (#555): Anthropic's Messages API, its models' hosted rungs; the hardware behind it is Anthropic's and unseen"
+measured = "2026-10-10"
+measured_by = "computed as check-fingerprints.py's digest_of over the hosted-api type's fields"
+provider = "Anthropic"
+api_host = "api.anthropic.com"
+
 [equipment.canned-loopback]
 display_name = "the canned loopback server"
 entry_type = "canned-server"
@@ -1140,6 +1150,38 @@ weights_kind = "hosted"
 weights_provider = "diet-drive stub"
 weights_model_id = "a-hosted-model"
 weights_version_or_date_observed = "constructed"
+
+[substrate.anthropic-claude-haiku-5-5]
+equipment = "anthropic-api"
+description = "Claude Haiku 5.5 over Anthropic's Messages API (#555): the hosted rung nearest the 27B floor, the maintainer's choice. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (055d95bb, packages/opencode/src/provider/transform.ts:657-684, adaptive for claude ids at 4.7 and after) both declare it; no budget_tokens. No live call has been made against it"
+pinned = true
+server_kind = "api"
+dialect = "anthropic-messages"
+engine_name = "anthropic-messages"
+engine_identity = "2023-06-01"
+engine_identity_is = "the anthropic-version header every request carries: a hosted API reports no build, so its engine is the API version it is spoken to at"
+engine_betas = "interleaved-thinking-2025-05-14"
+thinking = "adaptive"
+weights_kind = "hosted"
+weights_provider = "Anthropic"
+weights_model_id = "claude-haiku-5-5"
+weights_version_or_date_observed = "2026-10-10"
+
+[substrate.anthropic-claude-sonnet-5-5]
+equipment = "anthropic-api"
+description = "Claude Sonnet 5.5 over Anthropic's Messages API (#555): the hosted rung near Qwen3.8-Flash-Next, the maintainer's choice over Sonnet 5, which sits closer and costs more. Its thinking is adaptive, as Pi (42a3497d, packages/ai/scripts/generate-models.ts:622-641, forceAdaptiveThinking for sonnet-5/haiku-5 ids) and OpenCode 2 (055d95bb, packages/opencode/src/provider/transform.ts:657-684, adaptive for claude ids at 4.7 and after) both declare it; no budget_tokens. No live call has been made against it"
+pinned = true
+server_kind = "api"
+dialect = "anthropic-messages"
+engine_name = "anthropic-messages"
+engine_identity = "2023-06-01"
+engine_identity_is = "the anthropic-version header every request carries: a hosted API reports no build, so its engine is the API version it is spoken to at"
+engine_betas = "interleaved-thinking-2025-05-14"
+thinking = "adaptive"
+weights_kind = "hosted"
+weights_provider = "Anthropic"
+weights_model_id = "claude-sonnet-5-5"
+weights_version_or_date_observed = "2026-10-10"
 
 # The drive endpoint's engine commit and weights on this host's CPU, served for #29's I0
 # captures (a streamed tool call and its turn 2); not a claim substrate.
