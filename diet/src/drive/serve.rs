@@ -846,6 +846,11 @@ impl<S: Streaming + 'static> Serving<S> {
                     Err(rejection) => rejected(rejection),
                 }
             }
+            // The operator's ruling on the model's phase proposal (#124).
+            Command::RatifyPhase(call, choice) => match self.session.ratify_phase(&call, choice) {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
             // The job the running call becomes (#614).
             Command::Background => match self.session.background() {
                 Ok(job) => (
@@ -881,6 +886,8 @@ enum Command {
     CloseTangent(BTreeMap<String, crate::object::tangent::Disposition>),
     /// Move the running command to the background (#614).
     Background,
+    /// Rule on the pending phase proposal its call names (#124).
+    RatifyPhase(String, crate::drive::session::PhaseChoice),
 }
 
 impl Command {
@@ -905,6 +912,9 @@ impl Command {
             CommandKind::CloseTangent => &["kind", "dispositions"],
             // #614: moving the running call ends no idle gap either.
             CommandKind::Background => &["kind"],
+            // #124: the proposal's call and the operator's choice; a ruling
+            // ends no idle gap.
+            CommandKind::RatifyPhase => &["kind", "call", "choice"],
         };
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
@@ -963,6 +973,16 @@ impl Command {
                 _ => None,
             },
             CommandKind::Background => Some(Self::Background),
+            CommandKind::RatifyPhase => match (object.get("call"), object.get("choice")) {
+                (Some(Value::String(call)), Some(Value::String(choice))) => {
+                    crate::drive::session::PhaseChoice::ALL
+                        .iter()
+                        .copied()
+                        .find(|candidate| candidate.tag() == choice)
+                        .map(|choice| Self::RatifyPhase(call.clone(), choice))
+                }
+                _ => None,
+            },
         }?;
         Some(Posted {
             command,
@@ -1389,6 +1409,36 @@ mod tests {
             assert!(read(refused).is_none(), "{refused}");
         }
     }
+
+    /// #124: `ratify-phase` takes the proposal's call and a choice --
+    /// `seam`, `continue` or `stay`; anything else, or an idle gap, is no
+    /// command.
+    #[test]
+    fn the_phase_ruling_reads_its_call_and_choice_and_nothing_else() {
+        use crate::drive::session::PhaseChoice;
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        for (word, choice) in [
+            ("seam", PhaseChoice::Seam),
+            ("continue", PhaseChoice::Continue),
+            ("stay", PhaseChoice::Stay),
+        ] {
+            assert!(matches!(
+                read(&format!(r#"{{"kind":"ratify-phase","call":"call-p","choice":"{word}"}}"#)),
+                Some(Command::RatifyPhase(call, ruled)) if call == "call-p" && ruled == choice
+            ));
+        }
+        for refused in [
+            r#"{"kind":"ratify-phase","call":"call-p","choice":"maybe"}"#,
+            r#"{"kind":"ratify-phase","choice":"seam"}"#,
+            r#"{"kind":"ratify-phase","call":"call-p","choice":"seam","idle_gap":{}}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
     #[test]
     fn an_ask_over_http_streams_its_answer_to_a_reader_already_listening() {
         let (_session, server) = serve(Canned::new([deltas(&["Hel", "lo"])]), quick());

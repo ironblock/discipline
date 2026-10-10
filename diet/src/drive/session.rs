@@ -108,6 +108,8 @@ vocabulary! {
         CloseTangent => "close-tangent",
         /// Move the running command to the background (#614).
         Background => "background",
+        /// Rule on the model's pending phase proposal (#124).
+        RatifyPhase => "ratify-phase",
     }
 }
 
@@ -148,6 +150,9 @@ vocabulary! {
         NotTheScope => "not-the-scope",
         /// A move to the background with no command running (#614).
         NothingRunning => "nothing-running",
+        /// A phase ruling named no pending proposal (#124): none is pending,
+        /// or the call it names is not the one that is.
+        NoProposal => "no-proposal",
     }
 }
 
@@ -687,6 +692,17 @@ pub enum Event {
         tangent: Option<String>,
     },
     /// A self-capture call and what it came to (#609).
+    /// The operator's ruling on the model's pending phase proposal (#124).
+    PhaseRuled {
+        /// The proposal's call.
+        call: String,
+        /// What the operator ruled.
+        choice: PhaseChoice,
+        /// The phase the session was in.
+        from: Option<String>,
+        /// The phase proposed.
+        to: String,
+    },
     Captured {
         /// The request whose answer made the call: the trunk's, or with
         /// `fork` the interview fork's (#610).
@@ -704,6 +720,10 @@ pub enum Event {
         /// The interview fork that made the call, when one answered through
         /// the capture tools (#610).
         fork: Option<u64>,
+        /// A phase proposal's move (#124): the phase the session was in.
+        from: Option<String>,
+        /// The phase a `propose_phase_transition` call proposed.
+        to: Option<String>,
     },
     /// A fork screened out of the gap (#611): the turn's own self-capture
     /// already recorded what it would ask.
@@ -1719,6 +1739,8 @@ struct State {
     seam_pending: Option<PendingSeam>,
     /// The pre-warm in flight (#504), which an ask cancels.
     warming: Option<Cancel>,
+    /// The model's phase proposal awaiting the operator's ruling (#124).
+    proposal: Option<PendingProposal>,
     /// The latest measured prompt (prefilled plus cached tokens) and the
     /// estimate of the request it measured: what the next request's prompt
     /// is sized from (#588).
@@ -1769,6 +1791,7 @@ impl State {
             overflow_retried: None,
             seam_pending: None,
             warming: None,
+            proposal: None,
             measured_prompt: None,
             step_tokens: None,
             ran: Vec::new(),
@@ -2073,8 +2096,11 @@ impl State {
                 CommandKind::Cancel => GapEnd::Cancel,
                 CommandKind::DeclareSeam => GapEnd::Seam,
                 CommandKind::End => GapEnd::End,
-                CommandKind::OpenTangent | CommandKind::CloseTangent | CommandKind::Background => {
-                    unreachable!("a tangent or background command carries no idle gap")
+                CommandKind::OpenTangent
+                | CommandKind::CloseTangent
+                | CommandKind::Background
+                | CommandKind::RatifyPhase => {
+                    unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
             if gap.ended_by != ends {
@@ -2678,24 +2704,7 @@ impl<S: Streaming + 'static> Session<S> {
             {
                 Some(Refusal::NothingToSeam)
             }
-            Settlement::Awaiting => to.and_then(|to| {
-                use crate::seam::phase::{Decision, Refusal as Graph};
-                let graph = state
-                    .interview
-                    .as_ref()
-                    .map(|interview| &interview.phases)
-                    .filter(|graph| !graph.is_empty());
-                let Some(graph) = graph else {
-                    return Some(Refusal::NoPhaseGraph);
-                };
-                match graph.decide(state.phase.as_deref(), to) {
-                    Decision::Ratified => None,
-                    Decision::Refused(Graph::NoGraph) => Some(Refusal::NoPhaseGraph),
-                    Decision::Refused(Graph::NotAPhase) => Some(Refusal::NotAPhase),
-                    Decision::Refused(Graph::AlreadyThere) => Some(Refusal::AlreadyInPhase),
-                    Decision::Refused(Graph::NoEdge) => Some(Refusal::NoPhaseEdge),
-                }
-            }),
+            Settlement::Awaiting => to.and_then(|to| graph_refusal(&state, to)),
         };
         if let Some(because) = because {
             let refused = state.refuse(CommandKind::DeclareSeam, because);
@@ -2714,6 +2723,85 @@ impl<S: Streaming + 'static> Session<S> {
         self.shared.changed.notify_all();
         if queued {
             // Its audit and pre-warm (#504), on a thread of their own.
+            let shared = Arc::clone(&self.shared);
+            let spawned = std::thread::Builder::new()
+                .name("diet-seam".to_owned())
+                .spawn(move || seam_work(&shared));
+            if spawned.is_err() {
+                seam_work(&self.shared);
+            }
+        }
+        Ok(())
+    }
+
+    /// Rule on the model's pending phase proposal (#124), the one its call
+    /// `call` made: `seam` declares the seam that moves to the proposed
+    /// phase, as [`Session::declare_seam_to`] does (and, with the regimen's
+    /// audit or pre-warm, queues them); `continue` moves the phase and keeps
+    /// the trunk, so the next seam's render names it; `stay` declines. A
+    /// `phase.ruled` line records the ruling, and the proposal is spent.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`];
+    /// [`Refusal::NoProposal`] when none is pending or `call` names another;
+    /// for `seam` and `continue`, the graph's refusal of the move from the
+    /// phase the session is in now, and for `seam`
+    /// [`Refusal::NothingToSeam`] as a declared seam would be.
+    pub fn ratify_phase(&self, call: &str, choice: PhaseChoice) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let pending = state
+            .proposal
+            .as_ref()
+            .filter(|proposal| proposal.call == call)
+            .map(|proposal| proposal.to.clone());
+        let because = match (state.settlement, pending.as_deref()) {
+            (Settlement::Ended, _) => Some(Refusal::Ended),
+            (Settlement::Turn | Settlement::Capture, _) => Some(Refusal::InFlight),
+            (Settlement::Awaiting, None) => Some(Refusal::NoProposal),
+            (Settlement::Awaiting, Some(_)) if choice == PhaseChoice::Stay => None,
+            (Settlement::Awaiting, Some(to)) => graph_refusal(&state, to).or_else(|| {
+                (choice == PhaseChoice::Seam
+                    && (state.turns == 0
+                        || state
+                            .interview
+                            .as_ref()
+                            .is_none_or(|interview| interview.object.live().next().is_none())))
+                .then_some(Refusal::NothingToSeam)
+            }),
+        };
+        if let Some(because) = because {
+            let refused = state.refuse(CommandKind::RatifyPhase, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+        state.admit()?;
+        let Some(PendingProposal { call, from, to }) = state.proposal.take() else {
+            unreachable!("a pending proposal was checked above");
+        };
+        state.push(Event::PhaseRuled {
+            call,
+            choice,
+            from,
+            to: to.clone(),
+        });
+        let queued = match choice {
+            PhaseChoice::Seam => seam(
+                &self.shared.template,
+                &mut state,
+                crate::seam::Reason::Phase,
+                Some(to),
+            ),
+            PhaseChoice::Continue => {
+                state.phase = Some(to);
+                false
+            }
+            PhaseChoice::Stay => false,
+        };
+        drop(state);
+        self.shared.changed.notify_all();
+        if queued {
             let shared = Arc::clone(&self.shared);
             let spawned = std::thread::Builder::new()
                 .name("diet-seam".to_owned())
@@ -3611,6 +3699,17 @@ pub fn line_of(logged: &Logged) -> log::Line {
             supersedes: supersedes.clone(),
             tangent: tangent.clone(),
         },
+        Event::PhaseRuled {
+            call,
+            choice,
+            from,
+            to,
+        } => log::Event::PhaseRuled {
+            call: call.clone(),
+            choice: choice.tag().to_owned(),
+            from: from.clone(),
+            to: to.clone(),
+        },
         Event::Captured {
             request,
             call,
@@ -3619,6 +3718,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entries,
             why,
             fork,
+            from,
+            to,
         } => log::Event::Capture {
             request: *request,
             call: call.clone(),
@@ -3627,6 +3728,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             entries: entries.clone(),
             why: why.clone(),
             fork: *fork,
+            from: from.clone(),
+            to: to.clone(),
         },
         Event::Skipped {
             of_turn,
@@ -3837,6 +3940,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::OpenTangent => log::Command::OpenTangent,
         CommandKind::CloseTangent => log::Command::CloseTangent,
         CommandKind::Background => log::Command::Background,
+        CommandKind::RatifyPhase => log::Command::RatifyPhase,
     }
 }
 
@@ -3853,6 +3957,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::Stale => log::Refusal::Stale,
         Refusal::TangentOpen => log::Refusal::TangentOpen,
         Refusal::NoTangent => log::Refusal::NoTangent,
+        Refusal::NoProposal => log::Refusal::NoProposal,
         Refusal::BadTangent => log::Refusal::BadTangent,
         Refusal::NotTheScope => log::Refusal::NotTheScope,
         Refusal::NothingRunning => log::Refusal::NothingRunning,
@@ -4476,6 +4581,31 @@ fn capture_call<S>(
     if call.name == CaptureTool::UpdateRecord.tag() && outcome == "recorded" {
         state.recorded_this_turn = true;
     }
+    // A phase proposal (#124), ruled by the graph at once: refused in the
+    // graph's word, or held as the one proposal pending the operator.
+    let (mut outcome, mut why) = (outcome, why);
+    let mut moved = None;
+    if call.name == CaptureTool::ProposePhaseTransition.tag() && outcome == "proposed" {
+        let to = serde_json::from_str::<serde_json::Value>(&call.arguments)
+            .ok()
+            .and_then(|args| args.get("to")?.as_str().map(str::to_owned))
+            .unwrap_or_default();
+        let from = state.phase.clone();
+        match graph_refusal(&state, &to) {
+            Some(refusal) => {
+                outcome = "refused";
+                why = Some(refusal.tag().to_owned());
+            }
+            None => {
+                state.proposal = Some(PendingProposal {
+                    call: call.id.clone(),
+                    from: from.clone(),
+                    to: to.clone(),
+                });
+            }
+        }
+        moved = Some((from, to));
+    }
     let shown = match (&why, entries.first()) {
         (Some(why), _) => format!("{outcome}: {why}"),
         (None, Some(entry)) => format!("{outcome}: {entry}"),
@@ -4489,6 +4619,8 @@ fn capture_call<S>(
         entries,
         why,
         fork: None,
+        from: moved.as_ref().and_then(|(from, _)| from.clone()),
+        to: moved.map(|(_, to)| to),
     });
     for patch in lines {
         state.push(patch);
@@ -6323,6 +6455,49 @@ struct AuditFired {
     items: Vec<crate::object::EntryId>,
 }
 
+vocabulary! {
+    /// What the operator ruled on the model's phase proposal (#124).
+    PhaseChoice {
+        /// Start the new phase from the summary: a seam that moves to it.
+        Seam => "seam",
+        /// Move to the new phase and keep the trunk.
+        Continue => "continue",
+        /// Stay: the proposal is declined.
+        Stay => "stay",
+    }
+}
+
+/// The model's phase proposal the operator has not yet ruled on (#124).
+struct PendingProposal {
+    /// Its `propose_phase_transition` call.
+    call: String,
+    /// The phase the session was in when it was made.
+    from: Option<String>,
+    /// The phase proposed.
+    to: String,
+}
+
+/// The phase graph's ruling on a move from `from` to `to` (#563, #124),
+/// as a refusal when it refuses.
+fn graph_refusal(state: &State, to: &str) -> Option<Refusal> {
+    use crate::seam::phase::{Decision, Refusal as Graph};
+    let graph = state
+        .interview
+        .as_ref()
+        .map(|interview| &interview.phases)
+        .filter(|graph| !graph.is_empty());
+    let Some(graph) = graph else {
+        return Some(Refusal::NoPhaseGraph);
+    };
+    match graph.decide(state.phase.as_deref(), to) {
+        Decision::Ratified => None,
+        Decision::Refused(Graph::NoGraph) => Some(Refusal::NoPhaseGraph),
+        Decision::Refused(Graph::NotAPhase) => Some(Refusal::NotAPhase),
+        Decision::Refused(Graph::AlreadyThere) => Some(Refusal::AlreadyInPhase),
+        Decision::Refused(Graph::NoEdge) => Some(Refusal::NoPhaseEdge),
+    }
+}
+
 /// How a fork's call fits its server ([`State::fork_fit`], #406).
 struct ForkFit {
     /// Its prompt, as sized.
@@ -6975,6 +7150,8 @@ fn captured(
             entries,
             why,
             fork: Some(fork),
+            from: None,
+            to: None,
         });
         lines.extend(patched);
     }
@@ -9143,6 +9320,8 @@ pub(in crate::drive) mod tests {
                 entries: Vec::new(),
                 why: Some("the groundedness gate kept nothing of it".to_owned()),
                 fork: None,
+                to: None,
+                from: None,
             },
             Event::Reminded {
                 turn: 2,
@@ -9153,6 +9332,12 @@ pub(in crate::drive) mod tests {
                 at: 3,
                 template: crate::dogma::Template::AuditQHuman,
                 question: "audit the notes".to_owned(),
+            },
+            Event::PhaseRuled {
+                call: "call-p".to_owned(),
+                choice: PhaseChoice::Continue,
+                from: Some("plan".to_owned()),
+                to: "build".to_owned(),
             },
         ];
         let mut kinds = std::collections::BTreeSet::new();
@@ -9194,9 +9379,10 @@ pub(in crate::drive) mod tests {
                 Event::TimeoutNear { .. } => 33,
                 Event::Skipped { .. } => 34,
                 Event::Audited { .. } => 35,
+                Event::PhaseRuled { .. } => 36,
             });
         }
-        assert_eq!(kinds.len(), 36, "a variant has no sample");
+        assert_eq!(kinds.len(), 37, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -9570,6 +9756,8 @@ pub(in crate::drive) mod tests {
                 entries: Vec::new(),
                 why: Some("the groundedness gate kept nothing of it".to_owned()),
                 fork: None,
+                to: None,
+                from: None,
             },
             log::Event::Reminded {
                 turn: 2,
@@ -9587,6 +9775,12 @@ pub(in crate::drive) mod tests {
                 seat: None,
                 ask: Some("audit_q_human".to_owned()),
                 hazard: None,
+            },
+            log::Event::PhaseRuled {
+                call: "call-p".to_owned(),
+                choice: "continue".to_owned(),
+                from: Some("plan".to_owned()),
+                to: "build".to_owned(),
             },
         ]
     }
@@ -10053,12 +10247,12 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "ask cancel declare-seam end open-tangent close-tangent background"
+            "ask cancel declare-seam end open-tangent close-tangent background ratify-phase"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal"
         );
         assert_eq!(
             tags(
@@ -14653,6 +14847,164 @@ pub(in crate::drive) mod tests {
             phases: graph,
             ..interviewing(&[log::Warrant::Scoping])
         }
+    }
+
+    /// A self-capturing session over `phased()`'s graph whose first turn
+    /// records a fact and proposes `to` (#124); the log once it settled.
+    fn proposing(to: &str, rest: Vec<Vec<Step>>) -> (Session<Canned>, Vec<Logged>) {
+        const SAID: &str = "The schema has two tables.";
+        let mut interview = phased();
+        interview.rules = Vec::new();
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        let mut acts = vec![
+            vec![
+                Step::Delta(SAID.to_owned()),
+                Step::call(
+                    0,
+                    "call-f",
+                    "update_record",
+                    &serde_json::json!({ "field": "fact", "content": SAID }).to_string(),
+                ),
+                Step::call(
+                    1,
+                    "call-p",
+                    "propose_phase_transition",
+                    &serde_json::json!({ "to": to, "reason": "the plan is settled" }).to_string(),
+                ),
+            ],
+            deltas(&["done"]),
+        ];
+        acts.extend(rest);
+        let session =
+            Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview));
+        session.ask("plan it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        (session, log)
+    }
+
+    fn proposal_line(log: &[Logged]) -> (String, Option<String>, Option<String>, Option<String>) {
+        log.iter()
+            .find_map(|logged| match &logged.event {
+                Event::Captured {
+                    tool,
+                    outcome,
+                    why,
+                    from,
+                    to,
+                    ..
+                } if tool == "propose_phase_transition" => {
+                    Some((outcome.clone(), why.clone(), from.clone(), to.clone()))
+                }
+                _ => None,
+            })
+            .expect("the proposal's capture line")
+    }
+
+    /// #124: a proposal the graph allows is pending -- `proposed`, its move
+    /// on the capture line -- and nothing moves until the operator rules;
+    /// `continue` moves the phase and keeps the trunk, and the ruling is
+    /// spent.
+    #[test]
+    fn a_proposal_the_graph_allows_waits_and_continue_moves_the_phase_on_the_trunk() {
+        let (session, log) = proposing("build", Vec::new());
+        assert_eq!(
+            proposal_line(&log),
+            (
+                "proposed".to_owned(),
+                None,
+                Some("plan".to_owned()),
+                Some("build".to_owned())
+            )
+        );
+        assert_eq!(
+            session.shared.lock().phase.as_deref(),
+            Some("plan"),
+            "nothing moved yet"
+        );
+        let trunk = session.trunk();
+        session
+            .ratify_phase("call-p", PhaseChoice::Continue)
+            .expect("ruled");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        assert_eq!(session.trunk(), trunk, "the trunk is kept");
+        let log = session.events_from(0);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PhaseRuled { call, choice: PhaseChoice::Continue, from: Some(from), to }
+                if call == "call-p" && from == "plan" && to == "build"
+        )));
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Seamed { .. }))
+        );
+        assert!(matches!(
+            session.ratify_phase("call-p", PhaseChoice::Continue),
+            Err(Rejected::Refused(Refusal::NoProposal))
+        ));
+        reads_whole(&session);
+    }
+
+    /// #124: a proposal the graph refuses is `refused` in the graph's word,
+    /// as the model is shown, and leaves nothing to rule on.
+    #[test]
+    fn a_proposal_the_graph_refuses_is_refused_in_its_word() {
+        let (session, log) = proposing("review", Vec::new());
+        assert_eq!(
+            proposal_line(&log),
+            (
+                "refused".to_owned(),
+                Some("no-phase-edge".to_owned()),
+                Some("plan".to_owned()),
+                Some("review".to_owned())
+            )
+        );
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::ToolCalled(line) if line.shown.as_deref() == Some("refused: no-phase-edge")
+        )));
+        assert!(matches!(
+            session.ratify_phase("call-p", PhaseChoice::Seam),
+            Err(Rejected::Refused(Refusal::NoProposal))
+        ));
+        reads_whole(&session);
+    }
+
+    /// #124: `seam` declares the seam that moves to the proposed phase;
+    /// `stay` declines, moving nothing; a ruling naming another call is
+    /// `no-proposal`.
+    #[test]
+    fn ratifying_seam_moves_the_phase_at_a_seam_and_stay_declines() {
+        let (session, _) = proposing("build", Vec::new());
+        assert!(matches!(
+            session.ratify_phase("call-other", PhaseChoice::Seam),
+            Err(Rejected::Refused(Refusal::NoProposal))
+        ));
+        session
+            .ratify_phase("call-p", PhaseChoice::Seam)
+            .expect("ruled");
+        let log = session.events_from(0);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Seamed { reason: crate::seam::Reason::Phase, phase: Some(moved), .. }
+                if moved.from == "plan" && moved.to == "build"
+        )));
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        reads_whole(&session);
+
+        let (session, _) = proposing("build", Vec::new());
+        session
+            .ratify_phase("call-p", PhaseChoice::Stay)
+            .expect("ruled");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("plan"));
+        assert!(
+            !session
+                .events_from(0)
+                .iter()
+                .any(|logged| matches!(logged.event, Event::Seamed { .. }))
+        );
+        reads_whole(&session);
     }
 
     /// #563: a served session opens in its graph's first phase and logs the

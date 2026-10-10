@@ -30,6 +30,7 @@ export type Kind =
   | "delivered"
   | "recalled"
   | "pruned"
+  | "phase.ruled"
   | "tangent.open"
   | "tangent.close"
   | "capture"
@@ -61,6 +62,7 @@ export type Command =
   | "open-tangent"
   | "close-tangent"
   | "background"
+  | "ratify-phase"
 ;
 
 export type Refusal =
@@ -79,6 +81,7 @@ export type Refusal =
   | "bad-tangent"
   | "not-the-scope"
   | "nothing-running"
+  | "no-proposal"
 ;
 
 export type FailReason =
@@ -606,6 +609,16 @@ export type PrunedLine = {
   text: string;
 };
 
+export type PhaseRuledLine = {
+  seq: number;
+  t: number;
+  kind: "phase.ruled";
+  call: string;
+  choice: string;
+  from?: string;
+  to: string;
+};
+
 export type TangentOpenLine = {
   seq: number;
   t: number;
@@ -639,6 +652,8 @@ export type CaptureLine = {
   entries: string[];
   why?: string;
   fork?: number;
+  from?: string;
+  to?: string;
 };
 
 export type RemindedLine = {
@@ -709,6 +724,7 @@ export type LogLine =
   | DeliveredLine
   | RecalledLine
   | PrunedLine
+  | PhaseRuledLine
   | TangentOpenLine
   | TangentCloseLine
   | CaptureLine
