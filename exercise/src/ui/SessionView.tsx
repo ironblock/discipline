@@ -633,6 +633,10 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                 foreground={session.eras.at(-1)?.nodes.some((n) => n.kind === 'tool' && n.running && n.tool === 'bash') ?? false}
                 // That command near its timeout (#613): the move asks itself.
                 {...(session.proposal ? { proposal: session.proposal } : {})}
+                // A seam held for the operator (#150's gate): what its reconcile left unaddressed, with each entry's text.
+                {...(session.held
+                  ? { held: { unaddressed: session.held.unaddressed.map((id) => ({ id, text: session.memory.find((m) => m.id === id)?.text ?? id })) } }
+                  : {})}
                 // Nothing to seam (#685), as serve decides it: no turn has settled, or working memory holds no live entry.
                 {...(session.lastSettled === undefined
                   ? { noSeam: 'no turn has settled yet' }

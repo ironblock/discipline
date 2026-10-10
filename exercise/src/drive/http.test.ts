@@ -226,6 +226,13 @@ describe('HttpTransport: commands', () => {
     expect(posted).toEqual([{ kind: 'background' }]);
   });
 
+  it('posts a held seam’s refill-anyway as serve takes it (#150’s gate), and reads its refusal', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"nothing-held"}', { status: 409 })) });
+    await expect(transport.dispatch({ kind: 'refill-anyway' })).resolves.toEqual({ ok: false, refused: 'nothing-held' });
+    expect(posted).toEqual([{ kind: 'refill-anyway' }]);
+  });
+
   it('posts the operator’s ruling on a phase proposal as serve takes it (#651), and reads its refusal', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"no-proposal"}', { status: 409 })) });

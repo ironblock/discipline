@@ -80,3 +80,8 @@
 .ex-seam__job-output {
   color: var(--ink-muted);
 }
+
+/* Refilled over the operator's unaddressed changes (#150's gate). */
+.ex-seam__anyway {
+  color: var(--warn);
+}

@@ -33,6 +33,8 @@ export interface ComposerProps {
   readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string };
   /** Why a seam has nothing to refill from now, when it has none (#685): serve refuses a seam then (`nothing-to-seam`). */
   readonly noSeam?: string;
+  /** A seam held for the operator (#150's gate): the changes its reconcile left unaddressed, each with its entry's text. */
+  readonly held?: { readonly unaddressed: readonly { readonly id: string; readonly text: string }[] };
 }
 
 const DISPOSITIONS: readonly Disposition[] = ['keep', 'drop', 'park'];
@@ -64,7 +66,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, noSeam }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, noSeam, held }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -196,6 +198,23 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
       data-state={state}
       data-link={link}
     >
+      {/* A seam held for the operator (#150's gate): the reconcile left their changes unaddressed, so no refill yet. */}
+      {held && dispatch ? (
+        <section className="ex-composer__held" aria-label="the seam is held for you">
+          <span className="ex-composer__label">the seam is held: the reconcile left your changes unaddressed</span>
+          <ul className="ex-composer__held-list">
+            {held.unaddressed.map((entry) => (
+              <li key={entry.id} className="ex-composer__held-entry">{`${entry.id} · ${entry.text}`}</li>
+            ))}
+          </ul>
+          <span className="ex-composer__held-actions">
+            <span className="ex-composer__held-else">or edit or flag those entries, or declare the refill again</span>
+            <button type="button" disabled={!idle} title="refill now, carrying the changes as they stand" onClick={() => run({ kind: 'refill-anyway' })}>
+              refill anyway
+            </button>
+          </span>
+        </section>
+      ) : null}
       {/* The model proposes a phase move (#124): the operator rules -- refill now, move without a seam, or stay. */}
       {proposal && dispatch ? (
         <section className="ex-composer__proposal" aria-label="the model proposes a phase move">

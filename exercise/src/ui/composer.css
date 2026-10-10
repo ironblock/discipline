@@ -258,3 +258,31 @@
   justify-self: end;
   color: var(--ink-muted);
 }
+
+/* A seam held for the operator (#150's gate): what is unaddressed, refill anyway, and the alternatives. */
+.ex-composer__held {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius);
+}
+
+.ex-composer__held-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--ink);
+}
+
+.ex-composer__held-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.ex-composer__held-else {
+  color: var(--ink-muted);
+}

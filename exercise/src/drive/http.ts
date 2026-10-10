@@ -241,6 +241,8 @@ export class HttpTransport implements DriveTransport {
         return { kind: 'ratify-phase', call: command.call, choice: command.choice };
       case 'background':
         return { kind: 'background' };
+      case 'refill-anyway':
+        return { kind: 'refill-anyway' };
     }
   }
 

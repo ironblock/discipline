@@ -20,6 +20,7 @@ import triggeredForks from '../../../diet/formats/log/fixtures/valid/a-v7-gap-wi
 import auditedSeam from '../../../diet/formats/log/fixtures/valid/a-v7-seam-audited-on-its-lane-and-warmed.jsonl?raw';
 import operatorEdits from '../../../diet/formats/log/fixtures/valid/a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl?raw';
 import seamBackground from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-listed-a-running-background-command.jsonl?raw';
+import seamHeld from '../../../diet/formats/log/fixtures/valid/a-v7-seam-held-for-the-operator-then-refilled-anyway.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -816,6 +817,42 @@ export const ServedSeamBackground: Story = {
     await expect(job.querySelector('.ex-seam__job-command')?.textContent).toBe('python3 -m http.server 8765');
     await expect(job.querySelector('.ex-seam__job-since')?.textContent).toBe('no output since it started');
     await expect(job.querySelector('.ex-seam__job-output')?.textContent).toBe('background/shell-bg_0123abcd.output');
+  },
+};
+
+/** The held-seam fixture up to its hold: the seam waits on the operator, nothing refilled yet. */
+const UNTIL_HELD = seamHeld.split('\n').slice(0, seamHeld.split('\n').findIndex((line) => line.includes('"kind":"seam.held"')) + 1).join('\n');
+
+/** `?drive`, log v7 (#150's gate, #698): a seam held for the operator names what is unaddressed and offers refill anyway. */
+export const ServedSeamHeld: Story = {
+  name: '?drive: a seam held for the operator, with refill anyway and the alternatives',
+  args: { drive: true, web: posting(UNTIL_HELD) },
+  play: async ({ canvasElement }) => {
+    const held = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-composer__held');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(held.querySelector('.ex-composer__held-entry')?.textContent).toBe('d2 · a tracker for one team');
+    await expect(held.querySelector('.ex-composer__held-else')?.textContent).toBe('or edit or flag those entries, or declare the refill again');
+    posted.length = 0;
+    await userEvent.click([...held.querySelectorAll('button')].find((b) => b.textContent === 'refill anyway')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'refill-anyway' }]));
+  },
+};
+
+/** The whole fixture: the operator refilled anyway -- no hold waits, and the seam says how it was refilled. */
+export const ServedSeamRefilledAnyway: Story = {
+  name: '?drive: a seam refilled anyway over unaddressed changes',
+  args: { drive: true, web: serving(seamHeld) },
+  play: async ({ canvasElement }) => {
+    const seam = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-seam .ex-seam__anyway');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(seam.textContent).toBe('refilled anyway');
+    await expect(canvasElement.querySelector('.ex-composer__held')).toBeNull();
   },
 };
 
