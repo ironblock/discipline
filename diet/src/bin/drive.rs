@@ -791,6 +791,9 @@ fn serving_interview(
         // #566: how archived items are recalled; off unless declared.
         recall: diet::drive::archive::Recall::of(&read),
         view: session::fork_view(&read),
+        // #564: when a fork fires, and on what; one per gap unless declared.
+        cadence: session::interview_cadence(&read),
+        threshold_bytes: session::interview_threshold_bytes(&read),
     }))
 }
 

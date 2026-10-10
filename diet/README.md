@@ -18,6 +18,8 @@ It's primarily a library, but exists primarily to apply a `regimen` - a fixed co
 
 **The tool surface** (#557): a regimen's `tool_surface = "standard"` offers `read`, `write`, `edit`, `grep` and `glob` beside `bash`, shaped as the compared harnesses shape them. `bash` alone is the default. Every tool runs through the session's confinement, as `bash` does, and no approval gate decides them; each call is logged under its tool's name.
 
+**The interview cadence** (#564): a regimen's `interview_cadence` says when the capture gap's forks fire, and on what. `gap`, the default, fires at most one: the judgment ask on an operator-marked turn, else the class ask on the turn's last read. `per_class` forks on every call the router routes to a class ask. `per_call` forks on every call that ran, with the generic ask for a call the router would not interrupt. `turn_boundary` asks the judgment question at every turn's end. Every state queues its forks into the gap in call order, one after another. `interview_threshold_bytes = N`, unset by default, forks a read only when its output is at least N bytes. Each fork line names its `trigger`, and the start row names the cadence.
+
 **Two binaries**, built from the repository root with `cargo build -p discipline-diet`:
 
 - `diet` is the command-line reader of every format (`diet check-log`, `diet check-record`, ...). Anything outside this library that reads a format goes through it.

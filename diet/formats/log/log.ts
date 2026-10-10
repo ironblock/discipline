@@ -486,6 +486,7 @@ export type ForkLine = {
   why: Warrant;
   question: string;
   view?: string;
+  trigger?: string;
 };
 
 export type ForkSettledLine = {
