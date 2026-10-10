@@ -50,6 +50,7 @@ The last instance is on record. On 2026-10-07 the seeded-fault selftest left CI 
 - "Any significant decision or result needs my approval in some form." Knowing the program runs this way, any ratified outcome came through him. Nothing is done in his name.
 - "The priority now, above all else: get a working version of the system that exercises the core idea. No constraints, restrictions, or 'correctness' obstacles." The initiatives are in `releases.md`.
 - Sessions that know why a punted item mattered give him the data and the perspective; they do not put it back on the map themselves.
+- "All questions like this should follow the conventions of other harnesses, such as they may exist." A question about how the harness behaves (what a cancel keeps, how a tool is shaped, what an instruction file does) follows the convention Pi, OpenCode and Qwen Code share, from `docs/harness-baseline.md` and their sources, without asking him. Only where they differ, or have none, is it his question.
 
 **Dispatch's practice, which it may change:**
 - Work comes from the earliest open milestone of the prototype initiative, and every session may take some. A blank in what a lever means goes to the maintainer as a question; work that depends on it waits, and other work goes on.
