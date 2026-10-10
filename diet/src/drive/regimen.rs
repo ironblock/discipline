@@ -586,19 +586,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("tangent_closure".to_owned(), undeclared()),
         ("capture_modality".to_owned(), undeclared()),
         ("interview_routing_and_cadence".to_owned(), warrant),
-        (
-            "render_budget".to_owned(),
-            crate::seam::policy::render_budget(regimen).map_or_else(
-                || "none".to_owned(),
-                |budget| {
-                    let over = match budget.over {
-                        crate::seam::render::OverBudget::Tier => "tier",
-                        crate::seam::render::OverBudget::Elide => "elide",
-                    };
-                    format!("{}:{over}", budget.tokens)
-                },
-            ),
-        ),
+        ("render_budget".to_owned(), render_budget_lever(regimen)),
         ("fork_memory_share".to_owned(), undeclared()),
         ("archive_recall".to_owned(), "off".to_owned()),
         ("fork_input_view".to_owned(), "whole-warm-trunk".to_owned()),
@@ -608,6 +596,20 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
         ("subagent".to_owned(), "harness".to_owned()),
     ])
+}
+
+/// The render budget lever's word (#565): `none`, or `<tokens>:<tier|elide>`.
+fn render_budget_lever(regimen: &Regimen) -> String {
+    crate::seam::policy::render_budget(regimen).map_or_else(
+        || "none".to_owned(),
+        |budget| {
+            let over = match budget.over {
+                crate::seam::render::OverBudget::Tier => "tier",
+                crate::seam::render::OverBudget::Elide => "elide",
+            };
+            format!("{}:{over}", budget.tokens)
+        },
+    )
 }
 
 /// The levers a regimen's commands set -- tool-output disposition, approval,
