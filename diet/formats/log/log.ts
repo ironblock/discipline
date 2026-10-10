@@ -325,6 +325,8 @@ export type SessionStartLine = {
   unsent?: Unsent;
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
+  fork_asks?: string;
+  fork_asks_digest?: string;
   reasoning_effort_default?: string;
   phases?: string[];
   phase_transitions?: PhaseMove[];
@@ -488,6 +490,7 @@ export type ForkLine = {
   why: Warrant;
   question: string;
   view?: string;
+  ask?: string;
 };
 
 export type ForkSettledLine = {

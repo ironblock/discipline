@@ -1,0 +1,4 @@
+{imperative}
+You last ran: {last_command}
+You said: "{intent}"
+You just read source. Which names did it establish that a later turn would call, and what about them is not obvious from their names? Answer with the fields API_SURFACE, LEARNED and STUCK, one per line; API_SURFACE lists names exactly as they appear in what you read, and NONE is an answer.

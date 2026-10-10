@@ -1540,6 +1540,7 @@ mod tests {
             phases: None,
             phase_transitions: None,
             opening_phase: None,
+            fork_asks: None,
         }
     }
 
@@ -2427,6 +2428,7 @@ mod tests {
             why,
             question: "what did the operator decide".to_owned(),
             view: None,
+            ask: None,
         };
         let call = |turn: u32, fork: u64| {
             [
