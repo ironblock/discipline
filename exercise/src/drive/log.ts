@@ -265,7 +265,14 @@ export interface Patch extends At {
   /** For `supersede`: the entry this one replaces. */
   readonly supersedes?: string;
   readonly authority?: Authority;
+  /** The tangent open when it was made (log v7, #608): the entry is that tangent's, to be ruled on at its close. */
+  readonly tangent?: string;
 }
+
+/** The operator opened a tangent (log v7, #608): the trunk as it stood is the point a close rolls back to. */
+export type TangentOpen = V0.TangentOpenLine;
+/** The operator closed it: its entries kept, dropped or parked, and the trunk rolled back to where it opened. */
+export type TangentClose = V0.TangentCloseLine;
 
 /**
  * The one deliberate prefill event -- the trunk refilled from working memory (log v6, #493): the head, the render
@@ -309,7 +316,9 @@ export type LogLine =
   | Patch
   | Seam
   | Delivered
-  | Recalled;
+  | Recalled
+  | TangentOpen
+  | TangentClose;
 
 export type Kind = LogLine['kind'];
 
