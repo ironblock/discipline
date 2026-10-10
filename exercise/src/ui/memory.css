@@ -130,3 +130,10 @@
   color: var(--ink-faint);
   font-style: italic;
 }
+
+/* The trunk's own lane that wrote the entry (#627): said quietly, after the text, as an op is. */
+.ex-memory__lane {
+  margin-left: 0.5em;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1 var(--font-chrome);
+}
