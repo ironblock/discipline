@@ -141,17 +141,64 @@ pub const LIFECYCLE: &[&str] = &[
     "dependencies",
 ];
 
+/// The `bash` tool's description (#558), by the harness vote: where Pi and
+/// `OpenCode` 2 agree (a command run in the working directory), theirs;
+/// where they differ, Qwen Code's; each sentence held to what this harness
+/// does -- a fresh `bash -c` per call in the worktree, only the policy's
+/// variables, no timeout, a call that returns when its leader exits (#551),
+/// a confinement that may refuse -- and no rule it does not enforce.
+pub const BASH_DESCRIPTION: &str = "Executes a bash command (as `bash -c <command>`) in the \
+     working directory. Returns its standard output, then its standard error.\n\n\
+     - Each call runs in a fresh shell that starts in the working directory: `cd` and exported \
+     variables do not carry over to the next call, and only the environment variables the \
+     session passes are set.\n\
+     - There is no timeout. A command that does not exit on its own, such as a server or a \
+     watcher, holds the call until the turn is cancelled: start it in the background with `&` \
+     and redirect its output to a file.\n\
+     - The call returns when the command exits. A process left running in the background keeps \
+     running, but nothing it prints after the call returns is shown.\n\
+     - The command may run in a sandbox: writes outside the working directory, some reads, and \
+     network access can be refused.";
+
+/// The `bash` tool's one argument's description (#558): Pi's and
+/// `OpenCode` 2's, which agree.
+pub const BASH_COMMAND_DESCRIPTION: &str = "Shell command to execute";
+
 /// The `bash` tool as a request declares it: one string argument,
-/// `command`, the definition I0 captured a real server calling.
+/// `command`, the shape I0 captured a real server calling, with its
+/// description (#558).
 #[must_use]
 pub fn bash_tool() -> ToolDefinition {
+    let text = |s: &str| Value::String(s.to_owned());
+    let command = Value::Object(BTreeMap::from([
+        ("description".to_owned(), text(BASH_COMMAND_DESCRIPTION)),
+        ("type".to_owned(), text("string")),
+    ]));
+    ToolDefinition {
+        name: BASH.to_owned(),
+        description: Some(BASH_DESCRIPTION.to_owned()),
+        schema: Value::Object(BTreeMap::from([
+            (
+                "properties".to_owned(),
+                Value::Object(BTreeMap::from([("command".to_owned(), command)])),
+            ),
+            ("required".to_owned(), Value::Array(vec![text("command")])),
+            ("type".to_owned(), text("object")),
+        ])),
+    }
+}
+
+/// The `bash` tool as it was declared before #558, the definition I0
+/// captured: no description, and its argument's words from then. What a
+/// log written before #558 sent, so its heads still rebuild.
+#[must_use]
+pub fn bash_tool_before_its_description() -> ToolDefinition {
     let text = |s: &str| Value::String(s.to_owned());
     let command = Value::Object(BTreeMap::from([
         ("description".to_owned(), text("the command to run in bash")),
         ("type".to_owned(), text("string")),
     ]));
     ToolDefinition {
-        name: BASH.to_owned(),
         description: None,
         schema: Value::Object(BTreeMap::from([
             (
@@ -161,6 +208,7 @@ pub fn bash_tool() -> ToolDefinition {
             ("required".to_owned(), Value::Array(vec![text("command")])),
             ("type".to_owned(), text("object")),
         ])),
+        ..bash_tool()
     }
 }
 
@@ -2181,9 +2229,25 @@ pub(in crate::drive) mod tests {
     }
 
     #[test]
-    fn the_bash_tool_renders_as_i0_declared_it() {
+    fn the_bash_tool_renders_as_i0_declared_it_with_its_own_words() {
         let mut out = String::new();
         json::render(&bash_tool().schema, &mut out);
+        assert_eq!(
+            out,
+            "{\"properties\":{\"command\":{\"description\":\"Shell command to execute\",\
+             \"type\":\"string\"}},\"required\":[\"command\"],\"type\":\"object\"}"
+        );
+    }
+
+    /// Before #558, `bash` was I0's definition byte for byte, and no
+    /// description.
+    #[test]
+    fn the_bash_tool_before_its_description_is_i0s() {
+        let tool = bash_tool_before_its_description();
+        assert_eq!(tool.name, BASH);
+        assert_eq!(tool.description, None);
+        let mut out = String::new();
+        json::render(&tool.schema, &mut out);
         assert_eq!(
             out,
             "{\"properties\":{\"command\":{\"description\":\"the command to run in bash\",\

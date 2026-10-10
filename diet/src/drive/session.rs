@@ -6098,6 +6098,58 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// `bash` carries its description on the wire (#558), and a log
+    /// written before it -- `bash` as I0 captured it -- still rebuilds every
+    /// head; a definition that is neither leaves the heads unverified.
+    #[test]
+    fn bash_heads_rebuild_with_its_description_and_without_it_before_558() {
+        let run = |bash_tool: crate::client::shape::ToolDefinition| {
+            let tree = scratch("bash-description");
+            let session = Session::open_looping(
+                Canned::new([vec![bash("call-1", "echo hi")], deltas(&["done"])]),
+                RequestShape {
+                    tools: vec![bash_tool],
+                    ..template()
+                },
+                None,
+                tools(
+                    Confinement::Unconfined,
+                    &tree,
+                    &["echo"],
+                    None,
+                    Decider::Decline,
+                ),
+            );
+            session.ask("say hi", None).expect("accepted");
+            let log = wait_until(&session, "the turn to settle", settled);
+            assert_eq!(settled_as(&log), Some(SettleReason::Final));
+            let sent = session.shared.transport.sent();
+            tidy(&[&tree]);
+            (log, sent)
+        };
+        let (log, sent) = run(tool_loop::bash_tool());
+        assert_eq!(
+            sent[0].tools[0].description.as_deref(),
+            Some(tool_loop::BASH_DESCRIPTION)
+        );
+        every_head_rebuilds(&log);
+        let (log, _) = run(tool_loop::bash_tool_before_its_description());
+        every_head_rebuilds(&log);
+        let mut neither = tool_loop::bash_tool();
+        neither.description = Some("something else".to_owned());
+        let (log, _) = run(neither);
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        assert!(
+            projected
+                .unspellable
+                .iter()
+                .any(|named| named.why.contains("could not be rebuilt")),
+            "a definition the log never sent verifies nothing"
+        );
+    }
+
     /// Every head the log's projection rebuilds is verified: none is named
     /// as one it could not rebuild.
     fn every_head_rebuilds(log: &[Logged]) {
@@ -6507,7 +6559,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             declared,
             [
-                ("bash", false),
+                ("bash", true),
                 ("read", true),
                 ("write", true),
                 ("edit", true),
@@ -7079,7 +7131,9 @@ pub(in crate::drive) mod tests {
     const I0: &str = "../../../substrates/measurements/2026-10-02-i0-tool-call-captures";
 
     /// T12: after the round trip over HTTP, the second request is I0's
-    /// `openai`-shape turn 2, byte for byte.
+    /// `openai`-shape turn 2, byte for byte. The wire is under test, so the
+    /// `bash` tool is declared as I0 captured it, before its description
+    /// (#558).
     #[test]
     fn the_second_request_is_i0s_openai_shape_byte_for_byte() {
         use crate::client::shape::{Pin, SamplerSetting};
@@ -7108,7 +7162,7 @@ pub(in crate::drive) mod tests {
         let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("the stub's endpoint"));
         let shape = RequestShape {
             model: "qwen3.8-flash-next".to_owned(),
-            tools: vec![tool_loop::bash_tool()],
+            tools: vec![tool_loop::bash_tool_before_its_description()],
             messages: vec![Message::new(
                 Role::System,
                 "You are working in a git repository. Use the bash tool to run commands.",
