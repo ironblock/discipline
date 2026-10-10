@@ -5558,9 +5558,13 @@ fn aside<S: Streaming>(
     let mut partial = String::new();
     let mut reasoning = String::new();
     let mut called = false;
+    let mut hosted = Hosted::default();
     let result = shared
         .transport
         .stream(shape, deadline, cancel, &mut |piece: Piece<'_>| {
+            if hosted.took(&piece) {
+                return;
+            }
             let event = match piece {
                 Piece::Text(piece) => {
                     partial.push_str(piece);
@@ -5584,6 +5588,7 @@ fn aside<S: Streaming>(
                     called = true;
                     return;
                 }
+                Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => return,
             };
             shared.lock().push(event);
             shared.changed.notify_all();
@@ -5593,6 +5598,7 @@ fn aside<S: Streaming>(
         partial,
         reasoning,
         called,
+        hosted,
     }
 }
 
@@ -5602,6 +5608,8 @@ struct Aside {
     partial: String,
     reasoning: String,
     called: bool,
+    /// What a hosted API said beside the answer (#555).
+    hosted: Hosted,
 }
 
 /// A seam's audit call, made and settled (#504): its pieces streamed into
@@ -5624,6 +5632,7 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
         partial,
         reasoning,
         called,
+        hosted,
     } = aside(shared, &shape, &cancel, request);
     let mut state = shared.lock();
     state.flight = None;
@@ -5642,6 +5651,7 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
                 finish_reason,
                 reasoning,
                 timings,
+                hosted,
             });
             if cancel.is_asked() {
                 log::ForkOutcome::Cancelled
