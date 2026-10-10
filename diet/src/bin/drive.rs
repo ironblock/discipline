@@ -428,6 +428,15 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(tools) => tools,
         Err((code, why)) => return fail(code, &why),
     };
+    // A prune has nothing to prune in a session that runs no tools (#612).
+    if tools.is_none() && interview.as_ref().is_some_and(|i| i.prune.is_some()) {
+        return fail(
+            EXIT_INPUT,
+            "`model_pruning = \"on\"` needs a session that runs commands: it prunes tool \
+             results, and this one makes no tool calls (give it `--worktree` and \
+             `allowed_commands`)",
+        );
+    }
     // What an ask's named PNGs are checked against and copied to (#372):
     // the policy the commands run under, or the regimen's when it runs
     // none, and the recording's directory.
@@ -750,9 +759,17 @@ fn served_session(
     declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
     // A session that runs commands declares its surface's tools (#557):
-    // `bash` alone, or `bash` and the standard set.
+    // `bash` alone, or `bash` and the standard set; then `prune_output`
+    // when the regimen offers it (#612).
     if let Some(tools) = tools.as_ref() {
         shape.tools = tools.surface.tools();
+        if declared
+            .1
+            .as_ref()
+            .is_some_and(|interview| interview.prune.is_some())
+        {
+            shape.tools.push(diet::drive::prune::definition());
+        }
     }
     // Self-capture's tools after them (#609), from the first request and
     // never changed; with self-capture off the tools are as they were.
@@ -916,6 +933,13 @@ fn serving_interview(
     // to, in a set written for them, and where self-capture declares them.
     let capture = session::capture_modality(&read).map_err(|why| format!("{path}: {why}"))?;
     let asks = session::fork_asks(&read);
+    if rules.is_empty() && self_capture.is_none() && diet::drive::prune::of(&read).is_some() {
+        return Err(format!(
+            "{path} declares `model_pruning = \"on\"` and neither an `interview_warrant` nor \
+             self-capture: nothing fills working memory, so no seam could ever replace a \
+             pruned result"
+        ));
+    }
     if capture == diet::dogma::asks::Modality::Tools {
         let refused = if rules.is_empty() {
             Some("no `interview_warrant`, so no fork ever answers".to_owned())
@@ -957,6 +981,9 @@ fn serving_interview(
             // #564: when a fork fires, and on what; one per gap unless declared.
             cadence: session::interview_cadence(&read),
             threshold_bytes: session::interview_threshold_bytes(&read),
+            // #612: whether the model may prune its tool results; off unless
+            // declared.
+            prune: diet::drive::prune::of(&read),
         }),
     )
 }

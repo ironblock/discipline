@@ -224,6 +224,9 @@ vocabulary! {
         Delivered => "delivered",
         /// Archived items recalled at the tail of a trunk request (v7, #566).
         Recalled => "recalled",
+        /// A tool result the model pruned, replaced at a later seam (v7,
+        /// #612).
+        Pruned => "pruned",
         /// A tangent opened at the operator's word (v7, #22).
         TangentOpen => "tangent.open",
         /// A tangent closed: its entries disposed and the trunk rolled back
@@ -371,6 +374,9 @@ vocabulary! {
         Budget => "budget",
         /// The declared cadence came round.
         Cadence => "cadence",
+        /// The model pruned a tool result, applied as its turn settled (v7,
+        /// #612).
+        Prune => "prune",
     }
 }
 
@@ -543,6 +549,21 @@ vocabulary! {
         /// never its message (v1; R3.0's C3).
         ContextOverflow => "context_overflow",
     }
+}
+
+/// A context overflow's sizes (v7, #616): `prompt_tokens`, `window` and
+/// `inferred`, all three or none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Overflow {
+    /// The call's prompt, in tokens, as serve sized it: the latest measured
+    /// prompt plus the estimate of what was added since (#588).
+    pub prompt_tokens: u64,
+    /// The engine's context window, in tokens, as serve read it at start.
+    pub window: u64,
+    /// Whether the overflow was told from the sizes alone -- the prompt and
+    /// its output cap reached into the window's margin, and the server's
+    /// refusal named no kind -- rather than from the refusal's typed field.
+    pub inferred: bool,
 }
 
 vocabulary! {
@@ -1046,6 +1067,9 @@ pub enum Event {
         status: Option<u16>,
         /// What arrived before it ended, when anything did.
         partial: Option<String>,
+        /// Its prompt against the context window, when its reason is
+        /// `context_overflow` and serve knew the window (v7, #616).
+        overflow: Option<Overflow>,
     },
     /// A turn is over.
     TurnSettled {
@@ -1194,8 +1218,11 @@ pub enum Event {
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
-        /// The `seq` of the fork.
-        fork: u64,
+        /// The `seq` of the fork whose answer made it; absent for a patch the
+        /// trunk made itself (v7, #609), which names its `lane` instead.
+        fork: Option<u64>,
+        /// The lane that made it, when no fork did (v7): `self-capture`.
+        lane: Option<String>,
         /// What it does.
         op: PatchOp,
         /// The entry.
@@ -1231,6 +1258,21 @@ pub enum Event {
         text: String,
         /// Each item it carries, in rank order.
         items: Vec<RecalledItem>,
+    },
+    /// A tool result the model pruned (v7, #612), logged when the tool
+    /// answered: a later seam carries `text` in its place.
+    Pruned {
+        /// The turn the prune was called in.
+        turn: u32,
+        /// The id of the call whose result it pruned.
+        call: String,
+        /// The sha256 of that result's whole, as saved.
+        sha256: String,
+        /// The bytes of the result the trunk carried, which the seam
+        /// removes.
+        bytes: u64,
+        /// The reference line the seam carries in its place (#596).
+        text: String,
     },
     /// A tangent opened (v7, #22): its id, the turn it forks at, and how
     /// many messages the trunk held there, the fork point a close rolls the
@@ -1340,6 +1382,9 @@ pub enum Event {
         /// The render's budget and what it did (v7, #565), on a seam whose
         /// regimen declares one.
         render_budget: Option<RenderBudget>,
+        /// The calls whose results the model pruned that this seam replaced
+        /// with their `pruned` lines' text (v7, #612).
+        pruned: Option<Vec<String>>,
     },
 }
 
@@ -2413,7 +2458,10 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::ForkSettled { fork, outcome, .. } => forks
                 .settle(*fork, *outcome)
                 .map_err(|why| at(index, why))?,
-            Event::Patch { fork, .. } => forks.patch(*fork).map_err(|why| at(index, why))?,
+            // The trunk's own patch (#609) answers to no fork.
+            Event::Patch {
+                fork: Some(fork), ..
+            } => forks.patch(*fork).map_err(|why| at(index, why))?,
             Event::Seam { at_turn, .. } => {
                 seam_at(*at_turn, turns, &settled, state, &forks).map_err(|why| at(index, why))?;
                 forks.seamed = Some(*at_turn);
@@ -2687,6 +2735,37 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 ),
             },
             partial: fields.optional_string("partial")?,
+            overflow: {
+                let reason = fields.tag("reason", FailReason::from_tag)?;
+                match (
+                    fields.optional_count("prompt_tokens")?,
+                    fields.optional_count("window")?,
+                    fields.optional_flag("inferred")?,
+                ) {
+                    (None, None, None) => None,
+                    (Some(prompt_tokens), Some(window), Some(inferred))
+                        if reason == FailReason::ContextOverflow =>
+                    {
+                        Some(Overflow {
+                            prompt_tokens,
+                            window,
+                            inferred,
+                        })
+                    }
+                    (Some(_), Some(_), Some(_)) => {
+                        return Err(format!(
+                            "a `request.failed` whose reason is `{}` carries a context \
+                             overflow's sizes",
+                            reason.tag()
+                        ));
+                    }
+                    _ => {
+                        return Err("a `request.failed` carries `prompt_tokens`, `window` and \
+                                    `inferred` together or none of them"
+                            .to_owned());
+                    }
+                }
+            },
         },
         Kind::TurnSettled => Event::TurnSettled {
             turn: fields.turn("turn")?,
@@ -2786,8 +2865,22 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     }
                 ));
             }
+            let fork = fields.optional_count("fork")?;
+            let lane = fields.optional_string("lane")?;
+            if fork.is_some() == lane.is_some() {
+                return Err(format!(
+                    "a patch {}: it names the fork that made it or, made on the trunk, \
+                     its `lane`, and exactly one of them",
+                    if fork.is_some() {
+                        "names both a `fork` and a `lane`"
+                    } else {
+                        "names neither a `fork` nor a `lane`"
+                    }
+                ));
+            }
             Event::Patch {
-                fork: fields.count("fork")?,
+                fork,
+                lane,
                 op,
                 entry: fields.entry("entry")?,
                 supersedes,
@@ -2823,6 +2916,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 .ok_or("a `tangent.close` carries no `prefix_intact`")?,
             rolled_back: fields.count("rolled_back")?,
         },
+        Kind::Pruned => Event::Pruned {
+            turn: fields.turn("turn")?,
+            call: fields.string("call")?,
+            sha256: fields.digest("sha256")?,
+            bytes: fields.count("bytes")?,
+            text: fields.string("text")?,
+        },
         Kind::Recalled => Event::Recalled {
             turn: fields.turn("turn")?,
             recall: fields.tag("recall", RecallState::from_tag)?,
@@ -2855,6 +2955,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
             placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
+            pruned: fields.optional_strings("pruned")?,
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -3753,6 +3854,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Seam => 6,
         Kind::Delivered
         | Kind::Recalled
+        | Kind::Pruned
         | Kind::TangentOpen
         | Kind::TangentClose
         | Kind::Capture
@@ -3807,6 +3909,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
         return 7;
     }
     if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
+        return 7;
+    }
+    if tags == Tags::SeamReason && SeamReason::from_tag(tag) == Some(SeamReason::Prune) {
         return 7;
     }
     let capped =
@@ -3943,6 +4048,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("message", Text),
                 may("status", Count),
                 may("partial", Text),
+                may_v7("prompt_tokens", Count),
+                may_v7("window", Count),
+                may_v7("inferred", Holds::Flag),
             ];
             F
         }
@@ -4025,7 +4133,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
         }
         Kind::Patch => {
             const F: &[Field] = &[
-                must_v5("fork", Count),
+                // Every patch before v7 was a fork's; from v7 the trunk's
+                // own carry `lane` instead (#609), exactly one of the two.
+                may_v5("fork", Count),
+                may_v7("lane", Text),
                 must_v5("op", Tag(Tags::PatchOp)),
                 must_v5("entry", Holds::Entry),
                 may_v5("supersedes", Text),
@@ -4091,6 +4202,17 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("render_over_budget", Text),
                 may_v7("render_tokens", Count),
                 may_v7("render_reduced", Count),
+                may_v7("pruned", Holds::Strings),
+            ];
+            F
+        }
+        Kind::Pruned => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("call", Text),
+                must_v7("sha256", Holds::Digest),
+                must_v7("bytes", Count),
+                must_v7("text", Text),
             ];
             F
         }
@@ -4120,6 +4242,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
 pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
     match kind {
         Kind::Delta => &["text", "reasoning", "tool_call"],
+        // A fork's patch names its fork; the trunk's own its lane (#609).
+        Kind::Patch => &["fork", "lane"],
         _ => &[],
     }
 }
@@ -4131,6 +4255,8 @@ pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
 pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
     match kind {
         Kind::SessionStart => &["substrate", "registry_sha256"],
+        // A context overflow's sizes (v7, #616).
+        Kind::RequestFailed => &["prompt_tokens", "window", "inferred"],
         Kind::Fork => &["substrate", "model"],
         _ => &[],
     }
@@ -4659,9 +4785,15 @@ fn to_value(line: &Line) -> Value {
             message,
             status,
             partial,
+            overflow,
         } => {
             put("request", count(*request));
             put("reason", text(reason.tag()));
+            if let Some(overflow) = overflow {
+                put("prompt_tokens", count(overflow.prompt_tokens));
+                put("window", count(overflow.window));
+                put("inferred", Value::Boolean(overflow.inferred));
+            }
             put("message", text(message));
             if let Some(status) = status {
                 put("status", count(u64::from(*status)));
@@ -4838,12 +4970,18 @@ fn to_value(line: &Line) -> Value {
         }
         Event::Patch {
             fork,
+            lane,
             op,
             entry,
             supersedes,
             tangent,
         } => {
-            put("fork", count(*fork));
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
+            }
+            if let Some(lane) = lane {
+                put("lane", text(lane));
+            }
             put("op", text(op.tag()));
             let mut object = BTreeMap::from([
                 ("id".to_owned(), text(&entry.id)),
@@ -4938,6 +5076,7 @@ fn to_value(line: &Line) -> Value {
             carried_output_bytes,
             placement,
             render_budget,
+            pruned,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             if let Some(moved) = phase {
@@ -4976,6 +5115,12 @@ fn to_value(line: &Line) -> Value {
                 put("render_over_budget", text(&budget.over));
                 put("render_tokens", count(budget.rendered));
                 put("render_reduced", count(budget.reduced));
+            }
+            if let Some(calls) = pruned {
+                put(
+                    "pruned",
+                    Value::Array(calls.iter().map(|call| text(call)).collect()),
+                );
             }
             Kind::Seam
         }
@@ -5030,6 +5175,20 @@ fn to_value(line: &Line) -> Value {
                 ),
             );
             Kind::Recalled
+        }
+        Event::Pruned {
+            turn,
+            call,
+            sha256,
+            bytes,
+            text: line,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("call", text(call));
+            put("sha256", text(sha256));
+            put("bytes", count(*bytes));
+            put("text", text(line));
+            Kind::Pruned
         }
     };
     put("kind", text(kind.tag()));
@@ -5880,6 +6039,7 @@ mod tests {
                 message: "busy".to_owned(),
                 status: Some(503),
                 partial: Some(String::new()),
+                overflow: None,
             },
             Event::TurnSettled {
                 turn: 2,
@@ -5981,6 +6141,11 @@ mod tests {
                 message: "request (262149 tokens) exceeds the available context size".to_owned(),
                 status: Some(400),
                 partial: None,
+                overflow: Some(Overflow {
+                    prompt_tokens: 161_840,
+                    window: 163_840,
+                    inferred: true,
+                }),
             },
             Event::TurnSettled {
                 turn: 4,
@@ -6105,7 +6270,8 @@ mod tests {
                 wall_ms: Some(480),
             },
             Event::Patch {
-                fork,
+                fork: Some(fork),
+                lane: None,
                 op: PatchOp::Add,
                 entry: PatchEntry {
                     id: "d1".to_owned(),
@@ -6115,8 +6281,10 @@ mod tests {
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
             },
+            // The trunk's own (#609): named by its lane, not a fork.
             Event::Patch {
-                fork,
+                fork: None,
+                lane: Some("self-capture".to_owned()),
                 op: PatchOp::Supersede,
                 entry: PatchEntry {
                     id: "d2".to_owned(),
@@ -6563,6 +6731,19 @@ mod tests {
                     if kind == Kind::Patch && *absent == "supersedes" {
                         continue;
                     }
+                    // A stream's text comes with its byte count: added alone,
+                    // it is that pairing's refusal, not an exclusivity -- met
+                    // by a call that ran no command (#612's `prune_output`,
+                    // the standard tools), which writes `shown` and no stream.
+                    if kind == Kind::ToolCall && ["stdout", "stderr"].contains(absent) {
+                        continue;
+                    }
+                    // A key of an exactly-one set beside a line that already
+                    // carries another of it is that rule's refusal, whatever
+                    // key `present` is.
+                    if exactly_one(kind).contains(absent) && !exactly_one(kind).contains(present) {
+                        continue;
+                    }
                     let mut both = object.clone();
                     both.insert((*absent).to_owned(), Value::String("x".to_owned()));
                     let mut rendered = String::new();
@@ -6598,7 +6779,9 @@ mod tests {
     /// `policy` beside an `isolation` that names no profile, or none beside
     /// one that does (ruled at #299, 5976386318 point 6); and a
     /// `bash` refusal's `reason` decides its `argv`
-    /// ([`argv_if_it_parsed`]), which runs only once the reason has parsed.
+    /// ([`argv_if_it_parsed`]), which runs only once the reason has parsed;
+    /// and a `request.failed` carries a context overflow's sizes only under
+    /// that reason (v7, #616).
     fn the_reader_reads_it_as(object: &BTreeMap<String, Value>, key: &str, tags: Tags) {
         let with = |tag: &str| {
             let mut changed = object.clone();
@@ -6615,6 +6798,8 @@ mod tests {
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
                         || (tags == Tags::PatchOp && why.contains("`supersedes`"))
+                        || (tags == Tags::FailReason
+                            && why.contains("carries a context overflow's sizes"))
                         || (tags == Tags::ToolOutputState
                             && why.contains("`tool_output` is `keep` and carries a limit"))
                 },
@@ -7320,7 +7505,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled tangent.open tangent.close capture reminded"
+             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -7369,7 +7554,7 @@ mod tests {
         );
         assert_eq!(
             tags(SeamReason::ALL.iter().map(|it| it.tag()).collect()),
-            "operator phase budget cadence"
+            "operator phase budget cadence prune"
         );
     }
 

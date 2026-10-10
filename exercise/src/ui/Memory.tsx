@@ -60,12 +60,15 @@ export function Memory({ entries, seenThrough = -1, onSeen }: MemoryProps) {
                   data-fresh={isUnseen(e, seenThrough) ? '' : undefined}
                   data-from={e.from.join(' ')}
                   data-needs={e.needs.join(' ')}
+                  data-lane={e.lane}
                   title={`${e.state}${e.authority ? ` · ${e.authority}` : ''} · last changed by ${e.by}`}
                 >
                   <span className="ex-memory__id">#{e.id}</span>
                   <span className="ex-memory__text">
                     {e.text}
                     {e.op !== undefined ? <span className="ex-memory__op">{opOf(e.op).label}</span> : null}
+                    {/* Written by the trunk's own lane, not a fork (#627): self-capture today. */}
+                    {e.lane !== undefined ? <span className="ex-memory__lane" title="written by the trunk's own lane, not by a fork">{e.lane}</span> : null}
                   </span>
                 </li>
               ))}

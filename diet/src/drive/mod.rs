@@ -101,6 +101,7 @@ pub mod engine;
 pub mod instructions;
 pub mod output;
 pub mod projection;
+pub mod prune;
 pub mod regimen;
 pub mod registry;
 pub mod script;
@@ -1203,6 +1204,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tail_tokens: None,
                 carried_turns: None,
                 carried_tokens: None,
+                pruned: None,
             });
             seams.push(seam);
         }

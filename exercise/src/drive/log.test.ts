@@ -55,6 +55,18 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(answer?.kind === 'assistant' && answer.text).toBe(response?.kind === 'response' ? response.text : undefined);
   });
 
+  it('carries a prune on the turn that made it (v7, #612)', () => {
+    const file = 'a-v7-prune-applied-at-the-turns-seam.jsonl';
+    const line = logOf(file).find((l) => l.kind === 'pruned');
+    const user = fold(logOf(file))
+      .eras.flatMap((era) => era.nodes)
+      .find((n) => n.kind === 'user');
+    expect(line?.kind).toBe('pruned');
+    expect(user?.kind === 'user' && user.pruned).toEqual(
+      line?.kind === 'pruned' ? [{ call: line.call, bytes: line.bytes, text: line.text }] : undefined,
+    );
+  });
+
   it("opens a second era at a served seam (v6, #493): its system prompt is the head's and the render, and it says what it carried", () => {
     const file = 'a-v6-seam-the-operator-declared.jsonl';
     const line = logOf(file).find((l) => l.kind === 'seam');
@@ -220,6 +232,24 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(fold(declared).levers.table).toEqual(start?.kind === 'session.start' ? start.levers : undefined);
     expect(fold(declared).levers.table).not.toBeUndefined();
     expect(fold(logOf('an-answered-turn.jsonl')).levers.table).toBeUndefined();
+  });
+
+  it('folds an offboard fork’s seat onto its branch, with its prefill and wall time, and a warm fork’s as before (#570, #615)', () => {
+    // diet's v5 forks, the first one moved offboard -- WRITTEN HERE: no diet fixture has an offboard fork yet.
+    const file = 'a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl';
+    const log = logOf(file);
+    const first = log.find((l) => l.kind === 'fork')!;
+    const offboard = log.map((l) =>
+      l === first ? { ...l, substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b' } : l.kind === 'fork.settled' && l.fork === first.seq ? { ...l, prompt_tokens: 1820, wall_ms: 4300 } : l,
+    ) as LogLine[];
+    const branches = [...fold(offboard).branches.values()].flat();
+    expect(branches.map((b) => b.seat)).toEqual([{ substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b', promptTokens: 1820, wallMs: 4300 }, undefined]);
+  });
+
+  it('draws the trunk’s own working-memory changes from their patch lines, each with its lane (#574, #627)', () => {
+    const session = fold(logOf('a-v7-self-capture-patch-named-by-its-lane.jsonl'));
+    expect([...session.unknown.keys()]).toEqual([]);
+    expect(session.memory.map((e) => [e.id, e.text, e.state, e.lane])).toEqual([['r3/call-1/fact', 'The parser drops blank lines before it tokenizes.', 'live', 'self-capture']]);
   });
 
   it('takes the state from the log: an ended session is ended', () => {

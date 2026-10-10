@@ -69,6 +69,11 @@ export interface UserNode extends Provenance {
    * and how it matched. Folded, not yet drawn.
    */
   readonly recalled?: { readonly recall: string; readonly text: string };
+  /**
+   * The tool results the model pruned in this turn (log v7's `pruned`, #612): each call, the bytes a later seam
+   * removes, and the reference line it carries instead. Folded, not yet drawn.
+   */
+  readonly pruned?: readonly { readonly call: string; readonly bytes: number; readonly text: string }[];
   /** Self-capture's reminder after this ask (log v7's `reminded`, #619): a note the model was sent, the harness's words. */
   readonly reminded?: string;
   /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
@@ -228,6 +233,8 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly question: string;
   /** AHEAD (`slots`): prefix tokens shared with the trunk; `diet`'s fork line does not say. */
   readonly prefixTokens?: number;
+  /** The offboard seat it ran on (#615): the registry's id and model, with its cold prefill and wall time. Absent when warm. */
+  readonly seat?: { readonly substrate: string; readonly model: string; readonly promptTokens?: number; readonly wallMs?: number };
   readonly outcome?: ForkOutcome;
   readonly patches: readonly Folded<PatchNode>[];
 }
@@ -274,6 +281,8 @@ export interface MemoryEntry extends Provenance {
   readonly landedAt: number;
   /** Landed since the last ask: what the operator has not seen yet. */
   readonly fresh: boolean;
+  /** The trunk's lane that wrote it, when no fork did (a patch's `lane`, #627): `self-capture` today. */
+  readonly lane?: string;
   /** The tangent it was born in (a patch's `tangent`, #608): what that tangent's close rules on. */
   readonly tangent?: string;
 }
@@ -489,6 +498,7 @@ export function fold(lines: readonly LogLine[]): Session {
   const asks = new Map<number, LineOf<'ask'>>();
   const deliveries = new Map<number, LineOf<'delivered'>>();
   const recalls = new Map<number, LineOf<'recalled'>>();
+  const prunes = new Map<number, LineOf<'pruned'>[]>();
   const reminders = new Map<number, LineOf<'reminded'>>();
   // Self-capture's outcomes, by the call they belong to: `<request>/<call id>`.
   const captures = new Map<string, LineOf<'capture'>>();
@@ -658,7 +668,8 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       }
       case 'patch': {
-        forks.get(e.fork)?.patches.push(e);
+        // A fork's patch is drawn on its branch too; the trunk's own (a `lane`, #627) only in working memory.
+        if (e.fork !== undefined) forks.get(e.fork)?.patches.push(e);
         const old = entries.get(e.entry.id);
         const base = {
           ...(e.entry.category !== undefined ? { category: e.entry.category } : {}),
@@ -677,7 +688,7 @@ export function fold(lines: readonly LogLine[]): Session {
           if (replaced) entries.set(e.supersedes, { ...replaced, state: 'superseded', by: id(e.seq), seq: e.seq, from: [...replaced.from, e.seq] });
         }
         if (e.op === 'add' || e.op === 'supersede' || !old) {
-          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}), ...(e.tangent !== undefined ? { tangent: e.tangent } : {}) });
+          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}), ...(e.tangent !== undefined ? { tangent: e.tangent } : {}), ...(e.lane !== undefined ? { lane: e.lane } : {}) });
           break;
         }
         // Any other op rewrites the entry, keeps its state, and is shown by name.
@@ -689,6 +700,9 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       case 'recalled':
         recalls.set(e.turn, e);
+        break;
+      case 'pruned':
+        prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
         break;
       case 'reminded':
         reminders.set(e.turn, e);
@@ -812,6 +826,9 @@ export function fold(lines: readonly LogLine[]): Session {
             ...(recalls.has(slot.turn)
               ? { recalled: { recall: recalls.get(slot.turn)!.recall, text: recalls.get(slot.turn)!.text } }
               : {}),
+            ...(prunes.has(slot.turn)
+              ? { pruned: prunes.get(slot.turn)!.map(({ call, bytes, text }) => ({ call, bytes, text })) }
+              : {}),
             ...(reminders.has(slot.turn) ? { reminded: reminders.get(slot.turn)!.text } : {}),
             ...provenance(ask, first?.response),
           });
@@ -930,6 +947,16 @@ export function fold(lines: readonly LogLine[]): Session {
       why: fork.why,
       question: fork.question,
       ...(fork.prefix_tokens !== undefined ? { prefixTokens: fork.prefix_tokens } : {}),
+      ...(fork.substrate !== undefined && fork.model !== undefined
+        ? {
+            seat: {
+              substrate: fork.substrate,
+              model: fork.model,
+              ...(settled?.prompt_tokens !== undefined ? { promptTokens: settled.prompt_tokens } : {}),
+              ...(settled?.wall_ms !== undefined ? { wallMs: settled.wall_ms } : {}),
+            },
+          }
+        : {}),
       // A side call has finished when it settles, after its patches -- not at its response.
       ...(g ? unended(generation(g, slot)) : {}),
       ...(settled ? { outcome: settled.outcome, endedAt: settled.t } : {}),
