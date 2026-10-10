@@ -496,14 +496,16 @@ fn serve(args: &[String]) -> ExitCode {
     };
     // The offboard seat, checked as the trunk's server is (#570), before
     // anything binds.
-    let seat = match offboard_seat(
+    // With it, the chat template it reports: where a fork's ask is rendered.
+    let (seat, seat_template) = match offboard_seat(
         regime.as_ref(),
         seat,
         &trunk_endpoint,
         (&dialect, &shape),
         regimen_file.as_deref(),
     ) {
-        Ok(seat) => seat,
+        Ok(Some((seat, template))) => (Some(seat), template),
+        Ok(None) => (None, None),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     // What the announcement prints and the log's `session.start` claims,
@@ -524,25 +526,38 @@ fn serve(args: &[String]) -> ExitCode {
     // this window (#588); the record's lever says whether it was.
     let window = confirmed.as_ref().and_then(|confirmed| confirmed.window);
     // The interview's role (#599): a role but `user` runs only where the
-    // served template renders it, refused before anything binds.
+    // served template renders it, refused before anything binds -- the
+    // offboard seat's template when forks go there, else the trunk's.
     if let Some(role) = interview
         .as_ref()
         .map(|interview| interview.role)
         .filter(|role| *role != diet::client::shape::Role::User)
     {
-        let template = confirmed
-            .as_ref()
-            .and_then(|confirmed| confirmed.template.as_deref());
+        let (template, whose) = if seat.is_some() {
+            (seat_template.as_deref(), "the extraction seat")
+        } else {
+            (
+                confirmed
+                    .as_ref()
+                    .and_then(|confirmed| confirmed.template.as_deref()),
+                "the server",
+            )
+        };
         let refused = template.map_or_else(
             || {
                 Err(format!(
-                    "the server reports no chat template, so a `{}` interview ask cannot be confirmed to render",
+                    "{whose} reports no chat template, so a `{}` interview ask cannot be confirmed to render",
                     role.tag()
                 ))
             },
             |template| diet::drive::template_roles::renders(template, role.tag()),
         );
         if let Err(why) = refused {
+            let why = if seat.is_some() {
+                format!("the extraction seat: {why}")
+            } else {
+                why
+            };
             return fail(
                 EXIT_INPUT,
                 &format!("`interview_role = \"{}\"`: {why}", role.tag()),
@@ -819,8 +834,9 @@ fn served_session(
 /// The offboard extraction seat the regime declares (#570), reached by
 /// `serve`'s seat flags: its server, checked against the registry's entry
 /// as the trunk's is -- its engine, then [`confirmations`]' model, settings
-/// and warming, asked as a fork asks it -- and the model a fork names.
-/// `None` for a warm seat.
+/// and warming, asked as a fork asks it -- and the model a fork names,
+/// beside the chat template the seat reports, which a fork's ask renders
+/// through (#599). `None` for a warm seat.
 ///
 /// # Errors
 ///
@@ -834,7 +850,7 @@ fn offboard_seat(
     trunk: &Endpoint,
     (dialect, shape): (&Dialect, &RequestShape),
     regimen: Option<&str>,
-) -> Result<Option<session::Offboard<HttpStream>>, String> {
+) -> Result<Option<(session::Offboard<HttpStream>, Option<String>)>, String> {
     let seat = regime.and_then(|regime| regime.substrates.get(1));
     let Some(seat) = seat else {
         return match (&given.endpoint, &given.model, &given.key_file) {
@@ -881,17 +897,22 @@ fn offboard_seat(
         .map_err(|why| format!("the extraction seat: {why}"))?;
     let mut asked = shape.clone();
     asked.model.clone_from(&model);
-    let Confirmed { window, .. } = confirmations(&transport, id, &passed, &asked)
+    let Confirmed {
+        window, template, ..
+    } = confirmations(&transport, id, &passed, &asked)
         .map_err(|why| format!("the extraction seat: {why}"))?;
-    Ok(Some(session::Offboard {
-        transport,
-        substrate: id.to_owned(),
-        model,
-        // The window the seat reports, else the one its entry declares.
-        context_window: window.map(|(tokens, _)| tokens).or_else(|| {
-            diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
-        }),
-    }))
+    Ok(Some((
+        session::Offboard {
+            transport,
+            substrate: id.to_owned(),
+            model,
+            // The window the seat reports, else the one its entry declares.
+            context_window: window.map(|(tokens, _)| tokens).or_else(|| {
+                diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
+            }),
+        },
+        template,
+    )))
 }
 
 /// The dialect the registry names for substrate `id` (#496): llama.cpp's
