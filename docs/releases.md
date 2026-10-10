@@ -23,7 +23,6 @@ The prototype's first milestone. Each piece of the harness shown working **once,
 | --- | --- | --- |
 | Ask | an ask streams (reasoning, then the answer) and settles; the log has the response row | — |
 | Tools, unprompted | the model runs a shell command under Seatbelt without being told to, reads a file outside the worktree (the Babylon Lite source), and writes or edits a file inside it | — |
-| Approval | a command not in the pre-seeded list (`npm install`) prompts; approving it at workspace scope lets it run | — |
 | Image | an attached screenshot PNG, and a reply that shows the model saw it | — |
 | Interview fork | a fork in the idle gap lands a patch that shows in the working-memory panel | — |
 | Seam | a declared seam renders, refills from working memory, and one ask after it settles | — |
