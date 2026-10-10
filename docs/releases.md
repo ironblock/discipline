@@ -6,14 +6,14 @@
 
 The maintainer, 2026-10-09: "Working prototype _with every theorized lever present_ → controls and reproducible tests → rigor, test matrix, data collection → publish." Each is an initiative, run in that order, and holds as many milestones as it needs; nothing in a later initiative is an obstacle to an earlier one.
 
-1. **The prototype:** every theorized lever (`program.md`, The levers) present and working. v0.1.0 is its first milestone; the milestones after it are the remainder of the levers, proposed once each lever's code is inventoried.
+1. **The prototype:** every theorized lever (`program.md`, The levers) present and working. v0.1.0 is its first milestone, v0.2.0 the remainder of the levers, and v0.3.0 the hosted API (approved by the maintainer, 2026-10-10).
 2. **Controls and reproducible tests.**
 3. **Rigor:** the test matrix and data collection.
 4. **Publish.**
 
 ## v0.1.0 — the pieces work
 
-The prototype's first milestone. Each piece of the harness shown working **once, live, on the floor**. A passing test does not count. Using the pieces together is v0.2.0's.
+The prototype's first milestone. Each piece of the harness shown working **once, live, on the floor**. A passing test does not count. Using the pieces together is v0.4.0's.
 
 **Floor:** the 3.8 EXL3 line, config r2, on linux-pc (`accel24-tabbyapi-exl3-qwen38-27b-3p00`, #497), driven through TabbyAPI (#496). The 3.6 is retired.
 
@@ -31,11 +31,19 @@ The prototype's first milestone. Each piece of the harness shown working **once,
 
 A row's evidence is a results directory, or a line in one, filled from the recording. Its README says truthfully who drove the run, the maintainer or an agent. A row counts once the maintainer approves its evidence. The milestone is done when every row counts.
 
-## v0.2.0 — the pieces together (T2)
+## v0.2.0 — every lever live
 
-The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. This milestone and v0.3.0 predate the initiatives; where they sit among the lever milestones is proposed with those.
+The prototype's second milestone. Each lever in `program.md` §2 shown working **once, live, on the floor**, its state named on the record's start row. The rows are the levers themselves; a lever counts once the maintainer approves its evidence. Agent-driven runs count, labelled as such (the maintainer, 2026-10-10: "Deltas between what I do and what agents do will be interesting data"). Wording a lever needs is approved by the maintainer before it ships (`AGENTS.md`).
 
-## v0.3.0 — T3, NetHack
+## v0.3.0 — the hosted API live
+
+The hosted API kind driven live (#555, #556): the first paid calls, the cache lifetime lever, and the per-fork cache-read share, on Haiku 5.5 (the nearest to the 27B floor) and Sonnet 5.5 (the maintainer, 2026-10-10). Every live call needs the maintainer's approval.
+
+## v0.4.0 — the pieces together (T2)
+
+The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. This milestone and v0.5.0 predate the initiatives, and follow its lever milestones.
+
+## v0.5.0 — T3, NetHack
 
 Attempting the NetHack 5 WebAssembly port, with a record that says truthfully which arm, regime and model ran it. The comparison is the archived Claude desktop app session of the same work, read by the Claude Code adapter (#500, #501).
 
