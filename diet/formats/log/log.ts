@@ -593,6 +593,7 @@ export type CaptureLine = {
   outcome: string;
   entries: string[];
   why?: string;
+  fork?: number;
 };
 
 export type RemindedLine = {

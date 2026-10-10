@@ -1256,7 +1256,8 @@ pub enum Event {
     /// A self-capture call (v7, #609): the model elected one of the
     /// contract's tools, and this is what it came to in working memory.
     Capture {
-        /// The `seq` of the trunk `request` whose answer made the call.
+        /// The `seq` of the `request` whose answer made the call: the
+        /// trunk's, or with `fork` the interview fork's.
         request: u64,
         /// The call's id.
         call: String,
@@ -1271,6 +1272,9 @@ pub enum Event {
         entries: Vec<String>,
         /// Why, when it was dropped or refused.
         why: Option<String>,
+        /// The interview fork that made the call (#610), when a fork
+        /// answered through the capture tools; absent for the trunk's own.
+        fork: Option<u64>,
     },
     /// The self-capture reminder (v7, #609): an advisory note after turn
     /// `turn`'s ask, when the model had recorded nothing for the cadence.
@@ -2765,6 +2769,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             outcome: fields.string("outcome")?,
             entries: fields.optional_strings("entries")?.unwrap_or_default(),
             why: fields.optional_string("why")?,
+            fork: fields.optional_count("fork")?,
         },
         Kind::Reminded => Event::Reminded {
             turn: fields.turn("turn")?,
@@ -4003,6 +4008,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("outcome", Text),
                 must_v7("entries", Holds::Strings),
                 may_v7("why", Text),
+                may_v7("fork", Count),
             ];
             F
         }
@@ -4825,6 +4831,7 @@ fn to_value(line: &Line) -> Value {
             outcome,
             entries,
             why,
+            fork,
         } => {
             put("request", count(*request));
             put("call", text(call));
@@ -4836,6 +4843,9 @@ fn to_value(line: &Line) -> Value {
             );
             if let Some(why) = why {
                 put("why", text(why));
+            }
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
             }
             Kind::Capture
         }
@@ -6099,6 +6109,7 @@ mod tests {
                 outcome: "recorded".to_owned(),
                 entries: vec!["r3/call-c".to_owned()],
                 why: None,
+                fork: None,
             },
             Event::Capture {
                 request: 3,
@@ -6107,6 +6118,7 @@ mod tests {
                 outcome: "dropped".to_owned(),
                 entries: Vec::new(),
                 why: Some("the groundedness gate kept nothing of it".to_owned()),
+                fork: Some(7),
             },
             Event::Reminded {
                 turn: 5,

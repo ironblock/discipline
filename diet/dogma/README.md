@@ -74,3 +74,11 @@ other pin.
 - `v3`: the router's asks as they stood before #595, moved here unchanged.
 - `v4`: `v3` with the judgment ask showing the working record (`<id>\t<entry>`
   lines, dropped when empty) and asking for SUPERSEDE.
+
+Each set says how its asks have a fork answer (#610): in the capitalized
+fields the interview grammar parses (`v3` and `v4`), or through the
+self-capture tools. A regimen sets `capture_modality = "fields"` (the
+default) or `"tools"`; `tools` needs `self_capture` on, an
+`interview_warrant`, and a set whose asks are written for the tools, and serve
+refuses it at start otherwise. No tools set ships until its wording is
+approved, so today `tools` is always refused.
