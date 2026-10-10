@@ -1,6 +1,6 @@
 {
   "name": "exercise",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "description": "The reference coding harness's surface: a chat-shaped trunk, interviews branching into the slots that serve them, and working memory -- driven through one narrow drive interface.",
   "license": "Apache-2.0",
