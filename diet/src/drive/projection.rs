@@ -602,7 +602,7 @@ struct Walk<'a> {
     /// Each lane but the trunk's last logged head digest (v5, #374): a live
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
-    side_heads: BTreeMap<Lane, String>,
+    side_heads: BTreeMap<Lane, (String, Option<Head>)>,
     /// The forks whose head is the trunk's own (#157): a whole-trunk view,
     /// on the trunk's server -- what [`Walk::side_head_change`] can rebuild.
     whole_trunk_forks: BTreeSet<u64>,
@@ -1545,51 +1545,59 @@ impl<'a> Walk<'a> {
     }
 
     /// A side lane's head moving (v5, #374). A whole-trunk fork on the
-    /// trunk's own server sends the trunk as it stands, then its question, so
-    /// its head is rebuilt from the projected trunk and verified by digest
-    /// (#157): no row when it matches -- its move from the lane's last head
-    /// is the trunk's own growth. Any other side head -- one that does not
-    /// match, a `last:N` view, an offboard seat -- is not attributed here: a
-    /// move from the lane's last head is named `unattributed`, and the lane's
-    /// first head is no move at all.
+    /// trunk's own server sends the trunk as it stands, then its call's last
+    /// message, so its head is rebuilt from the projected trunk and verified
+    /// by digest (#157); a seam's audit (#504) is such a fork. A move between
+    /// two verified heads on a lane is attributed as the trunk's moves are --
+    /// the record names every move a lane's digests prove (`ChangeNotNamed`),
+    /// so a verified move is named, never left out. A move from or to a head
+    /// that is not rebuilt here (a `last:N` view, an offboard seat, one that
+    /// does not verify) is named `unattributed`; a lane's first head is no
+    /// move at all.
     fn side_head_change(&mut self, seq: u64, (lane, fork): (Lane, Option<u64>), logged: &str) {
-        let verified = fork.is_some_and(|fork| self.whole_trunk_forks.contains(&fork))
-            && self.rebuilds_the_trunk(logged);
-        let previous = self.side_heads.insert(lane, logged.to_owned());
-        if verified {
-            return;
-        }
-        let Some(previous) = previous else {
+        let verified = fork
+            .filter(|fork| self.whole_trunk_forks.contains(fork))
+            .and_then(|_| self.rebuilt_trunk_head(logged));
+        let previous = self
+            .side_heads
+            .insert(lane, (logged.to_owned(), verified.clone()));
+        let Some((previous_digest, previous_head)) = previous else {
             return;
         };
-        if previous == logged {
+        if previous_digest == logged {
             return;
         }
-        self.events.push(Event::PrefixChanged {
-            id: format!("{}#prefix", request_id(seq)),
-            at_request: request_id(seq),
+        let id = format!("{}#prefix", request_id(seq));
+        let at_request = request_id(seq);
+        let row = match (previous_head, verified) {
+            (Some(previous), Some(now)) => now
+                .change_from(&previous)
+                .map(|change| change.event(id.clone(), at_request.clone())),
+            _ => None,
+        };
+        self.events.push(row.unwrap_or(Event::PrefixChanged {
+            id,
+            at_request,
             reason: PrefixReason::Unattributed,
             diff: Vec::new(),
-        });
+        }));
     }
 
-    /// Whether `logged` is the head a request on the projected trunk carries
-    /// -- the trunk, then the request's own last message, which
+    /// The head a request on the projected trunk carries, when `logged` is
+    /// its digest -- the trunk, then the request's own last message, which
     /// `client::head` leaves out -- under the session's tools (or the `bash`
-    /// definition an older log sent, #558). Never, while the trunk carries
+    /// definition an older log sent, #558). Never while the trunk carries
     /// something the log cannot rebuild.
-    fn rebuilds_the_trunk(&self, logged: &str) -> bool {
+    fn rebuilt_trunk_head(&self, logged: &str) -> Option<Head> {
         if self.trunk_unrebuilt.is_some() {
-            return false;
+            return None;
         }
-        let Ok(tools) = self.tools.clone() else {
-            return false;
-        };
+        let tools = self.tools.clone().ok()?;
         let mut messages = self.trunk.clone();
         messages.push(Message::new(Role::User, String::new()));
         std::iter::once(tools.clone())
             .chain(earlier_bash(&tools))
-            .any(|tools| {
+            .map(|tools| {
                 Head::of(&RequestShape {
                     model: self.model.clone(),
                     messages: messages.clone(),
@@ -1605,9 +1613,8 @@ impl<'a> Walk<'a> {
                     template_kwargs: self.template_kwargs.clone(),
                     tools,
                 })
-                .digest()
-                    == logged
             })
+            .find(|rebuilt| rebuilt.digest() == logged)
     }
 
     /// Turn `turn`'s user message as the session sent it: the ask's words,
