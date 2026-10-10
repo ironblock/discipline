@@ -25,6 +25,9 @@ TURN_BOUNDARY	c28112e37572cf28	508
 self-capture/c1/contract	70019e15b8dfcf10	1129
 self-capture/c1/reminder	d647fcc4a028d32e	29
 self-capture/c1/sweep	f30c90a6c82e2959	58
+self-capture/c2/contract	4b499c56733fc57d	1600
+self-capture/c2/reminder	d647fcc4a028d32e	29
+self-capture/c2/sweep	f30c90a6c82e2959	58
 fork-asks/v3/api_surface	f23f9b8e6012614e	354
 fork-asks/v3/change	dd3d2627552842f0	297
 fork-asks/v3/finding	5095cdcf72f94ec2	272

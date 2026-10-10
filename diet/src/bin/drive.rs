@@ -1144,6 +1144,8 @@ fn serving_interview(
                 .is_some()
                 .then(|| session::fork_view(&read)),
             self_capture,
+            // #609: c1 unless the regimen names another set.
+            capture_contract: session::self_capture_contract(&read),
             asks,
             capture,
             // #564: when a fork fires, and on what; one per gap unless declared.
