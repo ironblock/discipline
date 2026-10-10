@@ -178,6 +178,15 @@ pub struct Identity {
     /// The client dialect its server speaks, by name, when the registry
     /// says (#496); llama.cpp's otherwise.
     pub dialect: Option<String>,
+    /// What kind of server answers (#509): `local`, one we run and can
+    /// reason about, unless the entry says otherwise. An `api` -- a server
+    /// we neither control nor see into -- is to come; nearly every field
+    /// under it would be declared, and nothing warms it.
+    pub server_kind: Option<String>,
+    /// The served configuration the entry declares, by the engine's own
+    /// name for each field: every `served_<field>` key, prefix removed
+    /// (#509). What the engine reports is compared against these.
+    pub served: BTreeMap<String, String>,
 }
 
 /// The identity the registry in `document` gives substrate `id`.
@@ -231,6 +240,16 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
         chat_template_sha256: table.strings.get("chat_template_sha256").cloned(),
         engine_check: table.strings.get("engine_check").cloned(),
         dialect: table.strings.get("dialect").cloned(),
+        server_kind: table.strings.get("server_kind").cloned(),
+        served: table
+            .strings
+            .iter()
+            .filter_map(|(key, value)| {
+                key.strip_prefix("served_")
+                    .filter(|field| !field.ends_with("_is"))
+                    .map(|field| (field.to_owned(), value.clone()))
+            })
+            .collect(),
     })
 }
 

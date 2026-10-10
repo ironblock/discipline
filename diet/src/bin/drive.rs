@@ -401,10 +401,25 @@ fn serve(args: &[String]) -> ExitCode {
     // What the announcement prints and the log's `session.start` claims,
     // built once from the same values (#292): the substrate, the registry's
     // digest, and the engine the check passed.
-    let registry_sha256 = diet::drive::registry::registry_sha256();
-    let claim = substrate
+    // The rest of what the start confirms (#509): the right model, the
+    // settings, warmed -- each declared field corroborated or declared, a
+    // contradiction refused before anything binds.
+    let confirmed = match substrate
         .zip(engine.as_ref())
-        .map(|(id, passed)| passed.claim(id, &registry_sha256));
+        .map(|(id, passed)| confirmations(&transport, id, passed, &shape))
+        .transpose()
+    {
+        Ok(confirmed) => confirmed,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    let registry_sha256 = diet::drive::registry::registry_sha256();
+    let claim = substrate.zip(engine.as_ref()).map(|(id, passed)| {
+        let fields = confirmed
+            .as_ref()
+            .map(|(fields, _)| fields.clone())
+            .unwrap_or_default();
+        passed.claim_with(id, &registry_sha256, fields)
+    });
     let log_path = log_file;
     let (log_file, record) = match outputs(log_path.as_deref(), record_file.as_deref()) {
         Ok(opened) => opened,
@@ -451,7 +466,9 @@ fn serve(args: &[String]) -> ExitCode {
             &running.server.addr().to_string(),
             opened,
             substrate.map(|id| (id, registry_sha256.as_str())),
-            engine.as_ref(),
+            engine
+                .as_ref()
+                .zip(confirmed.as_ref().map(|(_, warmed)| *warmed)),
             log_path.as_deref().zip(running.log_held),
             record_file.as_deref().zip(running.record_held),
             unsent_budget,
@@ -1214,11 +1231,89 @@ fn listener(listen: IpAddr, port: u16) -> Result<std::net::TcpListener, ExitCode
 
 /// The first line `serve` prints: where it listens and when it opened, as
 /// JSON.
+/// Who warmed the server before `serve` announced itself (#509).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Warmed {
+    /// `serve`'s own probe request.
+    ByServe,
+    /// The engine, as its entry declares (`served_warmup = "true"`).
+    ByEngine,
+    /// Nothing: a canned server, or an API, which nothing warms.
+    NotApplicable,
+}
+
+impl Warmed {
+    fn tag(self) -> &'static str {
+        match self {
+            Self::ByServe => "serve",
+            Self::ByEngine => "the engine (declared)",
+            Self::NotApplicable => "n/a",
+        }
+    }
+}
+
+/// What the start confirms of substrate `id`'s server beyond its engine
+/// (#509): each declared `served_*` field and the chat template's digest,
+/// against the engine's report on itself; then, unless the engine warms
+/// itself, one probe request, which also corroborates a declared draft.
+/// A canned server confirms none of it: its acts are the whole of it.
+///
+/// # Errors
+///
+/// An unreachable server, a contradiction, or a refused probe.
+fn confirmations(
+    transport: &HttpStream,
+    id: &str,
+    passed: &diet::drive::engine::Passed,
+    shape: &RequestShape,
+) -> Result<(Vec<diet::formats::log::ServedField>, Warmed), String> {
+    use diet::drive::served::{self, Engine, ServerKind};
+    let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+    if matches!(
+        identity.weights,
+        diet::formats::record::Weights::Canned { .. }
+    ) {
+        return Ok((Vec::new(), Warmed::NotApplicable));
+    }
+    if ServerKind::of(id, &identity)? == ServerKind::Api {
+        let mut fields = served::corroborated(id, &identity, None)?;
+        fields.extend(served::draft_corroborated(id, &identity, None)?);
+        return Ok((fields, Warmed::NotApplicable));
+    }
+    let engine = Engine::of(&identity);
+    let report = match (&passed.props, engine) {
+        (Some(props), Engine::LlamaCpp) => serde_json::from_str(props).ok(),
+        _ => served::report_of(
+            engine.report_path(),
+            transport.get(
+                engine.report_path(),
+                std::time::Instant::now() + diet::drive::engine::PROPS_DEADLINE,
+            ),
+        )?,
+    };
+    let mut fields = served::corroborated(id, &identity, report.as_ref())?;
+    let warms = served::warms_itself(&identity);
+    let timings = if warms && !identity.served.contains_key("draft") {
+        None
+    } else {
+        served::probe(transport, shape)?
+    };
+    fields.extend(served::draft_corroborated(id, &identity, timings.as_ref())?);
+    Ok((
+        fields,
+        if warms {
+            Warmed::ByEngine
+        } else {
+            Warmed::ByServe
+        },
+    ))
+}
+
 fn announcement(
     listening: &str,
     opened: u64,
     substrate: Option<(&str, &str)>,
-    engine: Option<&diet::drive::engine::Passed>,
+    engine: Option<(&diet::drive::engine::Passed, Warmed)>,
     log: Option<(&str, bool)>,
     record: Option<(&str, bool)>,
     unsent_budget: Option<u64>,
@@ -1242,7 +1337,7 @@ fn announcement(
     // The `build_info` the engine check passed, as the server reported it,
     // and how: on both paths, so a reader never infers the path from a
     // missing field.
-    if let Some(engine) = engine {
+    if let Some((engine, warmed)) = engine {
         fields.insert(
             "engine_build".to_owned(),
             Value::String(engine.build_info.clone()),
@@ -1251,6 +1346,8 @@ fn announcement(
             "engine_identity".to_owned(),
             Value::String(engine.identity.tag().to_owned()),
         );
+        // Who warmed the server before this line (#509).
+        fields.insert("warmed".to_owned(), Value::String(warmed.tag().to_owned()));
     }
     // A budget the regime declares and no request carries (R1): said, so
     // the operator knows the cap is not in force.

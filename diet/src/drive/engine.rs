@@ -36,8 +36,8 @@
 //! names the entry's `engine_commit` (or, without one, its
 //! `engine_identity`) as a served field whose provenance is `declared` (log
 //! v7). A field the engine was asked about and agreed on is `corroborated`.
-//! Corroborating what such an engine does report, and refusing on a
-//! contradiction, is the rest of #509.
+//! What the rest of the start confirms -- the model, the settings, warmed
+//! -- is `super::served`.
 
 use crate::client::stream::HttpStream;
 use crate::client::transport::{HttpReply, TransportFailure};
@@ -151,6 +151,9 @@ pub struct Passed {
     pub field: &'static str,
     /// That key's declared value.
     pub declared: String,
+    /// The `/props` body the check read, when it asked: the engine's report
+    /// on itself, which the rest of the start's confirmations read (#509).
+    pub props: Option<String>,
 }
 
 impl Passed {
@@ -160,16 +163,29 @@ impl Passed {
     /// the values the announcement prints, so the two cannot disagree.
     #[must_use]
     pub fn claim(&self, id: &str, registry_sha256: &str) -> log::SubstrateClaim {
+        self.claim_with(id, registry_sha256, Vec::new())
+    }
+
+    /// [`Self::claim`], with the rest of the start's confirmed fields after
+    /// the engine's own (#509).
+    #[must_use]
+    pub fn claim_with(
+        &self,
+        id: &str,
+        registry_sha256: &str,
+        confirmed: Vec<log::ServedField>,
+    ) -> log::SubstrateClaim {
+        let mut served = vec![log::ServedField {
+            field: self.field.to_owned(),
+            value: self.declared.clone(),
+            provenance: self.identity.provenance(),
+            reported: (self.identity != EngineIdentity::Declared).then(|| self.build_info.clone()),
+        }];
+        served.extend(confirmed);
         log::SubstrateClaim {
             substrate: id.to_owned(),
             registry_sha256: registry_sha256.to_owned(),
-            engine: log::ClaimedEngine::Served(vec![log::ServedField {
-                field: self.field.to_owned(),
-                value: self.declared.clone(),
-                provenance: self.identity.provenance(),
-                reported: (self.identity != EngineIdentity::Declared)
-                    .then(|| self.build_info.clone()),
-            }]),
+            engine: log::ClaimedEngine::Served(served),
         }
     }
 }
@@ -340,6 +356,7 @@ fn checked(
         identity,
         field,
         declared: declared.to_owned(),
+        props: Some(reply.body),
     })
 }
 
@@ -370,6 +387,7 @@ fn declared(id: &str, identity: &Identity) -> Result<Option<Passed>, String> {
                 identity: EngineIdentity::Declared,
                 field,
                 declared: build,
+                props: None,
             }))
         }
         Some(other) => Err(format!(
@@ -456,6 +474,7 @@ mod tests {
                 "{{\"build_info\":\"{build_info}\"}}"
             )))),
             Ok(Passed {
+                props: Some(format!("{{\"build_info\":\"{build_info}\"}}")),
                 build_info,
                 identity: EngineIdentity::Checked,
                 field: "engine_commit",
@@ -505,6 +524,7 @@ mod tests {
                 identity: EngineIdentity::Declared,
                 field: "engine_commit",
                 declared: "be74bf0a00bcb3a518e6feb7606f150c189be637".to_owned(),
+                props: None,
             }
         );
         // Every field declared: nothing was reported.
@@ -594,6 +614,7 @@ mod tests {
                 identity: EngineIdentity::Unreported,
                 field: "engine_build_info",
                 declared: "b0-unknown-dirty".to_owned(),
+                props: Some("{\"build_info\":\"b0-unknown-dirty\"}".to_owned()),
             })
         );
         assert_eq!(
@@ -682,6 +703,7 @@ mod tests {
                 identity: EngineIdentity::Unreported,
                 field: "engine_build_info",
                 declared: canned.clone(),
+                props: Some(format!("{{\"build_info\":\"{canned}\"}}")),
             })
         );
         let refused = check(&registry, "c", || {

@@ -290,7 +290,9 @@ An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB tha
 | `weights_main_file`, `weights_draft` | the file's name; a draft model's digest, if the server loads one | -- |
 | `serving_flags`, `serving_context`, `serving_slots` | the serving line, without paths or keys | read off the running process's command line (`/proc/<pid>/cmdline`) |
 | `sampler_card` | what the line fixes, or "none on the serving line; each request sets its own" | -- |
-| `chat_template_sha256` | optional: the served template's digest | from `GET /props` `chat_template` |
+| `chat_template_sha256` | optional: the served template's digest; on llama.cpp, `serve` corroborates it at start | from `GET /props` `chat_template` |
+| `server_kind` | optional: `local` (the default), a server you run; `api`, one you neither control nor see into, under which every served field stands declared and nothing is probed | -- |
+| `served_<field>` | optional: the served configuration you require, by the engine's own name for each field. `serve` corroborates what the engine reports and refuses a contradiction (#509). llama.cpp's `/props`: `served_model` (its `model_alias`), `served_n_ctx` (per slot), `served_total_slots`, `served_vision`, `served_audio`. `TabbyAPI`'s `/v1/model`: `served_model` (its `id`), `served_max_seq_len`, `served_cache_size`, `served_cache_mode`, `served_max_batch_size`, `served_chunk_size`, `served_use_vision`. Either engine: `served_draft = "true"`, corroborated by `draft_n` in the probe request's timings; `served_warmup = "true"` when the engine warms itself, which neither reports. Any other `served_*` field stands declared. | read off the serving line or config, as the server is started |
 | `vision`, `vision_is` | whether the line takes an image: `accepted`, `refused`, `answered-without-seeing` or `unreported`, and the cell that says so (#373) | the vision cell under the line's admission fingerprint directory (`substrates/admission/<substrate>/<fp>/vision/`), whose `recompute.sh` re-derives the word; anything but `unreported` needs that cell, and the admission check refuses a word without one |
 
 **Instances.** One instance, with the date of its reads and `current = true`, says what deployment pinned the entry (see Instances above). A later change to the operating system, engine or line is a new instance, never an edit.
@@ -298,9 +300,10 @@ An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB tha
 A regimen naming your substrate then binds the session to these declared facts:
 - the substrate id;
 - `substrate_hardware`, the equipment's fingerprint;
-- the server's `build_info`, against `engine_commit` or `engine_build_info`.
+- the server's `build_info`, against `engine_commit` or `engine_build_info` (unless the entry says `engine_check = "declared"`);
+- each `served_*` field the engine reports, and the chat template's digest on llama.cpp.
 
-`serve` refuses at start if any of these disagrees, and names the field.
+`serve` refuses at start if any of these disagrees, and names the field. Then, unless the entry declares `served_warmup = "true"`, it sends one short request to warm the server before it announces itself; a declared draft is probed the same way. `session.start`'s `served` list records each field as `declared` or `corroborated`, with what the engine reported.
 
 ## Still to be registered
 

@@ -29,6 +29,16 @@ const ANSWERED: &[u8] =
 
 const HEAD: &str = "you are the trunk, served\n";
 
+/// The probe request's answer at start (#509): a warm turn whose timings
+/// carry `draft_n`, captured off llama.cpp `e7051ef`.
+const WARM: &[u8] =
+    include_bytes!("../client/fixtures/llama-server-e7051ef-warm-turn2-stream.http");
+
+/// The probe's answer, as an act.
+fn warm() -> Act {
+    Act::Raw(WARM.to_vec())
+}
+
 /// A running `diet-drive serve`, stopped when dropped.
 struct Served {
     child: Child,
@@ -612,7 +622,7 @@ fn a_drive_server_starts_only_on_the_engine_the_registry_pins() {
     let path = regimen.0.to_string_lossy().into_owned();
 
     let build = format!("b1-{}", &commit[..7]);
-    let stub = Stub::serving(vec![props_saying(&build)]).expect("loopback");
+    let stub = Stub::serving(vec![props_saying(&build), warm()]).expect("loopback");
     let served = start(&stub.url(), &["--regimen", &path]);
     assert_eq!(
         (
@@ -892,7 +902,7 @@ fn a_drive_server_starts_on_a_substrate_of_several_shards() {
             &registered.engine_commit.expect("an engine identity")[..7]
         )
     });
-    let stub = Stub::serving(vec![props_saying(&build)]).expect("loopback");
+    let stub = Stub::serving(vec![props_saying(&build), warm()]).expect("loopback");
     let served = start(&stub.url(), &["--regimen", &path]);
     assert_eq!(
         (served.substrate.as_deref(), served.engine_build.as_deref()),
@@ -907,7 +917,7 @@ fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
     let id = "accel24-beellama-qwen27b-q4kxl";
     let regimen = regimen_registered(id);
     let path = regimen.0.to_string_lossy().into_owned();
-    let stub = Stub::serving(vec![props_saying("b0-unknown-dirty")]).expect("loopback");
+    let stub = Stub::serving(vec![props_saying("b0-unknown-dirty"), warm()]).expect("loopback");
     let served = start(&stub.url(), &["--regimen", &path]);
     assert_eq!(
         (
@@ -931,11 +941,42 @@ fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
     );
 }
 
+/// What `TabbyAPI`'s `GET /v1/model` answers for the 3.8 line's config r2
+/// (`endpoints/core/types/model.py:11-54` at `be74bf0`), with `cache_size`
+/// as given.
+fn tabby_model_card(cache_size: u64) -> Act {
+    Act::Answer(
+        serde_json::json!({
+            "id": "Qwen3.8-27B-exl3-3.00bpw-img1024",
+            "object": "model",
+            "created": 1,
+            "owned_by": "tabbyAPI",
+            "logging": null,
+            "parameters": {
+                "max_seq_len": 163_840,
+                "cache_size": cache_size,
+                "cache_mode": "8,8",
+                "rope_scale": 1.0,
+                "rope_alpha": 1.0,
+                "max_batch_size": 2,
+                "chunk_size": 2048,
+                "prompt_template": "chat_template",
+                "prompt_template_content": "",
+                "use_vision": true,
+                "draft": null,
+            },
+            "meta": null,
+        })
+        .to_string(),
+    )
+}
+
 #[test]
-fn a_drive_server_starts_on_a_declared_engine_without_asking_it() {
-    // #509: TabbyAPI reports no build, so its entry declares the engine
-    // (`engine_check = "declared"`) and serve starts without `/props`: the
-    // stub answers nothing, and the log claims `declared`.
+fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
+    // #509: TabbyAPI reports no build, so its entry declares the engine and
+    // serve does not ask `/props`; it reads `GET /v1/model` for the model and
+    // settings the entry declares, and -- the engine warming itself, a draft
+    // declared -- one probe request whose timings show the draft ran.
     let id = "accel24-tabbyapi-exl3-qwen38-27b-3p00";
     let commit = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
         .expect("registered")
@@ -943,7 +984,7 @@ fn a_drive_server_starts_on_a_declared_engine_without_asking_it() {
         .expect("an engine_commit");
     let regimen = regimen_registered(id);
     let path = regimen.0.to_string_lossy().into_owned();
-    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let stub = Stub::serving(vec![tabby_model_card(163_840), warm()]).expect("loopback");
     let log_file = file_holding("log", "");
     let logged = log_file.0.to_string_lossy().into_owned();
     let served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
@@ -959,19 +1000,74 @@ fn a_drive_server_starts_on_a_declared_engine_without_asking_it() {
             Some("declared (the engine not asked)")
         )
     );
+    let heads = stub.heads();
+    assert!(
+        heads[0].starts_with("GET /v1/model HTTP/1.1\r\n"),
+        "{heads:?}"
+    );
+    assert!(
+        heads[1].starts_with("POST /v1/chat/completions "),
+        "{heads:?}"
+    );
     let start_line = first_logged_line(&log_file.0);
+    let corroborated = |field: &str, value: &str| {
+        serde_json::json!({
+            "field": field, "value": value, "provenance": "corroborated", "reported": value,
+        })
+    };
     assert_eq!(
         start_line["served"],
-        serde_json::json!([{
-            "field": "engine_commit",
-            "value": commit,
-            "provenance": "declared",
-        }]),
+        serde_json::json!([
+            {"field": "engine_commit", "value": commit, "provenance": "declared"},
+            corroborated("served_cache_mode", "8,8"),
+            corroborated("served_cache_size", "163840"),
+            corroborated("served_chunk_size", "2048"),
+            corroborated("served_max_batch_size", "2"),
+            corroborated("served_max_seq_len", "163840"),
+            corroborated("served_model", "Qwen3.8-27B-exl3-3.00bpw-img1024"),
+            corroborated("served_use_vision", "true"),
+            {
+                "field": "served_draft", "value": "true", "provenance": "corroborated",
+                "reported": "draft_n 72, draft_n_accepted 44",
+            },
+        ]),
         "{start_line}"
     );
     assert_eq!(start_line["version"], 7, "{start_line}");
     // And its server speaks TabbyAPI's dialect, by name (#496).
     assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
+}
+
+#[test]
+fn a_drive_server_refuses_a_server_that_contradicts_a_declared_setting_or_draft() {
+    let id = "accel24-tabbyapi-exl3-qwen38-27b-3p00";
+    let regimen = regimen_registered(id);
+    let path = regimen.0.to_string_lossy().into_owned();
+    // A cache the entry does not declare: refused before the probe, naming
+    // the field and both values.
+    let stub = Stub::serving(vec![tabby_model_card(131_072), warm()]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("`served_cache_size`")
+            && said.contains("\\\"163840\\\"")
+            && said.contains("\\\"131072\\\""),
+        "{said}"
+    );
+    assert_eq!(stub.heads().len(), 1, "no probe after a contradiction");
+    // A declared draft whose probe ran no draft: refused, naming the draft.
+    let stub = Stub::serving(vec![tabby_model_card(163_840), Act::Raw(CAPTURED.to_vec())])
+        .expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("`served_draft`"), "{said}");
+    // An unreachable server is refused as one.
+    let gone = Stub::serving(Vec::new()).expect("loopback");
+    let url = gone.url();
+    drop(gone.received());
+    let (code, said) = run_briefly(&url, &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("not reachable"), "{said}");
 }
 
 #[test]
@@ -1177,7 +1273,7 @@ fn a_drive_servers_log_carries_the_substrate_claim_it_announced() {
     let canned = diet::drive::canned::build_info();
     for (stub, regimen, announced_as, logged_as) in [
         (
-            Stub::serving(vec![props_saying(&build)]).expect("loopback"),
+            Stub::serving(vec![props_saying(&build), warm()]).expect("loopback"),
             committed,
             "checked (commit)",
             "engine_commit",

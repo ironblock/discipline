@@ -102,6 +102,7 @@ pub mod regimen;
 pub mod registry;
 pub mod script;
 pub mod serve;
+pub mod served;
 pub mod session;
 pub mod shell_gate;
 pub mod tool_loop;
