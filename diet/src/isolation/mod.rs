@@ -514,6 +514,9 @@ pub struct Ran {
     pub stderr_bytes: u64,
     /// Whether a stop ended it: its whole process group killed (#551).
     pub cancelled: bool,
+    /// What it printed, as bytes: what a file tool reads an image from
+    /// (#557), which [`Ran::stdout`]'s lossy text cannot carry.
+    pub raw_stdout: Vec<u8>,
 }
 
 impl Ran {
@@ -728,6 +731,33 @@ impl Confinement {
         self.run_with_input(policy, worktree, argv, None, stop)
     }
 
+    /// `worktree` as a command may run in: absolute, a directory, and --
+    /// under a sandbox -- holding no declared secret.
+    fn check_worktree(&self, policy: &Policy, worktree: &Path) -> Result<(), NotRun> {
+        if !worktree.is_absolute() {
+            return Err(NotRun::Worktree {
+                path: worktree.to_string_lossy().into_owned(),
+                why: "it is not absolute, and a relative working tree is resolved once by \
+                      the harness and again inside the sandbox",
+            });
+        }
+        if !worktree.is_dir() {
+            return Err(NotRun::Worktree {
+                path: worktree.to_string_lossy().into_owned(),
+                why: "it is not a directory that exists",
+            });
+        }
+        if let Self::Sandbox(_) = self
+            && let Some(secret) = declared::secret_under_tree(policy, worktree)
+        {
+            return Err(NotRun::SecretInTree {
+                path: worktree.to_string_lossy().into_owned(),
+                secret: secret.to_string_lossy().into_owned(),
+            });
+        }
+        Ok(())
+    }
+
     /// [`Self::run_until`], with `input` on the command's standard input
     /// when there is one (#557: a file tool's write, fed to a confined
     /// helper, so the kernel judges the path as it judges `bash`'s).
@@ -751,27 +781,7 @@ impl Confinement {
         if argv.is_empty() {
             return Err(NotRun::Nothing);
         }
-        if !worktree.is_absolute() {
-            return Err(NotRun::Worktree {
-                path: worktree.to_string_lossy().into_owned(),
-                why: "it is not absolute, and a relative working tree is resolved once by \
-                      the harness and again inside the sandbox",
-            });
-        }
-        if !worktree.is_dir() {
-            return Err(NotRun::Worktree {
-                path: worktree.to_string_lossy().into_owned(),
-                why: "it is not a directory that exists",
-            });
-        }
-        if let Self::Sandbox(_) = self
-            && let Some(secret) = declared::secret_under_tree(policy, worktree)
-        {
-            return Err(NotRun::SecretInTree {
-                path: worktree.to_string_lossy().into_owned(),
-                secret: secret.to_string_lossy().into_owned(),
-            });
-        }
+        self.check_worktree(policy, worktree)?;
 
         let confined = self.compose(policy, worktree, argv);
         // A stop already asked runs nothing (Pi and `OpenCode` both check
@@ -789,6 +799,7 @@ impl Confinement {
                 stdout_bytes: 0,
                 stderr_bytes: 0,
                 cancelled: true,
+                raw_stdout: Vec::new(),
             });
         }
         let Some((program, rest)) = confined.split_first() else {
@@ -863,6 +874,7 @@ impl Confinement {
             stdout_bytes: u64::try_from(output.stdout.len()).unwrap_or(u64::MAX),
             stderr_bytes: u64::try_from(output.stderr.len()).unwrap_or(u64::MAX),
             cancelled: output.cancelled,
+            raw_stdout: output.stdout,
         })
     }
 }
@@ -4053,6 +4065,7 @@ mod tests {
             stdout_bytes: 0,
             stderr_bytes: stderr.len() as u64,
             cancelled: false,
+            raw_stdout: Vec::new(),
         }
     }
 

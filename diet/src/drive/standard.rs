@@ -129,8 +129,8 @@ pub fn read_tool() -> ToolDefinition {
         "Reads and returns the content of a specified file. If the file is large, the content \
          will be truncated. For text files, the tool's response will clearly indicate if \
          truncation has occurred and will provide details on how to read more of the file \
-         using the 'offset' and 'limit' parameters. For text files, it can read specific line \
-         ranges.",
+         using the 'offset' and 'limit' parameters. Handles text and images (PNG, JPG, GIF, \
+         WEBP). For text files, it can read specific line ranges.",
         &[
             (
                 "path",
@@ -365,6 +365,14 @@ fn ripgrep() -> Option<&'static Path> {
 pub enum Done {
     /// It returned this result, an error's text included.
     Shown(String),
+    /// `read` returned an image (#557): its bytes, delivered to the model as
+    /// an image part of the tool's result, as Pi and `OpenCode` 2 deliver it.
+    Image {
+        /// Its media type, from its signature.
+        media_type: &'static str,
+        /// Its bytes.
+        bytes: Vec<u8>,
+    },
     /// A stop killed its helper, after it had printed this.
     Cancelled(String),
 }
@@ -443,8 +451,12 @@ fn said(ran: &crate::isolation::Ran) -> String {
     }
 }
 
-/// A file's text through a confined `cat`.
-fn read_text(tools: &Tools, at: &Path, stop: &dyn Fn() -> bool) -> Result<String, Option<String>> {
+/// A file's bytes through a confined `cat`.
+fn read_bytes(
+    tools: &Tools,
+    at: &Path,
+    stop: &dyn Fn() -> bool,
+) -> Result<Vec<u8>, Option<String>> {
     let ran = confined(
         tools,
         &["/bin/cat", "--", &at.to_string_lossy()],
@@ -454,7 +466,29 @@ fn read_text(tools: &Tools, at: &Path, stop: &dyn Fn() -> bool) -> Result<String
     if ran.exit != Some(0) {
         return Err(Some(said(&ran)));
     }
-    Ok(ran.stdout)
+    Ok(ran.raw_stdout)
+}
+
+/// A file's text through a confined `cat`.
+fn read_text(tools: &Tools, at: &Path, stop: &dyn Fn() -> bool) -> Result<String, Option<String>> {
+    let bytes = read_bytes(tools, at, stop)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// The image formats Pi and `OpenCode` 2 both read (JPEG, PNG, GIF, WebP),
+/// by signature, never by extension.
+fn image_type(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        Some("image/png")
+    } else if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
 }
 
 /// `content` written to `at` through a confined helper: whether the file
@@ -518,13 +552,22 @@ fn read(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         (Ok(path), Ok(offset), Ok(limit)) => (path, offset, limit),
         (Err(why), _, _) | (_, Err(why), _) | (_, _, Err(why)) => return Done::Shown(why),
     };
-    let content = match read_text(tools, &located(tools, path), stop) {
-        Ok(content) => content,
+    let bytes = match read_bytes(tools, &located(tools, path), stop) {
+        Ok(bytes) => bytes,
         Err(why) => return failed(why, |why| format!("Error reading file {path}: {why}")),
     };
-    if content.contains('\u{FFFD}') {
-        return Done::Shown(format!("Cannot read binary file: {path}"));
+    if let Some(media_type) = image_type(&bytes) {
+        if u64::try_from(bytes.len()).unwrap_or(u64::MAX) > super::attach::MAX_BYTES {
+            return Done::Shown(format!(
+                "Cannot read image file {path}: it is larger than {} bytes",
+                super::attach::MAX_BYTES
+            ));
+        }
+        return Done::Image { media_type, bytes };
     }
+    let Ok(content) = String::from_utf8(bytes) else {
+        return Done::Shown(format!("Cannot read binary file: {path}"));
+    };
     let lines: Vec<&str> = content.split_inclusive('\n').collect();
     let total = lines.len();
     let start = offset.unwrap_or(1) - 1;
@@ -924,6 +967,7 @@ mod tests {
         match done {
             Done::Shown(text) => text,
             Done::Cancelled(_) => panic!("cancelled"),
+            Done::Image { media_type, .. } => panic!("an image: {media_type}"),
         }
     }
 
@@ -1001,6 +1045,47 @@ mod tests {
             call(READ, &serde_json::json!({"path": "gone"}), &tools)
                 .starts_with("Error reading file gone: ")
         );
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
+    /// An image is read as its bytes and its type, by signature and not by
+    /// name, for the result message (#557); a file that only looks like one
+    /// by name is read as what it is.
+    #[test]
+    fn read_returns_an_image_by_its_signature() {
+        let tree = scratch("std-read-image");
+        let tools = unconfined(&tree);
+        let png = b"\x89PNG\r\n\x1a\nnot really a picture".to_vec();
+        let jpeg = [0xff_u8, 0xd8, 0xff, 0xe0, 0x00];
+        std::fs::write(tree.join("shot.bin"), &png).expect("written");
+        std::fs::write(tree.join("photo"), jpeg).expect("written");
+        std::fs::write(tree.join("fake.png"), "words\n").expect("written");
+        let read = |path: &str| {
+            run(
+                READ,
+                &serde_json::json!({"path": path}).to_string(),
+                &tools,
+                &|| false,
+            )
+        };
+        assert_eq!(
+            read("shot.bin"),
+            Done::Image {
+                media_type: "image/png",
+                bytes: png
+            }
+        );
+        assert_eq!(
+            read("photo"),
+            Done::Image {
+                media_type: "image/jpeg",
+                bytes: jpeg.to_vec()
+            }
+        );
+        assert_eq!(shown(read("fake.png")), "words\n");
+        assert_eq!(image_type(b"GIF89a.."), Some("image/gif"));
+        assert_eq!(image_type(b"RIFF\0\0\0\0WEBPVP8 "), Some("image/webp"));
+        assert_eq!(image_type(b"RIFF\0\0\0\0WAVE"), None);
         let _ = std::fs::remove_dir_all(&tree);
     }
 
