@@ -1720,6 +1720,10 @@ mod tests {
             head_sha256: None,
         });
         router.observe(&Event::Response {
+            cache_read: None,
+            cache_creation: None,
+            cache_creation_5m: None,
+            cache_creation_1h: None,
             id: "a1".to_owned(),
             to_request: "q1".to_owned(),
             output_tokens: record::Count::default(),
@@ -1752,6 +1756,10 @@ mod tests {
             head_sha256: None,
         });
         aside.observe(&Event::Response {
+            cache_read: None,
+            cache_creation: None,
+            cache_creation_5m: None,
+            cache_creation_1h: None,
             id: "a2".to_owned(),
             to_request: "q2".to_owned(),
             output_tokens: record::Count::default(),
