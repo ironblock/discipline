@@ -180,6 +180,11 @@ export type ForkDelivery =
   | "imperative"
 ;
 
+export type ToolOutputState =
+  | "capped"
+  | "keep"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -272,6 +277,9 @@ export type SessionStartLine = {
   unsent?: Unsent;
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
+  tool_output?: ToolOutputState;
+  tool_output_max_lines?: number;
+  tool_output_max_bytes?: number;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {

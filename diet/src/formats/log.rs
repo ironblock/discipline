@@ -210,6 +210,58 @@ vocabulary! {
 }
 
 vocabulary! {
+    /// The tool output disposition lever's arrival state (v7, #554): whether
+    /// what the model is shown of a tool's output is capped as it arrives.
+    ToolOutputState {
+        /// Capped at a line and a byte limit, the whole kept by digest.
+        Capped => "capped",
+        /// Kept whole: the cap turned off.
+        Keep => "keep",
+    }
+}
+
+/// The cap a session's tool outputs arrived under (v7, #554): on the wire,
+/// `tool_output` and, when capped, `tool_output_max_lines` and
+/// `tool_output_max_bytes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolOutput {
+    /// Capped or kept.
+    pub state: ToolOutputState,
+    /// The line limit, when capped.
+    pub max_lines: Option<u64>,
+    /// The byte limit, when capped.
+    pub max_bytes: Option<u64>,
+}
+
+/// A `session.start`'s cap on tool output, from its three flat keys: the
+/// limits present exactly when it is `capped`.
+fn tool_output(fields: &Fields<'_>) -> Result<Option<ToolOutput>, String> {
+    let state = fields.optional_tag("tool_output", ToolOutputState::from_tag)?;
+    let max_lines = fields.optional_count("tool_output_max_lines")?;
+    let max_bytes = fields.optional_count("tool_output_max_bytes")?;
+    let limited = max_lines.is_some() || max_bytes.is_some();
+    match state {
+        None if limited => Err(
+            "`tool_output_max_lines` or `tool_output_max_bytes` without `tool_output`".to_owned(),
+        ),
+        None => Ok(None),
+        Some(ToolOutputState::Capped) if max_lines.is_none() || max_bytes.is_none() => Err(
+            "`tool_output` is `capped` without both `tool_output_max_lines` and \
+             `tool_output_max_bytes`"
+                .to_owned(),
+        ),
+        Some(ToolOutputState::Keep) if limited => {
+            Err("`tool_output` is `keep` and carries a limit".to_owned())
+        }
+        Some(state) => Ok(Some(ToolOutput {
+            state,
+            max_lines,
+            max_bytes,
+        })),
+    }
+}
+
+vocabulary! {
     /// The fork delivery lever's state (v7): how a fork's patches reach the
     /// trunk.
     ForkDelivery {
@@ -714,6 +766,9 @@ pub enum Event {
         approvals_off: Option<bool>,
         /// The fork delivery lever's state (v7), for a session that forks.
         fork_delivery: Option<ForkDelivery>,
+        /// The cap tool outputs arrived under (v7, #554), when the session
+        /// runs tools.
+        tool_output: Option<ToolOutput>,
     },
     /// An ask was admitted.
     Ask {
@@ -2150,6 +2205,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     off => off,
                 },
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
+                tool_output: tool_output(&fields)?,
             }
         }
         Kind::Ask => Event::Ask {
@@ -2777,6 +2833,8 @@ pub enum Tags {
     Framing,
     /// [`ForkDelivery`] (v7).
     ForkDelivery,
+    /// [`ToolOutputState`] (v7).
+    ToolOutputState,
 }
 
 impl Tags {
@@ -2804,6 +2862,7 @@ impl Tags {
         Self::SeamReason,
         Self::Framing,
         Self::ForkDelivery,
+        Self::ToolOutputState,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -2832,6 +2891,7 @@ impl Tags {
             Self::SeamReason => "SeamReason",
             Self::Framing => "Framing",
             Self::ForkDelivery => "ForkDelivery",
+            Self::ToolOutputState => "ToolOutputState",
         }
     }
 
@@ -2864,6 +2924,7 @@ impl Tags {
             Self::SeamReason => of(SeamReason::ALL, SeamReason::tag),
             Self::Framing => of(Framing::ALL, Framing::tag),
             Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
+            Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
         }
     }
 }
@@ -3270,6 +3331,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("unsent", Holds::Unsent),
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
+                may_v7("tool_output", Tag(Tags::ToolOutputState)),
+                may_v7("tool_output_max_lines", Holds::Count),
+                may_v7("tool_output_max_bytes", Holds::Count),
             ];
             F
         }
@@ -3708,10 +3772,20 @@ fn to_value(line: &Line) -> Value {
             unsent,
             approvals_off,
             fork_delivery,
+            tool_output,
         } => {
             put("version", Value::Integer(*version));
             if let Some(delivery) = fork_delivery {
                 put("fork_delivery", text(delivery.tag()));
+            }
+            if let Some(cap) = tool_output {
+                put("tool_output", text(cap.state.tag()));
+                if let Some(lines) = cap.max_lines {
+                    put("tool_output_max_lines", count(lines));
+                }
+                if let Some(bytes) = cap.max_bytes {
+                    put("tool_output_max_bytes", count(bytes));
+                }
             }
             if let Some(off) = approvals_off {
                 put("approvals_off", Value::Boolean(*off));
@@ -4756,6 +4830,11 @@ mod tests {
                 unsent: None,
                 approvals_off: None,
                 fork_delivery: None,
+                tool_output: Some(ToolOutput {
+                    state: ToolOutputState::Capped,
+                    max_lines: Some(2000),
+                    max_bytes: Some(51_200),
+                }),
             },
         }
     }
@@ -5484,6 +5563,8 @@ mod tests {
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
                         || (tags == Tags::PatchOp && why.contains("`supersedes`"))
+                        || (tags == Tags::ToolOutputState
+                            && why.contains("`tool_output` is `keep` and carries a limit"))
                 },
                 |_| true,
             )
@@ -5634,15 +5715,55 @@ mod tests {
         assert_eq!(parse(&document), Ok(lines));
     }
 
+    /// A `session.start`'s cap (#554): `capped` with both limits, `keep`
+    /// with neither; anything else refused.
+    #[test]
+    fn a_tool_output_cap_carries_its_limits_exactly_when_capped() {
+        let start = |extra: &str| {
+            format!(
+                r#"{{"head":[],"kind":"session.start","model":"m","opened":1,"seq":0,"t":0,"version":7{extra}}}"#
+            )
+        };
+        assert!(
+            line(&start(
+                r#","tool_output":"capped","tool_output_max_bytes":10,"tool_output_max_lines":2"#
+            ))
+            .is_ok()
+        );
+        assert!(line(&start(r#","tool_output":"keep""#)).is_ok());
+        for (extra, says) in [
+            (
+                r#","tool_output":"capped","tool_output_max_lines":2"#,
+                "without both",
+            ),
+            (
+                r#","tool_output":"keep","tool_output_max_lines":2"#,
+                "carries a limit",
+            ),
+            (r#","tool_output_max_bytes":10"#, "without `tool_output`"),
+        ] {
+            let refused = line(&start(extra)).expect_err(extra);
+            assert!(refused.contains(says), "{extra}: {refused}");
+        }
+    }
+
     #[test]
     fn a_v0_log_carrying_what_arrived_in_v1_is_refused_and_line_reads_it() {
         // The whole-log reader scopes by the version `session.start` states;
         // the per-line reader, which a resuming reader uses, reads the union.
         let mut lines = every_event();
-        let Event::SessionStart { version, .. } = &mut lines[0].event else {
+        let Event::SessionStart {
+            version,
+            tool_output,
+            ..
+        } = &mut lines[0].event
+        else {
             panic!("the first line opens the session");
         };
         *version = 0;
+        // A v7 key on the first line would be the one named; the check is of
+        // what arrived in v1, further down.
+        *tool_output = None;
         let document: String = lines.iter().map(|line| render(line) + "\n").collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");

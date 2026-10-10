@@ -97,6 +97,7 @@
 pub mod attach;
 pub mod canned;
 pub mod engine;
+pub mod output;
 pub mod projection;
 pub mod regimen;
 pub mod registry;
@@ -825,6 +826,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         source: Source::Live,
         regimen_sha256: None,
         fork_delivery: None,
+        tool_output: None,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();

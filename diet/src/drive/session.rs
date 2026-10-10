@@ -241,6 +241,9 @@ pub enum Event {
         approvals_off: bool,
         /// The fork delivery lever's state, for a session that forks.
         fork_delivery: Option<log::ForkDelivery>,
+        /// The cap tool outputs arrive under, for a session that runs tools
+        /// (#554).
+        tool_output: Option<super::output::OutputCap>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -543,6 +546,9 @@ pub struct ToolLine {
     /// Exactly what the model was given as the call's result, when it was
     /// given one (#472).
     pub shown: Option<String>,
+    /// The whole output, kept in the recording by digest, when what the
+    /// model was shown is capped (#554): the log's `files`.
+    pub files: Vec<log::RecordedFile>,
 }
 
 impl ToolLine {
@@ -567,6 +573,7 @@ impl ToolLine {
             stderr: None,
             approval: None,
             shown: None,
+            files: Vec::new(),
         }
     }
 }
@@ -1220,6 +1227,7 @@ impl<S: Streaming + 'static> Session<S> {
             unsent,
             approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
             fork_delivery,
+            tool_output: tools.as_ref().map(|tools| tools.output_cap),
         });
         Self {
             shared: Arc::new(Shared {
@@ -1757,8 +1765,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             unsent,
             approvals_off,
             fork_delivery,
+            tool_output,
         } => log::Event::SessionStart {
             fork_delivery: *fork_delivery,
+            tool_output: tool_output.map(tool_output_of),
             // The approval lever's `none`: `true`, or nothing.
             approvals_off: approvals_off.then_some(true),
             unsent: unsent.clone(),
@@ -1963,6 +1973,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 stderr,
                 approval,
                 shown,
+                files,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -1982,7 +1993,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 stdout,
                 stderr,
                 approval,
-                files: None,
+                files: (!files.is_empty()).then_some(files),
                 shown,
             }
         }
@@ -2601,6 +2612,53 @@ fn approval_of(judged: &Judged, allowed: &[Entry]) -> Option<log::Approval> {
     })
 }
 
+/// The log's words for a cap (#554).
+fn tool_output_of(cap: super::output::OutputCap) -> log::ToolOutput {
+    use super::output::OutputCap;
+    let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+    match cap {
+        OutputCap::Capped {
+            max_lines,
+            max_bytes,
+        } => log::ToolOutput {
+            state: log::ToolOutputState::Capped,
+            max_lines: Some(count(max_lines)),
+            max_bytes: Some(count(max_bytes)),
+        },
+        OutputCap::Keep => log::ToolOutput {
+            state: log::ToolOutputState::Keep,
+            max_lines: None,
+            max_bytes: None,
+        },
+    }
+}
+
+/// What the model is shown of `whole`, a call's output, under the session's
+/// cap (#554): within it, `whole`; over it, Qwen Code's notice and the head
+/// and tail, the whole kept in the recording by digest and named on `line`.
+fn shown_capped(tools: &Tools, whole: &str, line: &mut ToolLine) -> String {
+    use super::output::{self, Kept};
+    if !output::over(whole, tools.output_cap) {
+        return whole.to_owned();
+    }
+    let saved = tools.recording.as_ref().and_then(|dir| {
+        super::attach::kept_whole(dir, whole.as_bytes(), "text/plain")
+            .ok()
+            .map(|file| (dir.join(&file.path).to_string_lossy().into_owned(), file))
+    });
+    let kept = saved.as_ref().map_or(Kept::Nowhere, |(path, _)| Kept::At {
+        path,
+        read_tool: tools.read_tool.as_deref(),
+    });
+    let shown = output::capped(whole, tools.output_cap, kept);
+    if shown != whole
+        && let Some((_, file)) = saved
+    {
+        line.files.push(file);
+    }
+    shown
+}
+
 /// One call, to its line and what the model is shown of it (`None` when
 /// nothing goes back: an undeclared tool, the step limit, a stop).
 #[allow(clippy::too_many_lines)]
@@ -2799,7 +2857,8 @@ fn one_call<S: Streaming>(
                 text: ran.stderr.clone(),
                 bytes: ran.stderr_bytes,
             });
-            (line, Some(ran.as_the_model_sees_it()))
+            let shown = shown_capped(tools, &ran.as_the_model_sees_it(), &mut line);
+            (line, Some(shown))
         }
         Err(not_run) => {
             // It never ran: what would have run, and why it did not, as the
@@ -4313,6 +4372,7 @@ pub(in crate::drive) mod tests {
             unsent: None,
             approvals_off: false,
             fork_delivery: None,
+            tool_output: None,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -4411,6 +4471,7 @@ pub(in crate::drive) mod tests {
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
                 approvals_off: true,
                 fork_delivery: Some(log::ForkDelivery::Advisory),
+                tool_output: Some(crate::drive::output::OutputCap::DEFAULT),
             },
             Event::Asked {
                 turn: 1,
@@ -4559,6 +4620,7 @@ pub(in crate::drive) mod tests {
                     why: Some("not_approved".to_owned()),
                 }),
                 shown: None,
+                files: Vec::new(),
             })),
             Event::Forked {
                 of_turn: 1,
@@ -4674,6 +4736,11 @@ pub(in crate::drive) mod tests {
                 unsent: Some(log::Unsent { budget_tokens: 512 }),
                 approvals_off: Some(true),
                 fork_delivery: Some(log::ForkDelivery::Advisory),
+                tool_output: Some(log::ToolOutput {
+                    state: log::ToolOutputState::Capped,
+                    max_lines: Some(2000),
+                    max_bytes: Some(51_200),
+                }),
             },
             log::Event::Ask {
                 turn: 1,
@@ -5418,6 +5485,9 @@ pub(in crate::drive) mod tests {
             store: None,
             approval_policy: None,
             approvals_off: false,
+            output_cap: crate::drive::output::OutputCap::DEFAULT,
+            recording: None,
+            read_tool: None,
         }
     }
 
@@ -6060,6 +6130,182 @@ pub(in crate::drive) mod tests {
         });
         every_head_rebuilds(&log);
         tidy(&[&tree]);
+    }
+
+    /// A session whose one turn runs `commands`, one call each, then
+    /// answers; its tools capped as `cap`, keeping capped outputs in
+    /// `recording`.
+    fn capping_session(
+        tree: &Path,
+        commands: &[&str],
+        cap: crate::drive::output::OutputCap,
+        recording: Option<&Path>,
+    ) -> Session<Canned> {
+        let mut replies: Vec<Vec<Step>> = commands
+            .iter()
+            .enumerate()
+            .map(|(n, command)| vec![bash(&format!("call-{n}"), command)])
+            .collect();
+        replies.push(deltas(&["done"]));
+        let mut tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["seq", "sed", "echo"],
+            None,
+            Decider::Decline,
+        );
+        tools.output_cap = cap;
+        tools.recording = recording.map(Path::to_path_buf);
+        // The gate is not under test: a read of the recording runs.
+        tools.approvals_off = true;
+        Session::open_looping(Canned::new(replies), looping(), None, tools)
+    }
+
+    /// #554: an output over the cap reaches the model capped -- Qwen Code's
+    /// notice naming the kept file, the head, the separator, the tail -- and
+    /// the whole of it is kept in the recording by digest, named on the
+    /// line's `files`; a later call reads a slice of it through `bash`. The
+    /// session's start names the cap, the log reads, and the projection
+    /// rebuilds every head and carries the cap onto the record's start.
+    #[test]
+    fn an_output_over_the_cap_is_capped_kept_whole_by_digest_and_readable_in_slices() {
+        use crate::drive::output::{OutputCap, SEPARATOR};
+        let tree = scratch("cap-over");
+        let recording = scratch("cap-over-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let whole: String = (1..=5000)
+            .flat_map(|n| [n.to_string(), "\n".to_owned()])
+            .collect();
+        let sha256 = crate::digest::sha256_hex(whole.as_bytes());
+        let kept = recording.join("files").join(&sha256);
+        let slice = format!("sed -n '2500,2502p' \"{}\"", kept.display());
+        let session = capping_session(
+            &tree,
+            &["seq 1 5000", &slice],
+            OutputCap::DEFAULT,
+            Some(&recording),
+        );
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        reads_whole(&session);
+        let written = lines(&log);
+        let shown = written[0].shown.clone().expect("shown");
+        assert!(
+            shown.starts_with("Tool output was too large and has been truncated.\n"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains(&format!(
+                "The full output has been saved to: {}\n",
+                kept.display()
+            )),
+            "{shown}"
+        );
+        let (head, tail) = shown
+            .split_once("Truncated part of the output:\n")
+            .expect("the notice")
+            .1
+            .split_once(SEPARATOR)
+            .expect("the separator");
+        assert!(
+            head.starts_with("1\n2\n") && tail.ends_with("4999\n5000\n"),
+            "{shown}"
+        );
+        assert_eq!(head.lines().count(), 400);
+        assert_eq!(tail.lines().count(), 1600);
+        assert_eq!(
+            written[0].files,
+            [log::RecordedFile {
+                path: format!("files/{sha256}"),
+                sha256: sha256.clone(),
+                media_type: "text/plain".to_owned(),
+                bytes: whole.len() as u64,
+            }]
+        );
+        assert_eq!(std::fs::read_to_string(&kept).expect("kept whole"), whole);
+        // The log keeps the whole stream; the model was shown the cap.
+        assert_eq!(
+            written[0].stdout.as_ref().map(|out| out.text.as_str()),
+            Some(whole.as_str())
+        );
+        assert_eq!(written[1].shown.as_deref(), Some("2500\n2501\n2502\n"));
+        let Event::Started { tool_output, .. } = &log[0].event else {
+            panic!("the log opens with the session");
+        };
+        assert_eq!(*tool_output, Some(OutputCap::DEFAULT));
+        every_head_rebuilds(&log);
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        assert!(
+            matches!(
+                projected.events.first(),
+                Some(crate::formats::record::Event::Start {
+                    tool_output: Some(log::ToolOutput {
+                        state: log::ToolOutputState::Capped,
+                        ..
+                    }),
+                    ..
+                })
+            ),
+            "the record's start names the cap"
+        );
+        // And the record reads back with it.
+        let record = crate::formats::record::Record {
+            events: projected.events.clone(),
+        };
+        let read = crate::formats::record::parse(&crate::formats::record::render(&record))
+            .expect("the record reads");
+        assert_eq!(
+            read.tool_output().map(|cap| (cap.max_lines, cap.max_bytes)),
+            Some((Some(2000), Some(51_200)))
+        );
+        tidy(&[&tree, &recording]);
+    }
+
+    /// Within the cap the output is shown whole and nothing is kept; with
+    /// no recording, an output over it is capped and the notice says it was
+    /// not saved; with the cap off, it is shown whole, and the start says
+    /// `keep`.
+    #[test]
+    fn under_the_cap_without_a_recording_or_with_the_cap_off_nothing_is_kept() {
+        use crate::drive::output::OutputCap;
+        let tree = scratch("cap-under");
+        let recording = scratch("cap-under-recording");
+        let session = capping_session(&tree, &["echo short"], OutputCap::DEFAULT, Some(&recording));
+        session.ask("say", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        assert_eq!(written[0].shown.as_deref(), Some("short\n"));
+        assert!(written[0].files.is_empty());
+        assert!(!recording.join("files").exists(), "something was kept");
+
+        let session = capping_session(&tree, &["seq 1 5000"], OutputCap::DEFAULT, None);
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        let shown = written[0].shown.clone().expect("shown");
+        assert!(
+            shown.contains("The full output was not saved.\n"),
+            "{shown}"
+        );
+        assert!(written[0].files.is_empty());
+
+        let session = capping_session(&tree, &["seq 1 5000"], OutputCap::Keep, Some(&recording));
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        assert_eq!(
+            written[0].shown.as_deref().map(str::len),
+            written[0].stdout.as_ref().map(|out| out.text.len())
+        );
+        assert!(!recording.join("files").exists(), "something was kept");
+        let Event::Started { tool_output, .. } = &log[0].event else {
+            panic!("the log opens with the session");
+        };
+        assert_eq!(*tool_output, Some(OutputCap::Keep));
+        tidy(&[&tree, &recording]);
     }
 
     /// A turn that fails on its first request ran nothing, and keeps nothing:
