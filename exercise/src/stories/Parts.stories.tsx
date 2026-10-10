@@ -1161,23 +1161,23 @@ export const GapPasteIsComposing: Story = {
 };
 
 /**
- * A cancelled turn (#289): its ask and what answered it are gone from what the model reads next -- `diet` sends it
- * only finished turns -- and both say so. The log as `diet` writes a stopped turn.
+ * A turn cancelled before it said anything (#289, #575): its ask and its empty answer are gone from what the model
+ * reads next -- `diet` keeps a cancelled turn's steps and what it had said, and this one had neither -- and both say
+ * so. The log as `diet` writes a turn stopped during its prefill.
  */
 const CANCELLED_TURN = [
   { seq: 0, t: 0, kind: 'session.start', version: 2, opened: 1_790_000_000_000, model: 'm', head: [{ role: 'system', content: 's' }] },
   { seq: 1, t: 10, kind: 'ask', turn: 1, text: 'Walk me through what happens when the disk fills.' },
   { seq: 2, t: 10, kind: 'settlement', from: 'awaiting', to: 'turn' },
   { seq: 3, t: 10, kind: 'request', turn: 1, lane: 'trunk' },
-  { seq: 4, t: 200, kind: 'delta', request: 3, text: 'When the disk fills, the' },
-  { seq: 5, t: 900, kind: 'stop.asked', turn: 1 },
-  { seq: 6, t: 901, kind: 'cancelled', request: 3, partial: 'When the disk fills, the' },
-  { seq: 7, t: 901, kind: 'turn.settled', turn: 1, reason: 'cancelled' },
-  { seq: 8, t: 901, kind: 'settlement', from: 'turn', to: 'awaiting' },
+  { seq: 4, t: 900, kind: 'stop.asked', turn: 1 },
+  { seq: 5, t: 901, kind: 'cancelled', request: 3, partial: '' },
+  { seq: 6, t: 901, kind: 'turn.settled', turn: 1, reason: 'cancelled' },
+  { seq: 7, t: 901, kind: 'settlement', from: 'turn', to: 'awaiting' },
 ] as unknown as LogLine[];
 
 export const CancelledOutOfContext: Story = {
-  name: 'Message · a cancelled turn, not in the model’s context',
+  name: 'Message · a turn cancelled before a word, not in the model’s context',
   render: () => {
     const nodes = fold(CANCELLED_TURN).eras[0]?.nodes ?? [];
     return (

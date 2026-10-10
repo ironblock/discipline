@@ -396,6 +396,9 @@ struct Walk<'a> {
     /// The trunk requests that were tool steps: a `tool_call` line cites
     /// them.
     stepped: BTreeSet<u64>,
+    /// What each turn cancelled while generating had said, from its
+    /// `cancelled` line (#575).
+    cancelled_text: BTreeMap<u32, String>,
     /// Each turn's tool steps so far, in order: what the session sent after
     /// the ask, and what it put back on the trunk.
     steps: BTreeMap<u32, Vec<Step>>,
@@ -523,6 +526,7 @@ impl<'a> Walk<'a> {
             tools: Ok(Vec::new()),
             template_kwargs: BTreeMap::new(),
             stepped,
+            cancelled_text: BTreeMap::new(),
             steps: BTreeMap::new(),
             trunk_unrebuilt: None,
             side_heads: BTreeMap::new(),
@@ -583,12 +587,9 @@ impl<'a> Walk<'a> {
                     usage.as_ref(),
                 );
             }
-            Line::Cancelled { partial, .. } => self.name(
-                line.seq,
-                "cancelled",
-                "a cancelled call: the record has no row for one".to_owned(),
-                Some(partial.clone()),
-            ),
+            Line::Cancelled {
+                request, partial, ..
+            } => self.cancelled_call(line.seq, *request, partial),
             Line::RequestFailed {
                 reason, message, ..
             } => self.name(
@@ -646,8 +647,11 @@ impl<'a> Walk<'a> {
             // as the session does (`State::keep_ran_steps`).
             Line::TurnSettled {
                 turn,
-                reason: log::SettleReason::Failed | log::SettleReason::Timeout,
-            } => self.failed_after_steps(*turn),
+                reason:
+                    reason @ (log::SettleReason::Failed
+                    | log::SettleReason::Timeout
+                    | log::SettleReason::Cancelled),
+            } => self.cut_short(*turn, *reason),
             // Carried by the rows above: a delta by its response's text, a
             // settlement and a settled turn by the turn and response rows.
             Line::Delta { .. }
@@ -1183,6 +1187,50 @@ impl<'a> Walk<'a> {
             return;
         }
         self.onto_the_trunk(turn, completed);
+    }
+
+    /// A turn that settled short of an answer: what of it joins the trunk,
+    /// as the session puts it there (#541, #575).
+    fn cut_short(&mut self, turn: u32, reason: log::SettleReason) {
+        if reason == log::SettleReason::Cancelled {
+            self.cancelled_turn(turn);
+        } else {
+            self.failed_after_steps(turn);
+        }
+    }
+
+    /// A cancelled call: named, since the record has no row for one, and
+    /// its text kept for its turn's settling (#575).
+    fn cancelled_call(&mut self, seq: u64, request: u64, partial: &str) {
+        if let Some(turn) = self.turn_of.get(&request) {
+            self.cancelled_text.insert(*turn, partial.to_owned());
+        }
+        self.name(
+            seq,
+            "cancelled",
+            "a cancelled call: the record has no row for one".to_owned(),
+            Some(partial.to_owned()),
+        );
+    }
+
+    /// A turn settled `cancelled` (#575): every step it took joins the trunk
+    /// with its ask -- the one a cancel cut short has each call answered on
+    /// its line -- and then, when the cancel came while it was generating,
+    /// the text it had said. Nothing taken and nothing said, and nothing
+    /// joins it.
+    fn cancelled_turn(&mut self, turn: u32) {
+        let steps = self.steps.get(&turn).map_or(0, Vec::len);
+        let said = self
+            .cancelled_text
+            .remove(&turn)
+            .filter(|text| !text.is_empty());
+        if steps == 0 && said.is_none() {
+            return;
+        }
+        self.onto_the_trunk(turn, usize::MAX);
+        if let Some(text) = said {
+            self.trunk.push(Message::new(Role::Assistant, text));
+        }
     }
 
     /// A `tool_call` line's call, onto its step (#472).
