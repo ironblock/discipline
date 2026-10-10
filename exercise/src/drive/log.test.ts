@@ -234,6 +234,12 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(branches.map((b) => b.seat)).toEqual([{ substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b', promptTokens: 1820, wallMs: 4300 }, undefined]);
   });
 
+  it('draws the trunk’s own working-memory changes from their patch lines, each with its lane (#574, #627)', () => {
+    const session = fold(logOf('a-v7-self-capture-patch-named-by-its-lane.jsonl'));
+    expect([...session.unknown.keys()]).toEqual([]);
+    expect(session.memory.map((e) => [e.id, e.text, e.state, e.lane])).toEqual([['r3/call-1/fact', 'The parser drops blank lines before it tokenizes.', 'live', 'self-capture']]);
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });
