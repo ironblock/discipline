@@ -29,7 +29,8 @@
 //! leave it out otherwise (llama.cpp `server-common.cpp`
 //! `server_slot_stats::to_json`; `TabbyAPI` `endpoints/OAI/utils/common_.py:76-81`).
 //! So a declared `served_draft` is corroborated by the probe request's
-//! timings.
+//! timings, and only draft tokens are a report: a probe the draft produced
+//! nothing for is silence, and the declaration stands.
 //!
 //! **Warmed:** unless the entry declares `served_warmup = "true"` -- the
 //! engine warms itself, which neither engine reports -- `serve` sends one
@@ -212,12 +213,14 @@ pub fn warms_itself(identity: &Identity) -> bool {
     identity.served.get(WARMUP).map(String::as_str) == Some("true")
 }
 
-/// The declared draft, compared against the probe request's `timings`.
+/// The declared draft, against the probe request's `timings`. Only draft
+/// tokens are a report: `draft_n` above zero says a draft ran. A probe with
+/// none -- no timings, or a short answer the draft produced nothing for --
+/// is silence, and the declaration stands.
 ///
 /// # Errors
 ///
-/// A contradiction: a draft declared and the timings reporting none, or
-/// none declared and the timings reporting draft tokens.
+/// A contradiction: draft tokens reported where the entry declares no draft.
 pub fn draft_corroborated(
     id: &str,
     identity: &Identity,
@@ -226,13 +229,15 @@ pub fn draft_corroborated(
     let Some(declared) = identity.served.get(DRAFT) else {
         return Ok(None);
     };
-    let said = timings.map(|timings| match timings.draft_n {
-        Some(drafted) if drafted > 0 => "true".to_owned(),
-        _ => "false".to_owned(),
-    });
-    let field = compared(id, format!("served_{DRAFT}"), declared, said)?;
+    let drafted = timings.filter(|timings| timings.draft_n.is_some_and(|drafted| drafted > 0));
+    let field = compared(
+        id,
+        format!("served_{DRAFT}"),
+        declared,
+        drafted.map(|_| "true".to_owned()),
+    )?;
     Ok(Some(ServedField {
-        reported: field.reported.as_ref().and(timings).map(|timings| {
+        reported: field.reported.as_ref().and(drafted).map(|timings| {
             format!(
                 "draft_n {}, draft_n_accepted {}",
                 timings.draft_n.unwrap_or(0),
@@ -421,8 +426,8 @@ mod tests {
     }
 
     /// The draft against the probe's timings: `draft_n` corroborates a
-    /// declared draft; timings without it contradict one; no timings leave
-    /// it declared; and a draft not declared but run is a contradiction too.
+    /// declared draft; timings without it, or none, are silence and leave it
+    /// declared; a draft declared absent but reported running contradicts.
     #[test]
     fn the_probes_timings_corroborate_or_contradict_a_declared_draft() {
         let ran = Timings {
@@ -440,10 +445,11 @@ mod tests {
             field.reported.as_deref(),
             Some("draft_n 72, draft_n_accepted 44")
         );
-        assert!(
+        assert_eq!(
             draft_corroborated("s", &drafted, Some(&none))
-                .expect_err("no draft ran")
-                .contains("`served_draft`")
+                .expect("no draft tokens are silence")
+                .map(|field| field.provenance),
+            Some(FieldProvenance::Declared)
         );
         assert_eq!(
             draft_corroborated("s", &drafted, None)

@@ -1039,7 +1039,7 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
 }
 
 #[test]
-fn a_drive_server_refuses_a_server_that_contradicts_a_declared_setting_or_draft() {
+fn a_drive_server_refuses_a_contradicted_setting_and_takes_a_silent_draft_as_declared() {
     let id = "accel24-tabbyapi-exl3-qwen38-27b-3p00";
     let regimen = regimen_registered(id);
     let path = regimen.0.to_string_lossy().into_owned();
@@ -1055,12 +1055,27 @@ fn a_drive_server_refuses_a_server_that_contradicts_a_declared_setting_or_draft(
         "{said}"
     );
     assert_eq!(stub.heads().len(), 1, "no probe after a contradiction");
-    // A declared draft whose probe ran no draft: refused, naming the draft.
+    // A declared draft whose probe produced no draft tokens is silence, not
+    // a contradiction: the start goes on, the draft declared.
     let stub = Stub::serving(vec![tabby_model_card(163_840), Act::Raw(CAPTURED.to_vec())])
         .expect("loopback");
-    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
-    assert_eq!(code, Some(1), "{said}");
-    assert!(said.contains("`served_draft`"), "{said}");
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
+    assert_eq!(served.substrate.as_deref(), Some(id));
+    let start_line = first_logged_line(&log_file.0);
+    let draft = start_line["served"]
+        .as_array()
+        .and_then(|fields| fields.iter().find(|field| field["field"] == "served_draft"))
+        .cloned();
+    assert_eq!(
+        draft,
+        Some(
+            serde_json::json!({"field": "served_draft", "value": "true", "provenance": "declared"})
+        ),
+        "{start_line}"
+    );
+    drop(served);
     // An unreachable server is refused as one.
     let gone = Stub::serving(Vec::new()).expect("loopback");
     let url = gone.url();
