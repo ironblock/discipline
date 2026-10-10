@@ -130,6 +130,11 @@
 //! absent, `system`, appended to the head's system message, as every seam
 //! before #597 did.
 //!
+//! A v7 `fork` may carry `trigger`, what fired it under the interview
+//! cadence (#564): `turn_end`, or `call:<class>:<id>`. Forks that carry one
+//! may share a gap, each opened after the one before it settled; a fork
+//! with none is still its gap's only fork.
+//!
 //! # A torn final line
 //!
 //! A writer killed mid-write leaves the start of an event with no line break
@@ -1191,6 +1196,11 @@ pub enum Event {
         /// What it saw of the trunk (v7, #567): `last_turn` or `last:N`;
         /// absent is the whole trunk.
         view: Option<String>,
+        /// What fired it under the interview cadence (v7, #564): `turn_end`,
+        /// or `call:<class>:<id>` -- the router's class of the call and its
+        /// id. A gap may hold several forks that carry one, each after the
+        /// last settled; absent (a log before #564), the gap's only fork.
+        trigger: Option<String>,
         /// The role it was asked in (v7, #599): `system` or `developer`;
         /// absent is `user`.
         role: Option<String>,
@@ -2009,11 +2019,13 @@ struct Forks {
 impl Forks {
     /// A `fork` (#374): on the `interview` lane, after the latest turn
     /// settled `final` and before the next `ask`, at that turn's answered
-    /// trunk request, and the only fork in its gap.
+    /// trunk request, and the only fork in its gap -- or, carrying the
+    /// `trigger` the interview cadence fired it on (v7, #564), one of the
+    /// gap's forks, each opened after the one before it settled.
     fn fork(
         &mut self,
         seq: u64,
-        (lane, of_turn, at): (Lane, u32, u64),
+        (lane, of_turn, at, triggered): (Lane, u32, u64, bool),
         turns: u32,
         trunk: &BTreeMap<u32, u64>,
     ) -> Result<(), String> {
@@ -2040,9 +2052,22 @@ impl Forks {
                  trunk the fork would be cut from"
             ));
         }
-        if self.of_turn.values().any(|turn| *turn == of_turn) {
+        let earlier: Vec<u64> = self
+            .of_turn
+            .iter()
+            .filter(|(_, turn)| **turn == of_turn)
+            .map(|(fork, _)| *fork)
+            .collect();
+        if !earlier.is_empty() && !triggered {
             return Err(format!(
-                "a second fork in the gap after turn {of_turn}: at most one fork per gap"
+                "a second fork in the gap after turn {of_turn}: at most one fork per gap, \
+                 unless each names the `trigger` the interview cadence fired it on"
+            ));
+        }
+        if let Some(open) = earlier.iter().find(|fork| !self.settled.contains_key(fork)) {
+            return Err(format!(
+                "a fork in the gap after turn {of_turn} while fork {open} is unsettled: a \
+                 gap's forks run one after another"
             ));
         }
         self.of_turn.insert(seq, of_turn);
@@ -2447,9 +2472,15 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 lane,
                 of_turn,
                 at: forked_at,
+                trigger,
                 ..
             } => forks
-                .fork(line.seq, (*lane, *of_turn, *forked_at), turns, &trunk)
+                .fork(
+                    line.seq,
+                    (*lane, *of_turn, *forked_at, trigger.is_some()),
+                    turns,
+                    &trunk,
+                )
                 .map_err(|why| at(index, why))?,
             Event::ForkSettled { fork, outcome, .. } => forks
                 .settle(*fork, *outcome)
@@ -2832,6 +2863,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             why: fields.tag("why", Warrant::from_tag)?,
             question: fields.string("question")?,
             view: fields.optional_string("view")?,
+            trigger: fields.optional_string("trigger")?,
             role: fields.optional_string("role")?,
             // Built only when its two keys are carried ([`all_or_none`]).
             seat: match (
@@ -4148,6 +4180,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("why", Tag(Tags::Warrant)),
                 must_v5("question", Text),
                 may_v7("view", Text),
+                may_v7("trigger", Text),
                 may_v7("role", Text),
                 may_v7("substrate", Text),
                 may_v7("model", Text),
@@ -4963,6 +4996,7 @@ fn to_value(line: &Line) -> Value {
             why,
             question,
             view,
+            trigger,
             role,
             seat,
             ask,
@@ -4974,6 +5008,9 @@ fn to_value(line: &Line) -> Value {
             put("question", text(question));
             if let Some(view) = view {
                 put("view", text(view));
+            }
+            if let Some(trigger) = trigger {
+                put("trigger", text(trigger));
             }
             if let Some(role) = role {
                 put("role", text(role));
@@ -6280,6 +6317,7 @@ mod tests {
                 why: Warrant::Scoping,
                 question: "what did the operator decide".to_owned(),
                 view: Some("last:2".to_owned()),
+                trigger: Some("turn_end".to_owned()),
                 role: Some("developer".to_owned()),
                 seat: Some(ForkSeat {
                     substrate: "cpu-seat".to_owned(),

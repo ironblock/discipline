@@ -505,6 +505,9 @@ pub enum Event {
         question: String,
         /// What it saw of the trunk (#567).
         view: ForkView,
+        /// What fired it under the interview cadence (#564): `turn_end`,
+        /// or `call:<class>:<id>`.
+        trigger: String,
         /// The role it asked in (#599).
         role: Role,
         /// The offboard seat its call ran on (#570); `None` is warm.
@@ -878,6 +881,11 @@ pub struct Interview {
     /// turns after the head; `None` when the regimen does not say, which is
     /// the whole trunk warm and the last turn offboard (#570).
     pub view: Option<ForkView>,
+    /// When a fork fires, and on what (#564): one per gap, the default.
+    pub cadence: Cadence,
+    /// The output size, in bytes, a read must reach to fork (#564); `None`,
+    /// the default, gates nothing.
+    pub threshold_bytes: Option<u64>,
     /// Self-capture (#609): the contract's tools offered from the first
     /// request, and the cadence of silent turns its reminder fires after;
     /// `None` when off.
@@ -888,6 +896,74 @@ pub struct Interview {
     /// Whether the model is offered `prune_output`, and when its prunes
     /// are applied (#612); `None`, the default, offers nothing.
     pub prune: Option<super::prune::PruneSeam>,
+}
+
+/// The interview cadence (#564): when the capture gap's forks fire, and on
+/// what. Every state queues its forks into the gap, in call order, one
+/// after another; none fires mid-turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Cadence {
+    /// At most one fork per gap, under the warrant (#374): the judgment ask
+    /// on an operator-marked turn, else the class ask on the turn's last
+    /// read. Today's, the default.
+    #[default]
+    Gap,
+    /// A fork on every call that ran, under `read`: the class's ask where the
+    /// router routes the class to one, else its declared default (the
+    /// generic ask); then the judgment ask on a marked turn, under `scoping`.
+    PerCall,
+    /// A fork on every call the router routes to a class ask, under `read`;
+    /// then the judgment ask on a marked turn, under `scoping`.
+    PerClass,
+    /// The judgment ask at every turn's end, under `scoping`, marked or
+    /// not: the router's turn boundary.
+    TurnBoundary,
+}
+
+impl Cadence {
+    /// The regimen's word for it.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Gap => "gap",
+            Self::PerCall => "per_call",
+            Self::PerClass => "per_class",
+            Self::TurnBoundary => "turn_boundary",
+        }
+    }
+}
+
+/// The regimen key for the interview cadence (#564).
+pub const INTERVIEW_CADENCE: &str = "interview_cadence";
+
+/// The regimen key for the read fork's output threshold, in bytes (#564).
+pub const INTERVIEW_THRESHOLD_BYTES: &str = "interview_threshold_bytes";
+
+/// The cadence the regimen declares, leniently: a state's word, or `gap`.
+#[must_use]
+pub fn interview_cadence(regimen: &Regimen) -> Cadence {
+    let Some(crate::formats::regimen::Value::String(word)) = regimen.get(INTERVIEW_CADENCE) else {
+        return Cadence::Gap;
+    };
+    [
+        Cadence::Gap,
+        Cadence::PerCall,
+        Cadence::PerClass,
+        Cadence::TurnBoundary,
+    ]
+    .into_iter()
+    .find(|cadence| cadence.word() == word)
+    .unwrap_or_default()
+}
+
+/// The threshold the regimen declares, leniently: a positive whole number of
+/// bytes, or none.
+#[must_use]
+pub fn interview_threshold_bytes(regimen: &Regimen) -> Option<u64> {
+    match regimen.get(INTERVIEW_THRESHOLD_BYTES) {
+        Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => Some(n.unsigned_abs()),
+        _ => None,
+    }
 }
 
 /// `shape`'s tools with self-capture's after them, when `interview` has it
@@ -1076,24 +1152,45 @@ pub fn fork_asks(regimen: &Regimen) -> &'static crate::dogma::asks::AskSet {
     }
 }
 
-/// The rule that warrants a fork after `turn` settled `final`, and the
-/// question it asks, or `None` (#374, the predicate ruled at 5985110649).
+/// One fork the cadence fires in a gap (#564): the rule that warranted it,
+/// what it asks, and what fired it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Firing {
+    why: log::Warrant,
+    /// Which ask of the session's set it sends (#595).
+    ask: AskKind,
+    question: String,
+    /// `turn_end`, or `call:<class>:<id>`.
+    trigger: String,
+}
+
+/// A fork's trigger at a turn's end.
+const TURN_END: &str = "turn_end";
+
+/// One call of the turn, as the router classed it.
+struct Routed {
+    id: String,
+    class: Class,
+    routing: Routing,
+    /// `bash`'s command, quoted back by the ask; a standard tool has none.
+    command: Option<String>,
+    /// Its output's size: what the threshold reads.
+    bytes: u64,
+}
+
+/// The forks to fire after `turn` settled `final`, in order, under the
+/// interview's cadence and warrant (#374, #564).
 ///
-/// (b) `scoping`: the turn's ask carried the operator's mark. The question
-/// is the router's turn-boundary ask, [`AskKind::Judgment`].
-///
-/// (a) `read`: one of the turn's `tool_call`s `ran` and the router's table
-/// classes it [`Class::DocumentRead`] or [`Class::SourceRead`]. The question
-/// is the ask the router routes that class to, quoting back the command.
-///
-/// Both quote back what the trunk last said it was about to do, as the
-/// router does. Scoping is checked first: it is the operator's own mark.
-fn warranted(
-    interview: &Interview,
-    log: &[Logged],
-    turn: u32,
-    answer: &str,
-) -> Option<(log::Warrant, AskKind, String)> {
+/// Under `gap`, at most one, as the predicate ruled at 5985110649: (b)
+/// `scoping`, the turn's ask carried the operator's mark, and the question
+/// is the router's turn-boundary ask, [`AskKind::Judgment`]; else (a)
+/// `read`, the turn's last call that `ran` and that the router's table
+/// classes [`Class::DocumentRead`] or [`Class::SourceRead`], and the
+/// question is the ask the router routes that class to. The other states
+/// are [`Cadence`]'s. Every ask quotes back what the trunk last said it was
+/// about to do, as the router does; a read under the threshold forks
+/// nothing.
+fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Vec<Firing> {
     let rules = &interview.rules;
     let intent = router::stated_intent(answer);
     // The working record, for an ask in a set that shows it (#595).
@@ -1114,60 +1211,152 @@ fn warranted(
         );
         (kind, text)
     };
-    let scoping = log.iter().any(|logged| {
-        matches!(&logged.event, Event::Asked { turn: asked, scoping: true, .. } if *asked == turn)
-    });
-    if scoping && rules.contains(&log::Warrant::Scoping) {
-        let (kind, text) = ask(AskKind::Judgment, None);
-        return Some((log::Warrant::Scoping, kind, text));
-    }
-    if !rules.contains(&log::Warrant::Read) {
-        return None;
-    }
-    let mut table = Router::new().ok()?;
-    let read = log.iter().rev().find_map(|logged| {
-        let Event::ToolCalled(line) = &logged.event else {
-            return None;
-        };
-        if line.turn != turn || line.outcome != log::ToolOutcome::Ran {
-            return None;
+    let judgment = || {
+        let (kind, question) = ask(AskKind::Judgment, None);
+        Firing {
+            why: log::Warrant::Scoping,
+            ask: kind,
+            question,
+            trigger: TURN_END.to_owned(),
         }
-        // `bash`'s command, or a standard tool's own string arguments
-        // (#557): its `path` is what the router classes a read by.
-        let command = tool_loop::command_of(&line.arguments);
-        let args: BTreeMap<String, Value> = match &command {
-            Some(command) => {
-                BTreeMap::from([("command".to_owned(), Value::String(command.clone()))])
-            }
-            None => {
-                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&line.arguments)
-                    .ok()?
-                    .into_iter()
-                    .filter_map(|(key, value)| match value {
-                        serde_json::Value::String(text) => Some((key, Value::String(text))),
-                        _ => None,
-                    })
-                    .collect()
-            }
-        };
-        let decided = table.observe(&RecordEvent::ToolCall {
-            id: line.id.clone(),
-            at_turn: turn,
-            tool: line.name.clone(),
-            args: Some(args),
-            exit: None,
-            output: None,
-            exec: None,
+    };
+    let marked = rules.contains(&log::Warrant::Scoping)
+        && log.iter().any(|logged| {
+            matches!(&logged.event, Event::Asked { turn: asked, scoping: true, .. } if *asked == turn)
         });
-        let class = decided.first()?.class;
-        let Routing::Fork(kind) = class.routing() else {
-            return None;
-        };
-        READS.contains(&class).then_some((kind, command))
-    })?;
-    // A standard tool ran no command: the ask's `last_command` line drops.
-    let (kind, text) = ask(read.0, read.1);
-    Some((log::Warrant::Read, kind, text))
+    let calls = if rules.contains(&log::Warrant::Read) {
+        routed(log, turn)
+    } else {
+        Vec::new()
+    };
+    let enough = |call: &&Routed| {
+        !READS.contains(&call.class)
+            || interview
+                .threshold_bytes
+                .is_none_or(|bytes| call.bytes >= bytes)
+    };
+    let fork = |call: &Routed, kind: AskKind| {
+        let (kind, question) = ask(kind, call.command.clone());
+        Firing {
+            why: log::Warrant::Read,
+            ask: kind,
+            question,
+            trigger: format!("call:{}:{}", call.class.tag(), call.id),
+        }
+    };
+    let mut out: Vec<Firing> = match interview.cadence {
+        Cadence::Gap => {
+            if marked {
+                return vec![judgment()];
+            }
+            return calls
+                .iter()
+                .rev()
+                .filter(|call| READS.contains(&call.class))
+                .filter(enough)
+                .find_map(|call| match call.routing {
+                    Routing::Fork(kind) => Some(fork(call, kind)),
+                    Routing::Silent | Routing::Defer => None,
+                })
+                .into_iter()
+                .collect();
+        }
+        Cadence::TurnBoundary => {
+            return if rules.contains(&log::Warrant::Scoping) {
+                vec![judgment()]
+            } else {
+                Vec::new()
+            };
+        }
+        Cadence::PerClass => calls
+            .iter()
+            .filter(enough)
+            .filter_map(|call| match call.routing {
+                Routing::Fork(kind) => Some(fork(call, kind)),
+                Routing::Silent | Routing::Defer => None,
+            })
+            .collect(),
+        Cadence::PerCall => calls
+            .iter()
+            .filter(enough)
+            .map(|call| match call.routing {
+                Routing::Fork(kind) => fork(call, kind),
+                // The router's declared default for a call it would not
+                // interrupt: the generic ask.
+                Routing::Silent | Routing::Defer => fork(call, AskKind::Generic),
+            })
+            .collect(),
+    };
+    if marked {
+        out.push(judgment());
+    }
+    out
+}
+
+/// The forks the cadence chose, screened before any fires: where a routing
+/// state skips one, it is dropped here and the record says why. The first
+/// such state is #611's -- a fork the turn's own self-capture already
+/// covered -- and it lands with #609; until then every fork fires.
+fn screened(firings: Vec<Firing>) -> Vec<Firing> {
+    firings
+}
+
+/// The calls of `turn` that `ran`, in order, each classed by the router: a
+/// `bash` call by its command, a standard tool's by its own string
+/// arguments (#557), its `path` among them.
+fn routed(log: &[Logged], turn: u32) -> Vec<Routed> {
+    let Ok(mut table) = Router::new() else {
+        return Vec::new();
+    };
+    log.iter()
+        .filter_map(|logged| match &logged.event {
+            Event::ToolCalled(line)
+                if line.turn == turn && line.outcome == log::ToolOutcome::Ran =>
+            {
+                Some(line.as_ref())
+            }
+            _ => None,
+        })
+        .filter_map(|line| {
+            let command = tool_loop::command_of(&line.arguments);
+            let args: BTreeMap<String, Value> = match &command {
+                Some(command) => {
+                    BTreeMap::from([("command".to_owned(), Value::String(command.clone()))])
+                }
+                None => serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+                    &line.arguments,
+                )
+                .ok()?
+                .into_iter()
+                .filter_map(|(key, value)| match value {
+                    serde_json::Value::String(text) => Some((key, Value::String(text))),
+                    _ => None,
+                })
+                .collect(),
+            };
+            let decided = table.observe(&RecordEvent::ToolCall {
+                id: line.id.clone(),
+                at_turn: turn,
+                tool: line.name.clone(),
+                args: Some(args),
+                exit: None,
+                output: None,
+                exec: None,
+            });
+            let class = decided.first()?.class;
+            let bytes = match (&line.stdout, &line.stderr) {
+                (Some(out), err) => out.bytes + err.as_ref().map_or(0, |err| err.bytes),
+                (None, _) => line.shown.as_ref().map_or(0, |shown| shown.len() as u64),
+            };
+            Some(Routed {
+                id: line.id.clone(),
+                class,
+                routing: class.routing(),
+                command,
+                bytes,
+            })
+        })
+        .collect()
 }
 
 /// The router's classes that are a read under rule (a).
@@ -1291,6 +1480,9 @@ struct State {
     interview: Option<Interview>,
     /// The fork in flight in the capture gap, by its sequence number.
     forking: Option<u64>,
+    /// The gap's forks not yet fired (#564), in order: each fires once the
+    /// one before it settles; the turn and the trunk request they fork at.
+    queued: std::collections::VecDeque<(u32, u64, Firing)>,
     /// `turns` at the latest seam, or 0: what a cadence counts from.
     turns_at_seam: u32,
     /// The trunk's tokens as the latest trunk call measured them, cleared
@@ -1844,6 +2036,7 @@ impl<S: Streaming + 'static> Session<S> {
             answered: None,
             interview,
             forking: None,
+            queued: std::collections::VecDeque::new(),
             recording: tools.as_ref().and_then(|t| t.recording.clone()),
             pruned: Vec::new(),
             refilled: false,
@@ -2890,6 +3083,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             why,
             question,
             view,
+            trigger,
             role,
             seat,
             ask,
@@ -2902,6 +3096,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // Absent is the tail (#568): a tail fork's line is as before.
             // Absent is the whole trunk (#567).
             view: (*view != ForkView::Trunk).then(|| view.word()),
+            trigger: Some(trigger.clone()),
             // Absent is `user` (#599): a user-role fork's line is as before.
             role: (*role != Role::User).then(|| role.tag().to_owned()),
             seat: seat.clone(),
@@ -4957,15 +5152,30 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
             _ => None,
         })
         .unwrap_or_default();
-    let fired = state
+    let mut fired: std::collections::VecDeque<Firing> = state
         .interview
         .as_ref()
         .filter(|_| !state.ending)
-        .and_then(|interview| warranted(interview, &state.log, turn, answer));
-    let Some((why, kind, question)) = fired else {
+        .map(|interview| screened(firings(interview, &state.log, turn, answer)))
+        .unwrap_or_default()
+        .into();
+    let Some(first) = fired.pop_front() else {
         turn_over(&shared.template, state);
         return None;
     };
+    state.queued = fired.into_iter().map(|firing| (turn, at, firing)).collect();
+    Some(fire(shared, state, turn, at, first))
+}
+
+/// One of the gap's forks, fired: born off the warm trunk -- what the view
+/// shows of it, then the question -- and never appended to it.
+fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Firing) -> Fired {
+    let Firing {
+        why,
+        ask,
+        question,
+        trigger,
+    } = firing;
     let role = state
         .interview
         .as_ref()
@@ -4998,9 +5208,10 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         why,
         question,
         view,
+        trigger,
+        ask,
         role,
         seat,
-        ask: kind,
     });
     let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
     let request = state.push(Event::Requested {
@@ -5017,13 +5228,13 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         cancel: cancel.clone(),
     });
     state.forking = Some(fork);
-    Some(Fired {
+    Fired {
         turn,
         fork,
         request,
         shape,
         cancel,
-    })
+    }
 }
 
 /// The gap's fork, on the turn's own thread: its one call streamed into the
@@ -5038,8 +5249,17 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
 /// run nor logged as a piece, and its answer is `unparseable` -- unless the
 /// fork answers through the capture tools (#610), when each call is logged
 /// as a piece and its capture calls are what it answered ([`captured`]).
-#[allow(clippy::too_many_lines)]
 fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
+    let mut next = Some(forked);
+    while let Some(forked) = next {
+        next = one_fork(shared, forked);
+    }
+}
+
+/// One of the gap's forks, run to its settling: then the next queued fork,
+/// fired, or -- none left, a stop, or an `end` -- back to `awaiting`.
+#[allow(clippy::too_many_lines)]
+fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
     let Fired {
         turn,
         fork,
@@ -5202,9 +5422,20 @@ fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
     for patch in patches {
         state.push(patch);
     }
-    turn_over(&shared.template, &mut state);
+    // The gap's next fork (#564), unless a stop or an `end` came meanwhile.
+    if outcome == log::ForkOutcome::Cancelled || state.ending {
+        state.queued.clear();
+    }
+    let next = state
+        .queued
+        .pop_front()
+        .map(|(turn, at, firing)| fire(shared, &mut state, turn, at, firing));
+    if next.is_none() {
+        turn_over(&shared.template, &mut state);
+    }
     drop(state);
     shared.changed.notify_all();
+    next
 }
 
 /// A fork's answer through the capture tools (#610): each capture call run
@@ -6976,6 +7207,7 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
                 view: ForkView::Last(2),
+                trigger: "turn_end".to_owned(),
                 role: Role::Developer,
                 seat: Some(log::ForkSeat {
                     substrate: "cpu-seat".to_owned(),
@@ -7353,6 +7585,7 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
                 view: Some("last:2".to_owned()),
+                trigger: Some("turn_end".to_owned()),
                 role: Some("developer".to_owned()),
                 seat: Some(log::ForkSeat {
                     substrate: "cpu-seat".to_owned(),
@@ -9722,6 +9955,8 @@ pub(in crate::drive) mod tests {
             recall: super::super::archive::Recall::Off,
             role: Role::User,
             view: None,
+            cadence: Cadence::Gap,
+            threshold_bytes: None,
             prune: None,
             self_capture: None,
             asks: &crate::dogma::asks::V3,
@@ -9762,6 +9997,194 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Each fork's warrant and trigger, in order (#564).
+    fn triggers(log: &[Logged]) -> Vec<(log::Warrant, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked { why, trigger, .. } => Some((*why, trigger.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A session whose one turn runs `commands` in order, then answers, and
+    /// whose gap forks under `cadence` and `threshold` with both warrants:
+    /// each fork answers with a learned line (#564).
+    fn cadenced(
+        tree: &Path,
+        commands: &[&str],
+        (cadence, threshold_bytes): (Cadence, Option<u64>),
+        forks: usize,
+    ) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        std::fs::write(tree.join("lib.rs"), "pub fn f() {}\n").expect("a source");
+        let mut replies: Vec<Vec<Step>> = commands
+            .iter()
+            .enumerate()
+            .map(|(n, command)| vec![bash(&format!("call-{}", n + 1), command)])
+            .collect();
+        replies.push(deltas(&["Done. Next, I will write the schema."]));
+        replies.extend((0..forks).map(|_| deltas(&["LEARNED: something\n"])));
+        Session::open_with(
+            Canned::new(replies),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                tree,
+                &["cat", "echo"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(Interview {
+                cadence,
+                threshold_bytes,
+                ..interviewing(&[log::Warrant::Scoping, log::Warrant::Read])
+            }),
+        )
+    }
+
+    /// Runs `cadenced`'s one turn to the end of its gap: every fork settled.
+    fn through_the_gap(session: &Session<Canned>, forks: usize) -> Vec<Logged> {
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(session, "the gap's forks", |log| {
+            settled(log) && fork_outcomes(log).len() == forks
+        });
+        reads_whole(session);
+        log
+    }
+
+    /// `per_class` (#564): a fork on every call the router routes to a class
+    /// ask, in call order, each naming its call and class; a call it would
+    /// not interrupt forks nothing. The gap's forks run one after another,
+    /// and the log reads.
+    #[test]
+    fn per_class_forks_on_each_routed_call_in_call_order() {
+        let tree = scratch("cadence-per-class");
+        let session = cadenced(
+            &tree,
+            &["cat notes.md", "echo hi", "cat lib.rs"],
+            (Cadence::PerClass, None),
+            2,
+        );
+        let log = through_the_gap(&session, 2);
+        assert_eq!(
+            triggers(&log),
+            [
+                (log::Warrant::Read, "call:document-read:call-1".to_owned()),
+                (log::Warrant::Read, "call:source-read:call-3".to_owned()),
+            ]
+        );
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value; 2]);
+        let questions: Vec<String> = forks(&log).into_iter().map(|fork| fork.4).collect();
+        assert!(
+            questions[0].contains("You just read a document"),
+            "{questions:?}"
+        );
+        assert!(
+            questions[1].contains("You last ran: cat lib.rs"),
+            "{questions:?}"
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// `per_call` (#564): a fork on every call that ran -- the class's ask,
+    /// or the router's declared default, the generic ask, for one it would
+    /// not interrupt.
+    #[test]
+    fn per_call_forks_on_every_call_with_the_generic_ask_as_its_default() {
+        let tree = scratch("cadence-per-call");
+        let session = cadenced(
+            &tree,
+            &["cat notes.md", "echo hi"],
+            (Cadence::PerCall, None),
+            2,
+        );
+        let log = through_the_gap(&session, 2);
+        let found = triggers(&log);
+        assert_eq!(found[0].1, "call:document-read:call-1");
+        assert!(found[1].1.ends_with(":call-2"), "{found:?}");
+        let generic = router::Ask {
+            kind: AskKind::Generic,
+            intent: router::stated_intent("Done. Next, I will write the schema."),
+        }
+        .render(&Facts {
+            last_command: Some("echo hi".to_owned()),
+            ..Facts::default()
+        });
+        assert_eq!(forks(&log)[1].4, generic);
+        tidy(&[&tree]);
+    }
+
+    /// `turn_boundary` (#564): the judgment ask at the turn's end under
+    /// `scoping`, though the ask carried no mark; `gap` fires nothing for
+    /// the same turn with no read in it.
+    #[test]
+    fn turn_boundary_asks_judgment_at_every_turns_end() {
+        let tree = scratch("cadence-turn-boundary");
+        let session = cadenced(&tree, &["echo hi"], (Cadence::TurnBoundary, None), 1);
+        let log = through_the_gap(&session, 1);
+        assert_eq!(
+            triggers(&log),
+            [(log::Warrant::Scoping, "turn_end".to_owned())]
+        );
+        let session = cadenced(&tree, &["echo hi"], (Cadence::Gap, None), 0);
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(triggers(&log).is_empty());
+        tidy(&[&tree]);
+    }
+
+    /// The threshold (#564) gates a read: under it, the read forks nothing;
+    /// at it, the read forks as before, its trigger naming the call.
+    #[test]
+    fn a_read_under_the_threshold_forks_nothing() {
+        let tree = scratch("cadence-threshold");
+        // `notes.md` is seven bytes.
+        let session = cadenced(&tree, &["cat notes.md"], (Cadence::Gap, Some(8)), 0);
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(triggers(&log).is_empty(), "{:?}", triggers(&log));
+        let session = cadenced(&tree, &["cat notes.md"], (Cadence::Gap, Some(7)), 1);
+        let log = through_the_gap(&session, 1);
+        assert_eq!(
+            triggers(&log),
+            [(log::Warrant::Read, "call:document-read:call-1".to_owned())]
+        );
+        tidy(&[&tree]);
+    }
+
+    /// The cadence and the threshold read leniently (#564).
+    #[test]
+    fn the_cadence_and_threshold_read_leniently() {
+        let read = |text: &str| {
+            let regimen = regimen::parse(text).expect("a regimen");
+            (
+                interview_cadence(&regimen),
+                interview_threshold_bytes(&regimen),
+            )
+        };
+        assert_eq!(read(""), (Cadence::Gap, None));
+        assert_eq!(
+            read("interview_cadence = \"per_class\"\ninterview_threshold_bytes = 3000\n"),
+            (Cadence::PerClass, Some(3000))
+        );
+        assert_eq!(
+            read("interview_cadence = \"often\"\ninterview_threshold_bytes = 0\n"),
+            (Cadence::Gap, None)
+        );
+        assert_eq!(
+            read("interview_cadence = \"turn_boundary\"\n").0,
+            Cadence::TurnBoundary
+        );
+        assert_eq!(
+            read("interview_cadence = \"per_call\"\n").0,
+            Cadence::PerCall
+        );
     }
 
     fn fork_outcomes(log: &[Logged]) -> Vec<log::ForkOutcome> {

@@ -673,7 +673,10 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             "capture_modality".to_owned(),
             capture_modality_lever(regimen),
         ),
-        ("interview_routing_and_cadence".to_owned(), warrant),
+        (
+            "interview_routing_and_cadence".to_owned(),
+            cadence_lever(regimen),
+        ),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         ("fork_memory_share".to_owned(), undeclared()),
         ("fork_input_view".to_owned(), fork_input_view_lever(regimen)),
@@ -713,6 +716,16 @@ fn render_budget_lever(regimen: &Regimen) -> String {
             };
             format!("{}:{over}", budget.tokens)
         },
+    )
+}
+
+/// The interview routing and cadence lever (#564): the cadence's word, and
+/// the read fork's output threshold when one is declared.
+fn cadence_lever(regimen: &Regimen) -> String {
+    let cadence = crate::drive::session::interview_cadence(regimen).word();
+    crate::drive::session::interview_threshold_bytes(regimen).map_or_else(
+        || cadence.to_owned(),
+        |bytes| format!("{cadence}:threshold:{bytes}-bytes"),
     )
 }
 
@@ -873,6 +886,23 @@ mod tests {
             .expect("read")
             .expect("runs commands");
         assert_eq!(declared.max_steps, Some(40), "`[limits]` beneath it");
+    }
+
+    /// The interview routing and cadence lever names the cadence (#564)
+    /// and, when declared, the read fork's threshold: no longer the warrant.
+    #[test]
+    fn the_interview_lever_names_the_cadence_and_its_threshold() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("interview_routing_and_cadence")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever("interview_warrant = [\"scoping\"]\n"), "gap");
+        assert_eq!(
+            lever("interview_cadence = \"per_class\"\ninterview_threshold_bytes = 3000\n"),
+            "per_class:threshold:3000-bytes"
+        );
     }
 
     /// The tool-output disposition names the cap on arrival and, beside

@@ -2658,6 +2658,7 @@ mod tests {
             why,
             question: "what did the operator decide".to_owned(),
             view: None,
+            trigger: None,
             role: None,
             seat: None,
             ask: None,
