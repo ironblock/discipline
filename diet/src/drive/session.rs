@@ -1927,14 +1927,26 @@ impl State {
     fn append(&mut self, event: Event) -> u64 {
         // A call's measured prompt, against the estimate it was sized with
         // (#588).
-        if let Event::Answered { timings, .. }
-        | Event::Capped { timings, .. }
-        | Event::Called { timings, .. } = &event
-            && let (Some(timings), Some(sent)) = (timings, self.sent_estimate)
-            && (timings.prompt_n.is_some() || timings.cache_n.is_some())
+        if let Event::Answered {
+            timings, hosted, ..
+        }
+        | Event::Capped {
+            timings, hosted, ..
+        }
+        | Event::Called {
+            timings, hosted, ..
+        } = &event
+            && let Some(sent) = self.sent_estimate
         {
-            let prompt = timings.prompt_n.unwrap_or(0) + timings.cache_n.unwrap_or(0);
-            self.measured_prompt = Some((prompt, sent));
+            // llama.cpp's timings, or a hosted API's usage (#555).
+            let measured = timings
+                .as_ref()
+                .filter(|timings| timings.prompt_n.is_some() || timings.cache_n.is_some())
+                .map(|timings| timings.prompt_n.unwrap_or(0) + timings.cache_n.unwrap_or(0))
+                .or_else(|| hosted.usage.as_ref().map(|usage| usage.prompt_tokens));
+            if let Some(prompt) = measured {
+                self.measured_prompt = Some((prompt, sent));
+            }
         }
         let seq = u64::try_from(self.log.len()).expect("a log longer than u64 cannot be built");
         let t = u64::try_from(self.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX);
@@ -4038,7 +4050,10 @@ fn step<S: Streaming>(
                     arguments: call.arguments.clone(),
                 })
                 .collect();
-            state.step_tokens = timings.as_ref().and_then(trunk_tokens_of);
+            state.step_tokens = timings
+                .as_ref()
+                .and_then(trunk_tokens_of)
+                .or_else(|| hosted.trunk_tokens());
             state.push(Event::Called {
                 request,
                 text: partial,
@@ -6441,7 +6456,10 @@ fn settle_finished(
     answer.reasoning.clone_from(&reasoning);
     hosted.onto(&mut answer);
     state.trunk.push(answer);
-    state.trunk_tokens = timings.as_ref().and_then(trunk_tokens_of);
+    state.trunk_tokens = timings
+        .as_ref()
+        .and_then(trunk_tokens_of)
+        .or_else(|| hosted.trunk_tokens());
     state.push(Event::Answered {
         request,
         text: partial,
@@ -6494,6 +6512,15 @@ impl Hosted {
             _ => return false,
         }
         true
+    }
+
+    /// The trunk's tokens after this answer, from a hosted API's usage: the
+    /// prompt in all and what it generated (#555), as llama.cpp's timings
+    /// give them.
+    fn trunk_tokens(&self) -> Option<u64> {
+        self.usage
+            .as_ref()
+            .map(|usage| usage.prompt_tokens + usage.completion_tokens)
     }
 
     /// The signature and redacted thinking onto the message that goes back.
@@ -8210,6 +8237,75 @@ pub(in crate::drive) mod tests {
             )
         );
         reads_whole(&session);
+    }
+
+    /// #555: on a hosted API a fork reuses the trunk's prefix through the
+    /// prompt cache: each response row carries its cache reads and writes,
+    /// and the fork row the share of its prompt read from the cache.
+    #[test]
+    fn a_hosted_forks_row_names_its_cache_read_share() {
+        use crate::client::anthropic::tests::{answering, streamed};
+        use crate::client::stream::HttpStream;
+        use crate::client::stub::Stub;
+        use crate::client::transport::Endpoint;
+        use crate::formats::record::Event as Row;
+
+        let stub = Stub::serving(vec![
+            streamed(&answering(SCOPED, (40, 0, 900))),
+            streamed(&answering(DECIDED, (30, 900, 20))),
+        ])
+        .expect("loopback");
+        let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("an endpoint"))
+            .with_anthropic(crate::client::anthropic::Options::default());
+        let session = Session::open_with(
+            transport,
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let cache: Vec<_> = projected
+            .events
+            .iter()
+            .filter_map(|row| match row {
+                Row::Response {
+                    cache_read,
+                    cache_creation_5m,
+                    ..
+                } => Some((*cache_read, *cache_creation_5m)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            cache,
+            [(Some(0), Some(900)), (Some(900), Some(20))],
+            "{:#?}",
+            projected.unspellable
+        );
+        let share = projected.events.iter().find_map(|row| match row {
+            Row::Fork {
+                cache_read_share, ..
+            } => Some(cache_read_share.clone()),
+            _ => None,
+        });
+        // 900 read of 30 + 900 + 20 = 950.
+        assert_eq!(
+            share
+                .unwrap_or_else(|| panic!("no fork row: {:#?}", projected.unspellable))
+                .as_ref()
+                .map(|share| share.as_str().to_owned()),
+            Some("0.9474".to_owned())
+        );
     }
 
     #[test]

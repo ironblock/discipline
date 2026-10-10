@@ -387,7 +387,14 @@ fn serve(args: &[String]) -> ExitCode {
     // default, and the template's default level named when none is sent.
     let mut unsent_budget = None;
     let mut effort_default = None;
-    if let Some(regime) = regime.as_ref() {
+    // A hosted API's entry (#555): its requests carry no template kwargs --
+    // a local template's -- and its thinking is the transport's.
+    let hosted = regime.as_ref().and_then(|regime| {
+        diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
+            .ok()
+            .filter(|identity| identity.server_kind.as_deref() == Some("api"))
+    });
+    if let Some(regime) = regime.as_ref().filter(|_| hosted.is_none()) {
         let identity = diet::drive::registry::identity(
             diet::drive::registry::REGISTRY,
             &regime.substrates[0].id,
@@ -468,11 +475,39 @@ fn serve(args: &[String]) -> ExitCode {
     };
     let trunk_endpoint = endpoint.clone();
     let mut transport = HttpStream::new(endpoint);
-    if let Some(key_file) = key_file {
-        match key_file_in_declared_path(regimen_file.as_deref(), &key_file)
-            .map_or_else(|| bearer_from(&key_file), Err)
+    if let Some(key_file) = key_file.as_deref() {
+        match key_file_in_declared_path(regimen_file.as_deref(), key_file)
+            .map_or_else(|| bearer_from(key_file), Err)
         {
             Ok(bearer) => transport = transport.with_bearer(bearer),
+            Err(why) => return fail(EXIT_INPUT, &why),
+        }
+    }
+    // A hosted API (#555): its key, from the file or the harnesses' own
+    // variable, and its wire, checked against its entry before anything
+    // binds.
+    if let Some((identity, regime)) = hosted.as_ref().zip(regime.as_ref()) {
+        let key = if key_file.is_some() {
+            diet::drive::hosted::Key::Given
+        } else {
+            diet::drive::hosted::Key::Environment(
+                std::env::var(diet::drive::hosted::ANTHROPIC_API_KEY).ok(),
+                tools.as_ref().is_some_and(|tools| {
+                    tools
+                        .policy
+                        .environment
+                        .iter()
+                        .any(|name| name == diet::drive::hosted::ANTHROPIC_API_KEY)
+                }),
+            )
+        };
+        match diet::drive::hosted::transport(
+            transport,
+            (identity, &regime.substrates[0]),
+            key,
+            &shape,
+        ) {
+            Ok(hosted) => transport = hosted,
             Err(why) => return fail(EXIT_INPUT, &why),
         }
     }
@@ -888,6 +923,13 @@ fn offboard_seat(
              `warm`, not `offboard:{id}`"
         ));
     }
+    let entry = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+    if entry.server_kind.as_deref() == Some("api") {
+        return Err(format!(
+            "`{id}` is a hosted API, and an offboard seat on one is not built: a seat speaks the \
+             trunk's local wire"
+        ));
+    }
     let seat_dialect = served_dialect(id)?;
     if seat_dialect.name != dialect.name {
         return Err(format!(
@@ -971,7 +1013,7 @@ fn served_dialect(id: &str) -> Result<Dialect, String> {
         Some(name) => Dialect::named(name).ok_or_else(|| {
             format!(
                 "the registry names `{name}` as `{id}`'s dialect, which this client does not \
-                 speak: `llama.cpp` or `tabbyapi`"
+                 speak: `llama.cpp`, `tabbyapi` or `anthropic-messages`"
             )
         }),
     }

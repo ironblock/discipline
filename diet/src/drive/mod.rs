@@ -99,6 +99,7 @@ pub mod attach;
 pub mod background;
 pub mod canned;
 pub mod engine;
+pub mod hosted;
 pub mod instructions;
 pub mod output;
 pub mod projection;
@@ -1079,6 +1080,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                     .is_some_and(|thought| !thought.is_empty());
             let fork_id = format!("fork-{index}");
             events.push(Event::Fork {
+                cache_read_share: None,
                 id: fork_id.clone(),
                 lane: INTERVIEW.to_owned(),
                 substrate: substrate.clone(),

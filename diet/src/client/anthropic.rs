@@ -762,6 +762,25 @@ pub(crate) mod tests {
         ]
     }
 
+    /// CONSTRUCTED, not captured: an answer of `text`, its prompt `input`
+    /// tokens uncached, `read` read from the cache and `written` written
+    /// for five minutes.
+    pub(crate) fn answering(text: &str, (input, read, written): (u64, u64, u64)) -> Vec<Value> {
+        vec![
+            json!({"type": "message_start", "message": {"usage": {
+                "input_tokens": input, "output_tokens": 1,
+                "cache_read_input_tokens": read, "cache_creation_input_tokens": written,
+                "cache_creation": {"ephemeral_5m_input_tokens": written, "ephemeral_1h_input_tokens": 0}}}}),
+            json!({"type": "content_block_start", "index": 0,
+                   "content_block": {"type": "text", "text": ""}}),
+            json!({"type": "content_block_delta", "index": 0,
+                   "delta": {"type": "text_delta", "text": text}}),
+            json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"},
+                   "usage": {"output_tokens": 20}}),
+            json!({"type": "message_stop"}),
+        ]
+    }
+
     /// What a stream delivered, piece by piece, in words.
     fn played(stub: &Stub, options: Options) -> (Vec<String>, Result<Ended, TransportFailure>) {
         let mut endpoint = Endpoint::parse(&stub.url()).expect("an endpoint");

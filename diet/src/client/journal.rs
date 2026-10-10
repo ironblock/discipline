@@ -514,6 +514,10 @@ pub fn project(journal: &Journal, substrate: &str) -> Projection {
                 capped,
             } => {
                 events.push(Event::Response {
+                    cache_read: None,
+                    cache_creation: None,
+                    cache_creation_5m: None,
+                    cache_creation_1h: None,
                     id: response_id(to_request),
                     to_request: to_request.clone(),
                     // A count the server did not report is not zero. Zero is a
