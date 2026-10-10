@@ -299,6 +299,9 @@ pub enum Event {
         /// Each lever's state, as the record's start row names them (#573):
         /// `serve_levers`' one reading, when a regimen was read.
         levers: Option<BTreeMap<String, String>>,
+        /// Whether a turn's notes ride in its ask's user message (#609):
+        /// always, from this build on.
+        notes_in_the_ask: bool,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -2476,6 +2479,7 @@ impl<S: Streaming + 'static> Session<S> {
             reasoning_effort_default,
             instruction_files,
             levers,
+            notes_in_the_ask: true,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             bash_timeout_ms: bash_timeout_of(tools.as_ref(), &template),
             phases,
@@ -2620,38 +2624,35 @@ impl<S: Streaming + 'static> Session<S> {
         state.move_to(Settlement::Turn);
         let mut shape = self.shared.template.clone();
         shape.messages.clone_from(&state.trunk);
-        shape.messages.push(message.clone());
-        // The fork delivery lever: what forks patched since the last
-        // request, as one note after the ask; it joins the trunk with it.
-        let mut opening = vec![message];
+        // The harness's notes ride in the ask's own user message, BEFORE the
+        // operator's words, which the model answers last (#609, run 3: a
+        // reminder sent as the last message was answered and the ask never
+        // was) -- Qwen Code's order, its system reminders ahead of the user's
+        // prompt in one user turn. In the order they are logged: the fork
+        // delivery lever's patches; archive recall (#566), what earlier
+        // seams dropped that this ask names; background commands that ended
+        // since (#614), Qwen Code's `<task-notification>`s; and the
+        // self-capture reminder (#609), when its cadence came round, never
+        // in the system prompt.
+        let mut message = message;
         if let Some(note) = state.deliver(turn) {
-            shape.messages.push(note.clone());
-            opening.push(note);
+            message.notes.push(note.content);
         }
-        // Archive recall (#566): what earlier seams dropped that this ask
-        // names, as one note after it (and after any delivered note).
-        if let Some(note) = state.recall(turn, &opening[0].content) {
-            shape.messages.push(note.clone());
-            opening.push(note);
+        if let Some(note) = state.recall(turn, &message.content) {
+            message.notes.push(note.content);
         }
-        // Background commands that ended since (#614): their notifications,
-        // as one note after it, Qwen Code's `<task-notification>`s.
         if let Some(note) = state.notify(turn) {
-            shape.messages.push(note.clone());
-            opening.push(note);
+            message.notes.push(note.content);
         }
-        // The self-capture reminder (#609), when its cadence came round: an
-        // advisory note after the ask (and after any other note), never in
-        // the system prompt.
         if let Some(text) = state.reminder_due.take() {
             state.push(Event::Reminded {
                 turn,
                 text: text.clone(),
             });
-            let note = Message::new(Role::User, text);
-            shape.messages.push(note.clone());
-            opening.push(note);
+            message.notes.push(text);
         }
+        shape.messages.push(message.clone());
+        let opening = vec![message];
         // Pushed here, under the lock that admits the ask, and never on the
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
@@ -3502,9 +3503,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             phases,
             instruction_files,
             levers,
+            notes_in_the_ask,
         } => log::Event::SessionStart {
             bash_timeout_ms: *bash_timeout_ms,
             levers: levers.clone(),
+            notes_in_the_ask: notes_in_the_ask.then_some(true),
             // #563: the graph, and the phase it opens in; nothing when none.
             phases: phases.as_ref().map(|(names, _, _)| names.clone()),
             phase_transitions: phases.as_ref().map(|(_, moves, _)| moves.clone()),
@@ -4943,7 +4946,7 @@ fn capture_outcome(
 }
 
 /// What the model saw by turn `turn`, as the groundedness gate reads it
-/// (#609): that turn's trunk prose and non-capture tool output as the
+/// (#609): that turn's ask, trunk prose and non-capture tool output as the
 /// source, every earlier turn's as the session prefix -- from the log, as
 /// `capture::tools::Seen::of_turn` reads a record.
 fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
@@ -4961,6 +4964,8 @@ fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
     };
     for logged in log {
         match &logged.event {
+            // The operator's ask: the model saw it (#609, run 3).
+            Event::Asked { turn: at, text, .. } => file(*at, text),
             Event::Requested {
                 turn: at,
                 lane: Lane::Trunk,
@@ -7907,6 +7912,14 @@ pub(in crate::drive) mod tests {
         Message::new(Role::User, text)
     }
 
+    /// A user message carrying the harness's `notes` before its words
+    /// (#609).
+    fn noted(text: &str, notes: &[&str]) -> Message {
+        let mut message = Message::new(Role::User, text);
+        message.notes = notes.iter().map(|note| (*note).to_owned()).collect();
+        message
+    }
+
     fn assistant(text: &str) -> Message {
         Message::new(Role::Assistant, text)
     }
@@ -9538,6 +9551,7 @@ pub(in crate::drive) mod tests {
                     "v3".to_owned(),
                 )])),
                 fork_asks: Some(&crate::dogma::asks::V4),
+                notes_in_the_ask: true,
             },
             Event::Asked {
                 turn: 1,
@@ -9968,6 +9982,7 @@ pub(in crate::drive) mod tests {
                     name: "v4".to_owned(),
                     digest: Some(crate::dogma::asks::V4.digest()),
                 }),
+                notes_in_the_ask: Some(true),
             },
             log::Event::Ask {
                 turn: 1,
@@ -11154,18 +11169,16 @@ pub(in crate::drive) mod tests {
         let log = wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
         let sent = session.shared.transport.sent();
         let last = &sent.last().expect("a request").messages;
-        let note = &last[last.len() - 1];
-        assert_eq!(last[last.len() - 2].content, "is it ready?");
-        assert_eq!(note.role, Role::User);
-        assert!(
-            note.content
-                .starts_with(&format!("<task-notification>\n<task-id>{id}</task-id>"))
-        );
-        assert!(note.content.contains("<status>completed</status>"));
-        assert!(
-            note.content
-                .contains("<output-tail truncated=\"false\">ready\n</output-tail>")
-        );
+        // The notice rides in the ask's own message, before its words (#609).
+        let asked = &last[last.len() - 1];
+        assert_eq!(asked.content, "is it ready?");
+        assert_eq!(asked.role, Role::User);
+        let [note] = asked.notes.as_slice() else {
+            panic!("one notice: {asked:?}");
+        };
+        assert!(note.starts_with(&format!("<task-notification>\n<task-id>{id}</task-id>")));
+        assert!(note.contains("<status>completed</status>"));
+        assert!(note.contains("<output-tail truncated=\"false\">ready\n</output-tail>"));
         reads_whole(&session);
         every_head_rebuilds(&log);
         session.end_commands();
@@ -13830,17 +13843,13 @@ pub(in crate::drive) mod tests {
                     .expect("one hole")
             };
             let note = format!("{}\n{}", line("the schema is per-team"), line("no login"));
-            // The first request: the ask, then the note at the tail.
+            // The first request: the ask's own message carries the note,
+            // before its words (#609).
             let first = &sent[0].messages;
-            assert_eq!(&first[first.len() - 2..], &[user("go"), user(&note)]);
-            // The second: the note stayed on the trunk after its ask.
+            assert_eq!(first.last(), Some(&noted("go", &[&note])));
+            // The second: the note stayed on the trunk in its ask.
             let second = &sent[1].messages;
-            assert!(
-                second
-                    .windows(2)
-                    .any(|pair| pair == [user("go"), user(&note)]),
-                "{second:#?}"
-            );
+            assert!(second.contains(&noted("go", &[&note])), "{second:#?}");
             assert_eq!(second.last(), Some(&user("again")));
             // The projection rebuilds both heads with the note, from the log.
             let lines: Vec<log::Line> = log.iter().map(line_of).collect();
@@ -15294,6 +15303,29 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// #609, run 3: the operator's ask is what the model saw too, so a fact
+    /// quoted from it grounds -- the gate's source counts the turn's ask.
+    #[test]
+    fn a_fact_quoted_from_the_operators_ask_is_grounded() {
+        let session = self_capturing(
+            vec![
+                vec![
+                    Step::Delta("Noted.".to_owned()),
+                    record("call-1", "fact", "the dev server must use port 5180"),
+                ],
+                deltas(&["done"]),
+            ],
+            3,
+        );
+        session
+            .ask("Remember: the dev server must use port 5180", None)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let recorded = captures(&log);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].0, "recorded", "{recorded:?}");
+    }
+
     /// #609: content the model never saw is dropped by the groundedness
     /// gate, nothing is written, and the drop is logged with why.
     #[test]
@@ -15467,7 +15499,9 @@ pub(in crate::drive) mod tests {
     }
 
     /// #609: after the cadence of silent turns the next ask carries the
-    /// reminder as a note after it, logged; the system prompt is untouched.
+    /// reminder, logged, in its own message before the operator's words --
+    /// the ask is what the model answers last (run 3); the system prompt is
+    /// untouched.
     #[test]
     fn the_self_capture_reminder_is_a_note_after_the_next_ask() {
         let session = self_capturing(vec![deltas(&["one"]), deltas(&["two"])], 1);
@@ -15486,9 +15520,10 @@ pub(in crate::drive) mod tests {
             Event::Reminded { turn: 2, text } if text == reminder
         )));
         let sent = session.shared.transport.sent();
+        // In the ask's own message, before its words, so the ask is what
+        // the model answers (#609, run 3).
         let second = &sent[1].messages;
-        assert_eq!(second.last().map(|m| m.content.as_str()), Some(reminder));
-        assert_eq!(second[second.len() - 2].content, "second");
+        assert_eq!(second.last(), Some(&noted("second", &[reminder])));
         assert_eq!(
             second[0], sent[0].messages[0],
             "the system prompt is unchanged"
@@ -16016,14 +16051,13 @@ pub(in crate::drive) mod tests {
                 "{text}"
             );
             assert!(text.contains(SCOPED), "{text}");
-            // The note follows the ask, on the request and on the trunk.
-            let n = asked.messages.len();
+            // The note rides in the ask's message, before its words, on the
+            // request and on the trunk (#609).
             assert_eq!(
-                asked.messages[n - 2].content,
-                "how should the `schema` look?"
+                asked.messages.last(),
+                Some(&noted("how should the `schema` look?", &[text]))
             );
-            assert_eq!(&asked.messages[n - 1].content, text);
-            assert!(session.trunk().iter().any(|m| &m.content == text));
+            assert!(session.trunk().iter().any(|m| m.notes.contains(text)));
             let projected =
                 crate::drive::projection::project(&lines, &regime(), None).expect("projected");
             assert!(

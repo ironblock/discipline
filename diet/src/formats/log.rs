@@ -1016,6 +1016,11 @@ pub enum Event {
         /// `docs/program.md` §2's words: the record's start row's `levers`,
         /// from the same reading, so the two agree by construction.
         levers: Option<BTreeMap<String, String>>,
+        /// Whether a turn's notes ride in its ask's own user message, before
+        /// the operator's words (v7, #609): `true` from this build on;
+        /// absent, an earlier log's notes followed the ask as messages of
+        /// their own.
+        notes_in_the_ask: Option<bool>,
         /// The fork ask set a session that forks asks in (v7, #595): its name
         /// and digest, `fork_asks` and `fork_asks_digest`.
         fork_asks: Option<ForkAsks>,
@@ -2861,6 +2866,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 },
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
                 levers: fields.optional_words("levers")?,
+                notes_in_the_ask: fields.optional_flag("notes_in_the_ask")?,
                 fork_asks: match fields.optional_string("fork_asks")? {
                     None => None,
                     Some(name) => Some(ForkAsks {
@@ -4407,6 +4413,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
                 may_v7("levers", Holds::Words),
+                may_v7("notes_in_the_ask", Holds::Flag),
                 may_v7("fork_asks", Text),
                 may_v7("fork_asks_digest", Text),
                 may_v7("reasoning_effort_default", Text),
@@ -5025,6 +5032,7 @@ fn to_value(line: &Line) -> Value {
             approvals_off,
             fork_delivery,
             levers,
+            notes_in_the_ask,
             fork_asks,
             reasoning_effort_default,
             tool_output,
@@ -5074,6 +5082,9 @@ fn to_value(line: &Line) -> Value {
                             .collect(),
                     ),
                 );
+            }
+            if let Some(in_the_ask) = notes_in_the_ask {
+                put("notes_in_the_ask", Value::Boolean(*in_the_ask));
             }
             if let Some(levers) = levers {
                 put(
@@ -6680,6 +6691,7 @@ mod tests {
                     name: "v4".to_owned(),
                     digest: Some("0123456789abcdef".to_owned()),
                 }),
+                notes_in_the_ask: Some(true),
             },
         }
     }
@@ -7759,6 +7771,7 @@ mod tests {
             tool_output,
             levers,
             fork_asks,
+            notes_in_the_ask,
             ..
         } = &mut lines[0].event
         else {
@@ -7770,6 +7783,7 @@ mod tests {
         *tool_output = None;
         *levers = None;
         *fork_asks = None;
+        *notes_in_the_ask = None;
         let document: String = lines.iter().map(|line| render(line) + "\n").collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");

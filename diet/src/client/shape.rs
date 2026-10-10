@@ -82,6 +82,13 @@ pub struct Message {
     /// 5989411005). Only [`attach`] adds one, and only after the bytes are
     /// checked against the file the log names, so an image here is always
     /// the bytes its reference describes.
+    /// Notes the harness attaches to this user message (#609, run 3): the
+    /// fork delivery, recall, background notices and the self-capture
+    /// reminder, each sent as a text part BEFORE the operator's words, which
+    /// come last -- Qwen Code's order (`client.ts`, `requestToSend =
+    /// [...systemReminders, ...requestToSend]`). Empty on every other
+    /// message, which goes out as it always did.
+    pub notes: Vec<String>,
     pub images: Vec<Image>,
     /// The signature a hosted model signed `reasoning` with (#555): sent
     /// back with it, verbatim; `None` from a server that signs nothing.
@@ -207,6 +214,7 @@ impl Message {
             reasoning: None,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            notes: Vec::new(),
             images: Vec::new(),
             reasoning_signature: None,
             redacted: Vec::new(),

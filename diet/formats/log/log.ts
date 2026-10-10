@@ -363,6 +363,7 @@ export type SessionStartLine = {
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
   levers?: Record<string, string>;
+  notes_in_the_ask?: boolean;
   fork_asks?: string;
   fork_asks_digest?: string;
   reasoning_effort_default?: string;

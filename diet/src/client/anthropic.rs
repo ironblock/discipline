@@ -294,7 +294,13 @@ fn image(image: &super::shape::Image) -> Value {
 }
 
 fn user_blocks(message: &Message) -> Vec<Value> {
-    let mut blocks = Vec::new();
+    // The harness's notes first, each a text block (#609), the operator's
+    // words last.
+    let mut blocks: Vec<Value> = message
+        .notes
+        .iter()
+        .map(|note| json!({"type": "text", "text": note}))
+        .collect();
     if !message.content.is_empty() || message.images.is_empty() {
         blocks.push(json!({"type": "text", "text": message.content}));
     }
