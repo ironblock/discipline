@@ -828,6 +828,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
         regimen_sha256: None,
         fork_delivery: None,
         tool_output: None,
+        levers: None,
     }];
     let mut unspellable: Vec<Unspellable> = Vec::new();
     let mut uncaptured: Vec<Uncaptured> = Vec::new();

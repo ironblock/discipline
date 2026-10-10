@@ -2254,6 +2254,7 @@ fn synthesized_record(
                 regimen_sha256: done.record.regimen_sha256().map(str::to_owned),
                 fork_delivery: done.record.fork_delivery(),
                 tool_output: done.record.tool_output(),
+                levers: None,
             },
             Event::Claim {
                 id: "c1".to_owned(),

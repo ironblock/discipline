@@ -341,6 +341,7 @@ pub fn project_in(
         fork_delivery: *fork_delivery,
         // The tool output cap, as `session.start` names it (#554).
         tool_output: *tool_output,
+        levers: None,
     }];
     events.extend(walk.events);
     Ok(Projection {

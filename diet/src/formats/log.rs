@@ -290,15 +290,17 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// Why a seam fired (v6, #493): `seam::Reason`'s words. Only `operator`
-    /// is written today; the others are the controller's triggers, read so
-    /// that a session that fires them needs no new version.
+    /// Why a seam fired (v6, #493): `seam::Reason`'s words. `serve` writes
+    /// `operator`, and `cadence` and `budget` when the regimen declares them
+    /// (#520); `phase` is read so that a session that fires it needs no new
+    /// version.
     SeamReason {
         /// The operator declared it.
         Operator => "operator",
         /// The phase graph ratified a transition.
         Phase => "phase",
-        /// The working set reached the declared byte count.
+        /// The declared budget was reached: the working set's byte count, or
+        /// a share of the context window (#520).
         Budget => "budget",
         /// The declared cadence came round.
         Cadence => "cadence",
