@@ -369,6 +369,10 @@ vocabulary! {
         Budget => "budget",
         /// The declared cadence came round.
         Cadence => "cadence",
+        /// The next trunk request's prompt would not have fit the context
+        /// window with room for its output (v7, #617): the automatic seam,
+        /// checked before every trunk request, between a turn's steps too.
+        Window => "window",
         /// The model pruned a tool result, applied as its turn settled (v7,
         /// #612).
         Prune => "prune",
@@ -1328,7 +1332,8 @@ pub enum Event {
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
-        /// The latest turn, settled, which the seam follows.
+        /// The latest turn, which the seam follows settled -- or, for a
+        /// `window` seam (v7, #617), guards in flight.
         at_turn: u32,
         /// Why it fired.
         reason: SeamReason,
@@ -1372,10 +1377,22 @@ pub enum Event {
         /// The render's budget and what it did (v7, #565), on a seam whose
         /// regimen declares one.
         render_budget: Option<RenderBudget>,
+        /// The prompt that fired it and the window, on a `window` seam (v7,
+        /// #617): `prompt_tokens` and `window`, both or neither.
+        fired: Option<SeamFired>,
         /// The calls whose results the model pruned that this seam replaced
         /// with their `pruned` lines' text (v7, #612).
         pruned: Option<Vec<String>>,
     },
+}
+
+/// What fired a `window` seam (v7, #617).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SeamFired {
+    /// The next trunk request's prompt, in tokens, as serve sized it (#588).
+    pub prompt_tokens: u64,
+    /// The engine's context window, in tokens.
+    pub window: u64,
 }
 
 /// A seam's render budget and what it did (v7, #565): `render_budget_tokens`,
@@ -1930,6 +1947,7 @@ fn gap_once(
 /// awaits and no fork is unsettled.
 fn seam_at(
     at_turn: u32,
+    reason: SeamReason,
     turns: u32,
     settled: &BTreeSet<u32>,
     state: State,
@@ -1939,6 +1957,12 @@ fn seam_at(
         return Err(format!(
             "a seam at turn {at_turn} where the latest is {turns}: a seam follows the latest turn"
         ));
+    }
+    // The automatic seam (v7, #617) is checked before every trunk request,
+    // so it may refill under the turn whose next request it makes fit; that
+    // turn's own exchange rides after the refill, as it rode after the trunk.
+    if reason == SeamReason::Window && state == State::Turn && !settled.contains(&turns) {
+        return Ok(());
     }
     if turns > 0 && !settled.contains(&turns) {
         return Err(format!(
@@ -2431,8 +2455,11 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::Patch {
                 fork: Some(fork), ..
             } => forks.patch(*fork).map_err(|why| at(index, why))?,
-            Event::Seam { at_turn, .. } => {
-                seam_at(*at_turn, turns, &settled, state, &forks).map_err(|why| at(index, why))?;
+            Event::Seam {
+                at_turn, reason, ..
+            } => {
+                seam_at(*at_turn, *reason, turns, &settled, state, &forks)
+                    .map_err(|why| at(index, why))?;
                 forks.seamed = Some(*at_turn);
             }
             Event::ToolCall {
@@ -2932,6 +2959,37 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     rendered: fields.count("render_tokens")?,
                     reduced: fields.count("render_reduced")?,
                 }),
+            },
+            fired: {
+                let reason = fields.tag("reason", SeamReason::from_tag)?;
+                match (
+                    fields.optional_count("prompt_tokens")?,
+                    fields.optional_count("window")?,
+                ) {
+                    (None, None) if reason != SeamReason::Window => None,
+                    (Some(prompt_tokens), Some(window)) if reason == SeamReason::Window => {
+                        Some(SeamFired {
+                            prompt_tokens,
+                            window,
+                        })
+                    }
+                    _ => {
+                        return Err(format!(
+                            "a seam whose reason is `{}` carries {}: a `window` seam names the \
+                             prompt that fired it and the window, both, and no other seam does",
+                            reason.tag(),
+                            match (
+                                object.contains_key("prompt_tokens"),
+                                object.contains_key("window")
+                            ) {
+                                (true, true) => "`prompt_tokens` and `window`",
+                                (true, false) => "`prompt_tokens` alone",
+                                (false, true) => "`window` alone",
+                                (false, false) => "neither `prompt_tokens` nor `window`",
+                            }
+                        ));
+                    }
+                }
             },
         },
     };
@@ -3847,6 +3905,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::NothingToSeam) {
         return 6;
     }
+    if tags == Tags::SeamReason && SeamReason::from_tag(tag) == Some(SeamReason::Window) {
+        return 7;
+    }
     let phase_refusal = tags == Tags::Refusal
         && Refusal::from_tag(tag).is_some_and(|refusal| {
             matches!(
@@ -4169,6 +4230,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("render_over_budget", Text),
                 may_v7("render_tokens", Count),
                 may_v7("render_reduced", Count),
+                may_v7("prompt_tokens", Count),
+                may_v7("window", Count),
                 may_v7("pruned", Holds::Strings),
             ];
             F
@@ -5039,9 +5102,14 @@ fn to_value(line: &Line) -> Value {
             carried_output_bytes,
             placement,
             render_budget,
+            fired,
             pruned,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
+            if let Some(fired) = fired {
+                put("prompt_tokens", count(fired.prompt_tokens));
+                put("window", count(fired.window));
+            }
             if let Some(moved) = phase {
                 put("phase", phase_move_value(moved));
             }
@@ -6760,6 +6828,7 @@ mod tests {
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
                         || (tags == Tags::PatchOp && why.contains("`supersedes`"))
+                        || (tags == Tags::SeamReason && why.contains("a `window` seam names"))
                         || (tags == Tags::FailReason
                             && why.contains("carries a context overflow's sizes"))
                         || (tags == Tags::ToolOutputState
@@ -7516,7 +7585,7 @@ mod tests {
         );
         assert_eq!(
             tags(SeamReason::ALL.iter().map(|it| it.tag()).collect()),
-            "operator phase budget cadence prune"
+            "operator phase budget cadence window prune"
         );
     }
 

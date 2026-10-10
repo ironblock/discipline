@@ -183,6 +183,7 @@ export type SeamReason =
   | "phase"
   | "budget"
   | "cadence"
+  | "window"
   | "prune"
 ;
 
@@ -540,6 +541,8 @@ export type SeamLine = {
   render_over_budget?: string;
   render_tokens?: number;
   render_reduced?: number;
+  prompt_tokens?: number;
+  window?: number;
   pruned?: string[];
 };
 
