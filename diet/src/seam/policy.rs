@@ -57,6 +57,12 @@ pub const SEAM_AUDIT: &str = "seam_audit";
 /// once, with an output cap of one, so the next ask finds it cached; off by
 /// default, and never after a `window` seam, whose request warms it.
 pub const SEAM_WARM: &str = "seam_warm";
+/// Whether a seam refills over an operator change no audit addressed
+/// (#150): `"carry"`, the default, refills and carries the change to the
+/// next seam; `"refuse"` re-asks the reconciling audit once over the
+/// changes left, then holds the seam for the operator. `"refuse"` needs
+/// [`SEAM_AUDIT`] on: only an audit addresses a change.
+pub const RECONCILE_GATE: &str = "reconcile_gate";
 
 /// Whether `regimen` turns `key` on: `"on"` or `true`.
 fn on(regimen: &Regimen, key: &str) -> bool {
@@ -130,6 +136,11 @@ pub enum PolicyError {
     /// A key a served session does not read: refused rather than ignored,
     /// so a regimen never declares a trigger that never fires.
     NotServed(&'static str),
+    /// [`RECONCILE_GATE`] holds a word other than `carry` or `refuse`.
+    NotAGate,
+    /// [`RECONCILE_GATE`] is `refuse` with the audit off: nothing could
+    /// address a change, so every seam with one would hold.
+    GateWithoutAudit,
 }
 
 impl fmt::Display for PolicyError {
@@ -171,6 +182,15 @@ impl fmt::Display for PolicyError {
                 f,
                 "a served session does not read `{key}`; its triggers are \
                  `{SEAM_EVERY_TURNS}` and `{SEAM_AT_CONTEXT_FRACTION}`"
+            ),
+            Self::NotAGate => write!(
+                f,
+                "`{RECONCILE_GATE}` takes \"carry\" (the default) or \"refuse\""
+            ),
+            Self::GateWithoutAudit => write!(
+                f,
+                "`{RECONCILE_GATE} = \"refuse\"` needs `{SEAM_AUDIT}` on: only the \
+                 audit addresses an operator change, so every seam with one would hold"
             ),
         }
     }
@@ -302,6 +322,21 @@ pub struct Served {
     /// Whether a seam sends its refilled trunk once to warm the cache
     /// ([`SEAM_WARM`], #504).
     pub warm: bool,
+    /// Whether a seam refills over an unaddressed operator change
+    /// ([`RECONCILE_GATE`], #150).
+    pub reconcile_gate: ReconcileGate,
+}
+
+/// What a seam does about an operator change no audit addressed
+/// ([`RECONCILE_GATE`], #150).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ReconcileGate {
+    /// Refill, and carry the change to the next seam: the default.
+    #[default]
+    Carry,
+    /// Re-ask the reconciling audit once over what is left, then hold the
+    /// seam for the operator.
+    Refuse,
 }
 
 /// The render budget `regimen` declares (#565), leniently: a positive
@@ -365,7 +400,17 @@ impl Served {
             }
             Some(_) => return Err(PolicyError::NotAnInteger(SEAM_TAIL_TOKENS)),
         };
+        let reconcile_gate = match regimen.get(RECONCILE_GATE) {
+            None => ReconcileGate::Carry,
+            Some(Value::String(word)) if word == "carry" => ReconcileGate::Carry,
+            Some(Value::String(word)) if word == "refuse" => ReconcileGate::Refuse,
+            Some(_) => return Err(PolicyError::NotAGate),
+        };
+        if reconcile_gate == ReconcileGate::Refuse && !on(regimen, SEAM_AUDIT) {
+            return Err(PolicyError::GateWithoutAudit);
+        }
         Ok(Self {
+            reconcile_gate,
             every_turns,
             at_trunk_tokens,
             tail_tokens,
@@ -456,6 +501,31 @@ mod tests {
         Served::from_regimen(&regimen::parse(text).expect("a regimen"), window)
     }
 
+    /// #150's gate: `carry` by default and as written, `refuse` as
+    /// written with the audit on; any other word, or `refuse` with the audit
+    /// off, is refused.
+    #[test]
+    fn the_reconcile_gate_is_carry_or_refuse_and_refuse_needs_the_audit() {
+        let gate = |text: &str| served(text, None).map(|read| read.reconcile_gate);
+        assert_eq!(gate(""), Ok(ReconcileGate::Carry));
+        assert_eq!(
+            gate("reconcile_gate = \"carry\"\n"),
+            Ok(ReconcileGate::Carry)
+        );
+        assert_eq!(
+            gate("seam_audit = \"on\"\nreconcile_gate = \"refuse\"\n"),
+            Ok(ReconcileGate::Refuse)
+        );
+        assert_eq!(
+            gate("reconcile_gate = \"refuse\"\n"),
+            Err(PolicyError::GateWithoutAudit)
+        );
+        assert_eq!(
+            gate("seam_audit = \"on\"\nreconcile_gate = \"hold\"\n"),
+            Err(PolicyError::NotAGate)
+        );
+    }
+
     /// The compaction depth (#552): absent is 0, the total refill; a
     /// whole number of tokens otherwise, 0 included; anything else refused.
     #[test]
@@ -482,6 +552,7 @@ mod tests {
                 Some(160_000)
             ),
             Ok(Served {
+                reconcile_gate: ReconcileGate::Carry,
                 every_turns: Some(4),
                 at_trunk_tokens: Some(96_000),
                 tail_tokens: 0,
@@ -495,6 +566,7 @@ mod tests {
         assert_eq!(
             served("seam_at_context_fraction = 1\n", Some(8192)),
             Ok(Served {
+                reconcile_gate: ReconcileGate::Carry,
                 every_turns: None,
                 at_trunk_tokens: Some(8192),
                 tail_tokens: 0,
@@ -531,6 +603,7 @@ mod tests {
     #[test]
     fn the_budget_outranks_the_cadence_and_each_fires_only_when_reached() {
         let policy = Served {
+            reconcile_gate: ReconcileGate::Carry,
             every_turns: Some(3),
             at_trunk_tokens: Some(1000),
             tail_tokens: 0,

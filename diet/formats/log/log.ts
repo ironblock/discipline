@@ -30,6 +30,7 @@ export type Kind =
   | "delivered"
   | "recalled"
   | "flag"
+  | "seam.held"
   | "patch.refused"
   | "pruned"
   | "phase.ruled"
@@ -67,6 +68,7 @@ export type Command =
   | "ratify-phase"
   | "edit-entry"
   | "flag-entry"
+  | "refill-anyway"
 ;
 
 export type Refusal =
@@ -89,6 +91,8 @@ export type Refusal =
   | "unknown-entry"
   | "not-live"
   | "empty"
+  | "seam-held"
+  | "nothing-held"
 ;
 
 export type FailReason =
@@ -595,6 +599,7 @@ export type SeamLine = {
   pruned?: string[];
   operator_changes?: OperatorChange[];
   unaddressed?: string[];
+  refilled_anyway?: boolean;
   warm?: Timings;
 };
 
@@ -625,6 +630,15 @@ export type FlagLine = {
   turn: number;
   entry: string;
   note: string;
+};
+
+export type SeamHeldLine = {
+  seq: number;
+  t: number;
+  kind: "seam.held";
+  at_turn: number;
+  reason: SeamReason;
+  unaddressed: string[];
 };
 
 export type PatchRefusedLine = {
@@ -764,6 +778,7 @@ export type LogLine =
   | DeliveredLine
   | RecalledLine
   | FlagLine
+  | SeamHeldLine
   | PatchRefusedLine
   | PrunedLine
   | PhaseRuledLine

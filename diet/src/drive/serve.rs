@@ -860,6 +860,11 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
+            // The operator's refill over a held seam (#150's gate).
+            Command::RefillAnyway => match self.session.refill_anyway() {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
             // The job the running call becomes (#614).
             Command::Background => match self.session.background() {
                 Ok(job) => (
@@ -901,6 +906,8 @@ enum Command {
     EditEntry(String, String),
     /// Flag the entry with this id with this note (#150).
     FlagEntry(String, String),
+    /// Refill the held seam anyway (#150's gate).
+    RefillAnyway,
 }
 
 impl Command {
@@ -923,8 +930,9 @@ impl Command {
             // No idle gap (#22): a tangent's open and close end none.
             CommandKind::OpenTangent => &["kind", "id"],
             CommandKind::CloseTangent => &["kind", "dispositions"],
-            // #614: moving the running call ends no idle gap either.
-            CommandKind::Background => &["kind"],
+            // #614: moving the running call ends no idle gap either; nor
+            // does #150's refill-anyway, the held seam being the one.
+            CommandKind::Background | CommandKind::RefillAnyway => &["kind"],
             // #124: the proposal's call and the operator's choice; a ruling
             // ends no idle gap.
             CommandKind::RatifyPhase => &["kind", "call", "choice"],
@@ -1006,6 +1014,7 @@ impl Command {
             CommandKind::FlagEntry => {
                 entry_and(object, "note").map(|(id, text)| Self::FlagEntry(id, text))
             }
+            CommandKind::RefillAnyway => Some(Self::RefillAnyway),
         }?;
         Some(Posted {
             command,

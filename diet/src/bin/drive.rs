@@ -1116,6 +1116,19 @@ fn serving_interview(
              pruned result"
         ));
     }
+    // #150's gate: a tools-route audit marks nothing (its pinned words
+    // carry no markers), so under `refuse` every seam with a change would
+    // hold.
+    if seams.reconcile_gate == diet::seam::policy::ReconcileGate::Refuse
+        && capture == diet::dogma::asks::Modality::Tools
+    {
+        return Err(format!(
+            "{path} declares `{} = \"refuse\"` with `{}` = \"tools\": the tools-route \
+             audit addresses no operator change, so every seam with one would hold",
+            diet::seam::policy::RECONCILE_GATE,
+            session::CAPTURE_MODALITY
+        ));
+    }
     if capture == diet::dogma::asks::Modality::Tools {
         let refused = if rules.is_empty() {
             Some("no `interview_warrant`, so no fork ever answers".to_owned())
