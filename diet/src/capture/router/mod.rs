@@ -1165,7 +1165,8 @@ mod tests {
     fn turn(index: u32) -> Event {
         Event::Turn {
             index,
-            prefill_tokens: record::Count::default(),
+            prefill_tokens: Some(record::Count::default()),
+            prefill_from: None,
             files: None,
         }
     }
@@ -1726,7 +1727,8 @@ mod tests {
             cache_creation_1h: None,
             id: "a1".to_owned(),
             to_request: "q1".to_owned(),
-            output_tokens: record::Count::default(),
+            output_tokens: Some(record::Count::default()),
+            output_from: None,
             text: Some("The parser keeps every line. I'll read the caller.".to_owned()),
             timings: None,
         });
@@ -1762,7 +1764,8 @@ mod tests {
             cache_creation_1h: None,
             id: "a2".to_owned(),
             to_request: "q2".to_owned(),
-            output_tokens: record::Count::default(),
+            output_tokens: Some(record::Count::default()),
+            output_from: None,
             text: Some("Let me answer that.".to_owned()),
             timings: None,
         });

@@ -421,10 +421,12 @@ export type ResponseLine = {
   text: string;
   finish_reason?: string;
   reasoning?: string;
+  timings?: Timings;
+  usage?: Usage;
   capped?: boolean;
   reasoning_signature?: string;
   redacted?: string[];
-} & ({ timings?: Timings; usage?: never } | { usage?: Usage; timings?: never });
+};
 
 export type CancelledLine = {
   seq: number;

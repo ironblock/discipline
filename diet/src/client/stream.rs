@@ -864,6 +864,26 @@ impl Reading {
         if let Some(timings) = value.get("timings").filter(|timings| timings.is_object()) {
             self.timings = Some(Timings::read(timings));
         }
+        // The server's own counts on the usage chunk (#645), as the
+        // OpenAI-compatible servers send them when `include_usage` is
+        // asked for: both counts, and the cached share where named.
+        if let Some(usage) = value.get("usage").filter(|usage| usage.is_object())
+            && let (Some(prompt), Some(completion)) = (
+                usage.get("prompt_tokens").and_then(Value::as_u64),
+                usage.get("completion_tokens").and_then(Value::as_u64),
+            )
+        {
+            let cached = usage
+                .pointer("/prompt_tokens_details/cached_tokens")
+                .and_then(Value::as_u64);
+            let counts = super::anthropic::Usage {
+                input_tokens: Some(prompt.saturating_sub(cached.unwrap_or(0))),
+                output_tokens: Some(completion),
+                cache_read_input_tokens: cached,
+                ..super::anthropic::Usage::default()
+            };
+            on_delta(Piece::Usage(&counts));
+        }
         if let Some(choice) = value
             .get("choices")
             .and_then(Value::as_array)
@@ -1536,7 +1556,9 @@ mod tests {
             Piece::Reasoning(reasoning) => {
                 panic!("reasoning where only text was sent: {reasoning:?}")
             }
-            Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+            // The server's counts (#645): no text.
+            Piece::Usage(_) => String::new(),
+            Piece::Signature(_) | Piece::Redacted(_) => {
                 panic!("a hosted piece from an OpenAI stream")
             }
             Piece::Progress(progress) => panic!("progress where only text was sent: {progress:?}"),
@@ -1569,7 +1591,9 @@ mod tests {
                 pieces.push(match piece {
                     Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
                     Piece::Text(text) => (false, text.to_owned()),
-                    Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                    // The server's counts (#645), read apart.
+                    Piece::Usage(_) => return,
+                    Piece::Signature(_) | Piece::Redacted(_) => {
                         panic!("a hosted piece from an OpenAI stream")
                     }
                     Piece::Progress(progress) => {
@@ -1928,7 +1952,9 @@ mod tests {
                 owned.push(match piece {
                     Piece::Text(text) => (0, text.to_owned(), None),
                     Piece::Reasoning(text) => (1, text.to_owned(), None),
-                    Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                    // The server's counts (#645), read apart.
+                    Piece::Usage(_) => return,
+                    Piece::Signature(_) | Piece::Redacted(_) => {
                         panic!("a hosted piece from an OpenAI stream")
                     }
                     Piece::Progress(progress) => (2, String::new(), Some(progress)),
@@ -2012,7 +2038,9 @@ mod tests {
         let ended = reading
             .feed(raw.as_bytes(), usize::MAX, &mut |piece| {
                 pieces.push(match piece {
-                    Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                    // The server's counts (#645), read apart.
+                    Piece::Usage(_) => return,
+                    Piece::Signature(_) | Piece::Redacted(_) => {
                         panic!("a hosted piece from an OpenAI stream")
                     }
                     Piece::Progress(progress) => format!("progress {}", progress.processed),
@@ -2148,7 +2176,16 @@ mod tests {
         let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
         let transport = HttpStream::new(endpoint(&stub));
         let mut pieces = Vec::new();
+        let mut counts = None;
         let ended = transport.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
+            if let Piece::Usage(usage) = piece {
+                counts = Some((
+                    usage.prompt_tokens(),
+                    usage.output_tokens,
+                    usage.cache_read_input_tokens,
+                ));
+                return;
+            }
             pieces.push(text(piece));
         });
         assert_eq!(
@@ -2159,6 +2196,9 @@ mod tests {
             })
         );
         assert_eq!(pieces, CAPTURED_PIECES);
+        // The server's own counts off its usage chunk (#645): 29 prompt
+        // tokens, 28 of them cached, and 6 generated.
+        assert_eq!(counts, Some((Some(29), Some(6), Some(28))));
         let sent = stub.received();
         assert!(
             sent[0].contains(r#""stream":true"#) && sent[0].contains(r#""include_usage":true"#),
@@ -2276,7 +2316,9 @@ mod tests {
         for byte in CAPTURED {
             if let Some(done) = reading
                 .feed(std::slice::from_ref(byte), usize::MAX, &mut |piece| {
-                    pieces.push(text(piece));
+                    if !matches!(piece, Piece::Usage(_)) {
+                        pieces.push(text(piece));
+                    }
                 })
                 .expect("the captured bytes are a well-formed stream")
             {

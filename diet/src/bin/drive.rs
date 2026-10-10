@@ -1538,17 +1538,25 @@ fn written_record(
     // the working memory at the session's end, kept beside the record as
     // FILE.product.txt so `sha256sum` recomputes the digest the row claims.
     let product = session.product();
+    // A total only when every turn's count was spelled (#645).
     let (turns, prefill) = projected
         .events
         .iter()
-        .fold((0u32, 0u64), |(n, total), event| match event {
-            record::Event::Turn { prefill_tokens, .. } => (n + 1, total + prefill_tokens.get()),
+        .fold((0u32, Some(0u64)), |(n, total), event| match event {
+            record::Event::Turn { prefill_tokens, .. } => (
+                n + 1,
+                total
+                    .zip(*prefill_tokens)
+                    .map(|(total, count)| total + count.get()),
+            ),
             _ => (n, total),
         });
     projected.events.push(record::Event::Summary {
         summary: record::Summary::Drive {
             turns,
-            prefill_tokens_total: record::Count::new(prefill)
+            prefill_tokens_total: prefill
+                .map(record::Count::new)
+                .transpose()
                 .map_err(|why| format!("prefill_tokens_total: {why:?}"))?,
         },
         product_sha256: diet::digest::sha256_hex(product.as_bytes()),

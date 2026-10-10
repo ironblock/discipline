@@ -23,8 +23,9 @@
 //! union, and the scoping is the whole-log reader's.
 //!
 //! v2 (#157 and #30's I0, applied from the #117 courier) adds a `response`'s
-//! `usage` (for a server that reports no `timings`; never both,
-//! [`at_most_one`]) and `capped`, a `session.start`'s `serving`, and a
+//! `usage` (for a server that reports no `timings`, until #645: a server
+//! that reports both, as `TabbyAPI` and llama-server do when `include_usage`
+//! is asked for, now logs both) and `capped`, a `session.start`'s `serving`, and a
 //! `request`'s `head_sha256`. A log that declares 0 or 1 and carries one is
 //! refused the same way.
 //!
@@ -2896,14 +2897,12 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 None => None,
                 Some(_) => Some(fields.timings("timings")?),
             },
-            usage: match (object.get("usage"), object.get("timings")) {
-                (None, _) => None,
-                (Some(_), None) => Some(fields.usage("usage")?),
-                (Some(_), Some(_)) => {
-                    return Err("a response carries both `timings` and `usage`: `usage` is \
-                                carried only for a server that reports no timings (#157)"
-                        .to_owned());
-                }
+            // Both when the server reported both (#645): the projection
+            // counts by `timings` on a cited engine and by `usage` anywhere
+            // else.
+            usage: match object.get("usage") {
+                None => None,
+                Some(_) => Some(fields.usage("usage")?),
             },
             capped: fields.optional_flag("capped")?,
             reasoning_signature: fields.optional_string("reasoning_signature")?,
@@ -4619,10 +4618,9 @@ pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
 /// both would let them disagree.
 #[must_use]
 pub fn at_most_one(kind: Kind) -> &'static [&'static str] {
-    match kind {
-        Kind::Response => &["timings", "usage"],
-        _ => &[],
-    }
+    // A response's `timings` and `usage` were here until #645.
+    let _ = kind;
+    &[]
 }
 
 // ---------------------------------------------------------------------------

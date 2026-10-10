@@ -996,7 +996,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
 
         events.push(Event::Turn {
             index,
-            prefill_tokens: prefill,
+            prefill_tokens: Some(prefill),
+            prefill_from: None,
             files: None,
         });
         prefill_total = prefill_total.saturating_add(prefill);
@@ -1246,7 +1247,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
     events.push(Event::Summary {
         summary: Summary::Drive {
             turns,
-            prefill_tokens_total: prefill_total,
+            prefill_tokens_total: Some(prefill_total),
         },
         product_sha256: crate::digest::sha256_hex(product.as_bytes()),
     });
@@ -1932,8 +1933,8 @@ mod tests {
         };
         assert_eq!(*turns, 3);
         assert_eq!(
-            prefill_tokens_total.get(),
-            1800,
+            prefill_tokens_total.map(Count::get),
+            Some(1800),
             "three turns at the 600 the canned server reported; the record's own \
              parser refuses a summary that disagrees with its rows, so this is \
              asserting the number rather than the agreement"
