@@ -863,15 +863,29 @@ fn warranted(
         if line.turn != turn || line.outcome != log::ToolOutcome::Ran {
             return None;
         }
-        let command = tool_loop::command_of(&line.arguments)?;
+        // `bash`'s command, or a standard tool's own string arguments
+        // (#557): its `path` is what the router classes a read by.
+        let command = tool_loop::command_of(&line.arguments);
+        let args: BTreeMap<String, Value> = match &command {
+            Some(command) => {
+                BTreeMap::from([("command".to_owned(), Value::String(command.clone()))])
+            }
+            None => {
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&line.arguments)
+                    .ok()?
+                    .into_iter()
+                    .filter_map(|(key, value)| match value {
+                        serde_json::Value::String(text) => Some((key, Value::String(text))),
+                        _ => None,
+                    })
+                    .collect()
+            }
+        };
         let decided = table.observe(&RecordEvent::ToolCall {
             id: line.id.clone(),
             at_turn: turn,
             tool: line.name.clone(),
-            args: Some(BTreeMap::from([(
-                "command".to_owned(),
-                Value::String(command.clone()),
-            )])),
+            args: Some(args),
             exit: None,
             output: None,
             exec: None,
@@ -882,7 +896,8 @@ fn warranted(
         };
         READS.contains(&class).then_some((kind, command))
     })?;
-    Some((log::Warrant::Read, ask(read.0, Some(read.1))))
+    // A standard tool ran no command: the ask's `last_command` line drops.
+    Some((log::Warrant::Read, ask(read.0, read.1)))
 }
 
 /// The router's classes that are a read under rule (a).
@@ -10083,6 +10098,49 @@ pub(in crate::drive) mod tests {
         assert_eq!(found[0].4, question);
         assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
         assert_eq!(patches(&log).len(), 1);
+        tidy(&[&tree]);
+    }
+
+    /// On the standard surface (#557) a `read` of a document fires the
+    /// read fork as `cat` does: the router classes it by its `path`, and the
+    /// ask, with no command to quote, drops its `last_command` line.
+    #[test]
+    fn a_standard_read_of_a_document_fires_a_read_fork() {
+        let tree = scratch("standard-read-fork");
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        let session = Session::open_with(
+            Canned::new([
+                vec![Step::call(0, "call-1", "read", r#"{"path":"notes.md"}"#)],
+                deltas(&["It says a note."]),
+                deltas(&["LEARNED: the note says a note\n"]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interviewing(&[log::Warrant::Read])),
+        );
+        session.ask("read the notes", None).expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        let question = router::Ask {
+            kind: AskKind::Finding,
+            intent: None,
+        }
+        .render(&Facts::default());
+        let found = forks(&log);
+        assert_eq!(found.len(), 1, "{log:#?}");
+        assert_eq!(found[0].3, log::Warrant::Read);
+        assert_eq!(found[0].4, question);
+        assert!(!question.contains("You last ran"));
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
         tidy(&[&tree]);
     }
 
