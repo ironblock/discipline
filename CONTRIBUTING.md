@@ -13,7 +13,7 @@ All found in `.github/ISSUE_TEMPLATE/`:
 # BRANCHES AND RELEASES
 Two long-lived branches, named once in `.github/branches.tsv` (#326):
 - **The integration branch** (`develop`) is the repository's default branch and the base of every pull request.
-- **The release branch** (`main`) takes only release pull requests from the integration branch. Nothing is versioned: a release is a tag on the release branch, not a version bump.
+- **The release branch** (`main`) takes only release pull requests from the integration branch. A release is a tag on the release branch, and the packages' versions name the latest release (the maintainer, 2026-10-10).
 
 What runs: every pull request, and every push to either branch, runs `verify.yml`: the checks `.github/check-owners.tsv` assigns to each job, which are `verify.sh`'s `DEFAULT_CHECKS` -- conventional checks (fmt, clippy, tests, the surface's suite, hygiene, history) and the product's own data (the results records and regimens parse; the published pages' hygiene). Its `gate` job passes when every job succeeded. A newer push supersedes a run in flight, except on the way into the release branch. Two more checks re-derive committed data and run only by hand: `./verify.sh --only recompute` and `./verify.sh --only admission`. The seeded-fault selftest and the checks that guarded it were deleted (#508). **A check enters CI only if getting the product complete end to end needs it** (the maintainer's direction, #506). **Pages** publishes from the integration branch: the site is the working surface.
 

@@ -69,7 +69,7 @@ dependencies = [
 
 [[package]]
 name = "discipline-diet"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "minijinja",
  "minijinja-contrib",
@@ -84,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "discipline-diet-wasm"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "discipline-diet",
  "serde_json",
