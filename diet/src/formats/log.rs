@@ -1164,8 +1164,11 @@ pub enum Event {
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
-        /// The `seq` of the fork.
-        fork: u64,
+        /// The `seq` of the fork whose answer made it; absent for a patch the
+        /// trunk made itself (v7, #609), which names its `lane` instead.
+        fork: Option<u64>,
+        /// The lane that made it, when no fork did (v7): `self-capture`.
+        lane: Option<String>,
         /// What it does.
         op: PatchOp,
         /// The entry.
@@ -2362,7 +2365,10 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::ForkSettled { fork, outcome } => forks
                 .settle(*fork, *outcome)
                 .map_err(|why| at(index, why))?,
-            Event::Patch { fork, .. } => forks.patch(*fork).map_err(|why| at(index, why))?,
+            // The trunk's own patch (#609) answers to no fork.
+            Event::Patch {
+                fork: Some(fork), ..
+            } => forks.patch(*fork).map_err(|why| at(index, why))?,
             Event::Seam { at_turn, .. } => {
                 seam_at(*at_turn, turns, &settled, state, &forks).map_err(|why| at(index, why))?;
                 forks.seamed = Some(*at_turn);
@@ -2724,8 +2730,22 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     }
                 ));
             }
+            let fork = fields.optional_count("fork")?;
+            let lane = fields.optional_string("lane")?;
+            if fork.is_some() == lane.is_some() {
+                return Err(format!(
+                    "a patch {}: it names the fork that made it or, made on the trunk, \
+                     its `lane`, and exactly one of them",
+                    if fork.is_some() {
+                        "names both a `fork` and a `lane`"
+                    } else {
+                        "names neither a `fork` nor a `lane`"
+                    }
+                ));
+            }
             Event::Patch {
-                fork: fields.count("fork")?,
+                fork,
+                lane,
                 op,
                 entry: fields.entry("entry")?,
                 supersedes,
@@ -3958,7 +3978,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
         }
         Kind::Patch => {
             const F: &[Field] = &[
-                must_v5("fork", Count),
+                // Every patch before v7 was a fork's; from v7 the trunk's
+                // own carry `lane` instead (#609), exactly one of the two.
+                may_v5("fork", Count),
+                may_v7("lane", Text),
                 must_v5("op", Tag(Tags::PatchOp)),
                 must_v5("entry", Holds::Entry),
                 may_v5("supersedes", Text),
@@ -4053,6 +4076,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
 pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
     match kind {
         Kind::Delta => &["text", "reasoning", "tool_call"],
+        // A fork's patch names its fork; the trunk's own its lane (#609).
+        Kind::Patch => &["fork", "lane"],
         _ => &[],
     }
 }
@@ -4750,12 +4775,18 @@ fn to_value(line: &Line) -> Value {
         }
         Event::Patch {
             fork,
+            lane,
             op,
             entry,
             supersedes,
             tangent,
         } => {
-            put("fork", count(*fork));
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
+            }
+            if let Some(lane) = lane {
+                put("lane", text(lane));
+            }
             put("op", text(op.tag()));
             let mut object = BTreeMap::from([
                 ("id".to_owned(), text(&entry.id)),
@@ -6010,7 +6041,8 @@ mod tests {
                 outcome: ForkOutcome::Value,
             },
             Event::Patch {
-                fork,
+                fork: Some(fork),
+                lane: None,
                 op: PatchOp::Add,
                 entry: PatchEntry {
                     id: "d1".to_owned(),
@@ -6020,8 +6052,10 @@ mod tests {
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
             },
+            // The trunk's own (#609): named by its lane, not a fork.
             Event::Patch {
-                fork,
+                fork: None,
+                lane: Some("self-capture".to_owned()),
                 op: PatchOp::Supersede,
                 entry: PatchEntry {
                     id: "d2".to_owned(),
@@ -6466,6 +6500,12 @@ mod tests {
                     // `op` is `supersede`: the reader's op rule, not the key
                     // beside it.
                     if kind == Kind::Patch && *absent == "supersedes" {
+                        continue;
+                    }
+                    // A key of an exactly-one set beside a line that already
+                    // carries another of it is that rule's refusal, whatever
+                    // key `present` is.
+                    if exactly_one(kind).contains(absent) && !exactly_one(kind).contains(present) {
                         continue;
                     }
                     let mut both = object.clone();
