@@ -1,7 +1,7 @@
 import logoDark from '../../../logo/logo-dark.svg?url';
 import logoLight from '../../../logo/logo-light.svg?url';
 import type { Link } from '../drive/transport.ts';
-import type { Session } from '../session/fold.ts';
+import type { Levers, Session } from '../session/fold.ts';
 import { Settings } from './Prefs.tsx';
 import { Segments } from './Segments.tsx';
 import { laneStyle } from './sets.ts';
@@ -22,6 +22,22 @@ export interface SessionHeaderProps {
 /** How far behind the curtain to look: not at all, each side call as a bar, or every side call whole. */
 const CURTAIN = ['closed', 'condensed', 'open'] as const;
 
+/** The levers the header names, in order, and what each state means on hover. */
+const LEVERS: readonly { readonly lever: keyof Levers; readonly label: string; readonly title: (state: string | undefined) => string }[] = [
+  {
+    lever: 'approvals',
+    label: 'approvals',
+    title: (s) =>
+      s === 'off'
+        ? 'approvals off: every command ran with no gate decision and no prompt; the sandbox still confined it'
+        : s === 'gate'
+          ? 'the gate decided each command: pre-seeded, approved by the operator, or refused'
+          : 'this log does not declare the approval lever',
+  },
+  { lever: 'forkDelivery', label: 'fork delivery', title: (s) => (s === undefined ? 'this log does not declare how a fork’s result reaches the trunk' : 'how a fork’s result reaches the trunk') },
+  { lever: 'reasoning', label: 'reasoning', title: (s) => (s === undefined ? 'this log does not declare the reasoning state it sent' : 'the reasoning state sent on every request') },
+];
+
 /** One quiet line: what is running this session, where it is, and the switches for seeing more. */
 export function SessionHeader({ session, link = 'live', linkWhy, surface, room = 'whole', onSurface }: SessionHeaderProps) {
   const unavailable = CURTAIN.filter((c) => (room === 'bars' && c === 'open') || (room === 'none' && c !== 'closed'));
@@ -40,6 +56,12 @@ export function SessionHeader({ session, link = 'live', linkWhy, surface, room =
         </span>
       ) : null}
       <span className="ex-header__item ex-header__model">{session.model}</span>
+      {/* The lever states the session ran under, as its first line declares them (#573); what it does not declare says so. */}
+      {LEVERS.map(({ lever, label, title }) => (
+        <span key={lever} className="ex-header__item ex-header__lever" data-lever={lever} data-undeclared={session.levers[lever] === undefined ? '' : undefined} title={title(session.levers[lever])}>
+          <span className="ex-header__k">{label}</span> {session.levers[lever] ?? 'undeclared'}
+        </span>
+      ))}
       {session.phase ? (
         <span className="ex-header__item">
           <span className="ex-header__k">phase</span> {session.phase}

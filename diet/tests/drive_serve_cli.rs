@@ -1452,6 +1452,15 @@ fn the_start_and_summary_name_the_regimen_and_the_product(
         Some(diet::digest::sha256_hex(&std::fs::read(dev_loop()).expect("the regimen")).as_str()),
         "{written}"
     );
+    // The dev-loop regimen warrants no fork and runs no commands.
+    assert_eq!(
+        (
+            rows[0]["levers"]["fork_warrant"].as_str(),
+            rows[0]["levers"]["approval"].as_str()
+        ),
+        (Some("none"), Some("undeclared")),
+        "{written}"
+    );
     let product = PathBuf::from(format!("{path}.product.txt"));
     assert_eq!(std::fs::read(&product).expect("the product"), b"");
     assert_eq!(

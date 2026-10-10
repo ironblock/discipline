@@ -438,9 +438,182 @@ fn sampled(value: &regimen::Value) -> Value {
     }
 }
 
+/// The word a lever is written with when nothing says its state: the lever
+/// exists in docs/program.md §2, and this run cannot describe where it sat.
+pub const UNDECLARED: &str = "undeclared";
+
+/// The state of each lever (docs/program.md §2) a session `serve` runs
+/// under `regimen`, with `max_output_tokens` its output cap, sits at, by
+/// lever, in that table's words: best effort. A lever this build cannot
+/// describe is [`UNDECLARED`], never an error, and nothing reads a missing
+/// one as a fault (the maintainer, 2026-10-09: "best effort in the 'duty of
+/// care' sense"). A value a reader would refuse is undeclared here too: serve
+/// refuses it at start, so no recorded session carries one.
+///
+/// Some states are the build's, not the regimen's -- the operator may always
+/// declare a seam, a fork sees the whole warm trunk and asks at its tail, a
+/// failed turn's commands stay on the trunk -- and are written as the build
+/// has them.
+#[must_use]
+pub fn serve_levers(regimen: &Regimen, max_output_tokens: u32) -> BTreeMap<String, String> {
+    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS, SEAM_TAIL_TOKENS};
+    let word = |key: &str| match regimen.get(key) {
+        Some(regimen::Value::String(word)) => word.clone(),
+        Some(regimen::Value::Integer(n)) => n.to_string(),
+        _ => UNDECLARED.to_owned(),
+    };
+    let undeclared = || UNDECLARED.to_owned();
+    let warrant = match crate::drive::session::interview_warrant(regimen) {
+        Ok(rules) if rules.is_empty() => "none".to_owned(),
+        Ok(rules) => format!(
+            "one-per-gap-gated:{}",
+            rules
+                .iter()
+                .map(|rule| rule.tag())
+                .collect::<Vec<_>>()
+                .join("+")
+        ),
+        Err(_) => undeclared(),
+    };
+    let depth = match regimen.get(SEAM_TAIL_TOKENS) {
+        None | Some(regimen::Value::Integer(0)) => "total".to_owned(),
+        Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
+        Some(_) => undeclared(),
+    };
+    let mut triggers = vec!["operator-declared"];
+    if regimen.get(SEAM_EVERY_TURNS).is_some() {
+        triggers.push("cadence");
+    }
+    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
+        .iter()
+        .any(|key| regimen.get(key).is_some())
+    {
+        triggers.push("budget");
+    }
+    let [disposition, approval, surface, limits] = command_levers(regimen, max_output_tokens);
+    let reasoning = match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
+        (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
+            match table.get("effort") {
+                Some(regimen::Value::String(effort)) => format!("{state}:effort:{effort}"),
+                _ => state.clone(),
+            }
+        }
+        (Some(regimen::Value::String(state)), _) => state.clone(),
+        _ => undeclared(),
+    };
+    let delivery = crate::drive::session::fork_delivery(regimen)
+        .map_or_else(|_| undeclared(), |delivery| delivery.tag().to_owned());
+    BTreeMap::from([
+        ("compaction_depth".to_owned(), depth),
+        ("seam_trigger".to_owned(), triggers.join("+")),
+        ("fork_warrant".to_owned(), warrant.clone()),
+        ("fork_delivery".to_owned(), delivery),
+        ("tool_output_disposition".to_owned(), disposition),
+        (
+            "isolation".to_owned(),
+            word(crate::isolation::policy::ISOLATION),
+        ),
+        ("approval".to_owned(), approval),
+        ("reasoning_state".to_owned(), reasoning),
+        ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
+        ("substrate_rung".to_owned(), word("substrate")),
+        ("tool_surface".to_owned(), surface),
+        ("instruction_files".to_owned(), "off".to_owned()),
+        ("tangent_closure".to_owned(), undeclared()),
+        ("capture_modality".to_owned(), undeclared()),
+        ("interview_routing_and_cadence".to_owned(), warrant),
+        ("render_budget".to_owned(), "none".to_owned()),
+        ("fork_memory_share".to_owned(), undeclared()),
+        ("archive_recall".to_owned(), "off".to_owned()),
+        ("fork_input_view".to_owned(), "whole-warm-trunk".to_owned()),
+        ("fork_delivery_site".to_owned(), "tail".to_owned()),
+        ("step_and_output_limits".to_owned(), limits),
+        ("extraction_seat".to_owned(), "warm-model".to_owned()),
+        ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
+        ("subagent".to_owned(), "harness".to_owned()),
+    ])
+}
+
+/// The levers a regimen's commands set -- tool-output disposition, approval,
+/// tool surface, step and output limits -- in [`serve_levers`]' words; the
+/// first three [`UNDECLARED`] when it runs none.
+fn command_levers(regimen: &Regimen, max_output_tokens: u32) -> [String; 4] {
+    use crate::drive::output::OutputCap;
+    use crate::drive::tool_loop::{self, ToolSurface};
+    let commands = tool_loop::declared(regimen).ok().flatten();
+    let undeclared = || UNDECLARED.to_owned();
+    let disposition = match commands.as_ref().map(|declared| declared.output_cap) {
+        Some(OutputCap::Keep) => "keep".to_owned(),
+        Some(OutputCap::Capped {
+            max_lines,
+            max_bytes,
+        }) => format!("cap-on-arrival:{max_lines}-lines:{max_bytes}-bytes"),
+        None => undeclared(),
+    };
+    let approval = match &commands {
+        Some(declared) if declared.approvals_off => "none".to_owned(),
+        Some(declared) if declared.allowed_commands.is_empty() => "denylist-prompt".to_owned(),
+        Some(_) => "denylist-prompt-preseeded".to_owned(),
+        None => undeclared(),
+    };
+    let surface = match commands.as_ref().map(|declared| declared.surface) {
+        Some(ToolSurface::Bash) => "bash".to_owned(),
+        Some(ToolSurface::Standard) => "standard".to_owned(),
+        None => undeclared(),
+    };
+    let limits = format!(
+        "max_steps:{}:output_cap:{max_output_tokens}",
+        commands
+            .as_ref()
+            .and_then(|declared| declared.max_steps)
+            .map_or_else(|| "none".to_owned(), |steps| steps.to_string())
+    );
+    [disposition, approval, surface, limits]
+}
+
 #[cfg(test)]
 mod tests {
-    use super::regime_of;
+    use super::{UNDECLARED, regime_of, serve_levers};
+
+    #[test]
+    fn t1s_draft_regimens_put_every_lever_at_a_word_and_undescribed_ones_at_undeclared() {
+        let draft = |name: &str| {
+            let path = format!("{}/../drafts/{name}", env!("CARGO_MANIFEST_DIR"));
+            let text = std::fs::read_to_string(&path).expect("the draft");
+            serve_levers(&regimen::parse(&text).expect("a regimen"), 32_768)
+        };
+        let floor = draft("t1-session-one.regimen.toml");
+        let at = |levers: &std::collections::BTreeMap<String, String>, lever: &str| {
+            levers.get(lever).cloned().unwrap_or_default()
+        };
+        assert_eq!(at(&floor, "fork_warrant"), "one-per-gap-gated:scoping");
+        assert_eq!(at(&floor, "isolation"), "sandbox");
+        assert_eq!(at(&floor, "approval"), "denylist-prompt-preseeded");
+        assert_eq!(
+            at(&floor, "substrate_rung"),
+            "accel24-beellama-qwen27b-q4kxl"
+        );
+        assert_eq!(at(&floor, "tool_surface"), "bash");
+        assert_eq!(at(&floor, "tangent_closure"), UNDECLARED);
+        let line = draft("t1-session-one-qwen38.regimen.toml");
+        assert_eq!(at(&line, "approval"), "none");
+        assert_eq!(at(&line, "reasoning_state"), "on:effort:xhigh");
+        assert_eq!(
+            at(&line, "step_and_output_limits"),
+            "max_steps:none:output_cap:32768"
+        );
+        // A regimen that says nothing still gets a table, never an error.
+        let empty = serve_levers(&regimen::parse("").expect("an empty regimen"), 8192);
+        assert_eq!(at(&empty, "fork_warrant"), "none");
+        assert_eq!(at(&empty, "isolation"), UNDECLARED);
+        assert_eq!(at(&empty, "compaction_depth"), "total");
+        let paced = serve_levers(
+            &regimen::parse("seam_every_turns = 3\nseam_tail_tokens = 8000\n").expect("a regimen"),
+            8192,
+        );
+        assert_eq!(at(&paced, "seam_trigger"), "operator-declared+cadence");
+        assert_eq!(at(&paced, "compaction_depth"), "tail:8000");
+    }
     use crate::formats::record::{Budget, Count, ReasoningControl};
     use crate::formats::regimen;
 

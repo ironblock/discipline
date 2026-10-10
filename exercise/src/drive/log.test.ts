@@ -148,6 +148,16 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     for (const file of fixtures) for (const line of logOf(file)) expect(needsOf(line), `${file}: seq ${line.seq} (${line.kind})`).toEqual([]);
   });
 
+  it('reads the lever states a session declares off its first line, and leaves out what it does not declare (#573)', () => {
+    const levers = (file: string) => fold(logOf(file)).levers;
+    expect(levers('a-v7-call-that-ran-with-approvals-off.jsonl')).toEqual({ approvals: 'off' });
+    expect(levers('a-v7-imperative-delivery-after-an-ask.jsonl')).toEqual({ approvals: 'gate', forkDelivery: 'imperative' });
+    expect(levers('a-v7-session-sending-thinking-off.jsonl')).toEqual({ approvals: 'gate', reasoning: 'thinking off' });
+    expect(levers('a-v7-session-sending-a-reasoning-effort.jsonl')).toEqual({ approvals: 'gate', reasoning: 'effort medium' });
+    // Before v7 the log has no approval lever to declare: undeclared, not assumed.
+    expect(levers('an-answered-turn.jsonl')).toEqual({});
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });

@@ -171,3 +171,8 @@
   height: 1px;
   margin: 0;
 }
+
+/* A lever the log does not declare (#573): named, and said quietly. */
+.ex-header__lever[data-undeclared] {
+  color: var(--ink-faint);
+}
