@@ -1323,6 +1323,10 @@ pub enum Event {
         /// its prompt and tail not fitting the window. Present exactly when
         /// the outcome is `refused`.
         refused: Option<String>,
+        /// What the fork's answer wrote after its last field, past a blank
+        /// line (v7, levers run A): read and recorded as no entry, and kept
+        /// here so it is seen.
+        trailer: Option<String>,
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
@@ -1613,7 +1617,7 @@ pub struct SeamFired {
 
 /// A seam's render budget and what it did (v7, #565): `render_budget_tokens`,
 /// `render_over_budget`, `render_tokens` and `render_reduced`, together or
-/// not at all.
+/// not at all; and `render_fits`, whether it fit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RenderBudget {
     /// The estimated tokens the render could run to.
@@ -1624,6 +1628,10 @@ pub struct RenderBudget {
     pub rendered: u64,
     /// How many entries it shortened or elided.
     pub reduced: u64,
+    /// Whether it came in at or under `tokens` (`render_fits`): `false`
+    /// when it did not with every reducible entry reduced. `None` on a log
+    /// written before it was logged.
+    pub fits: Option<bool>,
 }
 
 /// A patch's entry (v5, #374): its id, its text, and its category when the
@@ -3150,6 +3158,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 }
                 refused
             },
+            trailer: fields.optional_string("trailer")?,
         },
         Kind::Patch => {
             let op = fields.tag("op", PatchOp::from_tag)?;
@@ -3319,6 +3328,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     over: fields.string("render_over_budget")?,
                     rendered: fields.count("render_tokens")?,
                     reduced: fields.count("render_reduced")?,
+                    fits: fields.optional_flag("render_fits")?,
                 }),
             },
             warm: match object.get("warm") {
@@ -4593,6 +4603,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("prompt_tokens", Count),
                 may_v7("wall_ms", Count),
                 may_v7("refused", Text),
+                may_v7("trailer", Text),
             ];
             F
         }
@@ -4682,6 +4693,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("render_over_budget", Text),
                 may_v7("render_tokens", Count),
                 may_v7("render_reduced", Count),
+                may_v7("render_fits", Holds::Flag),
                 may_v7("prompt_tokens", Count),
                 may_v7("window", Count),
                 may_v7("pruned", Holds::Strings),
@@ -5526,11 +5538,15 @@ fn to_value(line: &Line) -> Value {
             prompt_tokens,
             wall_ms,
             refused,
+            trailer,
         } => {
             put("fork", count(*fork));
             put("outcome", text(outcome.tag()));
             if let Some(why) = refused {
                 put("refused", text(why));
+            }
+            if let Some(trailer) = trailer {
+                put("trailer", text(trailer));
             }
             if let Some(tokens) = prompt_tokens {
                 put("prompt_tokens", count(*tokens));
@@ -5724,6 +5740,9 @@ fn to_value(line: &Line) -> Value {
                 put("render_over_budget", text(&budget.over));
                 put("render_tokens", count(budget.rendered));
                 put("render_reduced", count(budget.reduced));
+                if let Some(fits) = budget.fits {
+                    put("render_fits", Value::Boolean(fits));
+                }
             }
             if let Some(calls) = pruned {
                 put(
@@ -7015,6 +7034,7 @@ mod tests {
                 capped: None,
             },
             Event::ForkSettled {
+                trailer: None,
                 fork,
                 outcome: ForkOutcome::Value,
                 prompt_tokens: Some(281),
@@ -7510,6 +7530,12 @@ mod tests {
                     // `op` is `supersede`: the reader's op rule, not the key
                     // beside it.
                     if kind == Kind::Patch && *absent == "supersedes" {
+                        continue;
+                    }
+                    // A fork names why it was never sent exactly when it
+                    // settled `refused` (v7, #406): the reader's outcome
+                    // rule, not the key beside it.
+                    if kind == Kind::ForkSettled && *absent == "refused" {
                         continue;
                     }
                     // A background job is a `bash` call's that `ran` (v7,

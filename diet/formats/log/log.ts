@@ -551,6 +551,7 @@ export type ForkSettledLine = {
   prompt_tokens?: number;
   wall_ms?: number;
   refused?: string;
+  trailer?: string;
 };
 
 export type PatchLine = {
@@ -588,6 +589,7 @@ export type SeamLine = {
   render_over_budget?: string;
   render_tokens?: number;
   render_reduced?: number;
+  render_fits?: boolean;
   prompt_tokens?: number;
   window?: number;
   pruned?: string[];

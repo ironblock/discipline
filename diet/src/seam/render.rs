@@ -60,6 +60,9 @@ pub struct Rendered {
     pub tokens: u64,
     /// How many entries it shortened or elided.
     pub reduced: u64,
+    /// Whether it came in at or under its budget; with none, it does. A
+    /// render that does not, with everything reducible reduced, says so.
+    pub fits: bool,
 }
 
 /// The most characters a tiered entry keeps of its first line.
@@ -113,7 +116,7 @@ pub fn rendered_marked(
     budget: Option<Budget>,
     marks: &Marks,
 ) -> Rendered {
-    let mut out = head(object, phase);
+    let head = head(object, phase);
     let mark = |id: &crate::object::EntryId| marks.get(id).map_or("", String::as_str);
     let line = |id: &crate::object::EntryId, content: &str| {
         format!(
@@ -123,77 +126,101 @@ pub fn rendered_marked(
             mark(id)
         )
     };
-    let brief = |content: &str| BRIEF.iter().any(|kind| content.starts_with(kind));
-    // Which entries are reduced: none without a budget; with one, the
-    // header and the brief are spent first, then the rest newest first.
-    let mut reduced = std::collections::BTreeSet::new();
-    if let Some(budget) = budget {
-        let mut spent = estimate(&out)
-            + object
-                .live()
-                .filter(|entry| brief(&entry.content))
-                .map(|entry| estimate(&line(&entry.id, &entry.content)))
-                .sum::<u64>();
-        let mut rest: Vec<_> = object
-            .live()
-            .filter(|entry| !brief(&entry.content))
-            .collect();
-        rest.sort_by(|a, b| {
-            b.provenances
-                .iter()
-                .max()
-                .cmp(&a.provenances.iter().max())
-                .then_with(|| b.id.cmp(&a.id))
-        });
-        let mut over = false;
-        for entry in rest {
-            let cost = estimate(&line(&entry.id, &entry.content));
-            over = over || spent + cost > budget.tokens;
-            if over {
-                reduced.insert(entry.id.clone());
-            } else {
-                spent += cost;
-            }
-        }
-    }
     let over = budget.map_or(OverBudget::Tier, |budget| budget.over);
-    let mut count = 0_u64;
-    for entry in object.live() {
-        if !reduced.contains(&entry.id) {
-            out.push_str(&line(&entry.id, &entry.content));
-            continue;
-        }
-        match over {
-            OverBudget::Tier => {
-                let first = entry.content.split('\n').next().unwrap_or_default();
-                let mut cut: String = first.chars().take(TIER_CHARS).collect();
-                // An entry already one short line is left as it is, and not
-                // counted: tiering did nothing to it.
-                if cut.chars().count() < entry.content.chars().count() {
-                    cut.push('…');
+    // The render with `reduced` shortened or elided, and how many were.
+    let compose = |reduced: &std::collections::BTreeSet<&crate::object::EntryId>| {
+        let mut out = head.clone();
+        let mut count = 0_u64;
+        for entry in object.live() {
+            if !reduced.contains(&entry.id) {
+                out.push_str(&line(&entry.id, &entry.content));
+                continue;
+            }
+            match over {
+                OverBudget::Tier => {
+                    let first = entry.content.split('\n').next().unwrap_or_default();
+                    let mut cut: String = first.chars().take(TIER_CHARS).collect();
+                    // An entry already one short line is left as it is, and
+                    // not counted: tiering did nothing to it.
+                    if cut.chars().count() < entry.content.chars().count() {
+                        cut.push('…');
+                        count += 1;
+                    }
+                    out.push_str(&line(&entry.id, &cut));
+                }
+                OverBudget::Elide => {
+                    out.push_str(&one_line(entry.id.as_str()));
+                    out.push_str(mark(&entry.id));
+                    out.push('\n');
                     count += 1;
                 }
-                out.push_str(&line(&entry.id, &cut));
-            }
-            OverBudget::Elide => {
-                out.push_str(&one_line(entry.id.as_str()));
-                out.push_str(mark(&entry.id));
-                out.push('\n');
-                count += 1;
             }
         }
-    }
-    if count > 0 {
-        let what = match over {
-            OverBudget::Tier => "shortened",
-            OverBudget::Elide => "elided",
+        if count > 0 {
+            let what = match over {
+                OverBudget::Tier => "shortened",
+                OverBudget::Elide => "elided",
+            };
+            let _ = writeln!(out, "{count} older entries {what}");
+        }
+        (out, count)
+    };
+    let Some(budget) = budget else {
+        let (text, reduced) = compose(&std::collections::BTreeSet::new());
+        return Rendered {
+            tokens: estimate(&text),
+            text,
+            reduced,
+            fits: true,
         };
-        let _ = writeln!(out, "{count} older entries {what}");
+    };
+    // The brief is never reduced; the rest are, oldest first -- newest by
+    // latest patch. The newest are kept whole while their whole lines fit
+    // beside the header and the brief; then, while the render with its
+    // reduced lines and its count still does not fit, one more is reduced,
+    // until it fits or nothing is left to reduce (levers run A: a render
+    // that counted only the whole lines overshot its budget).
+    let brief = |content: &str| BRIEF.iter().any(|kind| content.starts_with(kind));
+    let mut rest: Vec<_> = object
+        .live()
+        .filter(|entry| !brief(&entry.content))
+        .collect();
+    rest.sort_by(|a, b| {
+        b.provenances
+            .iter()
+            .max()
+            .cmp(&a.provenances.iter().max())
+            .then_with(|| b.id.cmp(&a.id))
+    });
+    let mut spent = estimate(&head)
+        + object
+            .live()
+            .filter(|entry| brief(&entry.content))
+            .map(|entry| estimate(&line(&entry.id, &entry.content)))
+            .sum::<u64>();
+    let mut whole = 0;
+    for entry in &rest {
+        let cost = estimate(&line(&entry.id, &entry.content));
+        if spent + cost > budget.tokens {
+            break;
+        }
+        spent += cost;
+        whole += 1;
     }
-    Rendered {
-        tokens: estimate(&out),
-        text: out,
-        reduced: count,
+    loop {
+        let reduced = rest[whole..].iter().map(|entry| &entry.id).collect();
+        let (text, count) = compose(&reduced);
+        let tokens = estimate(&text);
+        let fits = tokens <= budget.tokens;
+        if fits || whole == 0 {
+            return Rendered {
+                tokens,
+                text,
+                reduced: count,
+                fits,
+            };
+        }
+        whole -= 1;
     }
 }
 

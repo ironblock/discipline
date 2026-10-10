@@ -734,19 +734,26 @@ mod tests {
         ]);
         let plain = render::render(&object, None);
         let line = |id: &str| format!("{id}\t{}\n", long(id).replace('\n', "\\n"));
-        // Room for the header, the constraint and one long entry: the newest.
-        let without = plain.replace(&line("old"), "").replace(&line("mid"), "");
-        let room = (without.chars().count() as u64).div_ceil(4);
-        let tiered = render::rendered(&object, None, Some(budget(room, render::OverBudget::Tier)));
-        assert_eq!(tiered.reduced, 2, "{}", tiered.text);
-        assert!(tiered.text.contains(&line("new")), "the newest stays whole");
-        assert!(tiered.text.contains("rule\tconstraint: no login\n"));
         let cut = |id: &str| {
             long(id)
                 .chars()
                 .take(render::TIER_CHARS)
                 .collect::<String>()
         };
+        // Room for the header, the constraint, one long entry -- the newest
+        // -- and the two older ones tiered, with the count line.
+        let expected = format!(
+            "{}2 older entries shortened\n",
+            plain
+                .replace(&line("old"), &format!("old\t{}…\n", cut("old")))
+                .replace(&line("mid"), &format!("mid\t{}…\n", cut("mid")))
+        );
+        let room = (expected.chars().count() as u64).div_ceil(4);
+        let tiered = render::rendered(&object, None, Some(budget(room, render::OverBudget::Tier)));
+        assert_eq!(tiered.reduced, 2, "{}", tiered.text);
+        assert!(tiered.fits);
+        assert!(tiered.text.contains(&line("new")), "the newest stays whole");
+        assert!(tiered.text.contains("rule\tconstraint: no login\n"));
         assert!(
             tiered.text.contains(&format!("old\t{}…\n", cut("old"))),
             "{}",
@@ -762,7 +769,20 @@ mod tests {
             "{}",
             tiered.text
         );
-        let elided = render::rendered(&object, None, Some(budget(room, render::OverBudget::Elide)));
+        let elided_room = (format!(
+            "{}2 older entries elided\n",
+            plain
+                .replace(&line("old"), "old\n")
+                .replace(&line("mid"), "mid\n")
+        )
+        .chars()
+        .count() as u64)
+            .div_ceil(4);
+        let elided = render::rendered(
+            &object,
+            None,
+            Some(budget(elided_room, render::OverBudget::Elide)),
+        );
         assert!(
             elided.text.contains("\nold\n") && elided.text.contains("\nmid\n"),
             "{}",
@@ -775,10 +795,67 @@ mod tests {
             "{}",
             elided.text
         );
-        // A budget the brief alone passes still renders the brief whole.
+        // A budget the brief alone passes still renders the brief whole,
+        // and says it does not fit.
         let tight = render::rendered(&object, None, Some(budget(1, render::OverBudget::Elide)));
         assert!(tight.text.contains("rule\tconstraint: no login\n"));
         assert_eq!(tight.reduced, 3);
+        assert!(!tight.fits);
+    }
+
+    /// Levers run A (seams 2804 and 4039): an entry kept whole beside
+    /// reduced ones whose shortened lines and count push the render past its
+    /// budget is reduced too, until the render fits -- here at the run's own
+    /// three entries, with room for the newest two whole lines and nothing
+    /// for what reducing the third costs.
+    #[test]
+    fn a_render_keeps_reducing_until_it_fits_its_budget() {
+        let object = holding(&[
+            (
+                "interview-t2-0",
+                "decision: Add `#anchor` validation to `linkcheck.py` for local links \u{2014} \
+                 GitHub-style slugs via `slugify()`/`anchors_of()` (duplicates numbered `a`, \
+                 `a-1`), same-file `#anchor` supported, output format and exit codes \
+                 unchanged; samples updated to show valid anchor, broken file, and broken \
+                 anchor.",
+            ),
+            (
+                "interview-t2-1",
+                "plan: No open work; optional follow-ups only if asked \u{2014} verify \
+                 `[x](b.md#b \"B\")` title-with-anchor handling and decide whether headings \
+                 inside fenced code blocks should be ignored.",
+            ),
+            ("interview-t2-2", "supersede: NONE"),
+        ]);
+        // Room for the render with both older entries tiered: the newest
+        // two whole lines fit in it too, so a reduction that counted only
+        // whole lines kept the second whole and ran past it.
+        let floor = render::rendered(&object, None, Some(budget(1, render::OverBudget::Tier)));
+        let room = floor.tokens;
+        let plain = render::render(&object, None);
+        let first = plain
+            .lines()
+            .find(|line| line.starts_with("interview-t2-0\t"))
+            .expect("the oldest's line");
+        assert!(((plain.chars().count() - first.chars().count() - 1) as u64).div_ceil(4) <= room);
+        let tiered = render::rendered(&object, None, Some(budget(room, render::OverBudget::Tier)));
+        assert!(
+            tiered.tokens <= room,
+            "{} tokens against {room}:\n{}",
+            tiered.tokens,
+            tiered.text
+        );
+        assert!(tiered.fits);
+        assert_eq!(tiered.reduced, 2, "{}", tiered.text);
+        assert!(tiered.text.contains("interview-t2-2\tsupersede: NONE\n"));
+        // One token less and nothing is left to reduce: it says so.
+        let short = render::rendered(
+            &object,
+            None,
+            Some(budget(room - 1, render::OverBudget::Tier)),
+        );
+        assert!(!short.fits);
+        assert_eq!(short.text, floor.text);
     }
 
     /// #565: recency is an entry's latest patch, not its creation: an old
