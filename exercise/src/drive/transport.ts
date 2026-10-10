@@ -41,10 +41,15 @@ export type Command =
   | { readonly kind: 'open-tangent'; readonly id: string }
   /** Close the open tangent: each of its live entries kept, dropped or parked -- exactly those, no more. */
   | { readonly kind: 'close-tangent'; readonly dispositions: Readonly<Record<string, Disposition>> }
+  /** The operator's ruling on the model's phase proposal (#124, #651): refill now, move without a seam, or stay. */
+  | { readonly kind: 'ratify-phase'; readonly call: string; readonly choice: PhaseChoice }
   /** Move the running foreground command to the background (#614): it keeps running, and the turn goes on. */
   | { readonly kind: 'background' }
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
   | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision };
+
+/** How the operator rules on a proposed phase move (#651). */
+export type PhaseChoice = 'seam' | 'continue' | 'stay';
 
 /** What a tangent's close does with one of its entries (#608): keeps it live, retires it, or parks it as the tangent's. */
 export type Disposition = 'keep' | 'drop' | 'park';
@@ -117,6 +122,8 @@ export type Refusal = Open<
   | 'not-the-scope'
   /** A move to the background with no command running in the foreground (#614). */
   | 'nothing-running'
+  /** A ruling with no proposal waiting on it (#651). */
+  | 'no-proposal'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };

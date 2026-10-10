@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
+import { PHASE_PROPOSED, PHASE_RULED_CONTINUE } from './served/phase-proposal.ts';
 import { SELF_CAPTURE } from './served/self-capture.ts';
 import { TANGENT_CLOSED, TANGENT_OPEN } from './served/tangent.ts';
 import { needsOf } from './log.ts';
@@ -285,6 +286,18 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     const [audit] = [...fold(logOf('a-v7-seam-audited-on-its-lane-and-warmed.jsonl')).branches.values()].flat().filter((b) => b.lane === 'audit');
     expect(audit?.outcome).toBe('value');
     expect(audit?.audit).toEqual({ kept: [], updated: ['d1'], removed: [] });
+  });
+
+  it('folds the model’s phase proposal as pending until the operator rules on it, and a “continue” moves the phase (#124, #651)', () => {
+    const pending = fold([...PHASE_PROPOSED]);
+    expect(pending.proposal).toEqual({ call: 'p1', from: 'plan', to: 'build', reason: 'the spec is settled' });
+    expect(pending.phase).toBe('plan');
+    const ruled = fold([...PHASE_RULED_CONTINUE]);
+    expect([...ruled.unknown.keys()]).toEqual([]);
+    expect(ruled.proposal).toBeUndefined();
+    expect(ruled.phase).toBe('build');
+    const call = ruled.eras[0]?.nodes.find((n) => n.kind === 'tool' && n.tool === 'propose_phase_transition');
+    expect(call?.kind === 'tool' && call.ruled).toEqual({ choice: 'continue', to: 'build' });
   });
 
   it('takes the state from the log: an ended session is ended', () => {

@@ -353,7 +353,11 @@ export type LogLine =
   | BackgroundEnded
   | Notice
   | TimeoutNear
-  | ForkSkipped;
+  | ForkSkipped
+  | PhaseRuled;
+
+/** The operator's ruling on the model's phase proposal (log v7, #651): `seam` (a seam follows), `continue`, or `stay`. */
+export type PhaseRuled = V0.PhaseRuledLine;
 
 export type Kind = LogLine['kind'];
 
