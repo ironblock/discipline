@@ -696,6 +696,7 @@ impl<'a> Walk<'a> {
             Line::Capture { .. } => log::Kind::Capture,
             Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
             Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
+            Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
             // The trunk's own self-capture patch (#609), fork-less.
             Line::Patch { .. } => log::Kind::Patch,
             _ => log::Kind::Progress,
@@ -802,6 +803,7 @@ impl<'a> Walk<'a> {
             | Line::Progress { .. }
             | Line::BackgroundEnded { .. }
             | Line::TimeoutNear { .. }
+            | Line::ForkSkipped { .. }
             | Line::Capture { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.

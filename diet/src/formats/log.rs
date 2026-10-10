@@ -245,6 +245,9 @@ vocabulary! {
         /// A running call near its timeout (v7, #613): for the surface's
         /// warning, never the model's.
         TimeoutNear => "timeout.near",
+        /// A fork the turn's own self-capture already recorded, screened out
+        /// of its gap (v7, #611).
+        ForkSkipped => "fork.skipped",
     }
 }
 
@@ -1422,6 +1425,21 @@ pub enum Event {
     },
     /// The self-capture reminder (v7, #609): an advisory note after turn
     /// `turn`'s ask, when the model had recorded nothing for the cadence.
+    /// A fork screened out of its gap (v7, #611): the turn's own
+    /// self-capture already recorded what it would ask.
+    ForkSkipped {
+        /// The settled turn it would have followed.
+        of_turn: u32,
+        /// What would have fired it (#564).
+        trigger: String,
+        /// The ask it would have sent (#595).
+        ask: String,
+        /// The id of the self-capture call that recorded it, as its
+        /// `capture` line names it.
+        call: String,
+        /// The field that call recorded under.
+        field: String,
+    },
     Reminded {
         /// The turn whose request carried it.
         turn: u32,
@@ -2454,6 +2472,8 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
     let mut forks = Forks::default();
     // Background jobs (v7, #614): each started by one `tool_call`, ended once.
     let mut jobs: BTreeMap<String, bool> = BTreeMap::new();
+    // Self-capture calls (v7, #609), by id: what a skipped fork cites (#611).
+    let mut captured: BTreeSet<String> = BTreeSet::new();
     let mut claimed = false;
     let mut last_t = 0_u64;
     for (index, line) in lines.iter().enumerate() {
@@ -2589,6 +2609,15 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 seam_at(*at_turn, *reason, turns, &settled, state, &forks)
                     .map_err(|why| at(index, why))?;
                 forks.seamed = Some(*at_turn);
+            }
+            Event::Capture { call, .. } => {
+                captured.insert(call.clone());
+            }
+            Event::ForkSkipped { call, .. } if !captured.contains(call) => {
+                return Err(at(
+                    index,
+                    format!("`fork.skipped` cites `{call}`, which no earlier `capture` line names"),
+                ));
             }
             Event::BackgroundEnded { job, .. } => match jobs.get_mut(job) {
                 None => {
@@ -3064,6 +3093,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             entries: fields.optional_strings("entries")?.unwrap_or_default(),
             why: fields.optional_string("why")?,
             fork: fields.optional_count("fork")?,
+        },
+        Kind::ForkSkipped => Event::ForkSkipped {
+            of_turn: fields.turn("of_turn")?,
+            trigger: fields.string("trigger")?,
+            ask: fields.string("ask")?,
+            call: fields.string("call")?,
+            field: fields.string("field")?,
         },
         Kind::Reminded => Event::Reminded {
             turn: fields.turn("turn")?,
@@ -4100,7 +4136,8 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::Reminded
         | Kind::BackgroundEnded
         | Kind::Notice
-        | Kind::TimeoutNear => 7,
+        | Kind::TimeoutNear
+        | Kind::ForkSkipped => 7,
         _ => 0,
     }
 }
@@ -4417,6 +4454,16 @@ pub fn schema(kind: Kind) -> &'static [Field] {
         }
         // A note after an ask: the self-capture reminder (#609), background
         // commands' notices (#614).
+        Kind::ForkSkipped => {
+            const F: &[Field] = &[
+                must_v7("of_turn", Count),
+                must_v7("trigger", Text),
+                must_v7("ask", Text),
+                must_v7("call", Text),
+                must_v7("field", Text),
+            ];
+            F
+        }
         Kind::Reminded | Kind::Notice => {
             const F: &[Field] = &[must_v7("turn", Count), must_v7("text", Text)];
             F
@@ -5341,6 +5388,20 @@ fn to_value(line: &Line) -> Value {
                 put("fork", count(*fork));
             }
             Kind::Capture
+        }
+        Event::ForkSkipped {
+            of_turn,
+            trigger,
+            ask,
+            call,
+            field,
+        } => {
+            put("of_turn", count(u64::from(*of_turn)));
+            put("trigger", text(trigger));
+            put("ask", text(ask));
+            put("call", text(call));
+            put("field", text(field));
+            Kind::ForkSkipped
         }
         Event::Reminded { turn, text: note } => {
             put("turn", count(u64::from(*turn)));
@@ -7888,7 +7949,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded background.ended notice timeout.near"
+             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

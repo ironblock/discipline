@@ -320,6 +320,8 @@ export type BackgroundEnded = V0.BackgroundEndedLine;
 export type Notice = V0.NoticeLine;
 /** A running call near its timeout (v7, #613): for the surface's warning, never the model's. */
 export type TimeoutNear = V0.TimeoutNearLine;
+/** A fork the turn's own self-capture already recorded, screened out of its gap (v7, #611). Folded, not yet drawn. */
+export type ForkSkipped = V0.ForkSkippedLine;
 /** A tool result the model pruned, replaced at a later seam (v7, `prune_output`, #612). */
 export type Pruned = V0.PrunedLine;
 
@@ -351,7 +353,8 @@ export type LogLine =
   | Pruned
   | BackgroundEnded
   | Notice
-  | TimeoutNear;
+  | TimeoutNear
+  | ForkSkipped;
 
 export type Kind = LogLine['kind'];
 
