@@ -1504,6 +1504,7 @@ mod tests {
                 // so nothing else changes: a retry that never happens costs
                 // nothing.
                 retries: 1,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

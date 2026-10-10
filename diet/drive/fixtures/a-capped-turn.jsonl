@@ -1,7 +1,7 @@
 {"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":7}
 {"kind":"ask","seq":1,"t":5,"text":"what is the answer?","turn":1}
 {"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
-{"head_sha256":"1bfd211e2e023cbe1c522fd4542444e82f4a70103069011c42f3aec4fc994806","kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"head_sha256":"1bfd211e2e023cbe1c522fd4542444e82f4a70103069011c42f3aec4fc994806","kind":"request","lane":"trunk","max_tokens":64,"seq":3,"t":15,"turn":1}
 {"kind":"delta","reasoning":"Let me think about this carefully","request":3,"seq":4,"t":20}
 {"kind":"delta","request":3,"seq":5,"t":25,"text":"The answer"}
 {"capped":true,"finish_reason":"length","kind":"response","reasoning":"Let me think about this carefully","seq":6,"t":30,"text":"The answer","to_request":3}

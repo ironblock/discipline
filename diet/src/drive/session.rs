@@ -279,6 +279,8 @@ pub enum Event {
         /// The sequence number of the [`Event::Forked`] it is the call of,
         /// on the [`Lane::Interview`] lane; `None` on the trunk (#374).
         fork: Option<u64>,
+        /// The `max_tokens` it was sent with, after the clamp (#588).
+        max_tokens: u32,
     },
     /// The settlement moved.
     Settled {
@@ -867,6 +869,13 @@ struct State {
     /// The trunk's tokens as the latest trunk call measured them, cleared
     /// by a seam: what a budget reads.
     trunk_tokens: Option<u64>,
+    /// The estimated tokens of the latest request's messages, as it was
+    /// sized (#588).
+    sent_estimate: Option<u64>,
+    /// The latest measured prompt (prefilled plus cached tokens) and the
+    /// estimate of the request it measured: what the next request's prompt
+    /// is sized from (#588).
+    measured_prompt: Option<(u64, u64)>,
     /// The latest tool-calling step's measurement, the trunk's only once
     /// that step's exchange joins it (a `max_steps` settling).
     step_tokens: Option<u64>,
@@ -889,6 +898,27 @@ struct Waiting {
 pub type Sink = Box<dyn FnMut(&Logged) + Send>;
 
 impl State {
+    /// Size `shape`'s output cap to the room its prompt leaves in the
+    /// context window (#588), from `ceiling`, the session's cap, and return
+    /// it. The prompt is the latest measured one plus the estimate of what
+    /// was added since; with none to go on, or a prompt that shrank (a seam),
+    /// the whole estimate plus [`ESTIMATE_PAD`].
+    fn sized(&mut self, shape: &mut RequestShape, ceiling: u32) -> u32 {
+        let estimate: u64 = shape
+            .messages
+            .iter()
+            .map(crate::seam::render::estimated_tokens)
+            .sum();
+        let prompt = match self.measured_prompt {
+            Some((measured, then)) if estimate >= then => measured + (estimate - then),
+            _ => estimate + ESTIMATE_PAD,
+        };
+        self.sent_estimate = Some(estimate);
+        let cap = clamped(ceiling, shape.limits.context_window, prompt);
+        shape.limits.max_output_tokens = cap;
+        cap
+    }
+
     fn push(&mut self, event: Event) -> u64 {
         // An admitted command's gap is logged immediately BEFORE that
         // command's outcome, under the same lock (#117, D13 (c)).
@@ -900,6 +930,17 @@ impl State {
     }
 
     fn append(&mut self, event: Event) -> u64 {
+        // A call's measured prompt, against the estimate it was sized with
+        // (#588).
+        if let Event::Answered { timings, .. }
+        | Event::Capped { timings, .. }
+        | Event::Called { timings, .. } = &event
+            && let (Some(timings), Some(sent)) = (timings, self.sent_estimate)
+            && (timings.prompt_n.is_some() || timings.cache_n.is_some())
+        {
+            let prompt = timings.prompt_n.unwrap_or(0) + timings.cache_n.unwrap_or(0);
+            self.measured_prompt = Some((prompt, sent));
+        }
         let seq = u64::try_from(self.log.len()).expect("a log longer than u64 cannot be built");
         let t = u64::try_from(self.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX);
         if matches!(event, Event::TurnSettled { .. }) {
@@ -1219,6 +1260,8 @@ impl<S: Streaming + 'static> Session<S> {
             turns: 0,
             turns_at_seam: 0,
             trunk_tokens: None,
+            sent_estimate: None,
+            measured_prompt: None,
             step_tokens: None,
             ran: Vec::new(),
             opened_at: Instant::now(),
@@ -1366,11 +1409,13 @@ impl<S: Streaming + 'static> Session<S> {
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
         // finding 21).
+        let max_tokens = state.sized(&mut shape, self.shared.template.limits.max_output_tokens);
         let request = state.push(Event::Requested {
             turn,
             lane: Lane::Trunk,
             head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
             fork: None,
+            max_tokens,
         });
         let cancel = Cancel::new();
         state.flight = Some(Flight {
@@ -1860,6 +1905,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             lane,
             head_sha256,
             fork,
+            max_tokens,
         } => log::Event::Request {
             turn: *turn,
             lane: match lane {
@@ -1868,6 +1914,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             },
             head_sha256: Some(head_sha256.clone()),
             fork: *fork,
+            max_tokens: Some(u64::from(*max_tokens)),
         },
         Event::Settled { from, to } => log::Event::Settlement {
             from: state_of(*from),
@@ -2601,11 +2648,13 @@ fn run_calls<S: Streaming>(
     state.ran.clone_from(exchange);
     shape.messages.push(said);
     shape.messages.extend(results);
+    let max_tokens = state.sized(shape, shared.template.limits.max_output_tokens);
     let next = state.push(Event::Requested {
         turn,
         lane: Lane::Trunk,
         head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
         fork: None,
+        max_tokens,
     });
     if let Some(flight) = state.flight.as_mut() {
         flight.request = next;
@@ -3112,6 +3161,32 @@ fn turn_over(template: &RequestShape, state: &mut State) {
     }
 }
 
+/// The pad added to a prompt that is wholly estimated (#588): Qwen Code's,
+/// for the system prompt and tool definitions an estimate misses
+/// (`qc:packages/core/src/core/llm-chat.ts:729`, `ESTIMATE_CLAMP_OVERHEAD_PAD`).
+pub const ESTIMATE_PAD: u64 = 20_000;
+
+/// The output cap `ceiling`, clamped to the room a `prompt` of that many
+/// tokens leaves in a `window` (#588), by Qwen Code's arithmetic, which
+/// breaks Pi's and its tie on the margin and the floor
+/// (`qc:packages/core/src/core/tokenLimits.ts:50,59-61,83-106`): the room is
+/// the window less the prompt less a margin of max(10,000, 5% of the window),
+/// floored at min(4,000, window - prompt), and at least 1. No window, no
+/// clamp.
+#[must_use]
+pub fn clamped(ceiling: u32, window: Option<u64>, prompt: u64) -> u32 {
+    let Some(window) = window else {
+        return ceiling;
+    };
+    let window = i128::from(window);
+    let prompt = i128::from(prompt);
+    let margin = (window * 5 / 100).max(10_000);
+    let room = window - prompt - margin;
+    let floor = (window - prompt).clamp(1, 4_000);
+    let cap = i128::from(ceiling).min(room.max(floor));
+    u32::try_from(cap).unwrap_or(ceiling)
+}
+
 /// The trunk's tokens after a trunk call: what it prefilled, what it reused
 /// from the cache, and what it generated. `None` when the server reported
 /// none of them.
@@ -3233,11 +3308,13 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         why,
         question,
     });
+    let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Interview,
         head_sha256: crate::client::head::Head::of(&shape).digest().to_owned(),
         fork: Some(fork),
+        max_tokens,
     });
     let cancel = Cancel::new();
     state.flight = Some(Flight {
@@ -3578,6 +3655,7 @@ pub(in crate::drive) mod tests {
                 call: Duration::from_secs(5),
                 max_output_tokens: 64,
                 retries: 0,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
@@ -3665,6 +3743,7 @@ pub(in crate::drive) mod tests {
                     lane: Lane::Trunk,
                     head_sha256: first_head("say hello"),
                     fork: None,
+                    max_tokens: 64,
                 },
                 Event::Delta {
                     request: 3,
@@ -3862,6 +3941,83 @@ pub(in crate::drive) mod tests {
         let mut next = kept.to_vec();
         next.push(user("second"));
         assert_eq!(session.shared.transport.sent()[1].messages, next);
+    }
+
+    #[test]
+    fn the_output_cap_is_clamped_to_the_room_the_prompt_leaves_by_qwen_codes_arithmetic() {
+        // No window, no clamp.
+        assert_eq!(clamped(64_000, None, 1_000_000), 64_000);
+        // The room: window - prompt - max(10,000, 5% of the window).
+        assert_eq!(
+            clamped(64_000, Some(32_768), 1_000),
+            32_768 - 1_000 - 10_000
+        );
+        assert_eq!(
+            clamped(500_000, Some(400_000), 1_000),
+            400_000 - 1_000 - 20_000
+        );
+        // A ceiling below the room stands.
+        assert_eq!(clamped(8_192, Some(160_000), 1_000), 8_192);
+        // Floored at min(4,000, window - prompt), and at least 1.
+        assert_eq!(clamped(64_000, Some(32_768), 30_000), 2_768);
+        assert_eq!(clamped(64_000, Some(32_768), 20_000), 4_000);
+        assert_eq!(clamped(64_000, Some(32_768), 40_000), 1);
+    }
+
+    #[test]
+    fn a_request_is_sized_from_the_pad_until_a_prompt_is_measured_then_from_the_measure() {
+        let measured = Timings {
+            prompt_n: Some(18),
+            cache_n: Some(0),
+            predicted_n: Some(2),
+            ..Timings::default()
+        };
+        let canned = Canned::new([
+            vec![
+                Step::Delta("one".to_owned()),
+                Step::Timings(measured.clone()),
+            ],
+            vec![Step::Delta("two".to_owned()), Step::Timings(measured)],
+        ]);
+        let mut shape = template();
+        shape.limits.max_output_tokens = 50_000;
+        shape.limits.context_window = Some(40_000);
+        let session = Session::open(canned, shape);
+        for (turn, ask) in [(1, "first"), (2, "second")] {
+            session.ask(ask, None).expect("accepted");
+            wait_until(&session, "the turn to settle", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    >= turn
+            });
+        }
+        let caps: Vec<u32> = session
+            .events_from(0)
+            .iter()
+            .filter_map(|logged| match logged.event {
+                Event::Requested { max_tokens, .. } => Some(max_tokens),
+                _ => None,
+            })
+            .collect();
+        let sent: Vec<u32> = session
+            .shared
+            .transport
+            .sent()
+            .iter()
+            .map(|shape| shape.limits.max_output_tokens)
+            .collect();
+        assert_eq!(
+            caps, sent,
+            "the log names the cap each request was sent with"
+        );
+        // The first is wholly estimated: a few tokens plus the 20,000 pad.
+        assert!(
+            u64::from(caps[0]) < 40_000 - ESTIMATE_PAD - 10_000,
+            "{caps:?}"
+        );
+        // The second starts from the 18 tokens measured, plus what was added.
+        assert!(caps[1] > 40_000 - 100 - 10_000, "{caps:?}");
     }
 
     #[test]
@@ -4661,6 +4817,7 @@ pub(in crate::drive) mod tests {
                 lane: Lane::Trunk,
                 head_sha256: "a".repeat(64),
                 fork: None,
+                max_tokens: 8192,
             },
             Event::Refused {
                 command: CommandKind::Cancel,
@@ -4808,6 +4965,7 @@ pub(in crate::drive) mod tests {
                 lane: Lane::Interview,
                 head_sha256: "b".repeat(64),
                 fork: Some(20),
+                max_tokens: 8192,
             },
             Event::ForkSettled {
                 fork: 20,
@@ -4937,6 +5095,7 @@ pub(in crate::drive) mod tests {
                 lane: log::Lane::Trunk,
                 head_sha256: Some("a".repeat(64)),
                 fork: None,
+                max_tokens: Some(8192),
             },
             log::Event::Refused {
                 command: log::Command::Cancel,
@@ -5097,6 +5256,7 @@ pub(in crate::drive) mod tests {
                 lane: log::Lane::Interview,
                 head_sha256: Some("b".repeat(64)),
                 fork: Some(20),
+                max_tokens: Some(8192),
             },
             log::Event::ForkSettled {
                 fork: 20,
@@ -7336,6 +7496,7 @@ pub(in crate::drive) mod tests {
                 call: Duration::from_secs(10),
                 max_output_tokens: 512,
                 retries: 0,
+                context_window: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::from([(

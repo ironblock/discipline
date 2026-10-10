@@ -1041,6 +1041,7 @@ impl<'a> Walk<'a> {
                     call: std::time::Duration::ZERO,
                     max_output_tokens: 0,
                     retries: 0,
+                    context_window: None,
                 },
                 grammar: None,
                 // From `session.start` (R1), and ASSERTED by the digest check
@@ -1499,6 +1500,7 @@ mod tests {
                 lane: Lane::Trunk,
                 head_sha256: Some(head()),
                 fork: None,
+                max_tokens: None,
             },
             Line::Delta {
                 request,
@@ -1768,6 +1770,7 @@ mod tests {
                     lane: Lane::Trunk,
                     head_sha256: Some(head()),
                     fork: None,
+                    max_tokens: None,
                 },
                 outcome,
             ]);
@@ -1777,6 +1780,7 @@ mod tests {
             lane: Lane::Trunk,
             head_sha256: Some(head()),
             fork: None,
+            max_tokens: None,
         });
         let events_len = events.len();
         let projection = project(
@@ -1826,6 +1830,7 @@ mod tests {
             lane: Lane::Trunk,
             head_sha256: None,
             fork: None,
+            max_tokens: None,
         };
         events.extend(turn);
         let refused = project(
@@ -1875,6 +1880,7 @@ mod tests {
                 call: std::time::Duration::from_secs(5),
                 max_output_tokens: 64,
                 retries: 0,
+                context_window: None,
             },
             grammar: None,
             template_kwargs,
@@ -2339,6 +2345,7 @@ mod tests {
                     lane: Lane::Interview,
                     head_sha256: Some(format!("{fork:064x}")),
                     fork: Some(fork),
+                    max_tokens: None,
                 },
                 Line::Response {
                     to_request: fork + 1,
