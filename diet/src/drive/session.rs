@@ -275,6 +275,9 @@ pub enum Event {
         /// The instruction files the system prompt carries (#559), by path
         /// and digest: empty when none were injected.
         instruction_files: Vec<log::InstructionFile>,
+        /// Each lever's state, as the record's start row names them (#573):
+        /// `serve_levers`' one reading, when a regimen was read.
+        levers: Option<BTreeMap<String, String>>,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -786,6 +789,7 @@ pub type Declared = (
         Option<log::Unsent>,
         Option<String>,
         Vec<log::InstructionFile>,
+        Option<BTreeMap<String, String>>,
     ),
 );
 
@@ -1522,7 +1526,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             None,
             None,
-            (None, None, (None, None, Vec::new())),
+            (None, None, (None, None, Vec::new(), None)),
         )
     }
 
@@ -1536,7 +1540,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             Some(serving),
             None,
-            (None, None, (None, None, Vec::new())),
+            (None, None, (None, None, Vec::new(), None)),
         )
     }
 
@@ -1554,7 +1558,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             Some(tools),
-            (None, None, (None, None, Vec::new())),
+            (None, None, (None, None, Vec::new(), None)),
         )
     }
 
@@ -1577,7 +1581,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             tools,
-            (claim, interview, (None, None, Vec::new())),
+            (claim, interview, (None, None, Vec::new(), None)),
         )
     }
 
@@ -1605,7 +1609,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, (unsent, reasoning_effort_default, instruction_files)): Declared,
+        (claim, interview, (unsent, reasoning_effort_default, instruction_files, levers)): Declared,
     ) -> Self {
         // A head is the trunk before any turn; a tool result answers a call
         // made in one, and the log's head has no word for it (`role_of`).
@@ -1691,6 +1695,7 @@ impl<S: Streaming + 'static> Session<S> {
             fork_asks,
             reasoning_effort_default,
             instruction_files,
+            levers,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             phases,
         });
@@ -2430,7 +2435,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tool_output,
             phases,
             instruction_files,
+            levers,
         } => log::Event::SessionStart {
+            levers: levers.clone(),
             // #563: the graph, and the phase it opens in; nothing when none.
             phases: phases.as_ref().map(|(names, _, _)| names.clone()),
             phase_transitions: phases.as_ref().map(|(_, moves, _)| moves.clone()),
@@ -5848,6 +5855,7 @@ pub(in crate::drive) mod tests {
             tool_output: None,
             phases: _,
             instruction_files: _,
+            levers: None,
             ..
         } = &log[0].event
         else {
@@ -5954,6 +5962,10 @@ pub(in crate::drive) mod tests {
                     path: "AGENTS.md".to_owned(),
                     sha256: "e".repeat(64),
                 }],
+                levers: Some(BTreeMap::from([(
+                    "fork-asks".to_owned(),
+                    "v3".to_owned(),
+                )])),
                 fork_asks: Some(&crate::dogma::asks::V4),
             },
             Event::Asked {
@@ -6280,6 +6292,10 @@ pub(in crate::drive) mod tests {
                     path: "AGENTS.md".to_owned(),
                     sha256: "e".repeat(64),
                 }]),
+                levers: Some(BTreeMap::from([(
+                    "fork-asks".to_owned(),
+                    "v3".to_owned(),
+                )])),
                 tool_output: Some(log::ToolOutput {
                     state: log::ToolOutputState::Capped,
                     max_lines: Some(2000),

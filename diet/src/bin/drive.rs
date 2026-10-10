@@ -512,6 +512,8 @@ fn serve(args: &[String]) -> ExitCode {
                 unsent_budget.map(|budget_tokens| diet::formats::log::Unsent { budget_tokens }),
                 effort_default.clone(),
                 instruction_files,
+                // #573: the start row's levers, from the same reading.
+                read_at_start.as_ref().map(|read| read.levers.clone()),
             ),
         ),
     );
@@ -1202,17 +1204,12 @@ fn written_record(
         .map(diet::drive::session::line_of)
         .collect();
     let mut projected = projection::project_in(&lines, regime, engine, recording)?;
-    if let (
-        Some(record::Event::Start {
-            regimen_sha256,
-            levers,
-            ..
-        }),
-        Some(read),
-    ) = (projected.events.first_mut(), read_at_start)
+    // The levers come from the log's `session.start` (#573), so the record
+    // and the log say the same.
+    if let (Some(record::Event::Start { regimen_sha256, .. }), Some(read)) =
+        (projected.events.first_mut(), read_at_start)
     {
         *regimen_sha256 = Some(read.regimen_sha256.clone());
-        *levers = Some(read.levers.clone());
     }
     // The summary: the turns and prefill the rows carry, and the product --
     // the working memory at the session's end, kept beside the record as
