@@ -492,7 +492,7 @@ export type ForkLine = {
   question: string;
   view?: string;
   ask?: string;
-};
+} & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
   seq: number;
@@ -500,6 +500,8 @@ export type ForkSettledLine = {
   kind: "fork.settled";
   fork: number;
   outcome: ForkOutcome;
+  prompt_tokens?: number;
+  wall_ms?: number;
 };
 
 export type PatchLine = {

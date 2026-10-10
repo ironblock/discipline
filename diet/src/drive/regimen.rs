@@ -41,6 +41,55 @@ pub const SUBSTRATE_KEYS: &[&str] = &["substrate_reasoning", "substrate_hardware
 /// table over.
 pub const CACHE_TTL_KEY: &str = "substrate_cache_ttl";
 
+/// The regimen key for where the interview fork runs (#570).
+pub const EXTRACTION_SEAT: &str = "extraction_seat";
+
+/// Where the interview fork runs: `warm`, on the trunk's own server, the
+/// default and the only arrangement before #570; or `offboard:<registry id>`,
+/// on a second server the registry resolves, never the executor's.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Seat {
+    /// The trunk's server, its model, its cache.
+    #[default]
+    Warm,
+    /// The substrate the registry resolves for this id.
+    Offboard(String),
+}
+
+impl Seat {
+    /// The seat `regimen` declares, read leniently: `offboard:<id>` with an
+    /// id, and anything else, or nothing, `warm`.
+    #[must_use]
+    pub fn of(regimen: &Regimen) -> Self {
+        match regimen.get(EXTRACTION_SEAT) {
+            Some(regimen::Value::String(seat)) => match seat.strip_prefix("offboard:") {
+                Some(id) if !id.is_empty() => Self::Offboard(id.to_owned()),
+                _ => Self::Warm,
+            },
+            _ => Self::Warm,
+        }
+    }
+
+    /// The start row's word for the seat `regimen` declares: `warm-model`
+    /// (the lever's word for it before #570) or `offboard:<id>`, and for a
+    /// value read as warm that is not `warm`, the value it fell back from
+    /// (`warm-model:unknown:cold`).
+    #[must_use]
+    pub fn lever(regimen: &Regimen) -> String {
+        match (Self::of(regimen), regimen.get(EXTRACTION_SEAT)) {
+            (Self::Offboard(id), _) => format!("offboard:{id}"),
+            (Self::Warm, None) => "warm-model".to_owned(),
+            (Self::Warm, Some(regimen::Value::String(seat))) if seat == "warm" => {
+                "warm-model".to_owned()
+            }
+            (Self::Warm, Some(regimen::Value::String(seat))) => {
+                format!("warm-model:unknown:{seat}")
+            }
+            (Self::Warm, Some(_)) => "warm-model:unknown".to_owned(),
+        }
+    }
+}
+
 /// The regime `regimen` declares, or the list of what it is missing.
 ///
 /// # Errors
@@ -205,6 +254,28 @@ pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, St
         substrate.engine = identity.engine;
         substrate.weights = identity.weights;
         substrate.chat_template_sha256 = identity.chat_template_sha256;
+    }
+    // An offboard seat is a second substrate (#570): the registry says what
+    // it is, and the fork's requests -- a clone of the trunk's, its sampler
+    // and reasoning state with it -- say how it was asked.
+    if let Seat::Offboard(id) = Seat::of(regimen) {
+        let trunk = regime.substrates[0].clone();
+        if id == trunk.id {
+            return Err(format!(
+                "`extraction_seat = \"offboard:{id}\"` names the trunk's own substrate: \
+                 a seat on the executor's server is `warm`"
+            ));
+        }
+        let identity = crate::drive::registry::identity(registry, &id)
+            .map_err(|why| format!("`extraction_seat`: {why}"))?;
+        regime.substrates.push(Substrate {
+            id,
+            engine: identity.engine,
+            weights: identity.weights,
+            hardware_fingerprint: identity.hardware_fingerprint,
+            chat_template_sha256: identity.chat_template_sha256,
+            ..trunk
+        });
     }
     Ok(regime)
 }
@@ -613,17 +684,28 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("interview_routing_and_cadence".to_owned(), warrant),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         ("fork_memory_share".to_owned(), undeclared()),
-        (
-            "fork_input_view".to_owned(),
-            crate::drive::session::fork_view(regimen).word(),
-        ),
+        ("fork_input_view".to_owned(), fork_input_view_lever(regimen)),
         ("fork_asks".to_owned(), fork_asks_lever(regimen)),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
         ("step_and_output_limits".to_owned(), limits),
-        ("extraction_seat".to_owned(), "warm-model".to_owned()),
+        ("extraction_seat".to_owned(), Seat::lever(regimen)),
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
         ("subagent".to_owned(), "harness".to_owned()),
     ])
+}
+
+/// The fork input view lever's word (#567): the regimen's `fork_view`, and
+/// undeclared, the seat's default -- the whole trunk warm, the last turn
+/// offboard, which the word says was defaulted (`last_turn:defaulted`, #570).
+fn fork_input_view_lever(regimen: &Regimen) -> String {
+    let declared = regimen.get(crate::drive::session::FORK_VIEW).is_some();
+    match Seat::of(regimen) {
+        Seat::Offboard(_) if !declared => format!(
+            "{}:defaulted",
+            crate::drive::session::ForkView::Last(1).word()
+        ),
+        _ => crate::drive::session::fork_view(regimen).word(),
+    }
 }
 
 /// The render budget lever's word (#565): `none`, or `<tokens>:<tier|elide>`.
@@ -901,6 +983,60 @@ mod tests {
                 acts_sha256: crate::drive::canned::acts_digest()
             }
         );
+    }
+
+    /// #570: the seat reads leniently, and an offboard one is a second
+    /// substrate the registry says what it is, asked as the trunk is.
+    #[test]
+    fn an_offboard_seat_is_a_second_substrate_the_registry_resolves() {
+        use crate::drive::registry::{REGISTRY, identity};
+        let read = |line: &str| {
+            let text = format!("{line}\narm = \"a\"\n");
+            let parsed = regimen::parse(&text).expect("a regimen");
+            (super::Seat::of(&parsed), super::Seat::lever(&parsed))
+        };
+        assert_eq!(read(""), (super::Seat::Warm, "warm-model".to_owned()));
+        assert_eq!(
+            read("extraction_seat = \"warm\""),
+            (super::Seat::Warm, "warm-model".to_owned())
+        );
+        assert_eq!(
+            read("extraction_seat = \"offboard:cpu\""),
+            (
+                super::Seat::Offboard("cpu".to_owned()),
+                "offboard:cpu".to_owned()
+            )
+        );
+        for unread in ["offboard:", "cold"] {
+            assert_eq!(
+                read(&format!("extraction_seat = \"{unread}\"")),
+                (super::Seat::Warm, format!("warm-model:unknown:{unread}"))
+            );
+        }
+
+        let dev_loop = crate::drive::canned::DEV_LOOP;
+        let seated = |seat: &str| {
+            let text = format!("extraction_seat = \"offboard:{seat}\"\n{dev_loop}");
+            super::regime_registered(&regimen::parse(&text).expect("a regimen"), REGISTRY)
+        };
+        let regime = seated("canned-replay").expect("a registered seat");
+        let [trunk, seat] = regime.substrates.as_slice() else {
+            panic!("two substrates: {:#?}", regime.substrates);
+        };
+        let registered = identity(REGISTRY, "canned-replay").expect("registered");
+        assert_eq!(seat.id, "canned-replay");
+        assert_eq!(seat.engine, registered.engine);
+        assert_eq!(seat.weights, registered.weights);
+        assert_eq!(seat.hardware_fingerprint, registered.hardware_fingerprint);
+        // Asked as the trunk is: a fork's request is a clone of the trunk's.
+        assert_eq!(seat.sampler_card, trunk.sampler_card);
+        assert_eq!(seat.reasoning, trunk.reasoning);
+        assert_ne!(seat.weights, trunk.weights);
+
+        let own = seated(&trunk.id).expect_err("the trunk's own substrate");
+        assert!(own.contains("is `warm`"), "{own}");
+        let unknown = seated("no-such-seat").expect_err("unregistered");
+        assert!(unknown.starts_with("`extraction_seat`: "), "{unknown}");
     }
 
     #[test]
