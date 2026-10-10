@@ -53,9 +53,10 @@ Each lever has states; the current build sits at one of them; the experiments mo
 | **fork input view** | the whole warm trunk · the last turn · the last *N* turns | the whole warm trunk by default; the last turn and the last *N* turns built (#603) | a narrower view pays a prefill; #567 |
 | **interview role** | user · system · developer, where the served template supports it | user by default; system and developer where the served template renders them (#606, #635) | the maintainer, 2026-10-09: "consider asking the interview question as something other than 'user' role when supported". The floor's Qwen3.8 template allows a system message only at the beginning and has no developer role, so only user runs there. Replaces the fork delivery site lever (#568), whose position-0 state appended to the system message. the predecessor's #21 kept the ask last and moved only an instruction: at the end of the ask it scored +0.222 (p 0.0023); a priming paragraph in the system message scored +0.056, a sham's score, unless the ask was also wrapped in `<interview>` tags (+0.222). Its intent, not a result here; #599 |
 | **step and output limits** | `max_steps` · the output cap, as regimen settings | regimen settings, a flag overriding (#587); the cap is clamped to the context window (#590) | an 8,192-token cap killed an xhigh write step on the 3.8; T1 runs 32,768; #569 |
-| **extraction seat** | the warm model · a small offboard model · an encoder | the warm model by default; a small offboard model built (#615); the encoder not built | #570, and #499's claim |
 | **failed turns on the trunk** | the commands a failed turn ran are kept · dropped | kept (#541) | a cancelled turn keeps its finished steps (#577) |
 | **subagent** (later) | fired by the harness (the interview fork) · called by the model | the harness | Qwen Code exposes an `agent` tool; #561 |
+
+**Struck:** the extraction seat (#570): a smaller model to format interview answers, so the warm model would not spend its time on it. The tools route sidestepped that. It returns when a small LLM is needed to test a hypothesis, not as a ranker, decision model or embedding model (the maintainer, 2026-10-10).
 
 ## 3. Cross-cutting concerns
 

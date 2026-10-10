@@ -65,9 +65,10 @@ One working state per lever, a non-default one where the default is off, none or
 | fork input view | last turn | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): forks 2439 and 4952 |
 | interview role | user | the start rows of [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) and [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven). System and developer do not render in the floor's chat template |
 | step and output limits | `max_steps` 6 | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): turn 3 stopped at `max_steps` (814) |
-| extraction seat | the warm model | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) and [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): every interview fork. The offboard seat needs a live bring-up on the box |
 | failed turns on the trunk | kept | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): turn 4 cancelled after 3 steps, and the next request only appended |
 | subagent | — | later |
+
+Every row's evidence is approved (the maintainer, 2026-10-10: "approve all, proceed"). The extraction seat is struck (#570). The milestone closes with its open issues and the v0.2.0 tag.
 
 ## v0.3.0 — the hosted API live
 
