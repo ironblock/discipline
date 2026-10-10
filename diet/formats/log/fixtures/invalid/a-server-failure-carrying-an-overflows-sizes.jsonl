@@ -1,0 +1,7 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"registry_sha256":"0000000000000000000000000000000000000000000000000000000000000000","seq":0,"served":[{"field":"engine_commit","provenance":"declared","value":"be74bf0a00bcb3a518e6feb7606f150c189be637"},{"field":"max_seq_len","provenance":"corroborated","reported":"196608","value":"196608"}],"substrate":"a-substrate","t":0,"version":7}
+{"kind":"ask","seq":1,"t":5,"text":"go on","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","max_tokens":2000,"seq":3,"t":15,"turn":1}
+{"inferred":true,"kind":"request.failed","message":"Chat completion aborted. Please check the server console.","prompt_tokens":161840,"reason":"server","request":3,"seq":4,"status":500,"t":20,"window":163840}
+{"kind":"turn.settled","reason":"failed","seq":5,"t":25,"turn":1}
+{"from":"turn","kind":"settlement","seq":6,"t":30,"to":"awaiting"}
