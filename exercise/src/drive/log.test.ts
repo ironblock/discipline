@@ -68,6 +68,14 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(era.nodes.map((n) => n.kind)).toEqual(['user', 'assistant']);
   });
 
+  it('a seam since #597 leaves the system prompt alone: the era opens on the user message carrying the render', () => {
+    const file = 'a-v7-seam-whose-refill-is-a-message.jsonl';
+    const line = logOf(file).find((l) => l.kind === 'seam');
+    const era = fold(logOf(file)).eras[1]!;
+    expect(era.system.placement).toBe('message');
+    expect(era.system.text).toBe(line?.kind === 'seam' ? `<summary>\n${line.render}\n</summary>` : undefined);
+  });
+
   it('folds a stopped call as cancelled, keeping what arrived', () => {
     const answer = fold(logOf('a-cancelled-turn.jsonl')).eras[0]?.nodes.find((n) => n.kind === 'assistant');
     expect(answer?.kind === 'assistant' && answer.progress).toBe('cancelled');
@@ -156,6 +164,18 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(levers('a-v7-session-sending-a-reasoning-effort.jsonl')).toEqual({ approvals: 'gate', reasoning: 'effort medium' });
     // Before v7 the log has no approval lever to declare: undeclared, not assumed.
     expect(levers('an-answered-turn.jsonl')).toEqual({});
+  });
+
+  it('reads the phase graph off the first line, opens in its opening phase, and moves with each seam that moved (#563)', () => {
+    const log = logOf('a-v7-seam-that-moved-a-phase.jsonl');
+    const opened = fold(log.slice(0, 1));
+    expect(opened.phase).toBe('plan');
+    expect(opened.phaseMoves).toEqual(['build']);
+    const moved = fold(log);
+    expect(moved.phase).toBe('build');
+    expect(moved.phaseMoves).toEqual(['review']);
+    // A log with no graph offers no move.
+    expect(fold(logOf('an-answered-turn.jsonl')).phaseMoves).toEqual([]);
   });
 
   it('takes the state from the log: an ended session is ended', () => {

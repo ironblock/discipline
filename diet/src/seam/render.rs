@@ -214,7 +214,7 @@ fn head(object: &WorkingObject, phase: Option<&str>) -> String {
 }
 
 /// The trunk a served session continues from after a seam (#493): its
-/// `head`, with `render` after the head's standing instruction, and nothing
+/// `head`, untouched, then [`refill_message`] carrying `render`, and nothing
 /// of the old trunk.
 ///
 /// A TOTAL compaction, by the maintainer's intent on #493: the refill is not
@@ -222,15 +222,36 @@ fn head(object: &WorkingObject, phase: Option<&str>) -> String {
 /// to make the model believe it is continuing the session. Each seam hands it
 /// a better starting point, built from working memory alone.
 ///
-/// The render joins the first message when that message is the system one,
-/// separated by a blank line, rather than arriving as a message of its own: a
-/// second system message, or two user messages in a row, is a shape some chat
-/// templates refuse. A head with no system message gets one, holding the
-/// render. The session and the record's projection both rebuild the trunk
-/// through this one function, so the projection's head check holds the
-/// session to it.
+/// The system message is never changed (#597, the maintainer: "System
+/// prompt mutation is forbidden"): after a seam it is byte-identical to the
+/// session's first. The session and the record's projection both rebuild
+/// the trunk through this one function, so the projection's head check
+/// holds the session to it.
 #[must_use]
 pub fn refill(head: &[Message], render: &str) -> Vec<Message> {
+    let mut trunk = head.to_vec();
+    trunk.push(refill_message(render));
+    trunk
+}
+
+/// The message a seam's refill rides in (#597), shaped as Pi and `OpenCode`
+/// 2 carry a compaction summary: a user message, the text inside
+/// `<summary>` tags, opened and closed on lines of their own (Pi
+/// `core/messages.ts:11-17`, `OpenCode` 2 `session/runner/to-llm-message.ts:
+/// 147-158`). Their lead sentences differ and Qwen Code's summary message
+/// has none, so it has none; no harness but Qwen Code adds a trailer, so it
+/// has none.
+#[must_use]
+pub fn refill_message(render: &str) -> Message {
+    Message::new(Role::User, format!("<summary>\n{render}\n</summary>"))
+}
+
+/// The trunk after a seam logged before #597: `render` appended to the
+/// head's system message after a blank line, or a system message of its
+/// own when the head has none. What those logs' heads were sent, so they
+/// still rebuild.
+#[must_use]
+pub fn refill_in_the_system_message(head: &[Message], render: &str) -> Vec<Message> {
     let mut trunk = head.to_vec();
     match trunk.first_mut() {
         Some(first) if first.role == Role::System => {
@@ -290,6 +311,30 @@ pub fn tail(turns: &[Message], budget: u64) -> &[Message] {
         }
     }
     &turns[start..]
+}
+
+/// The last `n` whole turns of `turns` (#567), each starting at its user
+/// message as [`tail`]'s do, so no call is parted from its result; all of
+/// them when there are fewer, none when `n` is 0.
+#[must_use]
+pub fn last_turns(turns: &[Message], n: usize) -> &[Message] {
+    if n == 0 {
+        return &turns[turns.len()..];
+    }
+    let mut seen = 0;
+    for (at, message) in turns.iter().enumerate().rev() {
+        if message.role == Role::User {
+            seen += 1;
+            if seen == n {
+                return &turns[at..];
+            }
+        }
+    }
+    let first = turns
+        .iter()
+        .position(|message| message.role == Role::User)
+        .unwrap_or(turns.len());
+    &turns[first..]
 }
 
 /// `text` with everything that could forge a row escaped out of it.
@@ -364,6 +409,27 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
 /// [`working_set_bytes`] against what is actually emitted -- can find the
 /// section without re-deriving the header's shape.
 pub const WORKING_SET_HEADER: &str = "# working set\n";
+
+#[cfg(test)]
+mod refill_tests {
+    use super::*;
+
+    /// The head is never changed (#597): the render rides in a user
+    /// message after it, inside `<summary>` tags on lines of their own.
+    #[test]
+    fn a_refill_leaves_the_head_alone_and_carries_the_render_in_a_user_message() {
+        let head = vec![Message::new(Role::System, "you are the trunk")];
+        let trunk = refill(&head, "# regime\n");
+        assert_eq!(trunk[..1], head[..]);
+        assert_eq!(trunk.len(), 2);
+        assert_eq!(trunk[1].role, Role::User);
+        assert_eq!(trunk[1].content, "<summary>\n# regime\n\n</summary>");
+        // Before #597, appended to the system message.
+        let before = refill_in_the_system_message(&head, "# regime\n");
+        assert_eq!(before.len(), 1);
+        assert_eq!(before[0].content, "you are the trunk\n\n# regime\n");
+    }
+}
 
 #[cfg(test)]
 mod tail_tests {

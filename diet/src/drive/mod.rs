@@ -94,6 +94,7 @@
 //! pair (design point 3) is not built: there is no rendered side to pair
 //! with.
 
+pub mod archive;
 pub mod attach;
 pub mod canned;
 pub mod engine;

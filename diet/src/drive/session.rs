@@ -102,6 +102,10 @@ vocabulary! {
         DeclareSeam => "declare-seam",
         /// End the session.
         End => "end",
+        /// Open a tangent (#22).
+        OpenTangent => "open-tangent",
+        /// Close the open tangent (#22).
+        CloseTangent => "close-tangent",
     }
 }
 
@@ -130,6 +134,16 @@ vocabulary! {
         /// that turn settled and must not stop the next (the admission
         /// counter ruled on #117).
         Stale => "stale",
+        /// A seam, or a second tangent, while a tangent is open (#22).
+        TangentOpen => "tangent-open",
+        /// A close with no tangent open (#22).
+        NoTangent => "no-tangent",
+        /// A tangent asked of a session that keeps no working memory, or
+        /// under an id it cannot take (#22).
+        BadTangent => "bad-tangent",
+        /// A close whose dispositions are not exactly the tangent's entries
+        /// (#22).
+        NotTheScope => "not-the-scope",
     }
 }
 
@@ -479,6 +493,8 @@ pub enum Event {
         why: log::Warrant,
         /// What it asks.
         question: String,
+        /// What it saw of the trunk (#567).
+        view: ForkView,
         /// The role it asked in (#599).
         role: Role,
     },
@@ -525,6 +541,18 @@ pub enum Event {
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
+    /// Archived items recalled after an ask (#566): one note, which stays
+    /// on the trunk.
+    Recalled {
+        /// The turn whose first request carried it.
+        turn: u32,
+        /// How it matched.
+        recall: log::RecallState,
+        /// The note as sent.
+        text: String,
+        /// Each item, in rank order.
+        items: Vec<log::RecalledItem>,
+    },
     Delivered {
         /// The turn whose first request carried it.
         turn: u32,
@@ -546,6 +574,35 @@ pub enum Event {
         entry: log::PatchEntry,
         /// The id of the entry it replaced, exactly when `op` is `supersede`.
         supersedes: Option<String>,
+        /// The tangent it was made under (#22), when one was open.
+        tangent: Option<String>,
+    },
+    /// A tangent opened (#22).
+    TangentOpened {
+        /// Its id.
+        id: String,
+        /// The turns settled when it opened.
+        at_turn: u32,
+        /// The trunk's messages at the fork point.
+        trunk_messages: u64,
+    },
+    /// A tangent closed (#22): its entries disposed and the trunk rolled
+    /// back to the fork point.
+    TangentClosed {
+        /// Its id.
+        id: String,
+        /// The turns settled when it closed.
+        at_turn: u32,
+        /// The entries kept, dropped and parked, by id.
+        kept: Vec<String>,
+        /// Dropped to the archive.
+        dropped: Vec<String>,
+        /// Parked as the tangent's.
+        parked: Vec<String>,
+        /// Whether working memory's trunk entries rendered as at the fork.
+        prefix_intact: bool,
+        /// Messages the rollback took off the trunk.
+        rolled_back: u64,
     },
 }
 
@@ -746,6 +803,66 @@ pub struct Interview {
     /// default, or `system` or `developer` where the served template
     /// renders it (serve checks at start).
     pub role: Role,
+    /// How archived items are recalled at an ask (#566): off, the default.
+    pub recall: super::archive::Recall,
+    /// What a fork sees of the trunk (#567): all of it, or its last whole
+    /// turns after the head.
+    pub view: ForkView,
+}
+
+/// What a fork sees of the trunk (#567).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ForkView {
+    /// The whole warm trunk: today's, the default.
+    #[default]
+    Trunk,
+    /// The head -- everything before the first turn -- then the last this
+    /// many whole turns.
+    Last(u32),
+}
+
+impl ForkView {
+    /// The regimen's word for it: `trunk`, `last_turn`, or `last:N`.
+    #[must_use]
+    pub fn word(self) -> String {
+        match self {
+            Self::Trunk => "trunk".to_owned(),
+            Self::Last(1) => "last_turn".to_owned(),
+            Self::Last(n) => format!("last:{n}"),
+        }
+    }
+}
+
+/// The regimen key for what a fork sees of the trunk (#567).
+pub const FORK_VIEW: &str = "fork_view";
+
+/// The fork view the regimen declares, leniently: `"last_turn"`, or
+/// `"last:N"` with N a positive whole number; anything else is the trunk.
+#[must_use]
+pub fn fork_view(regimen: &Regimen) -> ForkView {
+    let Some(crate::formats::regimen::Value::String(word)) = regimen.get(FORK_VIEW) else {
+        return ForkView::Trunk;
+    };
+    if word == "last_turn" {
+        return ForkView::Last(1);
+    }
+    word.strip_prefix("last:")
+        .and_then(|n| n.parse::<u32>().ok())
+        .filter(|n| *n > 0)
+        .map_or(ForkView::Trunk, ForkView::Last)
+}
+
+/// What a fork under `view` sees of `trunk`, whose first `head` messages
+/// are the session's head (#567): all of it, or the head -- the system
+/// message and everything before the first turn, so that much of the prefix
+/// still meets the cache -- then the last whole turns.
+fn viewed(trunk: &[Message], head: usize, view: ForkView) -> Vec<Message> {
+    let ForkView::Last(n) = view else {
+        return trunk.to_vec();
+    };
+    let head = head.min(trunk.len());
+    let turns = crate::seam::render::last_turns(&trunk[head..], n as usize);
+    trunk[..head].iter().chain(turns).cloned().collect()
 }
 
 /// The regimen key for the role the interview asks in (#599).
@@ -811,15 +928,29 @@ fn warranted(
         if line.turn != turn || line.outcome != log::ToolOutcome::Ran {
             return None;
         }
-        let command = tool_loop::command_of(&line.arguments)?;
+        // `bash`'s command, or a standard tool's own string arguments
+        // (#557): its `path` is what the router classes a read by.
+        let command = tool_loop::command_of(&line.arguments);
+        let args: BTreeMap<String, Value> = match &command {
+            Some(command) => {
+                BTreeMap::from([("command".to_owned(), Value::String(command.clone()))])
+            }
+            None => {
+                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&line.arguments)
+                    .ok()?
+                    .into_iter()
+                    .filter_map(|(key, value)| match value {
+                        serde_json::Value::String(text) => Some((key, Value::String(text))),
+                        _ => None,
+                    })
+                    .collect()
+            }
+        };
         let decided = table.observe(&RecordEvent::ToolCall {
             id: line.id.clone(),
             at_turn: turn,
             tool: line.name.clone(),
-            args: Some(BTreeMap::from([(
-                "command".to_owned(),
-                Value::String(command.clone()),
-            )])),
+            args: Some(args),
             exit: None,
             output: None,
             exec: None,
@@ -830,7 +961,8 @@ fn warranted(
         };
         READS.contains(&class).then_some((kind, command))
     })?;
-    Some((log::Warrant::Read, ask(read.0, Some(read.1))))
+    // A standard tool ran no command: the ask's `last_command` line drops.
+    Some((log::Warrant::Read, ask(read.0, read.1)))
 }
 
 /// The router's classes that are a read under rule (a).
@@ -914,9 +1046,14 @@ struct State {
     /// The phase the session is in, under a phase graph (#563): the graph's
     /// first at open, then where each seam's move took it.
     phase: Option<String>,
+    /// The open tangent (#22), and the trunk at its fork point, which its
+    /// close restores.
+    tangent: Option<(crate::object::tangent::Tangent, Vec<Message>)>,
     /// Patches waiting to be delivered at the next trunk request, under a
     /// mid-turn fork delivery: each op and the entry text its line names.
     undelivered: Vec<(log::PatchOp, String, String)>,
+    /// What seams dropped from the trunk, for a recall to find (#566).
+    archive: super::archive::Archive,
     /// The text each recovered call came from, by its id, until its line is
     /// logged (#560).
     recovered: BTreeMap<String, String>,
@@ -963,6 +1100,9 @@ struct State {
     /// The recording directory, when the session keeps one: where a seam's
     /// `reference` saves an output's whole (#553).
     recording: Option<std::path::PathBuf>,
+    /// Whether the trunk carries a seam's refill message after the head
+    /// (#597): the turns start after it.
+    refilled: bool,
 }
 
 /// A prompt waiting on the operator, and the answer when one arrives.
@@ -1038,16 +1178,38 @@ impl State {
         self.carried = gap.map(|gap| (gap, command));
     }
 
-    /// A command was admitted. The gap it carries is checked and held for its
-    /// outcome; and whatever gap was open ended here, carried or not (a gap
-    /// ends at the command that ends it -- left open, a later command could
-    /// log it after the one that really ended it, or after the session
-    /// ended; #146's first review).
-    ///
-    /// # Errors
-    ///
-    /// [`Rejected::BadGap`] when the carried gap cannot be logged: then the
-    /// command is not carried out and nothing is logged.
+    /// The note recalling what earlier seams archived that `asked` names
+    /// (#566), logged as turn `turn`'s `recalled` line, or `None`: under
+    /// `literal`, the archive's best items by the ask's anchors, in Qwen
+    /// Code's reminder shape. Under `off`, nothing.
+    fn recall(&mut self, turn: u32, asked: &str) -> Option<Message> {
+        use super::archive::Recall;
+        let recall = self.interview.as_ref()?.recall;
+        if recall != Recall::Literal || self.archive.is_empty() {
+            return None;
+        }
+        let found = self.archive.literal(asked);
+        if found.is_empty() {
+            return None;
+        }
+        let text = super::archive::note(&found);
+        let items = found
+            .iter()
+            .map(|(item, score)| log::RecalledItem {
+                key: item.key.clone(),
+                sha256: item.sha256(),
+                score: *score,
+            })
+            .collect();
+        self.push(Event::Recalled {
+            turn,
+            recall: log::RecallState::Literal,
+            text: text.clone(),
+            items,
+        });
+        Some(Message::new(Role::User, text))
+    }
+
     /// The note delivering every patch waiting since the last trunk
     /// request, logged as turn `turn`'s `delivered` line, or `None` when
     /// none waits. One line per patch, each the (b′) sentence of the
@@ -1094,6 +1256,16 @@ impl State {
         Some(Message::new(Role::User, text))
     }
 
+    /// A command was admitted. The gap it carries is checked and held for its
+    /// outcome; and whatever gap was open ended here, carried or not (a gap
+    /// ends at the command that ends it -- left open, a later command could
+    /// log it after the one that really ended it, or after the session
+    /// ended; #146's first review).
+    ///
+    /// # Errors
+    ///
+    /// [`Rejected::BadGap`] when the carried gap cannot be logged: then the
+    /// command is not carried out and nothing is logged.
     fn admit(&mut self) -> Result<(), Rejected> {
         if let Some((gap, command)) = self.carried.take() {
             let ends = match command {
@@ -1101,6 +1273,9 @@ impl State {
                 CommandKind::Cancel => GapEnd::Cancel,
                 CommandKind::DeclareSeam => GapEnd::Seam,
                 CommandKind::End => GapEnd::End,
+                CommandKind::OpenTangent | CommandKind::CloseTangent => {
+                    unreachable!("a tangent command carries no idle gap: it takes none")
+                }
             };
             if gap.ended_by != ends {
                 return Err(Rejected::BadGap(GapError::EndedByAnotherCommand {
@@ -1360,7 +1535,9 @@ impl<S: Streaming + 'static> Session<S> {
             carried: None,
             pending_gap: None,
             phase: phase_at_open.clone(),
+            tangent: None,
             undelivered: Vec::new(),
+            archive: super::archive::Archive::default(),
             recovered: BTreeMap::new(),
             sink: None,
             allowed: tools
@@ -1382,6 +1559,7 @@ impl<S: Streaming + 'static> Session<S> {
             interview,
             forking: None,
             recording: tools.as_ref().and_then(|t| t.recording.clone()),
+            refilled: false,
         };
         state.push(Event::Started {
             opened,
@@ -1497,6 +1675,12 @@ impl<S: Streaming + 'static> Session<S> {
         // request, as one note after the ask; it joins the trunk with it.
         let mut opening = vec![message];
         if let Some(note) = state.deliver(turn) {
+            shape.messages.push(note.clone());
+            opening.push(note);
+        }
+        // Archive recall (#566): what earlier seams dropped that this ask
+        // names, as one note after it (and after any delivered note).
+        if let Some(note) = state.recall(turn, &opening[0].content) {
             shape.messages.push(note.clone());
             opening.push(note);
         }
@@ -1637,6 +1821,9 @@ impl<S: Streaming + 'static> Session<S> {
             // Nothing to refill from: no turn yet, no working object, or an
             // empty one -- a refill from an empty object would drop every
             // turn and carry nothing in their place.
+            // A seam while a tangent is open would replace the trunk its
+            // close restores (#22).
+            Settlement::Awaiting if state.tangent.is_some() => Some(Refusal::TangentOpen),
             Settlement::Awaiting
                 if state.turns == 0
                     || state
@@ -1678,6 +1865,140 @@ impl<S: Streaming + 'static> Session<S> {
             crate::seam::Reason::Operator,
             to.map(str::to_owned),
         );
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Open a tangent under `id` (#22): the trunk as it stands is the fork
+    /// point, kept for the close to restore; every entry a fork patches in
+    /// until the close carries `id` in its provenance.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`];
+    /// [`Refusal::TangentOpen`] with one already open; [`Refusal::BadTangent`]
+    /// when the session keeps no working memory, or `id` is blank or names a
+    /// tangent the object already holds entries from.
+    pub fn open_tangent(&self, id: &str) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if state.tangent.is_some() => Some(Refusal::TangentOpen),
+            Settlement::Awaiting => None,
+        };
+        let opened = match because {
+            Some(because) => Err(because),
+            None => state
+                .interview
+                .as_ref()
+                .ok_or(Refusal::BadTangent)
+                .and_then(|interview| {
+                    crate::object::tangent::Tangent::open(&interview.object, id, state.turns)
+                        .map_err(|_| Refusal::BadTangent)
+                }),
+        };
+        let tangent = match opened {
+            Ok(tangent) => tangent,
+            Err(because) => {
+                let refused = state.refuse(CommandKind::OpenTangent, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+        };
+        let at_turn = state.turns;
+        let trunk_messages = state.trunk.len() as u64;
+        let fork_point = state.trunk.clone();
+        state.tangent = Some((tangent, fork_point));
+        state.push(Event::TangentOpened {
+            id: id.to_owned(),
+            at_turn,
+            trunk_messages,
+        });
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Close the open tangent (#22): `dispositions` rules on every entry it
+    /// created -- kept live, dropped to the archive, or parked as the
+    /// tangent's -- through `object::tangent::Tangent::close`, and the trunk
+    /// is restored to the fork point.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`];
+    /// [`Refusal::NoTangent`] with none open; [`Refusal::NotTheScope`] when
+    /// the map names an entry the tangent did not create or leaves one it
+    /// did unruled. A refused close changes nothing.
+    pub fn close_tangent(
+        &self,
+        dispositions: &BTreeMap<String, crate::object::tangent::Disposition>,
+    ) -> Result<(), Rejected> {
+        use crate::object::tangent::Disposition;
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if state.tangent.is_none() => Some(Refusal::NoTangent),
+            Settlement::Awaiting => None,
+        };
+        let map: Option<BTreeMap<crate::object::EntryId, Disposition>> = dispositions
+            .iter()
+            .map(|(id, disposition)| {
+                crate::object::EntryId::new(id)
+                    .ok()
+                    .map(|id| (id, *disposition))
+            })
+            .collect();
+        let at_turn = state.turns;
+        let closed = match (because, map) {
+            (Some(because), _) => Err(because),
+            (None, None) => Err(Refusal::NotTheScope),
+            (None, Some(map)) => {
+                let state = &mut *state;
+                match (state.tangent.as_ref(), state.interview.as_mut()) {
+                    (Some((tangent, _)), Some(interview)) => tangent
+                        .close(&mut interview.object, at_turn, &map)
+                        .map_err(|_| Refusal::NotTheScope),
+                    _ => Err(Refusal::NoTangent),
+                }
+            }
+        };
+        let closed = match closed {
+            Ok(closed) => closed,
+            Err(because) => {
+                let refused = state.refuse(CommandKind::CloseTangent, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
+        };
+        let Some((tangent, fork_point)) = state.tangent.take() else {
+            unreachable!("a close that applied had a tangent open");
+        };
+        let rolled_back = state.trunk.len().saturating_sub(fork_point.len()) as u64;
+        state.trunk = fork_point;
+        // What was measured of the trunk the rollback removed no longer holds.
+        state.trunk_tokens = None;
+        let ruled = |wanted: Disposition| {
+            dispositions
+                .iter()
+                .filter(|(_, disposition)| **disposition == wanted)
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>()
+        };
+        state.push(Event::TangentClosed {
+            id: tangent.id().to_owned(),
+            at_turn,
+            kept: ruled(Disposition::Keep),
+            dropped: ruled(Disposition::Drop),
+            parked: ruled(Disposition::Park),
+            prefix_intact: closed.prefix_intact,
+            rolled_back,
+        });
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
@@ -2235,6 +2556,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             at,
             why,
             question,
+            view,
             role,
         } => log::Event::Fork {
             lane: log::Lane::Interview,
@@ -2242,12 +2564,26 @@ pub fn line_of(logged: &Logged) -> log::Line {
             at: *at,
             why: *why,
             question: question.clone(),
+            // Absent is the tail (#568): a tail fork's line is as before.
+            // Absent is the whole trunk (#567).
+            view: (*view != ForkView::Trunk).then(|| view.word()),
             // Absent is `user` (#599): a user-role fork's line is as before.
             role: (*role != Role::User).then(|| role.tag().to_owned()),
         },
         Event::ForkSettled { fork, outcome } => log::Event::ForkSettled {
             fork: *fork,
             outcome: *outcome,
+        },
+        Event::Recalled {
+            turn,
+            recall,
+            text,
+            items,
+        } => log::Event::Recalled {
+            turn: *turn,
+            recall: *recall,
+            text: text.clone(),
+            items: items.clone(),
         },
         Event::Delivered {
             turn,
@@ -2265,11 +2601,39 @@ pub fn line_of(logged: &Logged) -> log::Line {
             op,
             entry,
             supersedes,
+            tangent,
         } => log::Event::Patch {
             fork: *fork,
             op: *op,
             entry: entry.clone(),
             supersedes: supersedes.clone(),
+            tangent: tangent.clone(),
+        },
+        Event::TangentOpened {
+            id,
+            at_turn,
+            trunk_messages,
+        } => log::Event::TangentOpen {
+            id: id.clone(),
+            at_turn: *at_turn,
+            trunk_messages: *trunk_messages,
+        },
+        Event::TangentClosed {
+            id,
+            at_turn,
+            kept,
+            dropped,
+            parked,
+            prefix_intact,
+            rolled_back,
+        } => log::Event::TangentClose {
+            id: id.clone(),
+            at_turn: *at_turn,
+            kept: kept.clone(),
+            dropped: dropped.clone(),
+            parked: parked.clone(),
+            prefix_intact: *prefix_intact,
+            rolled_back: *rolled_back,
         },
         Event::Seamed {
             at_turn,
@@ -2310,6 +2674,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             outputs: outputs.as_ref().map(|(text, _)| text.clone()),
             carried_outputs: outputs.as_ref().map(|(_, n)| *n),
             carried_output_bytes: outputs.as_ref().map(|(text, _)| text.len() as u64),
+            // A user message after the head (#597).
+            placement: Some(log::RenderPlacement::Message),
             render_budget: render_budget.clone(),
         },
     };
@@ -2403,6 +2769,8 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::Cancel => log::Command::Cancel,
         CommandKind::DeclareSeam => log::Command::DeclareSeam,
         CommandKind::End => log::Command::End,
+        CommandKind::OpenTangent => log::Command::OpenTangent,
+        CommandKind::CloseTangent => log::Command::CloseTangent,
     }
 }
 
@@ -2417,6 +2785,10 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::AlreadyInPhase => log::Refusal::AlreadyInPhase,
         Refusal::NoPhaseEdge => log::Refusal::NoPhaseEdge,
         Refusal::Stale => log::Refusal::Stale,
+        Refusal::TangentOpen => log::Refusal::TangentOpen,
+        Refusal::NoTangent => log::Refusal::NoTangent,
+        Refusal::BadTangent => log::Refusal::BadTangent,
+        Refusal::NotTheScope => log::Refusal::NotTheScope,
     }
 }
 
@@ -3296,7 +3668,7 @@ fn refill_trunk(
     let tail_tokens = interview.seams.tail_tokens;
     let turns = state
         .trunk
-        .get(template.messages.len()..)
+        .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
     let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
     let carried_turns = kept
@@ -3311,6 +3683,9 @@ fn refill_trunk(
     // before the kept tail, which stays as it sat.
     let tool_outputs = interview.seams.outputs;
     let compacted = &turns[..turns.len() - kept.len()];
+    // The archive (#566): what this seam drops from the trunk, and every
+    // working-memory entry no longer live, for a recall to find later.
+    let archived = archived_at_seam(compacted, &interview.object, state.turns);
     let outputs = crate::seam::outputs::section(
         tool_outputs,
         &compacted_outputs(
@@ -3324,9 +3699,13 @@ fn refill_trunk(
         .as_ref()
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
     let mut refilled = crate::seam::render::refill(&template.messages, &sent);
+    state.refilled = true;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
+    for item in archived {
+        state.archive.push(item);
+    }
     state.turns_at_seam = state.turns;
     state.trunk_tokens = None;
     let at_turn = state.turns;
@@ -3345,6 +3724,49 @@ fn refill_trunk(
         outputs,
         render_budget,
     });
+}
+
+/// What a seam at `at_turn` archives (#566): each message of `compacted`,
+/// keyed by the seam and its position, and each entry of `object` that is
+/// no longer live, keyed by its id.
+fn archived_at_seam(
+    compacted: &[Message],
+    object: &WorkingObject,
+    at_turn: u32,
+) -> Vec<super::archive::Item> {
+    use super::archive::Item;
+    let messages = compacted.iter().enumerate().map(|(at, message)| {
+        let calls: Vec<String> = message
+            .tool_calls
+            .iter()
+            .map(|call| format!("{} {}", call.name, call.arguments))
+            .collect();
+        let title = match message.role {
+            Role::User => "an ask".to_owned(),
+            Role::Tool => "a tool result".to_owned(),
+            _ if !calls.is_empty() => "a step that called tools".to_owned(),
+            _ => "an answer".to_owned(),
+        };
+        let text = if calls.is_empty() {
+            message.content.clone()
+        } else {
+            format!("{}\n{}", message.content, calls.join("\n"))
+        };
+        Item {
+            key: format!("seam-{at_turn}/message-{}", at + 1),
+            title,
+            text,
+        }
+    });
+    let entries = object
+        .entries()
+        .filter(|entry| !entry.state.is_live())
+        .map(|entry| Item {
+            key: format!("entry/{}", entry.id.as_str()),
+            title: format!("a {} entry", entry.state.name()),
+            text: entry.content.clone(),
+        });
+    messages.chain(entries).collect()
 }
 
 /// The outputs in `compacted` -- the trunk's turns a seam compacts away --
@@ -3493,12 +3915,18 @@ fn turn_over(template: &RequestShape, state: &mut State) {
     if state.settlement != Settlement::Awaiting {
         return;
     }
-    let due = state.interview.as_ref().and_then(|interview| {
-        interview.object.live().next()?;
-        interview
-            .seams
-            .due(state.turns - state.turns_at_seam, state.trunk_tokens)
-    });
+    // No derived seam while a tangent is open (#22): its close restores the
+    // fork point's trunk, which a refill would have replaced.
+    let due = state
+        .interview
+        .as_ref()
+        .filter(|_| state.tangent.is_none())
+        .and_then(|interview| {
+            interview.object.live().next()?;
+            interview
+                .seams
+                .due(state.turns - state.turns_at_seam, state.trunk_tokens)
+        });
     if let Some(reason) = due {
         refill_trunk(template, state, reason, None);
     }
@@ -3645,13 +4073,18 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         .as_ref()
         .map_or(Role::User, |interview| interview.role);
     let mut shape = shared.template.clone();
-    shape.messages.clone_from(&state.trunk);
+    let view = state
+        .interview
+        .as_ref()
+        .map_or(ForkView::Trunk, |interview| interview.view);
+    shape.messages = viewed(&state.trunk, shared.template.messages.len(), view);
     shape.messages.push(Message::new(role, question.clone()));
     let fork = state.push(Event::Forked {
         of_turn: turn,
         at,
         why,
         question,
+        view,
         role,
     });
     let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
@@ -3825,6 +4258,25 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
     let patches = cited(patches, &interview.object);
+    // Made under an open tangent (#22): stamped with it from birth, so its
+    // close finds them by provenance and never by recency.
+    let patches: Vec<Patch> = match state.tangent.as_ref() {
+        None => patches,
+        Some((tangent, _)) => patches
+            .into_iter()
+            .map(|mut patch| {
+                let at = match &mut patch {
+                    Patch::Add { provenance, .. }
+                    | Patch::Supersede { provenance, .. }
+                    | Patch::Resolve { provenance, .. }
+                    | Patch::Retire { provenance, .. }
+                    | Patch::Park { provenance, .. } => provenance,
+                };
+                at.tangent = Some(tangent.id().to_owned());
+                patch
+            })
+            .collect(),
+    };
     applied(state, &patches, fork)
 }
 
@@ -3944,6 +4396,7 @@ fn patched(fork: u64, patch: &Patch, object: &WorkingObject) -> Event {
             category: None,
         },
         supersedes,
+        tangent: patch.provenance().tangent.clone(),
     }
 }
 
@@ -5370,6 +5823,7 @@ pub(in crate::drive) mod tests {
                 at: 3,
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
+                view: ForkView::Last(2),
                 role: Role::Developer,
             },
             Event::Requested {
@@ -5392,6 +5846,7 @@ pub(in crate::drive) mod tests {
                     category: None,
                 },
                 supersedes: None,
+                tangent: Some("t/1".to_owned()),
             },
             Event::Seamed {
                 at_turn: 1,
@@ -5408,6 +5863,16 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 render_budget: None,
             },
+            Event::Recalled {
+                turn: 2,
+                recall: log::RecallState::Literal,
+                text: "<system-reminder>\n## Relevant memory\n</system-reminder>".to_owned(),
+                items: vec![log::RecalledItem {
+                    key: "seam-1/message-2".to_owned(),
+                    sha256: "f".repeat(64),
+                    score: 2,
+                }],
+            },
             Event::Delivered {
                 turn: 2,
                 framing: log::Framing::Advisory,
@@ -5417,6 +5882,20 @@ pub(in crate::drive) mod tests {
                     op: log::PatchOp::Retire,
                     template: "FORK_NOTE_ADVISORY".to_owned(),
                 }],
+            },
+            Event::TangentOpened {
+                id: "t/1".to_owned(),
+                at_turn: 1,
+                trunk_messages: 3,
+            },
+            Event::TangentClosed {
+                id: "t/1".to_owned(),
+                at_turn: 2,
+                kept: vec!["interview-t2-0".to_owned()],
+                dropped: Vec::new(),
+                parked: vec!["interview-t2-1".to_owned()],
+                prefix_intact: true,
+                rolled_back: 2,
             },
         ];
         let mut kinds = std::collections::BTreeSet::new();
@@ -5447,9 +5926,12 @@ pub(in crate::drive) mod tests {
                 Event::Patched { .. } => 22,
                 Event::Seamed { .. } => 23,
                 Event::Delivered { .. } => 24,
+                Event::Recalled { .. } => 25,
+                Event::TangentOpened { .. } => 26,
+                Event::TangentClosed { .. } => 27,
             });
         }
-        assert_eq!(kinds.len(), 25, "a variant has no sample");
+        assert_eq!(kinds.len(), 28, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -5673,6 +6155,7 @@ pub(in crate::drive) mod tests {
                 at: 3,
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
+                view: Some("last:2".to_owned()),
                 role: Some("developer".to_owned()),
             },
             log::Event::Request {
@@ -5695,6 +6178,7 @@ pub(in crate::drive) mod tests {
                     category: None,
                 },
                 supersedes: None,
+                tangent: Some("t/1".to_owned()),
             },
             log::Event::Seam {
                 at_turn: 1,
@@ -5712,7 +6196,18 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
+            },
+            log::Event::Recalled {
+                turn: 2,
+                recall: log::RecallState::Literal,
+                text: "<system-reminder>\n## Relevant memory\n</system-reminder>".to_owned(),
+                items: vec![log::RecalledItem {
+                    key: "seam-1/message-2".to_owned(),
+                    sha256: "f".repeat(64),
+                    score: 2,
+                }],
             },
             log::Event::Delivered {
                 turn: 2,
@@ -5723,6 +6218,20 @@ pub(in crate::drive) mod tests {
                     op: log::PatchOp::Retire,
                     template: "FORK_NOTE_ADVISORY".to_owned(),
                 }],
+            },
+            log::Event::TangentOpen {
+                id: "t/1".to_owned(),
+                at_turn: 1,
+                trunk_messages: 3,
+            },
+            log::Event::TangentClose {
+                id: "t/1".to_owned(),
+                at_turn: 2,
+                kept: vec!["interview-t2-0".to_owned()],
+                dropped: Vec::new(),
+                parked: vec!["interview-t2-1".to_owned()],
+                prefix_intact: true,
+                rolled_back: 2,
             },
         ]
     }
@@ -6183,12 +6692,12 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "ask cancel declare-seam end"
+            "ask cancel declare-seam end open-tangent close-tangent"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope"
         );
         assert_eq!(
             tags(
@@ -7977,6 +8486,8 @@ pub(in crate::drive) mod tests {
             seams: crate::seam::policy::Served::default(),
             delivery: log::ForkDelivery::Seam,
             phases: crate::seam::phase::PhaseGraph::none(),
+            recall: super::super::archive::Recall::Off,
+            view: ForkView::Trunk,
             role: Role::User,
         }
     }
@@ -8421,6 +8932,121 @@ pub(in crate::drive) mod tests {
         assert_eq!(delivered[0].template, "FORK_NOTE_ADVISORY");
     }
 
+    /// #567: a narrow view keeps the head whole and the last whole turns,
+    /// each from its user message; the trunk view is the trunk.
+    #[test]
+    fn a_forks_view_keeps_the_head_and_cuts_at_whole_turns() {
+        let call = {
+            let mut said = Message::new(Role::Assistant, "");
+            said.tool_calls = vec![crate::client::shape::ToolCall {
+                id: "c".to_owned(),
+                name: "bash".to_owned(),
+                arguments: "{}".to_owned(),
+            }];
+            said
+        };
+        let head = template().messages;
+        let mut trunk = head.clone();
+        trunk.extend([user("one"), Message::new(Role::Assistant, "a")]);
+        trunk.extend([
+            user("two"),
+            call,
+            Message::tool_result("c".to_owned(), "out".to_owned()),
+            Message::new(Role::Assistant, "b"),
+        ]);
+        trunk.extend([user("three"), Message::new(Role::Assistant, "c")]);
+        assert_eq!(viewed(&trunk, head.len(), ForkView::Trunk), trunk);
+        let last = viewed(&trunk, head.len(), ForkView::Last(1));
+        assert_eq!(last[..head.len()], head[..], "the head is unchanged");
+        assert_eq!(last[head.len()..], trunk[trunk.len() - 2..]);
+        let two = viewed(&trunk, head.len(), ForkView::Last(2));
+        assert_eq!(
+            two[head.len()],
+            user("two"),
+            "a turn starts at its user message"
+        );
+        assert_eq!(
+            two.len(),
+            head.len() + 6,
+            "the call and its result stay together"
+        );
+        assert_eq!(viewed(&trunk, head.len(), ForkView::Last(9)), trunk);
+    }
+
+    /// #567: the regimen's words, read leniently.
+    #[test]
+    fn the_fork_view_is_read_leniently() {
+        let read = |text: &str| fork_view(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), ForkView::Trunk);
+        assert_eq!(read("fork_view = \"trunk\"\n"), ForkView::Trunk);
+        assert_eq!(read("fork_view = \"last_turn\"\n"), ForkView::Last(1));
+        assert_eq!(read("fork_view = \"last:3\"\n"), ForkView::Last(3));
+        for unread in ["last:0", "last:x", "everything"] {
+            assert_eq!(
+                read(&format!("fork_view = \"{unread}\"\n")),
+                ForkView::Trunk
+            );
+        }
+        assert_eq!(ForkView::Last(1).word(), "last_turn");
+        assert_eq!(ForkView::Last(3).word(), "last:3");
+    }
+
+    /// #567: a served fork under `last_turn` sees the head and the turn it
+    /// follows, not the one before; under the trunk it sees the whole trunk,
+    /// as before; its `fork` line names a narrow view.
+    #[test]
+    fn a_served_fork_sees_the_view_its_regimen_declares() {
+        for view in [ForkView::Trunk, ForkView::Last(1)] {
+            let mut interview = interviewing(&[log::Warrant::Scoping]);
+            interview.view = view;
+            let session = Session::open_with(
+                Canned::new([
+                    deltas(&["first answer"]),
+                    deltas(&[SCOPED]),
+                    deltas(&[DECIDED]),
+                ]),
+                template(),
+                None,
+                None,
+                None,
+                Some(interview),
+            );
+            session.ask("an earlier turn", None).expect("accepted");
+            wait_until(&session, "turn one", settled);
+            let trunk_before = session.trunk();
+            session
+                .ask_marked("what are we building?", None, true)
+                .expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+            let sent = session.shared.transport.sent();
+            let fork = &sent.last().expect("the fork's request").messages;
+            let ask = fork.last().expect("its ask");
+            let seen = &fork[..fork.len() - 1];
+            let trunk = session.trunk();
+            match view {
+                ForkView::Trunk => assert_eq!(seen, &trunk[..], "the whole trunk, as before"),
+                ForkView::Last(_) => {
+                    let head = template().messages.len();
+                    assert_eq!(seen[..head], trunk[..head]);
+                    assert_eq!(seen[head..], trunk[trunk_before.len()..]);
+                    assert!(!seen.iter().any(|m| m.content == "an earlier turn"));
+                }
+            }
+            assert_eq!(ask.role, Role::User);
+            let lines = whole_log(&session);
+            let named = lines.iter().find_map(|line| match &line.event {
+                log::Event::Fork { view, .. } => Some(view.clone()),
+                _ => None,
+            });
+            assert_eq!(
+                named.expect("a fork line"),
+                (view != ForkView::Trunk).then(|| view.word())
+            );
+        }
+    }
+
     /// #599: a fork's ask goes in the interview's role, and its `fork` line
     /// names a role but `user`; under `user` the line is as before.
     #[test]
@@ -8458,6 +9084,174 @@ pub(in crate::drive) mod tests {
                 (role != Role::User).then(|| role.tag().to_owned())
             );
         }
+    }
+
+    /// A session whose first scoping turn records three trunk decisions,
+    /// then opens tangent `t/1`, whose scoping turn's fork records four.
+    fn a_tangent_with_four_entries() -> (Session<Canned>, Vec<Message>) {
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&[SCOPED]),
+                deltas(&["DECISION: one\nDECISION: two\nDECISION: three\nDECISION: four\n"]),
+                deltas(&["back on the trunk"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the first fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 1
+        });
+        let fork_point = session.trunk();
+        session.open_tangent("t/1").expect("opened");
+        session
+            .ask_marked("what if we tried it another way?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the tangent's fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        (session, fork_point)
+    }
+
+    /// #22: closing four tangent entries KEEP, DROP, PARK, KEEP leaves the
+    /// two kept in the render, keeps all four in the object, and restores
+    /// the trunk to the fork point byte for byte; the close is logged.
+    #[test]
+    fn closing_a_tangent_disposes_its_entries_and_rolls_the_trunk_back() {
+        use crate::object::tangent::Disposition;
+        let (session, fork_point) = a_tangent_with_four_entries();
+        assert_ne!(
+            session.trunk(),
+            fork_point,
+            "the tangent's turn is on the trunk"
+        );
+        let ruled = BTreeMap::from([
+            ("interview-t2-0".to_owned(), Disposition::Keep),
+            ("interview-t2-1".to_owned(), Disposition::Drop),
+            ("interview-t2-2".to_owned(), Disposition::Park),
+            ("interview-t2-3".to_owned(), Disposition::Keep),
+        ]);
+        session.close_tangent(&ruled).expect("closed");
+        assert_eq!(session.trunk(), fork_point, "rolled back to the fork point");
+        let held = session.shared.lock();
+        let object = &held.interview.as_ref().expect("interviewing").object;
+        let render = crate::seam::render::render(object, None);
+        for kept in [
+            "interview-t2-0\tdecision: one",
+            "interview-t2-3\tdecision: four",
+        ] {
+            assert!(render.contains(kept), "{render}");
+        }
+        for gone in ["decision: two", "decision: three"] {
+            assert!(!render.contains(gone), "{render}");
+        }
+        assert_eq!(
+            object
+                .entries()
+                .filter(|e| e.id.as_str().starts_with("interview-t2-"))
+                .count(),
+            4,
+            "the archive keeps everything"
+        );
+        drop(held);
+        let lines = whole_log(&session);
+        let closed = lines.iter().find_map(|line| match &line.event {
+            log::Event::TangentClose {
+                kept,
+                dropped,
+                parked,
+                rolled_back,
+                ..
+            } => Some((kept.clone(), dropped.clone(), parked.clone(), *rolled_back)),
+            _ => None,
+        });
+        let (kept, dropped, parked, rolled_back) = closed.expect("a tangent.close line");
+        assert_eq!(kept, ["interview-t2-0", "interview-t2-3"]);
+        assert_eq!((dropped.len(), parked.len()), (1, 1));
+        assert_eq!(rolled_back, 2, "the tangent's ask and answer");
+        assert!(lines.iter().any(|line| matches!(
+            &line.event,
+            log::Event::Patch { tangent: Some(t), .. } if t == "t/1"
+        )));
+    }
+
+    /// #22: the record's projection rolls its rebuilt trunk back at the
+    /// close as the session does, so the next trunk request's head is
+    /// rebuilt from the log and verified.
+    #[test]
+    fn the_trunk_request_after_a_close_is_rebuilt_from_the_log() {
+        use crate::object::tangent::Disposition;
+        let (session, _) = a_tangent_with_four_entries();
+        let ruled: BTreeMap<String, Disposition> = (0..4)
+            .map(|i| (format!("interview-t2-{i}"), Disposition::Keep))
+            .collect();
+        session.close_tangent(&ruled).expect("closed");
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "the turn after the close", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 3
+        });
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let named: Vec<String> = projected
+            .unspellable
+            .iter()
+            .filter(|u| u.kind == "request")
+            .map(|u| u.why.clone())
+            .collect();
+        assert_eq!(named, Vec::<String>::new());
+    }
+
+    /// #22: scope is provenance, never recency -- a close naming an entry
+    /// born outside the tangent is refused, and changes nothing.
+    #[test]
+    fn a_close_naming_an_entry_born_outside_the_tangent_is_refused() {
+        use crate::object::tangent::Disposition;
+        let (session, _) = a_tangent_with_four_entries();
+        let mut ruled: BTreeMap<String, Disposition> = (0..4)
+            .map(|i| (format!("interview-t2-{i}"), Disposition::Keep))
+            .collect();
+        ruled.insert("interview-t1-0".to_owned(), Disposition::Drop);
+        let trunk = session.trunk();
+        let refused = session.close_tangent(&ruled).expect_err("refused");
+        assert!(
+            matches!(refused, Rejected::Refused(Refusal::NotTheScope)),
+            "{refused:?}"
+        );
+        assert_eq!(session.trunk(), trunk, "nothing rolled back");
+        let missing: BTreeMap<String, Disposition> =
+            BTreeMap::from([("interview-t2-0".to_owned(), Disposition::Keep)]);
+        assert!(matches!(
+            session.close_tangent(&missing),
+            Err(Rejected::Refused(Refusal::NotTheScope))
+        ));
+    }
+
+    /// #22: a seam while a tangent is open is refused `tangent-open`, as is
+    /// a second tangent.
+    #[test]
+    fn a_seam_or_a_second_tangent_while_one_is_open_is_refused() {
+        let (session, _) = a_tangent_with_four_entries();
+        assert!(matches!(
+            session.declare_seam(None),
+            Err(Rejected::Refused(Refusal::TangentOpen))
+        ));
+        assert!(matches!(
+            session.open_tangent("t/2"),
+            Err(Rejected::Refused(Refusal::TangentOpen))
+        ));
     }
 
     /// #599: the role is read leniently, `user` by default.
@@ -8730,6 +9524,108 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// #566, `literal`: a seam archives what it drops; a later ask that
+    /// names it gets one note after it, in Qwen Code's reminder shape, logged
+    /// `recalled` with each item's key, digest and score; the note stays on
+    /// the trunk and the projection rebuilds the head. Under `off`, nothing.
+    #[test]
+    fn a_literal_recall_brings_back_what_a_seam_archived() {
+        for recall in [
+            super::super::archive::Recall::Literal,
+            super::super::archive::Recall::Off,
+        ] {
+            let session = Session::open_with(
+                Canned::new([
+                    deltas(&[SCOPED]),
+                    deltas(&[DECIDED]),
+                    deltas(&["a table per team"]),
+                ]),
+                template(),
+                None,
+                None,
+                None,
+                Some(Interview {
+                    recall,
+                    ..interviewing(&[log::Warrant::Scoping])
+                }),
+            );
+            session
+                .ask_marked("what are we building?", None, true)
+                .expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+            session.declare_seam(None).expect("a seam");
+            session
+                .ask("how should the `schema` look?", None)
+                .expect("accepted");
+            let log = wait_until(&session, "turn two", |log| {
+                settled(log)
+                    && log
+                        .iter()
+                        .filter(|l| matches!(l.event, Event::TurnSettled { .. }))
+                        .count()
+                        == 2
+            });
+            reads_whole(&session);
+            let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+            let recalled: Vec<&log::Event> = lines
+                .iter()
+                .map(|line| &line.event)
+                .filter(|event| matches!(event, log::Event::Recalled { .. }))
+                .collect();
+            let sent = session.shared.transport.sent();
+            let asked = sent.last().expect("turn two's request");
+            if recall == super::super::archive::Recall::Off {
+                assert!(recalled.is_empty(), "{recalled:?}");
+                assert_eq!(
+                    asked.messages.last().map(|m| m.content.as_str()),
+                    Some("how should the `schema` look?")
+                );
+                continue;
+            }
+            let [
+                log::Event::Recalled {
+                    turn, text, items, ..
+                },
+            ] = recalled.as_slice()
+            else {
+                panic!("one recall: {recalled:?}");
+            };
+            assert_eq!(*turn, 2);
+            // The scoping turn's answer, archived by the seam, names the schema.
+            assert_eq!(items[0].key, "seam-1/message-2");
+            assert_eq!(
+                items[0].sha256,
+                crate::digest::sha256_hex(SCOPED.as_bytes())
+            );
+            assert_eq!(items[0].score, 1);
+            assert!(
+                text.starts_with("<system-reminder>\n## Relevant memory"),
+                "{text}"
+            );
+            assert!(text.contains(SCOPED), "{text}");
+            // The note follows the ask, on the request and on the trunk.
+            let n = asked.messages.len();
+            assert_eq!(
+                asked.messages[n - 2].content,
+                "how should the `schema` look?"
+            );
+            assert_eq!(&asked.messages[n - 1].content, text);
+            assert!(session.trunk().iter().any(|m| &m.content == text));
+            let projected =
+                crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+            assert!(
+                !projected
+                    .unspellable
+                    .iter()
+                    .any(|item| item.why.contains("rebuilt")),
+                "{:?}",
+                projected.unspellable
+            );
+        }
+    }
+
     /// #563: naming a phase with no graph is refused, logged.
     #[test]
     fn a_phase_named_with_no_graph_is_refused() {
@@ -8861,14 +9757,103 @@ pub(in crate::drive) mod tests {
             seam_outputs_of(&log),
             (Some(log::SeamToolOutputs::Evict), None, None, None)
         );
+        let head = template().messages.len();
         assert!(
-            !sent.messages[0]
+            !sent.messages[head]
                 .content
                 .contains(crate::seam::outputs::HEADER)
         );
-        // Nothing of turn 1 after the refill: the next ask follows the head.
-        assert_eq!(sent.messages[template().messages.len()].content, "go on");
+        // Nothing of turn 1 after the refill: the next ask follows it.
+        assert_eq!(sent.messages[head + 1].content, "go on");
         every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// After a seam the system message is the session's first, byte for
+    /// byte, and the render rides in a user message after it (#597). A log
+    /// written before #597 -- its seam with no `placement`, its heads hashed
+    /// over the render in the system message -- still rebuilds every head,
+    /// and the digest still decides: the wrong placement verifies nothing.
+    #[test]
+    fn the_system_message_survives_a_seam_and_a_log_from_before_597_still_rebuilds() {
+        let tree = scratch("seam-placement");
+        let session = seaming_outputs(&tree, log::SeamToolOutputs::Evict, (1, 0), None);
+        let (log, _) = through_the_seam(&session, 1);
+        let head = template().messages.len();
+        let sent = session.shared.transport.sent();
+        let after: Vec<&RequestShape> = sent
+            .iter()
+            .filter(|shape| {
+                shape.messages.len() > head
+                    && shape.messages[head].content.starts_with("<summary>\n")
+            })
+            .collect();
+        assert!(!after.is_empty(), "a request after the seam");
+        for shape in &after {
+            assert_eq!(
+                shape.messages[..head],
+                template().messages[..],
+                "never mutated"
+            );
+        }
+        every_head_rebuilds(&log);
+
+        // The same session as a build before #597 sent it: the render
+        // appended to the system message, no refill message.
+        let digest =
+            |shape: &RequestShape| crate::client::head::Head::of(shape).digest().to_owned();
+        let old: BTreeMap<String, String> = after
+            .iter()
+            .map(|shape| {
+                let mut before = (*shape).clone();
+                let refill = before.messages.remove(head);
+                let render = refill
+                    .content
+                    .strip_prefix("<summary>\n")
+                    .and_then(|text| text.strip_suffix("\n</summary>"))
+                    .expect("the refill's wrapper");
+                before.messages[0].content.push_str("\n\n");
+                before.messages[0].content.push_str(render);
+                (digest(shape), digest(&before))
+            })
+            .collect();
+        let rewritten = |placement: Option<log::RenderPlacement>| -> Vec<log::Line> {
+            log.iter()
+                .map(line_of)
+                .map(|mut line| {
+                    match &mut line.event {
+                        log::Event::Seam { placement: at, .. } => *at = placement,
+                        log::Event::Request {
+                            head_sha256: Some(sha),
+                            ..
+                        } => {
+                            if let Some(before) = old.get(sha.as_str()) {
+                                sha.clone_from(before);
+                            }
+                        }
+                        _ => {}
+                    }
+                    line
+                })
+                .collect()
+        };
+        let unrebuilt = |lines: &[log::Line]| -> usize {
+            crate::drive::projection::project(lines, &regime(), None)
+                .expect("projected")
+                .unspellable
+                .iter()
+                .filter(|named| named.why.contains("could not be rebuilt"))
+                .count()
+        };
+        assert_eq!(
+            unrebuilt(&rewritten(None)),
+            0,
+            "a log from before #597 rebuilds"
+        );
+        assert!(
+            unrebuilt(&rewritten(Some(log::RenderPlacement::Message))) > 0,
+            "the wrong placement verifies nothing"
+        );
         tidy(&[&tree]);
     }
 
@@ -8894,12 +9879,20 @@ pub(in crate::drive) mod tests {
                  [Tool result]: {notes}"
             )
         );
-        assert!(sent.messages[0].content.ends_with(&section));
+        // The system message as the session sent it first (#597), the
+        // refill after it.
+        let head = template().messages.len();
+        assert_eq!(sent.messages[..head], template().messages[..]);
+        assert!(
+            sent.messages[head]
+                .content
+                .ends_with(&format!("{section}\n</summary>"))
+        );
         assert!(
             !section.contains("echo tail"),
             "the kept tail is not carried"
         );
-        let tail: Vec<&Message> = sent.messages[template().messages.len()..].iter().collect();
+        let tail: Vec<&Message> = sent.messages[head + 1..].iter().collect();
         assert_eq!(tail[0].content, "echo something");
         assert_eq!(tail[2].role, Role::Tool);
         assert_eq!(
@@ -8942,7 +9935,12 @@ pub(in crate::drive) mod tests {
             "{section}"
         );
         assert_eq!(std::fs::read_to_string(&saved).expect("saved whole"), notes);
-        assert!(sent.messages[0].content.ends_with(&section));
+        let head = template().messages.len();
+        assert!(
+            sent.messages[head]
+                .content
+                .ends_with(&format!("{section}\n</summary>"))
+        );
         every_head_rebuilds(&log);
         tidy(&[&tree, &recording]);
     }
@@ -8964,7 +9962,12 @@ pub(in crate::drive) mod tests {
              before context was compacted, in call order:\n\n- turn 1: bash \
              args={\"command\":\"cat notes.md\"}\n[Tool result excerpt]: line two\n"
         );
-        assert!(sent.messages[0].content.ends_with(&section));
+        let head = template().messages.len();
+        assert!(
+            sent.messages[head]
+                .content
+                .ends_with(&format!("{section}\n</summary>"))
+        );
         every_head_rebuilds(&log);
         tidy(&[&tree]);
     }
@@ -9090,7 +10093,8 @@ pub(in crate::drive) mod tests {
             Message::new(Role::Assistant, SCOPED),
         ];
         assert_eq!(trunk[trunk.len() - 2..], kept[..], "{trunk:#?}");
-        assert_eq!(trunk.len(), template().messages.len() + 2);
+        // The head, the refill message (#597), then the tail.
+        assert_eq!(trunk.len(), template().messages.len() + 3);
         let seam = log
             .iter()
             .find_map(|logged| match line_of(logged).event {
@@ -9122,7 +10126,7 @@ pub(in crate::drive) mod tests {
             .ask_marked("what are we building?", None, true)
             .expect("accepted");
         wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
-        assert_eq!(session.trunk().len(), template().messages.len());
+        assert_eq!(session.trunk().len(), template().messages.len() + 1);
     }
 
     /// A budget: the trunk call reports 18 prefilled, 160 reused and 66
@@ -9466,6 +10470,7 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
             }
         );
@@ -9744,6 +10749,49 @@ pub(in crate::drive) mod tests {
         assert_eq!(found[0].4, question);
         assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
         assert_eq!(patches(&log).len(), 1);
+        tidy(&[&tree]);
+    }
+
+    /// On the standard surface (#557) a `read` of a document fires the
+    /// read fork as `cat` does: the router classes it by its `path`, and the
+    /// ask, with no command to quote, drops its `last_command` line.
+    #[test]
+    fn a_standard_read_of_a_document_fires_a_read_fork() {
+        let tree = scratch("standard-read-fork");
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        let session = Session::open_with(
+            Canned::new([
+                vec![Step::call(0, "call-1", "read", r#"{"path":"notes.md"}"#)],
+                deltas(&["It says a note."]),
+                deltas(&["LEARNED: the note says a note\n"]),
+            ]),
+            shape,
+            None,
+            Some(tools),
+            None,
+            Some(interviewing(&[log::Warrant::Read])),
+        );
+        session.ask("read the notes", None).expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        reads_whole(&session);
+        let question = router::Ask {
+            kind: AskKind::Finding,
+            intent: None,
+        }
+        .render(&Facts::default());
+        let found = forks(&log);
+        assert_eq!(found.len(), 1, "{log:#?}");
+        assert_eq!(found[0].3, log::Warrant::Read);
+        assert_eq!(found[0].4, question);
+        assert!(!question.contains("You last ran"));
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
         tidy(&[&tree]);
     }
 

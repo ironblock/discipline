@@ -36,6 +36,11 @@ export interface SystemNode extends Provenance {
   readonly tokens?: number;
   /** Set when this system prompt is a render of working memory: the frame it was rendered with. */
   readonly render?: string;
+  /**
+   * Set when the render rode in a user message after the head, which stays as the session sent it (log v7's seam
+   * `placement`, #597): `text` is that message.
+   */
+  readonly placement?: 'message';
 }
 
 export interface UserNode extends Provenance {
@@ -59,6 +64,11 @@ export interface UserNode extends Provenance {
    * sent at the tail of the turn's first request, and its framing. Folded, not yet drawn.
    */
   readonly delivered?: { readonly framing: string; readonly text: string };
+  /**
+   * Archived items recalled after this ask (log v7's `recalled`, #566): the note the model was sent after the ask,
+   * and how it matched. Folded, not yet drawn.
+   */
+  readonly recalled?: { readonly recall: string; readonly text: string };
   /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
   readonly files?: readonly FileRef[];
   /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
@@ -303,6 +313,8 @@ export interface Session {
   readonly slots: number;
   readonly trunkSlot: number;
   readonly phase: string;
+  /** The phases the logged graph allows a seam to move to from the current one (#563): none without a graph. */
+  readonly phaseMoves: readonly string[];
   readonly eras: readonly Era[];
   /** Branches keyed by the trunk node they came from. */
   readonly branches: ReadonlyMap<string, readonly Folded<BranchNode>[]>;
@@ -437,6 +449,7 @@ export function fold(lines: readonly LogLine[]): Session {
       slots: 0,
       trunkSlot: 0,
       phase: '',
+      phaseMoves: [],
       eras: [],
       gaps: [],
       branches: new Map(),
@@ -457,6 +470,7 @@ export function fold(lines: readonly LogLine[]): Session {
   const generations = new Map<number, GenerationBuilder>();
   const asks = new Map<number, LineOf<'ask'>>();
   const deliveries = new Map<number, LineOf<'delivered'>>();
+  const recalls = new Map<number, LineOf<'recalled'>>();
   const firstRequestOfTurn = new Map<number, number>();
   // Each call, keyed by the `seq` of its first fragment (or of its line, where none streamed); found by its request and index.
   const calls = new Map<number, { request: number; t: number; first?: LineOf<'delta'>; id?: string; name?: Tool; args: string; line?: LineOf<'tool_call'> }>();
@@ -494,7 +508,8 @@ export function fold(lines: readonly LogLine[]): Session {
   const cappedTurns = new Set<number>();
   const gaps: Folded<GapNode>[] = [];
   let lastSettled: number | undefined;
-  let phase = start.phase ?? '';
+  // The phase it opens in: the graph's opening phase (log v7, #563), or a placed recording's own `phase`.
+  let phase = start.opening_phase ?? start.phase ?? '';
   let openTurn: number | undefined;
   let lastAskSeq = -1;
   // The state as the log says it, when it says it (`diet` logs every move; a script logs only the end).
@@ -645,14 +660,24 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'delivered':
         deliveries.set(e.turn, e);
         break;
+      case 'recalled':
+        recalls.set(e.turn, e);
+        break;
       case 'seam': {
         if (e.phase) phase = e.phase.to;
+        // What the model was sent after the seam -- `diet`'s `seam::render::refill`, whose output the record's head
+        // check verifies: since #597 the head as it was and a user message carrying the render (and the tool outputs
+        // the seam carried, #553); before, the head's system message, a blank line, then the render.
+        const message = 'placement' in e && e.placement === 'message';
         const rendered: SystemNode = {
           kind: 'system',
           id: `system/${e.seq}`,
-          // What the model was sent after the seam: the head's system message, a blank line, then the render --
-          // `diet`'s `seam::render::refill`, whose output the record's head check verifies.
-          text: system ? `${system.content}\n\n${e.render}` : e.render,
+          text: message
+            ? `<summary>\n${e.render}${'outputs' in e && e.outputs !== undefined ? e.outputs : ''}\n</summary>`
+            : system
+              ? `${system.content}\n\n${e.render}`
+              : e.render,
+          ...(message ? { placement: 'message' as const } : {}),
           ...(e.render_tokens !== undefined ? { tokens: e.render_tokens } : {}),
           render: e.render_version !== undefined ? `v${e.render_version}` : (e.frame ?? 'frame not recorded'),
           ...provenance(e),
@@ -729,6 +754,9 @@ export function fold(lines: readonly LogLine[]): Session {
             ...(ask.scoping === true ? { scoping: true as const } : {}),
             ...(deliveries.has(slot.turn)
               ? { delivered: { framing: deliveries.get(slot.turn)!.framing, text: deliveries.get(slot.turn)!.text } }
+              : {}),
+            ...(recalls.has(slot.turn)
+              ? { recalled: { recall: recalls.get(slot.turn)!.recall, text: recalls.get(slot.turn)!.text } }
               : {}),
             ...provenance(ask, first?.response),
           });
@@ -902,6 +930,7 @@ export function fold(lines: readonly LogLine[]): Session {
     slots,
     trunkSlot,
     phase,
+    phaseMoves: (start.phase_transitions ?? []).filter((move) => move.from === phase).map((move) => move.to),
     eras: builtEras,
     branches,
     memory,

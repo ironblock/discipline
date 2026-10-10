@@ -124,7 +124,11 @@
 //! v7 `seam` may carry `tool_outputs`, the seam's tool-output state (#553),
 //! and, when it carried any, `outputs` -- the section of the refill after
 //! the render, as sent -- with `carried_outputs`, the outputs it carried,
-//! and `carried_output_bytes`, the section's bytes; absent, `evict`.
+//! and `carried_output_bytes`, the section's bytes; absent, `evict`. A
+//! v7 `seam` may carry `placement`, where the refill put the render (#597):
+//! `message`, a user message after the head, which is never changed;
+//! absent, `system`, appended to the head's system message, as every seam
+//! before #597 did.
 //!
 //! # A torn final line
 //!
@@ -213,6 +217,13 @@ vocabulary! {
         /// Forks' patches delivered at the tail of a trunk request (v7, the
         /// fork delivery lever).
         Delivered => "delivered",
+        /// Archived items recalled at the tail of a trunk request (v7, #566).
+        Recalled => "recalled",
+        /// A tangent opened at the operator's word (v7, #22).
+        TangentOpen => "tangent.open",
+        /// A tangent closed: its entries disposed and the trunk rolled back
+        /// to the fork point (v7, #22).
+        TangentClose => "tangent.close",
     }
 }
 
@@ -282,6 +293,16 @@ vocabulary! {
 }
 
 vocabulary! {
+    /// Where a seam's refill put the render (v7, #597).
+    RenderPlacement {
+        /// Appended to the head's system message: every seam before #597.
+        System => "system",
+        /// A user message after the head, which stays as the session sent it.
+        Message => "message",
+    }
+}
+
+vocabulary! {
     /// What a seam's refill carries of the tool outputs it compacts away
     /// (v7, #553): those in the turns before the kept tail.
     SeamToolOutputs {
@@ -301,6 +322,15 @@ impl Default for SeamToolOutputs {
     /// `evict`: today's behaviour.
     fn default() -> Self {
         Self::Evict
+    }
+}
+
+vocabulary! {
+    /// How an archive recall matched (v7, #566): the `archive_recall`
+    /// lever's states that recall anything.
+    RecallState {
+        /// By the ask's anchors, matched whole.
+        Literal => "literal",
     }
 }
 
@@ -373,6 +403,10 @@ vocabulary! {
         DeclareSeam => "declare-seam",
         /// The end.
         End => "end",
+        /// Open a tangent (v7, #22).
+        OpenTangent => "open-tangent",
+        /// Close the open tangent (v7, #22).
+        CloseTangent => "close-tangent",
     }
 }
 
@@ -401,6 +435,16 @@ vocabulary! {
         NoPhaseEdge => "no-phase-edge",
         /// A stop named a turn older than the latest.
         Stale => "stale",
+        /// A seam, or a second tangent, while a tangent is open (v7, #22).
+        TangentOpen => "tangent-open",
+        /// A close with no tangent open (v7, #22).
+        NoTangent => "no-tangent",
+        /// A tangent asked of a session that keeps no working memory, or
+        /// under an id it cannot take (v7, #22).
+        BadTangent => "bad-tangent",
+        /// A close whose dispositions name an entry the tangent did not
+        /// create, or leave one it did unruled (v7, #22).
+        NotTheScope => "not-the-scope",
     }
 }
 
@@ -701,6 +745,19 @@ pub struct TemplateKwargs {
 pub struct Unsent {
     /// `[reasoning]`'s token budget: no chat template variable carries one.
     pub budget_tokens: u64,
+}
+
+/// One item a recall carried (v7, #566): its archive key, the digest of its
+/// text, and its score -- under `literal`, how many of the ask's anchors it
+/// holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecalledItem {
+    /// The archive's key for it.
+    pub key: String,
+    /// The sha256 of its text.
+    pub sha256: String,
+    /// Its score.
+    pub score: u64,
 }
 
 /// One line of a delivered note (v7): the patch it delivers, by its entry
@@ -1070,6 +1127,9 @@ pub enum Event {
         why: Warrant,
         /// What it asks.
         question: String,
+        /// What it saw of the trunk (v7, #567): `last_turn` or `last:N`;
+        /// absent is the whole trunk.
+        view: Option<String>,
         /// The role it was asked in (v7, #599): `system` or `developer`;
         /// absent is `user`.
         role: Option<String>,
@@ -1092,6 +1152,8 @@ pub enum Event {
         /// The id of the entry it replaces, exactly when `op` is
         /// `supersede`.
         supersedes: Option<String>,
+        /// The tangent it was made under (v7, #22), when one was open.
+        tangent: Option<String>,
     },
     /// Forks' patches delivered to the trunk (v7, the fork delivery lever):
     /// one note at the tail of turn `turn`'s first request, after its ask,
@@ -1106,6 +1168,49 @@ pub enum Event {
         /// Each line, in order: the patch it delivers and the template it
         /// was written with.
         lines: Vec<NoteLine>,
+    },
+    /// Archived items recalled (v7, #566): one note after turn `turn`'s
+    /// ask, at the tail of its first request, which stays on the trunk.
+    Recalled {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// How it matched.
+        recall: RecallState,
+        /// The note as sent.
+        text: String,
+        /// Each item it carries, in rank order.
+        items: Vec<RecalledItem>,
+    },
+    /// A tangent opened (v7, #22): its id, the turn it forks at, and how
+    /// many messages the trunk held there, the fork point a close rolls the
+    /// trunk back to.
+    TangentOpen {
+        /// The tangent's id, stamped into the provenance of every entry its
+        /// forks patch in.
+        id: String,
+        /// The turns settled when it opened.
+        at_turn: u32,
+        /// The trunk's messages at the fork point.
+        trunk_messages: u64,
+    },
+    /// A tangent closed (v7, #22): every entry it created kept, dropped to
+    /// the archive, or parked, and the trunk rolled back to the fork point.
+    TangentClose {
+        /// The tangent's id.
+        id: String,
+        /// The turns settled when it closed.
+        at_turn: u32,
+        /// The entries kept live.
+        kept: Vec<String>,
+        /// The entries retired to the archive.
+        dropped: Vec<String>,
+        /// The entries parked as the tangent's.
+        parked: Vec<String>,
+        /// Whether working memory's trunk entries rendered at close as they
+        /// did at the fork point (`object::tangent::Closed`).
+        prefix_intact: bool,
+        /// How many messages the rollback took off the trunk.
+        rolled_back: u64,
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
@@ -1148,6 +1253,8 @@ pub enum Event {
         carried_outputs: Option<u64>,
         /// The section's bytes (v7, #553).
         carried_output_bytes: Option<u64>,
+        /// Where the refill put the render (v7, #597). Absent is `system`.
+        placement: Option<RenderPlacement>,
         /// The render's budget and what it did (v7, #565), on a seam whose
         /// regimen declares one.
         render_budget: Option<RenderBudget>,
@@ -2535,6 +2642,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             at: fields.count("at")?,
             why: fields.tag("why", Warrant::from_tag)?,
             question: fields.string("question")?,
+            view: fields.optional_string("view")?,
             role: fields.optional_string("role")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
@@ -2561,8 +2669,31 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 op,
                 entry: fields.entry("entry")?,
                 supersedes,
+                tangent: fields.optional_string("tangent")?,
             }
         }
+        Kind::TangentOpen => Event::TangentOpen {
+            id: fields.string("id")?,
+            at_turn: fields.turn("at_turn")?,
+            trunk_messages: fields.count("trunk_messages")?,
+        },
+        Kind::TangentClose => Event::TangentClose {
+            id: fields.string("id")?,
+            at_turn: fields.turn("at_turn")?,
+            kept: fields.optional_strings("kept")?.unwrap_or_default(),
+            dropped: fields.optional_strings("dropped")?.unwrap_or_default(),
+            parked: fields.optional_strings("parked")?.unwrap_or_default(),
+            prefix_intact: fields
+                .optional_flag("prefix_intact")?
+                .ok_or("a `tangent.close` carries no `prefix_intact`")?,
+            rolled_back: fields.count("rolled_back")?,
+        },
+        Kind::Recalled => Event::Recalled {
+            turn: fields.turn("turn")?,
+            recall: fields.tag("recall", RecallState::from_tag)?,
+            text: fields.string("text")?,
+            items: fields.recalled_items("items")?,
+        },
         Kind::Delivered => Event::Delivered {
             turn: fields.turn("turn")?,
             framing: fields.tag("framing", Framing::from_tag)?,
@@ -2588,6 +2719,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             outputs: fields.optional_string("outputs")?,
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
+            placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -3007,6 +3139,8 @@ pub enum Tags {
     PatchOp,
     /// [`SeamReason`] (v6).
     SeamReason,
+    /// [`RecallState`] (v7).
+    RecallState,
     /// [`Framing`] (v7).
     Framing,
     /// [`ForkDelivery`] (v7).
@@ -3015,6 +3149,8 @@ pub enum Tags {
     ToolOutputState,
     /// [`SeamToolOutputs`] (v7).
     SeamToolOutputs,
+    /// [`RenderPlacement`] (v7).
+    RenderPlacement,
 }
 
 impl Tags {
@@ -3041,9 +3177,11 @@ impl Tags {
         Self::PatchOp,
         Self::SeamReason,
         Self::Framing,
+        Self::RecallState,
         Self::ForkDelivery,
         Self::ToolOutputState,
         Self::SeamToolOutputs,
+        Self::RenderPlacement,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -3071,9 +3209,11 @@ impl Tags {
             Self::PatchOp => "PatchOp",
             Self::SeamReason => "SeamReason",
             Self::Framing => "Framing",
+            Self::RecallState => "RecallState",
             Self::ForkDelivery => "ForkDelivery",
             Self::ToolOutputState => "ToolOutputState",
             Self::SeamToolOutputs => "SeamToolOutputs",
+            Self::RenderPlacement => "RenderPlacement",
         }
     }
 
@@ -3105,9 +3245,11 @@ impl Tags {
             Self::PatchOp => of(PatchOp::ALL, PatchOp::tag),
             Self::SeamReason => of(SeamReason::ALL, SeamReason::tag),
             Self::Framing => of(Framing::ALL, Framing::tag),
+            Self::RecallState => of(RecallState::ALL, RecallState::tag),
             Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
             Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
             Self::SeamToolOutputs => of(SeamToolOutputs::ALL, SeamToolOutputs::tag),
+            Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
         }
     }
 }
@@ -3144,6 +3286,9 @@ pub enum Holds {
     /// A `delivered` line's `lines` (v7): a non-empty list of objects of
     /// the keys [`DELIVERED_LINE`] declares.
     DeliveredLines,
+    /// A `recalled` line's `items` (v7): a non-empty list of objects of the
+    /// keys [`RECALLED_ITEM`] declares.
+    RecalledItems,
     /// A seam's `phase` (v7): an object of [`PHASE_MOVE`]'s keys.
     PhaseMove,
     /// A `session.start`'s `phase_transitions` (v7): a list of such objects.
@@ -3307,6 +3452,13 @@ pub const TEMPLATE_KWARGS: &[Field] = &[
     may_v7("preserve_thinking", Holds::Flag),
 ];
 
+/// The keys of each of a `recalled` line's `items`. Arrived in v7.
+pub const RECALLED_ITEM: &[Field] = &[
+    must_v7("key", Holds::Text),
+    must_v7("sha256", Holds::Digest),
+    must_v7("score", Holds::Count),
+];
+
 /// The keys of each of a `delivered` line's `lines`. Arrived in v7.
 pub const DELIVERED_LINE: &[Field] = &[
     must_v7("entry", Holds::Text),
@@ -3443,6 +3595,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::PhaseMove | Holds::PhaseMoves => Some(PHASE_MOVE),
         Holds::InstructionFiles => Some(INSTRUCTION_FILE),
         Holds::DeliveredLines => Some(DELIVERED_LINE),
+        Holds::RecalledItems => Some(RECALLED_ITEM),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
@@ -3460,7 +3613,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         Kind::Seam => 6,
-        Kind::Delivered => 7,
+        Kind::Delivered | Kind::Recalled | Kind::TangentOpen | Kind::TangentClose => 7,
         _ => 0,
     }
 }
@@ -3492,6 +3645,22 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
             )
         });
     if phase_refusal {
+        return 7;
+    }
+    let tangent_refusal = tags == Tags::Refusal
+        && Refusal::from_tag(tag).is_some_and(|refusal| {
+            matches!(
+                refusal,
+                Refusal::TangentOpen
+                    | Refusal::NoTangent
+                    | Refusal::BadTangent
+                    | Refusal::NotTheScope
+            )
+        });
+    let tangent_command = tags == Tags::Command
+        && Command::from_tag(tag)
+            .is_some_and(|command| matches!(command, Command::OpenTangent | Command::CloseTangent));
+    if tangent_refusal || tangent_command {
         return 7;
     }
     if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
@@ -3691,6 +3860,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("at", Count),
                 must_v5("why", Tag(Tags::Warrant)),
                 must_v5("question", Text),
+                may_v7("view", Text),
                 may_v7("role", Text),
             ];
             F
@@ -3708,6 +3878,27 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("op", Tag(Tags::PatchOp)),
                 must_v5("entry", Holds::Entry),
                 may_v5("supersedes", Text),
+                may_v7("tangent", Text),
+            ];
+            F
+        }
+        Kind::TangentOpen => {
+            const F: &[Field] = &[
+                must_v7("id", Text),
+                must_v7("at_turn", Count),
+                must_v7("trunk_messages", Count),
+            ];
+            F
+        }
+        Kind::TangentClose => {
+            const F: &[Field] = &[
+                must_v7("id", Text),
+                must_v7("at_turn", Count),
+                must_v7("kept", Holds::Strings),
+                must_v7("dropped", Holds::Strings),
+                must_v7("parked", Holds::Strings),
+                must_v7("prefix_intact", Holds::Flag),
+                must_v7("rolled_back", Count),
             ];
             F
         }
@@ -3728,10 +3919,20 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("outputs", Text),
                 may_v7("carried_outputs", Count),
                 may_v7("carried_output_bytes", Count),
+                may_v7("placement", Tag(Tags::RenderPlacement)),
                 may_v7("render_budget_tokens", Count),
                 may_v7("render_over_budget", Text),
                 may_v7("render_tokens", Count),
                 may_v7("render_reduced", Count),
+            ];
+            F
+        }
+        Kind::Recalled => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("recall", Tag(Tags::RecallState)),
+                must_v7("text", Text),
+                must_v7("items", Holds::RecalledItems),
             ];
             F
         }
@@ -3806,6 +4007,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::PhaseMoves => "PhaseMove[]".to_owned(),
         Holds::InstructionFiles => "InstructionFile[]".to_owned(),
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
+        Holds::RecalledItems => "RecalledItem[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
@@ -3907,6 +4109,7 @@ pub fn typescript() -> String {
         ("PhaseMove", PHASE_MOVE),
         ("InstructionFile", INSTRUCTION_FILE),
         ("NoteLine", DELIVERED_LINE),
+        ("RecalledItem", RECALLED_ITEM),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
@@ -4404,6 +4607,7 @@ fn to_value(line: &Line) -> Value {
             at,
             why,
             question,
+            view,
             role,
         } => {
             put("lane", text(lane.tag()));
@@ -4411,6 +4615,9 @@ fn to_value(line: &Line) -> Value {
             put("at", count(*at));
             put("why", text(why.tag()));
             put("question", text(question));
+            if let Some(view) = view {
+                put("view", text(view));
+            }
             if let Some(role) = role {
                 put("role", text(role));
             }
@@ -4426,6 +4633,7 @@ fn to_value(line: &Line) -> Value {
             op,
             entry,
             supersedes,
+            tangent,
         } => {
             put("fork", count(*fork));
             put("op", text(op.tag()));
@@ -4440,7 +4648,39 @@ fn to_value(line: &Line) -> Value {
             if let Some(replaced) = supersedes {
                 put("supersedes", text(replaced));
             }
+            if let Some(tangent) = tangent {
+                put("tangent", text(tangent));
+            }
             Kind::Patch
+        }
+        Event::TangentOpen {
+            id,
+            at_turn,
+            trunk_messages,
+        } => {
+            put("id", text(id));
+            put("at_turn", count(u64::from(*at_turn)));
+            put("trunk_messages", count(*trunk_messages));
+            Kind::TangentOpen
+        }
+        Event::TangentClose {
+            id,
+            at_turn,
+            kept,
+            dropped,
+            parked,
+            prefix_intact,
+            rolled_back,
+        } => {
+            let list = |ids: &[String]| Value::Array(ids.iter().map(|id| text(id)).collect());
+            put("id", text(id));
+            put("at_turn", count(u64::from(*at_turn)));
+            put("kept", list(kept));
+            put("dropped", list(dropped));
+            put("parked", list(parked));
+            put("prefix_intact", Value::Boolean(*prefix_intact));
+            put("rolled_back", count(*rolled_back));
+            Kind::TangentClose
         }
         Event::Seam {
             at_turn,
@@ -4458,6 +4698,7 @@ fn to_value(line: &Line) -> Value {
             outputs,
             carried_outputs,
             carried_output_bytes,
+            placement,
             render_budget,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
@@ -4488,6 +4729,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(n) = carried_output_bytes {
                 put("carried_output_bytes", count(*n));
+            }
+            if let Some(placement) = placement {
+                put("placement", text(placement.tag()));
             }
             if let Some(budget) = render_budget {
                 put("render_budget_tokens", count(budget.tokens));
@@ -4522,6 +4766,32 @@ fn to_value(line: &Line) -> Value {
                 ),
             );
             Kind::Delivered
+        }
+        Event::Recalled {
+            turn,
+            recall,
+            text: note,
+            items,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("recall", text(recall.tag()));
+            put("text", text(note));
+            put(
+                "items",
+                Value::Array(
+                    items
+                        .iter()
+                        .map(|item| {
+                            Value::Object(BTreeMap::from([
+                                ("key".to_owned(), text(&item.key)),
+                                ("sha256".to_owned(), text(&item.sha256)),
+                                ("score".to_owned(), count(item.score)),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            );
+            Kind::Recalled
         }
     };
     put("kind", text(kind.tag()));
@@ -4859,6 +5129,37 @@ impl Fields<'_> {
 
     /// A `delivered` line's `lines` (v7): a non-empty list, each entry the
     /// keys of [`DELIVERED_LINE`] and nothing else.
+    fn recalled_items(&self, key: &str) -> Result<Vec<RecalledItem>, String> {
+        let Value::Array(entries) = self.get(key)? else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a recall carries at least one item"
+            ));
+        }
+        let mut items = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !RECALLED_ITEM.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            items.push(RecalledItem {
+                key: inner.string("key").map_err(at)?,
+                sha256: inner.digest("sha256").map_err(at)?,
+                score: inner.count("score").map_err(at)?,
+            });
+        }
+        Ok(items)
+    }
+
     fn delivered_lines(&self, key: &str) -> Result<Vec<NoteLine>, String> {
         let Value::Array(entries) = self.get(key)? else {
             return Err(format!("`{key}` is not a list"));
@@ -5511,6 +5812,7 @@ mod tests {
                 at: request,
                 why: Warrant::Scoping,
                 question: "what did the operator decide".to_owned(),
+                view: Some("last:2".to_owned()),
                 role: Some("developer".to_owned()),
             },
             Event::Request {
@@ -5542,6 +5844,7 @@ mod tests {
                     category: None,
                 },
                 supersedes: None,
+                tangent: Some("t/1".to_owned()),
             },
             Event::Patch {
                 fork,
@@ -5552,6 +5855,21 @@ mod tests {
                     category: Some("scope".to_owned()),
                 },
                 supersedes: Some("d1".to_owned()),
+                tangent: None,
+            },
+            Event::TangentOpen {
+                id: "t/1".to_owned(),
+                at_turn: 5,
+                trunk_messages: 11,
+            },
+            Event::TangentClose {
+                id: "t/1".to_owned(),
+                at_turn: 5,
+                kept: vec!["d2".to_owned()],
+                dropped: Vec::new(),
+                parked: Vec::new(),
+                prefix_intact: true,
+                rolled_back: 0,
             },
         ]);
         events
@@ -5600,6 +5918,7 @@ mod tests {
                 Holds::Files
                 | Holds::Served
                 | Holds::DeliveredLines
+                | Holds::RecalledItems
                 | Holds::PhaseMoves
                 | Holds::InstructionFiles,
                 Value::Array(entries),
@@ -5817,6 +6136,7 @@ mod tests {
             ("phase_transitions", PHASE_MOVE),
             ("instruction_files", INSTRUCTION_FILE),
             ("lines", DELIVERED_LINE),
+            ("items", RECALLED_ITEM),
             ("tool_call", TOOL_CALL_PIECE),
             ("approval", APPROVAL),
             ("files", RECORDED_FILE),
@@ -5941,6 +6261,12 @@ mod tests {
                     // A key of an all-or-none set, added alone, is the
                     // reader's `all_or_none` refusal, not an exclusivity.
                     if all_or_none(kind).contains(absent) {
+                        continue;
+                    }
+                    // A patch names the entry it replaces exactly when its
+                    // `op` is `supersede`: the reader's op rule, not the key
+                    // beside it.
+                    if kind == Kind::Patch && *absent == "supersedes" {
                         continue;
                     }
                     let mut both = object.clone();
@@ -6696,7 +7022,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered"
+             fork.settled patch seam delivered recalled tangent.open tangent.close"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -6705,7 +7031,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight seam-not-built nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

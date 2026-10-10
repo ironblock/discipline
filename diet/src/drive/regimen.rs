@@ -581,6 +581,10 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers.join("+")),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
+        (
+            "archive_recall".to_owned(),
+            crate::drive::archive::Recall::lever(regimen),
+        ),
         ("fork_warrant".to_owned(), warrant.clone()),
         ("fork_delivery".to_owned(), delivery),
         ("tool_output_disposition".to_owned(), disposition),
@@ -603,20 +607,19 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             }
             .to_owned(),
         ),
-        ("tangent_closure".to_owned(), undeclared()),
+        // The operator opens and closes a tangent where there is working
+        // memory to scope (#22); an agent nominating is a later ask set.
+        ("tangent_closure".to_owned(), tangent_closure_lever(regimen)),
         ("capture_modality".to_owned(), undeclared()),
         ("interview_routing_and_cadence".to_owned(), warrant),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         ("fork_memory_share".to_owned(), undeclared()),
-        ("archive_recall".to_owned(), "off".to_owned()),
-        ("fork_input_view".to_owned(), "whole-warm-trunk".to_owned()),
-        ("fork_delivery_site".to_owned(), "tail".to_owned()),
         (
-            "interview_role".to_owned(),
-            crate::drive::session::interview_role(regimen)
-                .tag()
-                .to_owned(),
+            "fork_input_view".to_owned(),
+            crate::drive::session::fork_view(regimen).word(),
         ),
+        ("fork_delivery_site".to_owned(), "tail".to_owned()),
+        ("interview_role".to_owned(), interview_role_lever(regimen)),
         ("step_and_output_limits".to_owned(), limits),
         ("extraction_seat".to_owned(), "warm-model".to_owned()),
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
@@ -636,6 +639,23 @@ fn render_budget_lever(regimen: &Regimen) -> String {
             format!("{}:{over}", budget.tokens)
         },
     )
+}
+
+/// The tangent closure lever's word (#22): `operator` where there is
+/// working memory to scope, else [`UNDECLARED`].
+fn tangent_closure_lever(regimen: &Regimen) -> String {
+    if crate::drive::session::interview_warrant(regimen).is_ok_and(|rules| !rules.is_empty()) {
+        "operator".to_owned()
+    } else {
+        UNDECLARED.to_owned()
+    }
+}
+
+/// The interview role lever's word (#599): the role the regimen asks in.
+fn interview_role_lever(regimen: &Regimen) -> String {
+    crate::drive::session::interview_role(regimen)
+        .tag()
+        .to_owned()
 }
 
 /// The levers a regimen's commands set -- tool-output disposition, approval,
@@ -772,7 +792,8 @@ mod tests {
             "accel24-beellama-qwen27b-q4kxl"
         );
         assert_eq!(at(&floor, "tool_surface"), "bash");
-        assert_eq!(at(&floor, "tangent_closure"), UNDECLARED);
+        assert_eq!(at(&floor, "tangent_closure"), "operator");
+        assert_eq!(at(&floor, "capture_modality"), UNDECLARED);
         let line = draft("t1-session-one-qwen38.regimen.toml");
         assert_eq!(at(&line, "approval"), "none");
         assert_eq!(at(&line, "reasoning_state"), "on:effort:xhigh");

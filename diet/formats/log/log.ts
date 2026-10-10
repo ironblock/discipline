@@ -28,6 +28,9 @@ export type Kind =
   | "patch"
   | "seam"
   | "delivered"
+  | "recalled"
+  | "tangent.open"
+  | "tangent.close"
 ;
 
 export type State =
@@ -47,6 +50,8 @@ export type Command =
   | "cancel"
   | "declare-seam"
   | "end"
+  | "open-tangent"
+  | "close-tangent"
 ;
 
 export type Refusal =
@@ -60,6 +65,10 @@ export type Refusal =
   | "already-in-phase"
   | "no-phase-edge"
   | "stale"
+  | "tangent-open"
+  | "no-tangent"
+  | "bad-tangent"
+  | "not-the-scope"
 ;
 
 export type FailReason =
@@ -178,6 +187,10 @@ export type Framing =
   | "imperative"
 ;
 
+export type RecallState =
+  | "literal"
+;
+
 export type ForkDelivery =
   | "seam"
   | "advisory"
@@ -194,6 +207,11 @@ export type SeamToolOutputs =
   | "reference"
   | "salient"
   | "keep"
+;
+
+export type RenderPlacement =
+  | "system"
+  | "message"
 ;
 
 export interface HeadMessage {
@@ -246,6 +264,12 @@ export interface NoteLine {
   entry: string;
   op: PatchOp;
   template: string;
+}
+
+export interface RecalledItem {
+  key: string;
+  sha256: string;
+  score: number;
 }
 
 export interface ToolCallPiece {
@@ -461,6 +485,7 @@ export type ForkLine = {
   at: number;
   why: Warrant;
   question: string;
+  view?: string;
   role?: string;
 };
 
@@ -480,6 +505,7 @@ export type PatchLine = {
   op: PatchOp;
   entry: PatchEntry;
   supersedes?: string;
+  tangent?: string;
 };
 
 export type SeamLine = {
@@ -501,6 +527,7 @@ export type SeamLine = {
   outputs?: string;
   carried_outputs?: number;
   carried_output_bytes?: number;
+  placement?: RenderPlacement;
   render_budget_tokens?: number;
   render_over_budget?: string;
   render_tokens?: number;
@@ -515,6 +542,38 @@ export type DeliveredLine = {
   framing: Framing;
   text: string;
   lines: NoteLine[];
+};
+
+export type RecalledLine = {
+  seq: number;
+  t: number;
+  kind: "recalled";
+  turn: number;
+  recall: RecallState;
+  text: string;
+  items: RecalledItem[];
+};
+
+export type TangentOpenLine = {
+  seq: number;
+  t: number;
+  kind: "tangent.open";
+  id: string;
+  at_turn: number;
+  trunk_messages: number;
+};
+
+export type TangentCloseLine = {
+  seq: number;
+  t: number;
+  kind: "tangent.close";
+  id: string;
+  at_turn: number;
+  kept: string[];
+  dropped: string[];
+  parked: string[];
+  prefix_intact: boolean;
+  rolled_back: number;
 };
 
 export type LogLine =
@@ -537,4 +596,7 @@ export type LogLine =
   | PatchLine
   | SeamLine
   | DeliveredLine
+  | RecalledLine
+  | TangentOpenLine
+  | TangentCloseLine
 ;
