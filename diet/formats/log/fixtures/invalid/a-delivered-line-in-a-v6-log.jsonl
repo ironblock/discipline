@@ -1,0 +1,15 @@
+{"engine_build":"b1-4ceb171","engine_identity":"checked_commit","head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"registry_sha256":"0000000000000000000000000000000000000000000000000000000000000000","seq":0,"substrate":"a-substrate","t":0,"version":6}
+{"kind":"ask","seq":1,"t":5,"text":"say hello","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"delta","request":3,"seq":4,"t":20,"text":"hello"}
+{"finish_reason":"stop","kind":"response","seq":5,"t":25,"text":"hello","to_request":3}
+{"kind":"turn.settled","reason":"final","seq":6,"t":30,"turn":1}
+{"from":"turn","kind":"settlement","seq":7,"t":35,"to":"awaiting"}
+{"kind":"ask","seq":8,"t":40,"text":"go on","turn":2}
+{"from":"awaiting","kind":"settlement","seq":9,"t":45,"to":"turn"}
+{"framing":"imperative","kind":"delivered","lines":[{"entry":"interview-t1-0","op":"supersede","template":"FORK_NOTE_IMPERATIVE"}],"seq":10,"t":45,"text":"Working record: the entry \"the schema is per-team\" is superseded by this step. Update it now, before anything else: state the correction in your reply.","turn":2}
+{"kind":"request","lane":"trunk","seq":11,"t":50,"turn":2}
+{"finish_reason":"stop","kind":"response","seq":12,"t":55,"text":"corrected","to_request":11}
+{"kind":"turn.settled","reason":"final","seq":13,"t":60,"turn":2}
+{"from":"turn","kind":"settlement","seq":14,"t":65,"to":"awaiting"}

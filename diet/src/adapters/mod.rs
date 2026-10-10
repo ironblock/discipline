@@ -118,6 +118,7 @@ impl Adapted {
                 source_available,
             },
             regimen_sha256: None,
+            fork_delivery: None,
         });
         events.extend(self.events);
         Record { events }

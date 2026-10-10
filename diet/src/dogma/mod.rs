@@ -74,7 +74,12 @@ pub mod vocabulary;
 ///   invariance — 316 occurrences of `Qwen3.6-27B` in the mined provenance
 ///   record, the most frequent model id in the corpus, served no entry at all
 ///   and now serve `qwen3_6`.
-pub const VERSION: u32 = 2;
+/// * 3, 2026-10-09: two trunk notes joined, the fork delivery lever's
+///   (`FORK_NOTE_ADVISORY`, `FORK_NOTE_IMPERATIVE`): the (b′) framings,
+///   verbatim from `results/2026-09-27-false-nomination-edit-rate/plan.json`
+///   (identical in its 2026-09-29 sibling), so the measured rates transfer.
+///   No earlier template changed.
+pub const VERSION: u32 = 3;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -84,7 +89,7 @@ pub const VERSION: u32 = 2;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "e93b1fbf63c31266";
+pub const MANIFEST_DIGEST: &str = "8074321fc2e6e509";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -140,11 +145,14 @@ pub enum Site {
     /// The control's summarise-and-replace turn. Nothing continues in
     /// parallel: the answer replaces the conversation.
     Compaction,
+    /// The trunk itself: a note at the tail of a trunk request, which stays
+    /// on the trunk (the fork delivery lever).
+    Trunk,
 }
 
 impl Site {
     /// Every site.
-    pub const ALL: &'static [Self] = &[Self::Fork, Self::Compaction];
+    pub const ALL: &'static [Self] = &[Self::Fork, Self::Compaction, Self::Trunk];
 
     /// A stable name, for records and fixtures.
     #[must_use]
@@ -152,6 +160,7 @@ impl Site {
         match self {
             Self::Fork => "fork",
             Self::Compaction => "compaction",
+            Self::Trunk => "trunk",
         }
     }
 
@@ -198,6 +207,8 @@ pub enum Hole {
     OldEntry,
     /// What the model said latest, for the same verdict.
     NewQuote,
+    /// A working-memory entry's text, for a fork's note on the trunk.
+    Entry,
 }
 
 impl Hole {
@@ -213,6 +224,7 @@ impl Hole {
         Self::Size,
         Self::OldEntry,
         Self::NewQuote,
+        Self::Entry,
     ];
 
     /// The tag written between the braces in a template file.
@@ -229,6 +241,7 @@ impl Hole {
             Self::Size => "size",
             Self::OldEntry => "old_entry",
             Self::NewQuote => "new_quote",
+            Self::Entry => "entry",
         }
     }
 
@@ -287,6 +300,10 @@ pub enum Template {
     AddQ,
     /// The control's summarise-and-replace ask, deliberately plain.
     NativeGenerate,
+    /// A fork's patch, delivered to the trunk as advice: (b′)'s advisory.
+    ForkNoteAdvisory,
+    /// The same, as an instruction: (b′)'s imperative.
+    ForkNoteImperative,
 }
 
 impl Template {
@@ -312,6 +329,8 @@ impl Template {
         Self::AuditOpenNote,
         Self::AddQ,
         Self::NativeGenerate,
+        Self::ForkNoteAdvisory,
+        Self::ForkNoteImperative,
     ];
 
     /// The name the manifest pins this template under, and the stem of its
@@ -339,6 +358,8 @@ impl Template {
             Self::AuditOpenNote => "AUDIT_OPEN_NOTE",
             Self::AddQ => "ADD_Q",
             Self::NativeGenerate => "NATIVE_GENERATE_PROMPT",
+            Self::ForkNoteAdvisory => "FORK_NOTE_ADVISORY",
+            Self::ForkNoteImperative => "FORK_NOTE_IMPERATIVE",
         }
     }
 
@@ -377,6 +398,10 @@ impl Template {
             Self::NativeGenerate => {
                 include_str!("../../dogma/templates/NATIVE_GENERATE_PROMPT.txt")
             }
+            Self::ForkNoteAdvisory => include_str!("../../dogma/templates/FORK_NOTE_ADVISORY.txt"),
+            Self::ForkNoteImperative => {
+                include_str!("../../dogma/templates/FORK_NOTE_IMPERATIVE.txt")
+            }
         }
     }
 
@@ -385,6 +410,7 @@ impl Template {
     pub fn site(self) -> Site {
         match self {
             Self::NativeGenerate => Site::Compaction,
+            Self::ForkNoteAdvisory | Self::ForkNoteImperative => Site::Trunk,
             Self::ApiSurface
             | Self::Doctrine
             | Self::DocRead
@@ -421,6 +447,7 @@ impl Template {
             Self::Evidence => &[Hole::Source, Hole::Size],
             Self::ExtractMinimal => &[Hole::Source],
             Self::Supersede => &[Hole::OldEntry, Hole::NewQuote],
+            Self::ForkNoteAdvisory | Self::ForkNoteImperative => &[Hole::Entry],
             Self::AuditQ | Self::AuditQCadence | Self::AuditQHuman => {
                 &[Hole::Category, Hole::LineCount, Hole::Items]
             }

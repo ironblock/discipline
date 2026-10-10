@@ -2501,6 +2501,33 @@ fn a_drive_server_records_and_announces_a_reasoning_budget_it_cannot_send() {
 }
 
 #[test]
+fn a_drive_server_names_the_fork_delivery_its_regimen_declares() {
+    // The fork delivery lever: the regimen's state reaches `session.start`,
+    // and a value that is none of the three is refused before it listens.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nfork_delivery = \"advisory\"\n",
+        "seed = 7\n",
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let _served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(start_line["fork_delivery"], "advisory", "{start_line}");
+    let refused = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nfork_delivery = \"loud\"\n",
+        "seed = 7\n",
+    );
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &refused.0.to_string_lossy()]);
+    assert_ne!(code, None, "it listened: {said}");
+    assert!(said.contains("`fork_delivery`"), "{said}");
+}
+
+#[test]
 fn a_drive_server_refuses_a_sampler_key_it_cannot_pin_before_it_listens() {
     // No acts and no `/props`: a server that got as far as the engine check
     // would be refused with exit 1, and one that listened would not exit.

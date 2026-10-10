@@ -694,6 +694,7 @@ fn serving_interview(
     );
     let seams = diet::seam::policy::Served::from_regimen(&read, window)
         .map_err(|why| format!("{path}: {why}"))?;
+    let delivery = session::fork_delivery(&read).map_err(|why| format!("{path}: {why}"))?;
     if rules.is_empty() && seams.declares_a_trigger() {
         return Err(format!(
             "{path} declares a seam trigger and no `interview_warrant`: nothing fills \
@@ -704,6 +705,7 @@ fn serving_interview(
         rules,
         object: diet::object::WorkingObject::open(regime.clone()),
         seams,
+        delivery,
     }))
 }
 
