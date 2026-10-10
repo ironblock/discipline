@@ -1820,6 +1820,9 @@ pub enum SchemaError {
         /// What it held.
         found: String,
     },
+    /// A row spells the boundary in the other version's word (#583):
+    /// `meditation` in a version 1 record, `seam` in a version 2 one.
+    Respelled(String),
     /// A row's keys do not fit together: a `tool_call`'s against its
     /// outcome, by the log's own rule (#302).
     Inconsistent {
@@ -2185,6 +2188,7 @@ impl fmt::Display for SchemaError {
             Self::Inconsistent { of, why } => {
                 write!(f, "a `{of}` row's keys do not fit: {why}")
             }
+            Self::Respelled(why) => write!(f, "{why}"),
         }
     }
 }
@@ -2439,8 +2443,7 @@ pub fn parse(input: &str) -> Result<Record, ParseError> {
             )))?;
         let mut members = json::object(&object)?;
         let version = *declared.get_or_insert_with(|| spelling::record_declared(&members));
-        spelling::record_to_current(&mut members, version)
-            .map_err(|why| SchemaError::Inconsistent { of: "row", why })?;
+        spelling::record_to_current(&mut members, version).map_err(SchemaError::Respelled)?;
         events.push(event(members)?);
     }
 
