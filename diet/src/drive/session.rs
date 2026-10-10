@@ -4819,15 +4819,27 @@ fn capture_call<S>(
     let (outcome, entries, why) = match capture_patches(&mut state, (turn, request), call) {
         Err(why) => ("refused", Vec::new(), Some(why)),
         Ok(patches) => {
-            let refused = state.interview.as_mut().map_or_else(
-                || Some("the session keeps no working memory".to_owned()),
+            let (refused, written) = state.interview.as_mut().map_or_else(
+                || {
+                    (
+                        Some("the session keeps no working memory".to_owned()),
+                        Vec::new(),
+                    )
+                },
                 |interview| {
                     // An entry the operator wrote is theirs (#150).
                     let (kept, refusals) = guarded(&patches, &interview.object, None);
                     let refused = kept
                         .iter()
                         .find_map(|patch| interview.object.apply(patch).err())
-                        .map(|why| why.to_string());
+                        .map(|why| why.to_string())
+                        // Nothing of it kept: refused over the operator's
+                        // entry, and it says whose (#689).
+                        .or_else(|| {
+                            kept.is_empty()
+                                .then(|| operator_refused(&refusals))
+                                .flatten()
+                        });
                     if refused.is_none() {
                         lines = refusals
                             .into_iter()
@@ -4836,11 +4848,13 @@ fn capture_call<S>(
                                     .map(|patch| patched(None, patch, &interview.object)),
                             )
                             .collect();
+                    } else {
+                        lines = refusals;
                     }
-                    refused
+                    (refused, entries_of(&kept))
                 },
             );
-            capture_outcome(&call.name, refused, entries_of(&patches))
+            capture_outcome(&call.name, refused, written)
         }
     };
     if call.name == CaptureTool::UpdateRecord.tag() && outcome == "recorded" {
@@ -5993,6 +6007,27 @@ fn operator_refusal(state: &State, id: &str, text: &str) -> Option<Refusal> {
         Some(false) => Some(Refusal::NotLive),
         Some(true) => None,
     }
+}
+
+/// The entries `lines`' `patch` lines wrote or ruled on, by id.
+fn written_by(lines: &[Event]) -> Vec<String> {
+    lines
+        .iter()
+        .filter_map(|line| match line {
+            Event::Patched { entry, .. } => Some(entry.id.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Why a capture none of whose patches was kept was refused (#689): the
+/// first `patch.refused` line's reason and the entry it would have changed,
+/// `operator-entry: <id>`.
+fn operator_refused(refusals: &[Event]) -> Option<String> {
+    refusals.iter().find_map(|line| match line {
+        Event::PatchRefused { entry, .. } => Some(format!("{OPERATOR_ENTRY}: {entry}")),
+        _ => None,
+    })
 }
 
 /// Why a model's patch is refused (#150): its target is the operator's.
@@ -7645,12 +7680,18 @@ fn captured_in(
                     lane.tag().clone_into(&mut at.lane);
                     at.fork = Some(format!("f/{fork}"));
                 }
-                let entries = entries_of(&patches);
                 if patches.is_empty() {
-                    (None, entries, Vec::new())
+                    (None, Vec::new(), Vec::new())
                 } else {
                     match applied(state, &patches, fork) {
-                        (log::ForkOutcome::Value, lines) => (None, entries, lines),
+                        // The entries it wrote are its `patch` lines', not
+                        // a refused one's (#689).
+                        (log::ForkOutcome::Value, lines) => (None, written_by(&lines), lines),
+                        // Every patch refused over the operator's entry: it
+                        // says whose, and its refusals are logged (#689).
+                        (log::ForkOutcome::Decline, lines) if !lines.is_empty() => {
+                            (operator_refused(&lines), Vec::new(), lines)
+                        }
                         _ => (
                             Some("the working object refused it".to_owned()),
                             Vec::new(),
@@ -14039,8 +14080,23 @@ pub(in crate::drive) mod tests {
         let refill = refill_of(&session);
         assert!(!refill.contains(" [edited by the operator]"), "{refill}");
         reads_whole(&session);
-        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
-        super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+        // #688: the record reads back; the seam that addressed both carries
+        // them and no `unaddressed`, the one before both.
+        let rows: Vec<(Option<usize>, Option<usize>)> = record_read_back(&session)
+            .into_iter()
+            .filter_map(|row| match row {
+                crate::formats::record::Event::Seam {
+                    operator_changes,
+                    unaddressed,
+                    ..
+                } => Some((
+                    operator_changes.map(|changes| changes.len()),
+                    unaddressed.map(|left| left.len()),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(rows, [(Some(2), Some(2)), (Some(2), None), (None, None)]);
     }
 
     /// #654's seam smoke run 2: a session with the audit on and two seams --
@@ -16002,6 +16058,172 @@ pub(in crate::drive) mod tests {
         );
         let shown = lines(&log)[0].shown.clone();
         assert_eq!(shown, Some(format!("recorded: {entry}")));
+        reads_whole(&session);
+    }
+
+    /// #689, the operator-edits run (`runs/2026-10-10-operator-edits-agent-driven`,
+    /// #690): its `update_record` (`tool_call` 733, the run's own arguments)
+    /// superseding the operator's entry was refused over it (`patch.refused`
+    /// 732), yet capture 731 read `recorded` and the model was shown
+    /// `recorded: r710/…/decision`. Now the capture line and the result the
+    /// model is shown name the refusal and its reason, no entry is claimed,
+    /// and nothing the model sent is in working memory.
+    #[test]
+    fn a_capture_refused_over_the_operators_entry_says_so() {
+        const FACT: &str = "The parser drops blank lines before it tokenizes.";
+        let turn_one = || vec![Step::Delta(FACT.to_owned()), record("call-1", "fact", FACT)];
+        // The operator's entry: the turn's fact, edited. Its id is the
+        // log's length at the edit, the same in both sessions below.
+        let edited = |session: &Session<Canned>| {
+            session
+                .ask("how are blank lines treated?", None)
+                .expect("accepted");
+            wait_until(session, "turn one", settled);
+            let fact = live_entries(session)[0].0.clone();
+            session
+                .edit_entry(&fact, "The parser keeps blank lines.")
+                .expect("an edit");
+            live_entries(session)
+                .into_iter()
+                .find(|(_, content)| content == "The parser keeps blank lines.")
+                .expect("the operator's entry")
+                .0
+        };
+        let probe = self_capturing(vec![turn_one(), deltas(&["done"])], 3);
+        let operator = edited(&probe);
+        let session = self_capturing(
+            vec![
+                turn_one(),
+                deltas(&["done"]),
+                vec![
+                    Step::Delta(RUN_CONTENT.to_owned()),
+                    Step::call(
+                        0,
+                        "call-2",
+                        "update_record",
+                        &serde_json::json!({
+                            "content": RUN_CONTENT,
+                            "field": "decision",
+                            "supersedes": operator,
+                        })
+                        .to_string(),
+                    ),
+                ],
+                deltas(&["ok"]),
+            ],
+            3,
+        );
+        assert_eq!(edited(&session), operator);
+        session.ask("say again?", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let recorded = captures(&log);
+        assert_eq!(recorded.len(), 2, "{recorded:?}");
+        assert_eq!(
+            recorded[1],
+            ("refused".to_owned(), Vec::new()),
+            "{recorded:?}"
+        );
+        let shown = lines(&log)
+            .last()
+            .and_then(|line| line.shown.clone())
+            .expect("a result shown");
+        assert_eq!(shown, format!("refused: operator-entry: {operator}"));
+        assert!(
+            !live_entries(&session)
+                .iter()
+                .any(|(_, content)| content == RUN_CONTENT),
+        );
+        reads_whole(&session);
+    }
+
+    /// The content of the operator-edits run's refused `update_record`
+    /// (`tool_call` 733), verbatim.
+    const RUN_CONTENT: &str = "notes.txt date format is now YYYY-MM-DD HH:MM (datetime.now() \
+                               formatted in notes.py main), replacing the earlier date-only \
+                               YYYY-MM-DD decision (operator-547).";
+
+    /// #689, the fork route: a fork answering through the capture tools
+    /// whose `update_record` would supersede the operator's entry settles
+    /// that capture `refused`, naming the reason and the entry; its
+    /// `patch.refused` line is kept; and no entry is claimed or written.
+    #[test]
+    fn a_forks_capture_refused_over_the_operators_entry_says_so() {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let first = || vec![deltas(&[SAID]), vec![record_at(0, "f-1", "fact", SAID)]];
+        let edited = |session: &Session<Canned>| {
+            session
+                .ask_marked("how are blank lines treated?", None, true)
+                .expect("accepted");
+            wait_until(session, "the fork", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+            let fact = live_entries(session)[0].0.clone();
+            session
+                .edit_entry(&fact, "The parser keeps blank lines.")
+                .expect("an edit");
+            live_entries(session)
+                .into_iter()
+                .find(|(_, content)| content == "The parser keeps blank lines.")
+                .expect("the operator's entry")
+                .0
+        };
+        let operator = edited(&forks_through_tools(first()));
+        let mut acts = first();
+        acts.push(deltas(&[RUN_CONTENT]));
+        acts.push(vec![Step::call(
+            0,
+            "f-2",
+            "update_record",
+            &serde_json::json!({
+                "content": RUN_CONTENT,
+                "field": "decision",
+                "supersedes": operator,
+            })
+            .to_string(),
+        )]);
+        let session = forks_through_tools(acts);
+        assert_eq!(edited(&session), operator);
+        session
+            .ask_marked("and the dates?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the second fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        let refused: Vec<(String, Vec<String>, Option<String>)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Captured {
+                    outcome,
+                    entries,
+                    why,
+                    ..
+                } => Some((outcome.clone(), entries.clone(), why.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            refused.last(),
+            Some(&(
+                "refused".to_owned(),
+                Vec::new(),
+                Some(format!("operator-entry: {operator}"))
+            )),
+            "{refused:?}"
+        );
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PatchRefused { entry, .. } if *entry == operator
+        )));
+        assert!(
+            !live_entries(&session)
+                .iter()
+                .any(|(_, content)| content == RUN_CONTENT),
+        );
         reads_whole(&session);
     }
 

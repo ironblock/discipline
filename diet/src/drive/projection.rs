@@ -1277,7 +1277,13 @@ impl<'a> Walk<'a> {
             return;
         };
         let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
-        let (operator_changes, unaddressed) = (operator_changes.clone(), unaddressed.clone());
+        // Every change addressed is the log's `unaddressed: []` and the
+        // record's `unaddressed` absent beside its `operator_changes`: a
+        // record row's list is never empty (#688).
+        let (operator_changes, unaddressed) = (
+            operator_changes.clone(),
+            unaddressed.clone().filter(|left| !left.is_empty()),
+        );
         // The tail the session kept after the refill (#552), cut from the
         // rebuilt trunk by the same function.
         let turns = self
@@ -2018,6 +2024,56 @@ mod tests {
             tools_of(&names, None, &C1).expect("declared")[0],
             sent[0],
             "c1's and c2's update_record differ"
+        );
+    }
+
+    /// #688, the operator-edits run (`runs/2026-10-10-operator-edits-agent-driven`,
+    /// #690): its log, whole, projects to a record that reads back. Serve
+    /// refused it there -- the seam at seq 1079 addressed both operator
+    /// changes and logged `unaddressed: []`, which the projection carried
+    /// into the row the reader refuses; that row now carries
+    /// `operator_changes` and no `unaddressed`.
+    #[test]
+    fn the_operator_edits_runs_log_projects_to_a_record_that_reads_back() {
+        const LOG: &str =
+            include_str!("../../../runs/2026-10-10-operator-edits-agent-driven/session.log");
+        let lines: Vec<log::Line> = LOG
+            .lines()
+            .map(|text| log::line(text).expect("the run's log reads"))
+            .collect();
+        let events = project(&lines, &regime(), None)
+            .expect("the run's log projects")
+            .events;
+        let rendered = record::render(&record::Record {
+            events: events.clone(),
+        });
+        record::parse(&rendered).unwrap_or_else(|why| panic!("does not read back: {why:?}"));
+        let seams: Vec<_> = events
+            .iter()
+            .filter_map(|row| match row {
+                record::Event::Seam {
+                    operator_changes,
+                    unaddressed,
+                    ..
+                } => Some((operator_changes.clone(), unaddressed.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            seams,
+            [(
+                Some(vec![
+                    log::OperatorChange {
+                        entry: "operator-547".to_owned(),
+                        kind: "edit".to_owned(),
+                    },
+                    log::OperatorChange {
+                        entry: "interview-t2-1".to_owned(),
+                        kind: "flag".to_owned(),
+                    },
+                ]),
+                None
+            )]
         );
     }
 
