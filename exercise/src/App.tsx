@@ -55,7 +55,7 @@ export function App({
   const dispatch = async (command: Command) => {
     // An answer to a prompt and a move to the background (#614) come mid-turn, and a tangent's open or close (#608) is no
     // `GapEnd`: none of them ends a gap.
-    if (command.kind === 'approve' || command.kind === 'background' || command.kind === 'open-tangent' || command.kind === 'close-tangent') return transport.dispatch(command);
+    if (command.kind === 'approve' || command.kind === 'background' || command.kind === 'ratify-phase' || command.kind === 'open-tangent' || command.kind === 'close-tangent') return transport.dispatch(command);
     // A command's kind is the word for what it ends the gap with (the format's `GapEnd`): ask, seam, cancel, end.
     const idleGap = gap.carry(command.kind);
     const ack = await transport.dispatch(command, idleGap ? { idle_gap: idleGap } : undefined);

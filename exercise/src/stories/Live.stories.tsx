@@ -28,6 +28,7 @@ import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { TANGENT_OPEN } from '../drive/served/tangent.ts';
 import { SELF_CAPTURE } from '../drive/served/self-capture.ts';
+import { PHASE_PROPOSED, PHASE_RULED_CONTINUE } from '../drive/served/phase-proposal.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
@@ -726,5 +727,35 @@ export const ServedSeamAuditUnparseable: Story = {
     const branch = await auditBranch(canvasElement);
     await expect(branch.querySelector('.ex-branch__outcome')?.textContent).toBe(outcomeOf('unparseable').label);
     await expect(branch.querySelector('.ex-branch__audit')).toBeNull();
+  },
+};
+
+/** `?drive` (#124): the model's phase proposal, waiting on the operator -- three answers, each posting the ruling. */
+export const ServedPhaseProposal: Story = {
+  name: '?drive: the model proposes a phase move, and the operator rules',
+  args: { drive: true, web: posting(PHASE_PROPOSED.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const dock = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-composer__proposal');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(dock.querySelector('.ex-composer__proposal-move')?.textContent).toBe('plan → build');
+    await expect(dock.querySelector('.ex-composer__proposal-reason')?.textContent).toBe('the spec is settled');
+    await expect([...dock.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['seam', 'continue', 'stay']);
+    posted.length = 0;
+    await userEvent.click([...dock.querySelectorAll('button')].find((b) => b.textContent === 'continue')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'continue' }]));
+  },
+};
+
+/** Ruled "continue": no proposal waits, the phase is the new one, and the call says how it was ruled. */
+export const ServedPhaseRuled: Story = {
+  name: '?drive: a ruled proposal moves the phase and says how it was ruled',
+  args: { drive: true, web: serving(PHASE_RULED_CONTINUE.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
+    await expect(canvasElement.querySelector('.ex-composer__proposal')).toBeNull();
+    await expect(canvasElement.querySelector('.ex-trunk .ex-ruled')?.textContent).toBe('ruled · continue → build');
   },
 };

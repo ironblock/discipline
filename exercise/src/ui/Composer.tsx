@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from 'react';
 
 import type { SessionState } from '../session/fold.ts';
-import type { Ack, Command, Disposition, Link, Uploaded } from '../drive/transport.ts';
+import type { Ack, Command, Disposition, Link, PhaseChoice, Uploaded } from '../drive/transport.ts';
 import { Segments } from './Segments.tsx';
 import { refusalOf } from './sets.ts';
 import './panel.css';
@@ -29,9 +29,18 @@ export interface ComposerProps {
   readonly foreground?: boolean;
   /** That command is near its timeout (#613): the move to the background asks itself, before the timeout kills it. */
   readonly nearTimeout?: boolean;
+  /** The model's phase proposal waiting on the operator (#124, #651): the move, its reason, and the call it is. */
+  readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string };
 }
 
 const DISPOSITIONS: readonly Disposition[] = ['keep', 'drop', 'park'];
+
+/** The three rulings on a proposed phase move (#651), in the order offered, and what each does. */
+const PHASE_CHOICES: readonly { readonly choice: PhaseChoice; readonly title: string }[] = [
+  { choice: 'seam', title: 'move to the proposed phase now, through a seam: the trunk is refilled from working memory' },
+  { choice: 'continue', title: 'move to the proposed phase without a seam: the trunk goes on as it is' },
+  { choice: 'stay', title: 'stay in this phase' },
+];
 
 /** A PNG the drive has taken, waiting for the ask that names it: its digest, and a picture of it for the chip. */
 interface Attached {
@@ -53,7 +62,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -185,6 +194,21 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
       data-state={state}
       data-link={link}
     >
+      {/* The model proposes a phase move (#124): the operator rules -- refill now, move without a seam, or stay. */}
+      {proposal && dispatch ? (
+        <section className="ex-composer__proposal" aria-label="the model proposes a phase move">
+          <span className="ex-composer__label">the model proposes</span>{' '}
+          <span className="ex-composer__proposal-move">{`${proposal.from ?? 'no phase'} → ${proposal.to}`}</span>
+          {proposal.reason !== undefined ? <p className="ex-composer__proposal-reason">{proposal.reason}</p> : null}
+          <span className="ex-composer__proposal-actions">
+            {PHASE_CHOICES.map(({ choice, title }) => (
+              <button key={choice} type="button" disabled={!idle} title={title} onClick={() => run({ kind: 'ratify-phase', call: proposal.call, choice })}>
+                {choice}
+              </button>
+            ))}
+          </span>
+        </section>
+      ) : null}
       {tangents && open && closing ? (
         <fieldset className="ex-composer__tangent" aria-label={`end tangent ${open.id}`}>
           <legend>

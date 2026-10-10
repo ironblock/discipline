@@ -228,3 +228,27 @@
   border-color: var(--warn);
   color: var(--warn);
 }
+
+/* The model's phase proposal, waiting on the operator's ruling (#124). */
+.ex-composer__proposal {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--ink-ratify);
+  border-radius: var(--radius);
+}
+
+.ex-composer__proposal-move {
+  color: var(--ink);
+}
+
+.ex-composer__proposal-reason {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.ex-composer__proposal-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}

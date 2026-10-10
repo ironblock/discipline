@@ -226,6 +226,13 @@ describe('HttpTransport: commands', () => {
     expect(posted).toEqual([{ kind: 'background' }]);
   });
 
+  it('posts the operator’s ruling on a phase proposal as serve takes it (#651), and reads its refusal', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"no-proposal"}', { status: 409 })) });
+    await expect(transport.dispatch({ kind: 'ratify-phase', call: 'p1', choice: 'seam' })).resolves.toEqual({ ok: false, refused: 'no-proposal' });
+    expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'seam' }]);
+  });
+
   it('posts an end as serve.rs takes it (#289)', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });

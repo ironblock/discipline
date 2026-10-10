@@ -150,6 +150,8 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       {node.stderr ? <pre className="ex-tool__output ex-tool__stderr">{node.stderr}</pre> : null}
       {node.files ? <FileResults files={node.files} /> : null}
       {/* What a self-capture call did to working memory (#619): its outcome, and the entries it wrote or why not. */}
+      {/* A phase proposal the operator ruled on (#651): how. */}
+      {node.ruled ? <p className="ex-ruled">{`ruled · ${node.ruled.choice} → ${node.ruled.to}`}</p> : null}
       {/* Output the model pruned (#630): kept whole until the turn's seam replaces it by its pointer. */}
       {node.pruned ? (
         <p className="ex-pruned" data-replaced={node.pruned.replaced ? '' : undefined}>

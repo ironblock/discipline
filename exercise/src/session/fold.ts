@@ -205,6 +205,8 @@ export interface ToolNode extends Provenance {
   readonly background?: { readonly job: string; readonly status?: string; readonly exit?: number };
   /** The model pruned its output (log v7's `pruned`, #630): the bytes, and whether a seam has since replaced it by its pointer. */
   readonly pruned?: { readonly bytes: number; readonly replaced: boolean };
+  /** A phase proposal the operator ruled on (#651): the choice, and the phase it proposed. */
+  readonly ruled?: { readonly choice: string; readonly to: string };
   /** Running, it is near its timeout (log v7's `timeout.near`, #613): its timeout, and when the warning came. */
   readonly nearTimeout?: { readonly timeoutMs: number; readonly at: number };
   /** The policy it failed under: the Seatbelt profile's sha256. */
@@ -365,6 +367,8 @@ export interface Session {
   readonly tangent?: { readonly id: string; readonly entries: readonly string[] };
   /** How many tangents the session has opened: the next one's id is `t/<this + 1>`. */
   readonly tangentsOpened: number;
+  /** The model's phase proposal waiting on the operator's ruling (#124, #651): its call, the move, and its reason. */
+  readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string };
   /** What each slot is serving right now, and for which lane; absent when idle. */
   readonly occupancy: readonly (Holder | undefined)[];
   /** Session time of the last event. */
@@ -588,6 +592,8 @@ export function fold(lines: readonly LogLine[]): Session {
   let lastSettled: number | undefined;
   // The phase it opens in: the graph's opening phase (log v7, #563), or a placed recording's own `phase`.
   let phase = start.opening_phase ?? start.phase ?? '';
+  let proposal: { call: string; from?: string; to: string; reason?: string } | undefined;
+  const rulings = new Map<string, LineOf<'phase.ruled'>>();
   let openTurn: number | undefined;
   let lastAskSeq = -1;
   // The state as the log says it, when it says it (`diet` logs every move; a script logs only the end).
@@ -767,6 +773,17 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       case 'capture':
         captures.set(`${e.request}/${e.call}`, e);
+        // The model's phase proposal (#651): the latest one waits on the operator until a ruling names its call.
+        if (e.tool === 'propose_phase_transition' && e.outcome === 'proposed' && e.to !== undefined) {
+          const args = objectOf(calls.get([...calls.keys()].find((k) => calls.get(k)?.id === e.call && calls.get(k)?.request === e.request) ?? -1)?.args ?? '');
+          proposal = { call: e.call, ...(e.from !== undefined ? { from: e.from } : {}), to: e.to, ...(typeof args['reason'] === 'string' ? { reason: args['reason'] } : {}) };
+        }
+        break;
+      case 'phase.ruled':
+        rulings.set(e.call, e);
+        if (proposal?.call === e.call) proposal = undefined;
+        // "continue" moves the phase with no seam; "seam" is followed by the seam line, which moves it.
+        if (e.choice === 'continue') phase = e.to;
         break;
       case 'seam': {
         for (const call of e.pruned ?? []) replacedBySeam.add(call);
@@ -939,6 +956,7 @@ export function fold(lines: readonly LogLine[]): Session {
                   ...(line.exit !== undefined ? { exit: line.exit } : {}),
                   ...(line.stdout !== undefined ? { output: line.stdout } : {}),
                   ...(line.stderr ? { stderr: line.stderr } : {}),
+                  ...(rulings.has(line.id) ? { ruled: { choice: rulings.get(line.id)!.choice, to: rulings.get(line.id)!.to } } : {}),
                   ...(line.reason !== undefined ? { refusal: line.reason } : {}),
                   ...(() => {
                     const cut = [...prunes.values()].flat().find((p) => p.call === line.id);
@@ -1103,6 +1121,7 @@ export function fold(lines: readonly LogLine[]): Session {
     trunkSlot,
     phase,
     tangentsOpened,
+    ...(proposal ? { proposal } : {}),
     ...(openTangent !== undefined
       ? { tangent: { id: openTangent, entries: [...entries.values()].filter((x) => x.tangent === openTangent && x.state === 'live').map((x) => x.id) } }
       : {}),

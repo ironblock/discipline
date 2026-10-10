@@ -64,3 +64,10 @@
   color: var(--ink-faint);
   font: var(--size-chrome) / 1.4 var(--font-chrome);
 }
+
+/* A phase proposal's ruling (#651). */
+.ex-ruled {
+  margin: 0.35rem 0 0;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}
