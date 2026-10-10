@@ -789,6 +789,30 @@ fn serving_interview(
     }
     // Self-capture (#609) keeps working memory too, forks or none.
     let self_capture = session::self_capture(&read);
+    // #610: a fork answers through the capture tools only where it is asked
+    // to, in a set written for them, and where self-capture declares them.
+    let capture = session::capture_modality(&read).map_err(|why| format!("{path}: {why}"))?;
+    let asks = session::fork_asks(&read);
+    if capture == diet::dogma::asks::Modality::Tools {
+        let refused = if rules.is_empty() {
+            Some("no `interview_warrant`, so no fork ever answers".to_owned())
+        } else if self_capture.is_none() {
+            Some("self-capture off, so no fork is offered the capture tools".to_owned())
+        } else if asks.modality != capture {
+            Some(format!(
+                "the ask set `{}`, whose asks have a fork answer in fields",
+                asks.name
+            ))
+        } else {
+            None
+        };
+        if let Some(why) = refused {
+            return Err(format!(
+                "{path} declares `{}` = \"tools\" with {why}",
+                session::CAPTURE_MODALITY
+            ));
+        }
+    }
     Ok(
         (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
             rules,
@@ -800,7 +824,8 @@ fn serving_interview(
             recall: diet::drive::archive::Recall::of(&read),
             view: session::fork_view(&read),
             self_capture,
-            asks: session::fork_asks(&read),
+            asks,
+            capture,
         }),
     )
 }

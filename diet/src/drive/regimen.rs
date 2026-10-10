@@ -600,18 +600,16 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("tool_call_text_fallback".to_owned(), text_fallback),
         (
             "instruction_files".to_owned(),
-            if crate::drive::instructions::enabled(regimen) {
-                "on"
-            } else {
-                "off"
-            }
-            .to_owned(),
+            instruction_files_lever(regimen),
         ),
         // The operator opens and closes a tangent where there is working
         // memory to scope (#22); an agent nominating is a later ask set.
         ("tangent_closure".to_owned(), tangent_closure_lever(regimen)),
         ("self_capture".to_owned(), self_capture_lever(regimen)),
-        ("capture_modality".to_owned(), undeclared()),
+        (
+            "capture_modality".to_owned(),
+            capture_modality_lever(regimen),
+        ),
         ("interview_routing_and_cadence".to_owned(), warrant),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         ("fork_memory_share".to_owned(), undeclared()),
@@ -664,6 +662,25 @@ fn self_capture_lever(regimen: &Regimen) -> String {
     crate::drive::session::self_capture(regimen).map_or_else(
         || "off".to_owned(),
         |cadence| format!("on:every:{}", cadence.interval()),
+    )
+}
+
+/// The instruction files lever's word: `on` or `off`.
+fn instruction_files_lever(regimen: &Regimen) -> String {
+    if crate::drive::instructions::enabled(regimen) {
+        "on"
+    } else {
+        "off"
+    }
+    .to_owned()
+}
+
+/// The capture modality lever's word (#610): how a fork answers, `fields`
+/// or `tools`; [`UNDECLARED`] for a word serve refuses at start.
+fn capture_modality_lever(regimen: &Regimen) -> String {
+    crate::drive::session::capture_modality(regimen).map_or_else(
+        |_| UNDECLARED.to_owned(),
+        |modality| modality.word().to_owned(),
     )
 }
 
@@ -802,7 +819,7 @@ mod tests {
         );
         assert_eq!(at(&floor, "tool_surface"), "bash");
         assert_eq!(at(&floor, "tangent_closure"), "operator");
-        assert_eq!(at(&floor, "capture_modality"), UNDECLARED);
+        assert_eq!(at(&floor, "capture_modality"), "fields");
         let line = draft("t1-session-one-qwen38.regimen.toml");
         assert_eq!(at(&line, "approval"), "none");
         assert_eq!(at(&line, "reasoning_state"), "on:effort:xhigh");
