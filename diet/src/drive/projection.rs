@@ -410,6 +410,9 @@ struct Walk<'a> {
     /// attachment could not be read back: every later head names it (#471's
     /// review, NB3).
     trunk_unrebuilt: Option<String>,
+    /// Whether the trunk carries a seam's refill message after the head
+    /// (#597): the turns start after it.
+    refilled: bool,
     /// Each lane but the trunk's last logged head digest (v5, #374): a live
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
@@ -551,6 +554,7 @@ impl<'a> Walk<'a> {
             cancelled_text: BTreeMap::new(),
             steps: BTreeMap::new(),
             trunk_unrebuilt: None,
+            refilled: false,
             side_heads: BTreeMap::new(),
         }
     }
@@ -824,6 +828,7 @@ impl<'a> Walk<'a> {
             render,
             tail_tokens,
             outputs,
+            placement,
             ..
         } = &line.event
         else {
@@ -832,7 +837,10 @@ impl<'a> Walk<'a> {
         let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
         // The tail the session kept after the refill (#552), cut from the
         // rebuilt trunk by the same function.
-        let turns = self.trunk.get(self.head.len()..).unwrap_or_default();
+        let turns = self
+            .trunk
+            .get(self.head.len() + usize::from(self.refilled)..)
+            .unwrap_or_default();
         let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
         let carried_turns = kept
             .iter()
@@ -847,7 +855,14 @@ impl<'a> Walk<'a> {
         let sent = outputs
             .as_ref()
             .map_or_else(|| render.clone(), |section| format!("{render}{section}"));
-        self.trunk = crate::seam::render::refill(&self.head, &sent);
+        // Where the seam put it (#597): a user message after the head, or --
+        // a seam logged before #597 -- appended to the system message.
+        self.refilled = *placement == Some(log::RenderPlacement::Message);
+        self.trunk = if self.refilled {
+            crate::seam::render::refill(&self.head, &sent)
+        } else {
+            crate::seam::render::refill_in_the_system_message(&self.head, &sent)
+        };
         self.trunk.extend(kept);
         // An attachment the old trunk carried and could not be read back is
         // not on the refilled one.
@@ -1667,6 +1682,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            placement: None,
             render_budget: None,
         });
         let projection = project(
@@ -1710,6 +1726,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            placement: None,
             render_budget: None,
         });
         let projection = project(
