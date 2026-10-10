@@ -258,6 +258,8 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly refused?: string;
   /** A hazard it was sent knowing (#637): `may-displace-trunk-cache`. */
   readonly hazard?: string;
+  /** A seam's audit (#646): of the entries live when it opened, those it kept, updated (superseded) and removed (retired). */
+  readonly audit?: { readonly kept: readonly string[]; readonly updated: readonly string[]; readonly removed: readonly string[] };
   readonly patches: readonly Folded<PatchNode>[];
 }
 
@@ -546,7 +548,7 @@ export function fold(lines: readonly LogLine[]): Session {
   // Each call, keyed by the `seq` of its first fragment (or of its line, where none streamed); found by its request and index.
   const calls = new Map<number, { request: number; t: number; first?: LineOf<'delta'>; id?: string; name?: Tool; args: string; line?: LineOf<'tool_call'> }>();
   const callAt = new Map<string, number>();
-  const forks = new Map<number, { fork: LineOf<'fork'>; request?: number; settled?: LineOf<'fork.settled'>; patches: LineOf<'patch'>[] }>();
+  const forks = new Map<number, { fork: LineOf<'fork'>; request?: number; settled?: LineOf<'fork.settled'>; patches: LineOf<'patch'>[]; audited?: string[] }>();
   const entries = new Map<string, Mutable<Omit<MemoryEntry, 'fresh' | 'landedAt'>> & { seq: number }>();
   // The tangent open now (#608), the turns asked inside each, and the turns a close rolled the trunk back over.
   let openTangent: string | undefined;
@@ -700,7 +702,8 @@ export function fold(lines: readonly LogLine[]): Session {
         if (e.reason !== 'final' && e.reason !== 'cancelled') era().slots.push({ kind: 'settled', line: e });
         break;
       case 'fork':
-        forks.set(e.seq, { fork: e, patches: [] });
+        // A seam's audit (#646) rules on the working memory live when it opens: what it leaves alone, it kept.
+        forks.set(e.seq, { fork: e, patches: [], ...(e.lane === 'audit' ? { audited: [...entries.values()].filter((x) => x.state === 'live').map((x) => x.id) } : {}) });
         break;
       case 'fork.settled': {
         const f = forks.get(e.fork);
@@ -1004,7 +1007,7 @@ export function fold(lines: readonly LogLine[]): Session {
   // Branches, keyed by the trunk node they came from.
   const branches = new Map<string, Folded<BranchNode>[]>();
   const openForks: LineOf<'fork'>[] = [];
-  for (const { fork, request, settled, patches } of forks.values()) {
+  for (const { fork, request, settled, patches, audited } of forks.values()) {
     const g = request !== undefined ? generations.get(request) : undefined;
     const at = id(fork.at);
     const slot = fork.slot ?? g?.request.slot ?? sideSlot;
@@ -1034,6 +1037,13 @@ export function fold(lines: readonly LogLine[]): Session {
       ...(settled ? { outcome: settled.outcome, endedAt: settled.t } : {}),
       ...(settled?.refused !== undefined ? { refused: settled.refused } : {}),
       ...(fork.hazard !== undefined ? { hazard: fork.hazard } : {}),
+      ...(audited !== undefined && settled?.outcome === 'value'
+        ? (() => {
+            const updated = patches.filter((p) => p.op === 'supersede' && p.supersedes !== undefined).map((p) => p.supersedes!);
+            const removed = patches.filter((p) => p.op === 'retire').map((p) => p.entry.id);
+            return { audit: { kept: audited.filter((x) => !updated.includes(x) && !removed.includes(x)), updated, removed } };
+          })()
+        : {}),
       patches: patches.map((p) =>
         brand<PatchNode>({
           id: id(p.seq),

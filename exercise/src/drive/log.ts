@@ -48,7 +48,7 @@ export type SettleReason = Open<V0.SettleReason>;
 export type FailReason = Open<V0.FailReason>;
 
 /** The side lanes a fork runs in: `diet`'s `interview`, and AHEAD `ratify` and `extraction` (the predecessor's mechanical read of the trunk). */
-export type ForkLane = Open<'interview' | 'ratify' | 'extraction'>;
+export type ForkLane = Open<'interview' | 'ratify' | 'extraction' | 'audit'>;
 /** Which lane a request was made on: `diet`'s, or an AHEAD side lane. */
 export type Lane = V0.Lane | ForkLane;
 
