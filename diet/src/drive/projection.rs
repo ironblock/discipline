@@ -309,6 +309,7 @@ pub fn project_in(
                 fork_delivery,
                 tool_output,
                 levers,
+                bash_timeout_ms,
                 ..
             },
         ..
@@ -323,7 +324,7 @@ pub fn project_in(
         .ok_or("the regime declares no substrate")?;
     let mut walk = Walk::over(lines, substrate, engine);
     walk.recording = recording.map(std::path::Path::to_path_buf);
-    walk.tools = tools_of(tools.as_deref().unwrap_or_default());
+    walk.tools = tools_of(tools.as_deref().unwrap_or_default(), *bash_timeout_ms);
     walk.template_kwargs = kwargs_of(template_kwargs.as_ref());
     walk.model.clone_from(model);
     walk.head = head
@@ -485,7 +486,7 @@ fn kwargs_of(
 /// each name to the definition its requests carried. The head's digest is
 /// the check: a definition that differs from what was sent leaves the head
 /// unverified, never wrongly verified.
-fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
+fn tools_of(names: &[String], bash_timeout_ms: Option<u64>) -> Result<Vec<ToolDefinition>, String> {
     // Background commands (#614) were on exactly when `task_stop` was
     // declared: `bash` then took `is_background`.
     let background = names
@@ -495,7 +496,15 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
         .iter()
         .map(|name| {
             if name == super::tool_loop::BASH {
-                Ok(super::tool_loop::bash_tool_with(background))
+                // A session since #613 names its default timeout, 0 for
+                // none, and its `bash` took `timeout`; one before it did
+                // not.
+                Ok(match bash_timeout_ms {
+                    Some(ms) => {
+                        super::tool_loop::bash_tool_timed(background, (ms > 0).then_some(ms))
+                    }
+                    None => super::tool_loop::bash_tool_with(background),
+                })
             } else if name == super::background::TASK_STOP {
                 Ok(super::background::task_stop_tool())
             } else if let Some(tool) = super::standard::definitions()
@@ -686,6 +695,7 @@ impl<'a> Walk<'a> {
             Line::Refused { .. } => log::Kind::Refused,
             Line::Capture { .. } => log::Kind::Capture,
             Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
+            Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
             // The trunk's own self-capture patch (#609), fork-less.
             Line::Patch { .. } => log::Kind::Patch,
             _ => log::Kind::Progress,
@@ -791,6 +801,7 @@ impl<'a> Walk<'a> {
             | Line::Refused { .. }
             | Line::Progress { .. }
             | Line::BackgroundEnded { .. }
+            | Line::TimeoutNear { .. }
             | Line::Capture { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
@@ -1678,6 +1689,7 @@ mod tests {
 
     fn start() -> Line {
         Line::SessionStart {
+            bash_timeout_ms: None,
             version: VERSION,
             opened: 1_790_000_000_000,
             model: "a-model".to_owned(),
@@ -2512,6 +2524,7 @@ mod tests {
                 shown: None,
                 recovered_from: None,
                 background: None,
+                timeout_ms: None,
             }
         };
         let mut events = vec![start()];
@@ -2599,6 +2612,7 @@ mod tests {
                 shown: None,
                 recovered_from: None,
                 background: None,
+                timeout_ms: None,
             },
         );
         events.extend(turn);
@@ -2849,6 +2863,7 @@ mod tests {
                 shown: None,
                 recovered_from: None,
                 background: None,
+                timeout_ms: None,
             },
         );
         events.extend(turn);

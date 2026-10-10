@@ -242,6 +242,9 @@ vocabulary! {
         /// What background commands that ended said, delivered after an
         /// ask (v7, #614).
         Notice => "notice",
+        /// A running call near its timeout (v7, #613): for the surface's
+        /// warning, never the model's.
+        TimeoutNear => "timeout.near",
     }
 }
 
@@ -991,6 +994,10 @@ pub enum Event {
         /// The cap tool outputs arrived under (v7, #554), when the session
         /// runs tools.
         tool_output: Option<ToolOutput>,
+        /// The default timeout of a `bash` call, in milliseconds (v7,
+        /// #613), when the session runs commands; 0 is none. Absent, a
+        /// session before #613: no call timed out.
+        bash_timeout_ms: Option<u64>,
     },
     /// An ask was admitted.
     Ask {
@@ -1203,6 +1210,9 @@ pub enum Event {
         /// The background job it started, or was moved into (v7, #614): a
         /// `bash` call that `ran` only.
         background: Option<String>,
+        /// The timeout that ended it, in milliseconds (v7, #613): a `bash`
+        /// call that `ran` only.
+        timeout_ms: Option<u64>,
     },
     /// A side call off the trunk's warm tail (v5, #374).
     Fork {
@@ -1301,6 +1311,17 @@ pub enum Event {
         exit: Option<u64>,
         /// Its output, kept in the recording by digest.
         files: Option<Vec<RecordedFile>>,
+    },
+    /// A running `bash` call near its timeout (v7, #613): the surface may
+    /// warn the operator, who can move it to the background (#614). Never
+    /// sent to the model.
+    TimeoutNear {
+        /// The `seq` of the request whose response carried the call.
+        request: u64,
+        /// The call's id.
+        call: String,
+        /// The timeout it runs under, in milliseconds.
+        timeout_ms: u64,
     },
     /// What ended background commands said, as one note after turn
     /// `turn`'s ask, at the tail of its first request, which stays on the
@@ -2705,6 +2726,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 },
                 instruction_files: fields.instruction_files("instruction_files")?,
                 tool_output: tool_output(&fields)?,
+                bash_timeout_ms: fields.optional_count("bash_timeout_ms")?,
                 phases: fields.optional_strings("phases")?,
                 phase_transitions: match object.get("phase_transitions") {
                     None => None,
@@ -2923,6 +2945,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 shown: fields.optional_string("shown")?,
                 recovered_from: fields.optional_string("recovered_from")?,
                 background: fields.optional_string("background")?,
+                timeout_ms: fields.optional_count("timeout_ms")?,
             }
         }
         Kind::Fork => Event::Fork {
@@ -3021,6 +3044,11 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             status: fields.tag("status", BackgroundStatus::from_tag)?,
             exit: fields.optional_count("exit")?,
             files: fields.optional_files("files")?,
+        },
+        Kind::TimeoutNear => Event::TimeoutNear {
+            request: fields.count("request")?,
+            call: fields.string("call")?,
+            timeout_ms: fields.count("timeout_ms")?,
         },
         Kind::Notice => Event::Notice {
             turn: fields.turn("turn")?,
@@ -3439,6 +3467,14 @@ fn fits_its_outcome(
                 "a `tool_call` named `{name}` carries `{exec}`: only a `bash` call ran a command"
             ));
         }
+    }
+    // A timeout (v7, #613) ends a command: a `bash` call that ran.
+    if object.contains_key("timeout_ms") && !(bash && outcome == ToolOutcome::Ran) {
+        return Err(
+            "a `tool_call` carries `timeout_ms` and is not a `bash` call that `ran`: only a \
+             command times out"
+                .to_owned(),
+        );
     }
     // A background job (v7, #614) is a command's: a `bash` call that ran.
     if object.contains_key("background") && !(bash && outcome == ToolOutcome::Ran) {
@@ -4014,7 +4050,8 @@ pub fn introduced(kind: Kind) -> i64 {
         | Kind::Capture
         | Kind::Reminded
         | Kind::BackgroundEnded
-        | Kind::Notice => 7,
+        | Kind::Notice
+        | Kind::TimeoutNear => 7,
         _ => 0,
     }
 }
@@ -4133,6 +4170,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("tool_output", Tag(Tags::ToolOutputState)),
                 may_v7("tool_output_max_lines", Holds::Count),
                 may_v7("tool_output_max_bytes", Holds::Count),
+                may_v7("bash_timeout_ms", Holds::Count),
             ];
             F
         }
@@ -4264,6 +4302,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v5("shown", Text),
                 may_v7("recovered_from", Text),
                 may_v7("background", Text),
+                may_v7("timeout_ms", Count),
             ];
             F
         }
@@ -4378,6 +4417,14 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("sha256", Holds::Digest),
                 must_v7("bytes", Count),
                 must_v7("text", Text),
+            ];
+            F
+        }
+        Kind::TimeoutNear => {
+            const F: &[Field] = &[
+                must_v7("request", Count),
+                must_v7("call", Text),
+                must_v7("timeout_ms", Count),
             ];
             F
         }
@@ -4687,6 +4734,7 @@ fn to_value(line: &Line) -> Value {
             fork_asks,
             reasoning_effort_default,
             tool_output,
+            bash_timeout_ms,
             phases,
             phase_transitions,
             opening_phase,
@@ -4746,6 +4794,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(delivery) = fork_delivery {
                 put("fork_delivery", text(delivery.tag()));
+            }
+            if let Some(ms) = bash_timeout_ms {
+                put("bash_timeout_ms", count(*ms));
             }
             if let Some(cap) = tool_output {
                 put("tool_output", text(cap.state.tag()));
@@ -5036,6 +5087,7 @@ fn to_value(line: &Line) -> Value {
             shown,
             recovered_from,
             background,
+            timeout_ms,
         } => {
             put("request", count(*request));
             put("turn", count(u64::from(*turn)));
@@ -5096,6 +5148,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(job) = background {
                 put("background", text(job));
+            }
+            if let Some(ms) = timeout_ms {
+                put("timeout_ms", count(*ms));
             }
             Kind::ToolCall
         }
@@ -5352,6 +5407,16 @@ fn to_value(line: &Line) -> Value {
                 put("files", files_value(files));
             }
             Kind::BackgroundEnded
+        }
+        Event::TimeoutNear {
+            request,
+            call,
+            timeout_ms,
+        } => {
+            put("request", count(*request));
+            put("call", text(call));
+            put("timeout_ms", count(*timeout_ms));
+            Kind::TimeoutNear
         }
         Event::Notice { turn, text: note } => {
             put("turn", count(u64::from(*turn)));
@@ -6138,6 +6203,7 @@ mod tests {
             seq: 0,
             t: 0,
             event: Event::SessionStart {
+                bash_timeout_ms: None,
                 version: VERSION,
                 opened: 1_790_000_000_000,
                 model: "a-model".to_owned(),
@@ -6393,6 +6459,7 @@ mod tests {
                 shown: None,
                 recovered_from: None,
                 background: None,
+                timeout_ms: None,
             },
         ];
         // v5 (#374): a scoping turn answered and settled `final`, then the
@@ -7721,7 +7788,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded background.ended notice"
+             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded background.ended notice timeout.near"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),

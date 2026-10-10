@@ -182,6 +182,139 @@ pub const BASH_DESCRIPTION_BACKGROUND: &str = "Executes a bash command (as `bash
      - The command may run in a sandbox: writes outside the working directory, some reads, and \
      network access can be refused.";
 
+/// The most a call's `timeout` may say, in milliseconds (#613): `OpenCode`
+/// 2's and Qwen Code's 600000, which agree (`core/src/tool/bash.ts:20`,
+/// `tools/shell.ts:5765-5769`).
+pub const MAX_TIMEOUT_MS: u64 = 600_000;
+
+/// The default timeout when the regimen names none (#613): `OpenCode` 2's
+/// and Qwen Code's 120000 ms, where Pi has none and so breaks no tie.
+pub const DEFAULT_TIMEOUT_MS: u64 = 120_000;
+
+/// The regimen key for the default timeout, in milliseconds (#613): a
+/// positive whole number, 0 for none, read leniently.
+pub const BASH_TIMEOUT_MS: &str = "bash_timeout_ms";
+
+/// The default timeout the regimen declares (#613): `None` for 0, else its
+/// whole number of milliseconds, else [`DEFAULT_TIMEOUT_MS`].
+#[must_use]
+pub fn bash_timeout_ms(regimen: &Regimen) -> Option<u64> {
+    match regimen.get(BASH_TIMEOUT_MS) {
+        Some(regimen::Value::Integer(0)) => None,
+        Some(regimen::Value::Integer(n)) if *n > 0 => Some(n.unsigned_abs()),
+        _ => Some(DEFAULT_TIMEOUT_MS),
+    }
+}
+
+/// A call's own `timeout` (#613): none, or its milliseconds; refused with
+/// Qwen Code's words (`tools/shell.ts:5813-5826`) when it is not a whole
+/// number of milliseconds between 1 and [`MAX_TIMEOUT_MS`].
+///
+/// # Errors
+///
+/// The words the model is answered with.
+pub fn timeout_of(arguments: &str) -> Result<Option<u64>, &'static str> {
+    let Some(value) = serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()
+        .and_then(|value| value.get("timeout").cloned())
+    else {
+        return Ok(None);
+    };
+    let Some(ms) = value.as_i64().filter(|_| value.is_i64() || value.is_u64()) else {
+        return Err("Timeout must be an integer number of milliseconds.");
+    };
+    if ms <= 0 {
+        return Err("Timeout must be a positive number.");
+    }
+    let ms = ms.unsigned_abs();
+    if ms > MAX_TIMEOUT_MS {
+        return Err("Timeout cannot exceed 600000ms (10 minutes).");
+    }
+    Ok(Some(ms))
+}
+
+/// `ms` in the words Qwen Code's description gives its default: `(2
+/// minutes)`, or seconds, or nothing for an odd number.
+fn in_words(ms: u64) -> String {
+    let plural = |n: u64, unit: &str| format!(" ({n} {unit}{})", if n == 1 { "" } else { "s" });
+    if ms.is_multiple_of(60_000) {
+        plural(ms / 60_000, "minute")
+    } else if ms.is_multiple_of(1000) {
+        plural(ms / 1000, "second")
+    } else {
+        String::new()
+    }
+}
+
+/// The `bash` tool's description once calls time out (#613): #558's, its
+/// "no timeout" line replaced by Qwen Code's timeout sentence
+/// (`tools/shell.ts:5684`), where Pi (seconds, no default) and `OpenCode`
+/// 2 (milliseconds, 120000) differ; with background commands (#614), its
+/// advice to background a longer command.
+#[must_use]
+pub fn bash_description(background: bool, timeout: Option<u64>) -> String {
+    let timeout_line = match timeout {
+        Some(ms) => format!(
+            "- You can specify an optional timeout in milliseconds (up to 600000ms / 10 minutes). \
+             If not specified, commands will timeout after {ms}ms{}. A command at its timeout is \
+             ended, and what it printed is returned.{}",
+            in_words(ms),
+            if background {
+                " For longer commands, use `is_background: true` instead of a larger timeout."
+            } else {
+                ""
+            }
+        ),
+        None => "- You can specify an optional timeout in milliseconds (up to 600000ms / 10 \
+                 minutes). If not specified, a command runs until it exits or the turn is \
+                 cancelled."
+            .to_owned(),
+    };
+    let running = if background {
+        "- With `is_background: true` the call returns at once with the job's id, its output \
+         file and its status file, and the command keeps running, with no timeout; `task_stop` \
+         stops it, and when it ends a notification says so."
+    } else {
+        "- The call returns when the command exits. A process left running in the background \
+         keeps running, but nothing it prints after the call returns is shown."
+    };
+    format!(
+        "Executes a bash command (as `bash -c <command>`) in the working directory. Returns its \
+         standard output, then its standard error.\n\n\
+         - Each call runs in a fresh shell that starts in the working directory: `cd` and \
+         exported variables do not carry over to the next call, and only the environment \
+         variables the session passes are set.\n{timeout_line}\n{running}\n\
+         - The command may run in a sandbox: writes outside the working directory, some reads, \
+         and network access can be refused."
+    )
+}
+
+/// The `bash` tool once calls time out (#613): #614's, with `timeout`, its
+/// bounds `OpenCode` 2's and Qwen Code's and its words Qwen Code's
+/// (`tools/shell.ts:5765-5769`), and [`bash_description`].
+#[must_use]
+pub fn bash_tool_timed(background: bool, timeout: Option<u64>) -> ToolDefinition {
+    let mut tool = bash_tool_with(background);
+    tool.description = Some(bash_description(background, timeout));
+    if let Value::Object(schema) = &mut tool.schema
+        && let Some(Value::Object(properties)) = schema.get_mut("properties")
+    {
+        properties.insert(
+            "timeout".to_owned(),
+            Value::Object(BTreeMap::from([
+                (
+                    "description".to_owned(),
+                    Value::String("Optional timeout in milliseconds (max 600000)".to_owned()),
+                ),
+                ("maximum".to_owned(), Value::Integer(600_000)),
+                ("minimum".to_owned(), Value::Integer(1)),
+                ("type".to_owned(), Value::String("integer".to_owned())),
+            ])),
+        );
+    }
+    tool
+}
+
 /// The `bash` tool's one argument's description (#558): Pi's and
 /// `OpenCode` 2's, which agree.
 pub const BASH_COMMAND_DESCRIPTION: &str = "Shell command to execute";
@@ -317,8 +450,11 @@ impl Calls {
 pub fn command_of(arguments: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(arguments).ok()?;
     let object = value.as_object()?;
-    // `command`, and `is_background` (#614) when it is a boolean.
-    let others = object.iter().filter(|(key, _)| key.as_str() != "command");
+    // `command`, `is_background` (#614) when it is a boolean, and
+    // `timeout` (#613), whose value `timeout_of` judges.
+    let others = object
+        .iter()
+        .filter(|(key, _)| key.as_str() != "command" && key.as_str() != "timeout");
     for (key, value) in others {
         if key != super::background::IS_BACKGROUND || !value.is_boolean() {
             return None;
@@ -1477,6 +1613,9 @@ pub struct Declared {
     pub surface: ToolSurface,
     /// Whether background commands are on (#614).
     pub background: bool,
+    /// The default timeout of a call, in milliseconds (#613); `None`,
+    /// none.
+    pub timeout_ms: Option<u64>,
 }
 
 /// The tool surface lever (#557): the tools the model is offered.
@@ -1502,6 +1641,15 @@ impl ToolSurface {
         if background {
             tools.push(super::background::task_stop_tool());
         }
+        tools
+    }
+
+    /// [`Self::tools_with`], once calls time out (#613): `bash` with
+    /// `timeout`, its description naming `timeout`'s default.
+    #[must_use]
+    pub fn tools_timed(self, background: bool, timeout: Option<u64>) -> Vec<ToolDefinition> {
+        let mut tools = self.tools_with(background);
+        tools[0] = bash_tool_timed(background, timeout);
         tools
     }
 
@@ -1645,6 +1793,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             output_cap,
             surface,
             background: background_commands(regimen),
+            timeout_ms: bash_timeout_ms(regimen),
         }));
     };
     let regimen::Value::Array(items) = value else {
@@ -1670,6 +1819,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         output_cap,
         surface,
         background: background_commands(regimen),
+        timeout_ms: bash_timeout_ms(regimen),
     }))
 }
 
@@ -2042,6 +2192,8 @@ pub struct Tools {
     /// Whether background commands are on (#614): `bash` takes
     /// `is_background`, and `task_stop` is offered.
     pub background: bool,
+    /// A call's default timeout, in milliseconds (#613); `None`, none.
+    pub timeout_ms: Option<u64>,
 }
 
 vocabulary! {
@@ -2354,6 +2506,66 @@ pub(in crate::drive) mod tests {
 
     /// Before #558, `bash` was I0's definition byte for byte, and no
     /// description.
+    /// A call's own timeout (#613): none, a whole number of milliseconds
+    /// up to 600000, or refused in Qwen Code's words.
+    #[test]
+    fn a_calls_timeout_is_read_or_refused_in_qwens_words() {
+        assert_eq!(timeout_of(r#"{"command":"ls"}"#), Ok(None));
+        assert_eq!(
+            timeout_of(r#"{"command":"ls","timeout":5000}"#),
+            Ok(Some(5000))
+        );
+        assert_eq!(
+            timeout_of(r#"{"command":"ls","timeout":600001}"#),
+            Err("Timeout cannot exceed 600000ms (10 minutes).")
+        );
+        assert_eq!(
+            timeout_of(r#"{"command":"ls","timeout":0}"#),
+            Err("Timeout must be a positive number.")
+        );
+        assert_eq!(
+            timeout_of(r#"{"command":"ls","timeout":"soon"}"#),
+            Err("Timeout must be an integer number of milliseconds.")
+        );
+        assert_eq!(
+            timeout_of(r#"{"command":"ls","timeout":1.5}"#),
+            Err("Timeout must be an integer number of milliseconds.")
+        );
+        assert_eq!(
+            command_of(r#"{"command":"ls","timeout":5000}"#).as_deref(),
+            Some("ls")
+        );
+    }
+
+    /// The description (#613) names the default in Qwen Code's words, or
+    /// that there is none, and with background commands its advice.
+    #[test]
+    fn the_timed_description_names_the_default_and_the_background() {
+        let with = bash_description(true, Some(120_000));
+        assert!(
+            with.contains("If not specified, commands will timeout after 120000ms (2 minutes).")
+        );
+        assert!(with.contains("use `is_background: true` instead of a larger timeout"));
+        assert!(!with.contains("There is no timeout"));
+        let without = bash_description(false, None);
+        assert!(without.contains("a command runs until it exits or the turn is cancelled"));
+        assert!(!without.contains("is_background"));
+        let tool = bash_tool_timed(false, Some(30_000));
+        let mut out = String::new();
+        json::render(&tool.schema, &mut out);
+        assert!(
+            out.contains(
+                "\"timeout\":{\"description\":\"Optional timeout in milliseconds (max 600000)\",\
+             \"maximum\":600000,\"minimum\":1,\"type\":\"integer\"}"
+            ),
+            "{out}"
+        );
+        assert_eq!(
+            bash_timeout_ms(&crate::formats::regimen::parse("").expect("a regimen")),
+            Some(120_000)
+        );
+    }
+
     #[test]
     fn the_bash_tool_before_its_description_is_i0s() {
         let tool = bash_tool_before_its_description();
@@ -3157,6 +3369,7 @@ pub(in crate::drive) mod tests {
                 output_cap: OutputCap::DEFAULT,
                 surface: ToolSurface::Bash,
                 background: true,
+                timeout_ms: Some(DEFAULT_TIMEOUT_MS),
             }))
         );
         // The approval lever's `none`: commands run with no allow set.
@@ -3171,6 +3384,7 @@ pub(in crate::drive) mod tests {
                 output_cap: OutputCap::DEFAULT,
                 surface: ToolSurface::Bash,
                 background: true,
+                timeout_ms: Some(DEFAULT_TIMEOUT_MS),
             }))
         );
         assert!(read("approval = \"ask\"\n").is_err());

@@ -514,6 +514,9 @@ pub struct Ran {
     pub stderr_bytes: u64,
     /// Whether a stop ended it: its whole process group killed (#551).
     pub cancelled: bool,
+    /// Whether its timeout ended it (#613): its whole process group sent
+    /// `TERM`, then `KILL`.
+    pub timed_out: bool,
     /// What it printed, as bytes: what a file tool reads an image from
     /// (#557), which [`Ran::stdout`]'s lossy text cannot carry.
     pub raw_stdout: Vec<u8>,
@@ -773,7 +776,7 @@ impl Confinement {
         input: Option<&[u8]>,
         stop: &dyn Fn() -> bool,
     ) -> Result<Ran, NotRun> {
-        match self.run_inner(policy, worktree, argv, input, (stop, &|| None))? {
+        match self.run_inner(policy, worktree, argv, input, (stop, &|| None, None))? {
             Finished::Ran(ran) | Finished::Promoted(ran, _) => Ok(ran),
         }
     }
@@ -792,9 +795,9 @@ impl Confinement {
         worktree: &Path,
         argv: &[String],
         stop: &dyn Fn() -> bool,
-        promote: &dyn Fn() -> Option<std::fs::File>,
+        (promote, timeout): (&dyn Fn() -> Option<std::fs::File>, Option<Limit<'_>>),
     ) -> Result<Finished, NotRun> {
-        self.run_inner(policy, worktree, argv, None, (stop, promote))
+        self.run_inner(policy, worktree, argv, None, (stop, promote, timeout))
     }
 
     /// `argv` started under this confinement in the background (#614): its
@@ -854,6 +857,7 @@ impl Confinement {
                 stdout_bytes: 0,
                 stderr_bytes: 0,
                 cancelled: false,
+                timed_out: false,
                 raw_stdout: Vec::new(),
             },
             child,
@@ -868,7 +872,7 @@ impl Confinement {
         worktree: &Path,
         argv: &[String],
         input: Option<&[u8]>,
-        (stop, promote): (&dyn Fn() -> bool, &dyn Fn() -> Option<std::fs::File>),
+        (stop, promote, timeout): Hooks<'_>,
     ) -> Result<Finished, NotRun> {
         // The CALLER's argv, not the composed one. Under `Sandbox` the composed
         // vector is never empty, so this guard only ever fired for
@@ -896,6 +900,7 @@ impl Confinement {
                 stdout_bytes: 0,
                 stderr_bytes: 0,
                 cancelled: true,
+                timed_out: false,
                 raw_stdout: Vec::new(),
             }));
         }
@@ -942,9 +947,10 @@ impl Confinement {
                 let _ = stdin.write_all(&input);
             });
         }
-        let output = collected(&mut child, stop, promote).map_err(|why| NotRun::Runner {
-            said: format!("{program} could not be waited on: {why}"),
-        })?;
+        let output =
+            collected(&mut child, stop, promote, timeout).map_err(|why| NotRun::Runner {
+                said: format!("{program} could not be waited on: {why}"),
+            })?;
         if let Self::Sandbox(Backend::Seatbelt(runner)) = self {
             runner.forget_ended_groups();
         }
@@ -972,6 +978,7 @@ impl Confinement {
             stdout_bytes: u64::try_from(output.stdout.len()).unwrap_or(u64::MAX),
             stderr_bytes: u64::try_from(output.stderr.len()).unwrap_or(u64::MAX),
             cancelled: output.cancelled,
+            timed_out: output.timed_out,
             raw_stdout: output.stdout,
         };
         Ok(if output.status.is_none() {
@@ -981,6 +988,33 @@ impl Confinement {
         })
     }
 }
+
+/// A call's timeout (#613): how long it may run, and what to do a little
+/// before it is ended -- [`WARN_BEFORE`] ahead, when it runs that long.
+#[allow(missing_debug_implementations)]
+#[derive(Clone, Copy)]
+pub struct Limit<'a> {
+    /// How long it may run.
+    pub after: Duration,
+    /// Called once, [`WARN_BEFORE`] before the end.
+    pub warn: &'a dyn Fn(),
+}
+
+/// What watches a running call: a stop, a promotion (#614), a timeout
+/// (#613).
+type Hooks<'a> = (
+    &'a dyn Fn() -> bool,
+    &'a dyn Fn() -> Option<std::fs::File>,
+    Option<Limit<'a>>,
+);
+
+/// How long before a timeout its warning comes: Qwen Code's 15 seconds
+/// (`tools/shell.ts:1316-1318`).
+pub const WARN_BEFORE: Duration = Duration::from_secs(15);
+
+/// How long a timed-out group has between `TERM` and `KILL`: Qwen Code's
+/// 200 ms (`services/shellExecutionService.ts`).
+const TERM_GRACE: Duration = Duration::from_millis(200);
 
 /// How a promotable call ended (#614).
 #[derive(Debug)]
@@ -1006,6 +1040,8 @@ const POLL: Duration = Duration::from_millis(5);
 struct Collected {
     /// How the leader exited; `None` when the call was promoted (#614).
     status: Option<std::process::ExitStatus>,
+    /// Whether its timeout ended it (#613).
+    timed_out: bool,
     stdout: Vec<u8>,
     stderr: Vec<u8>,
     cancelled: bool,
@@ -1107,11 +1143,16 @@ impl Drained {
 /// `child` waited on by its leader: its output so far once the leader has
 /// exited, or, when `stop` is asked first, its whole process group killed
 /// and reaped (#551).
+#[allow(clippy::too_many_lines)]
 fn collected(
     child: &mut std::process::Child,
     stop: &dyn Fn() -> bool,
     promote: &dyn Fn() -> Option<std::fs::File>,
+    timeout: Option<Limit<'_>>,
 ) -> std::io::Result<Collected> {
+    let started = Instant::now();
+    let mut warned = false;
+    let mut timed_out = false;
     let stdout = child.stdout.take().map(Drained::of);
     let stderr = child.stderr.take().map(Drained::of);
     let group = child.id();
@@ -1131,6 +1172,34 @@ fn collected(
         if let Some(status) = child.try_wait()? {
             break status;
         }
+        // Its timeout (#613): the warning ahead of it, once; at it, the
+        // whole group sent `TERM`, then `KILL` after the grace.
+        if let Some(limit) = &timeout {
+            let ran = started.elapsed();
+            if !warned && limit.after > WARN_BEFORE && ran + WARN_BEFORE >= limit.after {
+                warned = true;
+                (limit.warn)();
+            }
+            if ran >= limit.after {
+                let target = format!("-{group}");
+                let _ = seatbelt::kill().args(["-TERM", "--", &target]).output();
+                let grace = Instant::now() + TERM_GRACE;
+                let mut ended = child.try_wait()?;
+                while ended.is_none() && Instant::now() < grace {
+                    std::thread::sleep(POLL);
+                    ended = child.try_wait()?;
+                }
+                if ended.is_none() {
+                    let _ = seatbelt::kill().args(["-KILL", "--", &target]).output();
+                    let _ = child.kill();
+                }
+                timed_out = true;
+                break match ended {
+                    Some(status) => status,
+                    None => child.wait()?,
+                };
+            }
+        }
         // Promoted (#614): what was printed so far into the file, the rest
         // after it, and the child left running.
         if let Some(file) = promote() {
@@ -1148,6 +1217,7 @@ fn collected(
                 stdout,
                 stderr,
                 cancelled: false,
+                timed_out: false,
             });
         }
         std::thread::sleep(POLL);
@@ -1155,6 +1225,7 @@ fn collected(
     let until = Instant::now() + DRAIN;
     Ok(Collected {
         status: Some(status),
+        timed_out,
         stdout: stdout
             .map(|drained| drained.taken(until))
             .unwrap_or_default(),
@@ -4272,6 +4343,7 @@ mod tests {
             stdout_bytes: 0,
             stderr_bytes: stderr.len() as u64,
             cancelled: false,
+            timed_out: false,
             raw_stdout: Vec::new(),
         }
     }

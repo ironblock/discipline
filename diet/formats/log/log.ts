@@ -36,6 +36,7 @@ export type Kind =
   | "reminded"
   | "background.ended"
   | "notice"
+  | "timeout.near"
 ;
 
 export type State =
@@ -349,6 +350,7 @@ export type SessionStartLine = {
   tool_output?: ToolOutputState;
   tool_output_max_lines?: number;
   tool_output_max_bytes?: number;
+  bash_timeout_ms?: number;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {
@@ -493,6 +495,7 @@ export type ToolCallLine = {
   shown?: string;
   recovered_from?: string;
   background?: string;
+  timeout_ms?: number;
 };
 
 export type ForkLine = {
@@ -651,6 +654,15 @@ export type NoticeLine = {
   text: string;
 };
 
+export type TimeoutNearLine = {
+  seq: number;
+  t: number;
+  kind: "timeout.near";
+  request: number;
+  call: string;
+  timeout_ms: number;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -679,4 +691,5 @@ export type LogLine =
   | RemindedLine
   | BackgroundEndedLine
   | NoticeLine
+  | TimeoutNearLine
 ;
