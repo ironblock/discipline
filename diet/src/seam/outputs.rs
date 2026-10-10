@@ -33,6 +33,9 @@ pub struct Output {
     pub saved: Option<Saved>,
     /// The verbatim excerpts the read fork quoted from it: for `salient`.
     pub excerpts: Vec<String>,
+    /// Its reference line, when the model pruned it (#612): carried in
+    /// its place whatever the state.
+    pub pruned: Option<String>,
 }
 
 /// An output's whole, kept by digest.
@@ -51,17 +54,26 @@ pub struct Saved {
 /// and under `salient` when no fork quoted any of them.
 #[must_use]
 pub fn section(state: SeamToolOutputs, outputs: &[Output]) -> Option<(String, u64)> {
-    let entries: Vec<String> = match state {
-        SeamToolOutputs::Evict => return None,
-        SeamToolOutputs::Keep => outputs.iter().map(kept).collect(),
-        SeamToolOutputs::Reference => outputs.iter().map(referenced).collect(),
-        SeamToolOutputs::Salient => outputs.iter().filter_map(salient).collect(),
-    };
+    // A pruned output is its reference line whatever the state (#612).
+    let entries: Vec<String> = outputs
+        .iter()
+        .filter_map(|output| match (&output.pruned, state) {
+            (Some(line), _) => Some(line.clone()),
+            (None, SeamToolOutputs::Evict) => None,
+            (None, SeamToolOutputs::Keep) => Some(kept(output)),
+            (None, SeamToolOutputs::Reference) => Some(reference_line(output)),
+            (None, SeamToolOutputs::Salient) => salient(output),
+        })
+        .collect();
     if entries.is_empty() {
         return None;
     }
+    // Every entry a reference line -- the state's, or a prune's under
+    // `evict` -- is introduced as reference.
+    let referenced_only = state == SeamToolOutputs::Reference
+        || (state == SeamToolOutputs::Evict && outputs.iter().any(|o| o.pruned.is_some()));
     let sentence = match state {
-        SeamToolOutputs::Reference => {
+        _ if referenced_only => {
             "The following tool results were produced before context was compacted. They are \
              listed as reference only: each was saved whole, and can be read at its path."
         }
@@ -113,8 +125,9 @@ fn kept(output: &Output) -> String {
 }
 
 /// `reference`: the call, its whole's size and sha256, and where it was
-/// saved.
-fn referenced(output: &Output) -> String {
+/// saved. What a pruned output is carried as (#612).
+#[must_use]
+pub fn reference_line(output: &Output) -> String {
     let Some(saved) = &output.saved else {
         return format!("{}: not saved\n", call_line(output));
     };
@@ -160,7 +173,31 @@ mod tests {
             images: Vec::new(),
             saved: None,
             excerpts: Vec::new(),
+            pruned: None,
         }
+    }
+
+    /// #612: a pruned output is its reference line whatever the state; under
+    /// `evict` it alone is carried, introduced as reference.
+    #[test]
+    fn a_pruned_output_is_its_line_under_every_state() {
+        let line = "- turn 1: bash args={\"command\":\"ls\"}: 4 bytes, sha256 x, not saved\n";
+        let pruned = Output {
+            pruned: Some(line.to_owned()),
+            ..output(1, "a\nb\n")
+        };
+        let outputs = [pruned, output(2, "c")];
+        let (evicted, count) = section(SeamToolOutputs::Evict, &outputs).expect("the prune");
+        assert_eq!(count, 1);
+        assert!(evicted.contains("listed as reference only"), "{evicted}");
+        assert!(evicted.ends_with(line), "{evicted}");
+        let (kept, count) = section(SeamToolOutputs::Keep, &outputs).expect("both");
+        assert_eq!(count, 2);
+        assert!(
+            kept.contains(line) && !kept.contains("[Tool result]: a\nb"),
+            "{kept}"
+        );
+        assert!(kept.contains("[Tool result]: c"), "{kept}");
     }
 
     #[test]

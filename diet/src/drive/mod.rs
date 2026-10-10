@@ -101,6 +101,7 @@ pub mod engine;
 pub mod instructions;
 pub mod output;
 pub mod projection;
+pub mod prune;
 pub mod regimen;
 pub mod registry;
 pub mod script;
@@ -1206,6 +1207,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 // Never the window's: the scripted drive has none.
                 prompt_tokens: None,
                 window: None,
+                pruned: None,
             });
             seams.push(seam);
         }

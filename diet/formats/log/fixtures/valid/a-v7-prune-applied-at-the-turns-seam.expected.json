@@ -1,0 +1,213 @@
+{
+  "events": [
+    {
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "opened": 1790000000000,
+      "seq": 0,
+      "t": 0,
+      "tools": [
+        "bash",
+        "prune_output"
+      ],
+      "version": 7
+    },
+    {
+      "kind": "ask",
+      "seq": 1,
+      "t": 5,
+      "text": "read the log, then tidy up",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 10,
+      "to": "turn"
+    },
+    {
+      "head_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 3,
+      "t": 15,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 3,
+      "seq": 4,
+      "t": 20,
+      "tool_call": {
+        "arguments": "{\"command\":\"cat big.log\"}",
+        "id": "call-0",
+        "index": 0,
+        "name": "bash"
+      }
+    },
+    {
+      "finish_reason": "tool_calls",
+      "kind": "response",
+      "seq": 5,
+      "t": 25,
+      "text": "",
+      "timings": {
+        "cache_n": 0,
+        "predicted_n": 10,
+        "prompt_n": 40
+      },
+      "to_request": 3
+    },
+    {
+      "approval": {
+        "scope": "off"
+      },
+      "arguments": "{\"command\":\"cat big.log\"}",
+      "argv": [
+        "sh",
+        "-c",
+        "cat big.log"
+      ],
+      "confined": [
+        "sh",
+        "-c",
+        "cat big.log"
+      ],
+      "cwd": "/work/tree",
+      "exit": 0,
+      "id": "call-0",
+      "isolation": "sandbox",
+      "kind": "tool_call",
+      "name": "bash",
+      "network": "none",
+      "outcome": "ran",
+      "request": 3,
+      "seq": 6,
+      "shown": "line 1\nline 2\n",
+      "stderr": "",
+      "stderr_bytes": 0,
+      "stdout": "line 1\nline 2\n",
+      "stdout_bytes": 14,
+      "t": 30,
+      "turn": 1
+    },
+    {
+      "head_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 7,
+      "t": 35,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 7,
+      "seq": 8,
+      "t": 40,
+      "tool_call": {
+        "arguments": "{\"call\":\"cat big.log\"}",
+        "id": "call-1",
+        "index": 0,
+        "name": "prune_output"
+      }
+    },
+    {
+      "finish_reason": "tool_calls",
+      "kind": "response",
+      "seq": 9,
+      "t": 45,
+      "text": "",
+      "timings": {
+        "cache_n": 0,
+        "predicted_n": 10,
+        "prompt_n": 40
+      },
+      "to_request": 7
+    },
+    {
+      "bytes": 14,
+      "call": "call-0",
+      "kind": "pruned",
+      "seq": 10,
+      "sha256": "9060554863a62b9db5f726216876654e561896071d2e6480f2048b70e0fdadb9",
+      "t": 50,
+      "text": "- turn 1: bash args={\"command\":\"cat big.log\"}: 14 bytes, sha256 9060554863a62b9db5f726216876654e561896071d2e6480f2048b70e0fdadb9, not saved\n",
+      "turn": 1
+    },
+    {
+      "arguments": "{\"call\":\"cat big.log\"}",
+      "id": "call-1",
+      "kind": "tool_call",
+      "name": "prune_output",
+      "outcome": "ran",
+      "request": 7,
+      "seq": 11,
+      "shown": "pruned; replaced when this turn ends",
+      "t": 55,
+      "turn": 1
+    },
+    {
+      "head_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "kind": "request",
+      "lane": "trunk",
+      "seq": 12,
+      "t": 60,
+      "turn": 1
+    },
+    {
+      "kind": "response",
+      "seq": 13,
+      "t": 65,
+      "text": "tidied",
+      "timings": {
+        "cache_n": 0,
+        "predicted_n": 10,
+        "prompt_n": 40
+      },
+      "to_request": 12
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 14,
+      "t": 70,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 15,
+      "t": 75,
+      "to": "awaiting"
+    },
+    {
+      "at_turn": 1,
+      "carried_entries": 1,
+      "carried_output_bytes": 314,
+      "carried_outputs": 1,
+      "carried_turns": 0,
+      "frame": "placeholder",
+      "kind": "seam",
+      "outputs": "\n# tool outputs\nThe following tool results were produced before context was compacted. They are listed as reference only: each was saved whole, and can be read at its path.\n\n- turn 1: bash args={\"command\":\"cat big.log\"}: 14 bytes, sha256 9060554863a62b9db5f726216876654e561896071d2e6480f2048b70e0fdadb9, not saved\n",
+      "placement": "message",
+      "prefix_hash_after": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "prefix_hash_before": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "pruned": [
+        "call-0"
+      ],
+      "reason": "prune",
+      "render": "# working set\nd1\ta tracker\n",
+      "seq": 16,
+      "t": 80,
+      "tool_outputs": "evict"
+    }
+  ],
+  "torn": 0
+}

@@ -219,6 +219,9 @@ vocabulary! {
         Delivered => "delivered",
         /// Archived items recalled at the tail of a trunk request (v7, #566).
         Recalled => "recalled",
+        /// A tool result the model pruned, replaced at a later seam (v7,
+        /// #612).
+        Pruned => "pruned",
         /// A tangent opened at the operator's word (v7, #22).
         TangentOpen => "tangent.open",
         /// A tangent closed: its entries disposed and the trunk rolled back
@@ -370,6 +373,9 @@ vocabulary! {
         /// window with room for its output (v7, #617): the automatic seam,
         /// checked before every trunk request, between a turn's steps too.
         Window => "window",
+        /// The model pruned a tool result, applied as its turn settled (v7,
+        /// #612).
+        Prune => "prune",
     }
 }
 
@@ -1206,8 +1212,11 @@ pub enum Event {
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
-        /// The `seq` of the fork.
-        fork: u64,
+        /// The `seq` of the fork whose answer made it; absent for a patch the
+        /// trunk made itself (v7, #609), which names its `lane` instead.
+        fork: Option<u64>,
+        /// The lane that made it, when no fork did (v7): `self-capture`.
+        lane: Option<String>,
         /// What it does.
         op: PatchOp,
         /// The entry.
@@ -1243,6 +1252,21 @@ pub enum Event {
         text: String,
         /// Each item it carries, in rank order.
         items: Vec<RecalledItem>,
+    },
+    /// A tool result the model pruned (v7, #612), logged when the tool
+    /// answered: a later seam carries `text` in its place.
+    Pruned {
+        /// The turn the prune was called in.
+        turn: u32,
+        /// The id of the call whose result it pruned.
+        call: String,
+        /// The sha256 of that result's whole, as saved.
+        sha256: String,
+        /// The bytes of the result the trunk carried, which the seam
+        /// removes.
+        bytes: u64,
+        /// The reference line the seam carries in its place (#596).
+        text: String,
     },
     /// A tangent opened (v7, #22): its id, the turn it forks at, and how
     /// many messages the trunk held there, the fork point a close rolls the
@@ -1356,6 +1380,9 @@ pub enum Event {
         /// The prompt that fired it and the window, on a `window` seam (v7,
         /// #617): `prompt_tokens` and `window`, both or neither.
         fired: Option<SeamFired>,
+        /// The calls whose results the model pruned that this seam replaced
+        /// with their `pruned` lines' text (v7, #612).
+        pruned: Option<Vec<String>>,
     },
 }
 
@@ -2424,7 +2451,10 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::ForkSettled { fork, outcome, .. } => forks
                 .settle(*fork, *outcome)
                 .map_err(|why| at(index, why))?,
-            Event::Patch { fork, .. } => forks.patch(*fork).map_err(|why| at(index, why))?,
+            // The trunk's own patch (#609) answers to no fork.
+            Event::Patch {
+                fork: Some(fork), ..
+            } => forks.patch(*fork).map_err(|why| at(index, why))?,
             Event::Seam {
                 at_turn, reason, ..
             } => {
@@ -2830,8 +2860,22 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     }
                 ));
             }
+            let fork = fields.optional_count("fork")?;
+            let lane = fields.optional_string("lane")?;
+            if fork.is_some() == lane.is_some() {
+                return Err(format!(
+                    "a patch {}: it names the fork that made it or, made on the trunk, \
+                     its `lane`, and exactly one of them",
+                    if fork.is_some() {
+                        "names both a `fork` and a `lane`"
+                    } else {
+                        "names neither a `fork` nor a `lane`"
+                    }
+                ));
+            }
             Event::Patch {
-                fork: fields.count("fork")?,
+                fork,
+                lane,
                 op,
                 entry: fields.entry("entry")?,
                 supersedes,
@@ -2867,6 +2911,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 .ok_or("a `tangent.close` carries no `prefix_intact`")?,
             rolled_back: fields.count("rolled_back")?,
         },
+        Kind::Pruned => Event::Pruned {
+            turn: fields.turn("turn")?,
+            call: fields.string("call")?,
+            sha256: fields.digest("sha256")?,
+            bytes: fields.count("bytes")?,
+            text: fields.string("text")?,
+        },
         Kind::Recalled => Event::Recalled {
             turn: fields.turn("turn")?,
             recall: fields.tag("recall", RecallState::from_tag)?,
@@ -2899,6 +2950,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
             placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
+            pruned: fields.optional_strings("pruned")?,
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -3828,6 +3880,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Seam => 6,
         Kind::Delivered
         | Kind::Recalled
+        | Kind::Pruned
         | Kind::TangentOpen
         | Kind::TangentClose
         | Kind::Capture
@@ -3885,6 +3938,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
         return 7;
     }
     if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
+        return 7;
+    }
+    if tags == Tags::SeamReason && SeamReason::from_tag(tag) == Some(SeamReason::Prune) {
         return 7;
     }
     let capped =
@@ -4105,7 +4161,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
         }
         Kind::Patch => {
             const F: &[Field] = &[
-                must_v5("fork", Count),
+                // Every patch before v7 was a fork's; from v7 the trunk's
+                // own carry `lane` instead (#609), exactly one of the two.
+                may_v5("fork", Count),
+                may_v7("lane", Text),
                 must_v5("op", Tag(Tags::PatchOp)),
                 must_v5("entry", Holds::Entry),
                 may_v5("supersedes", Text),
@@ -4173,6 +4232,17 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("render_reduced", Count),
                 may_v7("prompt_tokens", Count),
                 may_v7("window", Count),
+                may_v7("pruned", Holds::Strings),
+            ];
+            F
+        }
+        Kind::Pruned => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("call", Text),
+                must_v7("sha256", Holds::Digest),
+                must_v7("bytes", Count),
+                must_v7("text", Text),
             ];
             F
         }
@@ -4202,6 +4272,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
 pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
     match kind {
         Kind::Delta => &["text", "reasoning", "tool_call"],
+        // A fork's patch names its fork; the trunk's own its lane (#609).
+        Kind::Patch => &["fork", "lane"],
         _ => &[],
     }
 }
@@ -4924,12 +4996,18 @@ fn to_value(line: &Line) -> Value {
         }
         Event::Patch {
             fork,
+            lane,
             op,
             entry,
             supersedes,
             tangent,
         } => {
-            put("fork", count(*fork));
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
+            }
+            if let Some(lane) = lane {
+                put("lane", text(lane));
+            }
             put("op", text(op.tag()));
             let mut object = BTreeMap::from([
                 ("id".to_owned(), text(&entry.id)),
@@ -5025,6 +5103,7 @@ fn to_value(line: &Line) -> Value {
             placement,
             render_budget,
             fired,
+            pruned,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             if let Some(fired) = fired {
@@ -5067,6 +5146,12 @@ fn to_value(line: &Line) -> Value {
                 put("render_over_budget", text(&budget.over));
                 put("render_tokens", count(budget.rendered));
                 put("render_reduced", count(budget.reduced));
+            }
+            if let Some(calls) = pruned {
+                put(
+                    "pruned",
+                    Value::Array(calls.iter().map(|call| text(call)).collect()),
+                );
             }
             Kind::Seam
         }
@@ -5121,6 +5206,20 @@ fn to_value(line: &Line) -> Value {
                 ),
             );
             Kind::Recalled
+        }
+        Event::Pruned {
+            turn,
+            call,
+            sha256,
+            bytes,
+            text: line,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("call", text(call));
+            put("sha256", text(sha256));
+            put("bytes", count(*bytes));
+            put("text", text(line));
+            Kind::Pruned
         }
     };
     put("kind", text(kind.tag()));
@@ -6201,7 +6300,8 @@ mod tests {
                 wall_ms: Some(480),
             },
             Event::Patch {
-                fork,
+                fork: Some(fork),
+                lane: None,
                 op: PatchOp::Add,
                 entry: PatchEntry {
                     id: "d1".to_owned(),
@@ -6211,8 +6311,10 @@ mod tests {
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
             },
+            // The trunk's own (#609): named by its lane, not a fork.
             Event::Patch {
-                fork,
+                fork: None,
+                lane: Some("self-capture".to_owned()),
                 op: PatchOp::Supersede,
                 entry: PatchEntry {
                     id: "d2".to_owned(),
@@ -6657,6 +6759,19 @@ mod tests {
                     // `op` is `supersede`: the reader's op rule, not the key
                     // beside it.
                     if kind == Kind::Patch && *absent == "supersedes" {
+                        continue;
+                    }
+                    // A stream's text comes with its byte count: added alone,
+                    // it is that pairing's refusal, not an exclusivity -- met
+                    // by a call that ran no command (#612's `prune_output`,
+                    // the standard tools), which writes `shown` and no stream.
+                    if kind == Kind::ToolCall && ["stdout", "stderr"].contains(absent) {
+                        continue;
+                    }
+                    // A key of an exactly-one set beside a line that already
+                    // carries another of it is that rule's refusal, whatever
+                    // key `present` is.
+                    if exactly_one(kind).contains(absent) && !exactly_one(kind).contains(present) {
                         continue;
                     }
                     let mut both = object.clone();
@@ -7421,7 +7536,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled tangent.open tangent.close capture reminded"
+             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -7470,7 +7585,7 @@ mod tests {
         );
         assert_eq!(
             tags(SeamReason::ALL.iter().map(|it| it.tag()).collect()),
-            "operator phase budget cadence window"
+            "operator phase budget cadence window prune"
         );
     }
 

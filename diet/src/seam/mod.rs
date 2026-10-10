@@ -109,6 +109,9 @@ vocabulary! {
         /// window with room for its output (#617): the automatic seam. The
         /// scripted drive never fires it.
         Window => "window",
+        /// The model pruned a tool result, and the regimen applies a prune
+        /// as soon as the turn settles (#612). Served sessions only.
+        Prune => "prune",
     }
 }
 
@@ -484,8 +487,9 @@ impl<R: Ratifier> Controller<R> {
                     .every_turns
                     .is_some_and(|every| self.turn > 0 && self.turn.is_multiple_of(every)),
                 // The window is a served session's measure, never the
-                // scripted controller's.
-                Reason::Window => false,
+                // scripted controller's; and a scripted drive makes no tool
+                // calls to prune.
+                Reason::Window | Reason::Prune => false,
             })
             .collect()
     }
@@ -550,7 +554,7 @@ pub fn pinned_ask(reason: Reason) -> Option<Template> {
         Reason::Operator => Some(Template::AuditQHuman),
         Reason::Phase => Some(Template::AuditQ),
         Reason::Cadence => Some(Template::AuditQCadence),
-        Reason::Budget | Reason::Window => None,
+        Reason::Budget | Reason::Window | Reason::Prune => None,
     }
 }
 
@@ -1743,7 +1747,7 @@ mod tests {
     fn the_seams_vocabularies_are_the_words_a_record_carries() {
         assert_eq!(
             Reason::ALL.iter().map(|r| r.tag()).collect::<Vec<_>>(),
-            ["operator", "phase", "budget", "cadence", "window"],
+            ["operator", "phase", "budget", "cadence", "window", "prune"],
             "declaration order is precedence: an explicit act outranks every derived one"
         );
         assert_eq!(

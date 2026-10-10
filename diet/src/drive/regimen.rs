@@ -594,7 +594,7 @@ fn phase_graph_lever(regimen: &Regimen) -> String {
 /// has them.
 #[must_use]
 pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<String, String> {
-    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS, SEAM_TAIL_TOKENS};
+    use crate::seam::policy::SEAM_TAIL_TOKENS;
     let word = |key: &str| match regimen.get(key) {
         Some(regimen::Value::String(word)) => word.clone(),
         Some(regimen::Value::Integer(n)) => n.to_string(),
@@ -618,23 +618,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
         Some(_) => undeclared(),
     };
-    let mut triggers = vec!["operator-declared"];
-    if regimen.get(SEAM_EVERY_TURNS).is_some() {
-        triggers.push("cadence");
-    }
-    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
-        .iter()
-        .any(|key| regimen.get(key).is_some())
-    {
-        triggers.push("budget");
-    }
-    // The automatic seam (#617): on unless the regimen turns it off; it
-    // fires only where serve knows the window and keeps working memory.
-    if crate::seam::policy::Served::from_regimen(regimen, None)
-        .map_or(true, |served| !served.window_off)
-    {
-        triggers.push("window");
-    }
+    let triggers = seam_triggers(regimen);
     let [disposition, approval, surface, limits] = command_levers(regimen, output_cap);
     let reasoning = match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
         (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
@@ -655,9 +639,10 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         Some(regimen::Value::String(state)) if state == "off" || state == "on" => state.clone(),
         Some(_) => undeclared(),
     };
+    let pruning = crate::drive::prune::lever(regimen);
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
-        ("seam_trigger".to_owned(), triggers.join("+")),
+        ("seam_trigger".to_owned(), triggers),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         (
             "archive_recall".to_owned(),
@@ -698,6 +683,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("extraction_seat".to_owned(), Seat::lever(regimen)),
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
         ("subagent".to_owned(), "harness".to_owned()),
+        ("model_pruning".to_owned(), pruning),
     ])
 }
 
@@ -762,6 +748,31 @@ fn instruction_files_lever(regimen: &Regimen) -> String {
         "off"
     }
     .to_owned()
+}
+
+/// The seam triggers a regimen leaves armed, in [`serve_levers`]' words:
+/// the operator's always, then the cadence and budget it declares, and the
+/// automatic seam unless it turns it off (#617).
+fn seam_triggers(regimen: &Regimen) -> String {
+    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS};
+    let mut triggers = vec!["operator-declared"];
+    if regimen.get(SEAM_EVERY_TURNS).is_some() {
+        triggers.push("cadence");
+    }
+    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
+        .iter()
+        .any(|key| regimen.get(key).is_some())
+    {
+        triggers.push("budget");
+    }
+    // The automatic seam (#617): on unless the regimen turns it off; it
+    // fires only where serve knows the window and keeps working memory.
+    if crate::seam::policy::Served::from_regimen(regimen, None)
+        .map_or(true, |served| !served.window_off)
+    {
+        triggers.push("window");
+    }
+    triggers.join("+")
 }
 
 /// The capture modality lever's word (#610): how a fork answers, `fields`

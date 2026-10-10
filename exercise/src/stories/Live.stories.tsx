@@ -10,6 +10,7 @@ import deliveredNote from '../../../diet/formats/log/fixtures/valid/a-v7-imperat
 import recalledNote from '../../../diet/formats/log/fixtures/valid/a-v7-recall-after-an-ask.jsonl?raw';
 import refillMessage from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-refill-is-a-message.jsonl?raw';
 import leversDeclared from '../../../diet/formats/log/fixtures/valid/a-v7-session-declaring-its-levers.jsonl?raw';
+import selfCapturePatch from '../../../diet/formats/log/fixtures/valid/a-v7-self-capture-patch-named-by-its-lane.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -529,5 +530,42 @@ export const ServedNoLeverTable: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
     await expect(canvasElement.querySelector('.ex-header__levers')).toBeNull();
+  },
+};
+
+/** diet's v5 forks with the first moved offboard (#615) -- WRITTEN HERE: no diet fixture has an offboard fork yet. */
+const offboardForks = (() => {
+  const lines = forks.trimEnd().split('\n').map((l) => JSON.parse(l) as Record<string, unknown>);
+  const first = lines.find((l) => l['kind'] === 'fork')!;
+  return lines
+    .map((l) => (l === first ? { ...l, substrate: 'mac-pro-llamacpp-qwen3-4b', model: 'qwen3-4b' } : l['kind'] === 'fork.settled' && l['fork'] === first['seq'] ? { ...l, prompt_tokens: 1820, wall_ms: 4300 } : l))
+    .map((l) => JSON.stringify(l))
+    .join('\n');
+})();
+
+/** `?drive` (#570): an offboard fork names its seat on its branch, with its prefill and wall time; a warm one does not. */
+export const ServedOffboardFork: Story = {
+  name: '?drive: an offboard fork names its seat, prefill and wall time',
+  args: { drive: true, web: serving(offboardForks) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-lane .ex-branch')).toHaveLength(2));
+    const [offboard, warm] = [...canvasElement.querySelectorAll<HTMLElement>('.ex-lane .ex-branch')];
+    await expect(offboard?.querySelector('.ex-branch__seat')?.textContent).toBe('mac-pro-llamacpp-qwen3-4b · 1.8k tok · 4.3 s');
+    await expect(warm?.querySelector('.ex-branch__seat')).toBeNull();
+  },
+};
+
+/** `?drive`, log v7 (#627): a self-captured entry in the working-memory panel, marked with the lane that wrote it. */
+export const ServedSelfCapturedEntry: Story = {
+  name: '?drive: a self-captured entry in working memory, marked self-capture',
+  args: { drive: true, web: serving(selfCapturePatch) },
+  play: async ({ canvasElement }) => {
+    const entry = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-memory__entry[data-lane="self-capture"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(entry.querySelector('.ex-memory__lane')?.textContent).toBe('self-capture');
+    await expect(entry.querySelector('.ex-memory__text')?.textContent).toContain('The parser drops blank lines');
   },
 };

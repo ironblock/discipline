@@ -3443,3 +3443,87 @@ fn a_drive_server_refuses_an_offboard_seat_it_cannot_reach_as_declared() {
         "{said}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// model-elected pruning (#612)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_drive_server_offers_prune_output_only_where_a_prune_can_be_applied() {
+    let tree = Dir::new("prune-tree");
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let pruning = "model_pruning = \"on\"\n";
+
+    // Commands and a warrant: `prune_output` after the surface's tools.
+    let regimen = commands_regimen(
+        &format!("allowed_commands = []\ninterview_warrant = [\"scoping\"]\n{pruning}"),
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let _served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--log",
+            &logged,
+        ],
+    );
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["tools"],
+        serde_json::json!(["bash", "prune_output"]),
+        "{start_line}"
+    );
+
+    // No warrant: nothing fills working memory, so no seam could apply it.
+    let regimen = commands_regimen(
+        &format!("allowed_commands = []\n{pruning}"),
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("no seam could ever replace a pruned result"),
+        "{said}"
+    );
+
+    // No commands: nothing to prune.
+    let regimen = dev_loop_sampling(
+        &format!("interview_warrant = [\"scoping\"]\n{pruning}"),
+        "temperature = 0.6\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("needs a session that runs commands"),
+        "{said}"
+    );
+}

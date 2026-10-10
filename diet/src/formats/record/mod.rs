@@ -1132,6 +1132,18 @@ vocabulary! {
     }
 }
 
+/// A tool result the model pruned and a seam replaced (#612): the call's
+/// row, its whole's sha256, and the bytes the trunk no longer carries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PrunedOutput {
+    /// The `tool_call` row of the call whose result it was.
+    pub tool_call: String,
+    /// The sha256 of the result's whole, as saved.
+    pub sha256: String,
+    /// The bytes of the result the trunk carried.
+    pub bytes: u64,
+}
+
 /// One row of a session record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
@@ -1329,6 +1341,9 @@ pub enum Event {
         prompt_tokens: Option<u64>,
         /// The context window it would not have fit, beside `prompt_tokens`.
         window: Option<u64>,
+        /// The tool results the model pruned that this seam replaced with
+        /// their reference lines (#612), in the order they were pruned.
+        pruned: Option<Vec<PrunedOutput>>,
     },
     /// A tool was called.
     ToolCall {
@@ -2488,6 +2503,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             carried_tokens: take_optional_count(&mut members, of, "carried_tokens")?,
             prompt_tokens: take_optional_count(&mut members, of, "prompt_tokens")?,
             window: take_optional_count(&mut members, of, "window")?,
+            pruned: take_optional_pruned(&mut members, of)?,
         },
         Kind::ToolCall => tool_call(&mut members, of)?,
         Kind::Rejected => Event::Rejected {
@@ -4053,6 +4069,50 @@ fn take_tool_output(
     }))
 }
 
+/// A seam row's `pruned` (#612): absent, or a non-empty list of objects
+/// holding exactly `tool_call`, `sha256` and `bytes`.
+fn take_optional_pruned(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<Vec<PrunedOutput>>, ParseError> {
+    let wrong = || {
+        ParseError::from(SchemaError::WrongType {
+            of,
+            field: "pruned".to_owned(),
+            want: "a non-empty list of {tool_call, sha256, bytes}",
+        })
+    };
+    let Some(value) = members.remove("pruned") else {
+        return Ok(None);
+    };
+    let Value::Array(items) = value else {
+        return Err(wrong());
+    };
+    if items.is_empty() {
+        return Err(wrong());
+    }
+    items
+        .into_iter()
+        .map(|item| {
+            let Value::Object(mut fields) = item else {
+                return Err(wrong());
+            };
+            let tool_call = take_string(&mut fields, of, "tool_call")?;
+            let sha256 = take_optional_digest(&mut fields, of, "sha256")?.ok_or_else(wrong)?;
+            let bytes = take_optional_count(&mut fields, of, "bytes")?.ok_or_else(wrong)?;
+            if !fields.is_empty() {
+                return Err(wrong());
+            }
+            Ok(PrunedOutput {
+                tool_call,
+                sha256,
+                bytes,
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
 /// An optional non-negative integer.
 fn take_optional_count(
     members: &mut BTreeMap<String, Value>,
@@ -4961,6 +5021,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             carried_tokens,
             prompt_tokens,
             window,
+            pruned,
             ..
         } => {
             members.put_u32("at_turn", *at_turn);
@@ -4972,6 +5033,31 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_optional("carried_tokens", count(carried_tokens));
             members.put_optional("prompt_tokens", count(prompt_tokens));
             members.put_optional("window", count(window));
+            members.put_optional(
+                "pruned",
+                pruned.as_ref().map(|pruned| {
+                    Value::Array(
+                        pruned
+                            .iter()
+                            .map(|output| {
+                                Value::Object(BTreeMap::from([
+                                    (
+                                        "tool_call".to_owned(),
+                                        Value::String(output.tool_call.clone()),
+                                    ),
+                                    ("sha256".to_owned(), Value::String(output.sha256.clone())),
+                                    (
+                                        "bytes".to_owned(),
+                                        Value::Integer(
+                                            i64::try_from(output.bytes).unwrap_or(i64::MAX),
+                                        ),
+                                    ),
+                                ]))
+                            })
+                            .collect(),
+                    )
+                }),
+            );
         }
         Event::Rejected {
             lane,

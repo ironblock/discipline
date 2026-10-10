@@ -29,6 +29,7 @@ export type Kind =
   | "seam"
   | "delivered"
   | "recalled"
+  | "pruned"
   | "tangent.open"
   | "tangent.close"
   | "capture"
@@ -183,6 +184,7 @@ export type SeamReason =
   | "budget"
   | "cadence"
   | "window"
+  | "prune"
 ;
 
 export type Framing =
@@ -509,12 +511,11 @@ export type PatchLine = {
   seq: number;
   t: number;
   kind: "patch";
-  fork: number;
   op: PatchOp;
   entry: PatchEntry;
   supersedes?: string;
   tangent?: string;
-};
+} & ({ fork: number; lane?: never } | { lane: string; fork?: never });
 
 export type SeamLine = {
   seq: number;
@@ -542,6 +543,7 @@ export type SeamLine = {
   render_reduced?: number;
   prompt_tokens?: number;
   window?: number;
+  pruned?: string[];
 };
 
 export type DeliveredLine = {
@@ -562,6 +564,17 @@ export type RecalledLine = {
   recall: RecallState;
   text: string;
   items: RecalledItem[];
+};
+
+export type PrunedLine = {
+  seq: number;
+  t: number;
+  kind: "pruned";
+  turn: number;
+  call: string;
+  sha256: string;
+  bytes: number;
+  text: string;
 };
 
 export type TangentOpenLine = {
@@ -628,6 +641,7 @@ export type LogLine =
   | SeamLine
   | DeliveredLine
   | RecalledLine
+  | PrunedLine
   | TangentOpenLine
   | TangentCloseLine
   | CaptureLine
