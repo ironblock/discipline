@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 import { fold } from '../session/fold.ts';
 import type { LogLine } from './log.ts';
+import { SELF_CAPTURE } from './served/self-capture.ts';
 import { TANGENT_CLOSED, TANGENT_OPEN } from './served/tangent.ts';
 import { needsOf } from './log.ts';
 
@@ -197,6 +198,20 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(moved.phaseMoves).toEqual(['review']);
     // A log with no graph offers no move.
     expect(fold(logOf('an-answered-turn.jsonl')).phaseMoves).toEqual([]);
+  });
+
+  it('folds the harness’s notes onto the ask they followed, and a self-capture call’s outcome onto the call (#574)', () => {
+    const userOf = (log: LogLine[], turn: number) => fold(log).eras[0]?.nodes.find((n) => n.kind === 'user' && n.turn === turn);
+    const delivered = userOf(logOf('a-v7-imperative-delivery-after-an-ask.jsonl'), 2);
+    expect(delivered?.kind === 'user' && delivered.delivered?.framing).toBe('imperative');
+    const recalled = userOf(logOf('a-v7-recall-after-an-ask.jsonl'), 2);
+    expect(recalled?.kind === 'user' && recalled.recalled?.recall).toBe('literal');
+    const session = fold([...SELF_CAPTURE]);
+    expect([...session.unknown.keys()]).toEqual([]);
+    const reminded = session.eras[0]?.nodes.find((n) => n.kind === 'user' && n.turn === 2);
+    expect(reminded?.kind === 'user' && reminded.reminded).toBe('If this turn settled anything worth keeping, record it with update_record.');
+    const call = session.eras[0]?.nodes.find((n) => n.kind === 'tool');
+    expect(call?.kind === 'tool' && call.capture).toEqual({ outcome: 'recorded', entries: ['r10/c1/fact'] });
   });
 
   it('takes the state from the log: an ended session is ended', () => {

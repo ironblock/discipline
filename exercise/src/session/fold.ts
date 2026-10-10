@@ -69,6 +69,8 @@ export interface UserNode extends Provenance {
    * and how it matched. Folded, not yet drawn.
    */
   readonly recalled?: { readonly recall: string; readonly text: string };
+  /** Self-capture's reminder after this ask (log v7's `reminded`, #619): a note the model was sent, the harness's words. */
+  readonly reminded?: string;
   /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
   readonly files?: readonly FileRef[];
   /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
@@ -182,6 +184,8 @@ export interface ToolNode extends Provenance {
   readonly stderr?: string;
   /** Why the drive refused it. */
   readonly refusal?: ToolRefusal;
+  /** What a self-capture call did (log v7's `capture`, #619): its outcome, the entries it wrote, and why when it did not. */
+  readonly capture?: { readonly outcome: string; readonly entries: readonly string[]; readonly why?: string };
   /** The policy it failed under: the Seatbelt profile's sha256. */
   readonly policy?: string;
   readonly ms?: number;
@@ -479,6 +483,9 @@ export function fold(lines: readonly LogLine[]): Session {
   const asks = new Map<number, LineOf<'ask'>>();
   const deliveries = new Map<number, LineOf<'delivered'>>();
   const recalls = new Map<number, LineOf<'recalled'>>();
+  const reminders = new Map<number, LineOf<'reminded'>>();
+  // Self-capture's outcomes, by the call they belong to: `<request>/<call id>`.
+  const captures = new Map<string, LineOf<'capture'>>();
   const firstRequestOfTurn = new Map<number, number>();
   // Each call, keyed by the `seq` of its first fragment (or of its line, where none streamed); found by its request and index.
   const calls = new Map<number, { request: number; t: number; first?: LineOf<'delta'>; id?: string; name?: Tool; args: string; line?: LineOf<'tool_call'> }>();
@@ -677,6 +684,12 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'recalled':
         recalls.set(e.turn, e);
         break;
+      case 'reminded':
+        reminders.set(e.turn, e);
+        break;
+      case 'capture':
+        captures.set(`${e.request}/${e.call}`, e);
+        break;
       case 'seam': {
         if (e.phase) phase = e.phase.to;
         // What the model was sent after the seam -- `diet`'s `seam::render::refill`, whose output the record's head
@@ -793,6 +806,7 @@ export function fold(lines: readonly LogLine[]): Session {
             ...(recalls.has(slot.turn)
               ? { recalled: { recall: recalls.get(slot.turn)!.recall, text: recalls.get(slot.turn)!.text } }
               : {}),
+            ...(reminders.has(slot.turn) ? { reminded: reminders.get(slot.turn)!.text } : {}),
             ...provenance(ask, first?.response),
           });
         }
@@ -840,6 +854,12 @@ export function fold(lines: readonly LogLine[]): Session {
                   ...(line.stdout !== undefined ? { output: line.stdout } : {}),
                   ...(line.stderr ? { stderr: line.stderr } : {}),
                   ...(line.reason !== undefined ? { refusal: line.reason } : {}),
+                  ...(captures.has(`${c.request}/${line.id}`)
+                    ? (() => {
+                        const k = captures.get(`${c.request}/${line.id}`)!;
+                        return { capture: { outcome: k.outcome, entries: k.entries, ...(k.why !== undefined ? { why: k.why } : {}) } };
+                      })()
+                    : {}),
                   ...(line.policy !== undefined ? { policy: line.policy } : {}),
                 }
               : {}),
