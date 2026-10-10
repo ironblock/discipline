@@ -1805,8 +1805,11 @@ struct State {
     /// The results the model pruned (#612), in the order it pruned them.
     pruned: Vec<Prune>,
     /// The operator's edits and flags since a seam last addressed them
-    /// (#150): each entry and `edit` or `flag`, in order.
-    operator_pending: Vec<(String, String)>,
+    /// (#150), in order.
+    operator_pending: Vec<Pending>,
+    /// The pending changes this seam's audit addressed (#150): its answer
+    /// parsed, so each marked note had its line. Cleared as the seam ends.
+    operator_addressed: Vec<String>,
     /// Whether the trunk carries a seam's refill message after the head
     /// (#597): the turns start after it.
     refilled: bool,
@@ -1876,6 +1879,7 @@ impl State {
             recording: tools.and_then(|t| t.recording.clone()),
             pruned: Vec::new(),
             operator_pending: Vec::new(),
+            operator_addressed: Vec::new(),
             refilled: false,
             jobs: BTreeMap::new(),
             notices: Vec::new(),
@@ -3104,9 +3108,11 @@ impl<S: Streaming + 'static> Session<S> {
         }
         let line = patched(None, &patch, &interview.object);
         state.push(line);
-        state
-            .operator_pending
-            .push((new.as_str().to_owned(), "edit".to_owned()));
+        state.operator_pending.push(Pending {
+            entry: new.as_str().to_owned(),
+            kind: "edit",
+            note: None,
+        });
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
@@ -3134,9 +3140,11 @@ impl<S: Streaming + 'static> Session<S> {
             entry: id.to_owned(),
             note: note.to_owned(),
         });
-        state
-            .operator_pending
-            .push((id.to_owned(), "flag".to_owned()));
+        state.operator_pending.push(Pending {
+            entry: id.to_owned(),
+            kind: "flag",
+            note: Some(note.to_owned()),
+        });
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
@@ -5815,7 +5823,7 @@ fn refilled(
     };
     // The render, under the regimen's budget when it declares one (#565).
     let budget = interview.seams.render_budget;
-    let rendered = crate::seam::render::rendered(&interview.object, state.phase.as_deref(), budget);
+    let rendered = marked_render(state, interview, budget);
     let render_budget = budget.map(|budget| log::RenderBudget {
         tokens: budget.tokens,
         over: match budget.over {
@@ -5938,10 +5946,54 @@ fn operator_refusal(state: &State, id: &str, text: &str) -> Option<Refusal> {
 /// Why a model's patch is refused (#150): its target is the operator's.
 const OPERATOR_ENTRY: &str = "operator-entry";
 
-/// The operator's changes a seam carries (#150), each still live, and the
-/// ones no answer addressed. Until the reconciling ask's words are
-/// approved, the model is shown each change only as the render's plain
-/// entry text, so none is addressed and each is carried to the next seam.
+/// `interview`'s working memory rendered for a refill under `budget`, the
+/// operator's changes the seam carries marked (#150).
+fn marked_render(
+    state: &State,
+    interview: &Interview,
+    budget: Option<crate::seam::render::Budget>,
+) -> crate::seam::render::Rendered {
+    crate::seam::render::rendered_marked(
+        &interview.object,
+        state.phase.as_deref(),
+        budget,
+        &operator_marks(&state.operator_pending),
+    )
+}
+
+/// An operator change a seam has yet to address (#150).
+#[derive(Debug, Clone)]
+struct Pending {
+    /// The entry it changed: the edit's new entry, or the flagged one.
+    entry: String,
+    /// `edit` or `flag`.
+    kind: &'static str,
+    /// A flag's note.
+    note: Option<String>,
+}
+
+/// The markers the operator's pending changes put on their notes (#150):
+/// [`crate::seam::render::EDITED`] on an edit's entry, and
+/// [`crate::seam::render::flagged`] for each flag, in order.
+fn operator_marks(pending: &[Pending]) -> crate::seam::render::Marks {
+    let mut marks = crate::seam::render::Marks::new();
+    for change in pending {
+        let Ok(id) = crate::object::EntryId::new(&change.entry) else {
+            continue;
+        };
+        let marker = change.note.as_deref().map_or_else(
+            || crate::seam::render::EDITED.to_owned(),
+            crate::seam::render::flagged,
+        );
+        marks.entry(id).or_default().push_str(&marker);
+    }
+    marks
+}
+
+/// The operator's changes a seam carries (#150) -- each still live, or
+/// addressed by this seam's audit -- and the ones no answer addressed,
+/// which stay pending for the next seam. A change is addressed when the
+/// seam's audit, which marked its note, parsed: every note had its line.
 fn operator_carried(state: &mut State) -> (Option<Vec<log::OperatorChange>>, Option<Vec<String>>) {
     let live = |id: &str| {
         state.interview.as_ref().is_some_and(|interview| {
@@ -5951,25 +6003,36 @@ fn operator_carried(state: &mut State) -> (Option<Vec<log::OperatorChange>>, Opt
                 .is_some_and(|entry| entry.state.is_live())
         })
     };
-    let pending: Vec<(String, String)> = state
+    let addressed = std::mem::take(&mut state.operator_addressed);
+    let carried: Vec<Pending> = state
         .operator_pending
         .iter()
-        .filter(|(entry, _)| live(entry))
+        .filter(|change| addressed.contains(&change.entry) || live(&change.entry))
         .cloned()
         .collect();
-    state.operator_pending.clone_from(&pending);
-    if pending.is_empty() {
+    let unaddressed: Vec<Pending> = carried
+        .iter()
+        .filter(|change| !addressed.contains(&change.entry))
+        .cloned()
+        .collect();
+    state.operator_pending.clone_from(&unaddressed);
+    if carried.is_empty() {
         return (None, None);
     }
-    let changes = pending
+    let changes = carried
         .iter()
-        .map(|(entry, kind)| log::OperatorChange {
-            entry: entry.clone(),
-            kind: kind.clone(),
+        .map(|change| log::OperatorChange {
+            entry: change.entry.clone(),
+            kind: change.kind.to_owned(),
         })
         .collect();
-    let unaddressed = pending.into_iter().map(|(entry, _)| entry).collect();
-    (Some(changes), Some(unaddressed))
+    let mut left: Vec<String> = Vec::new();
+    for change in unaddressed {
+        if !left.contains(&change.entry) {
+            left.push(change.entry);
+        }
+    }
+    (Some(changes), Some(left))
 }
 
 /// `patches`, less each one a model lane made that targets an entry the
@@ -6110,7 +6173,15 @@ fn audit_fired(
         .live()
         .map(|entry| (entry.id.clone(), entry.content.clone()))
         .collect();
-    let ask = crate::seam::audit_ask(reason, &items)?;
+    // The operator's pending changes, marked; with any, the reconciling ask.
+    let marks = operator_marks(&state.operator_pending);
+    let ask = crate::seam::audit_ask_marked(reason, &items, &marks)?;
+    let marked = ask
+        .items
+        .iter()
+        .filter(|id| marks.contains_key(*id))
+        .map(|id| id.as_str().to_owned())
+        .collect();
     let turn = state.turns;
     let finished = state
         .log
@@ -6169,6 +6240,7 @@ fn audit_fired(
         shape,
         cancel,
         items: ask.items,
+        marked,
     })
 }
 
@@ -6253,6 +6325,7 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
         shape,
         cancel,
         items,
+        marked,
     } = fired;
     let Aside {
         result,
@@ -6289,6 +6362,10 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
             } else {
                 let (outcome, patched) = audit_folded(&mut state, &text, &items, fork);
                 lines = patched;
+                // Parsed: every marked note had its line (#150).
+                if outcome != log::ForkOutcome::Unparseable {
+                    state.operator_addressed.clone_from(&marked);
+                }
                 outcome
             }
         }
@@ -6782,6 +6859,8 @@ struct AuditFired {
     cancel: Cancel,
     /// The notes the ask numbered, in its order.
     items: Vec<crate::object::EntryId>,
+    /// The notes among them the operator's markers marked (#150).
+    marked: Vec<String>,
 }
 
 vocabulary! {
@@ -13215,8 +13294,89 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
+    /// #150's audit: the reconciling ask, the operator's entry third and
+    /// marked, the flagged one first, marked with the flag's note.
+    fn the_reconciling_ask_marks_them(log: &[Logged]) {
+        let (asked, question) = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited {
+                    template, question, ..
+                } => Some((*template, question.clone())),
+                _ => None,
+            })
+            .expect("an audit");
+        assert_eq!(asked, crate::dogma::Template::AuditQHumanReconcile);
+        assert!(
+            question.ends_with(
+                "\n3. decision: for the one team that files bugs [edited by the operator]"
+            ),
+            "{question}"
+        );
+        assert!(
+            question.contains(" [flagged: is this still true?]\n2. "),
+            "{question}"
+        );
+    }
+
+    /// #150's refill: both changes the seam carried, marked.
+    fn the_refill_marks_them(session: &Session<Canned>, operator: &str) {
+        // The refill marks the changes the seam carried.
+        let refill = refill_of(session);
+        let edited_line = format!(
+            "{operator}\tdecision: for the one team that files bugs [edited by the operator]\n"
+        );
+        assert!(refill.contains(&edited_line), "{refill}");
+        assert!(
+            refill.contains(" [flagged: is this still true?]\n"),
+            "{refill}"
+        );
+    }
+
+    /// A seam's operator changes and the entries it left unaddressed.
+    type Carried = (Option<Vec<log::OperatorChange>>, Option<Vec<String>>);
+
+    /// Each seam's operator changes and the entries it left unaddressed.
+    fn every_carried(log: &[Logged]) -> Vec<Carried> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Seamed {
+                    operator_changes,
+                    unaddressed,
+                    ..
+                } => Some((operator_changes.clone(), unaddressed.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Each audit's template, in order.
+    fn audited_templates(log: &[Logged]) -> Vec<crate::dogma::Template> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Audited { template, .. } => Some(*template),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The trunk's refill message, after the head.
+    fn refill_of(session: &Session<Canned>) -> String {
+        session.trunk()[template().messages.len()].content.clone()
+    }
+
+    /// A wait for `n` seams.
+    fn seams_logged(n: usize) -> impl Fn(&[Logged]) -> bool {
+        move |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Seamed { .. }))
+                .count()
+                == n
+        }
+    }
+
     /// The seam's operator changes and the entries it left unaddressed.
-    fn carried(log: &[Logged]) -> (Option<Vec<log::OperatorChange>>, Option<Vec<String>>) {
+    fn carried(log: &[Logged]) -> Carried {
         log.iter()
             .find_map(|logged| match &logged.event {
                 Event::Seamed {
@@ -13233,8 +13393,10 @@ pub(in crate::drive) mod tests {
     /// operator's lane, superseding it -- and flags another; edits and flags
     /// of an entry gone or unknown, or with nothing to say, are refused. The
     /// audit's answer that would rewrite the operator's entry is refused per
-    /// patch and the rest of the fold goes on; the seam records both changes
-    /// as carried and, with the reconciling ask not yet approved, unaddressed.
+    /// patch and the rest of the fold goes on. The audit is the reconciling
+    /// ask, each change marked on its note; its answer parsed, so the seam
+    /// records both changes as carried and addressed, and the refill marks
+    /// them too.
     #[test]
     fn the_operators_edits_and_flags_are_theirs_and_a_seam_carries_them() {
         let session = three_decisions_then(
@@ -13284,19 +13446,11 @@ pub(in crate::drive) mod tests {
 
         session.declare_seam(None).expect("admitted");
         let log = wait_until(&session, "the seam", seamed);
-        // The audit listed the operator's entry third; its UPDATE of it is
-        // refused, and the UPDATE of the model's own second note folded.
-        let question = log
-            .iter()
-            .find_map(|logged| match &logged.event {
-                Event::Audited { question, .. } => Some(question.clone()),
-                _ => None,
-            })
-            .expect("an audit");
-        assert!(
-            question.contains("3. decision: for the one team that files bugs"),
-            "{question}"
-        );
+        // The audit listed the operator's entry third, marked, and the
+        // flagged one first, marked with the flag's note, in the reconciling
+        // ask; its UPDATE of the operator's entry is refused, and the UPDATE
+        // of the model's own second note folded.
+        the_reconciling_ask_marks_them(&log);
         assert!(log.iter().any(|logged| matches!(
             &logged.event,
             Event::PatchRefused { op: log::PatchOp::Supersede, entry, .. } if *entry == operator
@@ -13335,9 +13489,87 @@ pub(in crate::drive) mod tests {
                         kind: "flag".to_owned()
                     },
                 ]),
-                Some(vec![operator, flagged])
+                Some(Vec::new())
             )
         );
+        the_refill_marks_them(&session, &operator);
+        reads_whole(&session);
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+    }
+
+    /// #150: an audit whose answer does not parse addresses nothing -- both
+    /// changes carried and left open, still marked -- and the next seam's
+    /// reconciling audit, parsed, addresses them; the seam after that carries
+    /// none and asks the trigger's own ask again.
+    #[test]
+    fn an_unparsed_audit_leaves_the_changes_open_for_the_next_seam() {
+        let session = three_decisions_then(
+            |seams| seams.audit = true,
+            vec![
+                deltas(&["not an audit"]),
+                deltas(&["the next answer"]),
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["the answer after"]),
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+            ],
+        );
+        let before = live_entries(&session);
+        let (edited, flagged) = (before[1].0.clone(), before[0].0.clone());
+        session
+            .edit_entry(&edited, "decision: the operator's version")
+            .expect("an edit");
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        let operator = live_entries(&session)
+            .into_iter()
+            .find(|(_, content)| content == "decision: the operator's version")
+            .expect("the operator's entry")
+            .0;
+        let changes = Some(vec![
+            log::OperatorChange {
+                entry: operator.clone(),
+                kind: "edit".to_owned(),
+            },
+            log::OperatorChange {
+                entry: flagged.clone(),
+                kind: "flag".to_owned(),
+            },
+        ]);
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "seam one", seams_logged(1));
+        assert_eq!(
+            every_carried(&log),
+            [(
+                changes.clone(),
+                Some(vec![operator.clone(), flagged.clone()])
+            )]
+        );
+        let refill = refill_of(&session);
+        assert!(refill.contains(" [edited by the operator]\n"), "{refill}");
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "turn two", |log: &[Logged]| {
+            turns_settled(log) == 2
+        });
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "seam two", seams_logged(2));
+        assert_eq!(every_carried(&log)[1], (changes, Some(Vec::new())));
+        session.ask("and on", None).expect("accepted");
+        wait_until(&session, "turn three", |log: &[Logged]| {
+            turns_settled(log) == 3
+        });
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "seam three", seams_logged(3));
+        assert_eq!(every_carried(&log)[2], (None, None));
+        assert_eq!(
+            audited_templates(&log),
+            [
+                crate::dogma::Template::AuditQHumanReconcile,
+                crate::dogma::Template::AuditQHumanReconcile,
+                crate::dogma::Template::AuditQHuman,
+            ]
+        );
+        let refill = refill_of(&session);
+        assert!(!refill.contains(" [edited by the operator]"), "{refill}");
         reads_whole(&session);
         let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
         super::super::projection::project(&lines, &regime(), None).expect("the log projects");

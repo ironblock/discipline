@@ -547,14 +547,40 @@ impl<R: Ratifier> Controller<R> {
 /// audit. The served session's audit and the controller's are the same ask.
 #[must_use]
 pub fn audit_ask(reason: Reason, items: &[(EntryId, String)]) -> Option<Ask> {
-    let template = pinned_ask(reason)?;
+    audit_ask_marked(reason, items, &render::Marks::new())
+}
+
+/// [`audit_ask`], each note in `marks` carrying its marker after its line
+/// (#150). With a marked note among `items`, the ask is the trigger's
+/// reconciling variant ([`pinned_reconcile`]), which tells the model what
+/// the markers mean and asks it to address each; with none, it is the
+/// trigger's own ask, byte for byte.
+#[must_use]
+pub fn audit_ask_marked(
+    reason: Reason,
+    items: &[(EntryId, String)],
+    marks: &render::Marks,
+) -> Option<Ask> {
+    let marked = items.iter().any(|(id, _)| marks.contains_key(id));
+    let template = if marked {
+        pinned_reconcile(reason)?
+    } else {
+        pinned_ask(reason)?
+    };
     if items.is_empty() {
         return None;
     }
     let numbered = items
         .iter()
         .enumerate()
-        .map(|(index, (_, content))| format!("{}. {}", index + 1, render::one_line(content)))
+        .map(|(index, (id, content))| {
+            format!(
+                "{}. {}{}",
+                index + 1,
+                render::one_line(content),
+                marks.get(id).map_or("", String::as_str)
+            )
+        })
         .collect::<Vec<_>>()
         .join("\n");
     let count = items.len().to_string();
@@ -571,6 +597,19 @@ pub fn audit_ask(reason: Reason, items: &[(EntryId, String)]) -> Option<Ask> {
         text,
         items: items.iter().map(|(id, _)| id.clone()).collect(),
     })
+}
+
+/// The reconciling variant of [`pinned_ask`]'s ask for `reason` (#150):
+/// the same ask, saying the operator changed notes since the last boundary
+/// and asking for each marked note to be addressed.
+#[must_use]
+pub fn pinned_reconcile(reason: Reason) -> Option<Template> {
+    match pinned_ask(reason)? {
+        Template::AuditQHuman => Some(Template::AuditQHumanReconcile),
+        Template::AuditQ => Some(Template::AuditQReconcile),
+        Template::AuditQCadence => Some(Template::AuditQCadenceReconcile),
+        _ => None,
+    }
 }
 
 /// The dogma's audit ask for a trigger, where one is pinned.

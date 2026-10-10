@@ -79,6 +79,19 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
     rendered(object, phase, None).text
 }
 
+/// What a note's line carries after its text (#150): the operator's
+/// markers, by entry -- [`EDITED`], and [`flagged`] for each flag.
+pub type Marks = std::collections::BTreeMap<crate::object::EntryId, String>;
+
+/// The marker on a note the operator's edit wrote (#150).
+pub const EDITED: &str = " [edited by the operator]";
+
+/// The marker on a note the operator flagged with `note` (#150).
+#[must_use]
+pub fn flagged(note: &str) -> String {
+    format!(" [flagged: {}]", one_line(note))
+}
+
 /// [`render`] under a `budget` (#565), still a pure function of the object,
 /// the phase and the budget. With none, or with everything inside it, the
 /// bytes are [`render`]'s. Past it, the goal and the constraints still
@@ -88,8 +101,28 @@ pub fn render(object: &WorkingObject, phase: Option<&str>) -> String {
 /// place, with one line after the working set counting them.
 #[must_use]
 pub fn rendered(object: &WorkingObject, phase: Option<&str>, budget: Option<Budget>) -> Rendered {
+    rendered_marked(object, phase, budget, &Marks::new())
+}
+
+/// [`rendered`], each entry in `marks` carrying its marker after its line
+/// (#150) -- whole, tiered or elided. With no mark, [`rendered`]'s bytes.
+#[must_use]
+pub fn rendered_marked(
+    object: &WorkingObject,
+    phase: Option<&str>,
+    budget: Option<Budget>,
+    marks: &Marks,
+) -> Rendered {
     let mut out = head(object, phase);
-    let line = |id: &str, content: &str| format!("{}\t{}\n", one_line(id), one_line(content));
+    let mark = |id: &crate::object::EntryId| marks.get(id).map_or("", String::as_str);
+    let line = |id: &crate::object::EntryId, content: &str| {
+        format!(
+            "{}\t{}{}\n",
+            one_line(id.as_str()),
+            one_line(content),
+            mark(id)
+        )
+    };
     let brief = |content: &str| BRIEF.iter().any(|kind| content.starts_with(kind));
     // Which entries are reduced: none without a budget; with one, the
     // header and the brief are spent first, then the rest newest first.
@@ -99,7 +132,7 @@ pub fn rendered(object: &WorkingObject, phase: Option<&str>, budget: Option<Budg
             + object
                 .live()
                 .filter(|entry| brief(&entry.content))
-                .map(|entry| estimate(&line(entry.id.as_str(), &entry.content)))
+                .map(|entry| estimate(&line(&entry.id, &entry.content)))
                 .sum::<u64>();
         let mut rest: Vec<_> = object
             .live()
@@ -114,7 +147,7 @@ pub fn rendered(object: &WorkingObject, phase: Option<&str>, budget: Option<Budg
         });
         let mut over = false;
         for entry in rest {
-            let cost = estimate(&line(entry.id.as_str(), &entry.content));
+            let cost = estimate(&line(&entry.id, &entry.content));
             over = over || spent + cost > budget.tokens;
             if over {
                 reduced.insert(entry.id.clone());
@@ -127,7 +160,7 @@ pub fn rendered(object: &WorkingObject, phase: Option<&str>, budget: Option<Budg
     let mut count = 0_u64;
     for entry in object.live() {
         if !reduced.contains(&entry.id) {
-            out.push_str(&line(entry.id.as_str(), &entry.content));
+            out.push_str(&line(&entry.id, &entry.content));
             continue;
         }
         match over {
@@ -140,10 +173,11 @@ pub fn rendered(object: &WorkingObject, phase: Option<&str>, budget: Option<Budg
                     cut.push('…');
                     count += 1;
                 }
-                out.push_str(&line(entry.id.as_str(), &cut));
+                out.push_str(&line(&entry.id, &cut));
             }
             OverBudget::Elide => {
                 out.push_str(&one_line(entry.id.as_str()));
+                out.push_str(mark(&entry.id));
                 out.push('\n');
                 count += 1;
             }
