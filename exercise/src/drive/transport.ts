@@ -37,8 +37,15 @@ export type Command =
   | { readonly kind: 'seam'; readonly to?: string }
   /** End the session: nothing more is asked of it (#289). */
   | { readonly kind: 'end' }
+  /** Open a tangent (#608): what the session learns until it closes is ruled on then, and the trunk returns to here. */
+  | { readonly kind: 'open-tangent'; readonly id: string }
+  /** Close the open tangent: each of its live entries kept, dropped or parked -- exactly those, no more. */
+  | { readonly kind: 'close-tangent'; readonly dispositions: Readonly<Record<string, Disposition>> }
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
   | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision };
+
+/** What a tangent's close does with one of its entries (#608): keeps it live, retires it, or parks it as the tangent's. */
+export type Disposition = 'keep' | 'drop' | 'park';
 
 /** What the operator may answer a prompt with (#298 5981578399 point 8): a scope, or decline. Closed: the surface offers each. */
 export type Decision = 'once' | 'session' | 'workspace' | 'decline';
@@ -101,6 +108,11 @@ export type Refusal = Open<
   | 'too-large'
   /** An ask naming a digest this session was never sent. */
   | 'not-uploaded'
+  /** `diet`'s tangent refusals (#608): one is open; none is; a bad id or no working memory; a map not exactly its entries. */
+  | 'tangent-open'
+  | 'no-tangent'
+  | 'bad-tangent'
+  | 'not-the-scope'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };

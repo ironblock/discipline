@@ -107,7 +107,8 @@ pub const CANONICAL_LANE: &str = "main";
 /// registered with a foreign harness: the adapters are a later issue, and what
 /// they will register is this file's bytes, not a rendering of a struct that
 /// happens to agree with it today.
-const CONTRACT: &str = include_str!("tools/contract.jsonl");
+/// The contract, as the dogma pins it: self-capture set `c1` (#609).
+const CONTRACT: &str = include_str!("../../dogma/self-capture/c1/contract.jsonl");
 
 // ---------------------------------------------------------------------------
 // the contract
@@ -306,6 +307,48 @@ impl fmt::Display for ContractError {
 }
 
 impl Error for ContractError {}
+
+/// The contract's tools as a request declares them (#609): each tool's name
+/// and description, and its parameters as a JSON schema -- text and entry
+/// ids as strings, a choice as a string of its listed words.
+#[must_use]
+pub fn definitions(specs: &[ToolSpec]) -> Vec<crate::client::shape::ToolDefinition> {
+    let text = |s: &str| Value::String(s.to_owned());
+    specs
+        .iter()
+        .map(|spec| {
+            let properties = spec
+                .parameters
+                .iter()
+                .map(|parameter| {
+                    let mut property = BTreeMap::from([("type".to_owned(), text("string"))]);
+                    if parameter.kind == ParamType::Choice {
+                        property.insert(
+                            "enum".to_owned(),
+                            Value::Array(parameter.choices.iter().map(|word| text(word)).collect()),
+                        );
+                    }
+                    (parameter.name.clone(), Value::Object(property))
+                })
+                .collect();
+            let required = spec
+                .parameters
+                .iter()
+                .filter(|parameter| parameter.required)
+                .map(|parameter| text(&parameter.name))
+                .collect();
+            crate::client::shape::ToolDefinition {
+                name: spec.tool.tag().to_owned(),
+                description: Some(spec.description.clone()),
+                schema: Value::Object(BTreeMap::from([
+                    ("properties".to_owned(), Value::Object(properties)),
+                    ("required".to_owned(), Value::Array(required)),
+                    ("type".to_owned(), text("object")),
+                ])),
+            }
+        })
+        .collect()
+}
 
 /// The contract, read from the shipped file.
 ///
@@ -750,6 +793,19 @@ impl Seen {
         bucket.push('\n');
     }
 
+    /// What the model saw, from its two parts (#609): `source`, this turn's
+    /// tool output and prose, and `session_prefix`, everything earlier. A
+    /// served session assembles them from its own log, as [`Seen::of_turn`]
+    /// does from a record, and with the same exclusions: no capture tool's
+    /// output, and no call's arguments.
+    #[must_use]
+    pub fn from_parts(source: String, session_prefix: String) -> Self {
+        Self {
+            source,
+            session_prefix,
+        }
+    }
+
     /// As the groundedness gate's contract input.
     #[must_use]
     pub fn contract_input(&self) -> ContractInput<'_> {
@@ -816,12 +872,33 @@ pub fn apply(call: &Event, index: u32, saw: ContractInput<'_>) -> Result<Effect,
     else {
         return Err(ToolError::NotAToolCall(call.kind().tag()));
     };
-    let Some(named) = CaptureTool::from_tag(tool) else {
+    if CaptureTool::from_tag(tool).is_none() {
         return Err(ToolError::NotACaptureTool(tool.clone()));
-    };
+    }
     let args = args
         .as_ref()
         .ok_or_else(|| ToolError::NoArguments(id.clone()))?;
+    apply_call(id, *at_turn, tool, args, index, saw)
+}
+
+/// [`apply`], from a call's parts rather than a record row (#609): what a
+/// served session hands this lane as the call arrives, before any record
+/// exists. The same contract, the same grounding, the same patches.
+///
+/// # Errors
+///
+/// As [`apply`].
+pub fn apply_call(
+    id: &str,
+    at_turn: u32,
+    tool: &str,
+    args: &BTreeMap<String, Value>,
+    index: u32,
+    saw: ContractInput<'_>,
+) -> Result<Effect, ToolError> {
+    let Some(named) = CaptureTool::from_tag(tool) else {
+        return Err(ToolError::NotACaptureTool(tool.to_owned()));
+    };
     let specs = contract().map_err(ToolError::NoContract)?;
     let spec = specs
         .iter()
@@ -832,7 +909,7 @@ pub fn apply(call: &Event, index: u32, saw: ContractInput<'_>) -> Result<Effect,
     let args = admissible(spec, args)?;
 
     let provenance = Provenance {
-        turn: *at_turn,
+        turn: at_turn,
         lane: LANE.to_owned(),
         fork: None,
         // Trunk. `object::tangent::Tangent::provenance` is the only thing in
@@ -849,8 +926,8 @@ pub fn apply(call: &Event, index: u32, saw: ContractInput<'_>) -> Result<Effect,
         CaptureTool::UpdateRecord => update_record(id, &args, saw, provenance),
         CaptureTool::ResolveEntry => resolve_entry(&args, provenance),
         CaptureTool::ProposePhaseTransition => Ok(advisory(Proposal {
-            from_call: id.clone(),
-            at_turn: *at_turn,
+            from_call: id.to_owned(),
+            at_turn,
             to: text_argument(&args, "to"),
             reason: text_argument(&args, "reason"),
         })),
@@ -1116,8 +1193,8 @@ impl AskKind {
     #[must_use]
     pub fn opening(self) -> &'static str {
         match self {
-            Self::Reminder => "Anything you meant to record?",
-            Self::Sweep => "What did this turn establish that a later turn would need?",
+            Self::Reminder => include_str!("../../dogma/self-capture/c1/reminder.txt"),
+            Self::Sweep => include_str!("../../dogma/self-capture/c1/sweep.txt"),
         }
     }
 }
@@ -1313,6 +1390,50 @@ mod tests {
     // the contract
     // -----------------------------------------------------------------
 
+    /// #609: the contract as a request declares it -- each tool's name and
+    /// description as the contract has them, text and entry ids as strings,
+    /// a choice as a string of its words, and the required parameters named.
+    #[test]
+    fn the_contract_converts_to_the_requests_tool_definitions() {
+        use crate::formats::record::json::Value;
+        let specs = super::contract().expect("the contract");
+        let tools = super::definitions(&specs);
+        assert_eq!(tools.len(), 3);
+        let update = &tools[0];
+        assert_eq!(update.name, "update_record");
+        assert_eq!(
+            update.description.as_deref(),
+            Some(specs[0].description.as_str())
+        );
+        let Value::Object(schema) = &update.schema else {
+            panic!("an object schema");
+        };
+        assert_eq!(
+            schema.get("type"),
+            Some(&Value::String("object".to_owned()))
+        );
+        assert_eq!(
+            schema.get("required"),
+            Some(&Value::Array(vec![
+                Value::String("content".to_owned()),
+                Value::String("field".to_owned())
+            ]))
+        );
+        let Some(Value::Object(properties)) = schema.get("properties") else {
+            panic!("properties");
+        };
+        let Some(Value::Object(field)) = properties.get("field") else {
+            panic!("field");
+        };
+        assert!(matches!(field.get("enum"), Some(Value::Array(words)) if words.len() == 21));
+        let Some(Value::Object(supersedes)) = properties.get("supersedes") else {
+            panic!("supersedes");
+        };
+        assert_eq!(
+            supersedes.get("type"),
+            Some(&Value::String("string".to_owned()))
+        );
+    }
     #[test]
     fn the_contract_describes_every_tool_this_lane_offers_and_no_other() {
         let specs = contract().expect("the shipped contract reads");

@@ -219,6 +219,16 @@ vocabulary! {
         Delivered => "delivered",
         /// Archived items recalled at the tail of a trunk request (v7, #566).
         Recalled => "recalled",
+        /// A tangent opened at the operator's word (v7, #22).
+        TangentOpen => "tangent.open",
+        /// A tangent closed: its entries disposed and the trunk rolled back
+        /// to the fork point (v7, #22).
+        TangentClose => "tangent.close",
+        /// A self-capture call the model elected, and what it wrote to
+        /// working memory (v7, #609).
+        Capture => "capture",
+        /// The self-capture reminder, as a note after an ask (v7, #609).
+        Reminded => "reminded",
     }
 }
 
@@ -398,6 +408,10 @@ vocabulary! {
         DeclareSeam => "declare-seam",
         /// The end.
         End => "end",
+        /// Open a tangent (v7, #22).
+        OpenTangent => "open-tangent",
+        /// Close the open tangent (v7, #22).
+        CloseTangent => "close-tangent",
     }
 }
 
@@ -426,6 +440,16 @@ vocabulary! {
         NoPhaseEdge => "no-phase-edge",
         /// A stop named a turn older than the latest.
         Stale => "stale",
+        /// A seam, or a second tangent, while a tangent is open (v7, #22).
+        TangentOpen => "tangent-open",
+        /// A close with no tangent open (v7, #22).
+        NoTangent => "no-tangent",
+        /// A tangent asked of a session that keeps no working memory, or
+        /// under an id it cannot take (v7, #22).
+        BadTangent => "bad-tangent",
+        /// A close whose dispositions name an entry the tangent did not
+        /// create, or leave one it did unruled (v7, #22).
+        NotTheScope => "not-the-scope",
     }
 }
 
@@ -1150,6 +1174,8 @@ pub enum Event {
         /// The id of the entry it replaces, exactly when `op` is
         /// `supersede`.
         supersedes: Option<String>,
+        /// The tangent it was made under (v7, #22), when one was open.
+        tangent: Option<String>,
     },
     /// Forks' patches delivered to the trunk (v7, the fork delivery lever):
     /// one note at the tail of turn `turn`'s first request, after its ask,
@@ -1176,6 +1202,64 @@ pub enum Event {
         text: String,
         /// Each item it carries, in rank order.
         items: Vec<RecalledItem>,
+    },
+    /// A tangent opened (v7, #22): its id, the turn it forks at, and how
+    /// many messages the trunk held there, the fork point a close rolls the
+    /// trunk back to.
+    TangentOpen {
+        /// The tangent's id, stamped into the provenance of every entry its
+        /// forks patch in.
+        id: String,
+        /// The turns settled when it opened.
+        at_turn: u32,
+        /// The trunk's messages at the fork point.
+        trunk_messages: u64,
+    },
+    /// A tangent closed (v7, #22): every entry it created kept, dropped to
+    /// the archive, or parked, and the trunk rolled back to the fork point.
+    TangentClose {
+        /// The tangent's id.
+        id: String,
+        /// The turns settled when it closed.
+        at_turn: u32,
+        /// The entries kept live.
+        kept: Vec<String>,
+        /// The entries retired to the archive.
+        dropped: Vec<String>,
+        /// The entries parked as the tangent's.
+        parked: Vec<String>,
+        /// Whether working memory's trunk entries rendered at close as they
+        /// did at the fork point (`object::tangent::Closed`).
+        prefix_intact: bool,
+        /// How many messages the rollback took off the trunk.
+        rolled_back: u64,
+    },
+    /// A self-capture call (v7, #609): the model elected one of the
+    /// contract's tools, and this is what it came to in working memory.
+    Capture {
+        /// The `seq` of the trunk `request` whose answer made the call.
+        request: u64,
+        /// The call's id.
+        call: String,
+        /// The tool.
+        tool: String,
+        /// What it came to: `recorded`, `dropped` (the groundedness gate
+        /// kept nothing), `resolved`, `judged` (a verdict that changes no
+        /// entry), `proposed` (advisory, writes nothing) or `refused` (the
+        /// contract or the object refused it).
+        outcome: String,
+        /// The entries it wrote or ruled on, by id.
+        entries: Vec<String>,
+        /// Why, when it was dropped or refused.
+        why: Option<String>,
+    },
+    /// The self-capture reminder (v7, #609): an advisory note after turn
+    /// `turn`'s ask, when the model had recorded nothing for the cadence.
+    Reminded {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
@@ -2643,8 +2727,37 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 op,
                 entry: fields.entry("entry")?,
                 supersedes,
+                tangent: fields.optional_string("tangent")?,
             }
         }
+        Kind::Capture => Event::Capture {
+            request: fields.count("request")?,
+            call: fields.string("call")?,
+            tool: fields.string("tool")?,
+            outcome: fields.string("outcome")?,
+            entries: fields.optional_strings("entries")?.unwrap_or_default(),
+            why: fields.optional_string("why")?,
+        },
+        Kind::Reminded => Event::Reminded {
+            turn: fields.turn("turn")?,
+            text: fields.string("text")?,
+        },
+        Kind::TangentOpen => Event::TangentOpen {
+            id: fields.string("id")?,
+            at_turn: fields.turn("at_turn")?,
+            trunk_messages: fields.count("trunk_messages")?,
+        },
+        Kind::TangentClose => Event::TangentClose {
+            id: fields.string("id")?,
+            at_turn: fields.turn("at_turn")?,
+            kept: fields.optional_strings("kept")?.unwrap_or_default(),
+            dropped: fields.optional_strings("dropped")?.unwrap_or_default(),
+            parked: fields.optional_strings("parked")?.unwrap_or_default(),
+            prefix_intact: fields
+                .optional_flag("prefix_intact")?
+                .ok_or("a `tangent.close` carries no `prefix_intact`")?,
+            rolled_back: fields.count("rolled_back")?,
+        },
         Kind::Recalled => Event::Recalled {
             turn: fields.turn("turn")?,
             recall: fields.tag("recall", RecallState::from_tag)?,
@@ -3570,7 +3683,12 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         Kind::Seam => 6,
-        Kind::Delivered | Kind::Recalled => 7,
+        Kind::Delivered
+        | Kind::Recalled
+        | Kind::TangentOpen
+        | Kind::TangentClose
+        | Kind::Capture
+        | Kind::Reminded => 7,
         _ => 0,
     }
 }
@@ -3602,6 +3720,22 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
             )
         });
     if phase_refusal {
+        return 7;
+    }
+    let tangent_refusal = tags == Tags::Refusal
+        && Refusal::from_tag(tag).is_some_and(|refusal| {
+            matches!(
+                refusal,
+                Refusal::TangentOpen
+                    | Refusal::NoTangent
+                    | Refusal::BadTangent
+                    | Refusal::NotTheScope
+            )
+        });
+    let tangent_command = tags == Tags::Command
+        && Command::from_tag(tag)
+            .is_some_and(|command| matches!(command, Command::OpenTangent | Command::CloseTangent));
+    if tangent_refusal || tangent_command {
         return 7;
     }
     if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
@@ -3822,6 +3956,42 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("op", Tag(Tags::PatchOp)),
                 must_v5("entry", Holds::Entry),
                 may_v5("supersedes", Text),
+                may_v7("tangent", Text),
+            ];
+            F
+        }
+        Kind::Capture => {
+            const F: &[Field] = &[
+                must_v7("request", Count),
+                must_v7("call", Text),
+                must_v7("tool", Text),
+                must_v7("outcome", Text),
+                must_v7("entries", Holds::Strings),
+                may_v7("why", Text),
+            ];
+            F
+        }
+        Kind::Reminded => {
+            const F: &[Field] = &[must_v7("turn", Count), must_v7("text", Text)];
+            F
+        }
+        Kind::TangentOpen => {
+            const F: &[Field] = &[
+                must_v7("id", Text),
+                must_v7("at_turn", Count),
+                must_v7("trunk_messages", Count),
+            ];
+            F
+        }
+        Kind::TangentClose => {
+            const F: &[Field] = &[
+                must_v7("id", Text),
+                must_v7("at_turn", Count),
+                must_v7("kept", Holds::Strings),
+                must_v7("dropped", Holds::Strings),
+                must_v7("parked", Holds::Strings),
+                must_v7("prefix_intact", Holds::Flag),
+                must_v7("rolled_back", Count),
             ];
             F
         }
@@ -4569,6 +4739,7 @@ fn to_value(line: &Line) -> Value {
             op,
             entry,
             supersedes,
+            tangent,
         } => {
             put("fork", count(*fork));
             put("op", text(op.tag()));
@@ -4583,7 +4754,65 @@ fn to_value(line: &Line) -> Value {
             if let Some(replaced) = supersedes {
                 put("supersedes", text(replaced));
             }
+            if let Some(tangent) = tangent {
+                put("tangent", text(tangent));
+            }
             Kind::Patch
+        }
+        Event::Capture {
+            request,
+            call,
+            tool,
+            outcome,
+            entries,
+            why,
+        } => {
+            put("request", count(*request));
+            put("call", text(call));
+            put("tool", text(tool));
+            put("outcome", text(outcome));
+            put(
+                "entries",
+                Value::Array(entries.iter().map(|id| text(id)).collect()),
+            );
+            if let Some(why) = why {
+                put("why", text(why));
+            }
+            Kind::Capture
+        }
+        Event::Reminded { turn, text: note } => {
+            put("turn", count(u64::from(*turn)));
+            put("text", text(note));
+            Kind::Reminded
+        }
+        Event::TangentOpen {
+            id,
+            at_turn,
+            trunk_messages,
+        } => {
+            put("id", text(id));
+            put("at_turn", count(u64::from(*at_turn)));
+            put("trunk_messages", count(*trunk_messages));
+            Kind::TangentOpen
+        }
+        Event::TangentClose {
+            id,
+            at_turn,
+            kept,
+            dropped,
+            parked,
+            prefix_intact,
+            rolled_back,
+        } => {
+            let list = |ids: &[String]| Value::Array(ids.iter().map(|id| text(id)).collect());
+            put("id", text(id));
+            put("at_turn", count(u64::from(*at_turn)));
+            put("kept", list(kept));
+            put("dropped", list(dropped));
+            put("parked", list(parked));
+            put("prefix_intact", Value::Boolean(*prefix_intact));
+            put("rolled_back", count(*rolled_back));
+            Kind::TangentClose
         }
         Event::Seam {
             at_turn,
@@ -5752,6 +5981,7 @@ mod tests {
                     category: None,
                 },
                 supersedes: None,
+                tangent: Some("t/1".to_owned()),
             },
             Event::Patch {
                 fork,
@@ -5762,6 +5992,41 @@ mod tests {
                     category: Some("scope".to_owned()),
                 },
                 supersedes: Some("d1".to_owned()),
+                tangent: None,
+            },
+            Event::TangentOpen {
+                id: "t/1".to_owned(),
+                at_turn: 5,
+                trunk_messages: 11,
+            },
+            Event::TangentClose {
+                id: "t/1".to_owned(),
+                at_turn: 5,
+                kept: vec!["d2".to_owned()],
+                dropped: Vec::new(),
+                parked: Vec::new(),
+                prefix_intact: true,
+                rolled_back: 0,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-c".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "recorded".to_owned(),
+                entries: vec!["r3/call-c".to_owned()],
+                why: None,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-d".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "dropped".to_owned(),
+                entries: Vec::new(),
+                why: Some("the groundedness gate kept nothing of it".to_owned()),
+            },
+            Event::Reminded {
+                turn: 5,
+                text: "Anything you meant to record?".to_owned(),
             },
         ]);
         events
@@ -6153,6 +6418,12 @@ mod tests {
                     // A key of an all-or-none set, added alone, is the
                     // reader's `all_or_none` refusal, not an exclusivity.
                     if all_or_none(kind).contains(absent) {
+                        continue;
+                    }
+                    // A patch names the entry it replaces exactly when its
+                    // `op` is `supersede`: the reader's op rule, not the key
+                    // beside it.
+                    if kind == Kind::Patch && *absent == "supersedes" {
                         continue;
                     }
                     let mut both = object.clone();
@@ -6908,7 +7179,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled"
+             fork.settled patch seam delivered recalled tangent.open tangent.close capture reminded"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -6917,7 +7188,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight seam-not-built nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

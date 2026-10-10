@@ -29,6 +29,10 @@ export type Kind =
   | "seam"
   | "delivered"
   | "recalled"
+  | "tangent.open"
+  | "tangent.close"
+  | "capture"
+  | "reminded"
 ;
 
 export type State =
@@ -48,6 +52,8 @@ export type Command =
   | "cancel"
   | "declare-seam"
   | "end"
+  | "open-tangent"
+  | "close-tangent"
 ;
 
 export type Refusal =
@@ -61,6 +67,10 @@ export type Refusal =
   | "already-in-phase"
   | "no-phase-edge"
   | "stale"
+  | "tangent-open"
+  | "no-tangent"
+  | "bad-tangent"
+  | "not-the-scope"
 ;
 
 export type FailReason =
@@ -498,6 +508,7 @@ export type PatchLine = {
   op: PatchOp;
   entry: PatchEntry;
   supersedes?: string;
+  tangent?: string;
 };
 
 export type SeamLine = {
@@ -546,6 +557,48 @@ export type RecalledLine = {
   items: RecalledItem[];
 };
 
+export type TangentOpenLine = {
+  seq: number;
+  t: number;
+  kind: "tangent.open";
+  id: string;
+  at_turn: number;
+  trunk_messages: number;
+};
+
+export type TangentCloseLine = {
+  seq: number;
+  t: number;
+  kind: "tangent.close";
+  id: string;
+  at_turn: number;
+  kept: string[];
+  dropped: string[];
+  parked: string[];
+  prefix_intact: boolean;
+  rolled_back: number;
+};
+
+export type CaptureLine = {
+  seq: number;
+  t: number;
+  kind: "capture";
+  request: number;
+  call: string;
+  tool: string;
+  outcome: string;
+  entries: string[];
+  why?: string;
+};
+
+export type RemindedLine = {
+  seq: number;
+  t: number;
+  kind: "reminded";
+  turn: number;
+  text: string;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -567,4 +620,8 @@ export type LogLine =
   | SeamLine
   | DeliveredLine
   | RecalledLine
+  | TangentOpenLine
+  | TangentCloseLine
+  | CaptureLine
+  | RemindedLine
 ;

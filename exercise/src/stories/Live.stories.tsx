@@ -5,6 +5,7 @@ import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
 import approvalsOff from '../../../diet/formats/log/fixtures/valid/a-v7-call-that-ran-with-approvals-off.jsonl?raw';
+import phaseMoved from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-moved-a-phase.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -12,6 +13,7 @@ import { App } from '../App.tsx';
 import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
+import { TANGENT_OPEN } from '../drive/served/tangent.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
@@ -310,8 +312,8 @@ export const AttachAScreenshot: Story = {
 };
 
 /**
- * `?drive`: `diet`'s drive declares no phases, and its declare-seam takes none -- so the composer offers no move,
- * says so, and its refill sends the bare declare-seam serve takes.
+ * `?drive`: a log that declares no phase graph -- so the composer offers no move, says so, and its refill sends a
+ * declare-seam naming no phase.
  */
 export const ServedRefillNamesNoPhase: Story = {
   name: '?drive: refill offers no phase, since the drive declares none',
@@ -361,5 +363,58 @@ export const ServedApprovalsUndeclared: Story = {
     const approvals = canvasElement.querySelector<HTMLElement>('.ex-header__lever[data-lever="approvals"]');
     await expect(approvals?.textContent).toBe('approvals undeclared');
     await expect(approvals?.dataset['undeclared']).toBe('');
+  },
+};
+
+/** A served log, from lines the surface holds: one per line, as `serving` streams it. */
+const jsonl = (lines: readonly unknown[]) => lines.map((l) => JSON.stringify(l)).join('\n');
+
+/** `?drive` (#608): with no tangent open, the composer offers to open one, as `t/1`. */
+export const ServedOpenTangent: Story = {
+  name: '?drive: open a tangent',
+  args: { drive: true, web: posting(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    posted.length = 0;
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'open tangent')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'open-tangent', id: 't/1' }]));
+  },
+};
+
+/** `?drive` (#608): a tangent open with two entries of its own -- end it, keeping one and dropping the other. */
+export const ServedEndTangent: Story = {
+  name: '?drive: end a tangent, ruling on each of its entries',
+  args: { drive: true, web: posting(jsonl(TANGENT_OPEN)) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(says(canvasElement)).toBe('your turn'));
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'end tangent…')!);
+    const panel = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('fieldset[aria-label="end tangent t/1"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect([...panel.querySelectorAll('li')].map((li) => li.dataset['entry'])).toEqual(['e1', 'e2']);
+    await userEvent.click(panel.querySelector('li[data-entry="e2"] input[value="drop"]')!);
+    posted.length = 0;
+    await userEvent.click([...panel.querySelectorAll('button')].find((b) => b.textContent === 'close tangent')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'close-tangent', dispositions: { e1: 'keep', e2: 'drop' } }]));
+  },
+};
+
+/**
+ * `?drive`, log v7 (#563): a session with a phase graph. The composer names the phase the log says it is in, offers
+ * exactly the moves the graph allows from there, and its refill sends the phase picked.
+ */
+export const ServedPhaseGraph: Story = {
+  name: '?drive: refill offers the moves the logged phase graph allows, and sends the one picked',
+  args: { drive: true, web: posting(phaseMoved) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
+    const select = canvasElement.querySelector<HTMLSelectElement>('select[aria-label="move to"]');
+    await expect([...(select?.options ?? [])].map((o) => o.value)).toEqual(['review']);
+    posted.length = 0;
+    await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'refill')!);
+    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-seam']));
+    await expect((posted[0] as { phase?: string }).phase).toBe('review');
   },
 };

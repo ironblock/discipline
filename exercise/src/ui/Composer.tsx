@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { ClipboardEvent, DragEvent, FormEvent, KeyboardEvent, MouseEvent } from 'react';
 
 import type { SessionState } from '../session/fold.ts';
-import type { Ack, Command, Link, Uploaded } from '../drive/transport.ts';
+import type { Ack, Command, Disposition, Link, Uploaded } from '../drive/transport.ts';
+import { Segments } from './Segments.tsx';
 import { refusalOf } from './sets.ts';
 import './panel.css';
 import './composer.css';
@@ -20,7 +21,13 @@ export interface ComposerProps {
   readonly hint?: string | undefined;
   /** Where the operator's PNGs go ahead of the ask that names them. Absent: nothing can be attached. */
   readonly upload?: (bytes: Uint8Array) => Promise<Uploaded>;
+  /** The drive takes tangents (#608): offer to open one, and to end the one open. Absent: no tangent control. */
+  readonly tangents?: boolean;
+  /** The tangent open now and the live entries born in it, with their text; and the id the next one opens as. */
+  readonly tangent?: { readonly open?: { readonly id: string; readonly entries: readonly { readonly id: string; readonly text: string }[] }; readonly next: string };
 }
+
+const DISPOSITIONS: readonly Disposition[] = ['keep', 'drop', 'park'];
 
 /** A PNG the drive has taken, waiting for the ask that names it: its digest, and a picture of it for the chip. */
 interface Attached {
@@ -42,7 +49,10 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent }: ComposerProps) {
+  // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
+  const [closing, setClosing] = useState(false);
+  const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
   const [draft, setDraft] = useState('');
   // The operator's attachments (#372): uploaded as they are added, named by digest on the next ask, cleared once taken.
   const [attached, setAttached] = useState<readonly Attached[]>([]);
@@ -73,6 +83,19 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
     setRefusal(refused.known ? refused.label : `not taken: ${refused.label}`);
   };
   const run = (command: Command) => dispatch && void dispatch(command).then(answer);
+
+  const open = tangent?.open;
+  // Every entry the tangent has, ruled: keep unless the operator said otherwise.
+  const dispositions = Object.fromEntries((open?.entries ?? []).map((e) => [e.id, rulings[e.id] ?? 'keep'])) as Record<string, Disposition>;
+  const closeTangent = async () => {
+    if (!dispatch || !open) return;
+    const ack = await dispatch({ kind: 'close-tangent', dispositions });
+    answer(ack);
+    if (ack.ok) {
+      setClosing(false);
+      setRulings({});
+    }
+  };
 
   // Whenever the operator can type: an upload does not depend on what the session is doing (`POST /files`).
   const attachable = dispatch !== undefined && upload !== undefined && link === 'live' && state !== 'ended' && state !== 'connecting';
@@ -158,6 +181,30 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
       data-state={state}
       data-link={link}
     >
+      {tangents && open && closing ? (
+        <fieldset className="ex-composer__tangent" aria-label={`end tangent ${open.id}`}>
+          <legend>
+            end tangent {open.id}: the trunk returns to where it opened; rule on what it learned
+          </legend>
+          {open.entries.length === 0 ? <p className="ex-composer__tangent-none">it learned nothing: closing only rolls the trunk back</p> : null}
+          <ul>
+            {open.entries.map((e) => (
+              <li key={e.id} data-entry={e.id}>
+                <span className="ex-composer__tangent-entry">{e.text}</span>
+                <Segments name={`tangent-${e.id}`} label={`what to do with ${e.text}`} options={DISPOSITIONS} value={dispositions[e.id]!} onPick={(next) => setRulings((now) => ({ ...now, [e.id]: next }))} />
+              </li>
+            ))}
+          </ul>
+          <span className="ex-composer__tangent-actions">
+            <button type="button" disabled={!idle} onClick={() => void closeTangent()}>
+              close tangent
+            </button>
+            <button type="button" onClick={() => setClosing(false)}>
+              not yet
+            </button>
+          </span>
+        </fieldset>
+      ) : null}
       {attached.length > 0 ? (
         <ul className="ex-composer__files" aria-label="attached to this ask">
           {attached.map((a) => (
@@ -204,10 +251,10 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
           {ending ? 'end the session?' : 'end'}
         </button>
         <span className="ex-composer__phase">
-          <span className="ex-composer__label">phase</span> {phases.length === 0 ? 'not declared' : phase || 'not said'}
+          <span className="ex-composer__label">phase</span> {phase || (phases.length === 0 ? 'not declared' : 'not said')}
         </span>
         <span className="ex-composer__seam">
-          {/* `diet`'s drive declares no phases yet (its declare-seam takes none): there, a refill offers no move to make. */}
+          {/* The moves the graph allows from here (#563); with none -- no graph, or the last phase -- a refill names no phase. */}
           {phases.length > 0 ? (
             <>
               <span className="ex-composer__label" aria-hidden="true">move to</span>
@@ -224,6 +271,23 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
             refill
           </button>
         </span>
+        {tangents && tangent ? (
+          open ? (
+            <button type="button" className="ex-composer__tangent-toggle" aria-pressed={closing} disabled={!idle || !dispatch} title={`end tangent ${open.id}: rule on its entries, and roll the trunk back to where it opened`} onClick={() => setClosing(!closing)}>
+              end tangent…
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="ex-composer__tangent-toggle"
+              disabled={!idle || !dispatch}
+              title="open a tangent: what the session learns until you end it is yours to keep, drop or park, and the trunk returns to here"
+              onClick={() => run({ kind: 'open-tangent', id: tangent.next })}
+            >
+              open tangent
+            </button>
+          )
+        ) : null}
         {upload ? (
           <>
             {/* The operator's screenshot (#372): picked, pasted or dropped, sent to the drive now, named by the ask. */}
