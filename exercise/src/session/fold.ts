@@ -59,6 +59,11 @@ export interface UserNode extends Provenance {
    * sent at the tail of the turn's first request, and its framing. Folded, not yet drawn.
    */
   readonly delivered?: { readonly framing: string; readonly text: string };
+  /**
+   * Archived items recalled after this ask (log v7's `recalled`, #566): the note the model was sent after the ask,
+   * and how it matched. Folded, not yet drawn.
+   */
+  readonly recalled?: { readonly recall: string; readonly text: string };
   /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
   readonly files?: readonly FileRef[];
   /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
@@ -457,6 +462,7 @@ export function fold(lines: readonly LogLine[]): Session {
   const generations = new Map<number, GenerationBuilder>();
   const asks = new Map<number, LineOf<'ask'>>();
   const deliveries = new Map<number, LineOf<'delivered'>>();
+  const recalls = new Map<number, LineOf<'recalled'>>();
   const firstRequestOfTurn = new Map<number, number>();
   // Each call, keyed by the `seq` of its first fragment (or of its line, where none streamed); found by its request and index.
   const calls = new Map<number, { request: number; t: number; first?: LineOf<'delta'>; id?: string; name?: Tool; args: string; line?: LineOf<'tool_call'> }>();
@@ -645,6 +651,9 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'delivered':
         deliveries.set(e.turn, e);
         break;
+      case 'recalled':
+        recalls.set(e.turn, e);
+        break;
       case 'seam': {
         if (e.phase) phase = e.phase.to;
         const rendered: SystemNode = {
@@ -729,6 +738,9 @@ export function fold(lines: readonly LogLine[]): Session {
             ...(ask.scoping === true ? { scoping: true as const } : {}),
             ...(deliveries.has(slot.turn)
               ? { delivered: { framing: deliveries.get(slot.turn)!.framing, text: deliveries.get(slot.turn)!.text } }
+              : {}),
+            ...(recalls.has(slot.turn)
+              ? { recalled: { recall: recalls.get(slot.turn)!.recall, text: recalls.get(slot.turn)!.text } }
               : {}),
             ...provenance(ask, first?.response),
           });

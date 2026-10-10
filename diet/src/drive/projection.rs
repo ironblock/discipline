@@ -389,8 +389,8 @@ struct Walk<'a> {
     recording: Option<std::path::PathBuf>,
     /// Each turn's attached files, from its `ask` line.
     ask_files: BTreeMap<u32, Vec<log::RecordedFile>>,
-    /// Each turn's delivered note (v7), from its `delivered` line.
-    notes: BTreeMap<u32, String>,
+    /// Each turn's notes after its ask (v7): its `delivered` and `recalled` lines.
+    notes: BTreeMap<u32, Vec<String>>,
     /// The tools the session's requests declared, rebuilt from
     /// `session.start`'s names (#472), or why they cannot be.
     tools: Result<Vec<ToolDefinition>, String>,
@@ -636,8 +636,10 @@ impl<'a> Walk<'a> {
             Line::Seam { .. } => self.seam(line),
             // Forks' patches delivered (v7): the note follows its turn's ask
             // on the rebuilt trunk, as it does on the session's.
-            Line::Delivered { turn, text, .. } => {
-                self.notes.insert(*turn, text.clone());
+            // Archived items recalled (v7, #566): a note after it too, in
+            // the log's order.
+            Line::Delivered { turn, text, .. } | Line::Recalled { turn, text, .. } => {
+                self.notes.entry(*turn).or_default().push(text.clone());
             }
             // Facts the record has no row for at all, named once per kind.
             Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
@@ -1016,7 +1018,7 @@ impl<'a> Walk<'a> {
     fn head_change(&mut self, seq: u64, turn: u32, logged: &str) {
         let mut messages = self.trunk.clone();
         let asked = self.user_message(turn);
-        let note = self.notes.get(&turn).cloned();
+        let notes = self.notes.get(&turn).cloned().unwrap_or_default();
         let unrebuilt = asked
             .as_ref()
             .err()
@@ -1031,7 +1033,7 @@ impl<'a> Walk<'a> {
                     .find_map(|step| step.unrebuilt.clone())
             });
         messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
-        if let Some(note) = note {
+        for note in notes {
             messages.push(Message::new(Role::User, note));
         }
         for step in self.steps.get(&turn).into_iter().flatten() {
@@ -1196,8 +1198,8 @@ impl<'a> Walk<'a> {
             )
         });
         self.trunk.push(asked);
-        if let Some(note) = self.notes.get(&turn) {
-            self.trunk.push(Message::new(Role::User, note.clone()));
+        for note in self.notes.get(&turn).cloned().unwrap_or_default() {
+            self.trunk.push(Message::new(Role::User, note));
         }
         let taken = self.steps.remove(&turn).unwrap_or_default();
         for step in taken.iter().take(steps) {

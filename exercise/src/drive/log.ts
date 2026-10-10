@@ -288,6 +288,8 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
 
 /** Forks' patches delivered after an ask (v7, the fork delivery lever). */
 export type Delivered = V0.DeliveredLine;
+/** Archived items recalled after an ask (v7, the archive recall lever, #566). */
+export type Recalled = V0.RecalledLine;
 
 export type LogLine =
   | SessionStart
@@ -308,7 +310,8 @@ export type LogLine =
   | ForkSettled
   | Patch
   | Seam
-  | Delivered;
+  | Delivered
+  | Recalled;
 
 export type Kind = LogLine['kind'];
 
