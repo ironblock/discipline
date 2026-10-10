@@ -105,6 +105,10 @@ vocabulary! {
         Budget => "budget",
         /// The declared cadence came round.
         Cadence => "cadence",
+        /// A served session's next trunk request would not fit the context
+        /// window with room for its output (#617): the automatic seam. The
+        /// scripted drive never fires it.
+        Window => "window",
     }
 }
 
@@ -479,6 +483,9 @@ impl<R: Ratifier> Controller<R> {
                     .policy
                     .every_turns
                     .is_some_and(|every| self.turn > 0 && self.turn.is_multiple_of(every)),
+                // The window is a served session's measure, never the
+                // scripted controller's.
+                Reason::Window => false,
             })
             .collect()
     }
@@ -543,7 +550,7 @@ pub fn pinned_ask(reason: Reason) -> Option<Template> {
         Reason::Operator => Some(Template::AuditQHuman),
         Reason::Phase => Some(Template::AuditQ),
         Reason::Cadence => Some(Template::AuditQCadence),
-        Reason::Budget => None,
+        Reason::Budget | Reason::Window => None,
     }
 }
 
@@ -1736,7 +1743,7 @@ mod tests {
     fn the_seams_vocabularies_are_the_words_a_record_carries() {
         assert_eq!(
             Reason::ALL.iter().map(|r| r.tag()).collect::<Vec<_>>(),
-            ["operator", "phase", "budget", "cadence"],
+            ["operator", "phase", "budget", "cadence", "window"],
             "declaration order is precedence: an explicit act outranks every derived one"
         );
         assert_eq!(

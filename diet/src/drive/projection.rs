@@ -933,6 +933,7 @@ impl<'a> Walk<'a> {
             tail_tokens,
             outputs,
             placement,
+            fired,
             ..
         } = &line.event
         else {
@@ -1001,6 +1002,9 @@ impl<'a> Walk<'a> {
             tail_tokens: tailed.then_some(tail_tokens),
             carried_turns: tailed.then_some(carried_turns),
             carried_tokens: tailed.then_some(carried_tokens),
+            // An automatic seam names the prompt that fired it (#617).
+            prompt_tokens: fired.map(|fired| fired.prompt_tokens),
+            window: fired.map(|fired| fired.window),
         });
     }
 
@@ -1790,6 +1794,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            fired: None,
         });
         let projection = project(
             &numbered(events),
@@ -1834,6 +1839,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            fired: None,
         });
         let projection = project(
             &numbered(events),

@@ -1324,6 +1324,11 @@ pub enum Event {
         carried_turns: Option<u64>,
         /// Their estimated tokens, beside `tail_tokens`.
         carried_tokens: Option<u64>,
+        /// The prompt, in tokens as serve sized it, that fired an automatic
+        /// seam (#617); absent on any other seam.
+        prompt_tokens: Option<u64>,
+        /// The context window it would not have fit, beside `prompt_tokens`.
+        window: Option<u64>,
     },
     /// A tool was called.
     ToolCall {
@@ -2481,6 +2486,8 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             tail_tokens: take_optional_count(&mut members, of, "tail_tokens")?,
             carried_turns: take_optional_count(&mut members, of, "carried_turns")?,
             carried_tokens: take_optional_count(&mut members, of, "carried_tokens")?,
+            prompt_tokens: take_optional_count(&mut members, of, "prompt_tokens")?,
+            window: take_optional_count(&mut members, of, "window")?,
         },
         Kind::ToolCall => tool_call(&mut members, of)?,
         Kind::Rejected => Event::Rejected {
@@ -4952,6 +4959,8 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             tail_tokens,
             carried_turns,
             carried_tokens,
+            prompt_tokens,
+            window,
             ..
         } => {
             members.put_u32("at_turn", *at_turn);
@@ -4961,6 +4970,8 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_optional("tail_tokens", count(tail_tokens));
             members.put_optional("carried_turns", count(carried_turns));
             members.put_optional("carried_tokens", count(carried_tokens));
+            members.put_optional("prompt_tokens", count(prompt_tokens));
+            members.put_optional("window", count(window));
         }
         Event::Rejected {
             lane,

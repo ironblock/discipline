@@ -628,6 +628,13 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     {
         triggers.push("budget");
     }
+    // The automatic seam (#617): on unless the regimen turns it off; it
+    // fires only where serve knows the window and keeps working memory.
+    if crate::seam::policy::Served::from_regimen(regimen, None)
+        .map_or(true, |served| !served.window_off)
+    {
+        triggers.push("window");
+    }
     let [disposition, approval, surface, limits] = command_levers(regimen, output_cap);
     let reasoning = match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
         (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
@@ -928,7 +935,10 @@ mod tests {
             &regimen::parse("seam_every_turns = 3\nseam_tail_tokens = 8000\n").expect("a regimen"),
             (8192, "default"),
         );
-        assert_eq!(at(&paced, "seam_trigger"), "operator-declared+cadence");
+        assert_eq!(
+            at(&paced, "seam_trigger"),
+            "operator-declared+cadence+window"
+        );
         assert_eq!(at(&paced, "compaction_depth"), "tail:8000");
     }
     use crate::formats::record::{Budget, Count, ReasoningControl};

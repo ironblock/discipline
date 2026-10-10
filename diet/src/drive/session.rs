@@ -555,6 +555,8 @@ pub enum Event {
         outputs: Option<(String, u64)>,
         /// The render's budget and what it did (#565), when declared.
         render_budget: Option<log::RenderBudget>,
+        /// The prompt that fired it and the window, on a `window` seam (#617).
+        fired: Option<log::SeamFired>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -1270,15 +1272,8 @@ impl State {
     /// was added since; with none to go on, or a prompt that shrank (a seam),
     /// the whole estimate plus [`ESTIMATE_PAD`].
     fn sized(&mut self, shape: &mut RequestShape, ceiling: u32) -> u32 {
-        let estimate: u64 = shape
-            .messages
-            .iter()
-            .map(crate::seam::render::estimated_tokens)
-            .sum();
-        let prompt = match self.measured_prompt {
-            Some((measured, then)) if estimate >= then => measured + (estimate - then),
-            _ => estimate + ESTIMATE_PAD,
-        };
+        let estimate = estimate_of(shape);
+        let prompt = self.prompt_of(shape);
         self.sent_estimate = Some(estimate);
         let cap = clamped(ceiling, shape.limits.context_window, prompt);
         shape.limits.max_output_tokens = cap;
@@ -1309,6 +1304,18 @@ impl State {
         match failure {
             TransportFailure::Timeout { .. } => None,
             _ => self.overflow(false),
+        }
+    }
+
+    /// The prompt a request on `shape` would send, as [`State::sized`]
+    /// sizes it (#588): the latest measured prompt plus the estimate of what
+    /// was added since; with none to go on, or a prompt that shrank (a
+    /// seam), the whole estimate plus [`ESTIMATE_PAD`].
+    fn prompt_of(&self, shape: &RequestShape) -> u64 {
+        let estimate = estimate_of(shape);
+        match self.measured_prompt {
+            Some((measured, then)) if estimate >= then => measured + (estimate - then),
+            _ => estimate + ESTIMATE_PAD,
         }
     }
 
@@ -1929,6 +1936,8 @@ impl<S: Streaming + 'static> Session<S> {
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
         // finding 21).
+        // The automatic seam (#617), before the request is sized.
+        window_seam(&self.shared.template, &mut state, &mut shape);
         let max_tokens = state.sized(&mut shape, self.shared.template.limits.max_output_tokens);
         let request = state.push(Event::Requested {
             turn,
@@ -2103,7 +2112,7 @@ impl<S: Streaming + 'static> Session<S> {
         refill_trunk(
             &self.shared.template,
             &mut state,
-            crate::seam::Reason::Operator,
+            (crate::seam::Reason::Operator, None),
             to.map(str::to_owned),
         );
         drop(state);
@@ -2932,7 +2941,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tool_outputs,
             outputs,
             render_budget,
+            fired,
         } => log::Event::Seam {
+            fired: *fired,
             phase: phase.clone(),
             at_turn: *at_turn,
             reason: match reason {
@@ -2940,6 +2951,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 crate::seam::Reason::Phase => log::SeamReason::Phase,
                 crate::seam::Reason::Budget => log::SeamReason::Budget,
                 crate::seam::Reason::Cadence => log::SeamReason::Cadence,
+                crate::seam::Reason::Window => log::SeamReason::Window,
             },
             prefix_hash_before: prefix_hash_before.clone(),
             prefix_hash_after: prefix_hash_after.clone(),
@@ -3471,6 +3483,8 @@ fn run_calls<S: Streaming>(
     state.ran.clone_from(exchange);
     shape.messages.push(said);
     shape.messages.extend(results);
+    // The automatic seam (#617), between the turn's steps too.
+    window_seam(&shared.template, &mut state, shape);
     let max_tokens = state.sized(shape, shared.template.limits.max_output_tokens);
     let next = state.push(Event::Requested {
         turn,
@@ -4100,7 +4114,7 @@ fn one_call<S: Streaming>(
 fn refill_trunk(
     template: &RequestShape,
     state: &mut State,
-    reason: crate::seam::Reason,
+    (reason, fired): (crate::seam::Reason, Option<log::SeamFired>),
     to: Option<String>,
 ) {
     // The move the graph allowed, made before the render, so the refill
@@ -4199,7 +4213,62 @@ fn refill_trunk(
         tool_outputs,
         outputs,
         render_budget,
+        fired,
     });
+}
+
+/// The automatic seam (#617), checked before every trunk request on
+/// `shape`: when serve knows the window, the regimen has not turned it off
+/// ([`crate::seam::policy::SEAM_WINDOW`]), no tangent is open, working
+/// memory holds an entry and the trunk holds turns the refill would drop,
+/// and the prompt as sized (#588) would leave less than
+/// [`crate::seam::policy::WINDOW_RESERVE`] -- or the output cap, if more --
+/// of the window: the trunk is refilled, and the turn's own messages so far
+/// ride after the refill as they rode after the trunk. Otherwise the request
+/// goes as it is, as Pi, `OpenCode` 2 and Qwen Code all send it when there is
+/// nothing to compact.
+fn window_seam(template: &RequestShape, state: &mut State, shape: &mut RequestShape) {
+    let Some(window) = shape.limits.context_window else {
+        return;
+    };
+    let Some(interview) = state.interview.as_ref() else {
+        return;
+    };
+    if interview.seams.window_off
+        || state.tangent.is_some()
+        || interview.object.live().next().is_none()
+        || !shape.messages.starts_with(&state.trunk)
+    {
+        return;
+    }
+    let turns = state
+        .trunk
+        .get(template.messages.len() + usize::from(state.refilled)..)
+        .unwrap_or_default();
+    if crate::seam::render::tail(turns, interview.seams.tail_tokens).len() == turns.len() {
+        return;
+    }
+    let prompt = state.prompt_of(shape);
+    let reserve =
+        u64::from(template.limits.max_output_tokens).max(crate::seam::policy::WINDOW_RESERVE);
+    if prompt <= window.saturating_sub(reserve) {
+        return;
+    }
+    let own = shape.messages.split_off(state.trunk.len());
+    refill_trunk(
+        template,
+        state,
+        (
+            crate::seam::Reason::Window,
+            Some(log::SeamFired {
+                prompt_tokens: prompt,
+                window,
+            }),
+        ),
+        None,
+    );
+    shape.messages.clone_from(&state.trunk);
+    shape.messages.extend(own);
 }
 
 /// What a seam at `at_turn` archives (#566): each message of `compacted`,
@@ -4404,7 +4473,7 @@ fn turn_over(template: &RequestShape, state: &mut State) {
                 .due(state.turns - state.turns_at_seam, state.trunk_tokens)
         });
     if let Some(reason) = due {
-        refill_trunk(template, state, reason, None);
+        refill_trunk(template, state, (reason, None), None);
     }
 }
 
@@ -4412,6 +4481,15 @@ fn turn_over(template: &RequestShape, state: &mut State) {
 /// prompt's estimate (#588): 5% of it, or 10,000 tokens if that is more.
 fn margin(window: i128) -> i128 {
     (window * 5 / 100).max(10_000)
+}
+
+/// The estimated tokens of `shape`'s messages (#588).
+fn estimate_of(shape: &RequestShape) -> u64 {
+    shape
+        .messages
+        .iter()
+        .map(crate::seam::render::estimated_tokens)
+        .sum()
 }
 
 /// The pad added to a prompt that is wholly estimated (#588): Qwen Code's,
@@ -6598,6 +6676,7 @@ pub(in crate::drive) mod tests {
                 tool_outputs: log::SeamToolOutputs::Evict,
                 outputs: None,
                 render_budget: None,
+                fired: None,
             },
             Event::Recalled {
                 turn: 2,
@@ -6967,6 +7046,7 @@ pub(in crate::drive) mod tests {
                 carried_output_bytes: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
+                fired: None,
             },
             log::Event::Recalled {
                 turn: 2,
@@ -10207,6 +10287,206 @@ pub(in crate::drive) mod tests {
         Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
     }
 
+    /// A self-capturing session over a `window`-token context, its seam
+    /// policy `seams`, playing `acts` (#617).
+    fn windowed(
+        acts: Vec<Vec<Step>>,
+        window: u64,
+        seams: crate::seam::policy::Served,
+    ) -> Session<Canned> {
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.seams = seams;
+        let mut shape = template();
+        shape.limits.context_window = Some(window);
+        declare_self_capture(&mut shape, Some(&interview));
+        Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
+    }
+
+    /// The acts of #617's two turns: turn one records a fact the trunk said
+    /// and answers; turn two takes a step the server measures at
+    /// `measured` prompt tokens, then answers.
+    fn two_turns_measuring(measured: u64) -> Vec<Vec<Step>> {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let timings = |prompt: u64| {
+            Step::Timings(Timings {
+                prompt_n: Some(prompt),
+                cache_n: Some(0),
+                ..Timings::default()
+            })
+        };
+        vec![
+            vec![
+                Step::Delta(SAID.to_owned()),
+                record("call-1", "fact", SAID),
+                timings(1_000),
+            ],
+            vec![Step::Delta("done".to_owned()), timings(1_100)],
+            vec![
+                Step::Delta("Reading it now.".to_owned()),
+                record("call-2", "fact", "Reading it now."),
+                timings(measured),
+            ],
+            deltas(&["done again"]),
+        ]
+    }
+
+    fn window_seams(log: &[Logged]) -> Vec<(u64, u32, Option<log::SeamFired>)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Seamed {
+                    reason: crate::seam::Reason::Window,
+                    at_turn,
+                    fired,
+                    ..
+                } => Some((logged.seq, *at_turn, *fired)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #617: before a step's request whose prompt would leave less than the
+    /// reserve of the window, the trunk is refilled from working memory --
+    /// under the turn, between its steps -- and the turn goes on: the next
+    /// request carries the refill, then the turn's own ask and step. The
+    /// seam names the prompt that fired it and the window, the log reads
+    /// back, and the record projects it.
+    #[test]
+    fn a_step_that_would_overflow_the_window_seams_first_and_the_turn_goes_on() {
+        let session = windowed(
+            two_turns_measuring(90_000),
+            100_000,
+            crate::seam::policy::Served::default(),
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let seams = window_seams(&log);
+        assert_eq!(seams.len(), 1, "{log:#?}");
+        let (at, at_turn, fired) = seams[0];
+        assert_eq!(at_turn, 2);
+        let fired = fired.expect("its sizes");
+        assert_eq!(fired.window, 100_000);
+        assert!(fired.prompt_tokens > 80_000, "{fired:?}");
+        // Under the turn: after its first request, before its next.
+        let turn_two_requests: Vec<u64> = log
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        turn: 2,
+                        lane: Lane::Trunk,
+                        ..
+                    }
+                )
+            })
+            .map(|logged| logged.seq)
+            .collect();
+        assert_eq!(turn_two_requests.len(), 2);
+        assert!(turn_two_requests[0] < at && at < turn_two_requests[1]);
+        // The request after it: the head, the refill, then turn two's ask
+        // and its step -- turn one is gone from it.
+        let sent = session.shared.transport.sent();
+        let after = &sent[3].messages;
+        assert!(
+            !after
+                .iter()
+                .any(|message| message.content == "how are blank lines treated?"),
+            "{after:#?}"
+        );
+        assert!(after.iter().any(|message| message.content == "second"));
+        reads_whole(&session);
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        let projected = super::super::projection::project(
+            &lines,
+            &regime(),
+            Some(super::super::projection::Engine::Commit("e7051ef")),
+        )
+        .expect("the log projects");
+        let rendered = crate::formats::record::render(&crate::formats::record::Record {
+            events: projected.events.clone(),
+        });
+        crate::formats::record::parse(&rendered)
+            .unwrap_or_else(|why| panic!("the record does not read: {why:?}\n{rendered}"));
+        // The record's seam row names the prompt that fired it and the
+        // window.
+        assert!(
+            projected.events.iter().any(|event| matches!(
+                event,
+                crate::formats::record::Event::Seam {
+                    at_turn: 2,
+                    prompt_tokens: Some(prompt),
+                    window: Some(100_000),
+                    ..
+                } if *prompt == fired.prompt_tokens
+            )),
+            "{:#?}",
+            projected.events
+        );
+    }
+
+    /// #617: with room in the window no seam fires; turned off by the
+    /// regimen none fires however full it is; and with nothing in working
+    /// memory the request goes as it is.
+    #[test]
+    fn no_window_seam_with_room_when_turned_off_or_with_nothing_to_refill_from() {
+        let run = |session: Session<Canned>| {
+            session
+                .ask("how are blank lines treated?", None)
+                .expect("accepted");
+            wait_until(&session, "turn one", settled);
+            session.ask("second", None).expect("accepted");
+            let log = wait_until(&session, "turn two", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+            });
+            reads_whole(&session);
+            window_seams(&log).len()
+        };
+        let roomy = windowed(
+            two_turns_measuring(10_000),
+            100_000,
+            crate::seam::policy::Served::default(),
+        );
+        assert_eq!(run(roomy), 0);
+        let off = windowed(
+            two_turns_measuring(90_000),
+            100_000,
+            crate::seam::policy::Served {
+                window_off: true,
+                ..crate::seam::policy::Served::default()
+            },
+        );
+        assert_eq!(run(off), 0);
+        let mut acts = two_turns_measuring(90_000);
+        acts[0] = vec![
+            Step::Delta("Nothing worth keeping.".to_owned()),
+            record(
+                "call-1",
+                "fact",
+                "The cache is flushed every ninety seconds.",
+            ),
+        ];
+        acts[2][1] = record(
+            "call-2",
+            "fact",
+            "The cache is flushed every ninety seconds.",
+        );
+        let empty = windowed(acts, 100_000, crate::seam::policy::Served::default());
+        assert_eq!(run(empty), 0);
+    }
+
     fn record(id: &str, field: &str, content: &str) -> Step {
         Step::call(
             0,
@@ -10947,6 +11227,7 @@ pub(in crate::drive) mod tests {
                     tail_tokens,
                     outputs: state,
                     render_budget: None,
+                    window_off: false,
                 },
                 ..interviewing(&[log::Warrant::Read])
             }),
@@ -11278,6 +11559,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -11334,6 +11616,7 @@ pub(in crate::drive) mod tests {
                     tail_tokens,
                     outputs: log::SeamToolOutputs::Evict,
                     render_budget: None,
+                    window_off: false,
                 })),
             )
         };
@@ -11405,6 +11688,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -11436,6 +11720,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -11478,6 +11763,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -11522,6 +11808,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -11554,6 +11841,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -11727,6 +12015,7 @@ pub(in crate::drive) mod tests {
                 carried_output_bytes: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
+                fired: None,
             }
         );
 

@@ -1203,6 +1203,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tail_tokens: None,
                 carried_turns: None,
                 carried_tokens: None,
+                // Never the window's: the scripted drive has none.
+                prompt_tokens: None,
+                window: None,
             });
             seams.push(seam);
         }

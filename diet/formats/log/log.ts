@@ -182,6 +182,7 @@ export type SeamReason =
   | "phase"
   | "budget"
   | "cadence"
+  | "window"
 ;
 
 export type Framing =
@@ -539,6 +540,8 @@ export type SeamLine = {
   render_over_budget?: string;
   render_tokens?: number;
   render_reduced?: number;
+  prompt_tokens?: number;
+  window?: number;
 };
 
 export type DeliveredLine = {
