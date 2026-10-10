@@ -831,6 +831,12 @@ fn seam_triggers(regimen: &Regimen) -> String {
     {
         triggers.push("window");
     }
+    // #124: the model proposes a move through self-capture's tool, ruled by
+    // the graph, and the operator ratifies it.
+    let phased = crate::seam::policy::phase_graph(regimen).is_ok_and(|graph| !graph.is_empty());
+    if phased && crate::drive::session::self_capture(regimen).is_some() {
+        triggers.push("model-proposed");
+    }
     triggers.join("+")
 }
 
@@ -924,6 +930,20 @@ fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4
 #[cfg(test)]
 mod tests {
     use super::{UNDECLARED, regime_of, serve_levers};
+
+    /// #124: a regimen that declares phases and turns self-capture on arms
+    /// the model's proposal, ratified by the operator; either alone does not.
+    #[test]
+    fn the_seam_trigger_names_a_model_proposed_move_where_both_are_on() {
+        let levers = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["seam_trigger"]
+                .clone()
+        };
+        let phased = "phases = [\"plan\", \"build\"]\n[phase_transitions]\nplan = [\"build\"]\n";
+        assert!(levers(&format!("self_capture = true\n{phased}")).contains("model-proposed"));
+        assert!(!levers(phased).contains("model-proposed"));
+        assert!(!levers("self_capture = true\n").contains("model-proposed"));
+    }
 
     #[test]
     fn the_output_cap_is_the_flag_else_the_regimens_else_the_default_and_steps_read_top_level_first()

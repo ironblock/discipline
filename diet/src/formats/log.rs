@@ -227,6 +227,8 @@ vocabulary! {
         /// A tool result the model pruned, replaced at a later seam (v7,
         /// #612).
         Pruned => "pruned",
+        /// The operator's ruling on the model's phase proposal (v7, #124).
+        PhaseRuled => "phase.ruled",
         /// A tangent opened at the operator's word (v7, #22).
         TangentOpen => "tangent.open",
         /// A tangent closed: its entries disposed and the trunk rolled back
@@ -452,6 +454,8 @@ vocabulary! {
         CloseTangent => "close-tangent",
         /// Move the running command to the background (v7, #614).
         Background => "background",
+        /// Rule on the model's pending phase proposal (v7, #124).
+        RatifyPhase => "ratify-phase",
     }
 }
 
@@ -492,6 +496,9 @@ vocabulary! {
         NotTheScope => "not-the-scope",
         /// A move to the background with no command running (v7, #614).
         NothingRunning => "nothing-running",
+        /// A phase ruling named no pending proposal (v7, #124): none is
+        /// pending, or the call it names is not the one that is.
+        NoProposal => "no-proposal",
     }
 }
 
@@ -1360,6 +1367,19 @@ pub enum Event {
         /// The note as sent.
         text: String,
     },
+    /// The operator's ruling on the model's pending phase proposal (v7,
+    /// #124): `seam`, a seam that moves to `to`; `continue`, the phase moved
+    /// to `to` with the trunk kept; `stay`, declined.
+    PhaseRuled {
+        /// The id of the `propose_phase_transition` call it rules on.
+        call: String,
+        /// `seam`, `continue` or `stay`.
+        choice: String,
+        /// The phase the session was in; absent before any.
+        from: Option<String>,
+        /// The phase proposed.
+        to: String,
+    },
     /// A tool result the model pruned (v7, #612), logged when the tool
     /// answered: a later seam carries `text` in its place.
     Pruned {
@@ -1428,6 +1448,11 @@ pub enum Event {
         /// The interview fork that made the call (#610), when a fork
         /// answered through the capture tools; absent for the trunk's own.
         fork: Option<u64>,
+        /// A phase proposal's move (v7, #124): the phase the session was in,
+        /// when it was in one. Only on a `propose_phase_transition` call.
+        from: Option<String>,
+        /// The phase a `propose_phase_transition` call proposed (v7, #124).
+        to: Option<String>,
     },
     /// The self-capture reminder (v7, #609): an advisory note after turn
     /// `turn`'s ask, when the model had recorded nothing for the cadence.
@@ -3107,6 +3132,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             entries: fields.optional_strings("entries")?.unwrap_or_default(),
             why: fields.optional_string("why")?,
             fork: fields.optional_count("fork")?,
+            from: fields.optional_string("from")?,
+            to: fields.optional_string("to")?,
         },
         Kind::ForkSkipped => Event::ForkSkipped {
             of_turn: fields.turn("of_turn")?,
@@ -3149,6 +3176,19 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
         Kind::Notice => Event::Notice {
             turn: fields.turn("turn")?,
             text: fields.string("text")?,
+        },
+        Kind::PhaseRuled => Event::PhaseRuled {
+            call: fields.string("call")?,
+            choice: match fields.string("choice")?.as_str() {
+                choice @ ("seam" | "continue" | "stay") => choice.to_owned(),
+                other => {
+                    return Err(format!(
+                        "a phase ruling's `choice` is `seam`, `continue` or `stay`, not `{other}`"
+                    ));
+                }
+            },
+            from: fields.optional_string("from")?,
+            to: fields.string("to")?,
         },
         Kind::Pruned => Event::Pruned {
             turn: fields.turn("turn")?,
@@ -4148,6 +4188,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Delivered
         | Kind::Recalled
         | Kind::Pruned
+        | Kind::PhaseRuled
         | Kind::TangentOpen
         | Kind::TangentClose
         | Kind::Capture
@@ -4208,11 +4249,16 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
                     | Refusal::NoTangent
                     | Refusal::BadTangent
                     | Refusal::NotTheScope
+                    | Refusal::NoProposal
             )
         });
     let tangent_command = tags == Tags::Command
-        && Command::from_tag(tag)
-            .is_some_and(|command| matches!(command, Command::OpenTangent | Command::CloseTangent));
+        && Command::from_tag(tag).is_some_and(|command| {
+            matches!(
+                command,
+                Command::OpenTangent | Command::CloseTangent | Command::RatifyPhase
+            )
+        });
     if tangent_refusal || tangent_command {
         return 7;
     }
@@ -4472,6 +4518,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("entries", Holds::Strings),
                 may_v7("why", Text),
                 may_v7("fork", Count),
+                may_v7("from", Text),
+                may_v7("to", Text),
             ];
             F
         }
@@ -4537,6 +4585,15 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("window", Count),
                 may_v7("pruned", Holds::Strings),
                 may_v7("warm", Holds::Timings),
+            ];
+            F
+        }
+        Kind::PhaseRuled => {
+            const F: &[Field] = &[
+                must_v7("call", Text),
+                must_v7("choice", Text),
+                may_v7("from", Text),
+                must_v7("to", Text),
             ];
             F
         }
@@ -5396,6 +5453,8 @@ fn to_value(line: &Line) -> Value {
             entries,
             why,
             fork,
+            from,
+            to,
         } => {
             put("request", count(*request));
             put("call", text(call));
@@ -5410,6 +5469,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(fork) = fork {
                 put("fork", count(*fork));
+            }
+            if let Some(from) = from {
+                put("from", text(from));
+            }
+            if let Some(to) = to {
+                put("to", text(to));
             }
             Kind::Capture
         }
@@ -5618,6 +5683,20 @@ fn to_value(line: &Line) -> Value {
                 ),
             );
             Kind::Recalled
+        }
+        Event::PhaseRuled {
+            call,
+            choice,
+            from,
+            to,
+        } => {
+            put("call", text(call));
+            put("choice", text(choice));
+            if let Some(from) = from {
+                put("from", text(from));
+            }
+            put("to", text(to));
+            Kind::PhaseRuled
         }
         Event::Pruned {
             turn,
@@ -6780,6 +6859,8 @@ mod tests {
                 entries: vec!["r3/call-c".to_owned()],
                 why: None,
                 fork: None,
+                to: None,
+                from: None,
             },
             Event::Capture {
                 request: 3,
@@ -6789,6 +6870,31 @@ mod tests {
                 entries: Vec::new(),
                 why: Some("the groundedness gate kept nothing of it".to_owned()),
                 fork: Some(7),
+                to: None,
+                from: None,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-p".to_owned(),
+                tool: "propose_phase_transition".to_owned(),
+                outcome: "proposed".to_owned(),
+                entries: Vec::new(),
+                why: None,
+                fork: None,
+                from: Some("plan".to_owned()),
+                to: Some("build".to_owned()),
+            },
+            Event::PhaseRuled {
+                call: "call-p".to_owned(),
+                choice: "seam".to_owned(),
+                from: Some("plan".to_owned()),
+                to: "build".to_owned(),
+            },
+            Event::PhaseRuled {
+                call: "call-q".to_owned(),
+                choice: "stay".to_owned(),
+                from: None,
+                to: "plan".to_owned(),
             },
             Event::Reminded {
                 turn: 5,
@@ -7977,7 +8083,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
+             fork.settled patch seam delivered recalled pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -7986,7 +8092,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight seam-not-built nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

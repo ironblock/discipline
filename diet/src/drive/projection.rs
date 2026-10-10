@@ -712,6 +712,7 @@ impl<'a> Walk<'a> {
             Line::IdleGap { .. } => log::Kind::IdleGap,
             Line::Refused { .. } => log::Kind::Refused,
             Line::Capture { .. } => log::Kind::Capture,
+            Line::PhaseRuled { .. } => log::Kind::PhaseRuled,
             Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
             Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
@@ -829,6 +830,9 @@ impl<'a> Walk<'a> {
             | Line::TimeoutNear { .. }
             | Line::ForkSkipped { .. }
             | Line::Capture { .. }
+            // The operator's ruling on a phase proposal (#124): a seam it
+            // declares has its own row.
+            | Line::PhaseRuled { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
             | Line::Patch { fork: None, .. } => self.no_row(line),
