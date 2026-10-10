@@ -481,6 +481,9 @@ fn serve(args: &[String]) -> ExitCode {
     let substrate = regime
         .as_ref()
         .map(|regime| regime.substrates[0].id.as_str());
+    if let Err(why) = tls_only_for_an_api(&trunk_endpoint, substrate) {
+        return fail(EXIT_INPUT, &why);
+    }
     let engine = match substrate
         .map(|id| diet::drive::engine::check_served(&transport, id))
         .transpose()
@@ -876,6 +879,7 @@ fn offboard_seat(
         Ok(endpoint) => chat_endpoint(endpoint),
         Err(why) => return Err(format!("{endpoint} is not an endpoint: {why}")),
     };
+    tls_only_for_an_api(&endpoint, Some(id))?;
     if endpoint == *trunk {
         return Err(format!(
             "--seat-endpoint is the trunk's own endpoint: a seat on the executor's server is \
@@ -916,6 +920,39 @@ fn offboard_seat(
         },
         template,
     )))
+}
+
+/// An `https` endpoint is a hosted API's (#555): served for a substrate the
+/// registry declares `server_kind = "api"`, and refused for any other, or
+/// for none. A server we run is reached in the clear on a network we own;
+/// one we reach over TLS is one we do not, and its entry has to say so.
+///
+/// # Errors
+///
+/// An `https` endpoint with no substrate, or one whose entry is not `api`.
+fn tls_only_for_an_api(endpoint: &Endpoint, substrate: Option<&str>) -> Result<(), String> {
+    if !endpoint.tls {
+        return Ok(());
+    }
+    let api = substrate
+        .map(|id| {
+            let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+            diet::drive::served::ServerKind::of(id, &identity)
+                .map(|kind| kind == diet::drive::served::ServerKind::Api)
+        })
+        .transpose()?;
+    match (substrate, api) {
+        (Some(_), Some(true)) => Ok(()),
+        (Some(id), _) => Err(format!(
+            "an https endpoint is a hosted API's, and `{id}`'s entry is not \
+             `server_kind = \"api\"`: a server we run is reached at its http address"
+        )),
+        (None, _) => Err(
+            "an https endpoint is a hosted API's, and without a regimen there is no \
+             registry entry to say this one is"
+                .to_owned(),
+        ),
+    }
 }
 
 /// The dialect the registry names for substrate `id` (#496): llama.cpp's

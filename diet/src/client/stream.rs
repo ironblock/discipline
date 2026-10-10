@@ -30,7 +30,7 @@
 use std::collections::VecDeque;
 use std::fmt;
 use std::io::{self, Read as _, Write as _};
-use std::net::{Shutdown, TcpStream, ToSocketAddrs as _};
+use std::net::{Shutdown, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -367,6 +367,7 @@ pub struct HttpStream {
     endpoint: Endpoint,
     reply_cap: usize,
     bearer: Option<Bearer>,
+    trust: super::tls::Trust,
 }
 
 /// A credential sent as `Authorization: Bearer <key>` -- what the DoD-1
@@ -401,7 +402,15 @@ impl HttpStream {
             endpoint,
             reply_cap: transport::MAX_REPLY_BYTES,
             bearer: None,
+            trust: super::tls::Trust::default(),
         }
+    }
+
+    /// The same, trusting `trust`'s roots for an `https` endpoint.
+    #[must_use]
+    pub fn with_trust(mut self, trust: super::tls::Trust) -> Self {
+        self.trust = trust;
+        self
     }
 
     /// The same, sending `bearer` with every request.
@@ -451,7 +460,12 @@ impl HttpStream {
              {authorization}Connection: close\r\n\r\n",
             self.endpoint.host, self.endpoint.port
         );
-        transport::exchange(&self.endpoint, &request, self.reply_cap, deadline)
+        transport::exchange(
+            (&self.endpoint, &self.trust),
+            &request,
+            self.reply_cap,
+            deadline,
+        )
     }
 
     /// The same, with a smaller cap -- the unstreamed transport's reason,
@@ -463,6 +477,7 @@ impl HttpStream {
             endpoint,
             reply_cap,
             bearer: None,
+            trust: super::tls::Trust::default(),
         }
     }
 }
@@ -489,21 +504,9 @@ impl Streaming for HttpStream {
         if cancel.is_asked() {
             return Ok(Ended::Cancelled);
         }
-        let address = (self.endpoint.host.as_str(), self.endpoint.port)
-            .to_socket_addrs()
-            .map_err(|why| TransportFailure::Connect(why.to_string()))?
-            .next()
-            .ok_or_else(|| {
-                TransportFailure::Connect("the host resolves to no address".to_owned())
-            })?;
-        let budget = remaining().ok_or_else(timeout)?;
-        let mut socket = TcpStream::connect_timeout(&address, budget).map_err(|why| {
-            if is_timeout(&why) {
-                timeout()
-            } else {
-                TransportFailure::Connect(why.to_string())
-            }
-        })?;
+        // Over TLS for an `https` endpoint (#555): the handshake is part
+        // of the connect, and the stopper below shuts the socket under it.
+        let mut socket = super::tls::connect(&self.endpoint, &self.trust, deadline, started)?;
 
         // The stopper: a second handle on the same socket, shut from
         // whichever thread asks. Shutting it is what makes a read blocked
@@ -516,9 +519,9 @@ impl Streaming for HttpStream {
         // connection is a slot still generating (measured; see above).
         // Taken out of its slot either way, so the socket closes once and a
         // reused `Cancel` holds no open connection per call.
-        let handle = Arc::new(Mutex::new(Some(socket.try_clone().map_err(|why| {
-            TransportFailure::Connect(format!("no second handle to cancel through: {why}"))
-        })?)));
+        let handle = Arc::new(Mutex::new(Some(socket.socket().try_clone().map_err(
+            |why| TransportFailure::Connect(format!("no second handle to cancel through: {why}")),
+        )?)));
         let waker = Arc::clone(&handle);
         cancel.on_cancel(move || close(&waker));
         let _closing = Closing(handle);
@@ -537,6 +540,7 @@ impl Streaming for HttpStream {
         );
         let budget = remaining().ok_or_else(timeout)?;
         socket
+            .socket()
             .set_write_timeout(Some(budget))
             .map_err(|why| TransportFailure::Connect(why.to_string()))?;
         if let Err(why) = socket
@@ -567,7 +571,7 @@ impl Streaming for HttpStream {
             // Re-armed on every pass, as the unstreamed transport does: one
             // timeout bounds one read, not the call.
             let budget = remaining().ok_or_else(timeout)?;
-            if let Err(why) = socket.set_read_timeout(Some(budget)) {
+            if let Err(why) = socket.socket().set_read_timeout(Some(budget)) {
                 // A stop that landed since the last read has shut the socket,
                 // and on macOS an option set on a shut socket fails (`EINVAL`).
                 // That is the stop landing too.
@@ -605,8 +609,11 @@ impl Streaming for HttpStream {
 
     fn describes(&self) -> String {
         format!(
-            "http://{}:{}{} (streamed)",
-            self.endpoint.host, self.endpoint.port, self.endpoint.path
+            "{}://{}:{}{} (streamed)",
+            self.endpoint.scheme(),
+            self.endpoint.host,
+            self.endpoint.port,
+            self.endpoint.path
         )
     }
 }
