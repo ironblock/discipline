@@ -18,17 +18,15 @@ sandbox_reads = "all"
 # The reference is writable like the worktree; the receipt's `reference_modified` covers the whole tree.
 sandbox_writable = ["~/git/reference/Babylon"]
 
-# T1 runs bash. The maintainer chose a pre-seeded list over an empty one (2026-10-05).
-# Bare `npm` and `pnpm` are left out: serve refuses them as pre-seeds (an npm or pnpm
-# approval binds to the script it runs), so `npm install` and the dev server are approved
-# once, at workspace scope, when the model first runs them. Declaring the list at all also
-# reads the operator's screenshot through the session's confinement (5992900910).
-allowed_commands = ["ls", "cat", "rg", "node", "npx", "chrome-devtools"]
+# T1 runs bash with approvals off (the maintainer, 2026-10-09; #544): every command runs with no
+# gate and no prompt, and the log says approvals were off. Seatbelt is unchanged: writes stay
+# confined to the worktree and the reference.
+approval = "none"
 
 # Names only: the values are set by whoever starts `serve`, inside the worktree.
 env_passthrough = ["npm_config_cache", "pnpm_config_store_dir"]
 
-approval_policy = "approve any command whose effects stay in the worktree or on loopback; approve network egress for `npm install`, `pnpm install` and the devtools CLI only; deny everything else"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; Seatbelt confines writes to the worktree and the reference"
 
 interview_warrant = ["scoping"]
 
