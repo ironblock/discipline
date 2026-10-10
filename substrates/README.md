@@ -266,6 +266,10 @@ An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB tha
 
 ## Registering your own box
 
+**Duty of care: whoever runs a test declares the served configuration accurately.** The registry entry and the regimen are that declaration. `serve` corroborates each declared field the engine can report: a field the engine is silent on stands as declared, one it reports and agrees with is corroborated, and one it contradicts refuses the start, naming the field (ruled 2026-10-07; implemented by #509). A closed API, which reports little beyond the model's name, is driven with nearly every field declared.
+
+**Windows and a machine's status are coordinated off GitHub**, in private notes on the device under test or the system monitoring it. The results or measurement directory records what ran, after the fact.
+
 **A registered box is a declared fact, not an admitted rung.** An entry says what the box is. It does not say that results on it are comparable to anyone else's; that is #143's admission (the substrate ladder: which substrates are admitted as rungs whose results may be compared), which is separate work.
 
 **The registry is compiled into the binary.** `diet/src/drive/registry.rs` reads `substrates/registry.toml` with `include_str!`. `diet-drive serve --regimen` therefore refuses an id it does not find, and it names the id: "`<id>` is not a substrate in the registry". To drive under a regimen on your own server:

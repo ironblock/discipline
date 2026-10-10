@@ -13,7 +13,7 @@ Each round is a commit, so `git log -p -- diet/drive/plans/` shows what every cr
 - A critique goes back to the proposer, who accepts or rebuts each finding and appends a revision log.
 - The critic then reviews the revision.
 - This repeats until neither side has a critical objection.
-- Planning then rules on the questions, on #117.
+- Planning then ruled on the questions, on #117 (before 2026-10-08, when planning left GitHub).
 
 The documents call earlier rounds `*.round1.md`. Those are the files as they stood at the round-1 commit, not separate copies.
 

@@ -10,4 +10,6 @@ An inverted economic model for agentic coding: Ephemeral interview forks inform 
 
 **Start here.** `diet/` holds the library and its two binaries, `diet` (the command-line reader of every format: `diet check-log`, `diet check-record`, ...) and `diet-drive` (what a harness talks to); `exercise/`, the reference harness, holds the surface a person drives a session from. To drive one, read [`diet/drive/BEGIN.md`](diet/drive/BEGIN.md), the one start document, and run its **No model at hand** section first: a session driven end to end against a captured model reply served on loopback, from a browser or from `curl` alone, with no model server and no GPU.
 
+**The program** (what this is for, what is known, what each release means and how the repository is worked) is in [`docs/`](docs/): [`program.md`](docs/program.md), [`experiments.md`](docs/experiments.md), [`releases.md`](docs/releases.md) and [`workflow.md`](docs/workflow.md).
+
 **The gate** is `./verify.sh` at the repository root: `./verify.sh --help` says what it checks and `./verify.sh --list` names each check. What a pull request runs before it is pushed, and how branches and reviews work, is in [`CONTRIBUTING.md`](CONTRIBUTING.md).
