@@ -207,4 +207,9 @@ export const refusalOf = registry<Refusal>({
   'not-a-png': { label: 'not attached: the file is not a PNG', level: 'warn' },
   'too-large': { label: 'not attached: the file is over the drive\'s size cap', level: 'warn' },
   'not-uploaded': { label: 'not taken: an attachment never reached the drive', level: 'bad' },
+  // A seam's phase the graph would not take (#563).
+  'no-phase-graph': { label: 'not taken: this session declares no phases', level: 'quiet' },
+  'not-a-phase': { label: 'not taken: that is not one of the session’s phases', level: 'warn' },
+  'already-in-phase': { label: 'not taken: the session is already in that phase', level: 'quiet' },
+  'no-phase-edge': { label: 'not taken: the phase graph has no move from here to there', level: 'warn' },
 });
