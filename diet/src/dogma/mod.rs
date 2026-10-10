@@ -51,6 +51,7 @@ use std::error::Error;
 use std::fmt;
 
 pub mod asks;
+pub mod audits;
 pub mod capture;
 pub mod vocabulary;
 
@@ -96,7 +97,12 @@ pub mod vocabulary;
 /// * 7, 2026-10-10: self-capture set `c2` joined (#609, [`capture`]): c1's
 ///   contract with a description on every parameter, the maintainer's
 ///   approval of the wording. No template and no set already pinned changed.
-pub const VERSION: u32 = 7;
+/// * 8, 2026-10-10: tools-route audit set `t1` joined ([`audits`]): the
+///   three pinned audit asks' openings, the notes as `<id>\t<note>` lines,
+///   and one instruction naming the record tools, the maintainer's wording,
+///   asked by a session whose forks answer through the tools. No template and
+///   no set already pinned changed.
+pub const VERSION: u32 = 8;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -106,7 +112,7 @@ pub const VERSION: u32 = 7;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "bea5c829492bcafc";
+pub const MANIFEST_DIGEST: &str = "86ecd636e6fa48ab";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -701,6 +707,8 @@ mod tests {
             .filter(|line| !line.starts_with("self-capture/"))
             // The fork ask sets' lines, held by `asks`' own test.
             .filter(|line| !line.starts_with("fork-asks/"))
+            // The tools-route audit sets' lines, held by `audits`' own test.
+            .filter(|line| !line.starts_with("audit-tools/"))
             .map(|line| {
                 let mut fields = line.split('\t');
                 let name = fields.next().expect("a manifest line starts with a name");

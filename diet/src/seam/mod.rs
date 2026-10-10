@@ -573,6 +573,33 @@ pub fn audit_ask(reason: Reason, items: &[(EntryId, String)]) -> Option<Ask> {
     })
 }
 
+/// The tools-route audit ask a seam fired by `reason` puts over `items`, in
+/// `set` (#610): the set's text for the pinned template, the notes as
+/// `<id>\t<note>` lines so a call can name them; `None` where [`audit_ask`]
+/// would give none.
+#[must_use]
+pub fn audit_ask_tools(
+    reason: Reason,
+    items: &[(EntryId, String)],
+    set: &crate::dogma::audits::AuditSet,
+) -> Option<Ask> {
+    let template = pinned_ask(reason)?;
+    if items.is_empty() {
+        return None;
+    }
+    let listed = items
+        .iter()
+        .map(|(id, content)| format!("{}\t{}", id.as_str(), render::one_line(content)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    Some(Ask {
+        reason,
+        template,
+        text: set.fill(template, AUDIT_CATEGORY, &listed)?,
+        items: items.iter().map(|(id, _)| id.clone()).collect(),
+    })
+}
+
 /// The dogma's audit ask for a trigger, where one is pinned.
 ///
 /// A table rather than a guess. The dogma pins an ask for a phase boundary
