@@ -30,6 +30,12 @@ approval_policy = "approvals are off: every command runs without a gate decision
 
 interview_warrant = ["scoping"]
 
+# T1 runs at xhigh, declared so the record names what was sent (the maintainer, 2026-10-09). The
+# format pairs a level with its cap; "none" is its spelling for no cap, and serve sends no budget.
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
 # The 3.8 line's sampler card, r2's preset qwen38_thinking; all four keys declared, top_k an
 # integer, so serve pins every one (#489) and none falls to the engine's untruncated defaults.
 [sampler]
