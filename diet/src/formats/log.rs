@@ -117,7 +117,10 @@
 //! regime declares and no request carries (`budget_tokens`), recorded rather
 //! than refused. And v7 adds the [`ApprovalScope`] `off` and a
 //! `session.start`'s `approvals_off`, `true` or absent: the approval lever's
-//! `none`, under which no gate decided a call and nothing prompted.
+//! `none`, under which no gate decided a call and nothing prompted. A v7
+//! `seam` may carry `tail_tokens`, the compaction depth it ran at, and
+//! `carried_tokens`, the estimated tokens of the whole turns it kept after
+//! the refill (#552); absent, the total refill, and `carried_turns` 0.
 //!
 //! # A torn final line
 //!
@@ -206,6 +209,58 @@ vocabulary! {
         /// Forks' patches delivered at the tail of a trunk request (v7, the
         /// fork delivery lever).
         Delivered => "delivered",
+    }
+}
+
+vocabulary! {
+    /// The tool output disposition lever's arrival state (v7, #554): whether
+    /// what the model is shown of a tool's output is capped as it arrives.
+    ToolOutputState {
+        /// Capped at a line and a byte limit, the whole kept by digest.
+        Capped => "capped",
+        /// Kept whole: the cap turned off.
+        Keep => "keep",
+    }
+}
+
+/// The cap a session's tool outputs arrived under (v7, #554): on the wire,
+/// `tool_output` and, when capped, `tool_output_max_lines` and
+/// `tool_output_max_bytes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolOutput {
+    /// Capped or kept.
+    pub state: ToolOutputState,
+    /// The line limit, when capped.
+    pub max_lines: Option<u64>,
+    /// The byte limit, when capped.
+    pub max_bytes: Option<u64>,
+}
+
+/// A `session.start`'s cap on tool output, from its three flat keys: the
+/// limits present exactly when it is `capped`.
+fn tool_output(fields: &Fields<'_>) -> Result<Option<ToolOutput>, String> {
+    let state = fields.optional_tag("tool_output", ToolOutputState::from_tag)?;
+    let max_lines = fields.optional_count("tool_output_max_lines")?;
+    let max_bytes = fields.optional_count("tool_output_max_bytes")?;
+    let limited = max_lines.is_some() || max_bytes.is_some();
+    match state {
+        None if limited => Err(
+            "`tool_output_max_lines` or `tool_output_max_bytes` without `tool_output`".to_owned(),
+        ),
+        None => Ok(None),
+        Some(ToolOutputState::Capped) if max_lines.is_none() || max_bytes.is_none() => Err(
+            "`tool_output` is `capped` without both `tool_output_max_lines` and \
+             `tool_output_max_bytes`"
+                .to_owned(),
+        ),
+        Some(ToolOutputState::Keep) if limited => {
+            Err("`tool_output` is `keep` and carries a limit".to_owned())
+        }
+        Some(state) => Ok(Some(ToolOutput {
+            state,
+            max_lines,
+            max_bytes,
+        })),
     }
 }
 
@@ -721,6 +776,9 @@ pub enum Event {
         /// chat template renders by default, as the registry declares it
         /// (v7): what the model was asked for, named.
         reasoning_effort_default: Option<String>,
+        /// The cap tool outputs arrived under (v7, #554), when the session
+        /// runs tools.
+        tool_output: Option<ToolOutput>,
     },
     /// An ask was admitted.
     Ask {
@@ -988,6 +1046,13 @@ pub enum Event {
         carried_entries: u64,
         /// How many turns of the old trunk the refill carried.
         carried_turns: u64,
+        /// The compaction depth the seam ran at (v7, #552): the estimated
+        /// tokens of recent whole turns it could keep. Absent is 0, the
+        /// total refill.
+        tail_tokens: Option<u64>,
+        /// The estimated tokens of the turns it kept (v7, #552), beside
+        /// `tail_tokens`.
+        carried_tokens: Option<u64>,
     },
 }
 
@@ -2161,6 +2226,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     None => None,
                     Some(_) => Some(fields.string("reasoning_effort_default")?),
                 },
+                tool_output: tool_output(&fields)?,
             }
         }
         Kind::Ask => Event::Ask {
@@ -2374,6 +2440,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             render: fields.string("render")?,
             carried_entries: fields.count("carried_entries")?,
             carried_turns: fields.count("carried_turns")?,
+            tail_tokens: fields.optional_count("tail_tokens")?,
+            carried_tokens: fields.optional_count("carried_tokens")?,
         },
     };
     Ok(Line {
@@ -2788,6 +2856,8 @@ pub enum Tags {
     Framing,
     /// [`ForkDelivery`] (v7).
     ForkDelivery,
+    /// [`ToolOutputState`] (v7).
+    ToolOutputState,
 }
 
 impl Tags {
@@ -2815,6 +2885,7 @@ impl Tags {
         Self::SeamReason,
         Self::Framing,
         Self::ForkDelivery,
+        Self::ToolOutputState,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -2843,6 +2914,7 @@ impl Tags {
             Self::SeamReason => "SeamReason",
             Self::Framing => "Framing",
             Self::ForkDelivery => "ForkDelivery",
+            Self::ToolOutputState => "ToolOutputState",
         }
     }
 
@@ -2875,6 +2947,7 @@ impl Tags {
             Self::SeamReason => of(SeamReason::ALL, SeamReason::tag),
             Self::Framing => of(Framing::ALL, Framing::tag),
             Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
+            Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
         }
     }
 }
@@ -3283,6 +3356,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
                 may_v7("reasoning_effort_default", Text),
+                may_v7("tool_output", Tag(Tags::ToolOutputState)),
+                may_v7("tool_output_max_lines", Holds::Count),
+                may_v7("tool_output_max_bytes", Holds::Count),
             ];
             F
         }
@@ -3447,6 +3523,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v6("render", Text),
                 must_v6("carried_entries", Count),
                 must_v6("carried_turns", Count),
+                may_v7("tail_tokens", Count),
+                may_v7("carried_tokens", Count),
             ];
             F
         }
@@ -3722,6 +3800,7 @@ fn to_value(line: &Line) -> Value {
             approvals_off,
             fork_delivery,
             reasoning_effort_default,
+            tool_output,
         } => {
             put("version", Value::Integer(*version));
             if let Some(effort) = reasoning_effort_default {
@@ -3729,6 +3808,15 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(delivery) = fork_delivery {
                 put("fork_delivery", text(delivery.tag()));
+            }
+            if let Some(cap) = tool_output {
+                put("tool_output", text(cap.state.tag()));
+                if let Some(lines) = cap.max_lines {
+                    put("tool_output_max_lines", count(lines));
+                }
+                if let Some(bytes) = cap.max_bytes {
+                    put("tool_output_max_bytes", count(bytes));
+                }
             }
             if let Some(off) = approvals_off {
                 put("approvals_off", Value::Boolean(*off));
@@ -4104,6 +4192,8 @@ fn to_value(line: &Line) -> Value {
             render,
             carried_entries,
             carried_turns,
+            tail_tokens,
+            carried_tokens,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             put("reason", text(reason.tag()));
@@ -4113,6 +4203,12 @@ fn to_value(line: &Line) -> Value {
             put("render", text(render));
             put("carried_entries", count(*carried_entries));
             put("carried_turns", count(*carried_turns));
+            if let Some(tokens) = tail_tokens {
+                put("tail_tokens", count(*tokens));
+            }
+            if let Some(tokens) = carried_tokens {
+                put("carried_tokens", count(*tokens));
+            }
             Kind::Seam
         }
         Event::Delivered {
@@ -4778,6 +4874,11 @@ mod tests {
                 approvals_off: None,
                 fork_delivery: None,
                 reasoning_effort_default: None,
+                tool_output: Some(ToolOutput {
+                    state: ToolOutputState::Capped,
+                    max_lines: Some(2000),
+                    max_bytes: Some(51_200),
+                }),
             },
         }
     }
@@ -5506,6 +5607,8 @@ mod tests {
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
                         || (tags == Tags::PatchOp && why.contains("`supersedes`"))
+                        || (tags == Tags::ToolOutputState
+                            && why.contains("`tool_output` is `keep` and carries a limit"))
                 },
                 |_| true,
             )
@@ -5656,15 +5759,55 @@ mod tests {
         assert_eq!(parse(&document), Ok(lines));
     }
 
+    /// A `session.start`'s cap (#554): `capped` with both limits, `keep`
+    /// with neither; anything else refused.
+    #[test]
+    fn a_tool_output_cap_carries_its_limits_exactly_when_capped() {
+        let start = |extra: &str| {
+            format!(
+                r#"{{"head":[],"kind":"session.start","model":"m","opened":1,"seq":0,"t":0,"version":7{extra}}}"#
+            )
+        };
+        assert!(
+            line(&start(
+                r#","tool_output":"capped","tool_output_max_bytes":10,"tool_output_max_lines":2"#
+            ))
+            .is_ok()
+        );
+        assert!(line(&start(r#","tool_output":"keep""#)).is_ok());
+        for (extra, says) in [
+            (
+                r#","tool_output":"capped","tool_output_max_lines":2"#,
+                "without both",
+            ),
+            (
+                r#","tool_output":"keep","tool_output_max_lines":2"#,
+                "carries a limit",
+            ),
+            (r#","tool_output_max_bytes":10"#, "without `tool_output`"),
+        ] {
+            let refused = line(&start(extra)).expect_err(extra);
+            assert!(refused.contains(says), "{extra}: {refused}");
+        }
+    }
+
     #[test]
     fn a_v0_log_carrying_what_arrived_in_v1_is_refused_and_line_reads_it() {
         // The whole-log reader scopes by the version `session.start` states;
         // the per-line reader, which a resuming reader uses, reads the union.
         let mut lines = every_event();
-        let Event::SessionStart { version, .. } = &mut lines[0].event else {
+        let Event::SessionStart {
+            version,
+            tool_output,
+            ..
+        } = &mut lines[0].event
+        else {
             panic!("the first line opens the session");
         };
         *version = 0;
+        // A v7 key on the first line would be the one named; the check is of
+        // what arrived in v1, further down.
+        *tool_output = None;
         let document: String = lines.iter().map(|line| render(line) + "\n").collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");

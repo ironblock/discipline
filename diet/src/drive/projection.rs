@@ -307,6 +307,7 @@ pub fn project_in(
                 tools,
                 template_kwargs,
                 fork_delivery,
+                tool_output,
                 ..
             },
         ..
@@ -338,6 +339,8 @@ pub fn project_in(
         regimen_sha256: None,
         // The fork delivery lever's state, as `session.start` names it.
         fork_delivery: *fork_delivery,
+        // The tool output cap, as `session.start` names it (#554).
+        tool_output: *tool_output,
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -396,6 +399,9 @@ struct Walk<'a> {
     /// The trunk requests that were tool steps: a `tool_call` line cites
     /// them.
     stepped: BTreeSet<u64>,
+    /// What each turn cancelled while generating had said, from its
+    /// `cancelled` line (#575).
+    cancelled_text: BTreeMap<u32, String>,
     /// Each turn's tool steps so far, in order: what the session sent after
     /// the ask, and what it put back on the trunk.
     steps: BTreeMap<u32, Vec<Step>>,
@@ -416,9 +422,12 @@ struct Step {
     request: u64,
     /// The step's response: its text and reasoning.
     said: Message,
-    /// Its calls, in order, each with what it was shown, when it was shown
-    /// anything.
-    calls: Vec<(ToolCall, Option<String>)>,
+    /// Its calls, in order, each with the result message it was shown, when
+    /// it was shown anything: `read`'s images on it, read back (#557).
+    calls: Vec<(ToolCall, Option<Message>)>,
+    /// Why a result's image could not be read back, from the first that
+    /// could not: every head that carries the step names it (#557).
+    unrebuilt: Option<String>,
 }
 
 impl Step {
@@ -428,11 +437,7 @@ impl Step {
         let mut said = self.said.clone();
         said.tool_calls = self.calls.iter().map(|(call, _)| call.clone()).collect();
         let mut messages = vec![said];
-        messages.extend(self.calls.iter().filter_map(|(call, shown)| {
-            shown
-                .as_ref()
-                .map(|shown| Message::tool_result(call.id.clone(), shown.clone()))
-        }));
+        messages.extend(self.calls.iter().filter_map(|(_, shown)| shown.clone()));
         messages
     }
 }
@@ -468,6 +473,11 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
         .map(|name| {
             if name == super::tool_loop::BASH {
                 Ok(super::tool_loop::bash_tool())
+            } else if let Some(tool) = super::standard::definitions()
+                .into_iter()
+                .find(|tool| tool.name == *name)
+            {
+                Ok(tool)
             } else {
                 Err(format!(
                     "the session declared `{name}`, a tool with no definition here"
@@ -526,6 +536,7 @@ impl<'a> Walk<'a> {
             tools: Ok(Vec::new()),
             template_kwargs: BTreeMap::new(),
             stepped,
+            cancelled_text: BTreeMap::new(),
             steps: BTreeMap::new(),
             trunk_unrebuilt: None,
             side_heads: BTreeMap::new(),
@@ -586,12 +597,9 @@ impl<'a> Walk<'a> {
                     usage.as_ref(),
                 );
             }
-            Line::Cancelled { partial, .. } => self.name(
-                line.seq,
-                "cancelled",
-                "a cancelled call: the record has no row for one".to_owned(),
-                Some(partial.clone()),
-            ),
+            Line::Cancelled {
+                request, partial, ..
+            } => self.cancelled_call(line.seq, *request, partial),
             Line::RequestFailed {
                 reason, message, ..
             } => self.name(
@@ -613,9 +621,7 @@ impl<'a> Walk<'a> {
             // A seam (v6, #493): its row, and the trunk refilled exactly as
             // the session refills it, so the next request's head is rebuilt
             // and checked like any other.
-            Line::Seam {
-                at_turn, render, ..
-            } => self.seam(line.seq, *at_turn, render),
+            Line::Seam { .. } => self.seam(line),
             // Forks' patches delivered (v7): the note follows its turn's ask
             // on the rebuilt trunk, as it does on the session's.
             Line::Delivered { turn, text, .. } => {
@@ -649,8 +655,11 @@ impl<'a> Walk<'a> {
             // as the session does (`State::keep_ran_steps`).
             Line::TurnSettled {
                 turn,
-                reason: log::SettleReason::Failed | log::SettleReason::Timeout,
-            } => self.failed_after_steps(*turn),
+                reason:
+                    reason @ (log::SettleReason::Failed
+                    | log::SettleReason::Timeout
+                    | log::SettleReason::Cancelled),
+            } => self.cut_short(*turn, *reason),
             // Carried by the rows above: a delta by its response's text, a
             // settlement and a settled turn by the turn and response rows.
             Line::Delta { .. }
@@ -794,8 +803,31 @@ impl<'a> Walk<'a> {
     /// refilled from `render` through [`crate::seam::render::refill`]. The
     /// row is named rather than written when that turn has no row; the
     /// trunk is refilled either way, since the session's was.
-    fn seam(&mut self, seq: u64, at_turn: u32, render: &str) {
+    fn seam(&mut self, line: &log::Line) {
+        let Line::Seam {
+            at_turn,
+            render,
+            tail_tokens,
+            ..
+        } = &line.event
+        else {
+            return;
+        };
+        let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
+        // The tail the session kept after the refill (#552), cut from the
+        // rebuilt trunk by the same function.
+        let turns = self.trunk.get(self.head.len()..).unwrap_or_default();
+        let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+        let carried_turns = kept
+            .iter()
+            .filter(|message| message.role == Role::User)
+            .count() as u64;
+        let carried_tokens = kept
+            .iter()
+            .map(crate::seam::render::estimated_tokens)
+            .sum::<u64>();
         self.trunk = crate::seam::render::refill(&self.head, render);
+        self.trunk.extend(kept);
         // An attachment the old trunk carried and could not be read back is
         // not on the refilled one.
         self.trunk_unrebuilt = None;
@@ -821,10 +853,14 @@ impl<'a> Walk<'a> {
             );
             return;
         };
+        let tailed = tail_tokens > 0;
         self.events.push(Event::Seam {
             id: format!("s/{seq}"),
             at_turn,
             rendered_bytes,
+            tail_tokens: tailed.then_some(tail_tokens),
+            carried_turns: tailed.then_some(carried_turns),
+            carried_tokens: tailed.then_some(carried_tokens),
         });
     }
 
@@ -967,7 +1003,14 @@ impl<'a> Walk<'a> {
             .err()
             .map(|why| format!("turn {turn}'s attachment: {why}"))
             .or_else(|| self.tools.as_ref().err().cloned())
-            .or_else(|| self.trunk_unrebuilt.clone());
+            .or_else(|| self.trunk_unrebuilt.clone())
+            .or_else(|| {
+                self.steps
+                    .get(&turn)
+                    .into_iter()
+                    .flatten()
+                    .find_map(|step| step.unrebuilt.clone())
+            });
         messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
         if let Some(note) = note {
             messages.push(Message::new(Role::User, note));
@@ -1100,6 +1143,7 @@ impl<'a> Walk<'a> {
                 request: to_request,
                 said,
                 calls: Vec::new(),
+                unrebuilt: None,
             });
             return;
         }
@@ -1128,6 +1172,10 @@ impl<'a> Walk<'a> {
         }
         let taken = self.steps.remove(&turn).unwrap_or_default();
         for step in taken.iter().take(steps) {
+            if let Some(why) = &step.unrebuilt {
+                self.trunk_unrebuilt
+                    .get_or_insert_with(|| format!("the trunk carries turn {turn}'s {why}"));
+            }
             self.trunk.extend(step.messages());
         }
     }
@@ -1188,6 +1236,50 @@ impl<'a> Walk<'a> {
         self.onto_the_trunk(turn, completed);
     }
 
+    /// A turn that settled short of an answer: what of it joins the trunk,
+    /// as the session puts it there (#541, #575).
+    fn cut_short(&mut self, turn: u32, reason: log::SettleReason) {
+        if reason == log::SettleReason::Cancelled {
+            self.cancelled_turn(turn);
+        } else {
+            self.failed_after_steps(turn);
+        }
+    }
+
+    /// A cancelled call: named, since the record has no row for one, and
+    /// its text kept for its turn's settling (#575).
+    fn cancelled_call(&mut self, seq: u64, request: u64, partial: &str) {
+        if let Some(turn) = self.turn_of.get(&request) {
+            self.cancelled_text.insert(*turn, partial.to_owned());
+        }
+        self.name(
+            seq,
+            "cancelled",
+            "a cancelled call: the record has no row for one".to_owned(),
+            Some(partial.to_owned()),
+        );
+    }
+
+    /// A turn settled `cancelled` (#575): every step it took joins the trunk
+    /// with its ask -- the one a cancel cut short has each call answered on
+    /// its line -- and then, when the cancel came while it was generating,
+    /// the text it had said. Nothing taken and nothing said, and nothing
+    /// joins it.
+    fn cancelled_turn(&mut self, turn: u32) {
+        let steps = self.steps.get(&turn).map_or(0, Vec::len);
+        let said = self
+            .cancelled_text
+            .remove(&turn)
+            .filter(|text| !text.is_empty());
+        if steps == 0 && said.is_none() {
+            return;
+        }
+        self.onto_the_trunk(turn, usize::MAX);
+        if let Some(text) = said {
+            self.trunk.push(Message::new(Role::Assistant, text));
+        }
+    }
+
     /// A `tool_call` line's call, onto its step (#472).
     fn step_call(&mut self, line: &Line) {
         let Line::ToolCall {
@@ -1197,25 +1289,71 @@ impl<'a> Walk<'a> {
             name,
             arguments,
             shown,
+            files,
             ..
         } = line
         else {
             return;
         };
+        let result = shown
+            .as_ref()
+            .map(|shown| self.tool_result(id, shown, files.as_deref().unwrap_or_default()));
         if let Some(step) = self
             .steps
             .get_mut(turn)
             .and_then(|steps| steps.iter_mut().rfind(|step| step.request == *request))
         {
+            let (result, why) = match result {
+                Some((result, why)) => (Some(result), why),
+                None => (None, None),
+            };
+            if step.unrebuilt.is_none() {
+                step.unrebuilt = why.map(|why| format!("call {id}'s image: {why}"));
+            }
             step.calls.push((
                 ToolCall {
                     id: id.clone(),
                     name: name.clone(),
                     arguments: arguments.clone(),
                 },
-                shown.clone(),
+                result,
             ));
         }
+    }
+
+    /// Call `id`'s result message as the session sent it: what it was shown,
+    /// and each image among the line's `files` -- `read`'s (#557), never a
+    /// capped output's whole -- read back from the recording and attached
+    /// through [`crate::client::attach`]; with why, when one could not be.
+    fn tool_result(
+        &self,
+        id: &str,
+        shown: &str,
+        files: &[log::RecordedFile],
+    ) -> (Message, Option<String>) {
+        let mut message = Message::tool_result(id.to_owned(), shown.to_owned());
+        for file in files
+            .iter()
+            .filter(|file| file.media_type.starts_with("image/"))
+        {
+            let Some(recording) = &self.recording else {
+                return (
+                    message,
+                    Some("no recording directory to read it back from".to_owned()),
+                );
+            };
+            let attached = std::fs::read(recording.join(&file.path))
+                .map_err(|why| format!("{}: {why}", file.path))
+                .and_then(|bytes| {
+                    crate::client::attach(message.clone(), file, &bytes)
+                        .map_err(|why| format!("{}: {why}", file.path))
+                });
+            match attached {
+                Ok(attached) => message = attached,
+                Err(why) => return (message, Some(why)),
+            }
+        }
+        (message, None)
     }
 
     fn response(
@@ -1292,6 +1430,7 @@ mod tests {
             approvals_off: None,
             fork_delivery: None,
             reasoning_effort_default: None,
+            tool_output: None,
         }
     }
 
@@ -1475,6 +1614,8 @@ mod tests {
             render: render.to_owned(),
             carried_entries: 1,
             carried_turns: 0,
+            tail_tokens: None,
+            carried_tokens: None,
         });
         let projection = project(
             &numbered(events),
@@ -1491,6 +1632,48 @@ mod tests {
             "{:#?}",
             projection.events
         );
+        validates(&projection);
+    }
+
+    /// A seam that kept a tail (#552): its row names the depth and what
+    /// the projection's own cut of the rebuilt trunk kept -- the turn before
+    /// it, whole -- and the record validates.
+    #[test]
+    fn a_seam_that_kept_a_tail_names_its_depth_and_what_it_kept() {
+        let mut events = vec![start()];
+        events.extend(answered(1, 3, Some(warm()), None));
+        events.push(Line::Seam {
+            at_turn: 1,
+            reason: log::SeamReason::Operator,
+            prefix_hash_before: "a".repeat(64),
+            prefix_hash_after: "b".repeat(64),
+            frame: crate::seam::render::FRAME_VERSION.to_owned(),
+            render: "# working set\n".to_owned(),
+            carried_entries: 1,
+            carried_turns: 1,
+            tail_tokens: Some(10_000),
+            carried_tokens: Some(1),
+        });
+        let projection = project(
+            &numbered(events),
+            &regime(),
+            Some(Engine::Commit("e7051ef")),
+        )
+        .expect("projected");
+        let row = projection
+            .events
+            .iter()
+            .find_map(|event| match event {
+                Event::Seam {
+                    tail_tokens,
+                    carried_turns,
+                    carried_tokens,
+                    ..
+                } => Some((*tail_tokens, *carried_turns, carried_tokens.is_some())),
+                _ => None,
+            })
+            .expect("a seam row");
+        assert_eq!(row, (Some(10_000), Some(1), true));
         validates(&projection);
     }
 

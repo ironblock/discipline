@@ -376,6 +376,15 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(attaching) => attaching,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // Where a capped tool output is kept whole (#554): the recording's
+    // directory, absolute, since the pointer is read from the worktree.
+    let mut tools = tools;
+    if let Some(tools) = tools.as_mut() {
+        tools.recording = attaching
+            .recording
+            .as_ref()
+            .map(|dir| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone()));
+    }
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
@@ -646,9 +655,10 @@ fn served_session(
     tools: Option<Tools>,
     declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
-    // A session that runs commands declares the one tool they run through.
-    if tools.is_some() {
-        shape.tools = vec![tool_loop::bash_tool()];
+    // A session that runs commands declares its surface's tools (#557):
+    // `bash` alone, or `bash` and the standard set.
+    if let Some(tools) = tools.as_ref() {
+        shape.tools = tools.surface.tools();
     }
     std::sync::Arc::new(Session::open_declaring(
         transport,
@@ -872,6 +882,13 @@ fn serving_tools(
         store: Some(store),
         approval_policy: declared.approval_policy,
         approvals_off: declared.approvals_off,
+        output_cap: declared.output_cap,
+        // Set once the recording's directory is known (`serve`).
+        recording: None,
+        // The read tool the surface offers, which a capped output's notice
+        // names (#554, #557).
+        read_tool: declared.surface.read_tool(),
+        surface: declared.surface,
     }))
 }
 

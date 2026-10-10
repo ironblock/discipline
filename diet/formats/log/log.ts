@@ -180,6 +180,11 @@ export type ForkDelivery =
   | "imperative"
 ;
 
+export type ToolOutputState =
+  | "capped"
+  | "keep"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -274,6 +279,9 @@ export type SessionStartLine = {
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
   reasoning_effort_default?: string;
+  tool_output?: ToolOutputState;
+  tool_output_max_lines?: number;
+  tool_output_max_bytes?: number;
 } & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {
@@ -458,6 +466,8 @@ export type SeamLine = {
   render: string;
   carried_entries: number;
   carried_turns: number;
+  tail_tokens?: number;
+  carried_tokens?: number;
 };
 
 export type DeliveredLine = {

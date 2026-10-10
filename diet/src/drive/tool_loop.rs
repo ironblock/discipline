@@ -30,6 +30,7 @@ use crate::formats::regimen::{self, Regimen};
 use crate::formats::shell::{self, Word};
 use crate::isolation::{Confinement, Policy};
 
+use super::output::OutputCap;
 use super::shell_gate::{self, Approval, Denylist, Judgement, Scope, Segment, Shape, Verdict, Why};
 
 /// The one tool the loop runs.
@@ -151,6 +152,7 @@ pub fn bash_tool() -> ToolDefinition {
     ]));
     ToolDefinition {
         name: BASH.to_owned(),
+        description: None,
         schema: Value::Object(BTreeMap::from([
             (
                 "properties".to_owned(),
@@ -1344,6 +1346,98 @@ pub struct Declared {
     pub approval_policy: Option<String>,
     /// `approval = "none"`: no gate decision, no prompt.
     pub approvals_off: bool,
+    /// `[tool_output]`: the cap on what the model is shown of a tool's
+    /// output (#554), the convention's default when the table is absent.
+    pub output_cap: OutputCap,
+    /// `tool_surface`: the tools the model is offered (#557).
+    pub surface: ToolSurface,
+}
+
+/// The tool surface lever (#557): the tools the model is offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolSurface {
+    /// `bash` alone: today's, the default.
+    #[default]
+    Bash,
+    /// `bash`, then the standard set: `read`, `write`, `edit`.
+    Standard,
+}
+
+impl ToolSurface {
+    /// The tools a request declares under this surface, in order.
+    #[must_use]
+    pub fn tools(self) -> Vec<ToolDefinition> {
+        let mut tools = vec![bash_tool()];
+        if self == Self::Standard {
+            tools.extend(super::standard::definitions());
+        }
+        tools
+    }
+
+    /// The read tool the surface offers, by name, when it offers one.
+    #[must_use]
+    pub fn read_tool(self) -> Option<String> {
+        (self == Self::Standard).then(|| super::standard::READ.to_owned())
+    }
+}
+
+/// The regimen's key for the tool surface (#557).
+pub const TOOL_SURFACE: &str = "tool_surface";
+
+/// `tool_surface` read: `bash` (the default) or `standard`.
+///
+/// # Errors
+///
+/// Any other value.
+pub fn tool_surface(regimen: &Regimen) -> Result<ToolSurface, String> {
+    match regimen.get(TOOL_SURFACE) {
+        None => Ok(ToolSurface::Bash),
+        Some(regimen::Value::String(word)) if word == "bash" => Ok(ToolSurface::Bash),
+        Some(regimen::Value::String(word)) if word == "standard" => Ok(ToolSurface::Standard),
+        Some(_) => Err(format!(
+            "`{TOOL_SURFACE}` takes \"bash\" (the default) or \"standard\""
+        )),
+    }
+}
+
+/// The regimen's table for the cap on tool output (#554).
+pub const TOOL_OUTPUT: &str = "tool_output";
+
+/// `[tool_output]` read: the default cap when absent; `cap = false` turns it
+/// off (the output kept whole); `max_lines` and `max_bytes` set the limits.
+///
+/// # Errors
+///
+/// A table of the wrong shape: `cap` not a boolean, or a limit not a
+/// positive integer.
+pub fn output_cap(regimen: &Regimen) -> Result<OutputCap, String> {
+    let Some(value) = regimen.get(TOOL_OUTPUT) else {
+        return Ok(OutputCap::DEFAULT);
+    };
+    let regimen::Value::Table(table) = value else {
+        return Err(format!("`{TOOL_OUTPUT}` is not a table"));
+    };
+    match table.get("cap") {
+        None | Some(regimen::Value::Boolean(true)) => {}
+        Some(regimen::Value::Boolean(false)) => return Ok(OutputCap::Keep),
+        Some(_) => return Err(format!("`[{TOOL_OUTPUT}] cap` is not a boolean")),
+    }
+    let OutputCap::Capped {
+        max_lines: default_lines,
+        max_bytes: default_bytes,
+    } = OutputCap::DEFAULT
+    else {
+        unreachable!("the default caps");
+    };
+    let limit = |key: &str, default: usize| match table.get(key) {
+        None => Ok(default),
+        Some(regimen::Value::Integer(n)) if *n > 0 => Ok(usize::try_from(*n).unwrap_or(usize::MAX)),
+        Some(_) => Err(format!("`[{TOOL_OUTPUT}] {key}` is not a positive integer")),
+    };
+    Ok(OutputCap::Capped {
+        max_lines: limit("max_lines", default_lines)?,
+        max_bytes: limit("max_bytes", default_bytes)?,
+    })
 }
 
 /// What `regimen` declares for the loop, or `None` when it runs no commands
@@ -1355,6 +1449,8 @@ pub struct Declared {
 /// strings, `max_steps` not a positive integer, `approval_policy` not a
 /// string.
 pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
+    let output_cap = output_cap(regimen)?;
+    let surface = tool_surface(regimen)?;
     let max_steps = match regimen.get(LIMITS) {
         None => None,
         Some(regimen::Value::Table(limits)) => match limits.get(MAX_STEPS) {
@@ -1392,6 +1488,8 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             max_steps,
             approval_policy,
             approvals_off,
+            output_cap,
+            surface,
         }));
     };
     let regimen::Value::Array(items) = value else {
@@ -1413,6 +1511,8 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         max_steps,
         approval_policy,
         approvals_off,
+        output_cap,
+        surface,
     }))
 }
 
@@ -1769,6 +1869,16 @@ pub struct Tools {
     /// Approvals off (`approval = "none"`): every command runs with no gate
     /// decision and no prompt, under the same confinement.
     pub approvals_off: bool,
+    /// The cap on what the model is shown of a tool's output (#554).
+    pub output_cap: OutputCap,
+    /// The recording's directory, where a capped output is kept whole;
+    /// `None` when the session keeps no recording.
+    pub recording: Option<PathBuf>,
+    /// The session's read tool, by name, when it offers one: what the cap's
+    /// notice tells the model to read the whole output with.
+    pub read_tool: Option<String>,
+    /// The tools the model is offered (#557).
+    pub surface: ToolSurface,
 }
 
 vocabulary! {
@@ -1942,6 +2052,63 @@ pub fn prompt_of(judged: &Judged, request: u64, turn: u32, call: &str, cwd: &str
 #[cfg(test)]
 pub(in crate::drive) mod tests {
     use super::*;
+
+    /// `tool_surface` (#557): absent or `bash`, today's single tool;
+    /// `standard`, `bash` and the standard set, with `read` as the read tool
+    /// a capped output's notice names; anything else refused.
+    #[test]
+    fn the_tool_surface_is_bash_or_standard() {
+        let read = |text: &str| tool_surface(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), Ok(ToolSurface::Bash));
+        assert_eq!(read("tool_surface = \"bash\"\n"), Ok(ToolSurface::Bash));
+        assert_eq!(
+            read("tool_surface = \"standard\"\n"),
+            Ok(ToolSurface::Standard)
+        );
+        assert!(read("tool_surface = \"everything\"\n").is_err());
+        let names = |surface: ToolSurface| -> Vec<String> {
+            surface.tools().into_iter().map(|tool| tool.name).collect()
+        };
+        assert_eq!(names(ToolSurface::Bash), ["bash"]);
+        assert_eq!(
+            names(ToolSurface::Standard),
+            ["bash", "read", "write", "edit", "grep", "glob"]
+        );
+        assert_eq!(ToolSurface::Bash.read_tool(), None);
+        assert_eq!(ToolSurface::Standard.read_tool().as_deref(), Some("read"));
+    }
+
+    /// `[tool_output]` (#554): absent, the convention's default cap; `cap =
+    /// false`, the output kept whole; limits set by `max_lines` and
+    /// `max_bytes`; anything else refused.
+    #[test]
+    fn the_tool_output_table_reads_as_the_default_cap_keep_or_its_limits() {
+        let read = |text: &str| output_cap(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), Ok(OutputCap::DEFAULT));
+        assert_eq!(read("[tool_output]\ncap = false\n"), Ok(OutputCap::Keep));
+        assert_eq!(
+            read("[tool_output]\nmax_lines = 100\n"),
+            Ok(OutputCap::Capped {
+                max_lines: 100,
+                max_bytes: 51_200
+            })
+        );
+        assert_eq!(
+            read("[tool_output]\nmax_lines = 10\nmax_bytes = 2048\n"),
+            Ok(OutputCap::Capped {
+                max_lines: 10,
+                max_bytes: 2048
+            })
+        );
+        for refused in [
+            "tool_output = 4000\n",
+            "[tool_output]\ncap = \"no\"\n",
+            "[tool_output]\nmax_lines = 0\n",
+            "[tool_output]\nmax_bytes = \"lots\"\n",
+        ] {
+            assert!(read(refused).is_err(), "{refused}");
+        }
+    }
 
     /// A git alias reader that knows none.
     pub(in crate::drive) fn no_aliases(_: &Path, _: &str) -> Option<String> {
@@ -2807,6 +2974,8 @@ pub(in crate::drive) mod tests {
                 max_steps: Some(4),
                 approval_policy: Some("ask".to_owned()),
                 approvals_off: false,
+                output_cap: OutputCap::DEFAULT,
+                surface: ToolSurface::Bash,
             }))
         );
         // The approval lever's `none`: commands run with no allow set.
@@ -2817,6 +2986,8 @@ pub(in crate::drive) mod tests {
                 max_steps: None,
                 approval_policy: None,
                 approvals_off: true,
+                output_cap: OutputCap::DEFAULT,
+                surface: ToolSurface::Bash,
             }))
         );
         assert!(read("approval = \"ask\"\n").is_err());

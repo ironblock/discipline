@@ -1150,6 +1150,11 @@ pub enum Event {
         /// `advisory`, `imperative`), as its log's `session.start` names it.
         /// Optional: a session that never forks names none.
         fork_delivery: Option<log::ForkDelivery>,
+        /// The cap tool outputs arrived under (#554), as its log's
+        /// `session.start` names it: `tool_output`, and when capped
+        /// `tool_output_max_lines` and `tool_output_max_bytes`. Optional: a
+        /// session that runs no tools names none.
+        tool_output: Option<log::ToolOutput>,
     },
     /// A turn happened.
     Turn {
@@ -1307,6 +1312,14 @@ pub enum Event {
         at_turn: u32,
         /// How large the render was.
         rendered_bytes: Count,
+        /// The compaction depth it ran at (#552): estimated tokens of
+        /// recent whole turns it could keep. Absent, the total refill.
+        tail_tokens: Option<u64>,
+        /// How many whole turns of the old trunk it kept, beside
+        /// `tail_tokens`.
+        carried_turns: Option<u64>,
+        /// Their estimated tokens, beside `tail_tokens`.
+        carried_tokens: Option<u64>,
     },
     /// A tool was called.
     ToolCall {
@@ -1574,6 +1587,16 @@ impl Record {
         match self.events.first() {
             Some(Event::Start { regimen_sha256, .. }) => regimen_sha256.as_deref(),
             _ => unreachable!("validate() refuses a record whose first event is not a start"),
+        }
+    }
+
+    /// The cap the session's tool outputs arrived under (#554), when its
+    /// start names one.
+    #[must_use]
+    pub fn tool_output(&self) -> Option<log::ToolOutput> {
+        match self.events.first() {
+            Some(Event::Start { tool_output, .. }) => *tool_output,
+            _ => None,
         }
     }
 
@@ -2407,6 +2430,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
                 "fork_delivery",
                 log::ForkDelivery::from_tag,
             )?,
+            tool_output: take_tool_output(&mut members, of)?,
         },
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
@@ -2449,6 +2473,9 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             id: take_string(&mut members, of, "id")?,
             at_turn: take_u32(&mut members, of, "at_turn")?,
             rendered_bytes: take_u64(&mut members, of, "rendered_bytes")?,
+            tail_tokens: take_optional_count(&mut members, of, "tail_tokens")?,
+            carried_turns: take_optional_count(&mut members, of, "carried_turns")?,
+            carried_tokens: take_optional_count(&mut members, of, "carried_tokens")?,
         },
         Kind::ToolCall => tool_call(&mut members, of)?,
         Kind::Rejected => Event::Rejected {
@@ -3973,6 +4000,66 @@ fn take_optional_object(
 /// An optional signed integer. An exit status may be anything the value
 /// space can spell; a shell reports signals as numbers past 128, and a
 /// harness that failed to run the tool at all may report a negative one.
+/// A `start` row's cap on tool output (#554): `tool_output`, with both
+/// limits exactly when it is `capped`.
+fn take_tool_output(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<log::ToolOutput>, ParseError> {
+    let state = take_optional_word(members, of, "tool_output", log::ToolOutputState::from_tag)?;
+    let limit = |members: &mut BTreeMap<String, Value>, field: &'static str| {
+        take_optional_integer(members, of, field)?
+            .map(|n| {
+                u64::try_from(n).map_err(|_| {
+                    ParseError::from(SchemaError::WrongType {
+                        of,
+                        field: field.to_owned(),
+                        want: "a non-negative integer",
+                    })
+                })
+            })
+            .transpose()
+    };
+    let max_lines = limit(members, "tool_output_max_lines")?;
+    let max_bytes = limit(members, "tool_output_max_bytes")?;
+    let consistent = match state {
+        None | Some(log::ToolOutputState::Keep) => max_lines.is_none() && max_bytes.is_none(),
+        Some(log::ToolOutputState::Capped) => max_lines.is_some() && max_bytes.is_some(),
+    };
+    if !consistent {
+        return Err(SchemaError::WrongType {
+            of,
+            field: "tool_output".to_owned(),
+            want: "`capped` with both limits, or `keep` with neither",
+        }
+        .into());
+    }
+    Ok(state.map(|state| log::ToolOutput {
+        state,
+        max_lines,
+        max_bytes,
+    }))
+}
+
+/// An optional non-negative integer.
+fn take_optional_count(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<u64>, ParseError> {
+    take_optional_integer(members, of, field)?
+        .map(|n| {
+            u64::try_from(n).map_err(|_| {
+                ParseError::from(SchemaError::WrongType {
+                    of,
+                    field: field.to_owned(),
+                    want: "a non-negative integer",
+                })
+            })
+        })
+        .transpose()
+}
+
 fn take_optional_integer(
     members: &mut BTreeMap<String, Value>,
     of: &'static str,
@@ -4728,8 +4815,22 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             source,
             regimen_sha256,
             fork_delivery,
+            tool_output,
         } => {
             members.put("regime", regime_value(regime));
+            if let Some(cap) = tool_output {
+                members.put("tool_output", Value::String(cap.state.tag().to_owned()));
+                members.put_optional(
+                    "tool_output_max_lines",
+                    cap.max_lines
+                        .map(|n| Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))),
+                );
+                members.put_optional(
+                    "tool_output_max_bytes",
+                    cap.max_bytes
+                        .map(|n| Value::Integer(i64::try_from(n).unwrap_or(i64::MAX))),
+                );
+            }
             members.put("source", source_value(source));
             members.put_optional("regimen_sha256", regimen_sha256.clone().map(Value::String));
             members.put_optional(
@@ -4813,10 +4914,18 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
         Event::Seam {
             at_turn,
             rendered_bytes,
+            tail_tokens,
+            carried_turns,
+            carried_tokens,
             ..
         } => {
             members.put_u32("at_turn", *at_turn);
             members.put_count("rendered_bytes", *rendered_bytes);
+            let count =
+                |n: &Option<u64>| n.map(|n| Value::Integer(i64::try_from(n).unwrap_or(i64::MAX)));
+            members.put_optional("tail_tokens", count(tail_tokens));
+            members.put_optional("carried_turns", count(carried_turns));
+            members.put_optional("carried_tokens", count(carried_tokens));
         }
         Event::Rejected {
             lane,

@@ -367,6 +367,32 @@ fn checked(named: &str, attaching: &Attaching) -> Result<(RecordedFile, Vec<u8>)
     Ok((file, bytes))
 }
 
+/// `bytes` -- a capped tool output whole (#554) -- kept in the recording by
+/// digest, as an attachment is, and the reference a line carries for it.
+///
+/// # Errors
+///
+/// The copy's [`Check::CopyConflict`] or [`Check::CopyFailed`].
+pub fn kept_whole(
+    recording: &Path,
+    bytes: &[u8],
+    media_type: &str,
+) -> Result<RecordedFile, (Check, String)> {
+    let file = referenced(bytes, media_type);
+    kept(recording, &file, bytes)?;
+    Ok(file)
+}
+
+/// The reference a line would carry for `bytes` of `media_type`, kept or
+/// not: what [`crate::client::attach`] checks an image's bytes against.
+#[must_use]
+pub fn referenced(bytes: &[u8], media_type: &str) -> RecordedFile {
+    RecordedFile {
+        media_type: media_type.to_owned(),
+        ..reference(bytes)
+    }
+}
+
 /// The reference an `ask` line carries for `bytes`: its copy's path under
 /// the recording, its digest, its media type and its length.
 fn reference(bytes: &[u8]) -> RecordedFile {

@@ -210,6 +210,9 @@ vocabulary! {
 }
 
 /// One thing that happened in a session.
+// `Started` is the large one, and it is built once per session, at open: the
+// size each other event carries for it is not worth a box per field.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// The session opened. Always the first event, at sequence number zero.
@@ -244,6 +247,9 @@ pub enum Event {
         /// The template's default level, when thinking is on and none is
         /// sent.
         reasoning_effort_default: Option<String>,
+        /// The cap tool outputs arrive under, for a session that runs tools
+        /// (#554).
+        tool_output: Option<super::output::OutputCap>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -479,6 +485,13 @@ pub enum Event {
         render: String,
         /// How many entries the render carried.
         carried_entries: u64,
+        /// The compaction depth the seam ran at (#552): estimated tokens of
+        /// recent whole turns it could keep; 0, the total refill.
+        tail_tokens: u64,
+        /// How many whole turns of the old trunk it kept.
+        carried_turns: u64,
+        /// Their estimated tokens.
+        carried_tokens: u64,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -546,6 +559,14 @@ pub struct ToolLine {
     /// Exactly what the model was given as the call's result, when it was
     /// given one (#472).
     pub shown: Option<String>,
+    /// The whole output, kept in the recording by digest, when what the
+    /// model was shown is capped (#554), or the image `read` returned
+    /// (#557): the log's `files`.
+    pub files: Vec<log::RecordedFile>,
+    /// The images `read` returned (#557), each with the reference its bytes
+    /// are checked against, for the result message: never logged, and
+    /// taken off the line before it is.
+    pub images: Vec<(log::RecordedFile, Vec<u8>)>,
 }
 
 impl ToolLine {
@@ -570,6 +591,8 @@ impl ToolLine {
             stderr: None,
             approval: None,
             shown: None,
+            files: Vec::new(),
+            images: Vec::new(),
         }
     }
 }
@@ -1232,6 +1255,7 @@ impl<S: Streaming + 'static> Session<S> {
             approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
             fork_delivery,
             reasoning_effort_default,
+            tool_output: tools.as_ref().map(|tools| tools.output_cap),
         });
         Self {
             shared: Arc::new(Shared {
@@ -1774,9 +1798,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             approvals_off,
             fork_delivery,
             reasoning_effort_default,
+            tool_output,
         } => log::Event::SessionStart {
             fork_delivery: *fork_delivery,
             reasoning_effort_default: reasoning_effort_default.clone(),
+            tool_output: tool_output.map(tool_output_of),
             // The approval lever's `none`: `true`, or nothing.
             approvals_off: approvals_off.then_some(true),
             unsent: unsent.clone(),
@@ -1981,6 +2007,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 stderr,
                 approval,
                 shown,
+                files,
+                images: _,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -2000,7 +2028,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 stdout,
                 stderr,
                 approval,
-                files: None,
+                files: (!files.is_empty()).then_some(files),
                 shown,
             }
         }
@@ -2053,6 +2081,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             prefix_hash_after,
             render,
             carried_entries,
+            tail_tokens,
+            carried_turns,
+            carried_tokens,
         } => log::Event::Seam {
             at_turn: *at_turn,
             reason: match reason {
@@ -2066,8 +2097,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             frame: crate::seam::render::FRAME_VERSION.to_owned(),
             render: render.clone(),
             carried_entries: *carried_entries,
-            // A total compaction: no turn of the old trunk is carried.
-            carried_turns: 0,
+            carried_turns: *carried_turns,
+            // The depth, and what it kept, on a seam that could keep a tail
+            // (#552); a total compaction writes neither.
+            tail_tokens: (*tail_tokens > 0).then_some(*tail_tokens),
+            carried_tokens: (*tail_tokens > 0).then_some(*carried_tokens),
         },
     };
     log::Line {
@@ -2342,6 +2376,28 @@ fn step<S: Streaming>(
             );
         }
         Ok(StreamEnded::Cancelled) => {
+            // The steps it finished stay on the trunk, and so does what it
+            // had said when the cancel came, as `OpenCode` and Qwen Code keep
+            // it (#575): its text, unmarked. Its reasoning is not kept: the
+            // log's `cancelled` line carries none to rebuild it from.
+            if partial.is_empty() {
+                state.keep_ran_steps();
+            } else {
+                let mut kept = std::mem::take(&mut state.ran);
+                if kept.is_empty() {
+                    kept.push(
+                        exchange
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| Message::new(Role::User, String::new())),
+                    );
+                }
+                kept.push(Message::new(Role::Assistant, partial.clone()));
+                state.trunk.extend(kept);
+                if let Some(measured) = state.step_tokens.take() {
+                    state.trunk_tokens = Some(measured);
+                }
+            }
             state.push(Event::Cancelled { request, partial });
             state.push(Event::TurnSettled {
                 turn,
@@ -2388,6 +2444,24 @@ fn step<S: Streaming>(
     None
 }
 
+/// What a cancelled turn tells the model of a call that was running when
+/// the cancel came: after what the command printed, Qwen Code's own result
+/// for a call the user cancelled (`qc:packages/core/src/core/coreToolScheduler.ts`
+/// 467-468 and 1201-1209 at `c0c697c8`). The other harnesses answer it too,
+/// in their own words (Pi "Command aborted", `OpenCode` "Tool execution
+/// interrupted"); where the wording differs, Qwen Code's, the harness
+/// closest to the model this drives (#575).
+pub const CANCELLED_CALL: &str = "[Operation Cancelled] Reason: User intentionally cancelled \
+     this tool call. Stop and await further instructions; do not retry or work around it.";
+
+/// What a cancelled turn tells the model of a call that had not started --
+/// or was waiting on the operator -- when the cancel came: Qwen Code's
+/// repair text for a call with no recorded result
+/// (`qc:packages/core/src/core/llm-chat.ts` 1817-1819 at `c0c697c8`), which
+/// is what its model sees after an interrupt (#575).
+pub const UNRECORDED_CALL: &str = "Tool execution result was not recorded — likely interrupted \
+     by network failure, abort, or process exit. Treat as failure and retry if needed.";
+
 /// A step's calls, each to its one line, in the order they were made; then
 /// the turn goes on with their results, or settles: `cancelled` if a stop
 /// reached it, `failed` if a call named a tool the session did not declare
@@ -2415,12 +2489,25 @@ fn run_calls<S: Streaming>(
         } else {
             one_call(shared, cancel, (turn, request), call, last)
         };
+        // A call a cancel reached before it ran is still answered, as every
+        // harness answers it (#575).
+        let shown = if line.outcome == log::ToolOutcome::Cancelled && shown.is_none() {
+            Some(UNRECORDED_CALL.to_owned())
+        } else {
+            shown
+        };
         // The one string the result message carries, logged as given.
         line.shown.clone_from(&shown);
         unknown |= line.reason == Some(log::ToolRefusal::UnknownTool);
         stopped |= line.outcome == log::ToolOutcome::Cancelled;
+        let images = std::mem::take(&mut line.images);
         if let Some(shown) = shown {
-            results.push(Message::tool_result(call.id.clone(), shown));
+            let mut result = Message::tool_result(call.id.clone(), shown);
+            for (file, bytes) in &images {
+                result = crate::client::attach(result, file, bytes)
+                    .expect("the reference was taken from these bytes");
+            }
+            results.push(result);
         }
         shared.lock().push(Event::ToolCalled(Box::new(line)));
         shared.changed.notify_all();
@@ -2446,6 +2533,16 @@ fn run_calls<S: Streaming>(
         } else if reason == SettleReason::Failed {
             state.step_tokens = measured;
             state.keep_ran_steps();
+        } else if reason == SettleReason::Cancelled {
+            // Every call of this step answered, the cancelled one included:
+            // the turn so far joins the trunk, as the other harnesses keep
+            // it (#575).
+            let mut ran = std::mem::take(exchange);
+            ran.push(said);
+            ran.extend(results);
+            state.trunk.extend(ran);
+            state.trunk_tokens = measured;
+            state.ran.clear();
         }
         state.push(Event::TurnSettled { turn, reason });
         turn_over(&shared.template, &mut state);
@@ -2562,6 +2659,103 @@ fn approval_of(judged: &Judged, allowed: &[Entry]) -> Option<log::Approval> {
     })
 }
 
+/// The log's words for a cap (#554).
+fn tool_output_of(cap: super::output::OutputCap) -> log::ToolOutput {
+    use super::output::OutputCap;
+    let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+    match cap {
+        OutputCap::Capped {
+            max_lines,
+            max_bytes,
+        } => log::ToolOutput {
+            state: log::ToolOutputState::Capped,
+            max_lines: Some(count(max_lines)),
+            max_bytes: Some(count(max_bytes)),
+        },
+        OutputCap::Keep => log::ToolOutput {
+            state: log::ToolOutputState::Keep,
+            max_lines: None,
+            max_bytes: None,
+        },
+    }
+}
+
+/// What the model is shown of `whole`, a call's output, under the session's
+/// cap (#554): within it, `whole`; over it, Qwen Code's notice and the head
+/// and tail, the whole kept in the recording by digest and named on `line`.
+fn shown_capped(tools: &Tools, whole: &str, line: &mut ToolLine) -> String {
+    use super::output::{self, Kept};
+    if !output::over(whole, tools.output_cap) {
+        return whole.to_owned();
+    }
+    let saved = tools.recording.as_ref().and_then(|dir| {
+        super::attach::kept_whole(dir, whole.as_bytes(), "text/plain")
+            .ok()
+            .map(|file| (dir.join(&file.path).to_string_lossy().into_owned(), file))
+    });
+    let kept = saved.as_ref().map_or(Kept::Nowhere, |(path, _)| Kept::At {
+        path,
+        read_tool: tools.read_tool.as_deref(),
+    });
+    let shown = output::capped(whole, tools.output_cap, kept);
+    if shown != whole
+        && let Some((_, file)) = saved
+    {
+        line.files.push(file);
+    }
+    shown
+}
+
+/// A standard tool's call (#557), to its line and what the model is shown:
+/// its result under the session's cap, or -- a stop having killed its
+/// helper -- the cancel's result; the step limit refuses it as it refuses
+/// `bash`.
+fn standard_call(
+    tools: &Tools,
+    cancel: &Cancel,
+    (turn, request): (u32, u64),
+    call: &Call,
+    last: bool,
+) -> (ToolLine, Option<String>) {
+    if last {
+        let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Refused);
+        line.reason = Some(log::ToolRefusal::MaxSteps);
+        return (line, None);
+    }
+    match super::standard::run(&call.name, &call.arguments, tools, &|| cancel.is_asked()) {
+        super::standard::Done::Shown(result) => {
+            let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+            let shown = shown_capped(tools, &result, &mut line);
+            (line, Some(shown))
+        }
+        super::standard::Done::Image { media_type, bytes } => {
+            let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+            // Kept by digest, as an attachment is, so the projection can
+            // rebuild the result; unrecorded, it is still sent.
+            let file = tools.recording.as_ref().map_or_else(
+                || super::attach::referenced(&bytes, media_type),
+                |dir| {
+                    super::attach::kept_whole(dir, &bytes, media_type).map_or_else(
+                        |_| super::attach::referenced(&bytes, media_type),
+                        |file| {
+                            line.files.push(file.clone());
+                            file
+                        },
+                    )
+                },
+            );
+            line.images.push((file, bytes));
+            // Qwen Code's form, since Pi's and `OpenCode` 2's words differ:
+            // the image alone, no text beside it.
+            (line, Some(String::new()))
+        }
+        super::standard::Done::Cancelled(_) => {
+            let line = ToolLine::of(request, turn, call, log::ToolOutcome::Cancelled);
+            (line, Some(CANCELLED_CALL.to_owned()))
+        }
+    }
+}
+
 /// One call, to its line and what the model is shown of it (`None` when
 /// nothing goes back: an undeclared tool, the step limit, a stop).
 #[allow(clippy::too_many_lines)]
@@ -2582,6 +2776,14 @@ fn one_call<S: Streaming>(
         .tools
         .iter()
         .any(|tool| tool.name == call.name);
+    // The standard surface's tools (#557), each run under the session's
+    // confinement; no gate decides them.
+    if declared
+        && super::standard::is_standard(&call.name)
+        && let Some(tools) = shared.tools.as_ref()
+    {
+        return standard_call(tools, cancel, (turn, request), call, last);
+    }
     let Some(tools) = shared
         .tools
         .as_ref()
@@ -2718,7 +2920,30 @@ fn one_call<S: Streaming>(
     let mut line = parsed(ToolLine::of(request, turn, call, log::ToolOutcome::Ran));
     line.approval = approval;
     let profiled = tools.confinement.isolation() != crate::isolation::Isolation::None;
-    match tools.confinement.run(&tools.policy, &tools.worktree, &run) {
+    // A stop reaches a running call: its whole process group is killed, and
+    // the turn settles `cancelled` (#551).
+    match tools
+        .confinement
+        .run_until(&tools.policy, &tools.worktree, &run, &|| cancel.is_asked())
+    {
+        Ok(ran) if ran.cancelled => {
+            // A cancelled line carries no streams (the log format's rule);
+            // what the command printed before the cancel reaches the log as
+            // the result the model was shown.
+            line.outcome = log::ToolOutcome::Cancelled;
+            line.confined = Some(ran.confined.clone());
+            line.isolation = Some(isolation_word(ran.isolation));
+            line.network = Some(network_word(ran.network));
+            // What it printed before the cancel, then the cancel's result
+            // (#575).
+            let printed = ran.as_the_model_sees_it();
+            let shown = if printed.is_empty() {
+                CANCELLED_CALL.to_owned()
+            } else {
+                format!("{printed}\n{CANCELLED_CALL}")
+            };
+            (line, Some(shown))
+        }
         Ok(ran) => {
             let denied = ran.denials().iter().any(|d| d.kind.is_unambiguous());
             if profiled && ran.exit != Some(0) && denied {
@@ -2737,7 +2962,8 @@ fn one_call<S: Streaming>(
                 text: ran.stderr.clone(),
                 bytes: ran.stderr_bytes,
             });
-            (line, Some(ran.as_the_model_sees_it()))
+            let shown = shown_capped(tools, &ran.as_the_model_sees_it(), &mut line);
+            (line, Some(shown))
         }
         Err(not_run) => {
             // It never ran: what would have run, and why it did not, as the
@@ -2784,7 +3010,24 @@ fn refill_trunk(template: &RequestShape, state: &mut State, reason: crate::seam:
         crate::client::head::Head::of(&shape).digest().to_owned()
     };
     let prefix_hash_before = digest(&state.trunk);
-    let refilled = crate::seam::render::refill(&template.messages, &render);
+    // The compaction depth (#552): the most recent whole turns, within the
+    // regimen's budget, kept after the refill as they sat on the trunk.
+    let tail_tokens = interview.seams.tail_tokens;
+    let turns = state
+        .trunk
+        .get(template.messages.len()..)
+        .unwrap_or_default();
+    let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+    let carried_turns = kept
+        .iter()
+        .filter(|message| message.role == Role::User)
+        .count() as u64;
+    let carried_tokens = kept
+        .iter()
+        .map(crate::seam::render::estimated_tokens)
+        .sum::<u64>();
+    let mut refilled = crate::seam::render::refill(&template.messages, &render);
+    refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
     state.turns_at_seam = state.turns;
@@ -2797,6 +3040,9 @@ fn refill_trunk(template: &RequestShape, state: &mut State, reason: crate::seam:
         prefix_hash_after,
         render,
         carried_entries,
+        tail_tokens,
+        carried_turns,
+        carried_tokens,
     });
 }
 
@@ -3506,7 +3752,7 @@ pub(in crate::drive) mod tests {
     }
 
     #[test]
-    fn a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone() {
+    fn a_cancel_reaches_a_call_blocked_mid_answer_and_keeps_what_it_had_said() {
         // Held, and never opened by this test: only the cancel can wake it.
         let gate = Gate::new();
         let canned = Canned::new([
@@ -3549,10 +3795,16 @@ pub(in crate::drive) mod tests {
                 },
             ]
         );
-        assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
+        // What it had said stays, unmarked, as OpenCode and Qwen Code keep it
+        // (#575).
+        let kept = [
+            Message::new(Role::System, HEAD),
+            user("first"),
+            Message::new(Role::Assistant, "Hel"),
+        ];
+        assert_eq!(session.trunk(), kept);
 
-        // The next ask goes out on the prefix the last SETTLED turn left:
-        // nothing of the stopped one.
+        // The next ask goes out on that prefix.
         session
             .ask("second", None)
             .expect("accepted after a cancel");
@@ -3561,10 +3813,9 @@ pub(in crate::drive) mod tests {
                 .any(|logged| matches!(logged.event, Event::Answered { .. }))
                 && settled(log)
         });
-        assert_eq!(
-            session.shared.transport.sent()[1].messages,
-            [Message::new(Role::System, HEAD), user("second")]
-        );
+        let mut next = kept.to_vec();
+        next.push(user("second"));
+        assert_eq!(session.shared.transport.sent()[1].messages, next);
     }
 
     #[test]
@@ -4247,6 +4498,7 @@ pub(in crate::drive) mod tests {
             approvals_off: false,
             fork_delivery: None,
             reasoning_effort_default: None,
+            tool_output: None,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -4346,6 +4598,7 @@ pub(in crate::drive) mod tests {
                 approvals_off: true,
                 fork_delivery: Some(log::ForkDelivery::Advisory),
                 reasoning_effort_default: Some("xhigh".to_owned()),
+                tool_output: Some(crate::drive::output::OutputCap::DEFAULT),
             },
             Event::Asked {
                 turn: 1,
@@ -4494,6 +4747,8 @@ pub(in crate::drive) mod tests {
                     why: Some("not_approved".to_owned()),
                 }),
                 shown: None,
+                files: Vec::new(),
+                images: Vec::new(),
             })),
             Event::Forked {
                 of_turn: 1,
@@ -4528,6 +4783,9 @@ pub(in crate::drive) mod tests {
                 prefix_hash_after: "d".repeat(64),
                 render: "# regime\n".to_owned(),
                 carried_entries: 1,
+                tail_tokens: 0,
+                carried_turns: 0,
+                carried_tokens: 0,
             },
             Event::Delivered {
                 turn: 2,
@@ -4611,6 +4869,11 @@ pub(in crate::drive) mod tests {
                 approvals_off: Some(true),
                 fork_delivery: Some(log::ForkDelivery::Advisory),
                 reasoning_effort_default: Some("xhigh".to_owned()),
+                tool_output: Some(log::ToolOutput {
+                    state: log::ToolOutputState::Capped,
+                    max_lines: Some(2000),
+                    max_bytes: Some(51_200),
+                }),
             },
             log::Event::Ask {
                 turn: 1,
@@ -4810,6 +5073,8 @@ pub(in crate::drive) mod tests {
                 render: "# regime\n".to_owned(),
                 carried_entries: 1,
                 carried_turns: 0,
+                tail_tokens: None,
+                carried_tokens: None,
             },
             log::Event::Delivered {
                 turn: 2,
@@ -5355,6 +5620,10 @@ pub(in crate::drive) mod tests {
             store: None,
             approval_policy: None,
             approvals_off: false,
+            output_cap: crate::drive::output::OutputCap::DEFAULT,
+            recording: None,
+            read_tool: None,
+            surface: tool_loop::ToolSurface::Bash,
         }
     }
 
@@ -5743,6 +6012,596 @@ pub(in crate::drive) mod tests {
         assert_eq!(trunk.len(), 1 + 1 + 2, "{trunk:#?}");
         assert_eq!(trunk[2], call_message("call-1", "touch a"));
         tidy(&[&tree]);
+    }
+
+    /// A cancel reaches a call that is running (#551): its process group is
+    /// killed, the call is logged `cancelled`, and the turn settles
+    /// `cancelled` within seconds.
+    #[test]
+    fn a_cancel_stops_a_running_call_and_settles_the_turn_cancelled() {
+        let tree = scratch("cancel-running-call");
+        let session = Session::open_looping(
+            Canned::new([vec![bash("call-1", "sleep 600")], deltas(&["never"])]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["sleep"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("wait", None).expect("accepted");
+        wait_until(&session, "the call to be made", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Called { .. }))
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        let asked = Instant::now();
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert!(
+            asked.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            asked.elapsed()
+        );
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        // The log reads: a cancelled line carries no streams.
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].outcome, log::ToolOutcome::Cancelled);
+        tidy(&[&tree]);
+    }
+
+    /// A call that leaves a server running in the background returns, and a
+    /// later call in the same session still runs (#551): the server's held
+    /// pipes do not poison the next call.
+    #[test]
+    fn a_call_after_a_backgrounded_server_still_runs() {
+        let tree = scratch("after-background");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "sleep 30 & echo started")],
+                vec![bash("call-2", "echo second")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["sleep", "echo"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        let asked = Instant::now();
+        session.ask("serve", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert!(
+            asked.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            asked.elapsed()
+        );
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        let written = lines(&log);
+        assert_eq!(written.len(), 2, "{written:?}");
+        assert!(
+            written.iter().all(|l| l.outcome == log::ToolOutcome::Ran),
+            "{written:?}"
+        );
+        let said = |line: &ToolLine| line.stdout.as_ref().map(|out| out.text.clone());
+        assert_eq!(said(&written[0]).as_deref(), Some("started\n"));
+        assert_eq!(said(&written[1]).as_deref(), Some("second\n"));
+        tidy(&[&tree]);
+    }
+
+    /// Every head the log's projection rebuilds is verified: none is named
+    /// as one it could not rebuild.
+    fn every_head_rebuilds(log: &[Logged]) {
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let unrebuilt: Vec<&str> = projected
+            .unspellable
+            .iter()
+            .filter(|named| named.why.contains("could not be rebuilt"))
+            .map(|named| named.why.as_str())
+            .collect();
+        assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
+    }
+
+    /// A turn cancelled after a finished call, while its next call runs
+    /// (#575): the finished step stays on the trunk, the running call is
+    /// killed and answered with what it printed and Qwen Code's cancel
+    /// result, the next ask carries all of it, and the projection rebuilds
+    /// every head.
+    #[test]
+    fn a_cancelled_turn_keeps_its_finished_steps_and_answers_the_running_call() {
+        let tree = scratch("cancel-keeps-steps");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![bash("call-2", "echo partway; sleep 600")],
+                deltas(&["next"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch", "echo", "sleep"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        wait_until(&session, "the second call to be made", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Called { .. }))
+                .count()
+                == 2
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
+        assert_eq!(trunk[1], user("work"));
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        assert_eq!(trunk[4], call_message("call-2", "echo partway; sleep 600"));
+        assert_eq!(
+            trunk[5].content,
+            format!("partway\n\n{CANCELLED_CALL}"),
+            "what it printed, then the cancel"
+        );
+        let written = lines(&log);
+        assert_eq!(written[1].outcome, log::ToolOutcome::Cancelled);
+        assert_eq!(written[1].shown.as_deref(), Some(trunk[5].content.as_str()));
+
+        session.ask("next", None).expect("accepted after a cancel");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        reads_whole(&session);
+        let sent = session.shared.transport.sent();
+        assert_eq!(
+            sent[2].messages[..trunk.len()],
+            trunk[..],
+            "the next ask carries the cancelled turn's steps"
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// A call the cancel reached before it started -- the second of one
+    /// message -- never runs, and is answered with Qwen Code's repair text
+    /// (#575), so every call of the kept step has its result.
+    #[test]
+    fn a_call_a_cancel_reached_before_it_started_is_answered_as_unrecorded() {
+        let tree = scratch("cancel-unstarted");
+        let session = Session::open_looping(
+            Canned::new([vec![
+                Step::call(0, "call-1", "bash", r#"{"command":"sleep 600"}"#),
+                Step::call(1, "call-2", "bash", r#"{"command":"touch never"}"#),
+            ]]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch", "sleep"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        wait_until(&session, "the calls to be made", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Called { .. }))
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        assert!(!tree.join("never").exists(), "the unstarted call ran");
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 3, "{trunk:#?}");
+        assert_eq!(
+            trunk[3].content, CANCELLED_CALL,
+            "the running call printed nothing"
+        );
+        assert_eq!(trunk[4].content, UNRECORDED_CALL);
+        assert_eq!(trunk[4].tool_call_id.as_deref(), Some("call-2"));
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// Cancelled while generating after a finished step: the step stays, and
+    /// so does the text said so far (#575).
+    #[test]
+    fn a_turn_cancelled_while_generating_keeps_its_step_and_its_text() {
+        let tree = scratch("cancel-generating");
+        let gate = Gate::new();
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![Step::Delta("so far".to_owned()), Step::Hold(gate.clone())],
+                deltas(&["next"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "never held"
+        );
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2 + 1, "{trunk:#?}");
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        assert_eq!(trunk[4], Message::new(Role::Assistant, "so far"));
+        session.ask("next", None).expect("accepted after a cancel");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// A session whose one turn runs `commands`, one call each, then
+    /// answers; its tools capped as `cap`, keeping capped outputs in
+    /// `recording`.
+    fn capping_session(
+        tree: &Path,
+        commands: &[&str],
+        cap: crate::drive::output::OutputCap,
+        recording: Option<&Path>,
+    ) -> Session<Canned> {
+        let mut replies: Vec<Vec<Step>> = commands
+            .iter()
+            .enumerate()
+            .map(|(n, command)| vec![bash(&format!("call-{n}"), command)])
+            .collect();
+        replies.push(deltas(&["done"]));
+        let mut tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["seq", "sed", "echo"],
+            None,
+            Decider::Decline,
+        );
+        tools.output_cap = cap;
+        tools.recording = recording.map(Path::to_path_buf);
+        // The gate is not under test: a read of the recording runs.
+        tools.approvals_off = true;
+        Session::open_looping(Canned::new(replies), looping(), None, tools)
+    }
+
+    /// #554: an output over the cap reaches the model capped -- Qwen Code's
+    /// notice naming the kept file, the head, the separator, the tail -- and
+    /// the whole of it is kept in the recording by digest, named on the
+    /// line's `files`; a later call reads a slice of it through `bash`. The
+    /// session's start names the cap, the log reads, and the projection
+    /// rebuilds every head and carries the cap onto the record's start.
+    #[test]
+    fn an_output_over_the_cap_is_capped_kept_whole_by_digest_and_readable_in_slices() {
+        use crate::drive::output::{OutputCap, SEPARATOR};
+        let tree = scratch("cap-over");
+        let recording = scratch("cap-over-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let whole: String = (1..=5000)
+            .flat_map(|n| [n.to_string(), "\n".to_owned()])
+            .collect();
+        let sha256 = crate::digest::sha256_hex(whole.as_bytes());
+        let kept = recording.join("files").join(&sha256);
+        let slice = format!("sed -n '2500,2502p' \"{}\"", kept.display());
+        let session = capping_session(
+            &tree,
+            &["seq 1 5000", &slice],
+            OutputCap::DEFAULT,
+            Some(&recording),
+        );
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        reads_whole(&session);
+        let written = lines(&log);
+        let shown = written[0].shown.clone().expect("shown");
+        assert!(
+            shown.starts_with("Tool output was too large and has been truncated.\n"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains(&format!(
+                "The full output has been saved to: {}\n",
+                kept.display()
+            )),
+            "{shown}"
+        );
+        let (head, tail) = shown
+            .split_once("Truncated part of the output:\n")
+            .expect("the notice")
+            .1
+            .split_once(SEPARATOR)
+            .expect("the separator");
+        assert!(
+            head.starts_with("1\n2\n") && tail.ends_with("4999\n5000\n"),
+            "{shown}"
+        );
+        assert_eq!(head.lines().count(), 400);
+        assert_eq!(tail.lines().count(), 1600);
+        assert_eq!(
+            written[0].files,
+            [log::RecordedFile {
+                path: format!("files/{sha256}"),
+                sha256: sha256.clone(),
+                media_type: "text/plain".to_owned(),
+                bytes: whole.len() as u64,
+            }]
+        );
+        assert_eq!(std::fs::read_to_string(&kept).expect("kept whole"), whole);
+        // The log keeps the whole stream; the model was shown the cap.
+        assert_eq!(
+            written[0].stdout.as_ref().map(|out| out.text.as_str()),
+            Some(whole.as_str())
+        );
+        assert_eq!(written[1].shown.as_deref(), Some("2500\n2501\n2502\n"));
+        let Event::Started { tool_output, .. } = &log[0].event else {
+            panic!("the log opens with the session");
+        };
+        assert_eq!(*tool_output, Some(OutputCap::DEFAULT));
+        every_head_rebuilds(&log);
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        assert!(
+            matches!(
+                projected.events.first(),
+                Some(crate::formats::record::Event::Start {
+                    tool_output: Some(log::ToolOutput {
+                        state: log::ToolOutputState::Capped,
+                        ..
+                    }),
+                    ..
+                })
+            ),
+            "the record's start names the cap"
+        );
+        // And the record reads back with it.
+        let record = crate::formats::record::Record {
+            events: projected.events.clone(),
+        };
+        let read = crate::formats::record::parse(&crate::formats::record::render(&record))
+            .expect("the record reads");
+        assert_eq!(
+            read.tool_output().map(|cap| (cap.max_lines, cap.max_bytes)),
+            Some((Some(2000), Some(51_200)))
+        );
+        tidy(&[&tree, &recording]);
+    }
+
+    /// Within the cap the output is shown whole and nothing is kept; with
+    /// no recording, an output over it is capped and the notice says it was
+    /// not saved; with the cap off, it is shown whole, and the start says
+    /// `keep`.
+    #[test]
+    fn under_the_cap_without_a_recording_or_with_the_cap_off_nothing_is_kept() {
+        use crate::drive::output::OutputCap;
+        let tree = scratch("cap-under");
+        let recording = scratch("cap-under-recording");
+        let session = capping_session(&tree, &["echo short"], OutputCap::DEFAULT, Some(&recording));
+        session.ask("say", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        assert_eq!(written[0].shown.as_deref(), Some("short\n"));
+        assert!(written[0].files.is_empty());
+        assert!(!recording.join("files").exists(), "something was kept");
+
+        let session = capping_session(&tree, &["seq 1 5000"], OutputCap::DEFAULT, None);
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        let shown = written[0].shown.clone().expect("shown");
+        assert!(
+            shown.contains("The full output was not saved.\n"),
+            "{shown}"
+        );
+        assert!(written[0].files.is_empty());
+
+        let session = capping_session(&tree, &["seq 1 5000"], OutputCap::Keep, Some(&recording));
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        assert_eq!(
+            written[0].shown.as_deref().map(str::len),
+            written[0].stdout.as_ref().map(|out| out.text.len())
+        );
+        assert!(!recording.join("files").exists(), "something was kept");
+        let Event::Started { tool_output, .. } = &log[0].event else {
+            panic!("the log opens with the session");
+        };
+        assert_eq!(*tool_output, Some(OutputCap::Keep));
+        tidy(&[&tree, &recording]);
+    }
+
+    /// The standard surface (#557): the request declares `bash` and the
+    /// standard tools with their descriptions; the model writes, reads and
+    /// edits a file in the worktree; each call is a line under its tool's
+    /// name with the result it was shown; the log reads whole and the
+    /// projection rebuilds every head from the declared names.
+    #[test]
+    fn the_standard_surface_writes_reads_and_edits_and_every_head_rebuilds() {
+        let tree = scratch("standard-surface");
+        let write = r#"{"path":"notes.txt","content":"alpha\nbeta\n"}"#;
+        let read = r#"{"path":"notes.txt"}"#;
+        let edit = r#"{"file_path":"notes.txt","old_string":"beta","new_string":"gamma"}"#;
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        let session = Session::open_looping(
+            Canned::new([
+                vec![Step::call(0, "call-1", "write", write)],
+                vec![Step::call(0, "call-2", "read", read)],
+                vec![Step::call(0, "call-3", "edit", edit)],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("keep notes", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        reads_whole(&session);
+        let written = lines(&log);
+        let names: Vec<&str> = written.iter().map(|line| line.name.as_str()).collect();
+        assert_eq!(names, ["write", "read", "edit"]);
+        assert!(
+            written
+                .iter()
+                .all(|line| line.outcome == log::ToolOutcome::Ran)
+        );
+        assert_eq!(
+            written[0].shown.as_deref(),
+            Some("Successfully created and wrote to new file: notes.txt.")
+        );
+        assert_eq!(written[1].shown.as_deref(), Some("alpha\nbeta\n"));
+        assert!(
+            written[2]
+                .shown
+                .as_deref()
+                .is_some_and(|shown| shown.starts_with("The file: notes.txt has been updated."))
+        );
+        assert_eq!(
+            std::fs::read_to_string(tree.join("notes.txt")).expect("the file"),
+            "alpha\ngamma\n"
+        );
+        let sent = session.shared.transport.sent();
+        let declared: Vec<(&str, bool)> = sent[0]
+            .tools
+            .iter()
+            .map(|tool| (tool.name.as_str(), tool.description.is_some()))
+            .collect();
+        assert_eq!(
+            declared,
+            [
+                ("bash", false),
+                ("read", true),
+                ("write", true),
+                ("edit", true),
+                ("grep", true),
+                ("glob", true)
+            ]
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// `read` of an image (#557): the result goes back as an image part
+    /// inside the tool message, with no words beside it, the image kept in
+    /// the recording by digest and named on the line's `files`; every head
+    /// rebuilds from the recording, and without one the head that carries
+    /// the image is named unrebuilt.
+    #[test]
+    fn a_read_image_rides_in_the_tool_message_and_every_head_rebuilds() {
+        let tree = scratch("standard-image");
+        let recording = scratch("standard-image-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let png = b"\x89PNG\r\n\x1a\nsome pixels".to_vec();
+        std::fs::write(tree.join("shot.png"), &png).expect("written");
+        let sha256 = crate::digest::sha256_hex(&png);
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.recording = Some(recording.clone());
+        let session = Session::open_looping(
+            Canned::new([
+                vec![Step::call(0, "call-1", "read", r#"{"path":"shot.png"}"#)],
+                deltas(&["red"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("what colour?", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written[0].outcome, log::ToolOutcome::Ran);
+        assert_eq!(written[0].shown.as_deref(), Some(""));
+        let file = log::RecordedFile {
+            path: format!("files/{sha256}"),
+            sha256: sha256.clone(),
+            media_type: "image/png".to_owned(),
+            bytes: png.len() as u64,
+        };
+        assert_eq!(written[0].files, std::slice::from_ref(&file));
+        assert!(written[0].images.is_empty(), "the bytes are never logged");
+        assert_eq!(
+            std::fs::read(recording.join(&file.path)).expect("kept"),
+            png
+        );
+        let sent = session.shared.transport.sent();
+        let result = sent[1].messages.last().expect("the result");
+        assert_eq!(result.role, Role::Tool);
+        assert_eq!(result.tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(result.content, "");
+        assert_eq!(
+            result.images,
+            crate::client::attach(Message::new(Role::Tool, ""), &file, &png)
+                .expect("the file's bytes")
+                .images
+        );
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project_in(&lines, &regime(), None, Some(&recording))
+                .expect("projected");
+        let unrebuilt = |projected: &crate::drive::projection::Projection| -> Vec<String> {
+            projected
+                .unspellable
+                .iter()
+                .filter(|named| named.why.contains("could not be rebuilt"))
+                .map(|named| named.why.clone())
+                .collect()
+        };
+        assert!(
+            unrebuilt(&projected).is_empty(),
+            "{:#?}",
+            unrebuilt(&projected)
+        );
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let named = unrebuilt(&projected);
+        assert!(
+            named.iter().any(|why| why.contains("call call-1's image")),
+            "{named:#?}"
+        );
+        tidy(&[&tree, &recording]);
     }
 
     /// A turn that fails on its first request ran nothing, and keeps nothing:
@@ -6703,6 +7562,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: Some(1),
                 at_trunk_tokens: None,
+                tail_tokens: 0,
             })),
         );
         session
@@ -6735,6 +7595,75 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// The compaction depth (#552): a seam with a tail budget keeps the
+    /// old trunk's most recent whole turn after the refill, as it sat on the
+    /// trunk; the seam line names the depth and what it kept; the next ask
+    /// runs on head, render and tail; the projection rebuilds every head. A
+    /// budget no whole turn fits keeps none.
+    #[test]
+    fn a_seam_with_a_tail_budget_keeps_the_most_recent_whole_turns() {
+        let tailed = |tail_tokens: u64| {
+            Session::open_with(
+                Canned::new([
+                    deltas(&[SCOPED]),
+                    deltas(&[DECIDED]),
+                    deltas(&["started on the schema"]),
+                ]),
+                template(),
+                None,
+                None,
+                None,
+                Some(seaming(crate::seam::policy::Served {
+                    every_turns: Some(1),
+                    at_trunk_tokens: None,
+                    tail_tokens,
+                })),
+            )
+        };
+        let session = tailed(10_000);
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        let trunk = session.trunk();
+        let kept = [
+            user("what are we building?"),
+            Message::new(Role::Assistant, SCOPED),
+        ];
+        assert_eq!(trunk[trunk.len() - 2..], kept[..], "{trunk:#?}");
+        assert_eq!(trunk.len(), template().messages.len() + 2);
+        let seam = log
+            .iter()
+            .find_map(|logged| match line_of(logged).event {
+                log::Event::Seam {
+                    tail_tokens,
+                    carried_turns,
+                    carried_tokens,
+                    ..
+                } => Some((tail_tokens, carried_turns, carried_tokens)),
+                _ => None,
+            })
+            .expect("a seam line");
+        let estimated: u64 = kept.iter().map(crate::seam::render::estimated_tokens).sum();
+        assert_eq!(seam, (Some(10_000), 1, Some(estimated)));
+
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the second seam", |log| seams_in(log).len() == 2);
+        reads_whole(&session);
+        let mut expected = trunk.clone();
+        expected.push(user("build it"));
+        assert_eq!(session.shared.transport.sent()[2].messages, expected);
+        every_head_rebuilds(&log);
+
+        // A budget no whole turn fits: the total refill.
+        let session = tailed(1);
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        assert_eq!(session.trunk().len(), template().messages.len());
+    }
+
     /// A budget: the trunk call reports 18 prefilled, 160 reused and 66
     /// generated, 244 tokens, against a limit of 200, so the seam fires
     /// `budget` though the cadence (every 5 turns) has not come round. The
@@ -6753,6 +7682,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: Some(5),
                 at_trunk_tokens: Some(200),
+                tail_tokens: 0,
             })),
         );
         session
@@ -6781,6 +7711,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: None,
                 at_trunk_tokens: Some(245),
+                tail_tokens: 0,
             })),
         );
         session
@@ -6820,6 +7751,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: None,
                 at_trunk_tokens: Some(100),
+                tail_tokens: 0,
             })),
         );
         session
@@ -6861,6 +7793,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: Some(1),
                 at_trunk_tokens: None,
+                tail_tokens: 0,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -6890,6 +7823,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: Some(2),
                 at_trunk_tokens: None,
+                tail_tokens: 0,
             })),
         );
         session
@@ -7005,6 +7939,8 @@ pub(in crate::drive) mod tests {
                 render: render.clone(),
                 carried_entries: 3,
                 carried_turns: 0,
+                tail_tokens: None,
+                carried_tokens: None,
             }
         );
 

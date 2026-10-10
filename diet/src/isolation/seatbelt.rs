@@ -555,7 +555,7 @@ pub(super) fn kill() -> Command {
 
 /// `command` spawned leading a process group of its own.
 #[cfg(unix)]
-fn spawn_leading_a_group(command: &mut Command) -> std::io::Result<Child> {
+pub(super) fn spawn_leading_a_group(command: &mut Command) -> std::io::Result<Child> {
     use std::os::unix::process::CommandExt as _;
     command.process_group(0).spawn()
 }
@@ -564,7 +564,7 @@ fn spawn_leading_a_group(command: &mut Command) -> std::io::Result<Child> {
 /// side compiles this module) Seatbelt refuses rather than spawn a command
 /// outside a group it could later kill.
 #[cfg(not(unix))]
-fn spawn_leading_a_group(_command: &mut Command) -> std::io::Result<Child> {
+pub(super) fn spawn_leading_a_group(_command: &mut Command) -> std::io::Result<Child> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "Seatbelt leads each command in a process group, which exists only on Unix",

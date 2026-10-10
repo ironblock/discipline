@@ -31,6 +31,11 @@ pub const SEAM_AT_WORKING_SET_BYTES: &str = "seam_at_working_set_bytes";
 /// The fraction of the serving context the trunk may reach before a served
 /// session seams, written as a decimal in (0, 1].
 pub const SEAM_AT_CONTEXT_FRACTION: &str = "seam_at_context_fraction";
+
+/// The compaction depth (#552): how many estimated tokens of the old
+/// trunk's most recent whole turns a served seam keeps after the refill.
+/// Absent or 0 is the total refill (#505).
+pub const SEAM_TAIL_TOKENS: &str = "seam_tail_tokens";
 /// The ordered list of phases the work moves through.
 pub const PHASES: &str = "phases";
 /// The table of allowed transitions, one array per phase.
@@ -220,6 +225,9 @@ pub struct Served {
     /// A seam once the trunk holds this many tokens:
     /// [`SEAM_AT_CONTEXT_FRACTION`] of the serving context, rounded down.
     pub at_trunk_tokens: Option<u64>,
+    /// The compaction depth: estimated tokens of recent whole turns a seam
+    /// keeps after the refill ([`SEAM_TAIL_TOKENS`]); 0, the total refill.
+    pub tail_tokens: u64,
 }
 
 impl Served {
@@ -259,9 +267,18 @@ impl Served {
                 Some(tokens.max(1))
             }
         };
+        let tail_tokens = match regimen.get(SEAM_TAIL_TOKENS) {
+            None => 0,
+            Some(Value::Integer(count)) if *count >= 0 => count.unsigned_abs(),
+            Some(Value::Integer(_)) => {
+                return Err(PolicyError::NotPositive(SEAM_TAIL_TOKENS));
+            }
+            Some(_) => return Err(PolicyError::NotAnInteger(SEAM_TAIL_TOKENS)),
+        };
         Ok(Self {
             every_turns,
             at_trunk_tokens,
+            tail_tokens,
         })
     }
 
@@ -343,6 +360,23 @@ mod tests {
         Served::from_regimen(&regimen::parse(text).expect("a regimen"), window)
     }
 
+    /// The compaction depth (#552): absent is 0, the total refill; a
+    /// whole number of tokens otherwise, 0 included; anything else refused.
+    #[test]
+    fn the_seam_tail_is_a_whole_number_of_tokens_defaulting_to_none() {
+        assert_eq!(served("", None).map(|s| s.tail_tokens), Ok(0));
+        assert_eq!(
+            served("seam_tail_tokens = 0\n", None).map(|s| s.tail_tokens),
+            Ok(0)
+        );
+        assert_eq!(
+            served("seam_tail_tokens = 8000\n", None).map(|s| s.tail_tokens),
+            Ok(8000)
+        );
+        assert!(served("seam_tail_tokens = -1\n", None).is_err());
+        assert!(served("seam_tail_tokens = \"lots\"\n", None).is_err());
+    }
+
     #[test]
     fn a_served_policy_is_read_from_the_regimen_or_refused_with_a_reason() {
         assert_eq!(served("", Some(160_000)), Ok(Served::default()));
@@ -354,6 +388,7 @@ mod tests {
             Ok(Served {
                 every_turns: Some(4),
                 at_trunk_tokens: Some(96_000),
+                tail_tokens: 0,
             })
         );
         assert_eq!(
@@ -361,6 +396,7 @@ mod tests {
             Ok(Served {
                 every_turns: None,
                 at_trunk_tokens: Some(8192),
+                tail_tokens: 0,
             })
         );
         for bad in ["0.0", "1.5", "-0.2", "\"half\""] {
@@ -393,6 +429,7 @@ mod tests {
         let policy = Served {
             every_turns: Some(3),
             at_trunk_tokens: Some(1000),
+            tail_tokens: 0,
         };
         assert_eq!(policy.due(2, Some(999)), None);
         assert_eq!(policy.due(2, None), None);
