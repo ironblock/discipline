@@ -91,6 +91,8 @@ pub struct Job {
     pub exit: Option<i32>,
     /// Whether a stop was asked of it.
     pub stopping: bool,
+    /// Its output's bytes when a seam last listed it running (#614).
+    pub listed: Option<u64>,
 }
 
 impl Job {
@@ -272,6 +274,53 @@ pub fn notification(job: &Job, output: &[u8]) -> String {
     parts.join("\n")
 }
 
+/// The longest command a seam's list shows, in characters: Qwen Code's
+/// cut for a task's description (`postCompactAttachments.ts`).
+pub const LISTED_COMMAND_CHARS: usize = 200;
+
+/// The list a seam's refill carries after its summary, of each job still
+/// running (#614), or `None` when none is: Qwen Code's
+/// `<background-tasks>` block (`postCompactAttachments.ts:743-774`), its
+/// subagents' words adapted to shells, each row with the job's command and
+/// output file, and -- the maintainer's addition -- whether it printed
+/// anything since it started or since the last seam that listed it. Each
+/// listed job keeps its output's size for the next seam.
+pub fn running_at_seam<'a>(jobs: impl Iterator<Item = &'a mut Job>) -> Option<String> {
+    let mut rows = Vec::new();
+    for job in jobs.filter(|job| job.status == Status::Running) {
+        let bytes = std::fs::metadata(&job.output).map_or(0, |meta| meta.len());
+        let since = match job.listed {
+            None if bytes == 0 => "no output since it started",
+            None => "output since it started",
+            Some(listed) if listed == bytes => "no new output since the last compaction",
+            Some(_) => "new output since the last compaction",
+        };
+        job.listed = Some(bytes);
+        let flat = job.command.split_whitespace().collect::<Vec<_>>().join(" ");
+        let command = if flat.chars().count() > LISTED_COMMAND_CHARS {
+            let cut: String = flat.chars().take(LISTED_COMMAND_CHARS).collect();
+            format!("{cut}\u{2026}")
+        } else {
+            flat
+        };
+        rows.push(format!(
+            "- [running, {since}] {}: {}\n  output file: {}",
+            escaped(&job.id),
+            escaped(&command),
+            escaped(&job.output.to_string_lossy())
+        ));
+    }
+    if rows.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "\n\n<background-tasks>\nThe following background commands were running at \
+         compaction. The summary above does not include their state. Use `task_stop` to stop \
+         one; do not assume they finished.\n{}\n</background-tasks>",
+        rows.join("\n")
+    ))
+}
+
 /// `text` safe inside the notification's elements.
 fn escaped(text: &str) -> String {
     text.replace('&', "&amp;")
@@ -317,6 +366,31 @@ mod tests {
     }
 
     #[test]
+    fn a_seams_list_cuts_a_long_command_at_200_characters_and_escapes_it() {
+        let mut job = Job {
+            id: "bg_0123abcd".to_owned(),
+            command: format!("echo <{}>", "x".repeat(300)),
+            cwd: ".".to_owned(),
+            pid: 42,
+            output: PathBuf::from("/nowhere/shell-bg_0123abcd.output"),
+            status_file: PathBuf::from("/nowhere/shell-bg_0123abcd.status"),
+            status: Status::Running,
+            exit: None,
+            stopping: false,
+            listed: None,
+        };
+        let list = running_at_seam(std::iter::once(&mut job)).expect("a list");
+        let cut = format!("echo &lt;{}\u{2026}", "x".repeat(194));
+        assert!(
+            list.contains(&format!("] bg_0123abcd: {cut}\n  output file: /nowhere/")),
+            "{list}"
+        );
+        assert_eq!(job.listed, Some(0));
+        job.status = Status::Completed;
+        assert_eq!(running_at_seam(std::iter::once(&mut job)), None);
+    }
+
+    #[test]
     fn the_notification_carries_the_jobs_facts_and_escapes_them() {
         let job = Job {
             id: "bg_0123abcd".to_owned(),
@@ -328,6 +402,7 @@ mod tests {
             status: Status::Completed,
             exit: Some(0),
             stopping: false,
+            listed: None,
         };
         let note = notification(&job, b"hi\n");
         assert!(note.starts_with("<task-notification>\n<task-id>bg_0123abcd</task-id>"));

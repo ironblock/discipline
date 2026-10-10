@@ -1243,6 +1243,7 @@ impl<'a> Walk<'a> {
             render,
             tail_tokens,
             outputs,
+            background,
             placement,
             fired,
             pruned,
@@ -1298,7 +1299,9 @@ impl<'a> Walk<'a> {
         // a seam logged before #597 -- appended to the system message.
         self.refilled = *placement == Some(log::RenderPlacement::Message);
         self.trunk = if self.refilled {
-            crate::seam::render::refill(&self.head, &sent)
+            // Its list of the background commands still running (#614),
+            // after the summary.
+            crate::seam::render::refill_with(&self.head, &sent, background.as_deref())
         } else {
             crate::seam::render::refill_in_the_system_message(&self.head, &sent)
         };
@@ -2320,6 +2323,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            background: None,
             placement: None,
             render_budget: None,
             fired: None,
@@ -2369,6 +2373,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            background: None,
             placement: None,
             render_budget: None,
             fired: None,
