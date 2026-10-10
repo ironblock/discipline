@@ -610,6 +610,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         // The operator opens and closes a tangent where there is working
         // memory to scope (#22); an agent nominating is a later ask set.
         ("tangent_closure".to_owned(), tangent_closure_lever(regimen)),
+        ("self_capture".to_owned(), self_capture_lever(regimen)),
         ("capture_modality".to_owned(), undeclared()),
         ("interview_routing_and_cadence".to_owned(), warrant),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
@@ -648,6 +649,15 @@ fn tangent_closure_lever(regimen: &Regimen) -> String {
     } else {
         UNDECLARED.to_owned()
     }
+}
+
+/// The self-capture lever's word (#609): `off`, or `on:every:<n>` with the
+/// reminder's cadence of silent turns.
+fn self_capture_lever(regimen: &Regimen) -> String {
+    crate::drive::session::self_capture(regimen).map_or_else(
+        || "off".to_owned(),
+        |cadence| format!("on:every:{}", cadence.interval()),
+    )
 }
 
 /// The levers a regimen's commands set -- tool-output disposition, approval,

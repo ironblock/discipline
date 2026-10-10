@@ -31,6 +31,8 @@ export type Kind =
   | "recalled"
   | "tangent.open"
   | "tangent.close"
+  | "capture"
+  | "reminded"
 ;
 
 export type State =
@@ -575,6 +577,26 @@ export type TangentCloseLine = {
   rolled_back: number;
 };
 
+export type CaptureLine = {
+  seq: number;
+  t: number;
+  kind: "capture";
+  request: number;
+  call: string;
+  tool: string;
+  outcome: string;
+  entries: string[];
+  why?: string;
+};
+
+export type RemindedLine = {
+  seq: number;
+  t: number;
+  kind: "reminded";
+  turn: number;
+  text: string;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -598,4 +620,6 @@ export type LogLine =
   | RecalledLine
   | TangentOpenLine
   | TangentCloseLine
+  | CaptureLine
+  | RemindedLine
 ;
