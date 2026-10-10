@@ -912,6 +912,16 @@ enum Command {
     RefillAnyway,
 }
 
+/// A command's word as a client written before #583's rename may send it,
+/// in the current spelling: `declare-seam`, and a ruling's `seam`.
+fn current(word: &str) -> &str {
+    match word {
+        "declare-seam" => "declare-meditation",
+        "seam" => "meditation",
+        other => other,
+    }
+}
+
 impl Command {
     /// A command from its body: `kind` names it, and every other key must be
     /// one that kind takes.
@@ -919,6 +929,7 @@ impl Command {
         let Some(Value::String(kind)) = object.get("kind") else {
             return None;
         };
+        let kind = current(kind);
         let kind = CommandKind::ALL
             .iter()
             .copied()
@@ -1002,6 +1013,7 @@ impl Command {
             CommandKind::Background => Some(Self::Background),
             CommandKind::RatifyPhase => match (object.get("call"), object.get("choice")) {
                 (Some(Value::String(call)), Some(Value::String(choice))) => {
+                    let choice = current(choice);
                     crate::drive::session::PhaseChoice::ALL
                         .iter()
                         .copied()
@@ -1450,6 +1462,25 @@ mod tests {
         ] {
             assert!(read(refused).is_none(), "{refused}");
         }
+    }
+
+    /// #583: a client written before the rename still works: the old
+    /// `declare-seam` and a ruling's `seam` read as their meditation names.
+    #[test]
+    fn the_old_seam_spellings_are_read_as_their_meditation_names() {
+        use crate::drive::session::PhaseChoice;
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"declare-seam"}"#),
+            Some(Command::DeclareMeditation(None))
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"ratify-phase","call":"call-p","choice":"seam"}"#),
+            Some(Command::RatifyPhase(call, PhaseChoice::Meditation)) if call == "call-p"
+        ));
     }
 
     /// #124: `ratify-phase` takes the proposal's call and a choice --
