@@ -1,0 +1,4 @@
+1. KEEP
+2. UPDATE: the parser drops blank lines before it tokenizes
+3. REMOVE — superseded by what turn 4 found
+4. REMOVE — dup of #2

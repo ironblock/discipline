@@ -384,6 +384,7 @@ mod formats {
     use std::collections::BTreeSet;
 
     per_format!(
+        audit,
         decline,
         interview,
         log,

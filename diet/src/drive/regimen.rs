@@ -620,16 +620,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     };
     let triggers = seam_triggers(regimen);
     let [disposition, approval, surface, limits] = command_levers(regimen, output_cap);
-    let reasoning = match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
-        (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
-            match table.get("effort") {
-                Some(regimen::Value::String(effort)) => format!("{state}:effort:{effort}"),
-                _ => state.clone(),
-            }
-        }
-        (Some(regimen::Value::String(state)), _) => state.clone(),
-        _ => undeclared(),
-    };
+    let reasoning = reasoning_lever(regimen);
     let delivery = crate::drive::session::fork_delivery(regimen)
         .map_or_else(|_| undeclared(), |delivery| delivery.tag().to_owned());
     // #560: whether a call written as text is recovered. `off` by default,
@@ -643,6 +634,14 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers),
+        (
+            "seam_audit".to_owned(),
+            seam_work_lever(regimen, crate::seam::policy::SEAM_AUDIT),
+        ),
+        (
+            "seam_warm".to_owned(),
+            seam_work_lever(regimen, crate::seam::policy::SEAM_WARM),
+        ),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         (
             "archive_recall".to_owned(),
@@ -833,6 +832,31 @@ fn seam_triggers(regimen: &Regimen) -> String {
         triggers.push("window");
     }
     triggers.join("+")
+}
+
+/// The reasoning state lever's word: the substrate's reasoning state, with
+/// the effort its `reasoning` table names when it names one.
+fn reasoning_lever(regimen: &Regimen) -> String {
+    match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
+        (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
+            match table.get("effort") {
+                Some(regimen::Value::String(effort)) => format!("{state}:effort:{effort}"),
+                _ => state.clone(),
+            }
+        }
+        (Some(regimen::Value::String(state)), _) => state.clone(),
+        _ => UNDECLARED.to_owned(),
+    }
+}
+
+/// A seam's audit or pre-warm lever's word (#504): `on` or `off`.
+fn seam_work_lever(regimen: &Regimen, key: &str) -> String {
+    let on = match regimen.get(key) {
+        Some(regimen::Value::Boolean(on)) => *on,
+        Some(regimen::Value::String(word)) => word == "on",
+        _ => false,
+    };
+    if on { "on" } else { "off" }.to_owned()
 }
 
 /// The fork memory share lever's word (#406): the tail a fork's call is

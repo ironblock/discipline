@@ -503,6 +503,9 @@ vocabulary! {
         /// A fork's single call off the trunk's warm tail, never appended
         /// to it (v5, #374).
         Interview => "interview",
+        /// A seam's audit (v7, #504): a fork's call, put the dogma's audit
+        /// ask over working memory before the refill.
+        Audit => "audit",
     }
 }
 
@@ -514,6 +517,9 @@ vocabulary! {
         Read => "read",
         /// The settled turn's ask was marked a scoping question.
         Scoping => "scoping",
+        /// A seam (v7, #504): its audit, on the `audit` lane. Never a
+        /// regimen's interview warrant.
+        Seam => "seam",
     }
 }
 
@@ -1496,6 +1502,10 @@ pub enum Event {
         /// The prompt that fired it and the window, on a `window` seam (v7,
         /// #617): `prompt_tokens` and `window`, both or neither.
         fired: Option<SeamFired>,
+        /// The pre-warm's timings (v7, #504): the refilled trunk sent once
+        /// with an output cap of one, so the next ask finds its prefix
+        /// cached. Absent when none was sent, or it was cancelled or failed.
+        warm: Option<Timings>,
         /// The calls whose results the model pruned that this seam replaced
         /// with their `pruned` lines' text (v7, #612).
         pruned: Option<Vec<String>>,
@@ -2139,12 +2149,17 @@ impl Forks {
         turns: u32,
         trunk: &BTreeMap<u32, u64>,
     ) -> Result<(), String> {
-        if lane != Lane::Interview {
+        if lane == Lane::Trunk {
             return Err(format!(
-                "a fork on the `{}` lane: a fork's call is made on `interview`",
+                "a fork on the `{}` lane: a fork's call is made on `interview`, or a seam's \
+                 audit on `audit`",
                 lane.tag()
             ));
         }
+        // A seam's audit (v7, #504) follows whatever forks the gap ran, once
+        // they settled: it is one more call in the gap, never a second
+        // interview.
+        let triggered = triggered || lane == Lane::Audit;
         if of_turn != turns || !self.finals.contains(&of_turn) {
             return Err(format!(
                 "a fork of turn {of_turn} outside its gap: a fork follows the latest turn \
@@ -2188,12 +2203,11 @@ impl Forks {
     /// fork not yet settled; a trunk request names none.
     fn request(&self, lane: Lane, fork: Option<u64>) -> Result<(), String> {
         let Some(fork) = fork else {
-            if lane == Lane::Interview {
-                return Err(
-                    "an `interview` request carries no `fork`: it names the fork it is the \
-                     call of"
-                        .to_owned(),
-                );
+            if lane != Lane::Trunk {
+                return Err(format!(
+                    "an `{}` request carries no `fork`: it names the fork it is the call of",
+                    lane.tag()
+                ));
             }
             return Ok(());
         };
@@ -3185,6 +3199,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     reduced: fields.count("render_reduced")?,
                 }),
             },
+            warm: match object.get("warm") {
+                None => None,
+                Some(_) => Some(fields.timings("warm")?),
+            },
             fired: {
                 let reason = fields.tag("reason", SeamReason::from_tag)?;
                 match (
@@ -4155,6 +4173,11 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::Lane && Lane::from_tag(tag) == Some(Lane::Interview) {
         return 5;
     }
+    if (tags == Tags::Lane && Lane::from_tag(tag) == Some(Lane::Audit))
+        || (tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Seam))
+    {
+        return 7;
+    }
     if tags == Tags::ForkOutcome && ForkOutcome::from_tag(tag) == Some(ForkOutcome::Refused) {
         return 7;
     }
@@ -4513,6 +4536,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("prompt_tokens", Count),
                 may_v7("window", Count),
                 may_v7("pruned", Holds::Strings),
+                may_v7("warm", Holds::Timings),
             ];
             F
         }
@@ -5457,8 +5481,12 @@ fn to_value(line: &Line) -> Value {
             render_budget,
             fired,
             pruned,
+            warm,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
+            if let Some(warm) = warm {
+                put("warm", timings_value(warm));
+            }
             if let Some(fired) = fired {
                 put("prompt_tokens", count(fired.prompt_tokens));
                 put("window", count(fired.window));
@@ -7982,11 +8010,11 @@ mod tests {
         );
         assert_eq!(
             tags(Lane::ALL.iter().map(|it| it.tag()).collect()),
-            "trunk interview"
+            "trunk interview audit"
         );
         assert_eq!(
             tags(Warrant::ALL.iter().map(|it| it.tag()).collect()),
-            "read scoping"
+            "read scoping seam"
         );
         assert_eq!(
             tags(ForkOutcome::ALL.iter().map(|it| it.tag()).collect()),

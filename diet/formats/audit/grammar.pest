@@ -1,0 +1,51 @@
+// The `audit` format, v0. This file is NORMATIVE: the Rust parser in
+// diet/src/formats/audit.rs implements it and is not itself the definition.
+//
+// An audit is the whole answer to a seam's audit ask (#504): the dogma's
+// pinned AUDIT_Q, AUDIT_Q_CADENCE and AUDIT_Q_HUMAN, which number the
+// working notes 1..n and ask for EXACTLY one line per note:
+//
+//   <n>. KEEP
+//   <n>. UPDATE: <the corrected one-line note>
+//   <n>. REMOVE — <one-clause reason>
+//   <n>. REMOVE — dup of #<k>
+//
+// and "Output {n} lines and nothing else". There is no ADD: the pinned
+// asks offer none. The rules, each closing a hole a tolerant reader would
+// open:
+//
+//   1. EVERY LINE IS A VERDICT. A line of prose before, between or after
+//      them is not part of the answer the ask asked for, and the whole
+//      answer is refused rather than read around.
+//   2. THE NUMBERS ARE 1..L, EACH ONCE, where L is how many lines there
+//      are. A skipped or repeated number is a note judged twice or not at
+//      all. (That L is the n the ask named is the caller's check: the
+//      grammar does not know n.)
+//   3. A DUP NAMES ANOTHER LINE'S NOTE: `dup of #k` with k among 1..L and
+//      not its own number.
+//   4. AN UPDATE CARRIES ITS NOTE, AND A REMOVE ITS REASON: both one line,
+//      neither empty.
+//
+// Case is not significant in the verdict word; the dash before a reason is
+// an em dash, an en dash, `--` or `-`, set off by spaces. Rules 2 and 3 need
+// the whole answer and are checked by the parser after the grammar.
+
+sp = _{ " " | "\t" }
+nl = _{ "\r\n" | "\n" }
+ws = _{ sp | nl }
+
+document = { SOI ~ ws* ~ line ~ (sp* ~ nl ~ (sp* ~ nl)* ~ line)* ~ ws* ~ EOI }
+
+line = { number ~ "." ~ sp+ ~ (keep | update | dup | remove) ~ sp* ~ &(nl | EOI) }
+// A note's number, from 1: the shared terminal (`diet/formats/number.pest`).
+number = @{ nonzero }
+
+keep = { ^"KEEP" }
+update = { ^"UPDATE" ~ sp* ~ ":" ~ sp* ~ text }
+// A dup is tried before a plain reason, and is a dup only when nothing
+// follows its number on the line.
+dup = { ^"REMOVE" ~ sp+ ~ dash ~ sp+ ~ ^"dup of" ~ sp+ ~ "#" ~ number ~ sp* ~ &(nl | EOI) }
+remove = { ^"REMOVE" ~ sp+ ~ dash ~ sp+ ~ text }
+
+dash = _{ "—" | "–" | "--" | "-" }
+text = @{ (!nl ~ ANY)+ }
