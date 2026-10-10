@@ -41,11 +41,8 @@
 //!
 //! A gate that has never been seen red is not a gate, and the twelve claims
 //! below were each proved by breaking the implementation and watching one
-//! named test fail. They are recorded here rather than as seeded cases in the
-//! gate because `verify.sh` and `tools/gate/faults.toml` are not this seat's
-//! files; that is disclosed on the pull request, and this table is what a
-//! reader can re-run in the meantime. Each is a plausible way to be wrong --
-//! not a deleted line.
+//! named test fail. This table is what a reader can re-run. Each is a
+//! plausible way to be wrong -- not a deleted line.
 //!
 //! | break this | and this fails |
 //! | --- | --- |
@@ -2191,50 +2188,6 @@ mod tests {
                 timings: super::stream::Timings::default(),
             },
         }
-    }
-
-    /// Every fault in this lane's `gate.toml` still names source that exists.
-    ///
-    /// The manifest carries each mutation's exact source text so the
-    /// orchestrator (#46) can apply it. That only works while the text is
-    /// still in the file it names, and nothing else checks: the orchestrator
-    /// is not built, and `check-fault-manifest.py` reads the gate's own
-    /// manifest rather than a package's. A manifest nobody checks is a
-    /// manifest that goes stale, and a stale seeded fault is one that
-    /// silently stops testing what it says it tests.
-    ///
-    /// Scanned rather than parsed as TOML: this crate has no TOML reader for
-    /// multi-line strings, and writing one to check a file this repository
-    /// generates would be a second reader of a format that already has one.
-    /// The scan mirrors the generator's shape exactly, and a scan that finds
-    /// no faults fails rather than passing over nothing.
-    ///
-    /// **Every field an orchestrator acts on, not just the anchor.** A
-    /// `catches` naming a test that had been renamed or deleted used to pass:
-    /// the fault would be applied, the named test would not run, and the run
-    /// would be scored against a catcher that does not exist. `expect_exit`
-    /// is checked for the same reason -- it is the number the orchestrator
-    /// compares against.
-    #[test]
-    fn every_seeded_fault_still_names_source_that_is_there() {
-        crate::gate::every_seeded_fault_still_names_source(
-            include_str!("../../client/gate.toml"),
-            // The lane's whole source, so a catcher can be looked for
-            // wherever its test lives rather than only in this file.
-            concat!(
-                include_str!("mod.rs"),
-                include_str!("cache.rs"),
-                include_str!("echo.rs"),
-                include_str!("head.rs"),
-                include_str!("journal.rs"),
-                include_str!("shape.rs"),
-                include_str!("stream.rs"),
-                include_str!("stub.rs"),
-                include_str!("transport.rs"),
-                include_str!("wire.rs")
-            ),
-            "client",
-        );
     }
 
     #[test]

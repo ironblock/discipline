@@ -73,7 +73,15 @@ npx --yes pnpm@11.20.0 -C exercise install
 DIET_DRIVE=http://127.0.0.1:7801 npx --yes pnpm@11.20.0 -C exercise dev
 ```
 
-Open `http://localhost:5173/?drive`. The surface's dev server proxies `/events` and `/commands` to `serve` (`exercise/vite.config.ts`).
+Open `http://localhost:5173/?drive`. The surface's dev server proxies `/events`, `/commands`, `/approve` and `/files` to `serve` (`exercise/vite.config.ts`).
+
+**A regimen that runs the model's commands** makes `serve` require `--auth-file FILE` (`user:password`). The page cannot answer that credential itself, so name the same file to the surface and its proxy presents it:
+
+```
+DIET_DRIVE=http://127.0.0.1:7801 DIET_DRIVE_AUTH_FILE=<the file given to --auth-file> npx --yes pnpm@11.20.0 -C exercise dev
+```
+
+Without it the page says the drive asks for credentials (401).
 
 ## Ending
 
@@ -138,3 +146,23 @@ An ask is answered `200` with the turn it opened, `{"seq":1,"turn":1}`. `end` is
 8. after `end`, `settlement` from `awaiting` to `ended`, the log's last line.
 
 After `end`, the stream closes, `serve` exits `0`, and `session.log` holds the same lines the stream carried. Before `end`, a command `serve` refuses is answered `409` with `{"refused": <why>}`, and the log gains a `refused` line naming it. An ask sent while a turn is in flight is one: `{"refused":"in-flight"}`.
+
+## Rehearsing a regimen with no model
+
+To rehearse a session that runs commands, with approvals and a record, use the rehearsal regimen [`replay.toml`](replay.toml) against `diet-drive replay`. It plays two captures of one real llama.cpp session, byte for byte. Every ask is answered with a `bash` call of `ls | wc -l`, and once the call's output comes back, with that session's answer, which settles `final`.
+
+- `ls` is in the regimen's allowed set and `wc` is not, so the first call waits on you: the surface's approval prompt, or `POST /approve`.
+- Approve it for the session or the workspace, and later calls run without asking. Decline it, and the model is told so and answers anyway.
+- The record carries `turn`, `tool_call` and `response` rows with the captures' counts.
+
+The words are the captures', whatever you ask. `diet-drive replay --answers` serves one captured answer for every request instead, with no call.
+
+```
+target/debug/diet-drive replay
+target/debug/diet-drive serve --endpoint http://127.0.0.1:7902/v1/chat/completions \
+    --model replay --head diet/drive/heads/floor.md --regimen diet/drive/replay.toml \
+    --worktree <a scratch checkout> --auth-file <a file holding user:password> \
+    --port 7801 --allow-origin http://localhost:5173 --log session.log --record session.record.jsonl
+```
+
+`serve`'s engine check passes only against the replay: its `GET /props` reports the `build_info` the registry's `canned-replay` entry declares.

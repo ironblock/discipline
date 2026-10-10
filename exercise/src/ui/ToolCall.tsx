@@ -4,7 +4,7 @@ import type { AssistantNode, Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
 import { bytes, count, lines, took } from './format.ts';
 import { Copy } from './Copy.tsx';
-import { alarmOf, approvalOf, callOf, callOutcomeOf, callRefusalOf } from './sets.ts';
+import { alarmOf, approvalOf, callOf, callOutcomeOf, callRefusalOf, heldOf } from './sets.ts';
 import { usePromptOf } from './Approval.tsx';
 import { JudgedSegments } from './GateSegments.tsx';
 import { writingOf, writtenApart } from './flow.ts';
@@ -138,7 +138,7 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       }
     >
       {node.cwd !== undefined || prompt ? <div className="ex-tool__cwd">in {node.cwd ?? prompt?.cwd}</div> : null}
-      {node.approval?.why !== undefined ? <div className="ex-tool__held">held: {node.approval.why}</div> : null}
+      {node.approval?.why !== undefined ? <div className="ex-tool__held" title={`held: ${node.approval.why}`}>held: {heldOf(node.approval.why).label}</div> : null}
       {/* What the gate read, re-derived from the logged argv: the live prompt's rows, in a replay (#389). */}
       {node.argv && !prompt && (node.approval?.why !== undefined || node.refusal === 'denylist' || node.refusal === 'declined') ? <JudgedSegments argv={node.argv} /> : null}
       <pre className="ex-tool__call">

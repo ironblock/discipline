@@ -128,6 +128,8 @@ REQUIRED_FILES = ["run.jsonl", "regimen.toml", "README.md"]
 # hex characters" check.
 DIR_NAME = re.compile(r"(\d{4}-\d{2}-\d{2})-([a-z0-9]+(?:-[a-z0-9]+)*)")
 SHA256 = re.compile(r"[0-9a-f]{64}")
+# The sha256 of no bytes: the product of a run that produced nothing.
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 HEADING = re.compile(r"^##\s+(.*?)\s*$")
 # CommonMark: a fence is three or more backticks or tildes, indented at most
 # three spaces. It is closed only by at least as many of the SAME character
@@ -620,14 +622,16 @@ def check_run(directory: pathlib.Path) -> list[str]:
         # script judging the format after all.
     else:
         value = verdict.value or {}
-        rows = [json.loads(line) for line in value.get("canonical", "").splitlines() if line.strip()]
+        # `\n` only: `splitlines` also splits on U+2028, U+2029 and U+0085,
+        # which a record's strings may carry raw.
+        rows = [json.loads(line) for line in value.get("canonical", "").split("\n") if line.strip()]
         summaries = [r for r in rows if r.get("record") == "summary"]
         if len(summaries) != 1:
             fail("results.summary-record-count", f"run.jsonl holds {len(summaries)} summary rows, expected exactly 1")
         else:
             summary = summaries[0]
             written_summary = next(
-                written for line in value.get("canonical", "").splitlines()
+                written for line in value.get("canonical", "").split("\n")
                 if line.strip() and (written := as_written(line)).get("record") == "summary"
             )
         recorded_regime = value.get("regime")
@@ -1441,8 +1445,10 @@ def check_claim_fields(directory: pathlib.Path, front: dict, fail: Callable[[str
     # ONE PRODUCT, ONE DIRECTORY (#271, ruled): a digest is the record's
     # identity, and two directories declaring one make every supersession of
     # it ambiguous.
+    # The empty product is no one's: a session whose working memory ended
+    # empty produced nothing, and every such session declares the same digest.
     own = front.get("product_sha256")
-    shared = sibling_products(directory).get(own, []) if isinstance(own, str) else []
+    shared = sibling_products(directory).get(own, []) if isinstance(own, str) and own != EMPTY_SHA256 else []
     if shared:
         fail(
             "results.product-shared",

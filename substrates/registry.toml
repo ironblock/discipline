@@ -269,6 +269,26 @@ display_gpu = "AMD Radeon RX 7900 XT (Navi 31) drives the desktop; it serves no 
 accelerator_ecc = "off"
 not_measured = "the DIMM population and speed, the power supply, NVMe firmware, cooling -- each needs root or a physical read this seat does not have"
 
+[equipment.canned-loopback-replay-tools]
+display_name = "the stream-replay loopback server, with tool turns"
+entry_type = "canned-server"
+hardware_fingerprint = "1c04e518950209a440101b6f982b8bc2d73f8d8f17502eb04e4d6a43b8852cbf"
+role = "diet-drive's own server in the stub's tool-turn replay mode (#411's follow-up): a request ending in a tool result is answered with a captured llama.cpp e486f80 answer, any other with that server's captured `bash` call, byte for byte, so a model-less rehearsal runs a call through the shell gate and its approval"
+measured = "2026-10-09"
+measured_by = "computed by canned::replay_tools_digest() and canned::hardware_fingerprint() over canned::replay_tool_acts(); canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps re-derives both"
+serves = "diet-drive canned"
+acts_sha256 = "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
+
+[equipment.canned-loopback-replay]
+display_name = "the stream-replay loopback server"
+entry_type = "canned-server"
+hardware_fingerprint = "cc12840de6240097540cb1a6e832c217ad3fd47c88cd4c6c5a6dc58e97dbc53b"
+role = "diet-drive's own server in the stub's stream-replay mode (#411): every request answered with one captured llama.cpp e7051ef warm turn, byte for byte, so a model-less serve records turns that settle and carry counts"
+measured = "2026-10-09"
+measured_by = "computed by canned::replay_digest() and canned::hardware_fingerprint() over canned::replay_acts(); canned::tests::every_registered_canned_digest_is_acts_this_crate_keeps re-derives both"
+serves = "diet-drive canned"
+acts_sha256 = "2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
+
 [equipment.canned-loopback]
 display_name = "the canned loopback server"
 entry_type = "canned-server"
@@ -931,17 +951,35 @@ engine_identity_is = "the composite over engine_components in the python-torch-e
 engine_component_form = "python-torch-exllamav3"
 engine_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
 engine_commit_is = "TabbyAPI's git HEAD on the ratified baseline line (#393 5985519740); the same commit as the 2026-10-03 line"
+engine_check = "declared"
+engine_check_is = "TabbyAPI reports no version or commit over HTTP (#509), so serve does not ask: the operator declares the engine by this entry, and session.start records engine_commit as a served field with provenance declared (the duty-of-care ruling, 2026-10-07)"
+dialect = "tabbyapi"
+server_kind = "local"
+served_model = "Qwen3.8-27B-exl3-3.00bpw-img1024"
+served_max_seq_len = "163840"
+served_cache_size = "163840"
+served_cache_mode = "8,8"
+served_max_batch_size = "2"
+served_chunk_size = "2048"
+served_use_vision = "true"
+served_warmup = "true"
+served_draft = "true"
+served_prompt_template = "chat_template"
+served_chat_template_sha256 = "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"
+chat_template_provenance = "stock: the model's own chat_template.jinja, byte-identical to Qwen/Qwen3.8-27B at 1d4bf0f2 and to turboderp/Qwen3.8-27B-exl3 at 6fe61ad6 (branch 3.00bpw); TabbyAPI at be74bf0 renders with the model directory's chat_template.jinja (no tabby_template.jinja override, no prompt_template in the config), and reports its name, chat_template, and its text at GET /v1/model. Digest read 2026-10-09 from the file on the host, the live /v1/model and /props, and the r2 window's model.json, all agreeing. A community template would differ in the digest and, set by name, in served_prompt_template"
+declared_served_is = "the served configuration serve confirms at start (#509), read off config r2 (substrates/measurements/2026-10-05-accel24-tabbyapi-exl3-27b-r2/config-redacted.yml): model_name, max_seq_len, cache_size, cache_mode, max_batch_size, chunk_size, vision, warmup, and draft_mode model with the DFlash2 drafter; TabbyAPI reports the first seven at GET /v1/model, the draft by draft_n in a response's timings, and warmup not at all; and the chat template, by its name and the digest of its text at GET /v1/model (chat_template_provenance)"
+dialect_is = "the client dialect serve speaks to this line: the llama.cpp paths, read from TabbyAPI's source at be74bf0, under its own name so session.start.serving says which server answered (#496)"
 weights_main = ["f9f4afe5fc1a2d67ca547c8dcde0f043eb226018257cdbde7c50a0956cddb822", "d13331e7a531dc2a6e94df6470d5bffa07b13e15912466242b7283469cd58179"]
 weights_main_file = "the two safetensors shards of turboderp/Qwen3.8-27B-exl3 branch 3.00bpw, revision 6fe61ad6 (#393 5985596031); the drafter igor255/Qwen3.8-27B-DFlash2-EXL3-4.00bpw, revision cbf4643e, one shard sha256 f2a397842bcc0c845ce0bd20253395958052308d4fb6eae65138c47e0b516733"
-sampler_card = "temperature 1.0, top_k 20, top_p 0.95; min_p as the preset file sets it, not yet read into this entry"
-sampler_card_is = "config r2's sampling.override_preset qwen38_thinking (preset file sha256 c3436227916b0dea0de99e2ab2a22045cdc4c22e64876471bdb06eed925d7664, #393 5998974930): fallbacks only, the model's generation_config values, applied when a request does not set its own (#393 5997532008)"
+sampler_card = "temperature 1.0, top_k 20, top_p 0.95, min_p 0.0"
+sampler_card_is = "config r2's sampling.override_preset qwen38_thinking (preset file sha256 c3436227916b0dea0de99e2ab2a22045cdc4c22e64876471bdb06eed925d7664, #393 5998974930): fallbacks only, the model's generation_config values, applied when a request does not set its own (#393 5997532008); the preset also sets presence_penalty 0.0 and repetition_penalty 1.0, every value force: false, read off the host 2026-10-09 by Dispatch"
 serving_context = 163840
 serving_slots = 2
 serving_context_is = "one paged KV pool of 163,840 tokens (cache_size, equal to max_seq_len) shared by up to two concurrent requests (max_batch_size), read off the r2 config"
 serving_flags = "config-floor.yml (retune r2): backend exllamav3, max_seq_len 163840, cache_size 163840, cache_mode 8,8, max_batch_size 2, chunk_size 2048, warmup true, sampling override_preset qwen38_thinking, reasoning true, vision true with the tower offloaded, template_vars_default preserve_thinking true, draft_mode model with draft_cache_mode 8,8, auth disabled (substrates/measurements/2026-10-05-accel24-tabbyapi-exl3-27b-r2/config-redacted.yml; the live file sha256 1e17c49d..., three non-serving lines redacted per config-redaction.diff)"
 admission = "unadmitted: no admission cell has run on this line; admission is the three results on #143 (the behavioural fingerprint, the canary from its own baseline draw, the parity fire), unchanged by the component identity (#337, 5975255706); the window's rulings are #393 5986337117"
 preflight = "the box preflight re-reads every live component of engine_components and compares, refusing on any difference and naming the component that drifted (#337, 5975255706); the re-read is the inference seat's, on the host"
-hazards = "the fastest engine, and its knowledge is built here (the maintainer, #393 5986337117): reasoning_effort 'high' is a 400; there is no /props or /slots, so no checkpoint-restore report (that word is n/a on this engine) and no draft_n in responses, so the parity routing check is instance identity plus the /v1/model id at every request; output invariance is n/a under this line (ruled #393 5986337117); the chat template's digest and its rendered effort levels come from the model directory, a capability fact"
+hazards = "the fastest engine, and its knowledge is built here (the maintainer, #393 5986337117): reasoning_effort 'high' is a 400; TabbyAPI at be74bf0a serves /props in llama-server's shape (total_slots, model_path, chat_template, default_generation_settings, modalities) but with no build_info, so the engine check cannot read a build from it, and serves no /slots, so there is no checkpoint-restore report (that word is n/a on this engine) (endpoints/core/router.py:138, endpoints/core/types/model.py:183); a response's timings carry draft_n and draft_n_accepted when the draft model produced draft tokens and leave both keys out otherwise (endpoints/OAI/utils/common_.py:77-81), and the live tool-call turn on config r2 carried both (#526); the parity window's routing check was instance identity plus the /v1/model id at every request (#393 5986337117); output invariance is n/a under this line (ruled #393 5986337117); the chat template's digest and its rendered effort levels come from the model directory, a capability fact"
 
 [substrate.accel24-tabbyapi-exl3-qwen38-27b-3p00.engine_components]
 serving_commit = "be74bf0a00bcb3a518e6feb7606f150c189be637"
@@ -1019,6 +1057,36 @@ reproducible_because = "as for `canned`: replay the acts and the same bytes play
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the acts are the whole of what it plays"
 engine_build_info = "canned-188c4004c8e620086962a29773f89bce58a3cdd2df502032291cb90736979b90"
 engine_build_info_is = "derived, not read from a server: canned::build_info(), \"canned-\" + the entry's acts digest (weights_acts_sha256, equal to engine_identity); the acts the crate plays now, so the canned server reports this literal at GET /props"
+
+[substrate.canned-replay]
+equipment = "canned-loopback-replay"
+description = "the stream-replay substrate (#411): `diet-drive replay` answers every request with diet/client/fixtures/llama-server-e7051ef-warm-turn2-stream.http, byte for byte, and GET /props with this entry's literal; a rehearsal substrate for regimens with tools and approvals when no model is at hand, and never a claim substrate: every answer is the same captured turn"
+pinned = true
+engine_name = "diet-drive replay"
+engine_identity = "2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
+engine_identity_is = "the acts digest, as for `canned`: the captured reply is the whole of what it plays"
+weights_kind = "canned"
+weights_acts_sha256 = "2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
+reproducible_by_config = true
+reproducible_because = "replay the capture and the same bytes play again; exact match, no band"
+engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the capture is the whole of what it plays"
+engine_build_info = "canned-2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
+engine_build_info_is = "derived, not read from a server: canned::replay_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
+
+[substrate.canned-replay-tools]
+equipment = "canned-loopback-replay-tools"
+description = "the tool-turn replay (#411's follow-up): `diet-drive replay` answers a request ending in a tool result with substrates/measurements/2026-10-02-i0-tool-call-captures/turn2-openai.http and any other with turn1.http (a `bash` call of `ls | wc -l`), byte for byte, and GET /props with this entry's literal; a rehearsal substrate for tools, the shell gate and approval prompts when no model is at hand, never a claim substrate"
+pinned = true
+engine_name = "diet-drive replay"
+engine_identity = "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
+engine_identity_is = "the acts digest, as for `canned`: the two captured replies are the whole of what it plays"
+weights_kind = "canned"
+weights_acts_sha256 = "7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
+reproducible_by_config = true
+reproducible_because = "replay the captures and the same bytes play again; exact match, no band"
+engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the captures are the whole of what it plays"
+engine_build_info = "canned-7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
+engine_build_info_is = "derived, not read from a server: canned::replay_tools_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
 
 # The drive endpoint's engine commit and weights on this host's CPU, served for #29's I0
 # captures (a streamed tool call and its turn 2); not a claim substrate.

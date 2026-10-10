@@ -1,9 +1,0 @@
-# #486's lane fault: serve pins the regimen's sampler on every request, trunk and fork.
-
-[[fault]]
-id = "drive.serve-pins-no-sampler"
-kind = "lane-fault"
-check = "lanes"
-label = "drive.serve-pins-no-sampler"
-failure_class = "drive.serve-pins-no-sampler"
-migrated = false

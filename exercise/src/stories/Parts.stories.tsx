@@ -11,7 +11,7 @@ import { Cable } from '../ui/Cable.tsx';
 import { Copy } from '../ui/Copy.tsx';
 import { Flowing } from '../ui/Flowing.tsx';
 import { Composer } from '../ui/Composer.tsx';
-import type { Command } from '../drive/transport.ts';
+import type { Ack, Command, Uploaded } from '../drive/transport.ts';
 import type { ComposerProps } from '../ui/Composer.tsx';
 import { Preferred, Settings } from '../ui/Prefs.tsx';
 import { Memory } from '../ui/Memory.tsx';
@@ -577,6 +577,25 @@ export const ProseStreaming: Story = {
 
 // ---------------------------------------------------------------- Tool calls
 
+/** A read outside the worktree, its path long (the T1 smoke run's): the whole command shows, wrapped, never clipped. */
+const LONG_READ = `cat ${'/a-long-reference-checkout'.repeat(6)}/examples/minecraft/main.js`;
+export const ToolLongCommand: Story = {
+  name: 'Tool · a long command wraps, so its path is read whole',
+  render: () => {
+    const node = trunkNodeAt(MOMENTS.testsRunning, 't/5', 'tool');
+    return (
+      <div style={{ width: 420 }}>
+        <ToolBlock node={{ ...node, args: { command: LONG_READ }, arguments: JSON.stringify({ command: LONG_READ }) }} />
+      </div>
+    );
+  },
+  play: async ({ canvasElement }) => {
+    const call = canvasElement.querySelector('.ex-tool__call') as HTMLElement;
+    await expect(call.textContent).toContain('main.js');
+    await expect(call.scrollWidth).toBeLessThanOrEqual(call.clientWidth);
+  },
+};
+
 export const ToolRunning: Story = {
   name: 'Tool · running',
   render: () => <ToolBlock node={trunkNodeAt(MOMENTS.testsRunning, 't/5', 'tool')} />,
@@ -766,6 +785,22 @@ export const MemoryFresh: Story = {
   play: async ({ canvasElement }) => {
     await expect([...entriesOf(canvasElement)].sort()).toEqual(['#d1 live new', '#d2 live new', '#f1 live new', '#f2 live new', '#f3 live new', '#o1 live new']);
     await expect(canvasElement.querySelector('.ex-memory__fresh')?.textContent).toBe('+6 new');
+  },
+};
+
+/** `diet`'s own entry ids, as a served interview writes them (`interview-t4-0`): longer than the surface's `d1`. */
+export const MemoryDietIds: Story = {
+  name: 'Memory · diet’s long entry ids keep clear of the text',
+  render: () => lane(<Memory entries={sessionAt(MOMENTS.firstSettled).memory.map((e, i) => ({ ...e, id: `interview-t4-${i}` }))} />),
+  play: async ({ canvasElement }) => {
+    const entries = [...canvasElement.querySelectorAll('.ex-memory__entry')];
+    await expect(entries.length).toBeGreaterThan(0);
+    for (const entry of entries) {
+      const id = entry.querySelector('.ex-memory__id') as HTMLElement;
+      // The id's text fits its own box -- none of it spills into the entry's text beside it.
+      await expect(id.scrollWidth).toBeLessThanOrEqual(id.clientWidth);
+      await expect(id.getBoundingClientRect().right).toBeLessThanOrEqual((entry.querySelector('.ex-memory__text') as HTMLElement).getBoundingClientRect().left + 0.5);
+    }
   },
 };
 
@@ -1126,23 +1161,23 @@ export const GapPasteIsComposing: Story = {
 };
 
 /**
- * A cancelled turn (#289): its ask and what answered it are gone from what the model reads next -- `diet` sends it
- * only finished turns -- and both say so. The log as `diet` writes a stopped turn.
+ * A turn cancelled before it said anything (#289, #575): its ask and its empty answer are gone from what the model
+ * reads next -- `diet` keeps a cancelled turn's steps and what it had said, and this one had neither -- and both say
+ * so. The log as `diet` writes a turn stopped during its prefill.
  */
 const CANCELLED_TURN = [
   { seq: 0, t: 0, kind: 'session.start', version: 2, opened: 1_790_000_000_000, model: 'm', head: [{ role: 'system', content: 's' }] },
   { seq: 1, t: 10, kind: 'ask', turn: 1, text: 'Walk me through what happens when the disk fills.' },
   { seq: 2, t: 10, kind: 'settlement', from: 'awaiting', to: 'turn' },
   { seq: 3, t: 10, kind: 'request', turn: 1, lane: 'trunk' },
-  { seq: 4, t: 200, kind: 'delta', request: 3, text: 'When the disk fills, the' },
-  { seq: 5, t: 900, kind: 'stop.asked', turn: 1 },
-  { seq: 6, t: 901, kind: 'cancelled', request: 3, partial: 'When the disk fills, the' },
-  { seq: 7, t: 901, kind: 'turn.settled', turn: 1, reason: 'cancelled' },
-  { seq: 8, t: 901, kind: 'settlement', from: 'turn', to: 'awaiting' },
+  { seq: 4, t: 900, kind: 'stop.asked', turn: 1 },
+  { seq: 5, t: 901, kind: 'cancelled', request: 3, partial: '' },
+  { seq: 6, t: 901, kind: 'turn.settled', turn: 1, reason: 'cancelled' },
+  { seq: 7, t: 901, kind: 'settlement', from: 'turn', to: 'awaiting' },
 ] as unknown as LogLine[];
 
 export const CancelledOutOfContext: Story = {
-  name: 'Message · a cancelled turn, not in the model’s context',
+  name: 'Message · a turn cancelled before a word, not in the model’s context',
   render: () => {
     const nodes = fold(CANCELLED_TURN).eras[0]?.nodes ?? [];
     return (
@@ -1196,5 +1231,96 @@ export const EndDisarmedWhenNotIdle: Story = {
     await new Promise((resolve) => setTimeout(resolve, 600));
     await userEvent.click(end);
     await expect(canvasElement.querySelector('[data-probe="sent"]')?.textContent).toBe('');
+  },
+};
+
+/** Held open until the story lets go: an upload, or an ask's answer. */
+function held<T>() {
+  let release!: (value: T) => void;
+  const promise = new Promise<T>((resolve) => (release = resolve));
+  return { promise, release };
+}
+
+/**
+ * The composer's attachments against a drive the story paces (#515's review): each upload waits on `uploads[i]`,
+ * each ask on `asks[i]`, and what was asked is listed. The state toggles between idle and a running turn.
+ */
+const attachDrive = { uploads: [] as ReturnType<typeof held<Uploaded>>[], asks: [] as ReturnType<typeof held<Ack>>[], sent: [] as Command[] };
+function AttachHarness() {
+  const [state, setState] = useState<SessionState>('awaiting');
+  return (
+    <div>
+      <Composer
+        state={state}
+        phase="spec"
+        phases={PHASES}
+        dispatch={(c) => {
+          attachDrive.sent.push(c);
+          const ask = held<Ack>();
+          attachDrive.asks.push(ask);
+          return ask.promise;
+        }}
+        upload={() => {
+          const upload = held<Uploaded>();
+          attachDrive.uploads.push(upload);
+          return upload.promise;
+        }}
+      />
+      <button type="button" data-probe="busy" onClick={() => setState('turn')}>
+        busy
+      </button>
+    </div>
+  );
+}
+const pick = async (root: HTMLElement, name: string) =>
+  userEvent.upload(root.querySelector('input[aria-label="attach a PNG"]') as HTMLInputElement, new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], name, { type: 'image/png' }));
+const chips = (root: HTMLElement) => [...root.querySelectorAll('.ex-composer__file img')].map((i) => i.getAttribute('alt'));
+const fresh = () => Object.assign(attachDrive, { uploads: [], asks: [], sent: [] });
+
+export const AttachHoldsSend: Story = {
+  name: 'Composer · send waits for an upload in flight, and takes only the chips it sent',
+  render: () => <AttachHarness />,
+  play: async ({ canvasElement }) => {
+    fresh();
+    const send = canvasElement.querySelector('.ex-composer__send') as HTMLButtonElement;
+    await pick(canvasElement, 'a.png');
+    await userEvent.type(canvasElement.querySelector('textarea') as HTMLTextAreaElement, 'look{Enter}');
+    // The upload is still out: nothing goes, and the button says it cannot.
+    await expect(attachDrive.sent).toEqual([]);
+    await expect(send.disabled).toBe(true);
+    attachDrive.uploads[0]!.release({ ok: true, sha256: 'a'.repeat(64), bytes: 4 });
+    await waitFor(async () => expect(chips(canvasElement)).toEqual(['a.png']));
+    await waitFor(async () => expect(send.disabled).toBe(false));
+    const revoked: string[] = [];
+    const revoke = URL.revokeObjectURL;
+    URL.revokeObjectURL = (url: string) => (revoked.push(url), revoke.call(URL, url));
+    try {
+      const urlA = (canvasElement.querySelector('.ex-composer__file img') as HTMLImageElement).src;
+      await userEvent.click(send);
+      await expect(attachDrive.sent).toEqual([{ kind: 'ask', text: 'look', files: ['a'.repeat(64)] }]);
+      // A chip added while that ask is out is not the ask's: taken, the ask clears only its own.
+      await pick(canvasElement, 'b.png');
+      attachDrive.uploads[1]!.release({ ok: true, sha256: 'b'.repeat(64), bytes: 4 });
+      await waitFor(async () => expect(chips(canvasElement)).toEqual(['a.png', 'b.png']));
+      attachDrive.asks[0]!.release({ ok: true });
+      await waitFor(async () => expect(chips(canvasElement)).toEqual(['b.png']));
+      await expect(revoked).toEqual([urlA]);
+    } finally {
+      URL.revokeObjectURL = revoke;
+    }
+  },
+};
+
+export const AttachWhileRunning: Story = {
+  name: 'Composer · a screenshot can be attached while a turn runs',
+  render: () => <AttachHarness />,
+  play: async ({ canvasElement }) => {
+    fresh();
+    (canvasElement.querySelector('[data-probe="busy"]') as HTMLButtonElement).click();
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__cancel')).not.toBeNull());
+    await pick(canvasElement, 'during.png');
+    await waitFor(async () => expect(attachDrive.uploads).toHaveLength(1));
+    attachDrive.uploads[0]!.release({ ok: true, sha256: 'c'.repeat(64), bytes: 4 });
+    await waitFor(async () => expect(chips(canvasElement)).toEqual(['during.png']));
   },
 };

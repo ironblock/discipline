@@ -25,8 +25,7 @@
 //!
 //! The `drive` lane shipped two seeded faults recorded as catching nothing
 //! for exactly this reason: its filter never reached the tests that caught
-//! them. This file is written after that lesson rather than before it, and
-//! the lane's `gate.toml` declares the same filter the issue does.
+//! them. This file is written after that lesson rather than before it.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -512,7 +511,7 @@ fn adapters_a_path_that_resolves_to_nothing_makes_no_fact() {
         "the resolvable operand is the only entry: {tally}"
     );
     assert!(
-        out.contains("mechanical/file:tools/gate/AGENTS.md"),
+        out.contains("mechanical/file:diet/AGENTS.md"),
         "and it is the one the lane could resolve: {out}"
     );
     assert!(

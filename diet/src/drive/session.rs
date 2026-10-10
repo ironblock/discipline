@@ -232,6 +232,18 @@ pub enum Event {
         /// The tools its requests declare, by name, in order (#472): empty
         /// when they declare none.
         tools: Vec<String>,
+        /// The template variables every request carries (R1), as sent:
+        /// empty when it sends none.
+        template_kwargs: BTreeMap<String, Value>,
+        /// What the regime declares and no request carries (R1).
+        unsent: Option<log::Unsent>,
+        /// Whether approvals were off: the approval lever's `none`.
+        approvals_off: bool,
+        /// The fork delivery lever's state, for a session that forks.
+        fork_delivery: Option<log::ForkDelivery>,
+        /// The cap tool outputs arrive under, for a session that runs tools
+        /// (#554).
+        tool_output: Option<super::output::OutputCap>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -451,12 +463,14 @@ pub enum Event {
         /// How.
         outcome: log::ForkOutcome,
     },
-    /// The operator declared a seam, and the trunk was refilled from working
-    /// memory (#493): the head with the working object rendered after it, and
-    /// no turn of the old trunk.
+    /// A seam fired, and the trunk was refilled from working memory (#493):
+    /// the head with the working object rendered after it, and no turn of
+    /// the old trunk.
     Seamed {
         /// The latest turn, settled, which it follows.
         at_turn: u32,
+        /// What fired it: the operator, or the regimen's budget or cadence.
+        reason: crate::seam::Reason,
         /// The `head_sha256` a trunk request on the trunk before would carry.
         prefix_hash_before: String,
         /// The same, after.
@@ -465,6 +479,25 @@ pub enum Event {
         render: String,
         /// How many entries the render carried.
         carried_entries: u64,
+        /// The compaction depth the seam ran at (#552): estimated tokens of
+        /// recent whole turns it could keep; 0, the total refill.
+        tail_tokens: u64,
+        /// How many whole turns of the old trunk it kept.
+        carried_turns: u64,
+        /// Their estimated tokens.
+        carried_tokens: u64,
+    },
+    /// Forks' patches delivered at the tail of a trunk request, after its
+    /// ask (the fork delivery lever): the note stays on the trunk.
+    Delivered {
+        /// The turn whose first request carried it.
+        turn: u32,
+        /// The framing every line used.
+        framing: log::Framing,
+        /// The note as sent: one line per patch.
+        text: String,
+        /// Each line's patch and template.
+        lines: Vec<log::NoteLine>,
     },
     /// One entry the fork's answer patched into the session's working
     /// object, after the fork settled `value`.
@@ -520,6 +553,14 @@ pub struct ToolLine {
     /// Exactly what the model was given as the call's result, when it was
     /// given one (#472).
     pub shown: Option<String>,
+    /// The whole output, kept in the recording by digest, when what the
+    /// model was shown is capped (#554), or the image `read` returned
+    /// (#557): the log's `files`.
+    pub files: Vec<log::RecordedFile>,
+    /// The images `read` returned (#557), each with the reference its bytes
+    /// are checked against, for the result message: never logged, and
+    /// taken off the line before it is.
+    pub images: Vec<(log::RecordedFile, Vec<u8>)>,
 }
 
 impl ToolLine {
@@ -544,6 +585,8 @@ impl ToolLine {
             stderr: None,
             approval: None,
             shown: None,
+            files: Vec::new(),
+            images: Vec::new(),
         }
     }
 }
@@ -554,6 +597,29 @@ impl ToolLine {
 /// [`tool_loop::APPROVAL_POLICY`]: the regimen format does not register it.
 /// Absent or empty, no fork ever fires.
 pub const INTERVIEW_WARRANT: &str = "interview_warrant";
+
+/// The regimen key for the fork delivery lever.
+pub const FORK_DELIVERY: &str = "fork_delivery";
+
+/// The fork delivery lever's state the regimen declares: `seam` (the
+/// default, today's behaviour), `advisory` or `imperative`.
+///
+/// # Errors
+///
+/// A value that is none of the three.
+pub fn fork_delivery(regimen: &Regimen) -> Result<log::ForkDelivery, String> {
+    match regimen.get(FORK_DELIVERY) {
+        None => Ok(log::ForkDelivery::Seam),
+        Some(crate::formats::regimen::Value::String(state)) => log::ForkDelivery::from_tag(state)
+            .ok_or_else(|| {
+                format!(
+                    "`{FORK_DELIVERY}` is \"{state}\": it takes \"seam\", \"advisory\" or \
+                     \"imperative\""
+                )
+            }),
+        Some(_) => Err(format!("`{FORK_DELIVERY}` is not a string")),
+    }
+}
 
 /// The rules `regimen` enables under [`INTERVIEW_WARRANT`], in the order it
 /// lists them; empty when it lists none.
@@ -596,6 +662,11 @@ pub struct Interview {
     pub rules: Vec<log::Warrant>,
     /// The session's working object.
     pub object: WorkingObject,
+    /// When derived seams fire: the regimen's cadence and budget.
+    pub seams: crate::seam::policy::Served,
+    /// How a fork's patches reach the trunk: at the seam (`seam`, the
+    /// default), or as a note at the tail of the next trunk request.
+    pub delivery: log::ForkDelivery,
 }
 
 /// The rule that warrants a fork after `turn` settled `final`, and the
@@ -745,6 +816,9 @@ struct State {
     /// A checked gap waiting for its admitted command's outcome: the next
     /// event pushed, under the same lock.
     pending_gap: Option<IdleGap>,
+    /// Patches waiting to be delivered at the next trunk request, under a
+    /// mid-turn fork delivery: each op and the entry text its line names.
+    undelivered: Vec<(log::PatchOp, String, String)>,
     /// Where each event is written as it is appended (see
     /// [`Session::write_through`]).
     sink: Option<Sink>,
@@ -765,6 +839,19 @@ struct State {
     interview: Option<Interview>,
     /// The fork in flight in the capture gap, by its sequence number.
     forking: Option<u64>,
+    /// `turns` at the latest seam, or 0: what a cadence counts from.
+    turns_at_seam: u32,
+    /// The trunk's tokens as the latest trunk call measured them, cleared
+    /// by a seam: what a budget reads.
+    trunk_tokens: Option<u64>,
+    /// The latest tool-calling step's measurement, the trunk's only once
+    /// that step's exchange joins it (a `max_steps` settling).
+    step_tokens: Option<u64>,
+    /// The turn in flight's exchange through its last completed step: its
+    /// ask, then each step's call and results that the turn went on from.
+    /// A turn that fails after a step keeps it on the trunk, as `max_steps`
+    /// does, rather than losing the commands it ran.
+    ran: Vec<Message>,
 }
 
 /// A prompt waiting on the operator, and the answer when one arrives.
@@ -818,6 +905,52 @@ impl State {
     ///
     /// [`Rejected::BadGap`] when the carried gap cannot be logged: then the
     /// command is not carried out and nothing is logged.
+    /// The note delivering every patch waiting since the last trunk
+    /// request, logged as turn `turn`'s `delivered` line, or `None` when
+    /// none waits. One line per patch, each the (b′) sentence of the
+    /// session's framing, pinned in the dogma.
+    fn deliver(&mut self, turn: u32) -> Option<Message> {
+        let delivery = self.interview.as_ref()?.delivery;
+        let (framing, template) = match delivery {
+            log::ForkDelivery::Seam => return None,
+            log::ForkDelivery::Advisory => (
+                log::Framing::Advisory,
+                crate::dogma::Template::ForkNoteAdvisory,
+            ),
+            log::ForkDelivery::Imperative => (
+                log::Framing::Imperative,
+                crate::dogma::Template::ForkNoteImperative,
+            ),
+        };
+        if self.undelivered.is_empty() {
+            return None;
+        }
+        let mut written = Vec::new();
+        let mut lines = Vec::new();
+        for (op, id, text) in std::mem::take(&mut self.undelivered) {
+            let Ok(line) = template.fill(&[(crate::dogma::Hole::Entry, text.as_str())]) else {
+                continue;
+            };
+            written.push(line);
+            lines.push(log::NoteLine {
+                entry: id,
+                op,
+                template: template.name().to_owned(),
+            });
+        }
+        if written.is_empty() {
+            return None;
+        }
+        let text = written.join("\n");
+        self.push(Event::Delivered {
+            turn,
+            framing,
+            text: text.clone(),
+            lines,
+        });
+        Some(Message::new(Role::User, text))
+    }
+
     fn admit(&mut self) -> Result<(), Rejected> {
         if let Some((gap, command)) = self.carried.take() {
             let ends = match command {
@@ -857,6 +990,18 @@ impl State {
 
     /// The turn is over: back to `awaiting`, and on to `ended` when an
     /// `end` was admitted while it waited on a prompt.
+    /// A turn that settled `failed` or `timeout` after at least one step
+    /// keeps those steps on the trunk -- the ask, each call and its results
+    /// -- as a `max_steps` settle does (#29): the commands it ran are not
+    /// lost. A turn that failed on its first request keeps nothing.
+    fn keep_ran_steps(&mut self) {
+        let ran = std::mem::take(&mut self.ran);
+        if ran.len() > 1 {
+            self.trunk.extend(ran);
+            self.trunk_tokens = self.step_tokens.take();
+        }
+    }
+
     fn after_the_turn(&mut self) {
         self.move_to(Settlement::Awaiting);
         if self.ending {
@@ -946,7 +1091,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// before any.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
-        Self::opened_as(transport, template, None, None, None, None)
+        Self::opened_as(transport, template, None, None, (None, None, None))
     }
 
     /// [`Session::open`], declaring what serves it -- the dialect it speaks
@@ -954,7 +1099,7 @@ impl<S: Streaming + 'static> Session<S> {
     /// `session.start` carries (#292).
     #[must_use]
     pub fn open_serving(transport: S, template: RequestShape, serving: Serving) -> Self {
-        Self::opened_as(transport, template, Some(serving), None, None, None)
+        Self::opened_as(transport, template, Some(serving), None, (None, None, None))
     }
 
     /// A session that runs the model's calls (#298): `template` declares the
@@ -966,7 +1111,13 @@ impl<S: Streaming + 'static> Session<S> {
         serving: Option<Serving>,
         tools: Tools,
     ) -> Self {
-        Self::opened_as(transport, template, serving, Some(tools), None, None)
+        Self::opened_as(
+            transport,
+            template,
+            serving,
+            Some(tools),
+            (None, None, None),
+        )
     }
 
     /// [`Session::open_serving`] or [`Session::open_looping`], by whether it
@@ -983,7 +1134,36 @@ impl<S: Streaming + 'static> Session<S> {
         claim: Option<log::SubstrateClaim>,
         interview: Option<Interview>,
     ) -> Self {
-        Self::opened_as(transport, template, serving, tools, claim, interview)
+        Self::opened_as(
+            transport,
+            template,
+            serving,
+            tools,
+            (claim, interview, None),
+        )
+    }
+
+    /// [`Self::open_with`], recording what the regime declares and no
+    /// request carries (R1) on `session.start`.
+    #[must_use]
+    pub fn open_declaring(
+        transport: S,
+        template: RequestShape,
+        serving: Option<Serving>,
+        tools: Option<Tools>,
+        (claim, interview, unsent): (
+            Option<log::SubstrateClaim>,
+            Option<Interview>,
+            Option<log::Unsent>,
+        ),
+    ) -> Self {
+        Self::opened_as(
+            transport,
+            template,
+            serving,
+            tools,
+            (claim, interview, unsent),
+        )
     }
 
     fn opened_as(
@@ -991,8 +1171,11 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        claim: Option<log::SubstrateClaim>,
-        interview: Option<Interview>,
+        (claim, interview, unsent): (
+            Option<log::SubstrateClaim>,
+            Option<Interview>,
+            Option<log::Unsent>,
+        ),
     ) -> Self {
         // A head is the trunk before any turn; a tool result answers a call
         // made in one, and the log's head has no word for it (`role_of`).
@@ -1001,6 +1184,7 @@ impl<S: Streaming + 'static> Session<S> {
             "a session's head holds no tool result"
         );
         let trunk = template.messages.clone();
+        let fork_delivery = interview.as_ref().map(|interview| interview.delivery);
         let opened = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| {
@@ -1012,10 +1196,15 @@ impl<S: Streaming + 'static> Session<S> {
             log: Vec::new(),
             flight: None,
             turns: 0,
+            turns_at_seam: 0,
+            trunk_tokens: None,
+            step_tokens: None,
+            ran: Vec::new(),
             opened_at: Instant::now(),
             gap_open: None,
             carried: None,
             pending_gap: None,
+            undelivered: Vec::new(),
             sink: None,
             allowed: tools
                 .as_ref()
@@ -1047,6 +1236,11 @@ impl<S: Streaming + 'static> Session<S> {
                 .iter()
                 .map(|tool| tool.name.clone())
                 .collect(),
+            template_kwargs: template.template_kwargs.clone(),
+            unsent,
+            approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
+            fork_delivery,
+            tool_output: tools.as_ref().map(|tools| tools.output_cap),
         });
         Self {
             shared: Arc::new(Shared {
@@ -1138,6 +1332,13 @@ impl<S: Streaming + 'static> Session<S> {
         let mut shape = self.shared.template.clone();
         shape.messages.clone_from(&state.trunk);
         shape.messages.push(message.clone());
+        // The fork delivery lever: what forks patched since the last
+        // request, as one note after the ask; it joins the trunk with it.
+        let mut opening = vec![message];
+        if let Some(note) = state.deliver(turn) {
+            shape.messages.push(note.clone());
+            opening.push(note);
+        }
         // Pushed here, under the lock that admits the ask, and never on the
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
@@ -1158,7 +1359,6 @@ impl<S: Streaming + 'static> Session<S> {
         self.shared.changed.notify_all();
 
         let shared = Arc::clone(&self.shared);
-        let ask = message;
         let spawned = std::thread::Builder::new()
             .name("diet-turn".to_owned())
             .spawn(move || {
@@ -1167,7 +1367,7 @@ impl<S: Streaming + 'static> Session<S> {
                 // say why -- or the session sits in `turn` for good, refusing
                 // every ask (#120's first review).
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    call(&shared, &shape, &cancel, ask, turn, request);
+                    call(&shared, &shape, &cancel, opening, turn, request);
                 }));
                 if let Err(payload) = outcome {
                     crashed(&shared, panic_message(payload.as_ref()));
@@ -1276,32 +1476,11 @@ impl<S: Streaming + 'static> Session<S> {
             return Err(Rejected::Refused(refused));
         }
         state.admit()?;
-        let Some(interview) = state.interview.as_ref() else {
-            unreachable!("refused above when the session keeps no working memory");
-        };
-        let render = crate::seam::render::render(&interview.object, None);
-        let carried_entries = interview.object.live().count() as u64;
-        let head = self.shared.template.messages.clone();
-        // The head a trunk request on `messages` carries: `Head::of` leaves
-        // out a request's last message, its ask, so one stands in for it.
-        let digest = |messages: &[Message]| {
-            let mut shape = self.shared.template.clone();
-            shape.messages = messages.to_vec();
-            shape.messages.push(Message::new(Role::User, String::new()));
-            crate::client::head::Head::of(&shape).digest().to_owned()
-        };
-        let prefix_hash_before = digest(&state.trunk);
-        let refilled = crate::seam::render::refill(&head, &render);
-        let prefix_hash_after = digest(&refilled);
-        state.trunk = refilled;
-        let at_turn = state.turns;
-        state.push(Event::Seamed {
-            at_turn,
-            prefix_hash_before,
-            prefix_hash_after,
-            render,
-            carried_entries,
-        });
+        refill_trunk(
+            &self.shared.template,
+            &mut state,
+            crate::seam::Reason::Operator,
+        );
         drop(state);
         self.shared.changed.notify_all();
         Ok(())
@@ -1564,6 +1743,23 @@ fn from(log: &[Logged], first: u64) -> Vec<Logged> {
     log[start..].to_vec()
 }
 
+/// The template variables a session sends, in the log's words (R1): the
+/// two it knows, `enable_thinking` and `reasoning_effort`. `None` when it
+/// sends neither.
+fn logged_kwargs(kwargs: &BTreeMap<String, Value>) -> Option<log::TemplateKwargs> {
+    let logged = log::TemplateKwargs {
+        enable_thinking: match kwargs.get("enable_thinking") {
+            Some(Value::Boolean(thinking)) => Some(*thinking),
+            _ => None,
+        },
+        reasoning_effort: match kwargs.get("reasoning_effort") {
+            Some(Value::String(effort)) => Some(effort.clone()),
+            _ => None,
+        },
+    };
+    (logged != log::TemplateKwargs::default()).then_some(logged)
+}
+
 /// A logged event as a line of the session log format, `diet/formats/log`,
 /// at its current [`log::VERSION`] (#117, R2c I3). One exhaustive match, so an event with no line fails
 /// to compile, and every word goes through the format's own vocabulary.
@@ -1578,8 +1774,20 @@ pub fn line_of(logged: &Logged) -> log::Line {
             serving,
             claim,
             tools,
+            template_kwargs,
+            unsent,
+            approvals_off,
+            fork_delivery,
+            tool_output,
         } => log::Event::SessionStart {
+            fork_delivery: *fork_delivery,
+            tool_output: tool_output.map(tool_output_of),
+            // The approval lever's `none`: `true`, or nothing.
+            approvals_off: approvals_off.then_some(true),
+            unsent: unsent.clone(),
             version: log::VERSION,
+            // R1: what reaches the template, as sent; nothing when nothing is.
+            template_kwargs: logged_kwargs(template_kwargs),
             opened: *opened,
             model: model.clone(),
             head: head
@@ -1778,6 +1986,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 stderr,
                 approval,
                 shown,
+                files,
+                images: _,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -1797,7 +2007,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 stdout,
                 stderr,
                 approval,
-                files: None,
+                files: (!files.is_empty()).then_some(files),
                 shown,
             }
         }
@@ -1821,6 +2031,17 @@ pub fn line_of(logged: &Logged) -> log::Line {
             fork: *fork,
             outcome: *outcome,
         },
+        Event::Delivered {
+            turn,
+            framing,
+            text,
+            lines,
+        } => log::Event::Delivered {
+            turn: *turn,
+            framing: *framing,
+            text: text.clone(),
+            lines: lines.clone(),
+        },
         Event::Patched {
             fork,
             op,
@@ -1834,21 +2055,32 @@ pub fn line_of(logged: &Logged) -> log::Line {
         },
         Event::Seamed {
             at_turn,
+            reason,
             prefix_hash_before,
             prefix_hash_after,
             render,
             carried_entries,
+            tail_tokens,
+            carried_turns,
+            carried_tokens,
         } => log::Event::Seam {
             at_turn: *at_turn,
-            // The only seam a served session fires is the operator's.
-            reason: log::SeamReason::Operator,
+            reason: match reason {
+                crate::seam::Reason::Operator => log::SeamReason::Operator,
+                crate::seam::Reason::Phase => log::SeamReason::Phase,
+                crate::seam::Reason::Budget => log::SeamReason::Budget,
+                crate::seam::Reason::Cadence => log::SeamReason::Cadence,
+            },
             prefix_hash_before: prefix_hash_before.clone(),
             prefix_hash_after: prefix_hash_after.clone(),
             frame: crate::seam::render::FRAME_VERSION.to_owned(),
             render: render.clone(),
             carried_entries: *carried_entries,
-            // A total compaction: no turn of the old trunk is carried.
-            carried_turns: 0,
+            carried_turns: *carried_turns,
+            // The depth, and what it kept, on a seam that could keep a tail
+            // (#552); a total compaction writes neither.
+            tail_tokens: (*tail_tokens > 0).then_some(*tail_tokens),
+            carried_tokens: (*tail_tokens > 0).then_some(*carried_tokens),
         },
     };
     log::Line {
@@ -1976,7 +2208,7 @@ fn call<S: Streaming>(
     shared: &Shared<S>,
     shape: &RequestShape,
     cancel: &Cancel,
-    ask: Message,
+    opening: Vec<Message>,
     turn: u32,
     request: u64,
 ) {
@@ -1985,8 +2217,11 @@ fn call<S: Streaming>(
     let mut steps = 1;
     // The turn's exchange so far: its ask, then each step's calls and their
     // results. It joins the trunk when the turn settles `final` or
-    // `max_steps` (Q12), and never otherwise (D13).
-    let mut exchange = vec![ask];
+    // `max_steps` (Q12); settling `failed` or `timeout` after a step, the
+    // steps that completed join it (`State::keep_ran_steps`); cancelled,
+    // never (D13).
+    let mut exchange = opening;
+    shared.lock().ran.clear();
     while let Some(next) = step(
         shared,
         &mut shape,
@@ -2100,6 +2335,7 @@ fn step<S: Streaming>(
                     arguments: call.arguments.clone(),
                 })
                 .collect();
+            state.step_tokens = timings.as_ref().and_then(trunk_tokens_of);
             state.push(Event::Called {
                 request,
                 text: partial,
@@ -2119,6 +2355,28 @@ fn step<S: Streaming>(
             );
         }
         Ok(StreamEnded::Cancelled) => {
+            // The steps it finished stay on the trunk, and so does what it
+            // had said when the cancel came, as `OpenCode` and Qwen Code keep
+            // it (#575): its text, unmarked. Its reasoning is not kept: the
+            // log's `cancelled` line carries none to rebuild it from.
+            if partial.is_empty() {
+                state.keep_ran_steps();
+            } else {
+                let mut kept = std::mem::take(&mut state.ran);
+                if kept.is_empty() {
+                    kept.push(
+                        exchange
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| Message::new(Role::User, String::new())),
+                    );
+                }
+                kept.push(Message::new(Role::Assistant, partial.clone()));
+                state.trunk.extend(kept);
+                if let Some(measured) = state.step_tokens.take() {
+                    state.trunk_tokens = Some(measured);
+                }
+            }
             state.push(Event::Cancelled { request, partial });
             state.push(Event::TurnSettled {
                 turn,
@@ -2138,6 +2396,7 @@ fn step<S: Streaming>(
                 class,
                 partial,
             });
+            state.keep_ran_steps();
             state.push(Event::TurnSettled {
                 turn,
                 reason: SettleReason::Failed,
@@ -2151,6 +2410,7 @@ fn step<S: Streaming>(
                 failure,
                 partial,
             });
+            state.keep_ran_steps();
             state.push(Event::TurnSettled { turn, reason });
             state.move_to(Settlement::Awaiting);
         }
@@ -2162,6 +2422,24 @@ fn step<S: Streaming>(
     }
     None
 }
+
+/// What a cancelled turn tells the model of a call that was running when
+/// the cancel came: after what the command printed, Qwen Code's own result
+/// for a call the user cancelled (`qc:packages/core/src/core/coreToolScheduler.ts`
+/// 467-468 and 1201-1209 at `c0c697c8`). The other harnesses answer it too,
+/// in their own words (Pi "Command aborted", `OpenCode` "Tool execution
+/// interrupted"); where the wording differs, Qwen Code's, the harness
+/// closest to the model this drives (#575).
+pub const CANCELLED_CALL: &str = "[Operation Cancelled] Reason: User intentionally cancelled \
+     this tool call. Stop and await further instructions; do not retry or work around it.";
+
+/// What a cancelled turn tells the model of a call that had not started --
+/// or was waiting on the operator -- when the cancel came: Qwen Code's
+/// repair text for a call with no recorded result
+/// (`qc:packages/core/src/core/llm-chat.ts` 1817-1819 at `c0c697c8`), which
+/// is what its model sees after an interrupt (#575).
+pub const UNRECORDED_CALL: &str = "Tool execution result was not recorded — likely interrupted \
+     by network failure, abort, or process exit. Treat as failure and retry if needed.";
 
 /// A step's calls, each to its one line, in the order they were made; then
 /// the turn goes on with their results, or settles: `cancelled` if a stop
@@ -2190,12 +2468,25 @@ fn run_calls<S: Streaming>(
         } else {
             one_call(shared, cancel, (turn, request), call, last)
         };
+        // A call a cancel reached before it ran is still answered, as every
+        // harness answers it (#575).
+        let shown = if line.outcome == log::ToolOutcome::Cancelled && shown.is_none() {
+            Some(UNRECORDED_CALL.to_owned())
+        } else {
+            shown
+        };
         // The one string the result message carries, logged as given.
         line.shown.clone_from(&shown);
         unknown |= line.reason == Some(log::ToolRefusal::UnknownTool);
         stopped |= line.outcome == log::ToolOutcome::Cancelled;
+        let images = std::mem::take(&mut line.images);
         if let Some(shown) = shown {
-            results.push(Message::tool_result(call.id.clone(), shown));
+            let mut result = Message::tool_result(call.id.clone(), shown);
+            for (file, bytes) in &images {
+                result = crate::client::attach(result, file, bytes)
+                    .expect("the reference was taken from these bytes");
+            }
+            results.push(result);
         }
         shared.lock().push(Event::ToolCalled(Box::new(line)));
         shared.changed.notify_all();
@@ -2212,18 +2503,35 @@ fn run_calls<S: Streaming>(
     };
     if let Some(reason) = settled {
         state.flight = None;
+        let measured = state.step_tokens.take();
         if reason == SettleReason::MaxSteps {
             let ran = std::mem::take(exchange);
             state.trunk.extend(ran);
+            state.trunk_tokens = measured;
+            state.ran.clear();
+        } else if reason == SettleReason::Failed {
+            state.step_tokens = measured;
+            state.keep_ran_steps();
+        } else if reason == SettleReason::Cancelled {
+            // Every call of this step answered, the cancelled one included:
+            // the turn so far joins the trunk, as the other harnesses keep
+            // it (#575).
+            let mut ran = std::mem::take(exchange);
+            ran.push(said);
+            ran.extend(results);
+            state.trunk.extend(ran);
+            state.trunk_tokens = measured;
+            state.ran.clear();
         }
         state.push(Event::TurnSettled { turn, reason });
-        state.after_the_turn();
+        turn_over(&shared.template, &mut state);
         drop(state);
         shared.changed.notify_all();
         return None;
     }
     exchange.push(said.clone());
     exchange.extend(results.iter().cloned());
+    state.ran.clone_from(exchange);
     shape.messages.push(said);
     shape.messages.extend(results);
     let next = state.push(Event::Requested {
@@ -2309,19 +2617,122 @@ fn decided<S: Streaming>(
 }
 
 /// The approval a call that runs records: the decision made for it, or the
-/// entry that covered its first approved segment.
+/// standing entry that covered it -- an operator's (`session`,
+/// `workspace`) over a pre-seed whenever one covered any segment, since
+/// that is the approval the call needed; the first segment's otherwise.
 fn approval_of(judged: &Judged, allowed: &[Entry]) -> Option<log::Approval> {
-    let entry = judged
+    let covering: Vec<&Entry> = judged
         .covered_by
         .iter()
         .flatten()
-        .next()
-        .and_then(|at| allowed.get(*at))?;
+        .filter_map(|at| allowed.get(*at))
+        .collect();
+    let entry = covering
+        .iter()
+        .find(|entry| entry.scope != Scope::Preseeded)
+        .or_else(|| covering.first())?;
     Some(log::Approval {
         scope: tool_loop::scope_tag(entry.scope),
         decided_at: entry.decided_at,
         why: entry.why.clone(),
     })
+}
+
+/// The log's words for a cap (#554).
+fn tool_output_of(cap: super::output::OutputCap) -> log::ToolOutput {
+    use super::output::OutputCap;
+    let count = |n: usize| u64::try_from(n).unwrap_or(u64::MAX);
+    match cap {
+        OutputCap::Capped {
+            max_lines,
+            max_bytes,
+        } => log::ToolOutput {
+            state: log::ToolOutputState::Capped,
+            max_lines: Some(count(max_lines)),
+            max_bytes: Some(count(max_bytes)),
+        },
+        OutputCap::Keep => log::ToolOutput {
+            state: log::ToolOutputState::Keep,
+            max_lines: None,
+            max_bytes: None,
+        },
+    }
+}
+
+/// What the model is shown of `whole`, a call's output, under the session's
+/// cap (#554): within it, `whole`; over it, Qwen Code's notice and the head
+/// and tail, the whole kept in the recording by digest and named on `line`.
+fn shown_capped(tools: &Tools, whole: &str, line: &mut ToolLine) -> String {
+    use super::output::{self, Kept};
+    if !output::over(whole, tools.output_cap) {
+        return whole.to_owned();
+    }
+    let saved = tools.recording.as_ref().and_then(|dir| {
+        super::attach::kept_whole(dir, whole.as_bytes(), "text/plain")
+            .ok()
+            .map(|file| (dir.join(&file.path).to_string_lossy().into_owned(), file))
+    });
+    let kept = saved.as_ref().map_or(Kept::Nowhere, |(path, _)| Kept::At {
+        path,
+        read_tool: tools.read_tool.as_deref(),
+    });
+    let shown = output::capped(whole, tools.output_cap, kept);
+    if shown != whole
+        && let Some((_, file)) = saved
+    {
+        line.files.push(file);
+    }
+    shown
+}
+
+/// A standard tool's call (#557), to its line and what the model is shown:
+/// its result under the session's cap, or -- a stop having killed its
+/// helper -- the cancel's result; the step limit refuses it as it refuses
+/// `bash`.
+fn standard_call(
+    tools: &Tools,
+    cancel: &Cancel,
+    (turn, request): (u32, u64),
+    call: &Call,
+    last: bool,
+) -> (ToolLine, Option<String>) {
+    if last {
+        let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Refused);
+        line.reason = Some(log::ToolRefusal::MaxSteps);
+        return (line, None);
+    }
+    match super::standard::run(&call.name, &call.arguments, tools, &|| cancel.is_asked()) {
+        super::standard::Done::Shown(result) => {
+            let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+            let shown = shown_capped(tools, &result, &mut line);
+            (line, Some(shown))
+        }
+        super::standard::Done::Image { media_type, bytes } => {
+            let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+            // Kept by digest, as an attachment is, so the projection can
+            // rebuild the result; unrecorded, it is still sent.
+            let file = tools.recording.as_ref().map_or_else(
+                || super::attach::referenced(&bytes, media_type),
+                |dir| {
+                    super::attach::kept_whole(dir, &bytes, media_type).map_or_else(
+                        |_| super::attach::referenced(&bytes, media_type),
+                        |file| {
+                            line.files.push(file.clone());
+                            file
+                        },
+                    )
+                },
+            );
+            line.images.push((file, bytes));
+            // Qwen Code's form, since Pi's and `OpenCode` 2's words differ:
+            // the image alone, no text beside it.
+            (line, Some(String::new()))
+        }
+        super::standard::Done::Cancelled(_) => {
+            let line = ToolLine::of(request, turn, call, log::ToolOutcome::Cancelled);
+            (line, Some(CANCELLED_CALL.to_owned()))
+        }
+    }
 }
 
 /// One call, to its line and what the model is shown of it (`None` when
@@ -2344,6 +2755,14 @@ fn one_call<S: Streaming>(
         .tools
         .iter()
         .any(|tool| tool.name == call.name);
+    // The standard surface's tools (#557), each run under the session's
+    // confinement; no gate decides them.
+    if declared
+        && super::standard::is_standard(&call.name)
+        && let Some(tools) = shared.tools.as_ref()
+    {
+        return standard_call(tools, cancel, (turn, request), call, last);
+    }
     let Some(tools) = shared
         .tools
         .as_ref()
@@ -2365,110 +2784,145 @@ fn one_call<S: Streaming>(
     if last {
         return (parsed(refused(log::ToolRefusal::MaxSteps)), None);
     }
-    let mut allowed = shared.lock().allowed.clone();
-    let mut judged = tools.gate.judge(&command, &allowed);
-    let mut approval = None;
-    match judged.outcome() {
-        GateOutcome::Refused => {
-            let entry = judged.judgement.refused_by().unwrap_or_default().to_owned();
-            return (
-                parsed(refused(log::ToolRefusal::Denylist)),
-                Some(tool_loop::refusal_text(log::ToolRefusal::Denylist, &entry)),
+    // Approvals off (the approval lever's `none`): no gate decision and no
+    // prompt; the command runs as the model sent it, confined as ever.
+    let (run, approval) = 'gated: {
+        if tools.approvals_off {
+            break 'gated (
+                tool_loop::argv_of(&command),
+                Some(log::Approval {
+                    scope: log::ApprovalScope::Off,
+                    decided_at: None,
+                    why: None,
+                }),
             );
         }
-        GateOutcome::Prompt => {
-            let why = judged.why().unwrap_or("not_approved").to_owned();
-            let answer = match tools.decider {
-                Decider::Decline => Some((Decision::Decline, 0)),
-                Decider::Operator => decided(
-                    shared,
-                    cancel,
-                    tool_loop::prompt_of(&judged, request, turn, &call.id, &tools.cwd),
-                ),
-            };
-            let Some((decision, at)) = answer else {
-                return (cancelled_line(shared, (turn, request), call), None);
-            };
-            let mut state = shared.lock();
-            let scope = match decision {
-                Decision::Decline => {
-                    state.counts.declined += 1;
-                    return (
-                        parsed(refused(log::ToolRefusal::Declined)),
-                        Some(tool_loop::refusal_text(log::ToolRefusal::Declined, "")),
-                    );
-                }
-                Decision::Once => {
-                    state.counts.once += 1;
-                    judged.approve_once();
-                    Scope::Once
-                }
-                Decision::Session | Decision::Workspace => {
-                    let mut scope = if decision == Decision::Workspace {
-                        Scope::Workspace
-                    } else {
-                        Scope::Session
-                    };
-                    let mut granted = judged.grants(scope, at);
-                    if scope == Scope::Workspace
-                        && let Some(store) = &tools.store
-                    {
-                        let wall = SystemTime::now()
-                            .duration_since(UNIX_EPOCH)
-                            .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0));
-                        for entry in &mut granted {
-                            entry.approved_unix_ms = Some(wall);
-                        }
-                        let mut kept: Vec<Entry> = state
-                            .allowed
-                            .iter()
-                            .filter(|e| e.scope == Scope::Workspace)
-                            .cloned()
-                            .collect();
-                        kept.extend(granted.iter().cloned());
-                        // An approval the store cannot keep is not a
-                        // workspace one, and is not recorded as one.
-                        if store.write(&kept, wall).is_err() {
-                            scope = Scope::Session;
+        let mut allowed = shared.lock().allowed.clone();
+        let mut judged = tools.gate.judge(&command, &allowed);
+        let mut approval = None;
+        match judged.outcome() {
+            GateOutcome::Refused => {
+                let entry = judged.judgement.refused_by().unwrap_or_default().to_owned();
+                return (
+                    parsed(refused(log::ToolRefusal::Denylist)),
+                    Some(tool_loop::refusal_text(log::ToolRefusal::Denylist, &entry)),
+                );
+            }
+            GateOutcome::Prompt => {
+                let why = judged.why().unwrap_or("not_approved").to_owned();
+                let answer = match tools.decider {
+                    Decider::Decline => Some((Decision::Decline, 0)),
+                    Decider::Operator => decided(
+                        shared,
+                        cancel,
+                        tool_loop::prompt_of(&judged, request, turn, &call.id, &tools.cwd),
+                    ),
+                };
+                let Some((decision, at)) = answer else {
+                    return (cancelled_line(shared, (turn, request), call), None);
+                };
+                let mut state = shared.lock();
+                let scope = match decision {
+                    Decision::Decline => {
+                        state.counts.declined += 1;
+                        return (
+                            parsed(refused(log::ToolRefusal::Declined)),
+                            Some(tool_loop::refusal_text(log::ToolRefusal::Declined, "")),
+                        );
+                    }
+                    Decision::Once => {
+                        state.counts.once += 1;
+                        judged.approve_once();
+                        Scope::Once
+                    }
+                    Decision::Session | Decision::Workspace => {
+                        let mut scope = if decision == Decision::Workspace {
+                            Scope::Workspace
+                        } else {
+                            Scope::Session
+                        };
+                        let mut granted = judged.grants(scope, at);
+                        if scope == Scope::Workspace
+                            && let Some(store) = &tools.store
+                        {
+                            let wall = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map_or(0, |since| u64::try_from(since.as_millis()).unwrap_or(0));
                             for entry in &mut granted {
-                                entry.scope = Scope::Session;
-                                entry.approved_unix_ms = None;
+                                entry.approved_unix_ms = Some(wall);
+                            }
+                            let mut kept: Vec<Entry> = state
+                                .allowed
+                                .iter()
+                                .filter(|e| e.scope == Scope::Workspace)
+                                .cloned()
+                                .collect();
+                            kept.extend(granted.iter().cloned());
+                            // An approval the store cannot keep is not a
+                            // workspace one, and is not recorded as one.
+                            if store.write(&kept, wall).is_err() {
+                                scope = Scope::Session;
+                                for entry in &mut granted {
+                                    entry.scope = Scope::Session;
+                                    entry.approved_unix_ms = None;
+                                }
                             }
                         }
+                        if scope == Scope::Workspace {
+                            state.counts.workspace += 1;
+                        } else {
+                            state.counts.session += 1;
+                        }
+                        state.allowed.extend(granted);
+                        allowed.clone_from(&state.allowed);
+                        judged = tools.gate.judge(&command, &allowed);
+                        scope
                     }
-                    if scope == Scope::Workspace {
-                        state.counts.workspace += 1;
-                    } else {
-                        state.counts.session += 1;
-                    }
-                    state.allowed.extend(granted);
-                    allowed.clone_from(&state.allowed);
-                    judged = tools.gate.judge(&command, &allowed);
-                    scope
+                };
+                drop(state);
+                if judged.outcome() != GateOutcome::Run {
+                    // The operator approved this call: whatever no entry covers,
+                    // the decision does.
+                    judged.approve_once();
                 }
-            };
-            drop(state);
-            if judged.outcome() != GateOutcome::Run {
-                // The operator approved this call: whatever no entry covers,
-                // the decision does.
-                judged.approve_once();
+                approval = Some(log::Approval {
+                    scope: tool_loop::scope_tag(scope),
+                    decided_at: Some(at),
+                    why: Some(why),
+                });
             }
-            approval = Some(log::Approval {
-                scope: tool_loop::scope_tag(scope),
-                decided_at: Some(at),
-                why: Some(why),
-            });
+            GateOutcome::Run => {}
         }
-        GateOutcome::Run => {}
-    }
-    let approval = approval.or_else(|| approval_of(&judged, &allowed));
+        let approval = approval.or_else(|| approval_of(&judged, &allowed));
+        (judged.run, approval)
+    };
     let mut line = parsed(ToolLine::of(request, turn, call, log::ToolOutcome::Ran));
     line.approval = approval;
     let profiled = tools.confinement.isolation() != crate::isolation::Isolation::None;
+    // A stop reaches a running call: its whole process group is killed, and
+    // the turn settles `cancelled` (#551).
     match tools
         .confinement
-        .run(&tools.policy, &tools.worktree, &judged.run)
+        .run_until(&tools.policy, &tools.worktree, &run, &|| cancel.is_asked())
     {
+        Ok(ran) if ran.cancelled => {
+            // A cancelled line carries no streams (the log format's rule);
+            // what the command printed before the cancel reaches the log as
+            // the result the model was shown.
+            line.outcome = log::ToolOutcome::Cancelled;
+            line.confined = Some(ran.confined.clone());
+            line.isolation = Some(isolation_word(ran.isolation));
+            line.network = Some(network_word(ran.network));
+            // What it printed before the cancel, then the cancel's result
+            // (#575).
+            let printed = ran.as_the_model_sees_it();
+            let shown = if printed.is_empty() {
+                CANCELLED_CALL.to_owned()
+            } else {
+                format!("{printed}\n{CANCELLED_CALL}")
+            };
+            (line, Some(shown))
+        }
         Ok(ran) => {
             let denied = ran.denials().iter().any(|d| d.kind.is_unambiguous());
             if profiled && ran.exit != Some(0) && denied {
@@ -2487,7 +2941,8 @@ fn one_call<S: Streaming>(
                 text: ran.stderr.clone(),
                 bytes: ran.stderr_bytes,
             });
-            (line, Some(ran.as_the_model_sees_it()))
+            let shown = shown_capped(tools, &ran.as_the_model_sees_it(), &mut line);
+            (line, Some(shown))
         }
         Err(not_run) => {
             // It never ran: what would have run, and why it did not, as the
@@ -2495,7 +2950,7 @@ fn one_call<S: Streaming>(
             let said = not_run.to_string();
             let confined = tools
                 .confinement
-                .compose(&tools.policy, &tools.worktree, &judged.run);
+                .compose(&tools.policy, &tools.worktree, &run);
             line.outcome = log::ToolOutcome::CommandFailed;
             line.policy = tools.confinement.policy_of(&confined);
             line.confined = Some(confined);
@@ -2512,6 +2967,96 @@ fn one_call<S: Streaming>(
             (line, Some(said))
         }
     }
+}
+
+/// Refill the trunk from working memory for a seam `reason` fired (#493):
+/// the head with the working object rendered after it, and no turn of the
+/// old trunk. The caller has checked the session is awaiting and working
+/// memory holds an entry. A cadence then counts from here, and a budget
+/// waits for the next trunk call to measure the refilled trunk.
+fn refill_trunk(template: &RequestShape, state: &mut State, reason: crate::seam::Reason) {
+    let Some(interview) = state.interview.as_ref() else {
+        unreachable!("a seam is refused or not due when the session keeps no working memory");
+    };
+    let render = crate::seam::render::render(&interview.object, None);
+    let carried_entries = interview.object.live().count() as u64;
+    // The head a trunk request on `messages` carries: `Head::of` leaves
+    // out a request's last message, its ask, so one stands in for it.
+    let digest = |messages: &[Message]| {
+        let mut shape = template.clone();
+        shape.messages = messages.to_vec();
+        shape.messages.push(Message::new(Role::User, String::new()));
+        crate::client::head::Head::of(&shape).digest().to_owned()
+    };
+    let prefix_hash_before = digest(&state.trunk);
+    // The compaction depth (#552): the most recent whole turns, within the
+    // regimen's budget, kept after the refill as they sat on the trunk.
+    let tail_tokens = interview.seams.tail_tokens;
+    let turns = state
+        .trunk
+        .get(template.messages.len()..)
+        .unwrap_or_default();
+    let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+    let carried_turns = kept
+        .iter()
+        .filter(|message| message.role == Role::User)
+        .count() as u64;
+    let carried_tokens = kept
+        .iter()
+        .map(crate::seam::render::estimated_tokens)
+        .sum::<u64>();
+    let mut refilled = crate::seam::render::refill(&template.messages, &render);
+    refilled.extend(kept);
+    let prefix_hash_after = digest(&refilled);
+    state.trunk = refilled;
+    state.turns_at_seam = state.turns;
+    state.trunk_tokens = None;
+    let at_turn = state.turns;
+    state.push(Event::Seamed {
+        at_turn,
+        reason,
+        prefix_hash_before,
+        prefix_hash_after,
+        render,
+        carried_entries,
+        tail_tokens,
+        carried_turns,
+        carried_tokens,
+    });
+}
+
+/// The turn is over: back to awaiting, or on to ended; then, while
+/// awaiting, the seam the regimen's cadence or budget makes due, if working
+/// memory holds an entry to refill from. Not due with nothing to refill
+/// from: it stays due, and fires after the next turn that leaves an entry.
+fn turn_over(template: &RequestShape, state: &mut State) {
+    state.after_the_turn();
+    if state.settlement != Settlement::Awaiting {
+        return;
+    }
+    let due = state.interview.as_ref().and_then(|interview| {
+        interview.object.live().next()?;
+        interview
+            .seams
+            .due(state.turns - state.turns_at_seam, state.trunk_tokens)
+    });
+    if let Some(reason) = due {
+        refill_trunk(template, state, reason);
+    }
+}
+
+/// The trunk's tokens after a trunk call: what it prefilled, what it reused
+/// from the cache, and what it generated. `None` when the server reported
+/// none of them.
+fn trunk_tokens_of(timings: &Timings) -> Option<u64> {
+    if timings.prompt_n.is_none() && timings.cache_n.is_none() && timings.predicted_n.is_none() {
+        return None;
+    }
+    Some(
+        timings.prompt_n.unwrap_or(0)
+            + timings.cache_n.unwrap_or(0)
+            + timings.predicted_n.unwrap_or(0),
+    )
 }
 
 /// A call that finished. One its output cap ended is not an answer: off the
@@ -2539,6 +3084,7 @@ fn settle_finished(
             reasoning: (!reasoning.is_empty()).then_some(reasoning),
             timings,
         });
+        state.keep_ran_steps();
         state.push(Event::TurnSettled {
             turn,
             reason: SettleReason::Failed,
@@ -2546,6 +3092,7 @@ fn settle_finished(
         state.move_to(Settlement::Awaiting);
         return false;
     }
+    state.ran.clear();
     state.trunk.extend(exchange);
     // The reasoning goes back with the answer, byte for byte and
     // untrimmed: measured on e7051ef (#117, Q10), dropping it
@@ -2556,6 +3103,7 @@ fn settle_finished(
     let mut answer = Message::new(Role::Assistant, partial.clone());
     answer.reasoning.clone_from(&reasoning);
     state.trunk.push(answer);
+    state.trunk_tokens = timings.as_ref().and_then(trunk_tokens_of);
     state.push(Event::Answered {
         request,
         text: partial,
@@ -2604,7 +3152,7 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         .filter(|_| !state.ending)
         .and_then(|interview| warranted(&interview.rules, &state.log, turn, answer));
     let Some((why, question)) = fired else {
-        state.after_the_turn();
+        turn_over(&shared.template, state);
         return None;
     };
     let mut shape = shared.template.clone();
@@ -2764,7 +3312,7 @@ fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
     for patch in patches {
         state.push(patch);
     }
-    state.after_the_turn();
+    turn_over(&shared.template, &mut state);
     drop(state);
     shared.changed.notify_all();
 }
@@ -2786,6 +3334,25 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
     let Some(interview) = state.interview.as_mut() else {
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
+    // The entry each delivered line names, read before the patches apply:
+    // a supersede's voided entry, a verdict's target. An `add` names none
+    // and is carried at the seam only (no measured sentence fits it).
+    let delivering = interview.delivery != log::ForkDelivery::Seam;
+    let named: Vec<(log::PatchOp, String, String)> = patches
+        .iter()
+        .filter(|_| delivering)
+        .filter_map(|patch| {
+            let (op, id) = match patch {
+                Patch::Add { .. } => return None,
+                Patch::Supersede { voids, .. } => (log::PatchOp::Supersede, voids),
+                Patch::Resolve { target, .. } => (log::PatchOp::Resolve, target),
+                Patch::Retire { target, .. } => (log::PatchOp::Retire, target),
+                Patch::Park { target, .. } => (log::PatchOp::Park, target),
+            };
+            let text = interview.object.entry(id)?.content.clone();
+            Some((op, id.as_str().to_owned(), text))
+        })
+        .collect();
     if interview.object.apply_turn(&patches).is_err() {
         return (log::ForkOutcome::Unparseable, Vec::new());
     }
@@ -2793,6 +3360,7 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
         .iter()
         .map(|patch| patched(fork, patch, &interview.object))
         .collect();
+    state.undelivered.extend(named);
     (log::ForkOutcome::Value, lines)
 }
 
@@ -2845,7 +3413,7 @@ fn settle_reason_of(failure: &TransportFailure) -> SettleReason {
 fn crashed<S>(shared: &Shared<S>, why: String) {
     let mut state = shared.lock();
     if state.settlement == Settlement::Capture {
-        crashed_fork(&mut state, why);
+        crashed_fork(&shared.template, &mut state, why);
         drop(state);
         shared.changed.notify_all();
         return;
@@ -2869,6 +3437,7 @@ fn crashed<S>(shared: &Shared<S>, why: String) {
                 partial,
                 why,
             });
+            state.keep_ran_steps();
             state.push(Event::TurnSettled {
                 turn: flight.turn,
                 reason: SettleReason::Failed,
@@ -2883,7 +3452,7 @@ fn crashed<S>(shared: &Shared<S>, why: String) {
 /// The gap's fork, when its thread died: its call `crashed`, with what it
 /// had delivered, and the fork settled `failed` (#374); then the gap is
 /// over.
-fn crashed_fork(state: &mut State, why: String) {
+fn crashed_fork(template: &RequestShape, state: &mut State, why: String) {
     if let (Some(flight), Some(fork)) = (state.flight.take(), state.forking.take()) {
         let mut partial = String::new();
         for logged in &state.log {
@@ -2903,7 +3472,7 @@ fn crashed_fork(state: &mut State, why: String) {
             outcome: log::ForkOutcome::Failed,
         });
     }
-    state.after_the_turn();
+    turn_over(template, state);
 }
 
 /// What a panic said, when it said it as text.
@@ -3162,7 +3731,7 @@ pub(in crate::drive) mod tests {
     }
 
     #[test]
-    fn a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone() {
+    fn a_cancel_reaches_a_call_blocked_mid_answer_and_keeps_what_it_had_said() {
         // Held, and never opened by this test: only the cancel can wake it.
         let gate = Gate::new();
         let canned = Canned::new([
@@ -3205,10 +3774,16 @@ pub(in crate::drive) mod tests {
                 },
             ]
         );
-        assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
+        // What it had said stays, unmarked, as OpenCode and Qwen Code keep it
+        // (#575).
+        let kept = [
+            Message::new(Role::System, HEAD),
+            user("first"),
+            Message::new(Role::Assistant, "Hel"),
+        ];
+        assert_eq!(session.trunk(), kept);
 
-        // The next ask goes out on the prefix the last SETTLED turn left:
-        // nothing of the stopped one.
+        // The next ask goes out on that prefix.
         session
             .ask("second", None)
             .expect("accepted after a cancel");
@@ -3217,10 +3792,9 @@ pub(in crate::drive) mod tests {
                 .any(|logged| matches!(logged.event, Event::Answered { .. }))
                 && settled(log)
         });
-        assert_eq!(
-            session.shared.transport.sent()[1].messages,
-            [Message::new(Role::System, HEAD), user("second")]
-        );
+        let mut next = kept.to_vec();
+        next.push(user("second"));
+        assert_eq!(session.shared.transport.sent()[1].messages, next);
     }
 
     #[test]
@@ -3898,6 +4472,11 @@ pub(in crate::drive) mod tests {
             serving: None,
             claim: None,
             tools: _,
+            template_kwargs: _,
+            unsent: None,
+            approvals_off: false,
+            fork_delivery: None,
+            tool_output: None,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -3951,8 +4530,12 @@ pub(in crate::drive) mod tests {
         log::SubstrateClaim {
             substrate: "a-substrate".to_owned(),
             registry_sha256: "ab".repeat(32),
-            engine_build: "b1-0123abc".to_owned(),
-            engine_identity: log::EngineIdentity::CheckedCommit,
+            engine: log::ClaimedEngine::Served(vec![log::ServedField {
+                field: "engine_commit".to_owned(),
+                value: "0123abc".repeat(5) + "01234",
+                provenance: log::FieldProvenance::Corroborated,
+                reported: Some("b1-0123abc".to_owned()),
+            }]),
         }
     }
 
@@ -3982,6 +4565,17 @@ pub(in crate::drive) mod tests {
                 }),
                 claim: Some(claimed()),
                 tools: Vec::new(),
+                template_kwargs: BTreeMap::from([
+                    ("enable_thinking".to_owned(), Value::Boolean(true)),
+                    (
+                        "reasoning_effort".to_owned(),
+                        Value::String("medium".to_owned()),
+                    ),
+                ]),
+                unsent: Some(log::Unsent { budget_tokens: 512 }),
+                approvals_off: true,
+                fork_delivery: Some(log::ForkDelivery::Advisory),
+                tool_output: Some(crate::drive::output::OutputCap::DEFAULT),
             },
             Event::Asked {
                 turn: 1,
@@ -4130,6 +4724,8 @@ pub(in crate::drive) mod tests {
                     why: Some("not_approved".to_owned()),
                 }),
                 shown: None,
+                files: Vec::new(),
+                images: Vec::new(),
             })),
             Event::Forked {
                 of_turn: 1,
@@ -4159,10 +4755,24 @@ pub(in crate::drive) mod tests {
             },
             Event::Seamed {
                 at_turn: 1,
+                reason: crate::seam::Reason::Operator,
                 prefix_hash_before: "c".repeat(64),
                 prefix_hash_after: "d".repeat(64),
                 render: "# regime\n".to_owned(),
                 carried_entries: 1,
+                tail_tokens: 0,
+                carried_turns: 0,
+                carried_tokens: 0,
+            },
+            Event::Delivered {
+                turn: 2,
+                framing: log::Framing::Advisory,
+                text: "Working record note: the entry \"decision: keep it\" may be affected by this step. If it no longer holds, say so; otherwise carry on.".to_owned(),
+                lines: vec![log::NoteLine {
+                    entry: "interview-t1-0".to_owned(),
+                    op: log::PatchOp::Retire,
+                    template: "FORK_NOTE_ADVISORY".to_owned(),
+                }],
             },
         ];
         let mut kinds = std::collections::BTreeSet::new();
@@ -4192,9 +4802,10 @@ pub(in crate::drive) mod tests {
                 Event::ForkSettled { .. } => 21,
                 Event::Patched { .. } => 22,
                 Event::Seamed { .. } => 23,
+                Event::Delivered { .. } => 24,
             });
         }
-        assert_eq!(kinds.len(), 24, "a variant has no sample");
+        assert_eq!(kinds.len(), 25, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -4226,6 +4837,18 @@ pub(in crate::drive) mod tests {
                 claim: Some(claimed()),
                 provenance: None,
                 tools: None,
+                template_kwargs: Some(log::TemplateKwargs {
+                    enable_thinking: Some(true),
+                    reasoning_effort: Some("medium".to_owned()),
+                }),
+                unsent: Some(log::Unsent { budget_tokens: 512 }),
+                approvals_off: Some(true),
+                fork_delivery: Some(log::ForkDelivery::Advisory),
+                tool_output: Some(log::ToolOutput {
+                    state: log::ToolOutputState::Capped,
+                    max_lines: Some(2000),
+                    max_bytes: Some(51_200),
+                }),
             },
             log::Event::Ask {
                 turn: 1,
@@ -4425,6 +5048,18 @@ pub(in crate::drive) mod tests {
                 render: "# regime\n".to_owned(),
                 carried_entries: 1,
                 carried_turns: 0,
+                tail_tokens: None,
+                carried_tokens: None,
+            },
+            log::Event::Delivered {
+                turn: 2,
+                framing: log::Framing::Advisory,
+                text: "Working record note: the entry \"decision: keep it\" may be affected by this step. If it no longer holds, say so; otherwise carry on.".to_owned(),
+                lines: vec![log::NoteLine {
+                    entry: "interview-t1-0".to_owned(),
+                    op: log::PatchOp::Retire,
+                    template: "FORK_NOTE_ADVISORY".to_owned(),
+                }],
             },
         ]
     }
@@ -4959,6 +5594,11 @@ pub(in crate::drive) mod tests {
             allowed,
             store: None,
             approval_policy: None,
+            approvals_off: false,
+            output_cap: crate::drive::output::OutputCap::DEFAULT,
+            recording: None,
+            read_tool: None,
+            surface: tool_loop::ToolSurface::Bash,
         }
     }
 
@@ -5254,6 +5894,715 @@ pub(in crate::drive) mod tests {
         tidy(&[&tree]);
     }
 
+    /// A turn that fails after its tool steps keeps them on the trunk, as a
+    /// `max_steps` turn does (#29): two calls ran, then the third request's
+    /// answer hit the output cap and the turn settled `failed`. The ask and
+    /// both exchanges stay on the trunk, the next ask's request carries them,
+    /// and the record's projection rebuilds every head from the log.
+    #[test]
+    fn a_turn_that_fails_after_its_tool_steps_keeps_them_on_the_trunk() {
+        let tree = scratch("failed-keeps-steps");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![bash("call-2", "touch b")],
+                vec![
+                    Step::Delta("cut off".to_owned()),
+                    Step::FinishReason("length".to_owned()),
+                ],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Failed));
+        assert!(tree.join("a").exists() && tree.join("b").exists());
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
+        assert_eq!(trunk[1], user("work"));
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        assert_eq!(trunk[4], call_message("call-2", "touch b"));
+
+        session.ask("next", None).expect("accepted");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        reads_whole(&session);
+        let sent = session.shared.transport.sent();
+        assert_eq!(sent.len(), 4);
+        assert_eq!(
+            sent[3].messages[..trunk.len()],
+            trunk[..],
+            "the next ask's request carries the failed turn's steps"
+        );
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let unrebuilt: Vec<&str> = projected
+            .unspellable
+            .iter()
+            .filter(|named| named.why.contains("could not be rebuilt"))
+            .map(|named| named.why.as_str())
+            .collect();
+        assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
+        tidy(&[&tree]);
+    }
+
+    /// A call to an undeclared tool fails the turn after a step that ran:
+    /// the step that ran stays on the trunk, the failing step does not.
+    #[test]
+    fn a_turn_failed_by_an_undeclared_tool_keeps_the_step_before_it() {
+        let tree = scratch("failed-unknown-keeps-step");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![Step::call(0, "call-2", "python", "{}")],
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Failed));
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2, "{trunk:#?}");
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        tidy(&[&tree]);
+    }
+
+    /// A cancel reaches a call that is running (#551): its process group is
+    /// killed, the call is logged `cancelled`, and the turn settles
+    /// `cancelled` within seconds.
+    #[test]
+    fn a_cancel_stops_a_running_call_and_settles_the_turn_cancelled() {
+        let tree = scratch("cancel-running-call");
+        let session = Session::open_looping(
+            Canned::new([vec![bash("call-1", "sleep 600")], deltas(&["never"])]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["sleep"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("wait", None).expect("accepted");
+        wait_until(&session, "the call to be made", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Called { .. }))
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        let asked = Instant::now();
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert!(
+            asked.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            asked.elapsed()
+        );
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        // The log reads: a cancelled line carries no streams.
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].outcome, log::ToolOutcome::Cancelled);
+        tidy(&[&tree]);
+    }
+
+    /// A call that leaves a server running in the background returns, and a
+    /// later call in the same session still runs (#551): the server's held
+    /// pipes do not poison the next call.
+    #[test]
+    fn a_call_after_a_backgrounded_server_still_runs() {
+        let tree = scratch("after-background");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "sleep 30 & echo started")],
+                vec![bash("call-2", "echo second")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["sleep", "echo"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        let asked = Instant::now();
+        session.ask("serve", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert!(
+            asked.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            asked.elapsed()
+        );
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        let written = lines(&log);
+        assert_eq!(written.len(), 2, "{written:?}");
+        assert!(
+            written.iter().all(|l| l.outcome == log::ToolOutcome::Ran),
+            "{written:?}"
+        );
+        let said = |line: &ToolLine| line.stdout.as_ref().map(|out| out.text.clone());
+        assert_eq!(said(&written[0]).as_deref(), Some("started\n"));
+        assert_eq!(said(&written[1]).as_deref(), Some("second\n"));
+        tidy(&[&tree]);
+    }
+
+    /// Every head the log's projection rebuilds is verified: none is named
+    /// as one it could not rebuild.
+    fn every_head_rebuilds(log: &[Logged]) {
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let unrebuilt: Vec<&str> = projected
+            .unspellable
+            .iter()
+            .filter(|named| named.why.contains("could not be rebuilt"))
+            .map(|named| named.why.as_str())
+            .collect();
+        assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
+    }
+
+    /// A turn cancelled after a finished call, while its next call runs
+    /// (#575): the finished step stays on the trunk, the running call is
+    /// killed and answered with what it printed and Qwen Code's cancel
+    /// result, the next ask carries all of it, and the projection rebuilds
+    /// every head.
+    #[test]
+    fn a_cancelled_turn_keeps_its_finished_steps_and_answers_the_running_call() {
+        let tree = scratch("cancel-keeps-steps");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![bash("call-2", "echo partway; sleep 600")],
+                deltas(&["next"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch", "echo", "sleep"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        wait_until(&session, "the second call to be made", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Called { .. }))
+                .count()
+                == 2
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
+        assert_eq!(trunk[1], user("work"));
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        assert_eq!(trunk[4], call_message("call-2", "echo partway; sleep 600"));
+        assert_eq!(
+            trunk[5].content,
+            format!("partway\n\n{CANCELLED_CALL}"),
+            "what it printed, then the cancel"
+        );
+        let written = lines(&log);
+        assert_eq!(written[1].outcome, log::ToolOutcome::Cancelled);
+        assert_eq!(written[1].shown.as_deref(), Some(trunk[5].content.as_str()));
+
+        session.ask("next", None).expect("accepted after a cancel");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        reads_whole(&session);
+        let sent = session.shared.transport.sent();
+        assert_eq!(
+            sent[2].messages[..trunk.len()],
+            trunk[..],
+            "the next ask carries the cancelled turn's steps"
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// A call the cancel reached before it started -- the second of one
+    /// message -- never runs, and is answered with Qwen Code's repair text
+    /// (#575), so every call of the kept step has its result.
+    #[test]
+    fn a_call_a_cancel_reached_before_it_started_is_answered_as_unrecorded() {
+        let tree = scratch("cancel-unstarted");
+        let session = Session::open_looping(
+            Canned::new([vec![
+                Step::call(0, "call-1", "bash", r#"{"command":"sleep 600"}"#),
+                Step::call(1, "call-2", "bash", r#"{"command":"touch never"}"#),
+            ]]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch", "sleep"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        wait_until(&session, "the calls to be made", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Called { .. }))
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        assert!(!tree.join("never").exists(), "the unstarted call ran");
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 3, "{trunk:#?}");
+        assert_eq!(
+            trunk[3].content, CANCELLED_CALL,
+            "the running call printed nothing"
+        );
+        assert_eq!(trunk[4].content, UNRECORDED_CALL);
+        assert_eq!(trunk[4].tool_call_id.as_deref(), Some("call-2"));
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// Cancelled while generating after a finished step: the step stays, and
+    /// so does the text said so far (#575).
+    #[test]
+    fn a_turn_cancelled_while_generating_keeps_its_step_and_its_text() {
+        let tree = scratch("cancel-generating");
+        let gate = Gate::new();
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![Step::Delta("so far".to_owned()), Step::Hold(gate.clone())],
+                deltas(&["next"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "never held"
+        );
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2 + 1, "{trunk:#?}");
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        assert_eq!(trunk[4], Message::new(Role::Assistant, "so far"));
+        session.ask("next", None).expect("accepted after a cancel");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// A session whose one turn runs `commands`, one call each, then
+    /// answers; its tools capped as `cap`, keeping capped outputs in
+    /// `recording`.
+    fn capping_session(
+        tree: &Path,
+        commands: &[&str],
+        cap: crate::drive::output::OutputCap,
+        recording: Option<&Path>,
+    ) -> Session<Canned> {
+        let mut replies: Vec<Vec<Step>> = commands
+            .iter()
+            .enumerate()
+            .map(|(n, command)| vec![bash(&format!("call-{n}"), command)])
+            .collect();
+        replies.push(deltas(&["done"]));
+        let mut tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["seq", "sed", "echo"],
+            None,
+            Decider::Decline,
+        );
+        tools.output_cap = cap;
+        tools.recording = recording.map(Path::to_path_buf);
+        // The gate is not under test: a read of the recording runs.
+        tools.approvals_off = true;
+        Session::open_looping(Canned::new(replies), looping(), None, tools)
+    }
+
+    /// #554: an output over the cap reaches the model capped -- Qwen Code's
+    /// notice naming the kept file, the head, the separator, the tail -- and
+    /// the whole of it is kept in the recording by digest, named on the
+    /// line's `files`; a later call reads a slice of it through `bash`. The
+    /// session's start names the cap, the log reads, and the projection
+    /// rebuilds every head and carries the cap onto the record's start.
+    #[test]
+    fn an_output_over_the_cap_is_capped_kept_whole_by_digest_and_readable_in_slices() {
+        use crate::drive::output::{OutputCap, SEPARATOR};
+        let tree = scratch("cap-over");
+        let recording = scratch("cap-over-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let whole: String = (1..=5000)
+            .flat_map(|n| [n.to_string(), "\n".to_owned()])
+            .collect();
+        let sha256 = crate::digest::sha256_hex(whole.as_bytes());
+        let kept = recording.join("files").join(&sha256);
+        let slice = format!("sed -n '2500,2502p' \"{}\"", kept.display());
+        let session = capping_session(
+            &tree,
+            &["seq 1 5000", &slice],
+            OutputCap::DEFAULT,
+            Some(&recording),
+        );
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        reads_whole(&session);
+        let written = lines(&log);
+        let shown = written[0].shown.clone().expect("shown");
+        assert!(
+            shown.starts_with("Tool output was too large and has been truncated.\n"),
+            "{shown}"
+        );
+        assert!(
+            shown.contains(&format!(
+                "The full output has been saved to: {}\n",
+                kept.display()
+            )),
+            "{shown}"
+        );
+        let (head, tail) = shown
+            .split_once("Truncated part of the output:\n")
+            .expect("the notice")
+            .1
+            .split_once(SEPARATOR)
+            .expect("the separator");
+        assert!(
+            head.starts_with("1\n2\n") && tail.ends_with("4999\n5000\n"),
+            "{shown}"
+        );
+        assert_eq!(head.lines().count(), 400);
+        assert_eq!(tail.lines().count(), 1600);
+        assert_eq!(
+            written[0].files,
+            [log::RecordedFile {
+                path: format!("files/{sha256}"),
+                sha256: sha256.clone(),
+                media_type: "text/plain".to_owned(),
+                bytes: whole.len() as u64,
+            }]
+        );
+        assert_eq!(std::fs::read_to_string(&kept).expect("kept whole"), whole);
+        // The log keeps the whole stream; the model was shown the cap.
+        assert_eq!(
+            written[0].stdout.as_ref().map(|out| out.text.as_str()),
+            Some(whole.as_str())
+        );
+        assert_eq!(written[1].shown.as_deref(), Some("2500\n2501\n2502\n"));
+        let Event::Started { tool_output, .. } = &log[0].event else {
+            panic!("the log opens with the session");
+        };
+        assert_eq!(*tool_output, Some(OutputCap::DEFAULT));
+        every_head_rebuilds(&log);
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        assert!(
+            matches!(
+                projected.events.first(),
+                Some(crate::formats::record::Event::Start {
+                    tool_output: Some(log::ToolOutput {
+                        state: log::ToolOutputState::Capped,
+                        ..
+                    }),
+                    ..
+                })
+            ),
+            "the record's start names the cap"
+        );
+        // And the record reads back with it.
+        let record = crate::formats::record::Record {
+            events: projected.events.clone(),
+        };
+        let read = crate::formats::record::parse(&crate::formats::record::render(&record))
+            .expect("the record reads");
+        assert_eq!(
+            read.tool_output().map(|cap| (cap.max_lines, cap.max_bytes)),
+            Some((Some(2000), Some(51_200)))
+        );
+        tidy(&[&tree, &recording]);
+    }
+
+    /// Within the cap the output is shown whole and nothing is kept; with
+    /// no recording, an output over it is capped and the notice says it was
+    /// not saved; with the cap off, it is shown whole, and the start says
+    /// `keep`.
+    #[test]
+    fn under_the_cap_without_a_recording_or_with_the_cap_off_nothing_is_kept() {
+        use crate::drive::output::OutputCap;
+        let tree = scratch("cap-under");
+        let recording = scratch("cap-under-recording");
+        let session = capping_session(&tree, &["echo short"], OutputCap::DEFAULT, Some(&recording));
+        session.ask("say", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        assert_eq!(written[0].shown.as_deref(), Some("short\n"));
+        assert!(written[0].files.is_empty());
+        assert!(!recording.join("files").exists(), "something was kept");
+
+        let session = capping_session(&tree, &["seq 1 5000"], OutputCap::DEFAULT, None);
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        let shown = written[0].shown.clone().expect("shown");
+        assert!(
+            shown.contains("The full output was not saved.\n"),
+            "{shown}"
+        );
+        assert!(written[0].files.is_empty());
+
+        let session = capping_session(&tree, &["seq 1 5000"], OutputCap::Keep, Some(&recording));
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        assert_eq!(
+            written[0].shown.as_deref().map(str::len),
+            written[0].stdout.as_ref().map(|out| out.text.len())
+        );
+        assert!(!recording.join("files").exists(), "something was kept");
+        let Event::Started { tool_output, .. } = &log[0].event else {
+            panic!("the log opens with the session");
+        };
+        assert_eq!(*tool_output, Some(OutputCap::Keep));
+        tidy(&[&tree, &recording]);
+    }
+
+    /// The standard surface (#557): the request declares `bash` and the
+    /// standard tools with their descriptions; the model writes, reads and
+    /// edits a file in the worktree; each call is a line under its tool's
+    /// name with the result it was shown; the log reads whole and the
+    /// projection rebuilds every head from the declared names.
+    #[test]
+    fn the_standard_surface_writes_reads_and_edits_and_every_head_rebuilds() {
+        let tree = scratch("standard-surface");
+        let write = r#"{"path":"notes.txt","content":"alpha\nbeta\n"}"#;
+        let read = r#"{"path":"notes.txt"}"#;
+        let edit = r#"{"file_path":"notes.txt","old_string":"beta","new_string":"gamma"}"#;
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        let session = Session::open_looping(
+            Canned::new([
+                vec![Step::call(0, "call-1", "write", write)],
+                vec![Step::call(0, "call-2", "read", read)],
+                vec![Step::call(0, "call-3", "edit", edit)],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("keep notes", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        reads_whole(&session);
+        let written = lines(&log);
+        let names: Vec<&str> = written.iter().map(|line| line.name.as_str()).collect();
+        assert_eq!(names, ["write", "read", "edit"]);
+        assert!(
+            written
+                .iter()
+                .all(|line| line.outcome == log::ToolOutcome::Ran)
+        );
+        assert_eq!(
+            written[0].shown.as_deref(),
+            Some("Successfully created and wrote to new file: notes.txt.")
+        );
+        assert_eq!(written[1].shown.as_deref(), Some("alpha\nbeta\n"));
+        assert!(
+            written[2]
+                .shown
+                .as_deref()
+                .is_some_and(|shown| shown.starts_with("The file: notes.txt has been updated."))
+        );
+        assert_eq!(
+            std::fs::read_to_string(tree.join("notes.txt")).expect("the file"),
+            "alpha\ngamma\n"
+        );
+        let sent = session.shared.transport.sent();
+        let declared: Vec<(&str, bool)> = sent[0]
+            .tools
+            .iter()
+            .map(|tool| (tool.name.as_str(), tool.description.is_some()))
+            .collect();
+        assert_eq!(
+            declared,
+            [
+                ("bash", false),
+                ("read", true),
+                ("write", true),
+                ("edit", true),
+                ("grep", true),
+                ("glob", true)
+            ]
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// `read` of an image (#557): the result goes back as an image part
+    /// inside the tool message, with no words beside it, the image kept in
+    /// the recording by digest and named on the line's `files`; every head
+    /// rebuilds from the recording, and without one the head that carries
+    /// the image is named unrebuilt.
+    #[test]
+    fn a_read_image_rides_in_the_tool_message_and_every_head_rebuilds() {
+        let tree = scratch("standard-image");
+        let recording = scratch("standard-image-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let png = b"\x89PNG\r\n\x1a\nsome pixels".to_vec();
+        std::fs::write(tree.join("shot.png"), &png).expect("written");
+        let sha256 = crate::digest::sha256_hex(&png);
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.recording = Some(recording.clone());
+        let session = Session::open_looping(
+            Canned::new([
+                vec![Step::call(0, "call-1", "read", r#"{"path":"shot.png"}"#)],
+                deltas(&["red"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("what colour?", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written[0].outcome, log::ToolOutcome::Ran);
+        assert_eq!(written[0].shown.as_deref(), Some(""));
+        let file = log::RecordedFile {
+            path: format!("files/{sha256}"),
+            sha256: sha256.clone(),
+            media_type: "image/png".to_owned(),
+            bytes: png.len() as u64,
+        };
+        assert_eq!(written[0].files, std::slice::from_ref(&file));
+        assert!(written[0].images.is_empty(), "the bytes are never logged");
+        assert_eq!(
+            std::fs::read(recording.join(&file.path)).expect("kept"),
+            png
+        );
+        let sent = session.shared.transport.sent();
+        let result = sent[1].messages.last().expect("the result");
+        assert_eq!(result.role, Role::Tool);
+        assert_eq!(result.tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(result.content, "");
+        assert_eq!(
+            result.images,
+            crate::client::attach(Message::new(Role::Tool, ""), &file, &png)
+                .expect("the file's bytes")
+                .images
+        );
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project_in(&lines, &regime(), None, Some(&recording))
+                .expect("projected");
+        let unrebuilt = |projected: &crate::drive::projection::Projection| -> Vec<String> {
+            projected
+                .unspellable
+                .iter()
+                .filter(|named| named.why.contains("could not be rebuilt"))
+                .map(|named| named.why.clone())
+                .collect()
+        };
+        assert!(
+            unrebuilt(&projected).is_empty(),
+            "{:#?}",
+            unrebuilt(&projected)
+        );
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let named = unrebuilt(&projected);
+        assert!(
+            named.iter().any(|why| why.contains("call call-1's image")),
+            "{named:#?}"
+        );
+        tidy(&[&tree, &recording]);
+    }
+
+    /// A turn that fails on its first request ran nothing, and keeps nothing:
+    /// the trunk is as it was (#289's rule, unchanged for it).
+    #[test]
+    fn a_turn_that_fails_before_any_step_keeps_nothing() {
+        let tree = scratch("failed-keeps-nothing");
+        let session = Session::open_looping(
+            Canned::new([vec![Step::Reject(500, "broken".to_owned())]]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Failed));
+        assert_eq!(session.trunk().len(), 1, "only the head");
+        tidy(&[&tree]);
+    }
+
     /// T13: a call to a tool the session never declared runs nothing, is not
     /// answered, and fails the turn naming the call.
     #[test]
@@ -5479,6 +6828,90 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             session.approve("call-1", Decision::Once),
             Err(ApproveRefusal::NothingWaiting)
+        );
+        tidy(&[&tree]);
+    }
+
+    /// The approval lever's `none`: a call that would prompt runs with no
+    /// gate decision and nothing waiting on the operator, its line says
+    /// approvals were off, and so does `session.start`.
+    #[test]
+    fn with_approvals_off_a_call_that_would_prompt_runs_and_says_so() {
+        let tree = scratch("approvals-off");
+        let mut off = tools(Confinement::Unconfined, &tree, &[], None, Decider::Operator);
+        off.approvals_off = true;
+        let session = Session::open_looping(
+            Canned::new([vec![bash("call-1", "touch a")], deltas(&["done"])]),
+            looping(),
+            None,
+            off,
+        );
+        session.ask("go", None).expect("accepted");
+        // Settles with no `approve`: an operator decider would wait forever.
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        assert!(session.waiting().is_none());
+        let written = lines(&log);
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].outcome, log::ToolOutcome::Ran);
+        assert_eq!(
+            written[0].approval,
+            Some(log::Approval {
+                scope: log::ApprovalScope::Off,
+                decided_at: None,
+                why: None,
+            })
+        );
+        assert!(tree.join("a").exists());
+        assert!(matches!(
+            line_of(&log[0]).event,
+            log::Event::SessionStart {
+                approvals_off: Some(true),
+                ..
+            }
+        ));
+        tidy(&[&tree]);
+    }
+
+    /// A call whose segments are covered partly by a pre-seed and partly by
+    /// the operator's session approval records the operator's approval, the
+    /// one it needed: `ls | wc -l` with `ls` pre-seeded and `wc` approved
+    /// for the session records `session` on its repeat, never `preseeded`
+    /// (the approval trace is a measurement).
+    #[test]
+    fn a_repeat_covered_by_a_session_approval_records_session_not_the_preseed() {
+        let tree = scratch("approve-mixed");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "ls | wc -l")],
+                vec![bash("call-2", "ls | wc -l")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["ls"],
+                None,
+                Decider::Operator,
+            ),
+        );
+        session.ask("go", None).expect("accepted");
+        let prompt = waiting_on(&session);
+        assert_eq!(prompt.command, "ls | wc -l");
+        assert_eq!(session.approve("call-1", Decision::Session), Ok(()));
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written.len(), 2);
+        assert!(written.iter().all(|l| l.outcome == log::ToolOutcome::Ran));
+        let first = written[0].approval.clone().expect("an approval");
+        assert_eq!(first.scope, log::ApprovalScope::Session);
+        assert_eq!(
+            written[1].approval,
+            Some(first),
+            "the repeat ran under the operator's session approval"
         );
         tidy(&[&tree]);
     }
@@ -5712,6 +7145,8 @@ pub(in crate::drive) mod tests {
         Interview {
             rules: rules.to_vec(),
             object: WorkingObject::open(regime()),
+            seams: crate::seam::policy::Served::default(),
+            delivery: log::ForkDelivery::Seam,
         }
     }
 
@@ -5777,6 +7212,169 @@ pub(in crate::drive) mod tests {
             .expect("an answer")
     }
 
+    /// The fork delivery lever: patches waiting at the next ask are one
+    /// note after it, each line the (b′) sentence of the session's framing,
+    /// logged as `delivered`; the note stays on the trunk for the turns
+    /// after. Under `seam`, nothing is delivered.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn a_delivered_note_follows_the_ask_and_stays_on_the_trunk() {
+        for (delivery, template_name) in [
+            (log::ForkDelivery::Advisory, "FORK_NOTE_ADVISORY"),
+            (log::ForkDelivery::Imperative, "FORK_NOTE_IMPERATIVE"),
+            (log::ForkDelivery::Seam, ""),
+        ] {
+            let mut interview = interviewing(&[]);
+            interview.delivery = delivery;
+            let session = Session::open_with(
+                Canned::new([deltas(&["one"]), deltas(&["two"])]),
+                template(),
+                None,
+                None,
+                None,
+                Some(interview),
+            );
+            session.shared.lock().undelivered = vec![
+                (
+                    log::PatchOp::Supersede,
+                    "e-1".to_owned(),
+                    "the schema is per-team".to_owned(),
+                ),
+                (
+                    log::PatchOp::Retire,
+                    "e-2".to_owned(),
+                    "no login".to_owned(),
+                ),
+            ];
+            session.ask("go", None).expect("accepted");
+            wait_until(&session, "turn one", settled);
+            session.ask("again", None).expect("accepted");
+            let log = wait_until(&session, "turn two", |log| {
+                settled(log)
+                    && log
+                        .iter()
+                        .filter(|l| matches!(l.event, Event::Answered { .. }))
+                        .count()
+                        == 2
+            });
+            reads_whole(&session);
+            let sent = session.shared.transport.sent();
+            let delivered: Vec<&Event> = log
+                .iter()
+                .map(|logged| &logged.event)
+                .filter(|event| matches!(event, Event::Delivered { .. }))
+                .collect();
+            if delivery == log::ForkDelivery::Seam {
+                assert!(delivered.is_empty(), "{delivered:?}");
+                assert_eq!(sent[0].messages.last(), Some(&user("go")));
+                continue;
+            }
+            let template = if delivery == log::ForkDelivery::Advisory {
+                crate::dogma::Template::ForkNoteAdvisory
+            } else {
+                crate::dogma::Template::ForkNoteImperative
+            };
+            let line = |entry: &str| {
+                template
+                    .fill(&[(crate::dogma::Hole::Entry, entry)])
+                    .expect("one hole")
+            };
+            let note = format!("{}\n{}", line("the schema is per-team"), line("no login"));
+            // The first request: the ask, then the note at the tail.
+            let first = &sent[0].messages;
+            assert_eq!(&first[first.len() - 2..], &[user("go"), user(&note)]);
+            // The second: the note stayed on the trunk after its ask.
+            let second = &sent[1].messages;
+            assert!(
+                second
+                    .windows(2)
+                    .any(|pair| pair == [user("go"), user(&note)]),
+                "{second:#?}"
+            );
+            assert_eq!(second.last(), Some(&user("again")));
+            // The projection rebuilds both heads with the note, from the log.
+            let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+            let projected =
+                crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+            // And the record names the state.
+            assert!(matches!(
+                projected.events.first(),
+                Some(crate::formats::record::Event::Start { fork_delivery: Some(named), .. })
+                    if *named == delivery
+            ));
+            assert!(
+                !projected
+                    .unspellable
+                    .iter()
+                    .any(|item| item.why.contains("rebuilt")),
+                "{:?}",
+                projected.unspellable
+            );
+            let [
+                Event::Delivered {
+                    turn, text, lines, ..
+                },
+            ] = delivered.as_slice()
+            else {
+                panic!("one delivery: {delivered:?}");
+            };
+            assert_eq!((*turn, text.as_str()), (1, note.as_str()));
+            assert_eq!(
+                lines
+                    .iter()
+                    .map(|l| (l.entry.as_str(), l.op, l.template.as_str()))
+                    .collect::<Vec<_>>(),
+                [
+                    ("e-1", log::PatchOp::Supersede, template_name),
+                    ("e-2", log::PatchOp::Retire, template_name),
+                ]
+            );
+        }
+    }
+
+    /// An `add` names no existing entry, and no measured sentence fits it:
+    /// under a mid-turn delivery it is still carried at the seam only.
+    #[test]
+    fn a_forks_add_patches_are_not_delivered_mid_turn() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.delivery = log::ForkDelivery::Imperative;
+        let session = Session::open_with(
+            Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED]), deltas(&["next"])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::Asked { .. }))
+                    .count()
+                    == 2
+        });
+        reads_whole(&session);
+        assert!(log.iter().any(|l| matches!(
+            l.event,
+            Event::Patched {
+                op: log::PatchOp::Add,
+                ..
+            }
+        )));
+        assert!(
+            !log.iter()
+                .any(|l| matches!(l.event, Event::Delivered { .. }))
+        );
+    }
+
     /// The definition of done's first line: the scope-boundary gap (an ask the operator
     /// marked `scoping`) fires one fork, off the warm trunk and never
     /// appended to it, whose patch carries the three decisions -- three
@@ -5839,6 +7437,349 @@ pub(in crate::drive) mod tests {
         born.push(user(&question));
         assert_eq!(sent[1].messages, born);
         assert_eq!(session.settlement(), Settlement::Awaiting);
+    }
+
+    // -----------------------------------------------------------------------
+    // derived seams: the regimen's cadence and budget
+    // -----------------------------------------------------------------------
+
+    /// An interview whose regimen declares `seams`.
+    fn seaming(seams: crate::seam::policy::Served) -> Interview {
+        Interview {
+            seams,
+            ..interviewing(&[log::Warrant::Scoping])
+        }
+    }
+
+    /// The seam lines in `log`, as the log writes them: turn and reason.
+    fn seams_in(log: &[Logged]) -> Vec<(u32, log::SeamReason)> {
+        log.iter()
+            .filter_map(|logged| match line_of(logged).event {
+                log::Event::Seam {
+                    at_turn, reason, ..
+                } => Some((at_turn, reason)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn a_reply_with_timings(
+        text: &str,
+        prompt_n: u64,
+        cache_n: u64,
+        predicted_n: u64,
+    ) -> Vec<Step> {
+        vec![
+            Step::Delta(text.to_owned()),
+            Step::Timings(Timings {
+                prompt_n: Some(prompt_n),
+                cache_n: Some(cache_n),
+                predicted_n: Some(predicted_n),
+                ..Timings::default()
+            }),
+        ]
+    }
+
+    /// A cadence of one operator turn: the scoping turn's fork fills working
+    /// memory, and the seam fires on its own once the gap is over, logged
+    /// `cadence`; the next ask runs on the refilled trunk, and the turn after
+    /// it fires the next. Nobody declared either.
+    #[test]
+    fn a_cadence_fires_a_seam_on_its_own_after_each_counted_turn() {
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["started on the schema"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: Some(1),
+                at_trunk_tokens: None,
+                tail_tokens: 0,
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the cadence's seam", |log| {
+            !seams_in(log).is_empty()
+        });
+        assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Cadence)]);
+        assert!(
+            !session.trunk().iter().any(|m| m.content == SCOPED),
+            "the seam carried a turn of the old trunk"
+        );
+        let refilled = session.trunk();
+
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the second seam", |log| seams_in(log).len() == 2);
+        assert_eq!(
+            seams_in(&log),
+            vec![(1, log::SeamReason::Cadence), (2, log::SeamReason::Cadence)]
+        );
+        let sent = session.shared.transport.sent();
+        let mut expected = refilled;
+        expected.push(user("build it"));
+        assert_eq!(
+            sent[2].messages, expected,
+            "the ask after the seam runs on the refill"
+        );
+        assert_eq!(session.settlement(), Settlement::Awaiting);
+        reads_whole(&session);
+    }
+
+    /// The compaction depth (#552): a seam with a tail budget keeps the
+    /// old trunk's most recent whole turn after the refill, as it sat on the
+    /// trunk; the seam line names the depth and what it kept; the next ask
+    /// runs on head, render and tail; the projection rebuilds every head. A
+    /// budget no whole turn fits keeps none.
+    #[test]
+    fn a_seam_with_a_tail_budget_keeps_the_most_recent_whole_turns() {
+        let tailed = |tail_tokens: u64| {
+            Session::open_with(
+                Canned::new([
+                    deltas(&[SCOPED]),
+                    deltas(&[DECIDED]),
+                    deltas(&["started on the schema"]),
+                ]),
+                template(),
+                None,
+                None,
+                None,
+                Some(seaming(crate::seam::policy::Served {
+                    every_turns: Some(1),
+                    at_trunk_tokens: None,
+                    tail_tokens,
+                })),
+            )
+        };
+        let session = tailed(10_000);
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        let trunk = session.trunk();
+        let kept = [
+            user("what are we building?"),
+            Message::new(Role::Assistant, SCOPED),
+        ];
+        assert_eq!(trunk[trunk.len() - 2..], kept[..], "{trunk:#?}");
+        assert_eq!(trunk.len(), template().messages.len() + 2);
+        let seam = log
+            .iter()
+            .find_map(|logged| match line_of(logged).event {
+                log::Event::Seam {
+                    tail_tokens,
+                    carried_turns,
+                    carried_tokens,
+                    ..
+                } => Some((tail_tokens, carried_turns, carried_tokens)),
+                _ => None,
+            })
+            .expect("a seam line");
+        let estimated: u64 = kept.iter().map(crate::seam::render::estimated_tokens).sum();
+        assert_eq!(seam, (Some(10_000), 1, Some(estimated)));
+
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the second seam", |log| seams_in(log).len() == 2);
+        reads_whole(&session);
+        let mut expected = trunk.clone();
+        expected.push(user("build it"));
+        assert_eq!(session.shared.transport.sent()[2].messages, expected);
+        every_head_rebuilds(&log);
+
+        // A budget no whole turn fits: the total refill.
+        let session = tailed(1);
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        assert_eq!(session.trunk().len(), template().messages.len());
+    }
+
+    /// A budget: the trunk call reports 18 prefilled, 160 reused and 66
+    /// generated, 244 tokens, against a limit of 200, so the seam fires
+    /// `budget` though the cadence (every 5 turns) has not come round. The
+    /// refilled trunk is unmeasured until its next call.
+    #[test]
+    fn a_budget_fires_a_seam_once_the_trunk_call_reports_the_limit_reached() {
+        let session = Session::open_with(
+            Canned::new([
+                a_reply_with_timings(SCOPED, 18, 160, 66),
+                deltas(&[DECIDED]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: Some(5),
+                at_trunk_tokens: Some(200),
+                tail_tokens: 0,
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the budget's seam", |log| {
+            !seams_in(log).is_empty()
+        });
+        assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Budget)]);
+        assert_eq!(session.shared.lock().trunk_tokens, None);
+        reads_whole(&session);
+    }
+
+    /// Under the limit, no seam: 18 + 160 + 66 is 244, and the limit is 245.
+    #[test]
+    fn a_trunk_under_the_budget_fires_no_seam() {
+        let session = Session::open_with(
+            Canned::new([
+                a_reply_with_timings(SCOPED, 18, 160, 66),
+                deltas(&[DECIDED]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: None,
+                at_trunk_tokens: Some(245),
+                tail_tokens: 0,
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert!(seams_in(&log).is_empty(), "{:#?}", seams_in(&log));
+        assert_eq!(session.shared.lock().trunk_tokens, Some(244));
+    }
+
+    /// A step that calls a tool measures a trunk that only holds if the
+    /// step's exchange joins it. Here the call names a tool the session never
+    /// declared, the turn settles `failed`, and nothing joins the trunk
+    /// (T13): its 500 tokens are not the trunk's, and the budget of 100 does
+    /// not fire on them. The first turn measured 10.
+    #[test]
+    fn a_step_whose_exchange_never_joins_the_trunk_does_not_count_against_the_budget() {
+        let mut call = vec![bash("call-1", "touch marker")];
+        call.push(Step::Timings(Timings {
+            prompt_n: Some(400),
+            cache_n: Some(0),
+            predicted_n: Some(100),
+            ..Timings::default()
+        }));
+        let session = Session::open_with(
+            Canned::new([
+                a_reply_with_timings(SCOPED, 4, 0, 6),
+                deltas(&[DECIDED]),
+                call,
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: None,
+                at_trunk_tokens: Some(100),
+                tail_tokens: 0,
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        session.ask("go", None).expect("accepted");
+        // The settling and any seam it makes due are pushed under one lock.
+        let log = wait_until(&session, "the second turn", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::TurnSettled {
+                turn: 2,
+                reason: SettleReason::Failed
+            }
+        )));
+        assert!(seams_in(&log).is_empty(), "{:#?}", seams_in(&log));
+        assert_eq!(session.shared.lock().trunk_tokens, Some(10));
+    }
+
+    /// A cadence that comes round with working memory empty fires nothing
+    /// (a refill would drop every turn and carry nothing) and stays due: the
+    /// first turn that leaves an entry fires it, at that turn.
+    #[test]
+    fn a_due_seam_with_nothing_to_refill_from_waits_for_an_entry() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["hello"]), deltas(&[SCOPED]), deltas(&[DECIDED])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: Some(1),
+                at_trunk_tokens: None,
+                tail_tokens: 0,
+            })),
+        );
+        session.ask("hi", None).expect("accepted");
+        let log = wait_until(&session, "the first turn", settled);
+        assert!(seams_in(&log).is_empty());
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        assert_eq!(seams_in(&log), vec![(2, log::SeamReason::Cadence)]);
+    }
+
+    /// An operator's seam resets the cadence: with a cadence of two, a
+    /// declared seam after turn 1 means turn 2 does not fire one.
+    #[test]
+    fn an_operator_seam_restarts_the_cadence() {
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["started on the schema"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(seaming(crate::seam::policy::Served {
+                every_turns: Some(2),
+                at_trunk_tokens: None,
+                tail_tokens: 0,
+            })),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        session.declare_seam(None).expect("admitted");
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        assert_eq!(seams_in(&log), vec![(1, log::SeamReason::Operator)]);
     }
 
     // -----------------------------------------------------------------------
@@ -5935,6 +7876,8 @@ pub(in crate::drive) mod tests {
                 render: render.clone(),
                 carried_entries: 3,
                 carried_turns: 0,
+                tail_tokens: None,
+                carried_tokens: None,
             }
         );
 

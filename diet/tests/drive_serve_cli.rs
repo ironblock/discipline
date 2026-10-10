@@ -29,6 +29,16 @@ const ANSWERED: &[u8] =
 
 const HEAD: &str = "you are the trunk, served\n";
 
+/// The probe request's answer at start (#509): a warm turn whose timings
+/// carry `draft_n`, captured off llama.cpp `e7051ef`.
+const WARM: &[u8] =
+    include_bytes!("../client/fixtures/llama-server-e7051ef-warm-turn2-stream.http");
+
+/// The probe's answer, as an act.
+fn warm() -> Act {
+    Act::Raw(WARM.to_vec())
+}
+
 /// A running `diet-drive serve`, stopped when dropped.
 struct Served {
     child: Child,
@@ -42,6 +52,8 @@ struct Served {
     engine_build: Option<String>,
     /// And how the engine's identity was established.
     engine_identity: Option<String>,
+    /// A reasoning budget the regime declares and no request carries (R1).
+    budget_tokens_unsent: Option<u64>,
     /// Where `--log` writes, and whether naming it emptied a file.
     log: Option<(String, bool)>,
     /// Where `--record` writes, and whether naming it emptied anything.
@@ -119,6 +131,7 @@ fn start_with(endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
         registry_sha256: announced["registry_sha256"].as_str().map(str::to_owned),
         engine_build: announced["engine_build"].as_str().map(str::to_owned),
         engine_identity: announced["engine_identity"].as_str().map(str::to_owned),
+        budget_tokens_unsent: announced["budget_tokens_unsent"].as_u64(),
         log: announced["log"]
             .as_str()
             .zip(announced["log_truncated"].as_bool())
@@ -609,7 +622,7 @@ fn a_drive_server_starts_only_on_the_engine_the_registry_pins() {
     let path = regimen.0.to_string_lossy().into_owned();
 
     let build = format!("b1-{}", &commit[..7]);
-    let stub = Stub::serving(vec![props_saying(&build)]).expect("loopback");
+    let stub = Stub::serving(vec![props_saying(&build), warm()]).expect("loopback");
     let served = start(&stub.url(), &["--regimen", &path]);
     assert_eq!(
         (
@@ -889,7 +902,7 @@ fn a_drive_server_starts_on_a_substrate_of_several_shards() {
             &registered.engine_commit.expect("an engine identity")[..7]
         )
     });
-    let stub = Stub::serving(vec![props_saying(&build)]).expect("loopback");
+    let stub = Stub::serving(vec![props_saying(&build), warm()]).expect("loopback");
     let served = start(&stub.url(), &["--regimen", &path]);
     assert_eq!(
         (served.substrate.as_deref(), served.engine_build.as_deref()),
@@ -904,7 +917,7 @@ fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
     let id = "accel24-beellama-qwen27b-q4kxl";
     let regimen = regimen_registered(id);
     let path = regimen.0.to_string_lossy().into_owned();
-    let stub = Stub::serving(vec![props_saying("b0-unknown-dirty")]).expect("loopback");
+    let stub = Stub::serving(vec![props_saying("b0-unknown-dirty"), warm()]).expect("loopback");
     let served = start(&stub.url(), &["--regimen", &path]);
     assert_eq!(
         (
@@ -926,6 +939,170 @@ fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
         said.contains("reports exactly") && said.contains("b0-unknown-dirty"),
         "{said}"
     );
+}
+
+/// What `TabbyAPI`'s `GET /v1/model` answered for the 3.8 line's config r2,
+/// as the r2 window captured it (Track 4's committed record), with
+/// `cache_size` as given: the active template's name and text among it.
+fn tabby_model_card(cache_size: u64) -> Act {
+    let mut card: serde_json::Value = serde_json::from_str(include_str!(
+        "../../substrates/measurements/2026-10-05-accel24-tabbyapi-exl3-27b-r2/window/raw/model.json"
+    ))
+    .expect("the captured model card");
+    card["parameters"]["cache_size"] = serde_json::Value::from(cache_size);
+    Act::Answer(card.to_string())
+}
+
+#[test]
+fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
+    // #509: TabbyAPI reports no build, so its entry declares the engine and
+    // serve does not ask `/props`; it reads `GET /v1/model` for the model and
+    // settings the entry declares, and -- the engine warming itself, a draft
+    // declared -- one probe request whose timings show the draft ran.
+    let id = "accel24-tabbyapi-exl3-qwen38-27b-3p00";
+    let commit = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("registered")
+        .engine_commit
+        .expect("an engine_commit");
+    let regimen = regimen_registered(id);
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(vec![tabby_model_card(163_840), warm()]).expect("loopback");
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
+    assert_eq!(
+        (
+            served.substrate.as_deref(),
+            served.engine_build.as_deref(),
+            served.engine_identity.as_deref()
+        ),
+        (
+            Some(id),
+            Some(commit.as_str()),
+            Some("declared (the engine not asked)")
+        )
+    );
+    let heads = stub.heads();
+    assert!(
+        heads[0].starts_with("GET /v1/model HTTP/1.1\r\n"),
+        "{heads:?}"
+    );
+    assert!(
+        heads[1].starts_with("POST /v1/chat/completions "),
+        "{heads:?}"
+    );
+    let start_line = first_logged_line(&log_file.0);
+    let corroborated = |field: &str, value: &str| {
+        serde_json::json!({
+            "field": field, "value": value, "provenance": "corroborated", "reported": value,
+        })
+    };
+    assert_eq!(
+        start_line["served"],
+        serde_json::json!([
+            {"field": "engine_commit", "value": commit, "provenance": "declared"},
+            corroborated("served_cache_mode", "8,8"),
+            corroborated("served_cache_size", "163840"),
+            corroborated(
+                "served_chat_template_sha256",
+                "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"
+            ),
+            corroborated("served_chunk_size", "2048"),
+            corroborated("served_max_batch_size", "2"),
+            corroborated("served_max_seq_len", "163840"),
+            corroborated("served_model", "Qwen3.8-27B-exl3-3.00bpw-img1024"),
+            corroborated("served_prompt_template", "chat_template"),
+            corroborated("served_use_vision", "true"),
+            {
+                "field": "served_draft", "value": "true", "provenance": "corroborated",
+                "reported": "draft_n 72, draft_n_accepted 44",
+            },
+        ]),
+        "{start_line}"
+    );
+    assert_eq!(start_line["version"], 7, "{start_line}");
+    // And its server speaks TabbyAPI's dialect, by name (#496).
+    assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
+}
+
+#[test]
+fn a_drive_server_refuses_a_contradicted_setting_and_takes_a_silent_draft_as_declared() {
+    let id = "accel24-tabbyapi-exl3-qwen38-27b-3p00";
+    let regimen = regimen_registered(id);
+    let path = regimen.0.to_string_lossy().into_owned();
+    // A cache the entry does not declare: refused before the probe, naming
+    // the field and both values.
+    let stub = Stub::serving(vec![tabby_model_card(131_072), warm()]).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("`served_cache_size`")
+            && said.contains("\\\"163840\\\"")
+            && said.contains("\\\"131072\\\""),
+        "{said}"
+    );
+    assert_eq!(stub.heads().len(), 1, "no probe after a contradiction");
+    // A declared draft whose probe produced no draft tokens is silence, not
+    // a contradiction: the start goes on, the draft declared.
+    let stub = Stub::serving(vec![tabby_model_card(163_840), Act::Raw(CAPTURED.to_vec())])
+        .expect("loopback");
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
+    assert_eq!(served.substrate.as_deref(), Some(id));
+    let start_line = first_logged_line(&log_file.0);
+    let draft = start_line["served"]
+        .as_array()
+        .and_then(|fields| fields.iter().find(|field| field["field"] == "served_draft"))
+        .cloned();
+    assert_eq!(
+        draft,
+        Some(
+            serde_json::json!({"field": "served_draft", "value": "true", "provenance": "declared"})
+        ),
+        "{start_line}"
+    );
+    drop(served);
+    // An unreachable server is refused as one.
+    let gone = Stub::serving(Vec::new()).expect("loopback");
+    let url = gone.url();
+    drop(gone.received());
+    let (code, said) = run_briefly(&url, &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("not reachable"), "{said}");
+}
+
+#[test]
+fn a_drive_server_given_a_base_url_asks_its_chat_completions() {
+    // #496's live turn: a server's bare base URL was a 404 on the first
+    // request. A base URL, or one ending in `/v1`, is completed.
+    for suffix in ["", "/", "/v1"] {
+        let stub = Stub::serving(vec![Act::Raw(ANSWERED.to_vec())]).expect("loopback");
+        let url = stub.url();
+        let base = format!(
+            "{}{suffix}",
+            url.strip_suffix("/v1/chat/completions")
+                .expect("the stub's path")
+        );
+        let served = start(&base, &[]);
+        let address = served.listening.clone();
+        let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+        assert_eq!(status(&reply), 200, "{reply}");
+        let read = exchange(
+            &address,
+            &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+            |read| read.contains("turn.settled"),
+        );
+        assert!(read.contains("turn.settled"), "{read}");
+        drop(served);
+        let heads = stub.heads();
+        assert!(
+            heads
+                .iter()
+                .any(|head| head.starts_with("POST /v1/chat/completions ")),
+            "{base}: {heads:#?}"
+        );
+    }
 }
 
 #[test]
@@ -1098,16 +1275,16 @@ fn a_drive_servers_log_carries_the_substrate_claim_it_announced() {
     let canned = diet::drive::canned::build_info();
     for (stub, regimen, announced_as, logged_as) in [
         (
-            Stub::serving(vec![props_saying(&build)]).expect("loopback"),
+            Stub::serving(vec![props_saying(&build), warm()]).expect("loopback"),
             committed,
             "checked (commit)",
-            "checked_commit",
+            "engine_commit",
         ),
         (
             Stub::serving_with_props(Vec::new(), &canned).expect("loopback"),
             dev_loop(),
             "unreported (literal matched)",
-            "literal_matched",
+            "engine_build_info",
         ),
     ] {
         let log_file = file_holding("log", "");
@@ -1117,18 +1294,22 @@ fn a_drive_servers_log_carries_the_substrate_claim_it_announced() {
         let start_line = first_logged_line(&log_file.0);
         assert_eq!(start_line["kind"], "session.start", "{start_line}");
         let claimed = |key: &str| start_line[key].as_str().map(str::to_owned);
+        // v7 (#509): the engine's field, corroborated, and what it reported.
+        let field = |key: &str| start_line["served"][0][key].as_str().map(str::to_owned);
         assert_eq!(
             (
                 claimed("substrate"),
                 claimed("registry_sha256"),
-                claimed("engine_build"),
-                claimed("engine_identity"),
+                field("reported"),
+                field("field"),
+                field("provenance"),
             ),
             (
                 served.substrate.clone(),
                 served.registry_sha256.clone(),
                 served.engine_build.clone(),
                 Some(logged_as.to_owned()),
+                Some("corroborated".to_owned()),
             ),
             "the log claims what stdout announced: {start_line}"
         );
@@ -1145,7 +1326,7 @@ fn a_drive_servers_log_carries_the_substrate_claim_it_announced() {
         assert_eq!(checked.status.code(), Some(0), "{said}");
         let read = log_line_object(&said);
         assert_eq!(
-            read["value"]["events"][0]["engine_identity"].as_str(),
+            read["value"]["events"][0]["served"][0]["field"].as_str(),
             Some(logged_as),
             "{said}"
         );
@@ -2020,8 +2201,8 @@ fn a_drive_server_runs_an_approved_call_records_it_and_writes_its_receipt() {
             "cwd": recorded_cwd(&tree),
             "reason": "not_approved",
             "segments": [
-                {"text": "ls", "program": "ls", "verdict": "prompt", "why": "not_approved"},
-                {"text": "wc -l", "program": "wc", "verdict": "prompt", "why": "not_approved"},
+                {"text": "ls", "shape": "ls", "program": "ls", "verdict": "prompt", "why": "not_approved"},
+                {"text": "wc -l", "shape": "wc", "program": "wc", "verdict": "prompt", "why": "not_approved"},
             ],
         })
     );
@@ -2255,6 +2436,12 @@ fn a_drive_server_pins_the_regimens_sampler_on_the_trunk_and_the_fork_as_its_rec
             pinned,
             "the {lane}'s sampler fields: {body}"
         );
+        // R1: the regime's reasoning state, on the fork as on the trunk.
+        assert_eq!(
+            log_line_object(body)["chat_template_kwargs"],
+            serde_json::json!({"enable_thinking": false}),
+            "the {lane}'s template kwargs: {body}"
+        );
         for written in [
             r#""temperature":0.6,"#,
             r#""top_k":20,"#,
@@ -2282,6 +2469,71 @@ fn a_drive_server_pins_the_regimens_sampler_on_the_trunk_and_the_fork_as_its_rec
         );
     }
     let _ = std::fs::remove_file(format!("{path}.unspellable.json"));
+}
+
+#[test]
+fn a_drive_server_records_and_announces_a_reasoning_budget_it_cannot_send() {
+    // R1, duty of care: no chat template has a variable for a budget, so it
+    // is not sent -- and nothing refuses for that. The announcement says so,
+    // `session.start` records it beside what was sent, and serve starts.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let whole = std::fs::read_to_string(dev_loop()).expect("the dev loop's regimen");
+    let regimen = file_holding(
+        "regimen",
+        &whole
+            .replace(
+                "substrate_reasoning = \"off\"",
+                "substrate_reasoning = \"on\"",
+            )
+            .replace(
+                "\n[sampler]\n",
+                "\n[reasoning]\neffort = \"medium\"\nbudget_tokens = 512\n\n[sampler]\n",
+            ),
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+    assert_eq!(served.budget_tokens_unsent, Some(512));
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["unsent"],
+        serde_json::json!({"budget_tokens": 512}),
+        "{start_line}"
+    );
+    assert_eq!(
+        start_line["template_kwargs"],
+        serde_json::json!({"enable_thinking": true, "reasoning_effort": "medium"}),
+        "{start_line}"
+    );
+}
+
+#[test]
+fn a_drive_server_names_the_fork_delivery_its_regimen_declares() {
+    // The fork delivery lever: the regimen's state reaches `session.start`,
+    // and a value that is none of the three is refused before it listens.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nfork_delivery = \"advisory\"\n",
+        "seed = 7\n",
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let _served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(start_line["fork_delivery"], "advisory", "{start_line}");
+    let refused = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nfork_delivery = \"loud\"\n",
+        "seed = 7\n",
+    );
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &refused.0.to_string_lossy()]);
+    assert_ne!(code, None, "it listened: {said}");
+    assert!(said.contains("`fork_delivery`"), "{said}");
 }
 
 #[test]
@@ -2321,4 +2573,366 @@ fn a_drive_server_without_a_regimen_pins_no_sampler_setting() {
         panic!("one request: {bodies:#?}");
     };
     assert!(sampler_fields(body).is_empty(), "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// the stream-replay substrate (#411)
+// ---------------------------------------------------------------------------
+
+/// `diet-drive replay` on a port of the system's choosing: the child, killed
+/// when dropped, and the endpoint its first line names.
+struct Replaying {
+    child: std::process::Child,
+    endpoint: String,
+}
+
+impl Drop for Replaying {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+fn replaying(answers: bool) -> Replaying {
+    let mode: &[&str] = if answers { &["--answers"] } else { &[] };
+    let (substrate, build_info) = if answers {
+        ("canned-replay", diet::drive::canned::replay_build_info())
+    } else {
+        (
+            "canned-replay-tools",
+            diet::drive::canned::replay_tools_build_info(),
+        )
+    };
+    let mut child = Command::new(DRIVE)
+        .arg("replay")
+        .args(mode)
+        .args(["--port", "0"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("diet-drive replay starts");
+    let stdout = child.stdout.take().expect("stdout is piped");
+    let (line, lines) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut first = String::new();
+        let _ = BufReader::new(stdout).read_line(&mut first);
+        let _ = line.send(first);
+    });
+    let mut replaying = Replaying {
+        child,
+        endpoint: String::new(),
+    };
+    let first = lines
+        .recv_timeout(Duration::from_secs(10))
+        .expect("diet-drive replay announced itself");
+    let announced = log_line_object(&first);
+    assert_eq!(announced["substrate"], substrate, "{first}");
+    assert_eq!(announced["build_info"], build_info.as_str(), "{first}");
+    announced["listening"]
+        .as_str()
+        .expect("the endpoint")
+        .clone_into(&mut replaying.endpoint);
+    replaying
+}
+
+fn replay_regimen() -> String {
+    format!("{}/drive/replay.toml", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// The rehearsal regimen, naming the answer-only replay instead.
+fn answers_regimen() -> HeadFile {
+    let tools = std::fs::read_to_string(replay_regimen()).expect("the rehearsal regimen");
+    let fingerprint = |acts: &str| diet::drive::canned::hardware_fingerprint(acts);
+    let answers = tools
+        .replace(
+            "substrate = \"canned-replay-tools\"",
+            "substrate = \"canned-replay\"",
+        )
+        .replace(
+            &fingerprint(&diet::drive::canned::replay_tools_digest()),
+            &fingerprint(&diet::drive::canned::replay_digest()),
+        );
+    assert_ne!(answers, tools);
+    file_holding("regimen", &answers)
+}
+
+/// #411's acceptance: a model-less `serve --record` under the rehearsal
+/// regimen -- commands allowed, an approval policy, a worktree -- against
+/// `diet-drive replay` records real turns. The engine check passes on the
+/// replay's literal; each turn settles; `diet check-record` reads the record,
+/// and it carries `turn` and `response` rows with the capture's counts
+/// (prompt 18 + cached 160, predicted 66), derived because the replay is a
+/// cited engine. Nothing is left unspellable but the asks.
+#[test]
+fn a_drive_server_records_real_turns_against_the_stream_replay_substrate() {
+    let replayed = replaying(true);
+    let regimen = answers_regimen();
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let tree = Dir::new("replay-tree");
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let served = start(
+        &replayed.endpoint,
+        &[
+            "--regimen",
+            &regimen_path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--record",
+            &path,
+        ],
+    );
+    assert_eq!(served.substrate.as_deref(), Some("canned-replay"));
+    let address = served.listening.clone();
+    for turn in 1..=2 {
+        let reply = post_authed(&address, "/commands", r#"{"kind":"ask","text":"hi"}"#);
+        assert_eq!(status(&reply), 200, "{reply}");
+        let read = events_authed(&address, |read| {
+            read.matches(r#""to":"awaiting""#).count() >= turn
+        });
+        assert_eq!(
+            read.matches(r#""reason":"final""#).count(),
+            turn,
+            "each turn settles final: {read}"
+        );
+    }
+    let reply = post_authed(&address, "/commands", r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _report = served
+        .said
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the record's report");
+    let checked = Command::new(DIET)
+        .args(["check-record"])
+        .arg(&record.0)
+        .output()
+        .expect("diet runs");
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&checked.stdout)
+    );
+    let written = std::fs::read_to_string(&record.0).expect("the record");
+    let rows: Vec<serde_json::Value> = written.lines().map(log_line_object).collect();
+    let kinds: Vec<&str> = rows
+        .iter()
+        .map(|row| row["record"].as_str().expect("a row's kind"))
+        .collect();
+    assert_eq!(
+        kinds.iter().filter(|kind| **kind == "turn").count(),
+        2,
+        "{written}"
+    );
+    assert_eq!(
+        kinds.iter().filter(|kind| **kind == "response").count(),
+        2,
+        "{written}"
+    );
+    for row in &rows {
+        match row["record"].as_str() {
+            Some("turn") => assert_eq!(row["prefill_tokens"], 178, "{row}"),
+            Some("response") => assert_eq!(row["output_tokens"], 66, "{row}"),
+            _ => {}
+        }
+    }
+    let sidecar = PathBuf::from(format!("{path}.unspellable.json"));
+    let named = log_line_object(&std::fs::read_to_string(&sidecar).expect("the sidecar"));
+    let named_kinds: Vec<&str> = named["unspellable"]
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter_map(|item| item["kind"].as_str())
+        .collect();
+    assert!(
+        !named_kinds.contains(&"response"),
+        "a response was left unspellable: {named}"
+    );
+    let _ = std::fs::remove_file(&sidecar);
+}
+
+/// The replay answers only a regimen naming it: the canned-cache-n regimen
+/// is refused against it (its literal is another digest's), and the
+/// rehearsal regimen is refused against the canned server.
+#[test]
+fn the_stream_replay_and_the_canned_server_each_pass_only_their_own_regimen() {
+    let replayed = replaying(false);
+    let refused = Command::new(DRIVE)
+        .args([
+            "serve",
+            "--endpoint",
+            &replayed.endpoint,
+            "--model",
+            "m",
+            "--head",
+        ])
+        .arg(&file_holding("head", HEAD).0)
+        .args(["--regimen", &dev_loop(), "--port", "0"])
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+    let canned =
+        Stub::serving_with_props(vec![], &diet::drive::canned::build_info()).expect("loopback");
+    let tree = Dir::new("replay-refused-tree");
+    let refused = Command::new(DRIVE)
+        .args([
+            "serve",
+            "--endpoint",
+            &canned.url(),
+            "--model",
+            "m",
+            "--head",
+        ])
+        .arg(&file_holding("head", HEAD).0)
+        .args([
+            "--regimen",
+            &replay_regimen(),
+            "--worktree",
+            &tree.path(),
+            "--port",
+            "0",
+        ])
+        .arg("--auth-file")
+        .arg(&file_holding("auth", "author:s3cret\n").0)
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(refused.status.code(), Some(1), "{refused:?}");
+}
+
+/// The tool-turn replay through the gate (#411's follow-up): each ask is
+/// answered with the captured `bash` call of `ls | wc -l`. On turn one `wc`
+/// is not in the regimen's allowed set, so the call waits on the operator;
+/// approved for the session, it runs in the worktree, its output goes back
+/// as a tool message, and the captured answer settles the turn `final`. On
+/// turn two the standing approval covers it and nothing prompts. The record
+/// reads, with a row for each call.
+#[test]
+fn the_tool_turn_replay_runs_a_call_through_the_gate_and_its_approval() {
+    let replayed = replaying(false);
+    let tree = Dir::new("replay-tools-tree");
+    let state = Dir::new("replay-tools-state");
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let served = start_with(
+        &replayed.endpoint,
+        &[
+            "--regimen",
+            &replay_regimen(),
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--record",
+            &path,
+        ],
+        &[("XDG_STATE_HOME", &state.path())],
+    );
+    assert_eq!(served.substrate.as_deref(), Some("canned-replay-tools"));
+    let address = served.listening.clone();
+    let reply = post_authed(&address, "/commands", r#"{"kind":"ask","text":"count"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let read = events_authed(&address, |read| read.contains("event: waiting"));
+    let waiting = read
+        .split("event: waiting\ndata: ")
+        .nth(1)
+        .and_then(|rest| rest.split('\n').next())
+        .unwrap_or_else(|| panic!("no prompt: {read}"));
+    let prompt = log_line_object(waiting);
+    assert_eq!(prompt["command"], "ls | wc -l", "{prompt}");
+    let approve = format!(
+        r#"{{"call":"{}","scope":"session"}}"#,
+        prompt["id"].as_str().expect("the call's id")
+    );
+    let reply = post_authed(&address, "/approve", &approve);
+    assert_eq!(status(&reply), 204, "{reply}");
+    events_authed(&address, |read| {
+        read.matches(r#""reason":"final""#).count() >= 1
+    });
+    let reply = post_authed(&address, "/commands", r#"{"kind":"ask","text":"again"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let read = events_authed(&address, |read| {
+        read.matches(r#""reason":"final""#).count() >= 2
+    });
+    assert_eq!(
+        read.matches("event: waiting").count(),
+        0,
+        "a fresh stream shows no prompt once both turns settled: {read}"
+    );
+    let reply = post_authed(&address, "/commands", r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _report = served
+        .said
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the record's report");
+    the_tool_turn_record_reads(&record.0);
+    let _ = std::fs::remove_file(format!("{path}.unspellable.json"));
+}
+
+/// The tool-turn replay's record: `diet check-record` reads it, each turn is
+/// one call and then its answer, and turn one's call was approved for the
+/// session at its prompt while turn two's ran under that same approval --
+/// recorded as it, not as the pre-seed that covered `ls`.
+fn the_tool_turn_record_reads(record: &std::path::Path) {
+    let checked = Command::new(DIET)
+        .args(["check-record"])
+        .arg(record)
+        .output()
+        .expect("diet runs");
+    assert_eq!(
+        checked.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&checked.stdout)
+    );
+    let written = std::fs::read_to_string(record).expect("the record");
+    let kinds: Vec<String> = written
+        .lines()
+        .map(|line| {
+            log_line_object(line)["record"]
+                .as_str()
+                .expect("a row's kind")
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "start",
+            "turn",
+            "request",
+            "response",
+            "tool_call",
+            "request",
+            "prefix.changed",
+            "response",
+            "turn",
+            "request",
+            "prefix.changed",
+            "response",
+            "tool_call",
+            "request",
+            "prefix.changed",
+            "response",
+            "summary",
+        ],
+        "one call, then its answer, each turn: {written}"
+    );
+    let calls: Vec<serde_json::Value> = written
+        .lines()
+        .map(log_line_object)
+        .filter(|row| row["record"] == "tool_call")
+        .collect();
+    assert_eq!(calls[0]["outcome"], "ran", "{written}");
+    assert_eq!(calls[0]["approval"]["scope"], "session", "{written}");
+    assert_eq!(calls[0]["approval"]["why"], "not_approved", "{written}");
+    assert_eq!(calls[1]["outcome"], "ran", "{written}");
+    assert_eq!(
+        calls[1]["approval"], calls[0]["approval"],
+        "turn two's call ran under turn one's session approval, unprompted: {written}"
+    );
 }

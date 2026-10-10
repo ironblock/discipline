@@ -30,7 +30,8 @@
 //!   names an upload either way, since this route answers it. An ask's optional
 //!   `"files": [<sha256>, ...]` attaches them, before the PNGs its words
 //!   name; a digest never uploaded refuses the ask `400`. `GET
-//!   /files/<sha256>` answers the bytes as `image/png`, or `404`.
+//!   /files/<sha256>` answers the bytes as `image/png` -- an upload's, or
+//!   the recording's copy of a PNG attached by path -- or `404`.
 //!
 //! # Who may drive it
 //!
@@ -663,10 +664,14 @@ impl<S: Streaming + 'static> Serving<S> {
         else {
             return respond(stream, 400, &empty());
         };
-        if length > attach::MAX_BYTES {
-            return respond(stream, 413, &empty());
-        }
-        let Ok(length) = usize::try_from(length) else {
+        let Some(length) = usize::try_from(length)
+            .ok()
+            .filter(|_| length <= attach::MAX_BYTES)
+        else {
+            // Read the declared body before answering: a close with it
+            // unread can reset the connection, and a browser then sees a
+            // failed fetch instead of the 413 (#515's review).
+            drain(stream, &request.early_body, length, request.deadline);
             return respond(stream, 413, &empty());
         };
         let Some(body) = read_body(stream, &request.early_body, length, request.deadline) else {
@@ -705,7 +710,8 @@ impl<S: Streaming + 'static> Serving<S> {
         }
     }
 
-    /// `GET /files/<sha256>`: an upload's bytes as `image/png`, or `404`.
+    /// `GET /files/<sha256>`: an upload's bytes as `image/png`, else the
+    /// recording's copy of that digest (a PNG attached by path), or `404`.
     fn file(&self, stream: &mut TcpStream, request: &Request) {
         let digest = request.path.strip_prefix("/files/").unwrap_or_default();
         let held = self
@@ -714,6 +720,16 @@ impl<S: Streaming + 'static> Serving<S> {
             .unwrap_or_else(PoisonError::into_inner)
             .get(digest)
             .map(|upload| Arc::clone(&upload.bytes));
+        // A PNG attached by path was never posted here; with a recording,
+        // its copy is.
+        let held = held.or_else(|| {
+            self.config
+                .attaching
+                .recording
+                .as_deref()
+                .and_then(|recording| attach::recorded(recording, digest))
+                .map(Arc::new)
+        });
         match held {
             Some(bytes) => respond_bytes(stream, attach::MEDIA_TYPE, &bytes),
             None => respond(stream, 404, &empty()),
@@ -1058,6 +1074,21 @@ fn read_body(
         }
     }
     Some(body)
+}
+
+/// Read and discard what is left of a body declared `length` long, of which
+/// `early` arrived with the head, until it is all read, the client stops
+/// sending, or `deadline` passes.
+fn drain(stream: &mut TcpStream, early: &[u8], length: u64, deadline: Instant) {
+    let mut left = length.saturating_sub(u64::try_from(early.len()).unwrap_or(u64::MAX));
+    let mut chunk = [0_u8; 16384];
+    while left > 0 {
+        let want = usize::try_from(left).map_or(chunk.len(), |left| left.min(chunk.len()));
+        match read_by(stream, chunk.get_mut(..want).unwrap_or_default(), deadline) {
+            Ok(0) | Err(_) => return,
+            Ok(read) => left = left.saturating_sub(u64::try_from(read).unwrap_or(u64::MAX)),
+        }
+    }
 }
 
 fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -2262,7 +2293,9 @@ mod tests {
             .and_then(|rest| rest.split('\n').next())
             .expect("the prompt's data line");
         // The wire shape #400's surface reads (`exercise/src/drive/http.ts`,
-        // `#waiting`; ruled at #389 5982826097 point 2): exactly these keys.
+        // `#waiting`; ruled at #389 5982826097 point 2, with `shape` added so
+        // the surface shows what a standing approval covers): exactly these
+        // keys.
         let prompt: serde_json::Value = serde_json::from_str(shown).expect("JSON");
         assert_eq!(
             prompt,
@@ -2274,6 +2307,7 @@ mod tests {
                 "reason": "not_approved",
                 "segments": [{
                     "text": "touch a",
+                    "shape": "touch",
                     "program": "touch",
                     "verdict": "prompt",
                     "why": "not_approved",
@@ -3120,5 +3154,91 @@ mod tests {
         drop(session);
         assert!(stub.received().is_empty(), "something was sent");
         let _ = std::fs::remove_dir_all(&recording);
+    }
+
+    /// A PNG the operator attached by path in a recorded session was never
+    /// posted to `/files`; `GET /files/<sha256>` answers it from the
+    /// recording's copy, so the live page draws it (#514's review). A copy
+    /// whose bytes are not its name's digest, and a name that is not a
+    /// digest, are `404`.
+    #[test]
+    fn files_answers_a_path_attached_png_from_the_recordings_copy() {
+        use crate::drive::attach::{
+            Attaching,
+            tests::{confinement_for, png},
+        };
+        use crate::drive::tool_loop::tests::scratch;
+
+        let tree = scratch("files-serve-path-tree");
+        let recording = scratch("files-serve-path-recording");
+        let bytes = png("on disk");
+        std::fs::write(tree.join("shot.png"), &bytes).expect("the screenshot");
+        let sha256 = crate::digest::sha256_hex(&bytes);
+        let (session, server, _stub) = serve_attaching(
+            1,
+            Attaching {
+                policy: Some(crate::isolation::Policy::merged_usr()),
+                worktree: Some(tree.clone()),
+                confinement: confinement_for(&crate::isolation::Policy::merged_usr()),
+                recording: Some(recording.clone()),
+            },
+            None,
+        );
+        let reply = post(&server, &ask_json("see shot.png"), "");
+        assert_eq!(status(&reply), 200, "{reply}");
+        turns_settled(&session, 1);
+        assert!(get_file(&server, &sha256).ends_with(&bytes));
+
+        let forged = crate::digest::sha256_hex(b"something else");
+        std::fs::write(recording.join("files").join(&forged), png("not that"))
+            .expect("a forged copy");
+        for name in [forged.as_str(), "../shot.png", "SHOT"] {
+            assert_eq!(
+                status(&String::from_utf8_lossy(&get_file(&server, name))),
+                404,
+                "{name}"
+            );
+        }
+        drop(server);
+        drop(session);
+        let _ = std::fs::remove_dir_all(&tree);
+        let _ = std::fs::remove_dir_all(&recording);
+    }
+
+    /// An upload past the cap whose body is actually sent is answered `413`
+    /// after the body is read and discarded, never a reset: closing with it
+    /// unread made a browser see a failed fetch (#515's review, 7 of 30 at
+    /// 17 MiB). Each round sends the whole body, then reads the reply.
+    #[test]
+    fn an_upload_past_the_cap_is_drained_and_answered_413() {
+        use crate::drive::attach::{Attaching, MAX_BYTES};
+
+        let (_session, server, _stub) = serve_attaching(0, Attaching::default(), None);
+        let body = vec![0_u8; usize::try_from(MAX_BYTES + 1024 * 1024).expect("fits")];
+        for round in 0..10 {
+            let head = format!(
+                "POST /files HTTP/1.1\r\nHost: {}\r\nContent-Type: image/png\r\n\
+                 Content-Length: {}\r\n\r\n",
+                host(&server),
+                body.len()
+            );
+            let mut stream = TcpStream::connect(server.addr()).expect("connects");
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("a read timeout");
+            stream.write_all(head.as_bytes()).expect("the head");
+            stream
+                .write_all(&body)
+                .unwrap_or_else(|why| panic!("round {round}: the body was refused: {why}"));
+            let mut reply = Vec::new();
+            stream
+                .read_to_end(&mut reply)
+                .unwrap_or_else(|why| panic!("round {round}: the reply was lost: {why}"));
+            assert_eq!(
+                status(&String::from_utf8_lossy(&reply)),
+                413,
+                "round {round}"
+            );
+        }
     }
 }

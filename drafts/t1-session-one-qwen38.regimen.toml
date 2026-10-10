@@ -1,0 +1,45 @@
+# T1 session one (#301): the Babylon Lite Minecraft-FPS trajectory, driven against the 3.8 floor,
+# config r2 of the EXL3 line (#497, approved by the maintainer 2026-10-09). Lines are those ratified
+# on #301, each citing its comment; the substrate and the sampler are the 3.8 line's registry entry.
+#
+# The endpoint, the head, `--worktree` (~/git/experiments/babylon-lite-minecraft-fps) and the
+# output cap are `serve`'s command line, not this file. The dev server is started in the
+# background by the model's command (#301 5985451013), on loopback port 5180 (the surface keeps 5173).
+arm = "t1-session-one"
+dogma_version = 0
+
+substrate = "accel24-tabbyapi-exl3-qwen38-27b-3p00"
+substrate_reasoning = "on"
+substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"
+
+isolation = "sandbox"
+network = "host"
+sandbox_reads = "all"
+# The reference is writable like the worktree; the receipt's `reference_modified` covers the whole tree.
+sandbox_writable = ["~/git/reference/Babylon"]
+
+# T1 runs bash with approvals off (the maintainer, 2026-10-09; #544): every command runs with no
+# gate and no prompt, and the log says approvals were off. Seatbelt is unchanged: writes stay
+# confined to the worktree and the reference.
+approval = "none"
+
+# Names only: the values are set by whoever starts `serve`, inside the worktree.
+env_passthrough = ["npm_config_cache", "pnpm_config_store_dir"]
+
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; Seatbelt confines writes to the worktree and the reference"
+
+interview_warrant = ["scoping"]
+
+# T1 runs at xhigh, declared so the record names what was sent (the maintainer, 2026-10-09). The
+# format pairs a level with its cap; "none" is its spelling for no cap, and serve sends no budget.
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
+# The 3.8 line's sampler card, r2's preset qwen38_thinking; all four keys declared, top_k an
+# integer, so serve pins every one (#489) and none falls to the engine's untruncated defaults.
+[sampler]
+temperature = 1.0
+top_k = 20
+top_p = 0.95
+min_p = 0.0

@@ -19,11 +19,8 @@
 //!   that matches nothing and exits 0, and the two cannot drift because one
 //!   macro invocation produces both.
 //!
-//! There is no way to redirect the fixture root. `verify.sh --selftest` injects
-//! a non-conforming fixture into a sandbox COPY of the repository and runs the
-//! real `verify.sh` there, so what goes red is the gate itself rather than a
-//! test-only path -- and no ambient environment variable can point this
-//! harness at a corpus that is not the committed one.
+//! There is no way to redirect the fixture root: no ambient environment
+//! variable can point this harness at a corpus that is not the committed one.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};

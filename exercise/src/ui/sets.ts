@@ -94,11 +94,27 @@ export const callRefusalOf = registry<ToolRefusal>({
 });
 
 /** What a call ran under (log v4's `approval`, #388): the operator's scope, or the pre-seeded set. */
+/** Why the gate held a command (`diet`'s `Why`, `shell_gate.rs`): the waiting event's `reason`, a segment's `why`. */
+export const heldOf = registry<string>({
+  not_approved: { label: 'no approval covers it yet', level: 'warn' },
+  dynamic: { label: 'what it runs is decided as it runs: only once can answer it', level: 'warn' },
+  unparsable: { label: 'the gate cannot read it', level: 'warn' },
+});
+
+/** What the gate made of one segment of a command. */
+export const verdictOf = registry<string>({
+  prompt: { label: 'asks you', level: 'warn' },
+  free: { label: 'free', level: 'quiet' },
+  approved: { label: 'approved', level: 'ok' },
+  refused: { label: 'refused', level: 'bad' },
+});
+
 export const approvalOf = registry<ApprovalScope>({
   once: { label: 'approved once', level: 'ok' },
   session: { label: 'approved for this session', level: 'ok' },
   workspace: { label: 'approved for this workspace', level: 'ok' },
   preseeded: { label: 'pre-seeded', level: 'quiet' },
+  off: { label: 'approvals off', level: 'quiet' },
 });
 
 // ------------------------------------------------------------------ fork outcomes

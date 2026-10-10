@@ -209,6 +209,58 @@ pub fn regime_registered(regimen: &Regimen, registry: &str) -> Result<Regime, St
     Ok(regime)
 }
 
+/// The `chat_template_kwargs` a session sends on every request (R1): the
+/// reasoning state the regime requests, in the template's own words.
+/// `enable_thinking` is `false` under `off` and `true` under `on` or
+/// `suppressed` (both requested it); `reasoning_effort` is `[reasoning]`'s
+/// level, as written, since the levels are the template's (the 3.8's knows
+/// `low`, `medium` and `xhigh`, and `high` is a 400). Nothing is sent for an
+/// `undeclared` state.
+///
+/// A token budget no chat template here has a variable for is returned
+/// beside them as unsent: best effort in the duty-of-care sense, recorded on
+/// `session.start` and announced, never refused for being missing.
+///
+/// # Errors
+///
+/// A level with thinking `off`: the declaration contradicts itself, and that
+/// is the operator's to fix.
+pub fn template_kwargs(
+    substrate: &Substrate,
+) -> Result<(BTreeMap<String, Value>, Option<u64>), String> {
+    let mut kwargs = BTreeMap::new();
+    let thinking = match substrate.reasoning {
+        Reasoning::Off => Some(false),
+        Reasoning::On | Reasoning::Suppressed => Some(true),
+        Reasoning::Undeclared => None,
+    };
+    if let Some(thinking) = thinking {
+        kwargs.insert("enable_thinking".to_owned(), Value::Boolean(thinking));
+    }
+    if let Some(control) = &substrate.reasoning_control {
+        if thinking == Some(false) {
+            return Err(format!(
+                "`[reasoning]` names the level \"{}\" and `substrate_reasoning` is \"off\": a \
+                 level instructs thinking that was not requested",
+                control.effort
+            ));
+        }
+        kwargs.insert(
+            "reasoning_effort".to_owned(),
+            Value::String(control.effort.clone()),
+        );
+    }
+    let unsent =
+        substrate
+            .reasoning_control
+            .as_ref()
+            .and_then(|control| match control.budget_tokens {
+                crate::formats::record::Budget::Tokens(cap) => Some(cap.get()),
+                crate::formats::record::Budget::Uncapped => None,
+            });
+    Ok((kwargs, unsent))
+}
+
 /// The pins a request sends for `card`, a regime's `sampler_card`: one per
 /// setting, each the very value the record holds (#486).
 ///
@@ -345,24 +397,26 @@ fn sampled(value: &regimen::Value) -> Value {
 pub const UNDECLARED: &str = "undeclared";
 
 /// The state of each lever (docs/program.md §2) a session `serve` runs
-/// under `regimen` sits at, by lever, in that table's words: best effort.
-/// A lever this build cannot describe is [`UNDECLARED`], never an error,
-/// and nothing reads a missing one as a fault (the maintainer, 2026-10-09:
-/// "best effort in the 'duty of care' sense").
+/// under `regimen`, with `max_output_tokens` its output cap, sits at, by
+/// lever, in that table's words: best effort. A lever this build cannot
+/// describe is [`UNDECLARED`], never an error, and nothing reads a missing
+/// one as a fault (the maintainer, 2026-10-09: "best effort in the 'duty of
+/// care' sense"). A value a reader would refuse is undeclared here too: serve
+/// refuses it at start, so no recorded session carries one.
 ///
-/// Some states are the build's, not the regimen's: serve's seam refills
-/// totally (#493), the operator may always declare one, and a call's output
-/// reaches the trunk whole. The regimen adds a cadence or a budget (#520).
+/// Some states are the build's, not the regimen's -- the operator may always
+/// declare a seam, a fork sees the whole warm trunk and asks at its tail, a
+/// failed turn's commands stay on the trunk -- and are written as the build
+/// has them.
 #[must_use]
-pub fn serve_levers(regimen: &Regimen) -> BTreeMap<String, String> {
+pub fn serve_levers(regimen: &Regimen, max_output_tokens: u32) -> BTreeMap<String, String> {
+    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS, SEAM_TAIL_TOKENS};
     let word = |key: &str| match regimen.get(key) {
         Some(regimen::Value::String(word)) => word.clone(),
         Some(regimen::Value::Integer(n)) => n.to_string(),
         _ => UNDECLARED.to_owned(),
     };
-    let runs_commands = regimen
-        .get(crate::drive::tool_loop::ALLOWED_COMMANDS)
-        .is_some();
+    let undeclared = || UNDECLARED.to_owned();
     let warrant = match crate::drive::session::interview_warrant(regimen) {
         Ok(rules) if rules.is_empty() => "none".to_owned(),
         Ok(rules) => format!(
@@ -373,43 +427,102 @@ pub fn serve_levers(regimen: &Regimen) -> BTreeMap<String, String> {
                 .collect::<Vec<_>>()
                 .join("+")
         ),
-        Err(_) => UNDECLARED.to_owned(),
+        Err(_) => undeclared(),
     };
-    let commands = |state: &str| {
-        if runs_commands {
-            state.to_owned()
-        } else {
-            UNDECLARED.to_owned()
-        }
+    let depth = match regimen.get(SEAM_TAIL_TOKENS) {
+        None | Some(regimen::Value::Integer(0)) => "total".to_owned(),
+        Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
+        Some(_) => undeclared(),
     };
     let mut triggers = vec!["operator-declared"];
-    if regimen.get(crate::seam::policy::SEAM_EVERY_TURNS).is_some() {
+    if regimen.get(SEAM_EVERY_TURNS).is_some() {
         triggers.push("cadence");
     }
-    if [
-        crate::seam::policy::SEAM_AT_WORKING_SET_BYTES,
-        "seam_at_context_fraction",
-    ]
-    .iter()
-    .any(|key| regimen.get(key).is_some())
+    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
+        .iter()
+        .any(|key| regimen.get(key).is_some())
     {
         triggers.push("budget");
     }
+    let [disposition, approval, surface, limits] = command_levers(regimen, max_output_tokens);
+    let reasoning = match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
+        (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
+            match table.get("effort") {
+                Some(regimen::Value::String(effort)) => format!("{state}:effort:{effort}"),
+                _ => state.clone(),
+            }
+        }
+        (Some(regimen::Value::String(state)), _) => state.clone(),
+        _ => undeclared(),
+    };
+    let delivery = crate::drive::session::fork_delivery(regimen)
+        .map_or_else(|_| undeclared(), |delivery| delivery.tag().to_owned());
     BTreeMap::from([
-        ("compaction_depth".to_owned(), "total".to_owned()),
+        ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers.join("+")),
-        ("fork_warrant".to_owned(), warrant),
-        ("fork_delivery".to_owned(), UNDECLARED.to_owned()),
-        ("tool_output_disposition".to_owned(), commands("keep")),
+        ("fork_warrant".to_owned(), warrant.clone()),
+        ("fork_delivery".to_owned(), delivery),
+        ("tool_output_disposition".to_owned(), disposition),
         (
             "isolation".to_owned(),
             word(crate::isolation::policy::ISOLATION),
         ),
-        ("approval".to_owned(), commands("denylist-prompt-preseeded")),
-        ("reasoning_state".to_owned(), word("substrate_reasoning")),
+        ("approval".to_owned(), approval),
+        ("reasoning_state".to_owned(), reasoning),
         ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
         ("substrate_rung".to_owned(), word("substrate")),
+        ("tool_surface".to_owned(), surface),
+        ("instruction_files".to_owned(), "off".to_owned()),
+        ("tangent_closure".to_owned(), undeclared()),
+        ("capture_modality".to_owned(), undeclared()),
+        ("interview_routing_and_cadence".to_owned(), warrant),
+        ("render_budget".to_owned(), "none".to_owned()),
+        ("fork_memory_share".to_owned(), undeclared()),
+        ("archive_recall".to_owned(), "off".to_owned()),
+        ("fork_input_view".to_owned(), "whole-warm-trunk".to_owned()),
+        ("fork_delivery_site".to_owned(), "tail".to_owned()),
+        ("step_and_output_limits".to_owned(), limits),
+        ("extraction_seat".to_owned(), "warm-model".to_owned()),
+        ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
+        ("subagent".to_owned(), "harness".to_owned()),
     ])
+}
+
+/// The levers a regimen's commands set -- tool-output disposition, approval,
+/// tool surface, step and output limits -- in [`serve_levers`]' words; the
+/// first three [`UNDECLARED`] when it runs none.
+fn command_levers(regimen: &Regimen, max_output_tokens: u32) -> [String; 4] {
+    use crate::drive::output::OutputCap;
+    use crate::drive::tool_loop::{self, ToolSurface};
+    let commands = tool_loop::declared(regimen).ok().flatten();
+    let undeclared = || UNDECLARED.to_owned();
+    let disposition = match commands.as_ref().map(|declared| declared.output_cap) {
+        Some(OutputCap::Keep) => "keep".to_owned(),
+        Some(OutputCap::Capped {
+            max_lines,
+            max_bytes,
+        }) => format!("cap-on-arrival:{max_lines}-lines:{max_bytes}-bytes"),
+        None => undeclared(),
+    };
+    let approval = match &commands {
+        Some(declared) if declared.approvals_off => "none".to_owned(),
+        Some(declared) if declared.allowed_commands.is_empty() => "denylist-prompt".to_owned(),
+        Some(_) => "denylist-prompt-preseeded".to_owned(),
+        None => undeclared(),
+    };
+    let surface = match commands.as_ref().map(|declared| declared.surface) {
+        Some(ToolSurface::Bash) => "bash".to_owned(),
+        Some(ToolSurface::Standard) => "standard".to_owned(),
+        None => undeclared(),
+    };
+    let limits = format!(
+        "max_steps:{}:output_cap:{max_output_tokens}",
+        commands
+            .as_ref()
+            .and_then(|declared| declared.max_steps)
+            .map_or_else(|| "none".to_owned(), |steps| steps.to_string())
+    );
+    [disposition, approval, surface, limits]
 }
 
 #[cfg(test)]
@@ -417,28 +530,43 @@ mod tests {
     use super::{UNDECLARED, regime_of, serve_levers};
 
     #[test]
-    fn t1s_draft_regimen_puts_every_lever_at_a_word_and_undescribed_ones_at_undeclared() {
-        let text = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../drafts/t1-session-one.regimen.toml"
-        ))
-        .expect("the draft");
-        let levers = serve_levers(&regimen::parse(&text).expect("a regimen"));
-        let at = |lever: &str| levers.get(lever).map(String::as_str);
-        assert_eq!(at("fork_warrant"), Some("one-per-gap-gated:scoping"));
-        assert_eq!(at("isolation"), Some("sandbox"));
-        assert_eq!(at("approval"), Some("denylist-prompt-preseeded"));
-        assert_eq!(at("substrate_rung"), Some("accel24-beellama-qwen27b-q4kxl"));
-        assert_eq!(at("fork_delivery"), Some(UNDECLARED));
-        // A regimen that says nothing still gets a table, never an error.
-        let empty = serve_levers(&regimen::parse("").expect("an empty regimen"));
-        assert_eq!(empty.get("fork_warrant").map(String::as_str), Some("none"));
-        assert_eq!(empty.get("isolation").map(String::as_str), Some(UNDECLARED));
-        let paced = serve_levers(&regimen::parse("seam_every_turns = 3\n").expect("a regimen"));
+    fn t1s_draft_regimens_put_every_lever_at_a_word_and_undescribed_ones_at_undeclared() {
+        let draft = |name: &str| {
+            let path = format!("{}/../drafts/{name}", env!("CARGO_MANIFEST_DIR"));
+            let text = std::fs::read_to_string(&path).expect("the draft");
+            serve_levers(&regimen::parse(&text).expect("a regimen"), 32_768)
+        };
+        let floor = draft("t1-session-one.regimen.toml");
+        let at = |levers: &std::collections::BTreeMap<String, String>, lever: &str| {
+            levers.get(lever).cloned().unwrap_or_default()
+        };
+        assert_eq!(at(&floor, "fork_warrant"), "one-per-gap-gated:scoping");
+        assert_eq!(at(&floor, "isolation"), "sandbox");
+        assert_eq!(at(&floor, "approval"), "denylist-prompt-preseeded");
         assert_eq!(
-            paced.get("seam_trigger").map(String::as_str),
-            Some("operator-declared+cadence")
+            at(&floor, "substrate_rung"),
+            "accel24-beellama-qwen27b-q4kxl"
         );
+        assert_eq!(at(&floor, "tool_surface"), "bash");
+        assert_eq!(at(&floor, "tangent_closure"), UNDECLARED);
+        let line = draft("t1-session-one-qwen38.regimen.toml");
+        assert_eq!(at(&line, "approval"), "none");
+        assert_eq!(at(&line, "reasoning_state"), "on:effort:xhigh");
+        assert_eq!(
+            at(&line, "step_and_output_limits"),
+            "max_steps:none:output_cap:32768"
+        );
+        // A regimen that says nothing still gets a table, never an error.
+        let empty = serve_levers(&regimen::parse("").expect("an empty regimen"), 8192);
+        assert_eq!(at(&empty, "fork_warrant"), "none");
+        assert_eq!(at(&empty, "isolation"), UNDECLARED);
+        assert_eq!(at(&empty, "compaction_depth"), "total");
+        let paced = serve_levers(
+            &regimen::parse("seam_every_turns = 3\nseam_tail_tokens = 8000\n").expect("a regimen"),
+            8192,
+        );
+        assert_eq!(at(&paced, "seam_trigger"), "operator-declared+cadence");
+        assert_eq!(at(&paced, "compaction_depth"), "tail:8000");
     }
     use crate::formats::record::{Budget, Count, ReasoningControl};
     use crate::formats::regimen;
@@ -530,6 +658,46 @@ mod tests {
             refused.contains("`nowhere-at-all` is not a substrate"),
             "{refused}"
         );
+    }
+
+    /// R1: the regime's reasoning state as the template variables every
+    /// request sends.
+    #[test]
+    fn the_reasoning_state_is_sent_in_the_templates_words() {
+        use crate::formats::record::json::Value;
+        use std::collections::BTreeMap;
+        let kwargs = |reasoning: &str, table: &str| {
+            let text = format!(
+                "arm = \"a\"\ndogma_version = 0\nsubstrate = \"canned\"\n\
+                 substrate_reasoning = \"{reasoning}\"\nsubstrate_hardware = \"{}\"\n\
+                 {table}[sampler]\nseed = 7\n",
+                "a".repeat(64)
+            );
+            let regime =
+                regime_of(&regimen::parse(&text).expect("a regimen"), false).expect("a regime");
+            super::template_kwargs(&regime.substrates[0])
+        };
+        assert_eq!(
+            kwargs("off", ""),
+            Ok((
+                BTreeMap::from([("enable_thinking".to_owned(), Value::Boolean(false))]),
+                None
+            ))
+        );
+        let level = "[reasoning]\neffort = \"medium\"\nbudget_tokens = \"none\"\n";
+        let medium = BTreeMap::from([
+            ("enable_thinking".to_owned(), Value::Boolean(true)),
+            (
+                "reasoning_effort".to_owned(),
+                Value::String("medium".to_owned()),
+            ),
+        ]);
+        assert_eq!(kwargs("on", level), Ok((medium.clone(), None)));
+        let refused = kwargs("off", level).expect_err("a level with thinking off");
+        assert!(refused.contains("\"medium\""), "{refused}");
+        // A budget no template carries is recorded as unsent, never refused.
+        let capped = "[reasoning]\neffort = \"medium\"\nbudget_tokens = 512\n";
+        assert_eq!(kwargs("on", capped), Ok((medium, Some(512))));
     }
 
     /// #486: the pins are the record's card, setting for setting, and a

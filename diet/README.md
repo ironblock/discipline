@@ -4,10 +4,17 @@
 
 It's primarily a library, but exists primarily to apply a `regimen` - a fixed combination of variables expected to describe the character, performance, and timing of a session (live or replayed).
 
-**A regimen** is a TOML file naming the arm, the dogma version, the substrate (a served model on a registered machine, `substrates/README.md`) and the sampler a session runs under, and what else it is held to (`diet check-regimen` reads one). Two ship as specimens:
+**A regimen** is a TOML file naming the arm, the dogma version, the substrate (a served model on a registered machine, `substrates/README.md`) and the sampler a session runs under, and what else it is held to (`diet check-regimen` reads one). Three ship as specimens:
 
 - [`drive/floor.toml`](drive/floor.toml) binds a session to the maintainer's registered floor substrate. It starts only against that substrate's registered engine.
 - [`drive/dev-loop.toml`](drive/dev-loop.toml) names the canned substrate: a scripted server inside this crate, with no weights. It is served only by that canned server, which the batch drive starts for itself.
+- [`drive/replay.toml`](drive/replay.toml) is a rehearsal: commands, approvals and a record, with no model. Its substrate, `canned-replay-tools`, is served by `diet-drive replay`, which answers each ask with a captured llama.cpp `bash` call and then that session's answer, so the shell gate and its approval prompt run.
+
+**Tool output is capped as it arrives** (#554): what the model is shown of a command's output stops at 2000 lines or 50 KiB, the convention of the harnesses it is compared with. Past the cap it sees the head and the tail with a notice, and the whole output is kept in the recording's `files/` by digest, for it to read in slices. A regimen's `[tool_output]` sets `max_lines` and `max_bytes`, or `cap = false` to keep every output whole. `session.start` and the record's start name the state the session ran under.
+
+**A seam can keep a recent tail** (#552): a regimen's `seam_tail_tokens = N` keeps the old trunk's most recent whole turns, within N estimated tokens (characters ÷ 4), after the refill, as they sat on the trunk. A tail starts only at a user message, and the turn that would cross N is not kept. 0, the default, is the total refill. The seam line and the record's seam row name the depth and what was kept.
+
+**The tool surface** (#557): a regimen's `tool_surface = "standard"` offers `read`, `write`, `edit`, `grep` and `glob` beside `bash`, shaped as the compared harnesses shape them. `bash` alone is the default. Every tool runs through the session's confinement, as `bash` does, and no approval gate decides them; each call is logged under its tool's name.
 
 **Two binaries**, built from the repository root with `cargo build -p discipline-diet`:
 

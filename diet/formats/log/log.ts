@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 6;
-export const READS = [0, 1, 2, 3, 4, 5, 6] as const;
+export const VERSION = 7;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -27,6 +27,7 @@ export type Kind =
   | "fork.settled"
   | "patch"
   | "seam"
+  | "delivered"
 ;
 
 export type State =
@@ -121,6 +122,11 @@ export type EngineIdentity =
   | "literal_matched"
 ;
 
+export type FieldProvenance =
+  | "declared"
+  | "corroborated"
+;
+
 export type Provenance =
   | "placed"
   | "constructed"
@@ -131,6 +137,7 @@ export type ApprovalScope =
   | "session"
   | "workspace"
   | "preseeded"
+  | "off"
 ;
 
 export type Warrant =
@@ -162,6 +169,22 @@ export type SeamReason =
   | "cadence"
 ;
 
+export type Framing =
+  | "advisory"
+  | "imperative"
+;
+
+export type ForkDelivery =
+  | "seam"
+  | "advisory"
+  | "imperative"
+;
+
+export type ToolOutputState =
+  | "capped"
+  | "keep"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -188,6 +211,21 @@ export interface Serving {
   concurrency?: number;
 }
 
+export interface TemplateKwargs {
+  enable_thinking?: boolean;
+  reasoning_effort?: string;
+}
+
+export interface Unsent {
+  budget_tokens: number;
+}
+
+export interface NoteLine {
+  entry: string;
+  op: PatchOp;
+  template: string;
+}
+
 export interface ToolCallPiece {
   index: number;
   id?: string;
@@ -208,6 +246,13 @@ export interface RecordedFile {
   bytes: number;
 }
 
+export interface ServedField {
+  field: string;
+  value: string;
+  provenance: FieldProvenance;
+  reported?: string;
+}
+
 export interface PatchEntry {
   id: string;
   text: string;
@@ -218,14 +263,24 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
   opened: number;
   model: string;
   head: HeadMessage[];
   serving?: Serving;
+  engine_build?: string;
+  engine_identity?: EngineIdentity;
+  served?: ServedField[];
   provenance?: Provenance;
   tools?: string[];
-} & ({ substrate: string; registry_sha256: string; engine_build: string; engine_identity: EngineIdentity } | { substrate?: never; registry_sha256?: never; engine_build?: never; engine_identity?: never });
+  template_kwargs?: TemplateKwargs;
+  unsent?: Unsent;
+  approvals_off?: boolean;
+  fork_delivery?: ForkDelivery;
+  tool_output?: ToolOutputState;
+  tool_output_max_lines?: number;
+  tool_output_max_bytes?: number;
+} & ({ substrate: string; registry_sha256: string } | { substrate?: never; registry_sha256?: never });
 
 export type AskLine = {
   seq: number;
@@ -409,6 +464,18 @@ export type SeamLine = {
   render: string;
   carried_entries: number;
   carried_turns: number;
+  tail_tokens?: number;
+  carried_tokens?: number;
+};
+
+export type DeliveredLine = {
+  seq: number;
+  t: number;
+  kind: "delivered";
+  turn: number;
+  framing: Framing;
+  text: string;
+  lines: NoteLine[];
 };
 
 export type LogLine =
@@ -430,4 +497,5 @@ export type LogLine =
   | ForkSettledLine
   | PatchLine
   | SeamLine
+  | DeliveredLine
 ;

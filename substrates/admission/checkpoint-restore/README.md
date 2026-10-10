@@ -93,7 +93,7 @@ So a known-good restore moves the distribution by an amount set by the batch com
   - the comparator over one side's top-k only; the sampler or roles comparison dropped; the engine digest matched by prefix; six tokens compared;
   - the cold floor over the first pair only; `full_attention_interval` not read as recurrent.
 
-Wiring the selftest into `verify.sh`, and the faults into `faults.toml`, is track one's, as the plan assigns it.
+Its selftest runs by hand; it is not wired into `verify.sh`.
 
 ## Use
 

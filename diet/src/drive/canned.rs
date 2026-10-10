@@ -200,6 +200,72 @@ pub fn build_info() -> String {
     format!("canned-{}", acts_digest())
 }
 
+/// The reply the stream-replay substrate plays for every request (#411): a
+/// warm second turn captured off llama.cpp `e7051ef`, byte for byte -- an
+/// event stream that finishes `stop` and closes on `usage` and `timings`
+/// (prompt 18, cached 160, predicted 66;
+/// `substrates/measurements/2026-09-29-r30-captures/`, capture C2). So a
+/// turn against it settles `final`, and its counts are that capture's.
+pub const REPLAYED: &[u8] =
+    include_bytes!("../../client/fixtures/llama-server-e7051ef-warm-turn2-stream.http");
+
+/// The acts the stream-replay substrate plays: [`REPLAYED`], once, which
+/// [`crate::client::stub::Stub::replaying`] plays for every request.
+#[must_use]
+pub fn replay_acts() -> Vec<Act> {
+    vec![Act::Raw(REPLAYED.to_vec())]
+}
+
+/// The digest of [`replay_acts`]: the stream-replay substrate's identity, as
+/// [`acts_digest`] is the canned one's.
+#[must_use]
+pub fn replay_digest() -> String {
+    digest_of(&replay_acts())
+}
+
+/// What the stream-replay server answers `GET /props` with:
+/// `canned-` and [`replay_digest`], the literal its registry entry declares.
+#[must_use]
+pub fn replay_build_info() -> String {
+    format!("canned-{}", replay_digest())
+}
+
+/// The streamed tool call the tool-turn replay plays (#411's follow-up): a
+/// real llama.cpp `e486f80` server calling `bash` with `ls | wc -l`
+/// (`substrates/measurements/2026-10-02-i0-tool-call-captures/`, turn 1).
+pub const REPLAYED_CALL: &[u8] =
+    include_bytes!("../../../substrates/measurements/2026-10-02-i0-tool-call-captures/turn1.http");
+
+/// The same server's answer once the call's output came back as a `tool`
+/// message (the same captures, turn 2 in the `openai` shape): it settles
+/// `stop`.
+pub const REPLAYED_ANSWER: &[u8] = include_bytes!(
+    "../../../substrates/measurements/2026-10-02-i0-tool-call-captures/turn2-openai.http"
+);
+
+/// The acts the tool-turn replay plays: [`REPLAYED_CALL`] for a request that
+/// does not end in a tool result, [`REPLAYED_ANSWER`] for one that does
+/// ([`crate::client::stub::Stub::replaying_tool_turns`]).
+#[must_use]
+pub fn replay_tool_acts() -> Vec<Act> {
+    vec![
+        Act::Raw(REPLAYED_CALL.to_vec()),
+        Act::Raw(REPLAYED_ANSWER.to_vec()),
+    ]
+}
+
+/// The digest of [`replay_tool_acts`]: substrate `canned-replay-tools`.
+#[must_use]
+pub fn replay_tools_digest() -> String {
+    digest_of(&replay_tool_acts())
+}
+
+/// What the tool-turn replay answers `GET /props` with.
+#[must_use]
+pub fn replay_tools_build_info() -> String {
+    format!("canned-{}", replay_tools_digest())
+}
+
 /// The digest of any act list, which is what makes [`acts_digest`] checkable.
 ///
 /// Split out because a digest that ignored its input would move the record and
@@ -426,7 +492,12 @@ mod tests {
     #[test]
     fn every_registered_canned_digest_is_acts_this_crate_keeps() {
         let registry = tables(REGISTRY);
-        let kept = [acts_digest(), digest_of(&acts_as_first_registered())];
+        let kept = [
+            acts_digest(),
+            digest_of(&acts_as_first_registered()),
+            super::replay_digest(),
+            super::replay_tools_digest(),
+        ];
         let mut current_is_registered = false;
         let (mut servers, mut substrates) = (0, 0);
         for (table, fields) in &registry {
@@ -577,5 +648,53 @@ mod tests {
             digest_of(&[Act::Stall(Duration::from_secs(2), "x".to_owned())]),
             "a wait is a property of the act, not decoration on it"
         );
+    }
+
+    /// The rehearsal regimen names the stream-replay substrate and the
+    /// fingerprint of the acts the replay plays (#411).
+    #[test]
+    fn the_rehearsal_regimen_names_the_stream_replay_and_its_acts() {
+        const REPLAY: &str = include_str!("../../drive/replay.toml");
+        let value = |key: &str| {
+            REPLAY
+                .lines()
+                .find_map(|line| line.strip_prefix(&format!("{key} = \"")))
+                .and_then(|rest| rest.strip_suffix('"'))
+                .unwrap_or_else(|| panic!("replay.toml declares no {key}"))
+        };
+        assert_eq!(value("substrate"), "canned-replay-tools");
+        assert_eq!(
+            value("substrate_hardware"),
+            hardware_fingerprint(&super::replay_tools_digest())
+        );
+    }
+
+    /// The tool-turn replay is cited (`projection::CITED`) because in each
+    /// of its captures the server's `usage` equals its `timings`: completion
+    /// tokens are `predicted_n`, prompt tokens `prompt_n + cache_n`.
+    #[test]
+    fn the_tool_turn_replays_usage_is_its_timings() {
+        let last = |capture: &str, key: &str| -> u64 {
+            let at = capture
+                .rfind(&format!("\"{key}\":"))
+                .unwrap_or_else(|| panic!("no {key}"));
+            capture[at + key.len() + 3..]
+                .chars()
+                .take_while(char::is_ascii_digit)
+                .collect::<String>()
+                .parse()
+                .unwrap_or_else(|why| panic!("{key}: {why}"))
+        };
+        for bytes in [super::REPLAYED_CALL, super::REPLAYED_ANSWER] {
+            let capture = String::from_utf8_lossy(bytes);
+            assert_eq!(
+                last(&capture, "completion_tokens"),
+                last(&capture, "predicted_n")
+            );
+            assert_eq!(
+                last(&capture, "prompt_tokens"),
+                last(&capture, "prompt_n") + last(&capture, "cache_n")
+            );
+        }
     }
 }

@@ -118,6 +118,8 @@ impl Adapted {
                 source_available,
             },
             regimen_sha256: None,
+            fork_delivery: None,
+            tool_output: None,
             levers: None,
         });
         events.extend(self.events);
@@ -601,29 +603,6 @@ mod tests {
                 "the first question of a refusal is where: {said}"
             );
         }
-    }
-
-    /// The lane's manifest still names source that is there.
-    ///
-    /// Written through `crate::gate` rather than copied from a neighbouring
-    /// lane, because four copies of this check had already drifted apart by
-    /// the time anybody compared them -- one never read `catches` at all.
-    #[test]
-    fn every_seeded_fault_still_names_source_that_is_there() {
-        crate::gate::every_seeded_fault_still_names_source(
-            include_str!("../../adapters/gate.toml"),
-            // The lane's whole source, so a catcher can be looked for
-            // wherever its test lives. `replay_cli.rs` is not optional here:
-            // it holds the only tests that run `diet replay`, and several
-            // faults in this manifest mutate what is now
-            // `diet/src/bin/diet/replay.rs` and are caught by nothing else.
-            concat!(
-                include_str!("mod.rs"),
-                include_str!("claude_code.rs"),
-                include_str!("../../tests/replay_cli.rs")
-            ),
-            "adapters",
-        );
     }
 
     #[test]

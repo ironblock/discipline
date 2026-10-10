@@ -611,6 +611,7 @@ mod tests {
     fn tool(name: &str, required: &str) -> ToolDefinition {
         ToolDefinition {
             name: name.to_owned(),
+            description: None,
             schema: Value::Object(BTreeMap::from([(
                 "required".to_owned(),
                 Value::String(required.to_owned()),

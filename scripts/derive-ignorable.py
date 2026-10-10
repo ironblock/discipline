@@ -30,7 +30,7 @@ committed.
 
 `--check` is NOT a CI gate, deliberately: it needs a 1.1 MB file this
 repository does not carry and a network fetch CI has no business making. It
-is a re-runnable harvest, like `--derive-scopes`, and the table it checks is
+is a re-runnable harvest, and the table it checks is
 committed so the scanner never depends on either.
 
 Exit 0 if the table matches (or was written), 1 if it differs, 2 if the

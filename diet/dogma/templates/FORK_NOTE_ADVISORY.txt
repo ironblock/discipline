@@ -1,0 +1,1 @@
+Working record note: the entry "{entry}" may be affected by this step. If it no longer holds, say so; otherwise carry on.

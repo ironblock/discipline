@@ -18,8 +18,7 @@
 //! * **Stringly predicates leak.** Field kinds, verdicts and outcome classes
 //!   were matched as strings in more than one place and the places drifted. A
 //!   typed predicate is caught by the compiler when a variant is added; a
-//!   string comparison is not. `scripts/check-library.py` keeps the rule
-//!   from being re-broken by hand.
+//!   string comparison is not.
 //!
 //! **Nothing here deletes.** A supersede voids the entry it replaces and links
 //! the pair; a retire marks it and keeps it. Claim atomicity at the object

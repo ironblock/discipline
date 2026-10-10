@@ -50,12 +50,18 @@ identity field, anywhere.
 
 ## Instances
 
-An id is stable. What it points at is not: an operating system gets updated, a
-part gets replaced, a serving flag changes. So each substrate id holds a list of
-**instances**, each pinned by a dated capture, and:
+An id is stable. What it serves is not: an engine gets upgraded, a config gets
+retuned. So each substrate id holds a list of **instances**, each pinned by a
+dated read, and:
 
-> **A changed deployment, a replaced part, or a changed serving configuration is
-> a new instance. It is never an edit of the old one.**
+> **An instance changes when the served configuration does: the engine, the
+> weights, the config, the template, the sampler, the draft. A new one is never
+> an edit of the old one.**
+
+**An operating-system, kernel or driver change on a host is not a new instance,
+and it is not drift** (the maintainer, 2026-10-09: "I never understood how a
+linux kernel patch could make our test invalid"). Instances minted for OS
+updates before that ruling stay in the registry as history.
 
 Editing an instance in place silently re-dates every fire that referenced it.
 That is not hypothetical here: both results directories on their way into this
@@ -65,14 +71,14 @@ current entry describes.
 The stable id is what a reader shops for. **The instance is what parity matches.**
 
 An instance is a statement about a moment, and `current = true` is a statement
-about today: as of 2026-09-07 the accelerator host has a newer image staged and
-unbooted, which will mint a new instance the next time it reboots.
+about today.
 
 ### What an instance is not
 
-The line, ruled on #52: **the registry records what the machine *is* — deployment
-checksum, kernel, engine and weights digests, hardware. The regimen records how
-it was *run*.**
+The line, ruled on #52: **the registry records what the machine *is* — engine and
+weights digests, the served configuration, hardware. The regimen records how
+it was *run*.** (#52 also keyed instances on the deployment checksum and kernel;
+the 2026-10-09 ruling above replaced that with the served configuration.)
 
 An earlier version of this file crossed it. The archive holds two captures,
 2026-08-13 and 2026-08-16, that agree on every field an instance carries and
@@ -165,8 +171,9 @@ entry's `chip` and an accelerator host's `board` are both covered by name. Two
 exclusions are rules rather than habits, and both were found by computing the
 thing rather than designing it:
 
-- **`os` and anything naming a deployment are excluded.** They are the instance.
-  A hardware fingerprint that changes on an operating-system update is not one.
+- **`os` and anything naming a deployment are excluded.** They are not the
+  hardware, and since 2026-10-09 not an instance either. A hardware fingerprint
+  that changes on an operating-system update is not one.
 - **Any field marked `_inferred = true` is excluded.** The laptop's core counts
   are the live case. An unverified claim baked into an identifier is one nobody
   can correct later without changing the identity of every record citing it.
@@ -290,17 +297,35 @@ An agent's reasoning traces are prose. Q2_0 remains the top rung. The 7.7 GB tha
 | `weights_main_file`, `weights_draft` | the file's name; a draft model's digest, if the server loads one | -- |
 | `serving_flags`, `serving_context`, `serving_slots` | the serving line, without paths or keys | read off the running process's command line (`/proc/<pid>/cmdline`) |
 | `sampler_card` | what the line fixes, or "none on the serving line; each request sets its own" | -- |
-| `chat_template_sha256` | optional: the served template's digest | from `GET /props` `chat_template` |
+| `chat_template_sha256` | optional: the served template's digest; on llama.cpp, `serve` corroborates it at start | from `GET /props` `chat_template` |
+| `server_kind` | optional: `local` (the default), a server you run; `api`, one you neither control nor see into, under which every served field stands declared and nothing is probed | -- |
+| `served_<field>` | optional: the served configuration you require, by the engine's own name for each field. `serve` corroborates what the engine reports and refuses a contradiction (#509). llama.cpp's `/props`: `served_model` (its `model_alias`), `served_n_ctx` (per slot), `served_total_slots`, `served_vision`, `served_audio`. `TabbyAPI`'s `/v1/model`: `served_model` (its `id`), `served_max_seq_len`, `served_cache_size`, `served_cache_mode`, `served_max_batch_size`, `served_chunk_size`, `served_use_vision`, and the template it renders with: `served_prompt_template` (its name) and `served_chat_template_sha256` (the digest of its text). Name where the template came from in `chat_template_provenance` (stock, the model repo's own, or a community template), since the template is part of the system under test. Either engine: `served_draft = "true"`, corroborated by `draft_n` in the probe request's timings; `served_warmup = "true"` when the engine warms itself, which neither reports. Any other `served_*` field stands declared. | read off the serving line or config, as the server is started |
 | `vision`, `vision_is` | whether the line takes an image: `accepted`, `refused`, `answered-without-seeing` or `unreported`, and the cell that says so (#373) | the vision cell under the line's admission fingerprint directory (`substrates/admission/<substrate>/<fp>/vision/`), whose `recompute.sh` re-derives the word; anything but `unreported` needs that cell, and the admission check refuses a word without one |
 
-**Instances.** One instance, with the date of its reads and `current = true`, says what deployment pinned the entry (see Instances above). A later change to the operating system, engine or line is a new instance, never an edit.
+**Instances.** One instance, with the date of its reads and `current = true`, says what served configuration pinned the entry (see Instances above). A later change to the engine, weights, config, template, sampler or draft is a new instance, never an edit; an operating-system, kernel or driver change is not a new instance.
 
 A regimen naming your substrate then binds the session to these declared facts:
 - the substrate id;
 - `substrate_hardware`, the equipment's fingerprint;
-- the server's `build_info`, against `engine_commit` or `engine_build_info`.
+- the server's `build_info`, against `engine_commit` or `engine_build_info` (unless the entry says `engine_check = "declared"`);
+- each `served_*` field the engine reports, and the chat template's digest on llama.cpp.
 
-`serve` refuses at start if any of these disagrees, and names the field.
+`serve` refuses at start if any of these disagrees, and names the field. Then, unless the entry declares `served_warmup = "true"`, it sends one short request to warm the server before it announces itself; a declared draft is probed the same way. `session.start`'s `served` list records each field as `declared` or `corroborated`, with what the engine reported.
+
+### Bring-up: what confirms a server
+
+The maintainer, 2026-10-09: a server under this program's governance is confirmed as
+1. "Up, reachable";
+2. "Having the right model loaded";
+3. "Warmed up (either through its own warmup or by sending some prompt to stimulate the system)";
+4. "Running the settings (sampler, chat template, spec decoding, etc) we require (if other than default)".
+
+"Everything else is just faffing about." So:
+- the fingerprint check, the canary and `verify-box` are not part of bring-up, including after a restore;
+- `serve`'s start does the four confirmations (#509);
+- `check-fingerprints.py` in `verify.sh` stays: it checks the registry's own consistency, not a host.
+
+His reason: "the harm was what the fire drill became."
 
 ## Still to be registered
 

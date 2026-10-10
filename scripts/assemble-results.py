@@ -20,11 +20,15 @@ them into OUT under the names a results directory reads:
     digests.json      every file's sha256 and size, and what was scrubbed
     README.md         a skeleton whose front-matter is filled from the data
 
+A relative --out is taken from the repository root. The directory is built
+beside OUT and moved there only once it passes, so a refusal leaves nothing.
+
 and refuses (exit 1) when:
 - the regimen's bytes do not hash to the record's `regimen_sha256`;
 - a named file is missing or is not its digest;
 - `diet check-log`, `check-record` or `check-regimen` refuses a copy;
-- the copy is not hygiene-clean.
+- the copy is not hygiene-clean;
+- the record or the log is empty (a session that never ended).
 
 SCRUB. A log carries the operator's absolute paths (a call's `cwd`, a
 receipt's reference checkouts). Each occurrence of the home directory (--home,
@@ -55,6 +59,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -69,12 +74,16 @@ class Refused(Exception):
     pass
 
 
+def lines(data: bytes) -> list[str]:
+    """JSON Lines, split on `\n` only: `str.splitlines` also splits on
+    U+2028, U+2029 and U+0085, which the writer leaves raw inside a string."""
+    return [line for line in data.decode("utf-8").split("\n") if line.strip()]
+
+
 def named_files(log: bytes) -> dict[str, dict]:
     """Every `files` entry of an `ask` or `tool_call` line, by digest."""
     named: dict[str, dict] = {}
-    for number, line in enumerate(log.decode("utf-8").splitlines(), 1):
-        if not line.strip():
-            continue
+    for number, line in enumerate(lines(log), 1):
         try:
             event = json.loads(line)
         except json.JSONDecodeError as err:
@@ -86,8 +95,10 @@ def named_files(log: bytes) -> dict[str, dict]:
 
 
 def scrub(data: bytes, home: str) -> bytes:
-    """`home` rewritten to `~` wherever it ends at a path boundary."""
-    pattern = re.compile(re.escape(home.rstrip("/").encode()) + rb"(?=[/\"\\\s]|$)")
+    """`home` rewritten to `~` wherever the name it ends in ends: the
+    boundary hygiene's personal-home-path reads, so whatever follows -- a
+    quote, a backtick, a paren, a colon -- the path is scrubbed."""
+    pattern = re.compile(re.escape(home.rstrip("/").encode()) + rb"(?![A-Za-z0-9._-])")
     return pattern.sub(b"~", data)
 
 
@@ -98,7 +109,8 @@ def diet() -> str:
     )
     if resolved.returncode != 0:
         raise Refused(f"no diet binary: {resolved.stderr.strip()}")
-    return json.loads(resolved.stdout)["path"]
+    # resolve-diet.py names the binary relative to the repository.
+    return str(ROOT / json.loads(resolved.stdout)["path"])
 
 
 def checked(binary: str, command: str, path: pathlib.Path) -> None:
@@ -154,7 +166,8 @@ def front_matter(regimen: dict, record_digest: str, summary: dict, opened: int) 
 
 
 def assemble(args: argparse.Namespace) -> dict:
-    out = pathlib.Path(args.out)
+    # A relative --out is the repository's `results/...`, wherever this runs.
+    out = ROOT / args.out
     if out.exists() and any(out.iterdir()):
         raise Refused(f"{out} exists and is not empty")
     log_path, record_path = pathlib.Path(args.log), pathlib.Path(args.record)
@@ -168,7 +181,12 @@ def assemble(args: argparse.Namespace) -> dict:
     log = log_path.read_bytes()
     record = record_path.read_bytes()
     regimen_bytes = pathlib.Path(args.regimen).read_bytes()
-    start = json.loads(record.decode("utf-8").splitlines()[0])
+    rows = [json.loads(line) for line in lines(record)]
+    if not rows:
+        raise Refused(f"{record_path} is empty: the session never ended, so serve never wrote its record")
+    if not lines(log):
+        raise Refused(f"{log_path} is empty")
+    start = rows[0]
     claimed = start.get("regimen_sha256")
     regimen_digest = sha256(regimen_bytes)
     if claimed is None:
@@ -191,7 +209,6 @@ def assemble(args: argparse.Namespace) -> dict:
     written: dict[str, bytes] = {"log.jsonl": log, "run.jsonl": record, "regimen.toml": regimen_bytes}
     if sidecar_path.is_file():
         written["unspellable.json"] = sidecar_path.read_bytes()
-    rows = [json.loads(line) for line in record.decode("utf-8").splitlines() if line.strip()]
     summary = next((row for row in rows if row.get("record") == "summary"), None)
     if summary is None:
         raise Refused("the record has no summary row: it was written before serve wrote one")
@@ -202,10 +219,40 @@ def assemble(args: argparse.Namespace) -> dict:
     if receipt_path is not None:
         written["receipt.json"] = receipt_path.read_bytes()
 
-    out.mkdir(parents=True, exist_ok=True)
+    # Assembled beside OUT under OUT's own name, and moved there only once it
+    # passes: a refusal leaves nothing behind.
+    out.parent.mkdir(parents=True, exist_ok=True)
+    holding = pathlib.Path(tempfile.mkdtemp(prefix=".assembling-", dir=out.parent))
+    try:
+        built = build(holding / out.name, written, files, args.home, regimen_bytes, record, log, summary)
+        if out.exists():
+            out.rmdir()
+        built.rename(out)
+    finally:
+        shutil.rmtree(holding, ignore_errors=True)
+
+    results = subprocess.run(
+        [sys.executable, str(ROOT / "scripts" / "check-results.py"), str(out)],
+        capture_output=True, text=True, cwd=ROOT,
+    )
+    digests = json.loads((out / "digests.json").read_text())["files"]
+    return {
+        "out": str(out),
+        "regimen_sha256": regimen_digest,
+        "files": len(digests),
+        "scrubbed": sorted(n for n, row in digests.items() if "as_written_sha256" in row),
+        "hygiene": "clean",
+        "check_results": {"exit": results.returncode, "says": (results.stdout + results.stderr).strip().split("\n")[:20]},
+    }
+
+
+def build(out: pathlib.Path, written: dict[str, bytes], files: dict[str, bytes], home: str,
+          regimen_bytes: bytes, record: bytes, log: bytes, summary: dict) -> pathlib.Path:
+    """The directory at OUT, written, checked and hygiene-clean, or a refusal."""
+    out.mkdir()
     digests: dict[str, dict] = {}
     for name, data in {**written, **files}.items():
-        copy = scrub(data, args.home) if name in SCRUBBED else data
+        copy = scrub(data, home) if name in SCRUBBED else data
         (out / name).parent.mkdir(parents=True, exist_ok=True)
         (out / name).write_bytes(copy)
         row = {"sha256": sha256(copy), "bytes": len(copy)}
@@ -213,9 +260,9 @@ def assemble(args: argparse.Namespace) -> dict:
             row["as_written_sha256"] = sha256(data)
         digests[name] = row
     regimen = tomllib.loads(regimen_bytes.decode("utf-8"))
-    (out / "README.md").write_text(front_matter(regimen, sha256(record), summary, json.loads(log.decode("utf-8").splitlines()[0])["opened"]))
+    (out / "README.md").write_text(front_matter(regimen, sha256(record), summary, json.loads(lines(log)[0])["opened"]))
     (out / "digests.json").write_text(json.dumps({
-        "regimen_sha256": regimen_digest,
+        "regimen_sha256": sha256(regimen_bytes),
         "home_scrubbed_to": "~",
         "files": dict(sorted(digests.items())),
     }, indent=2, sort_keys=True) + "\n")
@@ -230,20 +277,8 @@ def assemble(args: argparse.Namespace) -> dict:
         capture_output=True, text=True, cwd=ROOT, env={**os.environ, "LC_ALL": "C"},
     )
     if hygiene.returncode != 0:
-        raise Refused(f"hygiene.sh --tree {out} exits {hygiene.returncode}:\n{(hygiene.stdout + hygiene.stderr).strip()[:4000]}")
-
-    results = subprocess.run(
-        [sys.executable, str(ROOT / "scripts" / "check-results.py"), str(out)],
-        capture_output=True, text=True, cwd=ROOT,
-    )
-    return {
-        "out": str(out),
-        "regimen_sha256": regimen_digest,
-        "files": len(digests),
-        "scrubbed": sorted(n for n, row in digests.items() if "as_written_sha256" in row),
-        "hygiene": "clean",
-        "check_results": {"exit": results.returncode, "says": (results.stdout + results.stderr).strip().splitlines()[:20]},
-    }
+        raise Refused(f"hygiene.sh exits {hygiene.returncode} on the assembled copy:\n{(hygiene.stdout + hygiene.stderr).strip()[:4000]}")
+    return out
 
 
 def main() -> int:
