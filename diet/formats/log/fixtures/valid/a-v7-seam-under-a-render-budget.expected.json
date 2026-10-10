@@ -112,6 +112,7 @@
       "reason": "operator",
       "render": "# regime\narm: diet\nsubstrate: a-substrate\ndogma_version: 1\nphase: -\nframe_version: placeholder\n\n# working set\nd1\n1 older entries elided\n",
       "render_budget_tokens": 10,
+      "render_fits": false,
       "render_over_budget": "elide",
       "render_reduced": 1,
       "render_tokens": 34,

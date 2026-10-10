@@ -577,6 +577,9 @@ pub enum Event {
         wall_ms: Option<u64>,
         /// Why a fork settled `refused` was never sent (#406): `pool`.
         refused: Option<String>,
+        /// What its answer wrote after its last field, past a blank line:
+        /// recorded as no entry (levers run A).
+        trailer: Option<String>,
     },
     /// A seam fired, and the trunk was refilled from working memory (#493):
     /// the head with the working object rendered after it, and no turn of
@@ -3882,12 +3885,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
             prompt_tokens,
             wall_ms,
             refused,
+            trailer,
         } => log::Event::ForkSettled {
             fork: *fork,
             outcome: *outcome,
             prompt_tokens: *prompt_tokens,
             wall_ms: *wall_ms,
             refused: refused.clone(),
+            trailer: trailer.clone(),
         },
         Event::Recalled {
             turn,
@@ -5858,6 +5863,7 @@ fn refilled(
         .to_owned(),
         rendered: rendered.tokens,
         reduced: rendered.reduced,
+        fits: Some(rendered.fits),
     });
     let render = rendered.text;
     let carried_entries = interview.object.live().count() as u64;
@@ -5945,6 +5951,21 @@ fn refilled(
         operator_changes,
         unaddressed,
         warm: None,
+    }
+}
+
+impl Event {
+    /// A fork's settle with nothing beside its outcome: no cost, no
+    /// refusal, no trailer.
+    fn settled(fork: u64, outcome: log::ForkOutcome) -> Self {
+        Self::ForkSettled {
+            fork,
+            outcome,
+            prompt_tokens: None,
+            wall_ms: None,
+            refused: None,
+            trailer: None,
+        }
     }
 }
 
@@ -6476,13 +6497,7 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
             log::ForkOutcome::Failed
         }
     };
-    state.push(Event::ForkSettled {
-        fork,
-        outcome,
-        prompt_tokens: None,
-        wall_ms: None,
-        refused: None,
-    });
+    state.push(Event::settled(fork, outcome));
     for line in lines {
         state.push(line);
     }
@@ -7336,6 +7351,7 @@ fn fire<S>(
     });
     if refused {
         state.push(Event::ForkSettled {
+            trailer: None,
             fork,
             outcome: log::ForkOutcome::Refused,
             prompt_tokens: None,
@@ -7464,6 +7480,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
     state.forking = None;
     let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
     let mut patches = Vec::new();
+    let mut trailer = None;
     let mut prompt_tokens = None;
     let outcome = match result {
         Ok(StreamEnded::Finished {
@@ -7504,7 +7521,10 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
             } else if called {
                 log::ForkOutcome::Unparseable
             } else {
-                let (outcome, lines) = folded(&mut state, &text, turn, fork);
+                // What trails the last field is no field (levers run A).
+                let (fields, after) = trailed(&text);
+                trailer = after;
+                let (outcome, lines) = folded(&mut state, &fields, turn, fork);
                 patches = lines;
                 outcome
             }
@@ -7552,6 +7572,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
         (None, None)
     };
     state.push(Event::ForkSettled {
+        trailer,
         fork,
         outcome,
         prompt_tokens,
@@ -7660,6 +7681,49 @@ fn captured_in(
         log::ForkOutcome::Decline
     };
     (outcome, lines)
+}
+
+/// A fork's answer `text` cut at its last field's end (levers run A): what
+/// that field wrote after a blank line is no part of it -- a sign-off an
+/// instruction file asked of every answer, a remark -- and comes back on
+/// its own, trimmed, to be logged and recorded as no entry. A field before
+/// the last keeps its lines across a blank one, as the grammar reads them,
+/// since the next field's tag ends it; and the last keeps every line up to
+/// its first blank one. `None` when nothing trails.
+fn trailed(text: &str) -> (std::borrow::Cow<'_, str>, Option<String>) {
+    let unchanged = (std::borrow::Cow::Borrowed(text), None);
+    let Ok(answer) = crate::formats::interview::parse(text) else {
+        return unchanged;
+    };
+    let Some(last) = answer.fields.iter().rev().find(|field| field.tag.is_some()) else {
+        return unchanged;
+    };
+    let mut lines = last.raw.split('\n');
+    let _first = lines.next();
+    let mut rest = lines.skip_while(|line| !line.trim().is_empty());
+    if rest.next().is_none() {
+        return unchanged;
+    }
+    let after: Vec<&str> = rest.collect();
+    let trailer = after.join("\n").trim().to_owned();
+    if trailer.is_empty() {
+        return unchanged;
+    }
+    let first = after
+        .iter()
+        .find(|line| !line.trim().is_empty())
+        .copied()
+        .unwrap_or_default();
+    let Some(at) = text.rfind(first.trim_end()) else {
+        return unchanged;
+    };
+    // An answer the grammar read inside a fence keeps the fence's close.
+    let closing = text[at..].trim_end().strip_suffix("```").is_some();
+    let mut body = text[..at].trim_end().to_owned();
+    if closing {
+        body.push_str("\n```");
+    }
+    (std::borrow::Cow::Owned(body), Some(trailer))
 }
 
 /// The fork's answer, read by the interview grammar and folded as the
@@ -7786,11 +7850,8 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
             let Some(field) = content.strip_prefix(SUPERSEDE_FIELD) else {
                 return vec![patch];
             };
-            let pairs: Vec<&str> = field
-                .split(';')
-                .map(str::trim)
-                .filter(|pair| !pair.is_empty())
-                .collect();
+            let pairs = pairs_of(field, object);
+            let pairs: Vec<&str> = pairs.iter().map(String::as_str).collect();
             if pairs.len() < 2 {
                 return vec![
                     superseding(field.trim(), object, id.clone(), provenance).unwrap_or(patch),
@@ -7829,6 +7890,39 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
         }
     }
     read
+}
+
+/// A `SUPERSEDE` field's pairs (#562): `;` starts a new pair only where a
+/// live entry's id follows it -- the id a pair cites first. Elsewhere it is
+/// the prose's own, and stays in the pair it is part of (levers run A: a
+/// one-line supersede whose reason held two `;` was read as three pairs, two
+/// of them additions of its own fragments).
+fn pairs_of(field: &str, object: &WorkingObject) -> Vec<String> {
+    let quoted = |c: char| "`'\"[]()<>*:,—-".contains(c);
+    let cites = |piece: &str| {
+        let first = piece.split(char::is_whitespace).next().unwrap_or_default();
+        let first = first.split("→").next().unwrap_or_default();
+        let first = first.split("->").next().unwrap_or_default();
+        crate::object::EntryId::new(first.trim_matches(quoted))
+            .ok()
+            .is_some_and(|id| object.live().any(|entry| entry.id == id))
+    };
+    let mut pairs: Vec<String> = Vec::new();
+    for piece in field.split(';') {
+        let trimmed = piece.trim();
+        match pairs.last_mut() {
+            Some(pair) if !cites(trimmed) => {
+                pair.push(';');
+                pair.push_str(piece.trim_end());
+            }
+            _ if trimmed.is_empty() => {}
+            _ => pairs.push(trimmed.to_owned()),
+        }
+    }
+    for pair in &mut pairs {
+        *pair = pair.trim().to_owned();
+    }
+    pairs
 }
 
 /// One `SUPERSEDE` pair (#562): the cited id, then -- after whitespace, a
@@ -7977,13 +8071,7 @@ fn crashed_fork(template: &RequestShape, state: &mut State, why: String) {
             partial,
             why,
         });
-        state.push(Event::ForkSettled {
-            fork,
-            outcome: log::ForkOutcome::Failed,
-            prompt_tokens: None,
-            wall_ms: None,
-            refused: None,
-        });
+        state.push(Event::settled(fork, log::ForkOutcome::Failed));
     }
     turn_over(template, state);
 }
@@ -8771,6 +8859,119 @@ pub(in crate::drive) mod tests {
         // Each its own position, so the two apply together.
         let mut object = object;
         object.apply_turn(&patches).expect("both apply");
+    }
+
+    /// Levers run A's turn-2 fork answer, verbatim: its fields, then the
+    /// sign-off the worktree's AGENTS.md asks of every answer.
+    const RUN_A_T2: &str = "\n\nDECISION: Add `#anchor` validation to `linkcheck.py` for local links — GitHub-style slugs via `slugify()`/`anchors_of()` (duplicates numbered `a`, `a-1`), same-file `#anchor` supported, output format and exit codes unchanged; samples updated to show valid anchor, broken file, and broken anchor.\nPLAN: No open work; optional follow-ups only if asked — verify `[x](b.md#b \"B\")` title-with-anchor handling and decide whether headings inside fenced code blocks should be ignored.\nSUPERSEDE: NONE\n\n-- checked against AGENTS.md";
+
+    /// Levers run A's turn-7 fork answer, verbatim: a one-line SUPERSEDE
+    /// whose reason holds two `;`, then the sign-off.
+    const RUN_A_T7: &str = "\n\nDECISION: Dropped `--quiet` entirely in `linkcheck.py` — `main()` no longer filters argv for it; it takes the directory from `argv[1]` (default `.`) and always prints each broken link as `path:lineno: target`, exiting 1 if any were found. Verified: `python3 linkcheck.py docs` prints `docs/c.md:3: missing.md` and exits 1; a clean fixture dir prints nothing and exits 0. (Side effect worth noting: a stray `--quiet` argument would now be treated as a directory name.)\n\nPLAN: NONE — the change is made and verified; no further work this turn, per your note that you'll review the record yourself.\n\nSUPERSEDE: r3421/call_22baf3929b944b80b538212e/decision — its `--quiet` clause (\"main() accepts --quiet anywhere in argv (silences output…)\", \"--quiet prints nothing and exits 1 on broken / 0 on clean\") is replaced by this turn's decision: `--quiet` is gone; broken links always print. Also r4621/call_66c57752248e464cbd189810/decision — its \"–quiet kept\" clause is superseded by the same change, and its claim that anchor validation (HEADING_RE, FENCE_RE, slugify, anchors_of) was removed contradicts the file I read this turn, which still contains all of it; the entry that should stand on that point is the file's actual state.\n\n-- checked against AGENTS.md";
+
+    /// Levers run A: what trails the last field after a blank line -- the
+    /// sign-off -- is cut off and comes back on its own; `SUPERSEDE: NONE`
+    /// is then a decline and no entry, as the grammar reads it. Lines before
+    /// a blank one stay their field's.
+    #[test]
+    fn a_sign_off_after_the_last_field_is_no_field() {
+        let (fields, trailer) = trailed(RUN_A_T2);
+        assert_eq!(trailer.as_deref(), Some("-- checked against AGENTS.md"));
+        assert!(fields.trim_end().ends_with("SUPERSEDE: NONE"), "{fields}");
+        let (patches, _) =
+            super::super::fold(&fields, 2, super::super::INTERVIEW, Some("f/9")).expect("read");
+        let contents: Vec<String> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Add { content, .. } => content.clone(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(contents.len(), 2, "{contents:?}");
+        assert!(contents[0].starts_with("decision: Add `#anchor` validation"));
+        assert!(contents[1].starts_with("plan: No open work"));
+        // A last field's continuation line, with no blank line, is its own.
+        let (kept, none) = trailed("DECISION: first\nsecond\n");
+        assert_eq!((kept.as_ref(), none), ("DECISION: first\nsecond\n", None));
+    }
+
+    /// Levers run A, served: the fork's sign-off is on its `fork.settled`
+    /// line and in no entry; the log reads back.
+    #[test]
+    fn a_forks_sign_off_is_logged_on_its_settle_and_recorded_nowhere() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.asks = &crate::dogma::asks::V4;
+        let session = Session::open_with(
+            Canned::new([deltas(&[SCOPED]), deltas(&[RUN_A_T2])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        let held = live_entries(&session);
+        assert_eq!(held.len(), 2, "{held:?}");
+        assert!(
+            !held
+                .iter()
+                .any(|(_, content)| content.contains("AGENTS.md")),
+            "{held:?}"
+        );
+        let trailers: Vec<Option<String>> = whole_log(&session)
+            .iter()
+            .filter_map(|line| match &line.event {
+                log::Event::ForkSettled { trailer, .. } => Some(trailer.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(trailers, [Some("-- checked against AGENTS.md".to_owned())]);
+        reads_whole(&session);
+    }
+
+    /// Levers run A: a `;` in a SUPERSEDE's prose is the prose's -- one
+    /// pair, voiding the one entry it cites, its whole reason the entry that
+    /// stands -- and never an addition of its fragments.
+    #[test]
+    fn a_semicolon_in_a_supersedes_prose_is_no_new_pair() {
+        let object = object_of(&[
+            "r3421/call_22baf3929b944b80b538212e/decision",
+            "r4621/call_66c57752248e464cbd189810/decision",
+        ]);
+        let (fields, trailer) = trailed(RUN_A_T7);
+        assert_eq!(trailer.as_deref(), Some("-- checked against AGENTS.md"));
+        let (patches, _) =
+            super::super::fold(&fields, 7, super::super::INTERVIEW, Some("f/9")).expect("read");
+        let patches = cited(patches, &object);
+        let superseding: Vec<(&str, &str)> = patches
+            .iter()
+            .filter_map(|patch| match patch {
+                Patch::Supersede { voids, content, .. } => Some((voids.as_str(), content.as_str())),
+                _ => None,
+            })
+            .collect();
+        let [(voids, content)] = superseding.as_slice() else {
+            panic!("{patches:?}");
+        };
+        assert_eq!(*voids, "r3421/call_22baf3929b944b80b538212e/decision");
+        assert!(content.starts_with("its `--quiet` clause"), "{content}");
+        assert!(
+            content
+                .ends_with("the entry that should stand on that point is the file's actual state."),
+            "{content}"
+        );
+        assert!(
+            !patches.iter().any(|patch| matches!(
+                patch,
+                Patch::Add { content, .. } if content.starts_with("supersede: ")
+            )),
+            "{patches:?}"
+        );
     }
 
     /// #562: `→` or `->` between the cited id and what replaces it.
@@ -9907,6 +10108,7 @@ pub(in crate::drive) mod tests {
                 max_tokens: 8192,
             },
             Event::ForkSettled {
+                trailer: None,
                 fork: 20,
                 outcome: log::ForkOutcome::Value,
                 prompt_tokens: Some(281),
@@ -10356,6 +10558,7 @@ pub(in crate::drive) mod tests {
                 max_tokens: Some(8192),
             },
             log::Event::ForkSettled {
+                trailer: None,
                 fork: 20,
                 outcome: log::ForkOutcome::Value,
                 prompt_tokens: Some(281),

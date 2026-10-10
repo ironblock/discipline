@@ -3179,6 +3179,7 @@ mod tests {
         events.push(fork(3, 1, log::Warrant::Scoping));
         events.extend(call(1, 8));
         events.push(Line::ForkSettled {
+            trailer: None,
             fork: 8,
             outcome: log::ForkOutcome::Value,
             prompt_tokens: None,
@@ -3191,6 +3192,7 @@ mod tests {
         events.push(fork(24, 3, log::Warrant::Read));
         events.extend(call(3, 29));
         events.push(Line::ForkSettled {
+            trailer: None,
             fork: 29,
             outcome: log::ForkOutcome::Decline,
             prompt_tokens: None,

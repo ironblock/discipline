@@ -264,6 +264,8 @@ export interface ForkSettled extends At {
   readonly wall_ms?: number;
   /** Why it was never sent, when its outcome is `refused` (log v7, #637): `pool` when the slots had no room for it. */
   readonly refused?: string;
+  /** What its answer wrote after its last field, past a blank line (log v7): read as no entry. */
+  readonly trailer?: string;
 }
 
 export interface Entry {
