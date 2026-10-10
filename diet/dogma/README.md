@@ -80,5 +80,9 @@ fields the interview grammar parses (`v3` and `v4`), or through the
 self-capture tools. A regimen sets `capture_modality = "fields"` (the
 default) or `"tools"`; `tools` needs `self_capture` on, an
 `interview_warrant`, and a set whose asks are written for the tools, and serve
-refuses it at start otherwise. No tools set ships until its wording is
-approved, so today `tools` is always refused.
+refuses it at start otherwise.
+
+- `t1` (#610): `v4`'s asks with each answer instruction asking for the
+  self-capture tools (`update_record`, and for judgment `supersedes` and
+  `resolve_entry`) instead of fields. Its modality is `tools`. The
+  maintainer approved it as drafted.

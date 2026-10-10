@@ -1,0 +1,4 @@
+{imperative}
+You last ran: {last_command}
+You said: "{intent}"
+That run finished. What was its outcome, and what does it settle or leave open? Record each thing with update_record, under the field evidence, learned or stuck; evidence quotes the run's own output. If there is nothing to record, call nothing.
