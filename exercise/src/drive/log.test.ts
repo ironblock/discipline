@@ -56,6 +56,15 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(answer?.kind === 'assistant' && answer.text).toBe(response?.kind === 'response' ? response.text : undefined);
   });
 
+  it("carries the operator's edit and flag onto working memory (v7, #150)", () => {
+    const file = 'a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl';
+    const memory = fold(logOf(file)).memory;
+    const edited = memory.find((entry) => entry.id === 'd2');
+    expect(edited?.lane).toBe('operator');
+    expect(edited?.flag).toBe('is one team enough?');
+    expect(memory.find((entry) => entry.id === 'd1')?.state).toBe('superseded');
+  });
+
   it('carries a prune on the turn that made it (v7, #612)', () => {
     const file = 'a-v7-prune-applied-at-the-turns-seam.jsonl';
     const line = logOf(file).find((l) => l.kind === 'pruned');

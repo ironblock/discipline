@@ -1379,6 +1379,11 @@ pub enum Event {
         /// The tool results the model pruned that this seam replaced with
         /// their reference lines (#612), in the order they were pruned.
         pruned: Option<Vec<PrunedOutput>>,
+        /// The operator's edits and flags this seam carried (#150): each
+        /// entry and `edit` or `flag`.
+        operator_changes: Option<Vec<log::OperatorChange>>,
+        /// Of those, the entries no answer addressed, carried on (#150).
+        unaddressed: Option<Vec<String>>,
     },
     /// A tool was called.
     ToolCall {
@@ -2537,6 +2542,8 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             prompt_tokens: take_optional_count(&mut members, of, "prompt_tokens")?,
             window: take_optional_count(&mut members, of, "window")?,
             pruned: take_optional_pruned(&mut members, of)?,
+            operator_changes: take_optional_operator_changes(&mut members, of)?,
+            unaddressed: take_optional_strings_list(&mut members, of, "unaddressed")?,
         },
         Kind::ToolCall => tool_call(&mut members, of)?,
         Kind::Rejected => Event::Rejected {
@@ -4102,6 +4109,77 @@ fn take_tool_output(
     }))
 }
 
+/// A seam row's `operator_changes` (#150): absent, or a non-empty list of
+/// objects holding exactly `entry` and `kind` (`edit` or `flag`).
+fn take_optional_operator_changes(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<Vec<log::OperatorChange>>, ParseError> {
+    let wrong = || {
+        ParseError::from(SchemaError::WrongType {
+            of,
+            field: "operator_changes".to_owned(),
+            want: "a non-empty list of {entry, kind}",
+        })
+    };
+    let Some(value) = members.remove("operator_changes") else {
+        return Ok(None);
+    };
+    let Value::Array(items) = value else {
+        return Err(wrong());
+    };
+    if items.is_empty() {
+        return Err(wrong());
+    }
+    items
+        .into_iter()
+        .map(|item| {
+            let Value::Object(mut fields) = item else {
+                return Err(wrong());
+            };
+            let entry = take_string(&mut fields, of, "entry")?;
+            let kind = take_string(&mut fields, of, "kind")?;
+            if !fields.is_empty() || !["edit", "flag"].contains(&kind.as_str()) {
+                return Err(wrong());
+            }
+            Ok(log::OperatorChange { entry, kind })
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
+/// An optional non-empty list of strings under `field`.
+fn take_optional_strings_list(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<Vec<String>>, ParseError> {
+    let wrong = || {
+        ParseError::from(SchemaError::WrongType {
+            of,
+            field: field.to_owned(),
+            want: "a non-empty list of strings",
+        })
+    };
+    let Some(value) = members.remove(field) else {
+        return Ok(None);
+    };
+    let Value::Array(items) = value else {
+        return Err(wrong());
+    };
+    if items.is_empty() {
+        return Err(wrong());
+    }
+    items
+        .into_iter()
+        .map(|item| match item {
+            Value::String(text) => Ok(text),
+            _ => Err(wrong()),
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(Some)
+}
+
 /// A fork row's `cache_read_share` (#555): absent, or a decimal from 0 to
 /// 1 -- the share of its responses' prompt tokens read from the cache.
 fn take_optional_share(
@@ -5187,6 +5265,8 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             prompt_tokens,
             window,
             pruned,
+            operator_changes,
+            unaddressed,
             ..
         } => {
             members.put_u32("at_turn", *at_turn);
@@ -5221,6 +5301,28 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
                             })
                             .collect(),
                     )
+                }),
+            );
+            members.put_optional(
+                "operator_changes",
+                operator_changes.as_ref().map(|changes| {
+                    Value::Array(
+                        changes
+                            .iter()
+                            .map(|change| {
+                                Value::Object(BTreeMap::from([
+                                    ("entry".to_owned(), Value::String(change.entry.clone())),
+                                    ("kind".to_owned(), Value::String(change.kind.clone())),
+                                ]))
+                            })
+                            .collect(),
+                    )
+                }),
+            );
+            members.put_optional(
+                "unaddressed",
+                unaddressed.as_ref().map(|entries| {
+                    Value::Array(entries.iter().cloned().map(Value::String).collect())
                 }),
             );
         }
