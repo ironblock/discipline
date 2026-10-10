@@ -162,6 +162,32 @@ pub fn sidecar_value(projection: &Projection) -> crate::formats::record::json::V
         })
         .collect();
     fields.insert("unspellable".to_owned(), Value::Array(items));
+    // What the read-back repaired, and why it refused, when it did (#645):
+    // absent otherwise, so a record that read back first time has the
+    // sidecar it always had.
+    if !projection.repairs.is_empty() {
+        fields.insert(
+            "repairs".to_owned(),
+            Value::Array(
+                projection
+                    .repairs
+                    .iter()
+                    .map(|repair| {
+                        Value::Object(BTreeMap::from([
+                            (
+                                "at_request".to_owned(),
+                                Value::String(repair.at_request.clone()),
+                            ),
+                            ("why".to_owned(), Value::String(repair.why.clone())),
+                        ]))
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(refusal) = &projection.refusal {
+        fields.insert("refusal".to_owned(), Value::String(refusal.clone()));
+    }
     Value::Object(fields)
 }
 
@@ -188,6 +214,141 @@ pub struct Projection {
     pub unspellable: Vec<Unspellable>,
     /// The cited engine the counts were derived on, or `None` when none was.
     pub engine: Option<Engine>,
+    /// What [`read_back`] repaired before the record read back (#645): a
+    /// row the projection should have written, added in its honest form.
+    pub repairs: Vec<Repair>,
+    /// Why the record did not read back, when it did not and nothing in
+    /// [`read_back`]'s table could repair it (#645): the projected rows are
+    /// kept beside it, never passed off as a record.
+    pub refusal: Option<String>,
+}
+
+/// What [`kept`] wrote for a projection (#645).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kept {
+    /// The record, which read back, as written.
+    Record(String),
+    /// The projected rows that did not read back, kept at `path` beside the
+    /// record and never passed off as one, and the reader's refusal.
+    Refused {
+        /// Where they were kept: `<record>.refused.jsonl`.
+        path: String,
+        /// The rows, as written there.
+        rows: String,
+        /// The reader's refusal, in words.
+        refusal: String,
+    },
+}
+
+/// `projection` kept beside the record at `path` (#645): read back through
+/// [`read_back`]'s repairs and written to `record`; or, refused, its rows
+/// written to `<path>.refused.jsonl` with `record` left empty -- so the
+/// projection is never lost. Either way the sidecar, `<path>.unspellable.json`,
+/// names the repairs or the refusal; it is returned with its path.
+///
+/// # Errors
+///
+/// A file that could not be written.
+pub fn kept(
+    projection: &mut Projection,
+    path: &str,
+    record: &mut std::fs::File,
+) -> Result<(Kept, String, String), String> {
+    let kept = match read_back(projection) {
+        Ok(text) => {
+            record
+                .set_len(0)
+                .and_then(|()| std::io::Write::write_all(record, text.as_bytes()))
+                .map_err(|why| format!("{path}: {why}"))?;
+            Kept::Record(text)
+        }
+        Err(refusal) => {
+            projection.refusal = Some(refusal.clone());
+            let rows = crate::formats::record::render(&crate::formats::record::Record {
+                events: projection.events.clone(),
+            });
+            let refused = format!("{path}.refused.jsonl");
+            std::fs::write(&refused, &rows).map_err(|why| format!("{refused}: {why}"))?;
+            record.set_len(0).map_err(|why| format!("{path}: {why}"))?;
+            Kept::Refused {
+                path: refused,
+                rows,
+                refusal,
+            }
+        }
+    };
+    let sidecar = sidecar(projection) + "\n";
+    let sidecar_path = format!("{path}.unspellable.json");
+    std::fs::write(&sidecar_path, &sidecar).map_err(|why| format!("{sidecar_path}: {why}"))?;
+    Ok((kept, sidecar_path, sidecar))
+}
+
+/// A row [`read_back`] added (#645): which refusal it answered, and what.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Repair {
+    /// The request it was added at.
+    pub at_request: String,
+    /// The refusal it answered, and the row it added, as a sentence.
+    pub why: String,
+}
+
+/// The record `projection`'s rows render to, read back by
+/// [`crate::formats::record::parse`] -- after the repairs its table allows,
+/// each recorded in [`Projection::repairs`] (#645). The table holds only
+/// refusals of a MISSING row, whose honest form is known: a `prefix.changed`
+/// the record's reader proves was owed and the projection did not write
+/// (`ChangeNotNamed`) is added at its request as `unattributed`, which is
+/// what the projection writes for a move it cannot attribute. Every other
+/// refusal is a row that contradicts the record, which no repair can make
+/// true: it is the `Err`, in words, and nothing is repaired around it.
+///
+/// # Errors
+///
+/// The reader's refusal that the table does not repair.
+pub fn read_back(projection: &mut Projection) -> Result<String, String> {
+    use crate::formats::record::{
+        self, ParseError, PrefixChangeError, PrefixReason, Record, StructureError,
+    };
+    // Each repair adds a row the reader proved owed; a reader that asked for
+    // more than one per row would be a loop, not a repair.
+    for _ in 0..=projection.events.len() {
+        let text = record::render(&Record {
+            events: projection.events.clone(),
+        });
+        let Err(refusal) = record::parse(&text) else {
+            return Ok(text);
+        };
+        let ParseError::Structure(StructureError::PrefixChange(
+            PrefixChangeError::ChangeNotNamed { at_request, lane },
+        )) = &refusal
+        else {
+            return Err(format!("{refusal:?}"));
+        };
+        let Some(at) = projection
+            .events
+            .iter()
+            .position(|event| matches!(event, Event::Request { id, .. } if id == at_request))
+        else {
+            return Err(format!("{refusal:?}"));
+        };
+        projection.events.insert(
+            at + 1,
+            Event::PrefixChanged {
+                id: format!("{at_request}#prefix"),
+                at_request: at_request.clone(),
+                reason: PrefixReason::Unattributed,
+                diff: Vec::new(),
+            },
+        );
+        projection.repairs.push(Repair {
+            at_request: at_request.clone(),
+            why: format!(
+                "the reader proved a move of lane `{lane}`'s head at `{at_request}` that no \
+                 row named (ChangeNotNamed); added as `unattributed`"
+            ),
+        });
+    }
+    Err("a repair the reader kept asking for".to_owned())
 }
 
 /// The client's role for a log's.
@@ -374,6 +535,8 @@ pub fn project_in(
         events,
         unspellable: walk.unspellable,
         engine,
+        repairs: Vec::new(),
+        refusal: None,
     })
 }
 
@@ -3031,6 +3194,72 @@ mod tests {
             })
             .collect();
         assert_eq!(moves, vec![("q/30", PrefixReason::Unattributed)]);
+    }
+
+    /// #645: a record the reader refuses for a MISSING row -- a lane's move
+    /// no `prefix.changed` names -- is repaired in the row's honest form,
+    /// `unattributed`, the repair named, and the record reads back.
+    #[test]
+    fn a_missing_prefix_row_is_repaired_and_the_record_reads_back() {
+        let mut projection = two_forks();
+        projection.events.retain(
+            |event| !matches!(event, Event::PrefixChanged { at_request, .. } if at_request == "q/30"),
+        );
+        let text = read_back(&mut projection).expect("repaired");
+        record::parse(&text).expect("it reads back");
+        assert_eq!(
+            projection
+                .repairs
+                .iter()
+                .map(|repair| repair.at_request.as_str())
+                .collect::<Vec<_>>(),
+            ["q/30"]
+        );
+        assert!(projection.events.iter().any(|event| matches!(
+            event,
+            Event::PrefixChanged { at_request, reason: PrefixReason::Unattributed, .. }
+                if at_request == "q/30"
+        )));
+        assert!(sidecar(&projection).contains("\"repairs\""));
+    }
+
+    /// #645: a record the reader refuses for a row that CONTRADICTS it is
+    /// never repaired: its rows are kept at `<record>.refused.jsonl`, the
+    /// refusal named in the sidecar, and no record is written.
+    #[test]
+    fn a_contradicting_row_keeps_the_rows_beside_an_empty_record() {
+        let mut projection = two_forks();
+        let start = projection.events[0].clone();
+        projection.events.push(start);
+        let dir = std::env::temp_dir().join(format!("diet-kept-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a directory");
+        let path = dir.join("session.record.jsonl");
+        let path = path.to_str().expect("utf-8");
+        let mut record = std::fs::File::create(path).expect("the record");
+        let (kept, sidecar_path, sidecar) = kept(&mut projection, path, &mut record).expect("kept");
+        let Kept::Refused {
+            path: refused,
+            rows,
+            refusal: _,
+        } = kept
+        else {
+            panic!("a second start is refused, not repaired");
+        };
+        assert_eq!(refused, format!("{path}.refused.jsonl"));
+        assert_eq!(std::fs::read_to_string(&refused).expect("the rows"), rows);
+        assert!(rows.lines().count() >= projection.events.len());
+        assert_eq!(
+            std::fs::metadata(path).expect("the record").len(),
+            0,
+            "no record"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&sidecar_path).expect("the sidecar"),
+            sidecar
+        );
+        assert!(sidecar.contains("\"refusal\""), "{sidecar}");
+        assert!(projection.repairs.is_empty(), "nothing repaired around it");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A call's files (#372): the line's `files` on the row, by reference,
