@@ -8305,6 +8305,91 @@ pub(in crate::drive) mod tests {
         assert_eq!(retired, ["interview-t2-0", "interview-t2-1"]);
     }
 
+    /// #157: two scoping forks with a turn between them, under `view`;
+    /// the prefix rows the record writes at the forks' requests.
+    fn fork_prefix_rows(view: Option<ForkView>) -> Vec<crate::formats::record::Event> {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.view = view;
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["a turn between them"]),
+                deltas(&[SCOPED]),
+                deltas(&["DECISION: NONE\nPLAN: NONE\n"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "fork one", |log| {
+            settled(log) && fork_outcomes(log).len() == 1
+        });
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        session
+            .ask_marked("and who is it for?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "fork two", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        let forks: Vec<String> = log
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Interview,
+                        ..
+                    }
+                )
+            })
+            .map(|logged| format!("q/{}", logged.seq))
+            .collect();
+        assert_eq!(forks.len(), 2);
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        super::super::projection::project(&lines, &regime(), None)
+            .expect("the log projects")
+            .events
+            .into_iter()
+            .filter(|event| matches!(
+                event,
+                crate::formats::record::Event::PrefixChanged { at_request, .. } if forks.contains(at_request)
+            ))
+            .collect()
+    }
+
+    /// #157, from the seam smoke run (q/2142): a whole-trunk fork's head is
+    /// the trunk's, so the second fork's request -- its head moved by the
+    /// turns between -- is verified against the rebuilt trunk and writes no
+    /// prefix row; a `last_turn` fork's head is not rebuilt, and its move is
+    /// still named unattributed.
+    #[test]
+    fn a_whole_trunk_forks_head_is_verified_against_the_trunk_and_writes_no_row() {
+        assert_eq!(fork_prefix_rows(None), []);
+        let rows = fork_prefix_rows(Some(ForkView::Last(1)));
+        assert!(
+            matches!(
+                &rows[..],
+                [crate::formats::record::Event::PrefixChanged {
+                    reason: crate::formats::record::PrefixReason::Unattributed,
+                    ..
+                }]
+            ),
+            "{rows:?}"
+        );
+    }
+
     /// A transport that panics mid-call: the one thing a turn's thread can
     /// do that no `Ended` or `TransportFailure` describes.
     struct Panics;
