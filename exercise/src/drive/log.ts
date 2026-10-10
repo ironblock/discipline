@@ -22,7 +22,6 @@ export const NEEDS = {
   record: 'the arm a session runs, and its system prompt’s size in tokens, on its start',
   slots: 'the server’s slots, and the one that served each call',
   phases: 'phases: the one a session opens in, and the move a seam makes',
-  'pre-warm': 'a seam’s render size, and the pre-warm after it',
   lanes: 'the ratify and extraction side lanes',
 } as const;
 
@@ -294,7 +293,7 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
     readonly reason: SeamReason;
     /** The phases it moved between (v7, #563). */
     readonly phase?: { readonly from: string; readonly to: string };
-    /** AHEAD (`pre-warm`): the pre-warm -- the new prefix sent once so the next ask finds it cached. */
+    /** The pre-warm (log v7, #504): the new prefix sent once so the next ask finds it cached. */
     readonly warm?: Timings;
     /** The surface's own older shape: the render's number, in a recording placed before v6. */
     readonly render_version?: number;
@@ -378,8 +377,7 @@ export function needsOf(line: LogLine): Need[] {
       break;
     case 'seam':
       // `phase` is the format's own since v7 (#563); `render_tokens`, the render's estimated size, since v7's render
-      // budget (#565), written beside the budget that produced it.
-      has('pre-warm', line.warm);
+      // budget (#565), written beside the budget that produced it; `warm`, the pre-warm's timings, since #504.
       break;
   }
   return out;
