@@ -551,6 +551,22 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     };
     let delivery = crate::drive::session::fork_delivery(regimen)
         .map_or_else(|_| undeclared(), |delivery| delivery.tag().to_owned());
+    // #563: the phase graph a served session moves on, beside the triggers
+    // that fire its seams: `none`, or its phases and allowed moves.
+    let phase_graph = match crate::seam::policy::phase_graph(regimen) {
+        Ok(graph) if graph.is_empty() => "none".to_owned(),
+        Ok(graph) => format!(
+            "phases:{};transitions:{}",
+            graph.phases().join(","),
+            graph
+                .transitions()
+                .iter()
+                .map(|(from, to)| format!("{from}>{to}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Err(_) => undeclared(),
+    };
     // #560: whether a call written as text is recovered. `off` by default,
     // as Pi and `OpenCode` 2 have it; a value serve refuses is undeclared.
     let text_fallback = match regimen.get(crate::drive::tool_loop::TOOL_CALL_TEXT_FALLBACK) {
@@ -561,6 +577,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers.join("+")),
+        ("phase_graph".to_owned(), phase_graph),
         ("fork_warrant".to_owned(), warrant.clone()),
         ("fork_delivery".to_owned(), delivery),
         ("tool_output_disposition".to_owned(), disposition),

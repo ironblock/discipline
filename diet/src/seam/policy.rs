@@ -150,41 +150,53 @@ impl Policy {
     pub fn from_regimen(regimen: &Regimen) -> Result<Self, PolicyError> {
         let every_turns = Self::from_regimen_cadence(regimen)?;
         let at_working_set_bytes = positive(regimen, SEAM_AT_WORKING_SET_BYTES)?;
+        Ok(Self {
+            every_turns,
+            at_working_set_bytes,
+            phases: phase_graph(regimen)?,
+        })
+    }
+}
 
-        let phases = names(regimen, PHASES)?.unwrap_or_default();
-        let mut graph = PhaseGraph::of(&phases)?;
+/// The phase graph `regimen` declares under [`PHASES`] and
+/// [`PHASE_TRANSITIONS`]: the one reader the scripted drive and a served
+/// session share (#563). Empty when none is declared.
+///
+/// # Errors
+///
+/// [`PolicyError`] for a key of the wrong shape, a duplicate phase, or a
+/// transition naming a phase that was never declared.
+pub fn phase_graph(regimen: &Regimen) -> Result<PhaseGraph, PolicyError> {
+    let phases = names(regimen, PHASES)?.unwrap_or_default();
+    let mut graph = PhaseGraph::of(&phases)?;
 
-        if let Some(value) = regimen.get(PHASE_TRANSITIONS) {
-            let Value::Table(table) = value else {
-                return Err(PolicyError::NotAListOfNames(PHASE_TRANSITIONS.to_owned()));
+    if let Some(value) = regimen.get(PHASE_TRANSITIONS) {
+        let Value::Table(table) = value else {
+            return Err(PolicyError::NotAListOfNames(PHASE_TRANSITIONS.to_owned()));
+        };
+        if phases.is_empty() && !table.is_empty() {
+            return Err(PolicyError::TransitionsWithoutPhases);
+        }
+        for (from, targets) in table {
+            let Value::Array(items) = targets else {
+                return Err(PolicyError::NotAListOfNames(format!(
+                    "{PHASE_TRANSITIONS}.{from}"
+                )));
             };
-            if phases.is_empty() && !table.is_empty() {
-                return Err(PolicyError::TransitionsWithoutPhases);
-            }
-            for (from, targets) in table {
-                let Value::Array(items) = targets else {
+            for item in items {
+                let Value::String(to) = item else {
                     return Err(PolicyError::NotAListOfNames(format!(
                         "{PHASE_TRANSITIONS}.{from}"
                     )));
                 };
-                for item in items {
-                    let Value::String(to) = item else {
-                        return Err(PolicyError::NotAListOfNames(format!(
-                            "{PHASE_TRANSITIONS}.{from}"
-                        )));
-                    };
-                    graph.allow(from, to)?;
-                }
+                graph.allow(from, to)?;
             }
         }
-
-        Ok(Self {
-            every_turns,
-            at_working_set_bytes,
-            phases: graph,
-        })
     }
+    Ok(graph)
+}
 
+impl Policy {
     /// The cadence `regimen` declares under [`SEAM_EVERY_TURNS`], which the
     /// scripted and the served policy read alike.
     fn from_regimen_cadence(regimen: &Regimen) -> Result<Option<u32>, PolicyError> {
@@ -243,10 +255,9 @@ impl Served {
         regimen: &Regimen,
         serving_context: Option<u64>,
     ) -> Result<Self, PolicyError> {
-        for key in [SEAM_AT_WORKING_SET_BYTES, PHASES, PHASE_TRANSITIONS] {
-            if regimen.get(key).is_some() {
-                return Err(PolicyError::NotServed(key));
-            }
+        // The phase graph is read beside this, by `phase_graph` (#563).
+        if regimen.get(SEAM_AT_WORKING_SET_BYTES).is_some() {
+            return Err(PolicyError::NotServed(SEAM_AT_WORKING_SET_BYTES));
         }
         let every_turns = Policy::from_regimen_cadence(regimen)?;
         let at_trunk_tokens = match regimen.get(SEAM_AT_CONTEXT_FRACTION) {
@@ -418,10 +429,8 @@ mod tests {
             served("seam_at_working_set_bytes = 4096\n", None),
             Err(PolicyError::NotServed(SEAM_AT_WORKING_SET_BYTES))
         );
-        assert_eq!(
-            served("phases = [\"plan\", \"build\"]\n", None),
-            Err(PolicyError::NotServed(PHASES))
-        );
+        // #563: a served session reads its phase graph (`phase_graph`).
+        assert!(served("phases = [\"plan\", \"build\"]\n", None).is_ok());
     }
 
     #[test]

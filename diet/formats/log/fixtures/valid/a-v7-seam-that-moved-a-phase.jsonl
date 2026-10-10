@@ -1,0 +1,20 @@
+{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"opening_phase":"plan","phase_transitions":[{"from":"plan","to":"build"},{"from":"build","to":"review"}],"phases":["plan","build","review"],"seq":0,"t":0,"version":7}
+{"kind":"ask","scoping":true,"seq":1,"t":5,"text":"what are we building","turn":1}
+{"from":"awaiting","kind":"settlement","seq":2,"t":10,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
+{"kind":"response","seq":4,"t":20,"text":"a tracker for the team's bugs","to_request":3}
+{"kind":"turn.settled","reason":"final","seq":5,"t":25,"turn":1}
+{"from":"turn","kind":"settlement","seq":6,"t":30,"to":"awaiting"}
+{"at":3,"kind":"fork","lane":"interview","of_turn":1,"question":"what did the operator decide","seq":7,"t":35,"why":"scoping"}
+{"fork":7,"kind":"request","lane":"interview","seq":8,"t":40,"turn":1}
+{"kind":"response","seq":9,"t":45,"text":"{\"decisions\":[\"a tracker\"]}","to_request":8}
+{"fork":7,"kind":"fork.settled","outcome":"value","seq":10,"t":50}
+{"entry":{"id":"d1","text":"a tracker"},"fork":7,"kind":"patch","op":"add","seq":11,"t":55}
+{"at_turn":1,"carried_entries":1,"carried_turns":0,"frame":"placeholder","kind":"seam","phase":{"from":"plan","to":"build"},"prefix_hash_after":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","prefix_hash_before":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","reason":"operator","render":"# regime\narm: diet\nsubstrate: a-substrate\ndogma_version: 1\nphase: build\nframe_version: placeholder\n\n# working set\nd1\ta tracker\n","seq":12,"t":60}
+{"kind":"ask","seq":13,"t":65,"text":"build it","turn":2}
+{"from":"awaiting","kind":"settlement","seq":14,"t":70,"to":"turn"}
+{"kind":"request","lane":"trunk","seq":15,"t":75,"turn":2}
+{"kind":"response","seq":16,"t":80,"text":"started on the schema","to_request":15}
+{"kind":"turn.settled","reason":"final","seq":17,"t":85,"turn":2}
+{"from":"turn","kind":"settlement","seq":18,"t":90,"to":"awaiting"}
+{"because":"no-phase-edge","command":"declare-seam","during":"awaiting","kind":"refused","seq":19,"t":95}

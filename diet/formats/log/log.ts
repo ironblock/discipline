@@ -55,6 +55,10 @@ export type Refusal =
   | "nothing-in-flight"
   | "seam-not-built"
   | "nothing-to-seam"
+  | "no-phase-graph"
+  | "not-a-phase"
+  | "already-in-phase"
+  | "no-phase-edge"
   | "stale"
 ;
 
@@ -221,6 +225,11 @@ export interface Unsent {
   budget_tokens: number;
 }
 
+export interface PhaseMove {
+  from: string;
+  to: string;
+}
+
 export interface NoteLine {
   entry: string;
   op: PatchOp;
@@ -279,6 +288,9 @@ export type SessionStartLine = {
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
   reasoning_effort_default?: string;
+  phases?: string[];
+  phase_transitions?: PhaseMove[];
+  opening_phase?: string;
   tool_output?: ToolOutputState;
   tool_output_max_lines?: number;
   tool_output_max_bytes?: number;
@@ -470,6 +482,7 @@ export type SeamLine = {
   carried_turns: number;
   tail_tokens?: number;
   carried_tokens?: number;
+  phase?: PhaseMove;
 };
 
 export type DeliveredLine = {

@@ -117,6 +117,15 @@ vocabulary! {
         /// A seam has nothing to refill from: no turn has settled, or working
         /// memory holds no entry (#493).
         NothingToSeam => "nothing-to-seam",
+        /// A seam named a phase to move to, and the session has no phase
+        /// graph (#563).
+        NoPhaseGraph => "no-phase-graph",
+        /// A seam named a phase the graph does not declare.
+        NotAPhase => "not-a-phase",
+        /// A seam named the phase the session is already in.
+        AlreadyInPhase => "already-in-phase",
+        /// A seam named a move the graph does not allow from here.
+        NoPhaseEdge => "no-phase-edge",
         /// A cancel named a turn older than the latest one: it arrived after
         /// that turn settled and must not stop the next (the admission
         /// counter ruled on #117).
@@ -250,6 +259,10 @@ pub enum Event {
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
+        /// The phase graph it runs under, as the log names it (#563): its
+        /// phases and allowed moves, and the phase it opens in; `None` when
+        /// the regimen declares none.
+        phases: Option<(Vec<String>, Vec<log::PhaseMove>, String)>,
     },
     /// An ask was accepted, and a turn begins on it.
     Asked {
@@ -494,6 +507,9 @@ pub enum Event {
         carried_turns: u64,
         /// Their estimated tokens.
         carried_tokens: u64,
+        /// The phases it moved between (#563), when the operator named a
+        /// move the graph allowed.
+        phase: Option<log::PhaseMove>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -689,6 +705,9 @@ pub struct Interview {
     /// How a fork's patches reach the trunk: at the seam (`seam`, the
     /// default), or as a note at the tail of the next trunk request.
     pub delivery: log::ForkDelivery,
+    /// The regimen's phase graph (#563), read as the scripted drive reads
+    /// it; empty when it declares none.
+    pub phases: crate::seam::phase::PhaseGraph,
 }
 
 /// The rule that warrants a fork after `turn` settled `final`, and the
@@ -838,6 +857,9 @@ struct State {
     /// A checked gap waiting for its admitted command's outcome: the next
     /// event pushed, under the same lock.
     pending_gap: Option<IdleGap>,
+    /// The phase the session is in, under a phase graph (#563): the graph's
+    /// first at open, then where each seam's move took it.
+    phase: Option<String>,
     /// Patches waiting to be delivered at the next trunk request, under a
     /// mid-turn fork delivery: each op and the entry text its line names.
     undelivered: Vec<(log::PatchOp, String, String)>,
@@ -1247,6 +1269,27 @@ impl<S: Streaming + 'static> Session<S> {
         );
         let trunk = template.messages.clone();
         let fork_delivery = interview.as_ref().map(|interview| interview.delivery);
+        let graph = interview
+            .as_ref()
+            .map(|interview| interview.phases.clone())
+            .filter(|graph| !graph.is_empty());
+        let phase_at_open = graph
+            .as_ref()
+            .and_then(|graph| graph.first().map(str::to_owned));
+        let phases = graph
+            .as_ref()
+            .zip(phase_at_open.clone())
+            .map(|(graph, first)| {
+                (
+                    graph.phases().to_vec(),
+                    graph
+                        .transitions()
+                        .into_iter()
+                        .map(|(from, to)| log::PhaseMove { from, to })
+                        .collect(),
+                    first,
+                )
+            });
         let opened = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| {
@@ -1268,6 +1311,7 @@ impl<S: Streaming + 'static> Session<S> {
             gap_open: None,
             carried: None,
             pending_gap: None,
+            phase: phase_at_open.clone(),
             undelivered: Vec::new(),
             recovered: BTreeMap::new(),
             sink: None,
@@ -1307,6 +1351,7 @@ impl<S: Streaming + 'static> Session<S> {
             fork_delivery,
             reasoning_effort_default,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
+            phases,
         });
         Self {
             shared: Arc::new(Shared {
@@ -1518,6 +1563,22 @@ impl<S: Streaming + 'static> Session<S> {
     /// neither logged nor closed. [`Rejected::BadGap`] when `gap` cannot be
     /// logged, and then nothing is.
     pub fn declare_seam(&self, gap: Option<IdleGap>) -> Result<(), Rejected> {
+        self.declare_seam_to(gap, None)
+    }
+
+    /// [`Self::declare_seam`], moving to phase `to` when one is named
+    /// (#563): the regimen's phase graph rules on the move, as it rules on
+    /// the scripted drive's (`seam::phase::PhaseGraph::decide`), and a move
+    /// it does not allow is refused with its reason, logged, as
+    /// `nothing-to-seam` is. With no phase named, the session stays in its
+    /// phase.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::declare_seam`], and [`Refusal::NoPhaseGraph`],
+    /// [`Refusal::NotAPhase`], [`Refusal::AlreadyInPhase`] or
+    /// [`Refusal::NoPhaseEdge`] for a move the graph refuses.
+    pub fn declare_seam_to(&self, gap: Option<IdleGap>, to: Option<&str>) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
         state.carry(gap, CommandKind::DeclareSeam);
         let because = match state.settlement {
@@ -1535,7 +1596,24 @@ impl<S: Streaming + 'static> Session<S> {
             {
                 Some(Refusal::NothingToSeam)
             }
-            Settlement::Awaiting => None,
+            Settlement::Awaiting => to.and_then(|to| {
+                use crate::seam::phase::{Decision, Refusal as Graph};
+                let graph = state
+                    .interview
+                    .as_ref()
+                    .map(|interview| &interview.phases)
+                    .filter(|graph| !graph.is_empty());
+                let Some(graph) = graph else {
+                    return Some(Refusal::NoPhaseGraph);
+                };
+                match graph.decide(state.phase.as_deref(), to) {
+                    Decision::Ratified => None,
+                    Decision::Refused(Graph::NoGraph) => Some(Refusal::NoPhaseGraph),
+                    Decision::Refused(Graph::NotAPhase) => Some(Refusal::NotAPhase),
+                    Decision::Refused(Graph::AlreadyThere) => Some(Refusal::AlreadyInPhase),
+                    Decision::Refused(Graph::NoEdge) => Some(Refusal::NoPhaseEdge),
+                }
+            }),
         };
         if let Some(because) = because {
             let refused = state.refuse(CommandKind::DeclareSeam, because);
@@ -1548,6 +1626,7 @@ impl<S: Streaming + 'static> Session<S> {
             &self.shared.template,
             &mut state,
             crate::seam::Reason::Operator,
+            to.map(str::to_owned),
         );
         drop(state);
         self.shared.changed.notify_all();
@@ -1852,7 +1931,12 @@ pub fn line_of(logged: &Logged) -> log::Line {
             fork_delivery,
             reasoning_effort_default,
             tool_output,
+            phases,
         } => log::Event::SessionStart {
+            // #563: the graph, and the phase it opens in; nothing when none.
+            phases: phases.as_ref().map(|(names, _, _)| names.clone()),
+            phase_transitions: phases.as_ref().map(|(_, moves, _)| moves.clone()),
+            opening_phase: phases.as_ref().map(|(_, _, first)| first.clone()),
             fork_delivery: *fork_delivery,
             reasoning_effort_default: reasoning_effort_default.clone(),
             tool_output: tool_output.map(tool_output_of),
@@ -2141,7 +2225,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tail_tokens,
             carried_turns,
             carried_tokens,
+            phase,
         } => log::Event::Seam {
+            phase: phase.clone(),
             at_turn: *at_turn,
             reason: match reason {
                 crate::seam::Reason::Operator => log::SeamReason::Operator,
@@ -2257,6 +2343,10 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::Ended => log::Refusal::Ended,
         Refusal::NothingInFlight => log::Refusal::NothingInFlight,
         Refusal::NothingToSeam => log::Refusal::NothingToSeam,
+        Refusal::NoPhaseGraph => log::Refusal::NoPhaseGraph,
+        Refusal::NotAPhase => log::Refusal::NotAPhase,
+        Refusal::AlreadyInPhase => log::Refusal::AlreadyInPhase,
+        Refusal::NoPhaseEdge => log::Refusal::NoPhaseEdge,
         Refusal::Stale => log::Refusal::Stale,
     }
 }
@@ -3090,11 +3180,25 @@ fn one_call<S: Streaming>(
 /// old trunk. The caller has checked the session is awaiting and working
 /// memory holds an entry. A cadence then counts from here, and a budget
 /// waits for the next trunk call to measure the refilled trunk.
-fn refill_trunk(template: &RequestShape, state: &mut State, reason: crate::seam::Reason) {
+fn refill_trunk(
+    template: &RequestShape,
+    state: &mut State,
+    reason: crate::seam::Reason,
+    to: Option<String>,
+) {
+    // The move the graph allowed, made before the render, so the refill
+    // names the phase the session is now in (#563).
+    let phase = to.map(|to| log::PhaseMove {
+        from: state.phase.clone().unwrap_or_default(),
+        to,
+    });
+    if let Some(moved) = &phase {
+        state.phase = Some(moved.to.clone());
+    }
     let Some(interview) = state.interview.as_ref() else {
         unreachable!("a seam is refused or not due when the session keeps no working memory");
     };
-    let render = crate::seam::render::render(&interview.object, None);
+    let render = crate::seam::render::render(&interview.object, state.phase.as_deref());
     let carried_entries = interview.object.live().count() as u64;
     // The head a trunk request on `messages` carries: `Head::of` leaves
     // out a request's last message, its ask, so one stands in for it.
@@ -3138,6 +3242,7 @@ fn refill_trunk(template: &RequestShape, state: &mut State, reason: crate::seam:
         tail_tokens,
         carried_turns,
         carried_tokens,
+        phase,
     });
 }
 
@@ -3157,7 +3262,7 @@ fn turn_over(template: &RequestShape, state: &mut State) {
             .due(state.turns - state.turns_at_seam, state.trunk_tokens)
     });
     if let Some(reason) = due {
-        refill_trunk(template, state, reason);
+        refill_trunk(template, state, reason, None);
     }
 }
 
@@ -4701,6 +4806,7 @@ pub(in crate::drive) mod tests {
             fork_delivery: None,
             reasoning_effort_default: None,
             tool_output: None,
+            phases: _,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -4801,6 +4907,7 @@ pub(in crate::drive) mod tests {
                 fork_delivery: Some(log::ForkDelivery::Advisory),
                 reasoning_effort_default: Some("xhigh".to_owned()),
                 tool_output: Some(crate::drive::output::OutputCap::DEFAULT),
+                phases: None,
             },
             Event::Asked {
                 turn: 1,
@@ -4991,6 +5098,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 carried_turns: 0,
                 carried_tokens: 0,
+                phase: None,
             },
             Event::Delivered {
                 turn: 2,
@@ -5079,6 +5187,9 @@ pub(in crate::drive) mod tests {
                     max_lines: Some(2000),
                     max_bytes: Some(51_200),
                 }),
+                phases: None,
+                phase_transitions: None,
+                opening_phase: None,
             },
             log::Event::Ask {
                 turn: 1,
@@ -5283,6 +5394,7 @@ pub(in crate::drive) mod tests {
                 carried_turns: 0,
                 tail_tokens: None,
                 carried_tokens: None,
+                phase: None,
             },
             log::Event::Delivered {
                 turn: 2,
@@ -5757,7 +5869,8 @@ pub(in crate::drive) mod tests {
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
-            "in-flight ended nothing-in-flight nothing-to-seam stale"
+            "in-flight ended nothing-in-flight nothing-to-seam no-phase-graph not-a-phase \
+             already-in-phase no-phase-edge stale"
         );
         assert_eq!(
             tags(
@@ -7545,6 +7658,7 @@ pub(in crate::drive) mod tests {
             object: WorkingObject::open(regime()),
             seams: crate::seam::policy::Served::default(),
             delivery: log::ForkDelivery::Seam,
+            phases: crate::seam::phase::PhaseGraph::none(),
         }
     }
 
@@ -7885,6 +7999,173 @@ pub(in crate::drive) mod tests {
             seams,
             ..interviewing(&[log::Warrant::Scoping])
         }
+    }
+
+    /// An interview under a three-phase graph: plan to build to review.
+    fn phased() -> Interview {
+        let mut graph = crate::seam::phase::PhaseGraph::of(&[
+            "plan".to_owned(),
+            "build".to_owned(),
+            "review".to_owned(),
+        ])
+        .expect("three phases");
+        graph.allow("plan", "build").expect("an edge");
+        graph.allow("build", "review").expect("an edge");
+        Interview {
+            phases: graph,
+            ..interviewing(&[log::Warrant::Scoping])
+        }
+    }
+
+    /// #563: a served session opens in its graph's first phase and logs the
+    /// graph; a seam that names a move the graph allows moves, the refill
+    /// renders the new phase, and the seam line says from and to; a move it
+    /// refuses is refused with the graph's reason, logged; with no phase
+    /// named the session stays where it is; and the projection rebuilds the
+    /// refilled head.
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn a_served_seam_moves_between_the_phases_its_graph_allows() {
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["started on the schema"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(phased()),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        for (to, refused) in [
+            ("review", Refusal::NoPhaseEdge),
+            ("plan", Refusal::AlreadyInPhase),
+            ("ship", Refusal::NotAPhase),
+        ] {
+            assert_eq!(
+                session.declare_seam_to(None, Some(to)),
+                Err(Rejected::Refused(refused)),
+                "{to}"
+            );
+        }
+        session
+            .declare_seam_to(None, Some("build"))
+            .expect("plan to build is allowed");
+        let render = |phase: &str| {
+            let held = session.shared.lock();
+            let object = &held.interview.as_ref().expect("interviewing").object;
+            crate::seam::render::render(object, Some(phase))
+        };
+        assert_eq!(
+            session.trunk(),
+            crate::seam::render::refill(&template().messages, &render("build"))
+        );
+        // No phase named: a seam that stays in `build`.
+        session.declare_seam(None).expect("a seam that stays");
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|l| matches!(l.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+        let log::Event::SessionStart {
+            phases,
+            phase_transitions,
+            opening_phase,
+            ..
+        } = &lines[0].event
+        else {
+            panic!("the session's start");
+        };
+        assert_eq!(
+            phases.as_deref(),
+            Some(&["plan".to_owned(), "build".to_owned(), "review".to_owned()][..])
+        );
+        assert_eq!(
+            phase_transitions.as_ref().map(Vec::len),
+            Some(2),
+            "{phase_transitions:?}"
+        );
+        assert_eq!(opening_phase.as_deref(), Some("plan"));
+        let moves: Vec<Option<log::PhaseMove>> = lines
+            .iter()
+            .filter_map(|line| match &line.event {
+                log::Event::Seam { phase, .. } => Some(phase.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            moves,
+            [
+                Some(log::PhaseMove {
+                    from: "plan".to_owned(),
+                    to: "build".to_owned()
+                }),
+                None
+            ]
+        );
+        let refusals: Vec<log::Refusal> = lines
+            .iter()
+            .filter_map(|line| match &line.event {
+                log::Event::Refused { because, .. } => Some(*because),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            refusals,
+            [
+                log::Refusal::NoPhaseEdge,
+                log::Refusal::AlreadyInPhase,
+                log::Refusal::NotAPhase
+            ]
+        );
+        // The projection rebuilds the head the refill made, phase and all.
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        assert!(
+            !projected
+                .unspellable
+                .iter()
+                .any(|item| item.why.contains("rebuilt")),
+            "{:?}",
+            projected.unspellable
+        );
+        reads_whole(&session);
+    }
+
+    /// #563: naming a phase with no graph is refused, logged.
+    #[test]
+    fn a_phase_named_with_no_graph_is_refused() {
+        let session = Session::open_with(
+            Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert_eq!(
+            session.declare_seam_to(None, Some("build")),
+            Err(Rejected::Refused(Refusal::NoPhaseGraph))
+        );
+        reads_whole(&session);
     }
 
     /// The seam lines in `log`, as the log writes them: turn and reason.
@@ -8314,6 +8595,7 @@ pub(in crate::drive) mod tests {
                 carried_turns: 0,
                 tail_tokens: None,
                 carried_tokens: None,
+                phase: None,
             }
         );
 

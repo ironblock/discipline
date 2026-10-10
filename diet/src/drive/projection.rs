@@ -1463,6 +1463,9 @@ mod tests {
             fork_delivery: None,
             reasoning_effort_default: None,
             tool_output: None,
+            phases: None,
+            phase_transitions: None,
+            opening_phase: None,
         }
     }
 
@@ -1649,6 +1652,7 @@ mod tests {
             carried_turns: 0,
             tail_tokens: None,
             carried_tokens: None,
+            phase: None,
         });
         let projection = project(
             &numbered(events),
@@ -1686,6 +1690,7 @@ mod tests {
             carried_turns: 1,
             tail_tokens: Some(10_000),
             carried_tokens: Some(1),
+            phase: None,
         });
         let projection = project(
             &numbered(events),
