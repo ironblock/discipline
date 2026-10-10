@@ -34,6 +34,8 @@ export type Kind =
   | "tangent.close"
   | "capture"
   | "reminded"
+  | "background.ended"
+  | "notice"
 ;
 
 export type State =
@@ -55,6 +57,7 @@ export type Command =
   | "end"
   | "open-tangent"
   | "close-tangent"
+  | "background"
 ;
 
 export type Refusal =
@@ -72,6 +75,7 @@ export type Refusal =
   | "no-tangent"
   | "bad-tangent"
   | "not-the-scope"
+  | "nothing-running"
 ;
 
 export type FailReason =
@@ -217,6 +221,12 @@ export type SeamToolOutputs =
 export type RenderPlacement =
   | "system"
   | "message"
+;
+
+export type BackgroundStatus =
+  | "completed"
+  | "failed"
+  | "cancelled"
 ;
 
 export interface HeadMessage {
@@ -482,6 +492,7 @@ export type ToolCallLine = {
   files?: RecordedFile[];
   shown?: string;
   recovered_from?: string;
+  background?: string;
 };
 
 export type ForkLine = {
@@ -622,6 +633,24 @@ export type RemindedLine = {
   text: string;
 };
 
+export type BackgroundEndedLine = {
+  seq: number;
+  t: number;
+  kind: "background.ended";
+  job: string;
+  status: BackgroundStatus;
+  exit?: number;
+  files?: RecordedFile[];
+};
+
+export type NoticeLine = {
+  seq: number;
+  t: number;
+  kind: "notice";
+  turn: number;
+  text: string;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -648,4 +677,6 @@ export type LogLine =
   | TangentCloseLine
   | CaptureLine
   | RemindedLine
+  | BackgroundEndedLine
+  | NoticeLine
 ;

@@ -803,7 +803,7 @@ fn served_session(
     // `bash` alone, or `bash` and the standard set; then `prune_output`
     // when the regimen offers it (#612).
     if let Some(tools) = tools.as_ref() {
-        shape.tools = tools.surface.tools();
+        shape.tools = tools.surface.tools_with(tools.background);
         if declared
             .1
             .as_ref()
@@ -1199,6 +1199,8 @@ fn serving_tools(
         // names (#554, #557).
         read_tool: declared.surface.read_tool(),
         surface: declared.surface,
+        // #614: on unless the regimen turns it off.
+        background: declared.background,
     }))
 }
 

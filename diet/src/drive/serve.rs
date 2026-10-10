@@ -846,6 +846,14 @@ impl<S: Streaming + 'static> Serving<S> {
                     Err(rejection) => rejected(rejection),
                 }
             }
+            // The job the running call becomes (#614).
+            Command::Background => match self.session.background() {
+                Ok(job) => (
+                    200,
+                    BTreeMap::from([("job".to_owned(), Value::String(job))]),
+                ),
+                Err(rejection) => rejected(rejection),
+            },
         }
     }
 }
@@ -871,6 +879,8 @@ enum Command {
     OpenTangent(String),
     /// Close the open tangent with these dispositions, by entry id (#22).
     CloseTangent(BTreeMap<String, crate::object::tangent::Disposition>),
+    /// Move the running command to the background (#614).
+    Background,
 }
 
 impl Command {
@@ -893,6 +903,8 @@ impl Command {
             // No idle gap (#22): a tangent's open and close end none.
             CommandKind::OpenTangent => &["kind", "id"],
             CommandKind::CloseTangent => &["kind", "dispositions"],
+            // #614: moving the running call ends no idle gap either.
+            CommandKind::Background => &["kind"],
         };
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
@@ -950,6 +962,7 @@ impl Command {
                     .map(Self::CloseTangent),
                 _ => None,
             },
+            CommandKind::Background => Some(Self::Background),
         }?;
         Some(Posted {
             command,
@@ -1329,6 +1342,21 @@ mod tests {
             assert!(Instant::now() < give_up, "gave up waiting for {what}");
             std::thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    /// #614: `background` takes nothing but its kind.
+    #[test]
+    fn a_background_command_takes_nothing_but_its_kind() {
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"background"}"#),
+            Some(Command::Background)
+        ));
+        assert!(read(r#"{"kind":"background","job":"bg_1"}"#).is_none());
+        assert!(read(r#"{"kind":"background","idle_gap":{}}"#).is_none());
     }
 
     /// #22: `open-tangent` takes an id, `close-tangent` a map of entry ids to

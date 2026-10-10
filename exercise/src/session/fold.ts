@@ -70,6 +70,11 @@ export interface UserNode extends Provenance {
    */
   readonly recalled?: { readonly recall: string; readonly text: string };
   /**
+   * Ended background commands' notifications delivered after this ask (log v7's `notice`, #614): the note the model
+   * was sent at the tail of the turn's first request. Folded, not yet drawn.
+   */
+  readonly noticed?: string;
+  /**
    * The tool results the model pruned in this turn (log v7's `pruned`, #612): each call, the bytes a later seam
    * removes, and the reference line it carries instead. Folded, not yet drawn.
    */
@@ -498,6 +503,7 @@ export function fold(lines: readonly LogLine[]): Session {
   const asks = new Map<number, LineOf<'ask'>>();
   const deliveries = new Map<number, LineOf<'delivered'>>();
   const recalls = new Map<number, LineOf<'recalled'>>();
+  const notices = new Map<number, LineOf<'notice'>>();
   const prunes = new Map<number, LineOf<'pruned'>[]>();
   const reminders = new Map<number, LineOf<'reminded'>>();
   // Self-capture's outcomes, by the call they belong to: `<request>/<call id>`.
@@ -701,6 +707,13 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'recalled':
         recalls.set(e.turn, e);
         break;
+      case 'notice':
+        notices.set(e.turn, e);
+        break;
+      // A background job's end (#614): what it said reaches the model as the next ask's notice; the end itself is
+      // folded into no node yet.
+      case 'background.ended':
+        break;
       case 'pruned':
         prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
         break;
@@ -826,6 +839,7 @@ export function fold(lines: readonly LogLine[]): Session {
             ...(recalls.has(slot.turn)
               ? { recalled: { recall: recalls.get(slot.turn)!.recall, text: recalls.get(slot.turn)!.text } }
               : {}),
+            ...(notices.has(slot.turn) ? { noticed: notices.get(slot.turn)!.text } : {}),
             ...(prunes.has(slot.turn)
               ? { pruned: prunes.get(slot.turn)!.map(({ call, bytes, text }) => ({ call, bytes, text })) }
               : {}),

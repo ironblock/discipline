@@ -106,6 +106,8 @@ vocabulary! {
         OpenTangent => "open-tangent",
         /// Close the open tangent (#22).
         CloseTangent => "close-tangent",
+        /// Move the running command to the background (#614).
+        Background => "background",
     }
 }
 
@@ -144,6 +146,8 @@ vocabulary! {
         /// A close whose dispositions are not exactly the tangent's entries
         /// (#22).
         NotTheScope => "not-the-scope",
+        /// A move to the background with no command running (#614).
+        NothingRunning => "nothing-running",
     }
 }
 
@@ -583,6 +587,26 @@ pub enum Event {
     },
     /// Archived items recalled after an ask (#566): one note, which stays
     /// on the trunk.
+    /// A background command ended (#614): its job, how, its exit status,
+    /// and its output kept by digest.
+    BackgroundEnded {
+        /// The job's id.
+        job: String,
+        /// How it ended.
+        status: log::BackgroundStatus,
+        /// Its exit status, when it exited.
+        exit: Option<u64>,
+        /// Its output, kept in the recording by digest.
+        files: Vec<log::RecordedFile>,
+    },
+    /// Ended background commands' notifications, delivered after an ask
+    /// (#614): one note at the tail of its first request.
+    Notified {
+        /// The turn whose first request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
+    },
     Recalled {
         /// The turn whose first request carried it.
         turn: u32,
@@ -726,6 +750,8 @@ pub struct ToolLine {
     /// The text the call was recovered from, when the model wrote it as
     /// text rather than calling natively (#560).
     pub recovered_from: Option<String>,
+    /// The background job it started, or was moved into (#614).
+    pub background: Option<String>,
 }
 
 impl ToolLine {
@@ -753,6 +779,7 @@ impl ToolLine {
             files: Vec::new(),
             images: Vec::new(),
             recovered_from: None,
+            background: None,
         }
     }
 }
@@ -1512,6 +1539,13 @@ struct State {
     /// The recording directory, when the session keeps one: where a seam's
     /// `reference` saves an output's whole (#553).
     recording: Option<std::path::PathBuf>,
+    /// The session's background jobs (#614), by id.
+    jobs: BTreeMap<String, super::background::Job>,
+    /// Ended jobs' notifications, waiting for the next ask (#614).
+    notices: Vec<String>,
+    /// The running foreground `bash` call's promotion (#614): the job it
+    /// becomes, once the operator asks.
+    promotable: Option<Arc<Mutex<Option<super::background::Job>>>>,
     /// The results the model pruned (#612), in the order it pruned them.
     pruned: Vec<Prune>,
     /// Whether the trunk carries a seam's refill message after the head
@@ -1660,6 +1694,18 @@ impl State {
     /// request, logged as turn `turn`'s `delivered` line, or `None` when
     /// none waits. One line per patch, each the (b′) sentence of the
     /// session's framing, pinned in the dogma.
+    fn notify(&mut self, turn: u32) -> Option<Message> {
+        if self.notices.is_empty() {
+            return None;
+        }
+        let text = std::mem::take(&mut self.notices).join("\n");
+        self.push(Event::Notified {
+            turn,
+            text: text.clone(),
+        });
+        Some(Message::new(Role::User, text))
+    }
+
     fn deliver(&mut self, turn: u32) -> Option<Message> {
         let delivery = self.interview.as_ref()?.delivery;
         let (framing, template) = match delivery {
@@ -1719,8 +1765,8 @@ impl State {
                 CommandKind::Cancel => GapEnd::Cancel,
                 CommandKind::DeclareSeam => GapEnd::Seam,
                 CommandKind::End => GapEnd::End,
-                CommandKind::OpenTangent | CommandKind::CloseTangent => {
-                    unreachable!("a tangent command carries no idle gap: it takes none")
+                CommandKind::OpenTangent | CommandKind::CloseTangent | CommandKind::Background => {
+                    unreachable!("a tangent or background command carries no idle gap")
                 }
             };
             if gap.ended_by != ends {
@@ -1822,6 +1868,9 @@ struct Shared<S> {
     changed: Condvar,
     /// What a call runs under, when the session runs commands.
     tools: Option<Tools>,
+    /// Where a started background job's child goes to be waited on (#614):
+    /// the session's reaper, when background commands are on.
+    reap: Mutex<Option<std::sync::mpsc::Sender<(String, std::process::Child)>>>,
     /// Where the interview fork runs when it is not the trunk's server
     /// (#570); `None` is warm.
     seat: Option<Offboard<S>>,
@@ -2040,6 +2089,9 @@ impl<S: Streaming + 'static> Session<S> {
             recording: tools.as_ref().and_then(|t| t.recording.clone()),
             pruned: Vec::new(),
             refilled: false,
+            jobs: BTreeMap::new(),
+            notices: Vec::new(),
+            promotable: None,
         };
         state.push(Event::Started {
             opened,
@@ -2063,16 +2115,23 @@ impl<S: Streaming + 'static> Session<S> {
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             phases,
         });
-        Self {
-            shared: Arc::new(Shared {
-                transport,
-                template,
-                state: Mutex::new(state),
-                changed: Condvar::new(),
-                tools,
-                seat: None,
-            }),
-        }
+        Self::sharing(Shared {
+            transport,
+            template,
+            state: Mutex::new(state),
+            changed: Condvar::new(),
+            tools,
+            reap: Mutex::new(None),
+            seat: None,
+        })
+    }
+
+    /// The session over `shared`, its reaper started when background
+    /// commands are on (#614).
+    fn sharing(shared: Shared<S>) -> Self {
+        let shared = Arc::new(shared);
+        start_reaper(&shared);
+        Self { shared }
     }
 
     /// This session, its interview fork seated offboard (#570): every fork's
@@ -2180,6 +2239,12 @@ impl<S: Streaming + 'static> Session<S> {
         // Archive recall (#566): what earlier seams dropped that this ask
         // names, as one note after it (and after any delivered note).
         if let Some(note) = state.recall(turn, &opening[0].content) {
+            shape.messages.push(note.clone());
+            opening.push(note);
+        }
+        // Background commands that ended since (#614): their notifications,
+        // as one note after it, Qwen Code's `<task-notification>`s.
+        if let Some(note) = state.notify(turn) {
             shape.messages.push(note.clone());
             opening.push(note);
         }
@@ -2679,8 +2744,66 @@ impl<S: Streaming + 'static> Session<S> {
     /// End what the session's commands left running: every process group a
     /// command led, under Seatbelt. Called once, at the end.
     pub fn end_commands(&self) {
+        // Every running background job's process group (#614), as a stop.
+        {
+            let mut state = self.shared.lock();
+            for job in state.jobs.values_mut() {
+                if job.status == super::background::Status::Running {
+                    job.stopping = true;
+                    super::background::stop_group(job.pid);
+                }
+            }
+        }
         if let Some(tools) = &self.shared.tools {
             tools.confinement.end_session();
+        }
+    }
+
+    /// Move the running foreground `bash` call to the background (#614): it
+    /// returns at once, Qwen Code's promotion answer, and the command keeps
+    /// running under the session's confinement, its output written to a
+    /// file. Returns the job's id.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`]; [`Refusal::NothingRunning`]
+    /// when no `bash` call is running, or one is already being moved.
+    pub fn background(&self) -> Result<String, Rejected> {
+        let mut state = self.shared.lock();
+        let slot = match (state.settlement, &state.promotable) {
+            (Settlement::Ended, _) => Err(Refusal::Ended),
+            (_, Some(slot)) => Ok(Arc::clone(slot)),
+            (_, None) => Err(Refusal::NothingRunning),
+        };
+        let asked = slot.and_then(|slot| {
+            let mut job = slot.lock().unwrap_or_else(PoisonError::into_inner);
+            if job.is_some() {
+                return Err(Refusal::NothingRunning);
+            }
+            let id = super::background::new_id();
+            let (output, status_file) =
+                super::background::files_of(&background_dir(&self.shared, &state), &id);
+            *job = Some(super::background::Job {
+                id: id.clone(),
+                command: String::new(),
+                cwd: String::new(),
+                pid: 0,
+                output,
+                status_file,
+                status: super::background::Status::Running,
+                exit: None,
+                stopping: false,
+            });
+            Ok(id)
+        });
+        match asked {
+            Ok(id) => Ok(id),
+            Err(because) => {
+                let refused = state.refuse(CommandKind::Background, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                Err(Rejected::Refused(refused))
+            }
         }
     }
 
@@ -3049,6 +3172,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 files,
                 images: _,
                 recovered_from,
+                background,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -3071,8 +3195,24 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 files: (!files.is_empty()).then_some(files),
                 shown,
                 recovered_from,
+                background,
             }
         }
+        Event::BackgroundEnded {
+            job,
+            status,
+            exit,
+            files,
+        } => log::Event::BackgroundEnded {
+            job: job.clone(),
+            status: *status,
+            exit: *exit,
+            files: (!files.is_empty()).then(|| files.clone()),
+        },
+        Event::Notified { turn, text } => log::Event::Notice {
+            turn: *turn,
+            text: text.clone(),
+        },
         Event::TurnSettled { turn, reason } => log::Event::TurnSettled {
             turn: *turn,
             reason: settle_reason_in_the_log(*reason),
@@ -3360,6 +3500,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::End => log::Command::End,
         CommandKind::OpenTangent => log::Command::OpenTangent,
         CommandKind::CloseTangent => log::Command::CloseTangent,
+        CommandKind::Background => log::Command::Background,
     }
 }
 
@@ -3378,6 +3519,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NoTangent => log::Refusal::NoTangent,
         Refusal::BadTangent => log::Refusal::BadTangent,
         Refusal::NotTheScope => log::Refusal::NotTheScope,
+        Refusal::NothingRunning => log::Refusal::NothingRunning,
     }
 }
 
@@ -4315,6 +4457,19 @@ fn one_call<S: Streaming>(
     {
         return standard_call(tools, cancel, (turn, request), call, last);
     }
+    // `task_stop` (#614): no gate decides it; it stops a job the session
+    // started.
+    if declared
+        && call.name == super::background::TASK_STOP
+        && shared.tools.as_ref().is_some_and(|tools| tools.background)
+    {
+        if last {
+            let mut line = refused(log::ToolRefusal::MaxSteps);
+            line.reason = Some(log::ToolRefusal::MaxSteps);
+            return (line, None);
+        }
+        return task_stop_call(shared, (turn, request), call);
+    }
     let Some(tools) = shared
         .tools
         .as_ref()
@@ -4327,6 +4482,14 @@ fn one_call<S: Streaming>(
             refused(log::ToolRefusal::Unparsable),
             Some(tool_loop::refusal_text(log::ToolRefusal::Unparsable, "")),
         );
+    };
+    // In the background (#614): one bare trailing `&` comes off, as Qwen
+    // Code takes it off, before the gate judges the command.
+    let background = tools.background && tool_loop::background_of(&call.arguments);
+    let command = if background {
+        super::background::without_trailing_amp(&command)
+    } else {
+        command
     };
     let parsed = |mut line: ToolLine| {
         line.argv = Some(tool_loop::argv_of(&command));
@@ -4451,12 +4614,51 @@ fn one_call<S: Streaming>(
     let mut line = parsed(ToolLine::of(request, turn, call, log::ToolOutcome::Ran));
     line.approval = approval;
     let profiled = tools.confinement.isolation() != crate::isolation::Isolation::None;
+    if background {
+        return background_call(shared, tools, line, (&run, &command));
+    }
+    // A running call the operator can move to the background (#614), when
+    // background commands are on.
+    let slot = tools.background.then(|| {
+        let slot = Arc::new(Mutex::new(None));
+        shared.lock().promotable = Some(Arc::clone(&slot));
+        slot
+    });
     // A stop reaches a running call: its whole process group is killed, and
     // the turn settles `cancelled` (#551).
-    match tools
-        .confinement
-        .run_until(&tools.policy, &tools.worktree, &run, &|| cancel.is_asked())
-    {
+    let finished = match &slot {
+        Some(slot) => tools.confinement.run_promotable(
+            &tools.policy,
+            &tools.worktree,
+            &run,
+            &|| cancel.is_asked(),
+            &|| {
+                slot.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .as_ref()
+                    .and_then(|job: &super::background::Job| {
+                        std::fs::File::create(&job.output).ok()
+                    })
+            },
+        ),
+        None => tools
+            .confinement
+            .run_until(&tools.policy, &tools.worktree, &run, &|| cancel.is_asked())
+            .map(crate::isolation::Finished::Ran),
+    };
+    if slot.is_some() {
+        shared.lock().promotable = None;
+    }
+    let finished = match finished {
+        Ok(crate::isolation::Finished::Promoted(ran, child)) => {
+            let job =
+                slot.and_then(|slot| slot.lock().unwrap_or_else(PoisonError::into_inner).take());
+            return promoted_call(shared, tools, line, (ran, child), (job, &command));
+        }
+        Ok(crate::isolation::Finished::Ran(ran)) => Ok(ran),
+        Err(not_run) => Err(not_run),
+    };
+    match finished {
         Ok(ran) if ran.cancelled => {
             // A cancelled line carries no streams (the log format's rule);
             // what the command printed before the cancel reaches the log as
@@ -4496,29 +4698,297 @@ fn one_call<S: Streaming>(
             let shown = shown_capped(tools, &ran.as_the_model_sees_it(), &mut line);
             (line, Some(shown))
         }
-        Err(not_run) => {
-            // It never ran: what would have run, and why it did not, as the
-            // command's own failure under its confinement.
-            let said = not_run.to_string();
-            let confined = tools
+        Err(not_run) => never_ran(tools, line, &run, &not_run),
+    }
+}
+
+/// Where the session's background jobs write (#614): the recording's
+/// `background/`, or, with no recording, a directory of the session's own
+/// under the system's temporary one.
+fn background_dir<S>(shared: &Shared<S>, state: &State) -> std::path::PathBuf {
+    let dir = shared
+        .tools
+        .as_ref()
+        .and_then(|tools| tools.recording.as_ref())
+        .map_or_else(
+            || {
+                let opened = match state.log.first() {
+                    Some(Logged {
+                        event: Event::Started { opened, .. },
+                        ..
+                    }) => *opened,
+                    _ => 0,
+                };
+                std::env::temp_dir()
+                    .join(format!("diet-background-{opened}-{}", std::process::id()))
+            },
+            |recording| recording.join("background"),
+        );
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// A started job, kept and handed to the reaper (#614).
+fn register<S>(shared: &Shared<S>, job: super::background::Job, child: std::process::Child) {
+    job.write_status();
+    let id = job.id.clone();
+    shared.lock().jobs.insert(id.clone(), job);
+    if let Some(reap) = shared
+        .reap
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+    {
+        let _ = reap.send((id, child));
+    }
+}
+
+/// A `bash` call that asked for the background (#614): started under the
+/// session's confinement, its output written to a file, and answered at
+/// once with Qwen Code's start text.
+fn background_call<S>(
+    shared: &Shared<S>,
+    tools: &Tools,
+    mut line: ToolLine,
+    (run, command): (&[String], &str),
+) -> (ToolLine, Option<String>) {
+    let dir = background_dir(shared, &shared.lock());
+    let id = super::background::new_id();
+    let (output, status_file) = super::background::files_of(&dir, &id);
+    let spawned = std::fs::File::create(&output)
+        .map_err(|why| crate::isolation::NotRun::Runner {
+            said: format!(
+                "the output file {} could not be made: {why}",
+                output.display()
+            ),
+        })
+        .and_then(|file| {
+            tools
                 .confinement
-                .compose(&tools.policy, &tools.worktree, &run);
-            line.outcome = log::ToolOutcome::CommandFailed;
-            line.policy = tools.confinement.policy_of(&confined);
-            line.confined = Some(confined);
-            line.isolation = Some(isolation_word(tools.confinement.isolation()));
-            line.network = Some(network_word(tools.policy.network));
+                .spawn_detached(&tools.policy, &tools.worktree, run, &file)
+        });
+    match spawned {
+        Ok((ran, child)) => {
+            let job = super::background::Job {
+                id: id.clone(),
+                command: command.to_owned(),
+                cwd: tools.cwd.clone(),
+                pid: child.id(),
+                output,
+                status_file,
+                status: super::background::Status::Running,
+                exit: None,
+                stopping: false,
+            };
+            let shown = super::background::started(&job);
+            line.confined = Some(ran.confined.clone());
+            line.isolation = Some(isolation_word(ran.isolation));
+            line.network = Some(network_word(ran.network));
             line.stdout = Some(log::Output {
                 text: String::new(),
                 bytes: 0,
             });
             line.stderr = Some(log::Output {
-                text: said.clone(),
-                bytes: said.len() as u64,
+                text: String::new(),
+                bytes: 0,
             });
-            (line, Some(said))
+            line.background = Some(id);
+            register(shared, job, child);
+            (line, Some(shown))
+        }
+        Err(not_run) => never_ran(tools, line, run, &not_run),
+    }
+}
+
+/// A running call the operator moved to the background (#614): what it
+/// printed until then on its line, Qwen Code's promotion text for the
+/// model, and the command left running as a job.
+fn promoted_call<S>(
+    shared: &Shared<S>,
+    tools: &Tools,
+    mut line: ToolLine,
+    (ran, child): (crate::isolation::Ran, std::process::Child),
+    (job, command): (Option<super::background::Job>, &str),
+) -> (ToolLine, Option<String>) {
+    let Some(mut job) = job else {
+        unreachable!("a call is promoted only once its job is set");
+    };
+    command.clone_into(&mut job.command);
+    job.cwd.clone_from(&tools.cwd);
+    job.pid = child.id();
+    let shown = super::background::promoted(&job);
+    line.confined = Some(ran.confined.clone());
+    line.isolation = Some(isolation_word(ran.isolation));
+    line.network = Some(network_word(ran.network));
+    line.stdout = Some(log::Output {
+        text: ran.stdout.clone(),
+        bytes: ran.stdout_bytes,
+    });
+    line.stderr = Some(log::Output {
+        text: ran.stderr.clone(),
+        bytes: ran.stderr_bytes,
+    });
+    line.background = Some(job.id.clone());
+    register(shared, job, child);
+    (line, Some(shown))
+}
+
+/// A command that never ran: what would have run, and why it did not, as
+/// the command's own failure under its confinement.
+fn never_ran(
+    tools: &Tools,
+    mut line: ToolLine,
+    run: &[String],
+    not_run: &crate::isolation::NotRun,
+) -> (ToolLine, Option<String>) {
+    let said = not_run.to_string();
+    let confined = tools
+        .confinement
+        .compose(&tools.policy, &tools.worktree, run);
+    line.outcome = log::ToolOutcome::CommandFailed;
+    line.policy = tools.confinement.policy_of(&confined);
+    line.confined = Some(confined);
+    line.isolation = Some(isolation_word(tools.confinement.isolation()));
+    line.network = Some(network_word(tools.policy.network));
+    line.stdout = Some(log::Output {
+        text: String::new(),
+        bytes: 0,
+    });
+    line.stderr = Some(log::Output {
+        text: said.clone(),
+        bytes: said.len() as u64,
+    });
+    (line, Some(said))
+}
+
+/// `task_stop` (#614): a running job's whole process group signalled, and
+/// Qwen Code's answers -- its cancellation requested, an id that names no
+/// job, or one no longer running.
+fn task_stop_call<S>(
+    shared: &Shared<S>,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> (ToolLine, Option<String>) {
+    use super::background::{self, Status};
+    let id = serde_json::from_str::<serde_json::Value>(&call.arguments)
+        .ok()
+        .and_then(|value| value.get("task_id")?.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    let mut state = shared.lock();
+    let shown = match state.jobs.get_mut(&id) {
+        None => background::not_found(&id),
+        Some(job) if job.status != Status::Running => background::not_running(job),
+        Some(job) => {
+            job.stopping = true;
+            background::stop_group(job.pid);
+            background::stopping(job)
+        }
+    };
+    drop(state);
+    (
+        ToolLine::of(request, turn, call, log::ToolOutcome::Ran),
+        Some(shown),
+    )
+}
+
+/// Background commands (#614), when they are on: one thread waits on every
+/// job, holding the session only weakly, so a dropped session ends it.
+fn start_reaper<S: Streaming + 'static>(shared: &Arc<Shared<S>>) {
+    if !shared.tools.as_ref().is_some_and(|tools| tools.background) {
+        return;
+    }
+    let (send, receive) = std::sync::mpsc::channel();
+    *shared.reap.lock().unwrap_or_else(PoisonError::into_inner) = Some(send);
+    let weak = Arc::downgrade(shared);
+    let _ = std::thread::Builder::new()
+        .name("diet-reaper".to_owned())
+        .spawn(move || reaper(&weak, &receive));
+}
+
+/// The session's reaper (#614): it waits on every background job's child,
+/// and logs each as it ends; it stops once the session is gone.
+fn reaper<S: Streaming + 'static>(
+    shared: &std::sync::Weak<Shared<S>>,
+    receive: &std::sync::mpsc::Receiver<(String, std::process::Child)>,
+) {
+    use std::sync::mpsc::RecvTimeoutError;
+    let mut running: Vec<(String, std::process::Child)> = Vec::new();
+    loop {
+        match receive.recv_timeout(Duration::from_millis(50)) {
+            Ok(job) => running.push(job),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                if running.is_empty() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        running.extend(receive.try_iter());
+        let mut at = 0;
+        while at < running.len() {
+            match running[at].1.try_wait() {
+                Ok(None) => at += 1,
+                done => {
+                    let (id, _) = running.swap_remove(at);
+                    let Some(shared) = shared.upgrade() else {
+                        return;
+                    };
+                    ended(
+                        &shared,
+                        &id,
+                        done.ok().flatten().and_then(|status| status.code()),
+                    );
+                }
+            }
         }
     }
+}
+
+/// Job `id` ended with `code` (#614): its status file says so, its output
+/// is kept whole by digest, its end is logged, and its notification waits
+/// for the next ask.
+fn ended<S>(shared: &Shared<S>, id: &str, code: Option<i32>) {
+    use super::background::Status;
+    let recording = shared
+        .tools
+        .as_ref()
+        .and_then(|tools| tools.recording.clone());
+    let mut state = shared.lock();
+    let Some(job) = state.jobs.get_mut(id) else {
+        return;
+    };
+    job.exit = code;
+    job.status = if job.stopping {
+        Status::Cancelled
+    } else if code == Some(0) {
+        Status::Completed
+    } else {
+        Status::Failed
+    };
+    job.write_status();
+    let output = std::fs::read(&job.output).unwrap_or_default();
+    let note = super::background::notification(job, &output);
+    let status = match job.status {
+        Status::Completed => log::BackgroundStatus::Completed,
+        Status::Failed => log::BackgroundStatus::Failed,
+        Status::Running | Status::Cancelled => log::BackgroundStatus::Cancelled,
+    };
+    let files: Vec<log::RecordedFile> = recording
+        .and_then(|dir| super::attach::kept_whole(&dir, &output, "text/plain").ok())
+        .into_iter()
+        .collect();
+    state.notices.push(note);
+    if state.settlement != Settlement::Ended {
+        state.push(Event::BackgroundEnded {
+            job: id.to_owned(),
+            status,
+            exit: code.and_then(|code| u64::try_from(code).ok()),
+            files,
+        });
+    }
+    drop(state);
+    shared.changed.notify_all();
 }
 
 /// Refill the trunk from working memory for a seam `reason` fired (#493):
@@ -7200,6 +7670,7 @@ pub(in crate::drive) mod tests {
                 files: Vec::new(),
                 images: Vec::new(),
                 recovered_from: None,
+                background: None,
             })),
             Event::Forked {
                 of_turn: 1,
@@ -7298,6 +7769,16 @@ pub(in crate::drive) mod tests {
                 prefix_intact: true,
                 rolled_back: 2,
             },
+            Event::BackgroundEnded {
+                job: "bg_0123abcd".to_owned(),
+                status: log::BackgroundStatus::Completed,
+                exit: Some(0),
+                files: Vec::new(),
+            },
+            Event::Notified {
+                turn: 2,
+                text: "<task-notification>\n</task-notification>".to_owned(),
+            },
             Event::Captured {
                 request: 3,
                 call: "call-c".to_owned(),
@@ -7346,9 +7827,11 @@ pub(in crate::drive) mod tests {
                 Event::Pruned { .. } => 28,
                 Event::Captured { .. } => 29,
                 Event::Reminded { .. } => 30,
+                Event::BackgroundEnded { .. } => 31,
+                Event::Notified { .. } => 32,
             });
         }
-        assert_eq!(kinds.len(), 31, "a variant has no sample");
+        assert_eq!(kinds.len(), 33, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -7577,6 +8060,7 @@ pub(in crate::drive) mod tests {
                 files: None,
                 shown: None,
                 recovered_from: None,
+                background: None,
             },
             log::Event::Fork {
                 lane: log::Lane::Interview,
@@ -7679,6 +8163,16 @@ pub(in crate::drive) mod tests {
                 parked: vec!["interview-t2-1".to_owned()],
                 prefix_intact: true,
                 rolled_back: 2,
+            },
+            log::Event::BackgroundEnded {
+                job: "bg_0123abcd".to_owned(),
+                status: log::BackgroundStatus::Completed,
+                exit: Some(0),
+                files: None,
+            },
+            log::Event::Notice {
+                turn: 2,
+                text: "<task-notification>\n</task-notification>".to_owned(),
             },
             log::Event::Capture {
                 request: 3,
@@ -8158,12 +8652,12 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "ask cancel declare-seam end open-tangent close-tangent"
+            "ask cancel declare-seam end open-tangent close-tangent background"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running"
         );
         assert_eq!(
             tags(
@@ -8239,6 +8733,7 @@ pub(in crate::drive) mod tests {
             recording: None,
             read_tool: None,
             surface: tool_loop::ToolSurface::Bash,
+            background: false,
         }
     }
 
@@ -8256,6 +8751,260 @@ pub(in crate::drive) mod tests {
             "bash",
             &format!("{{\"command\":{}}}", serde_json::Value::from(command)),
         )
+    }
+
+    /// A session whose `bash` runs in the background on request (#614),
+    /// approvals off, playing `replies`.
+    fn backgrounding(
+        tree: &Path,
+        recording: Option<&Path>,
+        replies: Vec<Vec<Step>>,
+    ) -> Session<Canned> {
+        let mut tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["sleep", "echo"],
+            None,
+            Decider::Decline,
+        );
+        tools.background = true;
+        tools.approvals_off = true;
+        tools.recording = recording.map(Path::to_path_buf);
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Bash.tools_with(true);
+        Session::open_looping(Canned::new(replies), shape, None, tools)
+    }
+
+    /// A `bash` call asking for the background.
+    fn in_the_background(id: &str, command: &str) -> Step {
+        Step::call(
+            0,
+            id,
+            "bash",
+            &serde_json::json!({"command": command, "is_background": true}).to_string(),
+        )
+    }
+
+    /// Each ended job: its id, how, and its exit status (#614).
+    fn ended_jobs(log: &[Logged]) -> Vec<(String, log::BackgroundStatus, Option<u64>)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::BackgroundEnded {
+                    job, status, exit, ..
+                } => Some((job.clone(), *status, *exit)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// How many turns have settled.
+    fn turns_settled(log: &[Logged]) -> usize {
+        log.iter()
+            .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+            .count()
+    }
+
+    /// A background call (#614) returns at once with Qwen Code's start
+    /// text, its bare trailing `&` taken off; the command runs on, its
+    /// status file says so, and when it ends its output is kept by digest,
+    /// its end is logged, and its notification follows the next ask --
+    /// every head rebuilding.
+    #[test]
+    fn a_background_call_returns_at_once_and_its_end_is_noticed_at_the_next_ask() {
+        let tree = scratch("bg-start");
+        let recording = scratch("bg-start-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let session = backgrounding(
+            &tree,
+            Some(&recording),
+            vec![
+                vec![in_the_background("call-1", "sleep 2; echo ready &")],
+                deltas(&["started"]),
+                deltas(&["it is ready"]),
+            ],
+        );
+        let asked = Instant::now();
+        session.ask("start it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        assert!(
+            asked.elapsed() < Duration::from_millis(1500),
+            "{:?}",
+            asked.elapsed()
+        );
+        let line = lines(&log).remove(0);
+        let id = line.background.clone().expect("a job");
+        assert_eq!(line.outcome, log::ToolOutcome::Ran);
+        assert_eq!(line.argv, Some(tool_loop::argv_of("sleep 2; echo ready")));
+        assert!(
+            line.shown.as_deref().is_some_and(
+                |shown| shown.starts_with(&format!("Background shell started.\nid: {id}\n"))
+            ),
+            "{:?}",
+            line.shown
+        );
+        let (output, status) =
+            super::super::background::files_of(&recording.join("background"), &id);
+        assert!(
+            std::fs::read_to_string(&status)
+                .expect("a status file")
+                .contains("\"status\":\"running\"")
+        );
+        let log = wait_until(&session, "the job's end", |log| ended_jobs(log).len() == 1);
+        assert_eq!(
+            ended_jobs(&log),
+            [(id.clone(), log::BackgroundStatus::Completed, Some(0))]
+        );
+        assert_eq!(
+            std::fs::read_to_string(&output).expect("its output"),
+            "ready\n"
+        );
+        assert!(
+            std::fs::read_to_string(&status)
+                .expect("a status file")
+                .contains("\"status\":\"completed\"")
+        );
+        session.ask("is it ready?", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
+        let sent = session.shared.transport.sent();
+        let last = &sent.last().expect("a request").messages;
+        let note = &last[last.len() - 1];
+        assert_eq!(last[last.len() - 2].content, "is it ready?");
+        assert_eq!(note.role, Role::User);
+        assert!(
+            note.content
+                .starts_with(&format!("<task-notification>\n<task-id>{id}</task-id>"))
+        );
+        assert!(note.content.contains("<status>completed</status>"));
+        assert!(
+            note.content
+                .contains("<output-tail truncated=\"false\">ready\n</output-tail>")
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        session.end_commands();
+        tidy(&[&tree, &recording]);
+    }
+
+    /// `task_stop` (#614): a running job's group stopped and the job ended
+    /// `cancelled`; an id that names no job, and one no longer running,
+    /// answered in Qwen Code's words. A turn's end leaves a job running.
+    #[test]
+    fn task_stop_cancels_a_running_job_and_answers_what_it_cannot_stop() {
+        let tree = scratch("bg-stop");
+        let session = backgrounding(
+            &tree,
+            None,
+            vec![
+                vec![in_the_background("call-1", "sleep 30")],
+                deltas(&["started"]),
+            ],
+        );
+        session.ask("start it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let id = lines(&log)[0].background.clone().expect("a job");
+        assert!(
+            ended_jobs(&log).is_empty(),
+            "the turn's end leaves it running"
+        );
+        let stop = |call: &str, id: &str| {
+            Step::call(
+                0,
+                call,
+                super::super::background::TASK_STOP,
+                &serde_json::json!({ "task_id": id }).to_string(),
+            )
+        };
+        let transport = &session.shared.transport;
+        transport.append(vec![stop("call-2", &id)]);
+        transport.append(vec![stop("call-3", "bg_nothere")]);
+        transport.append(deltas(&["stopped"]));
+        session.ask("stop it", None).expect("accepted");
+        let log = wait_until(&session, "the stop and the job's end", |log| {
+            turns_settled(log) == 2 && ended_jobs(log).len() == 1
+        });
+        let written = lines(&log);
+        assert!(
+            written[1]
+                .shown
+                .as_deref()
+                .is_some_and(|shown| shown.starts_with(&format!(
+                    "Cancellation requested for background shell \"{id}\""
+                ))),
+            "{:?}",
+            written[1].shown
+        );
+        assert_eq!(
+            written[2].shown.as_deref(),
+            Some("Error: No background task found with ID \"bg_nothere\".")
+        );
+        assert_eq!(ended_jobs(&log)[0].1, log::BackgroundStatus::Cancelled);
+        transport.append(vec![stop("call-4", &id)]);
+        transport.append(deltas(&["done"]));
+        session.ask("stop it again", None).expect("accepted");
+        let log = wait_until(&session, "the third turn", |log| turns_settled(log) == 3);
+        assert_eq!(
+            lines(&log)[3].shown.as_deref(),
+            Some(
+                format!("Error: Background shell \"{id}\" is not running (status: cancelled).")
+                    .as_str()
+            )
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// The operator moves a running call to the background (#614): it
+    /// answers at once with Qwen Code's promotion text and what it printed
+    /// so far, the command runs on as the job the command channel named,
+    /// and with nothing running the move is refused `nothing-running`.
+    #[test]
+    fn a_running_call_moved_to_the_background_returns_and_runs_on() {
+        let tree = scratch("bg-promote");
+        let session = backgrounding(
+            &tree,
+            None,
+            vec![
+                vec![bash("call-1", "echo early; sleep 2; echo late")],
+                deltas(&["moved on"]),
+            ],
+        );
+        assert!(matches!(
+            session.background(),
+            Err(Rejected::Refused(Refusal::NothingRunning))
+        ));
+        session.ask("run it", None).expect("accepted");
+        let started = Instant::now();
+        let job = loop {
+            if let Ok(job) = session.background() {
+                break job;
+            }
+            assert!(started.elapsed() < Duration::from_secs(5), "never running");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let line = lines(&log).remove(0);
+        assert_eq!(line.background.as_deref(), Some(job.as_str()));
+        assert!(
+            line.shown.as_deref().is_some_and(|shown| shown.starts_with(&format!(
+                "Foreground command \"echo early; sleep 2; echo late\" promoted to background as {job}."
+            ))),
+            "{:?}",
+            line.shown
+        );
+        let log = wait_until(&session, "the job's end", |log| ended_jobs(log).len() == 1);
+        assert_eq!(ended_jobs(&log)[0].1, log::BackgroundStatus::Completed);
+        let output = std::fs::read_to_string(
+            super::super::background::files_of(
+                &background_dir(&session.shared, &session.shared.lock()),
+                &job,
+            )
+            .0,
+        )
+        .expect("its output");
+        assert!(output.ends_with("late\n"), "{output:?}");
+        reads_whole(&session);
+        tidy(&[&tree]);
     }
 
     pub(in crate::drive) fn lines(log: &[Logged]) -> Vec<ToolLine> {

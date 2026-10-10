@@ -3548,7 +3548,8 @@ fn a_drive_server_offers_prune_output_only_where_a_prune_can_be_applied() {
     let start_line = first_logged_line(&log_file.0);
     assert_eq!(
         start_line["tools"],
-        serde_json::json!(["bash", "prune_output"]),
+        // `task_stop` with background commands, on by default (#614).
+        serde_json::json!(["bash", "task_stop", "prune_output"]),
         "{start_line}"
     );
 

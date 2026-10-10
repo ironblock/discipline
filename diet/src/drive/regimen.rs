@@ -660,6 +660,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
         ("substrate_rung".to_owned(), word("substrate")),
         ("tool_surface".to_owned(), surface),
+        ("background_commands".to_owned(), background_lever(regimen)),
         ("tool_call_text_fallback".to_owned(), text_fallback),
         (
             "instruction_files".to_owned(),
@@ -743,6 +744,18 @@ fn tangent_closure_lever(regimen: &Regimen) -> String {
     } else {
         UNDECLARED.to_owned()
     }
+}
+
+/// The background commands lever (#614): on unless the regimen turns them
+/// off; undeclared where it runs no commands.
+fn background_lever(regimen: &Regimen) -> String {
+    crate::drive::tool_loop::declared(regimen)
+        .ok()
+        .flatten()
+        .map_or_else(
+            || UNDECLARED.to_owned(),
+            |declared| if declared.background { "on" } else { "off" }.to_owned(),
+        )
 }
 
 /// The interview role lever's word (#599): the role the regimen asks in.
@@ -935,6 +948,28 @@ mod tests {
             disposition("seam_tool_outputs = \"keep\"\n[tool_output]\ncap = false\n"),
             "keep+seam:keep"
         );
+    }
+
+    /// Background commands (#614) are on unless the regimen turns them
+    /// off, and undeclared where it runs no commands.
+    #[test]
+    fn the_background_commands_lever_is_on_unless_turned_off() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("background_commands")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever("approval = \"none\"\n"), "on");
+        assert_eq!(
+            lever("approval = \"none\"\nbackground_commands = false\n"),
+            "off"
+        );
+        assert_eq!(
+            lever("approval = \"none\"\nbackground_commands = \"off\"\n"),
+            "off"
+        );
+        assert_eq!(lever(""), UNDECLARED);
     }
 
     #[test]

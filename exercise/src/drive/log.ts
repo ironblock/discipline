@@ -308,6 +308,10 @@ export type Reminded = V0.RemindedLine;
 export type Capture = V0.CaptureLine;
 /** Archived items recalled after an ask (v7, the archive recall lever, #566). */
 export type Recalled = V0.RecalledLine;
+/** A background command's end (v7, #614). Folded, not yet drawn. */
+export type BackgroundEnded = V0.BackgroundEndedLine;
+/** Ended background commands' notifications delivered after an ask (v7, #614). */
+export type Notice = V0.NoticeLine;
 /** A tool result the model pruned, replaced at a later seam (v7, `prune_output`, #612). */
 export type Pruned = V0.PrunedLine;
 
@@ -336,7 +340,9 @@ export type LogLine =
   | Capture
   | TangentOpen
   | TangentClose
-  | Pruned;
+  | Pruned
+  | BackgroundEnded
+  | Notice;
 
 export type Kind = LogLine['kind'];
 

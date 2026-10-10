@@ -166,6 +166,22 @@ pub const BASH_DESCRIPTION: &str = "Executes a bash command (as `bash -c <comman
      - The command may run in a sandbox: writes outside the working directory, some reads, and \
      network access can be refused.";
 
+/// The `bash` tool's description where background commands are on
+/// (#614): #558's, its advice to background with `&` replaced by the
+/// harness's own background, Qwen Code's shape.
+pub const BASH_DESCRIPTION_BACKGROUND: &str = "Executes a bash command (as `bash -c <command>`) \
+     in the working directory. Returns its standard output, then its standard error.\n\n\
+     - Each call runs in a fresh shell that starts in the working directory: `cd` and exported \
+     variables do not carry over to the next call, and only the environment variables the \
+     session passes are set.\n\
+     - There is no timeout. A command that does not exit on its own, such as a server or a \
+     watcher, holds the call until the turn is cancelled: run it with `is_background: true`.\n\
+     - With `is_background: true` the call returns at once with the job's id, its output file \
+     and its status file, and the command keeps running; `task_stop` stops it, and when it ends \
+     a notification says so.\n\
+     - The command may run in a sandbox: writes outside the working directory, some reads, and \
+     network access can be refused.";
+
 /// The `bash` tool's one argument's description (#558): Pi's and
 /// `OpenCode` 2's, which agree.
 pub const BASH_COMMAND_DESCRIPTION: &str = "Shell command to execute";
@@ -175,19 +191,43 @@ pub const BASH_COMMAND_DESCRIPTION: &str = "Shell command to execute";
 /// description (#558).
 #[must_use]
 pub fn bash_tool() -> ToolDefinition {
+    bash_tool_with(false)
+}
+
+/// The `bash` tool, with `is_background` (#614) when background commands
+/// are on.
+#[must_use]
+pub fn bash_tool_with(background: bool) -> ToolDefinition {
     let text = |s: &str| Value::String(s.to_owned());
     let command = Value::Object(BTreeMap::from([
         ("description".to_owned(), text(BASH_COMMAND_DESCRIPTION)),
         ("type".to_owned(), text("string")),
     ]));
+    let mut properties = BTreeMap::from([("command".to_owned(), command)]);
+    if background {
+        properties.insert(
+            super::background::IS_BACKGROUND.to_owned(),
+            Value::Object(BTreeMap::from([
+                (
+                    "description".to_owned(),
+                    text(super::background::IS_BACKGROUND_DESCRIPTION),
+                ),
+                ("type".to_owned(), text("boolean")),
+            ])),
+        );
+    }
     ToolDefinition {
         name: BASH.to_owned(),
-        description: Some(BASH_DESCRIPTION.to_owned()),
+        description: Some(
+            if background {
+                BASH_DESCRIPTION_BACKGROUND
+            } else {
+                BASH_DESCRIPTION
+            }
+            .to_owned(),
+        ),
         schema: Value::Object(BTreeMap::from([
-            (
-                "properties".to_owned(),
-                Value::Object(BTreeMap::from([("command".to_owned(), command)])),
-            ),
+            ("properties".to_owned(), Value::Object(properties)),
             ("required".to_owned(), Value::Array(vec![text("command")])),
             ("type".to_owned(), text("object")),
         ])),
@@ -277,13 +317,40 @@ impl Calls {
 pub fn command_of(arguments: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(arguments).ok()?;
     let object = value.as_object()?;
-    if object.len() != 1 {
-        return None;
+    // `command`, and `is_background` (#614) when it is a boolean.
+    let others = object.iter().filter(|(key, _)| key.as_str() != "command");
+    for (key, value) in others {
+        if key != super::background::IS_BACKGROUND || !value.is_boolean() {
+            return None;
+        }
     }
     object
         .get("command")
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
+}
+
+/// Whether a `bash` call's arguments ask for the background (#614).
+#[must_use]
+pub fn background_of(arguments: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(arguments)
+        .ok()
+        .and_then(|value| value.get(super::background::IS_BACKGROUND)?.as_bool())
+        .unwrap_or(false)
+}
+
+/// The regimen key for background commands (#614): on (the default) unless
+/// it says `false` or `"off"`, read leniently.
+pub const BACKGROUND_COMMANDS: &str = "background_commands";
+
+/// Whether the regimen leaves background commands on.
+#[must_use]
+pub fn background_commands(regimen: &Regimen) -> bool {
+    match regimen.get(BACKGROUND_COMMANDS) {
+        Some(regimen::Value::Boolean(false)) => false,
+        Some(regimen::Value::String(word)) => word != "off",
+        _ => true,
+    }
 }
 
 /// The argv the drive runs a `bash` call's command as, and what its
@@ -1408,6 +1475,8 @@ pub struct Declared {
     pub output_cap: OutputCap,
     /// `tool_surface`: the tools the model is offered (#557).
     pub surface: ToolSurface,
+    /// Whether background commands are on (#614).
+    pub background: bool,
 }
 
 /// The tool surface lever (#557): the tools the model is offered.
@@ -1421,6 +1490,21 @@ pub enum ToolSurface {
 }
 
 impl ToolSurface {
+    /// The tools a request declares under this surface, with background
+    /// commands (#614) when `background`: `bash` with `is_background`, and
+    /// `task_stop` last.
+    #[must_use]
+    pub fn tools_with(self, background: bool) -> Vec<ToolDefinition> {
+        let mut tools = vec![bash_tool_with(background)];
+        if self == Self::Standard {
+            tools.extend(super::standard::definitions());
+        }
+        if background {
+            tools.push(super::background::task_stop_tool());
+        }
+        tools
+    }
+
     /// The tools a request declares under this surface, in order.
     #[must_use]
     pub fn tools(self) -> Vec<ToolDefinition> {
@@ -1560,6 +1644,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             text_fallback,
             output_cap,
             surface,
+            background: background_commands(regimen),
         }));
     };
     let regimen::Value::Array(items) = value else {
@@ -1584,6 +1669,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         text_fallback,
         output_cap,
         surface,
+        background: background_commands(regimen),
     }))
 }
 
@@ -1953,6 +2039,9 @@ pub struct Tools {
     pub read_tool: Option<String>,
     /// The tools the model is offered (#557).
     pub surface: ToolSurface,
+    /// Whether background commands are on (#614): `bash` takes
+    /// `is_background`, and `task_stop` is offered.
+    pub background: bool,
 }
 
 vocabulary! {
@@ -3067,6 +3156,7 @@ pub(in crate::drive) mod tests {
                 text_fallback: false,
                 output_cap: OutputCap::DEFAULT,
                 surface: ToolSurface::Bash,
+                background: true,
             }))
         );
         // The approval lever's `none`: commands run with no allow set.
@@ -3080,6 +3170,7 @@ pub(in crate::drive) mod tests {
                 text_fallback: false,
                 output_cap: OutputCap::DEFAULT,
                 surface: ToolSurface::Bash,
+                background: true,
             }))
         );
         assert!(read("approval = \"ask\"\n").is_err());
