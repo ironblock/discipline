@@ -89,13 +89,20 @@ pub mod vocabulary;
 ///   `v4`, whose judgment ask shows the working record and asks for
 ///   SUPERSEDE, the maintainer's approval of (a) and (c). No template and no
 ///   set already pinned changed.
-/// * 6, 2026-10-10: the audit asks' reconciling variants joined (#150):
+/// * 6, 2026-10-10: fork ask set `t1` joined (#610): v4's asks with each
+///   answer instruction asking for the self-capture tools instead of
+///   fields, its modality `tools`, the maintainer's approval as drafted ("Good
+///   starting point"). No template and no set already pinned changed.
+/// * 7, 2026-10-10: self-capture set `c2` joined (#609, [`capture`]): c1's
+///   contract with a description on every parameter, the maintainer's
+///   approval of the wording. No template and no set already pinned changed.
+/// * 9, 2026-10-10: the audit asks' reconciling variants joined (#150):
 ///   `AUDIT_Q_RECONCILE`, `AUDIT_Q_CADENCE_RECONCILE` and
 ///   `AUDIT_Q_HUMAN_RECONCILE`, each its ask with one sentence saying what
 ///   the operator's markers mean and one asking for each marked note to be
 ///   addressed, the maintainer's approval of the drafted wording. No
 ///   template already pinned changed.
-pub const VERSION: u32 = 6;
+pub const VERSION: u32 = 9;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -105,7 +112,7 @@ pub const VERSION: u32 = 6;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "484648983656c240";
+pub const MANIFEST_DIGEST: &str = "e2a19c70b200c692";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///

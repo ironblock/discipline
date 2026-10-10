@@ -80,5 +80,26 @@ fields the interview grammar parses (`v3` and `v4`), or through the
 self-capture tools. A regimen sets `capture_modality = "fields"` (the
 default) or `"tools"`; `tools` needs `self_capture` on, an
 `interview_warrant`, and a set whose asks are written for the tools, and serve
-refuses it at start otherwise. No tools set ships until its wording is
-approved, so today `tools` is always refused.
+refuses it at start otherwise.
+
+- `t1` (#610): `v4`'s asks with each answer instruction asking for the
+  self-capture tools (`update_record`, and for judgment `supersedes` and
+  `resolve_entry`) instead of fields. Its modality is `tools`. The
+  maintainer approved it as drafted.
+
+## Self-capture contract sets (#609)
+
+`self-capture/<name>/` holds one named set of what self-capture offers the
+model: the contract (`contract.jsonl`, the tools' names, descriptions and
+parameters) and the advisory asks (`reminder.txt`, `sweep.txt`). Each file is
+pinned in `MANIFEST.tsv` as `self-capture/<name>/<file>`, and a set's digest is
+the digest of its manifest lines, as the fork ask sets'. A regimen picks a set
+with `self_capture_contract = "<name>"` (`c1` when it names none or names no
+set); the `self_capture` lever's word in `session.start` names the set and its
+digest (`on:every:<n>:<set>:<digest>`). A set is never edited: a change adds a
+set.
+
+- `c1`: the contract and reminder words as #609 shipped them, moved here
+  unchanged.
+- `c2`: `c1` with a description on every parameter, in Qwen Code's lowercase
+  fragments; the tools, their descriptions and the reminder words are `c1`'s.

@@ -582,6 +582,7 @@ export type SeamLine = {
   outputs?: string;
   carried_outputs?: number;
   carried_output_bytes?: number;
+  background?: string;
   placement?: RenderPlacement;
   render_budget_tokens?: number;
   render_over_budget?: string;

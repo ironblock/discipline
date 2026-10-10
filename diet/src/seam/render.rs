@@ -283,6 +283,19 @@ pub fn refill(head: &[Message], render: &str) -> Vec<Message> {
     trunk
 }
 
+/// [`refill`], with `after` -- a seam's list of the background commands
+/// still running (#614) -- following the summary in the same message, as
+/// Qwen Code puts its list after the summary
+/// (`chatCompressionService.ts:1139`).
+#[must_use]
+pub fn refill_with(head: &[Message], render: &str, after: Option<&str>) -> Vec<Message> {
+    let mut trunk = refill(head, render);
+    if let (Some(after), Some(message)) = (after, trunk.last_mut()) {
+        message.content.push_str(after);
+    }
+    trunk
+}
+
 /// The message a seam's refill rides in (#597), shaped as Pi and `OpenCode`
 /// 2 carry a compaction summary: a user message, the text inside
 /// `<summary>` tags, opened and closed on lines of their own (Pi

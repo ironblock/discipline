@@ -2814,6 +2814,30 @@ fn a_drive_server_refuses_tools_capture_without_a_set_written_for_it() {
 }
 
 #[test]
+fn a_drive_server_starts_a_tools_capture_regimen_on_the_tools_set() {
+    // #610: with set t1, written for the tools, self-capture on and forks to
+    // answer, `capture_modality = "tools"` starts; session.start names the
+    // set and the start row's lever says `tools`.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\ncapture_modality = \"tools\"\nself_capture = true\n\
+         fork_asks = \"t1\"\n",
+        "seed = 7\n",
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let _served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(start_line["fork_asks"], "t1", "{start_line}");
+    assert_eq!(
+        start_line["levers"]["capture_modality"], "tools",
+        "{start_line}"
+    );
+}
+
+#[test]
 fn a_drive_server_runs_a_regimens_phase_graph() {
     // #563: serve reads `phases` and `phase_transitions` (it refused them,
     // #520), logs the graph and the phase it opens in, and takes a phase on

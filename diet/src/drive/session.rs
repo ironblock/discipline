@@ -609,6 +609,9 @@ pub enum Event {
         /// The section after the render carrying them, when it carried any,
         /// and how many it carried.
         outputs: Option<(String, u64)>,
+        /// The list of each background command still running (#614), as
+        /// sent after the summary.
+        background: Option<String>,
         /// The render's budget and what it did (#565), when declared.
         render_budget: Option<log::RenderBudget>,
         /// The prompt that fired it and the window, on a `window` seam (#617).
@@ -1042,6 +1045,9 @@ pub struct Interview {
     /// request, and the cadence of silent turns its reminder fires after;
     /// `None` when off.
     pub self_capture: Option<crate::capture::tools::Cadence>,
+    /// The contract set self-capture offers (#609): the regimen's
+    /// `self_capture_contract`, else `c1`.
+    pub capture_contract: &'static crate::dogma::capture::CaptureSet,
     /// How a fork answers (#610): in fields, the default, or through the
     /// self-capture tools.
     pub capture: crate::dogma::asks::Modality,
@@ -1145,8 +1151,8 @@ pub fn interview_threshold_bytes(regimen: &Regimen) -> Option<u64> {
 /// If the pinned contract does not read, which `dogma::capture`'s and
 /// `capture::tools`' tests hold it always does.
 pub fn declare_self_capture(shape: &mut RequestShape, interview: Option<&Interview>) {
-    if interview.is_some_and(|interview| interview.self_capture.is_some()) {
-        let contract = crate::capture::tools::contract()
+    if let Some(interview) = interview.filter(|interview| interview.self_capture.is_some()) {
+        let contract = crate::capture::tools::contract_of(interview.capture_contract)
             .expect("the pinned contract reads: `dogma::capture`'s tests hold it");
         shape
             .tools
@@ -1159,6 +1165,21 @@ pub const SELF_CAPTURE: &str = "self_capture";
 
 /// The regimen key for the self-capture reminder's cadence (#609).
 pub const SELF_CAPTURE_CADENCE: &str = "self_capture_cadence";
+
+/// The regimen key for the self-capture contract set (#609's c2).
+pub const SELF_CAPTURE_CONTRACT: &str = "self_capture_contract";
+
+/// The self-capture contract set the regimen names, leniently: a set by
+/// its name, or else [`crate::dogma::capture::DEFAULT`], `c1`.
+#[must_use]
+pub fn self_capture_contract(regimen: &Regimen) -> &'static crate::dogma::capture::CaptureSet {
+    match regimen.get(SELF_CAPTURE_CONTRACT) {
+        Some(crate::formats::regimen::Value::String(name)) => {
+            crate::dogma::capture::set(name).unwrap_or(crate::dogma::capture::DEFAULT)
+        }
+        _ => crate::dogma::capture::DEFAULT,
+    }
+}
 
 /// Self-capture as the regimen declares it, leniently (#609): on for
 /// `self_capture = true` or `"on"`, with `self_capture_cadence` silent
@@ -3361,6 +3382,7 @@ impl<S: Streaming + 'static> Session<S> {
                 status: super::background::Status::Running,
                 exit: None,
                 stopping: false,
+                listed: None,
             });
             Ok(id)
         });
@@ -3992,6 +4014,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             phase,
             tool_outputs,
             outputs,
+            background,
             render_budget,
             fired,
             pruned,
@@ -4027,6 +4050,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             outputs: outputs.as_ref().map(|(text, _)| text.clone()),
             carried_outputs: outputs.as_ref().map(|(_, n)| *n),
             carried_output_bytes: outputs.as_ref().map(|(text, _)| text.len() as u64),
+            background: background.clone(),
             // A user message after the head (#597).
             placement: Some(log::RenderPlacement::Message),
             render_budget: render_budget.clone(),
@@ -5517,6 +5541,7 @@ fn background_call<S>(
                 status: super::background::Status::Running,
                 exit: None,
                 stopping: false,
+                listed: None,
             };
             let shown = super::background::started(&job);
             line.confined = Some(ran.confined.clone());
@@ -5882,7 +5907,12 @@ fn refilled(
     let sent = outputs
         .as_ref()
         .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
-    let mut refilled = crate::seam::render::refill(&template.messages, &sent);
+    // Each background command still running (#614), after the summary in
+    // the refill's message, as Qwen Code places its list: the refill
+    // compacts away the call that started it.
+    let background = super::background::running_at_seam(state.jobs.values_mut());
+    let mut refilled =
+        crate::seam::render::refill_with(&template.messages, &sent, background.as_deref());
     state.refilled = true;
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
@@ -5908,6 +5938,7 @@ fn refilled(
         phase,
         tool_outputs,
         outputs,
+        background,
         render_budget,
         fired,
         pruned,
@@ -9849,6 +9880,7 @@ pub(in crate::drive) mod tests {
                 phase: None,
                 tool_outputs: log::SeamToolOutputs::Evict,
                 outputs: None,
+                background: None,
                 render_budget: None,
                 fired: None,
                 pruned: None,
@@ -10300,6 +10332,7 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                background: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
                 fired: None,
@@ -13156,6 +13189,7 @@ pub(in crate::drive) mod tests {
             skip_self_recorded: false,
             prune: None,
             self_capture: None,
+            capture_contract: crate::dogma::capture::DEFAULT,
             asks: &crate::dogma::asks::V3,
             capture: crate::dogma::asks::Modality::Fields,
             fork_tail: None,
@@ -13202,6 +13236,97 @@ pub(in crate::drive) mod tests {
                     }
                 )
             })
+    }
+
+    /// A background command still running at a seam (#614) is listed after
+    /// the refill's outputs -- its id, its command and its output file --
+    /// with whether it printed anything since it started, then since the
+    /// last seam that listed it; a job no longer running is not listed, and
+    /// every head rebuilds from the seam's `background`.
+    #[test]
+    fn a_seam_lists_each_background_command_still_running() {
+        let dir = scratch("bg-seam");
+        let session = three_decisions_then(|_| {}, Vec::new());
+        let output = dir.join("shell-bg_0123abcd.output");
+        std::fs::write(&output, "").expect("the output file");
+        let job = |id: &str, status| super::super::background::Job {
+            id: id.to_owned(),
+            command: "python3 -m http.server 8765\n  --directory docs".to_owned(),
+            cwd: ".".to_owned(),
+            pid: 0,
+            output: output.clone(),
+            status_file: dir.join(format!("shell-{id}.status")),
+            status,
+            exit: None,
+            stopping: false,
+            listed: None,
+        };
+        {
+            let mut state = session.shared.lock();
+            let running = job("bg_0123abcd", super::super::background::Status::Running);
+            let ended = job("bg_ffffffff", super::super::background::Status::Completed);
+            state.jobs.insert(running.id.clone(), running);
+            state.jobs.insert(ended.id.clone(), ended);
+        }
+        let backgrounds = |log: &[Logged]| -> Vec<Option<String>> {
+            log.iter()
+                .filter_map(|logged| match &logged.event {
+                    Event::Seamed { background, .. } => Some(background.clone()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let row = |since: &str| {
+            format!(
+                "\n\n<background-tasks>\nThe following background commands were running at \
+                 compaction. The summary above does not include their state. Use `task_stop` to \
+                 stop one; do not assume they finished.\n- [running, {since}] bg_0123abcd: \
+                 python3 -m http.server 8765 --directory docs\n  output file: {}\n\
+                 </background-tasks>",
+                output.display()
+            )
+        };
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the first seam", |log| {
+            backgrounds(log).len() == 1
+        });
+        assert_eq!(backgrounds(&log), [Some(row("no output since it started"))]);
+        let head = template().messages.len();
+        let refill = session.shared.lock().trunk[head].content.clone();
+        assert!(
+            refill.ends_with(&row("no output since it started")),
+            "{refill}"
+        );
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the second seam", |log| {
+            backgrounds(log).len() == 2
+        });
+        assert_eq!(
+            backgrounds(&log)[1],
+            Some(row("no new output since the last compaction"))
+        );
+        std::fs::write(&output, "Serving HTTP on :: port 8765\n").expect("its output");
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the third seam", |log| {
+            backgrounds(log).len() == 3
+        });
+        assert_eq!(
+            backgrounds(&log)[2],
+            Some(row("new output since the last compaction"))
+        );
+        session.shared.lock().jobs.clear();
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the fourth seam", |log| {
+            backgrounds(log).len() == 4
+        });
+        assert_eq!(
+            backgrounds(&log)[3],
+            None,
+            "nothing running, nothing listed"
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&dir]);
     }
 
     /// #504: with the audit on, an operator's seam puts the dogma's pinned
@@ -15601,6 +15726,8 @@ pub(in crate::drive) mod tests {
         let mut interview = interviewing(&[log::Warrant::Scoping]);
         interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
         interview.capture = crate::dogma::asks::Modality::Tools;
+        // The set written for the tools (#610).
+        interview.asks = &crate::dogma::asks::T1;
         let mut shape = template();
         declare_self_capture(&mut shape, Some(&interview));
         Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
@@ -15642,6 +15769,16 @@ pub(in crate::drive) mod tests {
         });
         reads_whole(&session);
         assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
+        // Asked in t1's words: the tools, not the fields.
+        let question = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Forked { question, .. } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("a fork");
+        assert!(question.contains("update_record"), "{question}");
+        assert!(!question.contains("Answer with the fields"), "{question}");
         let fork = log
             .iter()
             .find(|logged| matches!(logged.event, Event::Forked { .. }))
@@ -15763,6 +15900,46 @@ pub(in crate::drive) mod tests {
             "the system prompt is unchanged"
         );
         reads_whole(&session);
+    }
+
+    /// #609's c2: the session's contract set is the one declared, so c2's
+    /// parameter descriptions reach the request and c1's absence of them
+    /// stays as it was.
+    #[test]
+    fn self_capture_declares_the_sessions_contract_set() {
+        use crate::formats::record::json::Value;
+        let described = |set| {
+            let mut interview = interviewing(&[]);
+            interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+            interview.capture_contract = set;
+            let mut shape = looping();
+            declare_self_capture(&mut shape, Some(&interview));
+            let Value::Object(schema) = &shape.tools[1].schema else {
+                panic!("an object schema");
+            };
+            let Some(Value::Object(properties)) = schema.get("properties") else {
+                panic!("properties");
+            };
+            properties
+                .values()
+                .filter(|property| {
+                    matches!(property, Value::Object(p) if p.contains_key("description"))
+                })
+                .count()
+        };
+        assert_eq!(described(&crate::dogma::capture::C1), 0);
+        assert_eq!(described(&crate::dogma::capture::C2), 3);
+    }
+
+    /// #609's c2: the set is read from the regimen leniently, c1 by default.
+    #[test]
+    fn the_self_capture_contract_is_read_leniently_and_defaults_to_c1() {
+        let read =
+            |text: &str| self_capture_contract(&regimen::parse(text).expect("a regimen")).name;
+        assert_eq!(read(""), "c1");
+        assert_eq!(read("self_capture_contract = \"c2\"\n"), "c2");
+        assert_eq!(read("self_capture_contract = \"c9\"\n"), "c1");
+        assert_eq!(read("self_capture_contract = 2\n"), "c1");
     }
 
     /// #609: the regimen's words, read leniently.
@@ -17420,6 +17597,7 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                background: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
                 fired: None,

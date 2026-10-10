@@ -198,6 +198,9 @@ pub struct Parameter {
     pub required: bool,
     /// The admissible words, for a [`ParamType::Choice`]; empty otherwise.
     pub choices: Vec<String>,
+    /// What the model is told the parameter is (set `c2` on); `None` where
+    /// the contract gives none, as `c1`'s does not.
+    pub description: Option<String>,
 }
 
 /// One tool's whole contract.
@@ -322,6 +325,9 @@ pub fn definitions(specs: &[ToolSpec]) -> Vec<crate::client::shape::ToolDefiniti
                 .iter()
                 .map(|parameter| {
                     let mut property = BTreeMap::from([("type".to_owned(), text("string"))]);
+                    if let Some(description) = &parameter.description {
+                        property.insert("description".to_owned(), text(description));
+                    }
                     if parameter.kind == ParamType::Choice {
                         property.insert(
                             "enum".to_owned(),
@@ -359,6 +365,17 @@ pub fn definitions(specs: &[ToolSpec]) -> Vec<crate::client::shape::ToolDefiniti
 /// closed schema above does not define.
 pub fn contract() -> Result<Vec<ToolSpec>, ContractError> {
     read_contract(CONTRACT)
+}
+
+/// The contract of the pinned set `set` (#609's c2 on).
+///
+/// # Errors
+///
+/// As [`contract`].
+pub fn contract_of(
+    set: &crate::dogma::capture::CaptureSet,
+) -> Result<Vec<ToolSpec>, ContractError> {
+    read_contract(set.contract())
 }
 
 /// Read a contract out of `text`.
@@ -516,12 +533,24 @@ fn parameter(at: &str, name: String, value: Value) -> Result<Parameter, Contract
     if choices.is_empty() == (kind == ParamType::Choice) {
         return Err(ContractError::ChoicesDisagree { at: where_ });
     }
+    let description = match members.remove("description") {
+        None => None,
+        Some(Value::String(text)) => Some(text),
+        Some(_) => {
+            return Err(ContractError::WrongType {
+                at: where_,
+                key: "description".to_owned(),
+                want: "a string",
+            });
+        }
+    };
     no_other_keys(&members, &where_)?;
     Ok(Parameter {
         name,
         kind,
         required,
         choices,
+        description,
     })
 }
 
@@ -1574,6 +1603,75 @@ mod tests {
             matches!(refused, ContractError::UnexpectedKey { .. }),
             "an unread parameter key was accepted as {refused:?}"
         );
+    }
+
+    /// c2 (#609): c1's contract with a description on every parameter, and
+    /// nothing else changed -- the same tools, descriptions, types, choices
+    /// and requirements.
+    #[test]
+    fn c2_is_c1_with_every_parameter_described() {
+        use crate::dogma::capture::{C1, C2};
+        let c1 = super::contract_of(&C1).expect("c1");
+        let c2 = super::contract_of(&C2).expect("c2");
+        assert_eq!(c1, super::contract().expect("the contract"));
+        assert_eq!(c1.len(), c2.len());
+        for (one, two) in c1.iter().zip(&c2) {
+            assert_eq!(one.tool, two.tool);
+            assert_eq!(one.description, two.description);
+            assert_eq!(one.parameters.len(), two.parameters.len());
+            for (a, b) in one.parameters.iter().zip(&two.parameters) {
+                assert_eq!(a.description, None, "c1 describes no parameter");
+                assert!(
+                    b.description.as_deref().is_some_and(|d| !d.is_empty()),
+                    "c2 leaves {}.{} undescribed",
+                    two.tool.tag(),
+                    b.name
+                );
+                let mut undescribed = b.clone();
+                undescribed.description = None;
+                assert_eq!(a, &undescribed);
+            }
+        }
+    }
+
+    /// A parameter's description reaches the request's schema; with none,
+    /// the schema has no `description` key, so c1's requests are unchanged.
+    #[test]
+    fn a_parameters_description_reaches_the_requests_schema() {
+        use crate::dogma::capture::{C1, C2};
+        use crate::formats::record::json::Value;
+        let content = |set| {
+            let tools = super::definitions(&super::contract_of(set).expect("a contract"));
+            let Value::Object(schema) = &tools[0].schema else {
+                panic!("an object schema");
+            };
+            let Some(Value::Object(properties)) = schema.get("properties") else {
+                panic!("properties");
+            };
+            let Some(Value::Object(content)) = properties.get("content") else {
+                panic!("content");
+            };
+            content.clone()
+        };
+        assert_eq!(content(&C1).get("description"), None);
+        assert_eq!(
+            content(&C2).get("description"),
+            Some(&Value::String(
+                "the fact, in one line, as a later turn should read it".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_parameter_description_that_is_not_text_is_refused() {
+        let row = r#"{"tool":"resolve_entry","description":"d","parameters":{"entry":{"type":"entry_id","required":true,"description":3}}}"#;
+        assert!(matches!(
+            read_contract(row),
+            Err(ContractError::WrongType {
+                want: "a string",
+                ..
+            })
+        ));
     }
 
     #[test]

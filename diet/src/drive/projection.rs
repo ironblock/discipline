@@ -508,7 +508,11 @@ pub fn project_in(
         .ok_or("the regime declares no substrate")?;
     let mut walk = Walk::over(lines, substrate, engine);
     walk.recording = recording.map(std::path::Path::to_path_buf);
-    walk.tools = tools_of(tools.as_deref().unwrap_or_default(), *bash_timeout_ms);
+    walk.tools = tools_of(
+        tools.as_deref().unwrap_or_default(),
+        *bash_timeout_ms,
+        capture_contract_of(levers.as_ref()),
+    );
     walk.template_kwargs = kwargs_of(template_kwargs.as_ref());
     walk.model.clone_from(model);
     // Where its notes ride (#609): in the ask's message, from this build on.
@@ -676,11 +680,28 @@ fn kwargs_of(
     sent
 }
 
+/// The self-capture contract set a session offered (#609), as its
+/// `self_capture` lever names it (`on:every:<n>:<set>:<digest>`): `c1` for a
+/// session whose lever names none, which is every session before c2.
+fn capture_contract_of(
+    levers: Option<&BTreeMap<String, String>>,
+) -> &'static crate::dogma::capture::CaptureSet {
+    levers
+        .and_then(|levers| levers.get("self_capture"))
+        .and_then(|word| word.split(':').nth(3))
+        .and_then(crate::dogma::capture::set)
+        .unwrap_or(crate::dogma::capture::DEFAULT)
+}
+
 /// The tools `session.start` names, as the session declared them (#472):
 /// each name to the definition its requests carried. The head's digest is
 /// the check: a definition that differs from what was sent leaves the head
 /// unverified, never wrongly verified.
-fn tools_of(names: &[String], bash_timeout_ms: Option<u64>) -> Result<Vec<ToolDefinition>, String> {
+fn tools_of(
+    names: &[String],
+    bash_timeout_ms: Option<u64>,
+    capture_contract: &crate::dogma::capture::CaptureSet,
+) -> Result<Vec<ToolDefinition>, String> {
     // Background commands (#614) were on exactly when `task_stop` was
     // declared: `bash` then took `is_background`.
     let background = names
@@ -707,12 +728,13 @@ fn tools_of(names: &[String], bash_timeout_ms: Option<u64>) -> Result<Vec<ToolDe
                 .find(|tool| tool.name == *name)
             {
                 Ok(tool)
-            } else if let Some(tool) = crate::capture::tools::contract()
+            } else if let Some(tool) = crate::capture::tools::contract_of(capture_contract)
                 .ok()
                 .map(|contract| crate::capture::tools::definitions(&contract))
                 .and_then(|tools| tools.into_iter().find(|tool| tool.name == *name))
             {
-                // Self-capture's tools (#609), as the pinned contract has them.
+                // Self-capture's tools (#609), as the session's pinned set has
+                // them.
                 Ok(tool)
             } else {
                 Err(format!(
@@ -1243,6 +1265,7 @@ impl<'a> Walk<'a> {
             render,
             tail_tokens,
             outputs,
+            background,
             placement,
             fired,
             pruned,
@@ -1298,7 +1321,9 @@ impl<'a> Walk<'a> {
         // a seam logged before #597 -- appended to the system message.
         self.refilled = *placement == Some(log::RenderPlacement::Message);
         self.trunk = if self.refilled {
-            crate::seam::render::refill(&self.head, &sent)
+            // Its list of the background commands still running (#614),
+            // after the summary.
+            crate::seam::render::refill_with(&self.head, &sent, background.as_deref())
         } else {
             crate::seam::render::refill_in_the_system_message(&self.head, &sent)
         };
@@ -1972,6 +1997,30 @@ mod tests {
     };
     use crate::formats::record::Record;
 
+    /// #609's c2: a session's self-capture tools are rebuilt from the set its
+    /// lever names, c1 where it names none, so a c2 session's described
+    /// parameters are the ones its requests carried.
+    #[test]
+    fn self_capture_tools_are_rebuilt_from_the_set_the_lever_names() {
+        use crate::dogma::capture::{C1, C2};
+        let lever = |word: &str| BTreeMap::from([("self_capture".to_owned(), word.to_owned())]);
+        assert_eq!(capture_contract_of(None), &C1);
+        assert_eq!(capture_contract_of(Some(&lever("on:every:3"))), &C1);
+        let c2 = lever(&format!("on:every:3:c2:{}", C2.digest()));
+        assert_eq!(capture_contract_of(Some(&c2)), &C2);
+        let names = ["update_record".to_owned()];
+        let rebuilt = tools_of(&names, None, capture_contract_of(Some(&c2))).expect("declared");
+        let sent = crate::capture::tools::definitions(
+            &crate::capture::tools::contract_of(&C2).expect("c2"),
+        );
+        assert_eq!(rebuilt[0], sent[0]);
+        assert_ne!(
+            tools_of(&names, None, &C1).expect("declared")[0],
+            sent[0],
+            "c1's and c2's update_record differ"
+        );
+    }
+
     fn regime() -> Regime {
         let regimen =
             crate::formats::regimen::parse(crate::drive::canned::DEV_LOOP).expect("a regimen");
@@ -2320,6 +2369,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            background: None,
             placement: None,
             render_budget: None,
             fired: None,
@@ -2369,6 +2419,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            background: None,
             placement: None,
             render_budget: None,
             fired: None,
