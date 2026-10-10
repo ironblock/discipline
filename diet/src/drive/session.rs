@@ -2324,6 +2324,28 @@ fn step<S: Streaming>(
             );
         }
         Ok(StreamEnded::Cancelled) => {
+            // The steps it finished stay on the trunk, and so does what it
+            // had said when the cancel came, as `OpenCode` and Qwen Code keep
+            // it (#575): its text, unmarked. Its reasoning is not kept: the
+            // log's `cancelled` line carries none to rebuild it from.
+            if partial.is_empty() {
+                state.keep_ran_steps();
+            } else {
+                let mut kept = std::mem::take(&mut state.ran);
+                if kept.is_empty() {
+                    kept.push(
+                        exchange
+                            .first()
+                            .cloned()
+                            .unwrap_or_else(|| Message::new(Role::User, String::new())),
+                    );
+                }
+                kept.push(Message::new(Role::Assistant, partial.clone()));
+                state.trunk.extend(kept);
+                if let Some(measured) = state.step_tokens.take() {
+                    state.trunk_tokens = Some(measured);
+                }
+            }
             state.push(Event::Cancelled { request, partial });
             state.push(Event::TurnSettled {
                 turn,
@@ -2370,6 +2392,24 @@ fn step<S: Streaming>(
     None
 }
 
+/// What a cancelled turn tells the model of a call that was running when
+/// the cancel came: after what the command printed, Qwen Code's own result
+/// for a call the user cancelled (`qc:packages/core/src/core/coreToolScheduler.ts`
+/// 467-468 and 1201-1209 at `c0c697c8`). The other harnesses answer it too,
+/// in their own words (Pi "Command aborted", `OpenCode` "Tool execution
+/// interrupted"); where the wording differs, Qwen Code's, the harness
+/// closest to the model this drives (#575).
+pub const CANCELLED_CALL: &str = "[Operation Cancelled] Reason: User intentionally cancelled \
+     this tool call. Stop and await further instructions; do not retry or work around it.";
+
+/// What a cancelled turn tells the model of a call that had not started --
+/// or was waiting on the operator -- when the cancel came: Qwen Code's
+/// repair text for a call with no recorded result
+/// (`qc:packages/core/src/core/llm-chat.ts` 1817-1819 at `c0c697c8`), which
+/// is what its model sees after an interrupt (#575).
+pub const UNRECORDED_CALL: &str = "Tool execution result was not recorded — likely interrupted \
+     by network failure, abort, or process exit. Treat as failure and retry if needed.";
+
 /// A step's calls, each to its one line, in the order they were made; then
 /// the turn goes on with their results, or settles: `cancelled` if a stop
 /// reached it, `failed` if a call named a tool the session did not declare
@@ -2396,6 +2436,13 @@ fn run_calls<S: Streaming>(
             (cancelled_line(shared, (turn, request), call), None)
         } else {
             one_call(shared, cancel, (turn, request), call, last)
+        };
+        // A call a cancel reached before it ran is still answered, as every
+        // harness answers it (#575).
+        let shown = if line.outcome == log::ToolOutcome::Cancelled && shown.is_none() {
+            Some(UNRECORDED_CALL.to_owned())
+        } else {
+            shown
         };
         // The one string the result message carries, logged as given.
         line.shown.clone_from(&shown);
@@ -2428,6 +2475,16 @@ fn run_calls<S: Streaming>(
         } else if reason == SettleReason::Failed {
             state.step_tokens = measured;
             state.keep_ran_steps();
+        } else if reason == SettleReason::Cancelled {
+            // Every call of this step answered, the cancelled one included:
+            // the turn so far joins the trunk, as the other harnesses keep
+            // it (#575).
+            let mut ran = std::mem::take(exchange);
+            ran.push(said);
+            ran.extend(results);
+            state.trunk.extend(ran);
+            state.trunk_tokens = measured;
+            state.ran.clear();
         }
         state.push(Event::TurnSettled { turn, reason });
         turn_over(&shared.template, &mut state);
@@ -2707,19 +2764,22 @@ fn one_call<S: Streaming>(
         .run_until(&tools.policy, &tools.worktree, &run, &|| cancel.is_asked())
     {
         Ok(ran) if ran.cancelled => {
+            // A cancelled line carries no streams (the log format's rule);
+            // what the command printed before the cancel reaches the log as
+            // the result the model was shown.
             line.outcome = log::ToolOutcome::Cancelled;
             line.confined = Some(ran.confined.clone());
             line.isolation = Some(isolation_word(ran.isolation));
             line.network = Some(network_word(ran.network));
-            line.stdout = Some(log::Output {
-                text: ran.stdout.clone(),
-                bytes: ran.stdout_bytes,
-            });
-            line.stderr = Some(log::Output {
-                text: ran.stderr.clone(),
-                bytes: ran.stderr_bytes,
-            });
-            (line, None)
+            // What it printed before the cancel, then the cancel's result
+            // (#575).
+            let printed = ran.as_the_model_sees_it();
+            let shown = if printed.is_empty() {
+                CANCELLED_CALL.to_owned()
+            } else {
+                format!("{printed}\n{CANCELLED_CALL}")
+            };
+            (line, Some(shown))
         }
         Ok(ran) => {
             let denied = ran.denials().iter().any(|d| d.kind.is_unambiguous());
@@ -3508,7 +3568,7 @@ pub(in crate::drive) mod tests {
     }
 
     #[test]
-    fn a_cancel_reaches_a_call_blocked_mid_answer_and_leaves_the_trunk_alone() {
+    fn a_cancel_reaches_a_call_blocked_mid_answer_and_keeps_what_it_had_said() {
         // Held, and never opened by this test: only the cancel can wake it.
         let gate = Gate::new();
         let canned = Canned::new([
@@ -3551,10 +3611,16 @@ pub(in crate::drive) mod tests {
                 },
             ]
         );
-        assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
+        // What it had said stays, unmarked, as OpenCode and Qwen Code keep it
+        // (#575).
+        let kept = [
+            Message::new(Role::System, HEAD),
+            user("first"),
+            Message::new(Role::Assistant, "Hel"),
+        ];
+        assert_eq!(session.trunk(), kept);
 
-        // The next ask goes out on the prefix the last SETTLED turn left:
-        // nothing of the stopped one.
+        // The next ask goes out on that prefix.
         session
             .ask("second", None)
             .expect("accepted after a cancel");
@@ -3563,10 +3629,9 @@ pub(in crate::drive) mod tests {
                 .any(|logged| matches!(logged.event, Event::Answered { .. }))
                 && settled(log)
         });
-        assert_eq!(
-            session.shared.transport.sent()[1].messages,
-            [Message::new(Role::System, HEAD), user("second")]
-        );
+        let mut next = kept.to_vec();
+        next.push(user("second"));
+        assert_eq!(session.shared.transport.sent()[1].messages, next);
     }
 
     #[test]
@@ -5776,6 +5841,8 @@ pub(in crate::drive) mod tests {
             asked.elapsed()
         );
         assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        // The log reads: a cancelled line carries no streams.
+        reads_whole(&session);
         let written = lines(&log);
         assert_eq!(written.len(), 1);
         assert_eq!(written[0].outcome, log::ToolOutcome::Cancelled);
@@ -5822,6 +5889,176 @@ pub(in crate::drive) mod tests {
         let said = |line: &ToolLine| line.stdout.as_ref().map(|out| out.text.clone());
         assert_eq!(said(&written[0]).as_deref(), Some("started\n"));
         assert_eq!(said(&written[1]).as_deref(), Some("second\n"));
+        tidy(&[&tree]);
+    }
+
+    /// Every head the log's projection rebuilds is verified: none is named
+    /// as one it could not rebuild.
+    fn every_head_rebuilds(log: &[Logged]) {
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let unrebuilt: Vec<&str> = projected
+            .unspellable
+            .iter()
+            .filter(|named| named.why.contains("could not be rebuilt"))
+            .map(|named| named.why.as_str())
+            .collect();
+        assert!(unrebuilt.is_empty(), "{unrebuilt:#?}");
+    }
+
+    /// A turn cancelled after a finished call, while its next call runs
+    /// (#575): the finished step stays on the trunk, the running call is
+    /// killed and answered with what it printed and Qwen Code's cancel
+    /// result, the next ask carries all of it, and the projection rebuilds
+    /// every head.
+    #[test]
+    fn a_cancelled_turn_keeps_its_finished_steps_and_answers_the_running_call() {
+        let tree = scratch("cancel-keeps-steps");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![bash("call-2", "echo partway; sleep 600")],
+                deltas(&["next"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch", "echo", "sleep"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        wait_until(&session, "the second call to be made", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Called { .. }))
+                .count()
+                == 2
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2 * 2, "{trunk:#?}");
+        assert_eq!(trunk[1], user("work"));
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        assert_eq!(trunk[4], call_message("call-2", "echo partway; sleep 600"));
+        assert_eq!(
+            trunk[5].content,
+            format!("partway\n\n{CANCELLED_CALL}"),
+            "what it printed, then the cancel"
+        );
+        let written = lines(&log);
+        assert_eq!(written[1].outcome, log::ToolOutcome::Cancelled);
+        assert_eq!(written[1].shown.as_deref(), Some(trunk[5].content.as_str()));
+
+        session.ask("next", None).expect("accepted after a cancel");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        reads_whole(&session);
+        let sent = session.shared.transport.sent();
+        assert_eq!(
+            sent[2].messages[..trunk.len()],
+            trunk[..],
+            "the next ask carries the cancelled turn's steps"
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// A call the cancel reached before it started -- the second of one
+    /// message -- never runs, and is answered with Qwen Code's repair text
+    /// (#575), so every call of the kept step has its result.
+    #[test]
+    fn a_call_a_cancel_reached_before_it_started_is_answered_as_unrecorded() {
+        let tree = scratch("cancel-unstarted");
+        let session = Session::open_looping(
+            Canned::new([vec![
+                Step::call(0, "call-1", "bash", r#"{"command":"sleep 600"}"#),
+                Step::call(1, "call-2", "bash", r#"{"command":"touch never"}"#),
+            ]]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch", "sleep"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        wait_until(&session, "the calls to be made", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Called { .. }))
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        assert!(!tree.join("never").exists(), "the unstarted call ran");
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 3, "{trunk:#?}");
+        assert_eq!(
+            trunk[3].content, CANCELLED_CALL,
+            "the running call printed nothing"
+        );
+        assert_eq!(trunk[4].content, UNRECORDED_CALL);
+        assert_eq!(trunk[4].tool_call_id.as_deref(), Some("call-2"));
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// Cancelled while generating after a finished step: the step stays, and
+    /// so does the text said so far (#575).
+    #[test]
+    fn a_turn_cancelled_while_generating_keeps_its_step_and_its_text() {
+        let tree = scratch("cancel-generating");
+        let gate = Gate::new();
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "touch a")],
+                vec![Step::Delta("so far".to_owned()), Step::Hold(gate.clone())],
+                deltas(&["next"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("work", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "never held"
+        );
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        let trunk = session.trunk();
+        assert_eq!(trunk.len(), 1 + 1 + 2 + 1, "{trunk:#?}");
+        assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        assert_eq!(trunk[4], Message::new(Role::Assistant, "so far"));
+        session.ask("next", None).expect("accepted after a cancel");
+        let log = wait_until(&session, "the second turn to settle", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        every_head_rebuilds(&log);
         tidy(&[&tree]);
     }
 
