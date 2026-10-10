@@ -2208,6 +2208,10 @@ struct Shared<S> {
     /// Where the interview fork runs when it is not the trunk's server
     /// (#570); `None` is warm.
     seat: Option<Offboard<S>>,
+    /// A fork's own transport on the trunk's server, when it asks the cache
+    /// differently (#556): a hosted API's, whose fork never writes its tail
+    /// for an hour.
+    forks: Option<S>,
 }
 
 /// An offboard extraction seat (#570): the second server a fork's call is
@@ -2402,6 +2406,7 @@ impl<S: Streaming + 'static> Session<S> {
             tools,
             reap: Mutex::new(None),
             seat: None,
+            forks: None,
         })
     }
 
@@ -2426,6 +2431,21 @@ impl<S: Streaming + 'static> Session<S> {
         Arc::get_mut(&mut self.shared)
             .expect("a session is seated before it is shared")
             .seat = Some(seat);
+        self
+    }
+
+    /// This session, its forks on the trunk's server made through `forks`
+    /// (#556): the same server, asked to cache a fork's tail differently.
+    /// An offboard seat, when there is one, still takes them.
+    ///
+    /// # Panics
+    ///
+    /// When the session is already shared.
+    #[must_use]
+    pub fn forking_through(mut self, forks: S) -> Self {
+        Arc::get_mut(&mut self.shared)
+            .expect("a session's forks are set before it is shared")
+            .forks = Some(forks);
         self
     }
 
@@ -6921,10 +6941,10 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
         .map(|interview| interview.capture)
         == Some(crate::dogma::asks::Modality::Tools);
     let mut calls = Calls::default();
-    let transport = shared
-        .seat
-        .as_ref()
-        .map_or(&shared.transport, |seat| &seat.transport);
+    let transport = shared.seat.as_ref().map_or_else(
+        || shared.forks.as_ref().unwrap_or(&shared.transport),
+        |seat| &seat.transport,
+    );
     let began = Instant::now();
     let mut hosted = Hosted::default();
     let result = transport.stream(&shape, deadline, &cancel, &mut |piece: Piece<'_>| {
@@ -8499,6 +8519,71 @@ pub(in crate::drive) mod tests {
             )
         );
         reads_whole(&session);
+    }
+
+    /// #556: under `cache_ttl = "1h"` the trunk's request writes every
+    /// breakpoint for an hour; its fork, made through the transport's fork
+    /// form, reads the trunk's system at an hour and writes its own tail for
+    /// five minutes only.
+    #[test]
+    fn a_hosted_fork_never_writes_its_tail_for_an_hour() {
+        use crate::client::anthropic::tests::{answering, streamed};
+        use crate::client::anthropic::{Options, Ttl, Ttls};
+        use crate::client::stream::HttpStream;
+        use crate::client::stub::Stub;
+        use crate::client::transport::Endpoint;
+
+        let stub = Stub::serving(vec![
+            streamed(&answering(SCOPED, (40, 0, 900))),
+            streamed(&answering(DECIDED, (30, 900, 20))),
+        ])
+        .expect("loopback");
+        let transport = HttpStream::new(Endpoint::parse(&stub.url()).expect("an endpoint"))
+            .with_anthropic(Options {
+                ttl: Ttls::all(Ttl::Hour),
+                ..Options::default()
+            });
+        let forks = transport.for_forks().expect("a fork asks differently");
+        let session = Session::open_with(
+            transport,
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        )
+        .forking_through(forks);
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        let bodies: Vec<serde_json::Value> = stub
+            .received()
+            .iter()
+            .map(|body| serde_json::from_str(body).expect("a JSON body"))
+            .collect();
+        let [trunk, fork] = bodies.as_slice() else {
+            panic!("a trunk request and a fork request: {bodies:#?}");
+        };
+        let hour = serde_json::json!({"type": "ephemeral", "ttl": "1h"});
+        let tail = |body: &serde_json::Value| {
+            let messages = body["messages"].as_array().expect("messages");
+            let content = messages.last().expect("a last message")["content"]
+                .as_array()
+                .expect("blocks")
+                .clone();
+            content.last().expect("a last block")["cache_control"].clone()
+        };
+        assert_eq!(
+            (&trunk["system"][0]["cache_control"], tail(trunk)),
+            (&hour, hour.clone())
+        );
+        assert_eq!(
+            (&fork["system"][0]["cache_control"], tail(fork)),
+            (&hour, serde_json::json!({"type": "ephemeral"}))
+        );
     }
 
     /// #555: on a hosted API a fork reuses the trunk's prefix through the

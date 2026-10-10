@@ -3631,6 +3631,11 @@ const HOSTED_ANSWER: &[u8] = include_bytes!("../client/fixtures/anthropic-constr
 
 /// A regimen on the hosted-API rehearsal substrate.
 fn hosted_regimen() -> HeadFile {
+    hosted_regimen_with("")
+}
+
+/// The same, with `top` among its top-level keys.
+fn hosted_regimen_with(top: &str) -> HeadFile {
     let hardware =
         diet::drive::registry::identity(diet::drive::registry::REGISTRY, "stub-hosted-api")
             .expect("the rehearsal entry")
@@ -3638,7 +3643,7 @@ fn hosted_regimen() -> HeadFile {
     file_holding(
         "regimen",
         &format!(
-            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"stub-hosted-api\"\n\
+            "{top}arm = \"a\"\ndogma_version = 0\nsubstrate = \"stub-hosted-api\"\n\
              substrate_reasoning = \"on\"\nsubstrate_hardware = \"{hardware}\"\n\
              [reasoning]\neffort = \"low\"\nbudget_tokens = \"none\"\n\
              [sampler]\ntemperature = 1\n"
@@ -3740,4 +3745,64 @@ fn a_drive_server_on_a_hosted_api_entry_needs_its_key() {
         said.contains("neither --key-file nor ANTHROPIC_API_KEY") && !said.contains("listening"),
         "{said}"
     );
+}
+
+/// #556: `cache_ttl = "per-breakpoint"` writes the system and tools for an
+/// hour and the final user message's tail for five minutes; the start row
+/// names the lever under `cache_lifetime`; a word it does not know refuses
+/// the start.
+#[test]
+fn a_drive_server_on_a_hosted_api_entry_asks_the_cache_for_the_lifetimes_declared() {
+    let stub = Stub::serving(vec![Act::Raw(HOSTED_ANSWER.to_vec())]).expect("loopback");
+    let regimen = hosted_regimen_with("cache_ttl = \"per-breakpoint\"\n");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--key-file",
+            &key_path,
+            "--log",
+            &logged,
+        ],
+    );
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hello?"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains("turn.settled") && read.contains(r#""to":"awaiting""#),
+    );
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let body = log_line_object(&stub.received()[0]);
+    assert_eq!(
+        (
+            &body["system"][0]["cache_control"],
+            &body["messages"][0]["content"][0]["cache_control"]
+        ),
+        (
+            &serde_json::json!({"type": "ephemeral", "ttl": "1h"}),
+            &serde_json::json!({"type": "ephemeral"})
+        ),
+        "{body}"
+    );
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["levers"]["cache_lifetime"], "per-breakpoint",
+        "{start_line}"
+    );
+
+    let refused = hosted_regimen_with("cache_ttl = \"10m\"\n");
+    let path = refused.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path, "--key-file", &key_path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("cache_ttl"), "{said}");
 }

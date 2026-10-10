@@ -71,6 +71,75 @@ pub enum Thinking {
 pub struct Options {
     /// How the model thinks.
     pub thinking: Thinking,
+    /// How long each breakpoint asks the cache to keep its prefix (#556).
+    pub ttl: Ttls,
+}
+
+/// How long a breakpoint asks the cache to keep its prefix (#556).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Ttl {
+    /// Five minutes: `{"type":"ephemeral"}`, the API's default and the
+    /// three harnesses'.
+    #[default]
+    FiveMinutes,
+    /// An hour: `{"type":"ephemeral","ttl":"1h"}`.
+    Hour,
+}
+
+/// Each breakpoint's lifetime, in the cache's wire order: tools, system,
+/// the final user message's tail (#556).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Ttls {
+    /// The last tool's.
+    pub tools: Ttl,
+    /// The last system block's.
+    pub system: Ttl,
+    /// The last block of the final user message's.
+    pub tail: Ttl,
+}
+
+impl Ttls {
+    /// Every breakpoint at `ttl`.
+    #[must_use]
+    pub fn all(ttl: Ttl) -> Self {
+        Self {
+            tools: ttl,
+            system: ttl,
+            tail: ttl,
+        }
+    }
+
+    /// Each breakpoint as sent: an hour when it, or any breakpoint after it
+    /// on the wire, asks for one. Anthropic refuses a longer lifetime after
+    /// a shorter one, and Qwen Code promotes the earlier anchors rather than
+    /// refusing (`qc:packages/core/src/core/anthropicContentGenerator/
+    /// converter.ts:1009-1044`, `resolveCacheRetention`).
+    #[must_use]
+    pub fn on_the_wire(self) -> Self {
+        let hour = |ttls: &[Ttl]| {
+            if ttls.contains(&Ttl::Hour) {
+                Ttl::Hour
+            } else {
+                Ttl::FiveMinutes
+            }
+        };
+        Self {
+            tools: hour(&[self.tools, self.system, self.tail]),
+            system: hour(&[self.system, self.tail]),
+            tail: self.tail,
+        }
+    }
+
+    /// These, a fork's: its tools and system read the trunk's entries at
+    /// the trunk's lifetimes, and its own tail is never written for an
+    /// hour -- nothing reuses it.
+    #[must_use]
+    pub fn for_a_fork(self) -> Self {
+        Self {
+            tail: Ttl::FiveMinutes,
+            ..self
+        }
+    }
 }
 
 impl Options {
@@ -81,9 +150,12 @@ impl Options {
     }
 }
 
-/// A cache breakpoint: five minutes.
-fn ephemeral() -> Value {
-    json!({"type": "ephemeral"})
+/// A cache breakpoint at `ttl`.
+fn breakpoint(ttl: Ttl) -> Value {
+    match ttl {
+        Ttl::FiveMinutes => json!({"type": "ephemeral"}),
+        Ttl::Hour => json!({"type": "ephemeral", "ttl": "1h"}),
+    }
 }
 
 /// The sampler settings Anthropic has a parameter for, by our name.
@@ -119,15 +191,16 @@ pub fn body(shape: &RequestShape, options: &Options) -> Result<String, String> {
         .iter()
         .map(|message| json!({"type": "text", "text": message.content}))
         .collect();
+    let ttl = options.ttl.on_the_wire();
     if let Some(Value::Object(last)) = system.last_mut() {
-        last.insert("cache_control".to_owned(), ephemeral());
+        last.insert("cache_control".to_owned(), breakpoint(ttl.system));
     }
     if !system.is_empty() {
         out.insert("system".to_owned(), Value::Array(system));
     }
     out.insert(
         "messages".to_owned(),
-        Value::Array(messages(&shape.messages[head..])?),
+        Value::Array(messages(&shape.messages[head..], ttl.tail)?),
     );
     let mut tools: Vec<Value> = shape
         .tools
@@ -146,7 +219,7 @@ pub fn body(shape: &RequestShape, options: &Options) -> Result<String, String> {
         })
         .collect();
     if let Some(Value::Object(last)) = tools.last_mut() {
-        last.insert("cache_control".to_owned(), ephemeral());
+        last.insert("cache_control".to_owned(), breakpoint(ttl.tools));
     }
     if !tools.is_empty() {
         out.insert("tools".to_owned(), Value::Array(tools));
@@ -189,7 +262,7 @@ pub fn body(shape: &RequestShape, options: &Options) -> Result<String, String> {
 /// The turns after the head as Anthropic's messages: a tool result joins
 /// the user message its neighbours make, and the last block of the final
 /// user message carries the third breakpoint.
-fn messages(turns: &[Message]) -> Result<Vec<Value>, String> {
+fn messages(turns: &[Message], tail: Ttl) -> Result<Vec<Value>, String> {
     let mut out: Vec<(&'static str, Vec<Value>)> = Vec::new();
     for message in turns {
         let (role, blocks) = match message.role {
@@ -205,7 +278,7 @@ fn messages(turns: &[Message]) -> Result<Vec<Value>, String> {
     if let Some(("user", blocks)) = out.last_mut()
         && let Some(Value::Object(block)) = blocks.last_mut()
     {
-        block.insert("cache_control".to_owned(), ephemeral());
+        block.insert("cache_control".to_owned(), breakpoint(tail));
     }
     Ok(out
         .into_iter()
@@ -580,6 +653,7 @@ pub(crate) mod tests {
             Pin::Decimal(crate::formats::record::json::Decimal::new("0.60").expect("digits")),
         );
         let options = Options {
+            ttl: Ttls::default(),
             thinking: Thinking::Adaptive {
                 effort: Some("medium".to_owned()),
             },
@@ -636,6 +710,75 @@ pub(crate) mod tests {
         assert_eq!(Options::default().beta(), None);
     }
 
+    /// #556: each breakpoint at its lifetime, longer before shorter in the
+    /// cache's tools, system, messages order -- an anchor promoted to an hour
+    /// when one after it asks for an hour, as Qwen Code resolves it -- and a
+    /// fork's tail never written for an hour.
+    #[test]
+    fn breakpoints_carry_their_lifetimes_longer_before_shorter() {
+        let hour = json!({"type": "ephemeral", "ttl": "1h"});
+        let five = json!({"type": "ephemeral"});
+        let mut request = shape(vec![
+            Message::new(Role::System, "you are a coder"),
+            Message::new(Role::User, "hi"),
+        ]);
+        request.tools = vec![ToolDefinition {
+            name: "read".to_owned(),
+            description: None,
+            schema: crate::formats::record::json::Value::Object(
+                crate::formats::record::json::line(r#"{"type":"object"}"#).expect("a schema"),
+            ),
+        }];
+        let sent = |ttl: Ttls| {
+            let value = parsed(
+                &body(
+                    &request,
+                    &Options {
+                        ttl,
+                        ..Options::default()
+                    },
+                )
+                .expect("a body"),
+            );
+            (
+                value["tools"][0]["cache_control"].clone(),
+                value["system"][0]["cache_control"].clone(),
+                value["messages"][0]["content"][0]["cache_control"].clone(),
+            )
+        };
+        assert_eq!(
+            sent(Ttls::default()),
+            (five.clone(), five.clone(), five.clone())
+        );
+        let per_breakpoint = Ttls {
+            tools: Ttl::Hour,
+            system: Ttl::Hour,
+            tail: Ttl::FiveMinutes,
+        };
+        assert_eq!(
+            sent(per_breakpoint),
+            (hour.clone(), hour.clone(), five.clone())
+        );
+        assert_eq!(
+            sent(Ttls::all(Ttl::Hour)),
+            (hour.clone(), hour.clone(), hour.clone())
+        );
+        // An hour on the system alone promotes the tools before it.
+        let system_only = Ttls {
+            system: Ttl::Hour,
+            ..Ttls::default()
+        };
+        assert_eq!(
+            sent(system_only),
+            (hour.clone(), hour.clone(), five.clone())
+        );
+        // A fork reads the trunk's system and tools, its tail five minutes.
+        assert_eq!(
+            sent(Ttls::all(Ttl::Hour).for_a_fork()),
+            (hour.clone(), hour, five)
+        );
+    }
+
     /// What has no Anthropic parameter is refused, never dropped; reasoning
     /// with no signature goes back as text; a budget is `enabled`.
     #[test]
@@ -664,6 +807,7 @@ pub(crate) mod tests {
             &body(
                 &request,
                 &Options {
+                    ttl: Ttls::default(),
                     thinking: Thinking::Budget { tokens: 16_384 },
                 },
             )
@@ -826,6 +970,7 @@ pub(crate) mod tests {
         let (pieces, ended) = played(
             &stub,
             Options {
+                ttl: Ttls::default(),
                 thinking: Thinking::Adaptive { effort: None },
             },
         );

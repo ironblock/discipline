@@ -501,10 +501,26 @@ fn serve(args: &[String]) -> ExitCode {
                 }),
             )
         };
+        // The cache-lifetime lever (#556), from the regimen as written.
+        let ttl = regimen_file
+            .as_deref()
+            .map(|path| {
+                std::fs::read_to_string(path)
+                    .map_err(|why| format!("{path} cannot be read: {why}"))
+                    .and_then(|text| {
+                        regimen::parse(&text).map_err(|why| format!("{path}: {why:?}"))
+                    })
+                    .and_then(|read| diet::drive::hosted::cache_ttl(&read))
+            })
+            .transpose();
+        let ttl = match ttl {
+            Ok(ttl) => ttl.unwrap_or_default(),
+            Err(why) => return fail(EXIT_INPUT, &why),
+        };
         match diet::drive::hosted::transport(
             transport,
             (identity, &regime.substrates[0]),
-            key,
+            (key, ttl),
             &shape,
         ) {
             Ok(hosted) => transport = hosted,
@@ -837,6 +853,7 @@ fn served_session(
     tools: Option<Tools>,
     declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
+    let forks = transport.for_forks();
     // A session that runs commands declares its surface's tools (#557):
     // `bash` alone, or `bash` and the standard set; then `prune_output`
     // when the regimen offers it (#612).
@@ -865,6 +882,11 @@ fn served_session(
         tools,
         declared,
     );
+    // A hosted fork's own lifetimes (#556), when they differ.
+    let session = match forks {
+        Some(forks) => session.forking_through(forks),
+        None => session,
+    };
     std::sync::Arc::new(match seat {
         Some(seat) => session.seated(seat),
         None => session,
