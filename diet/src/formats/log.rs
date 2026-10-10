@@ -526,6 +526,8 @@ vocabulary! {
         Failed => "failed",
         /// It was stopped.
         Cancelled => "cancelled",
+        /// It was never sent (v7, #406): `refused` names why.
+        Refused => "refused",
     }
 }
 
@@ -1233,6 +1235,10 @@ pub enum Event {
         seat: Option<ForkSeat>,
         /// Which ask of its set it sent (v7, #595): the router kind's tag.
         ask: Option<String>,
+        /// What its call may do to the trunk's server (v7, #406):
+        /// `may-displace-trunk-cache` when it is sent to the trunk's own
+        /// server with a prompt that is not the trunk's prefix.
+        hazard: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -1246,6 +1252,10 @@ pub enum Event {
         /// An offboard fork's call, wall time from request to its end, in
         /// milliseconds (v7, #570).
         wall_ms: Option<u64>,
+        /// Why a fork settled `refused` was never sent (v7, #406): `pool`,
+        /// its prompt and tail not fitting the window. Present exactly when
+        /// the outcome is `refused`.
+        refused: Option<String>,
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
@@ -2943,12 +2953,30 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 _ => None,
             },
             ask: fields.optional_string("ask")?,
+            hazard: fields.optional_string("hazard")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
             outcome: fields.tag("outcome", ForkOutcome::from_tag)?,
             prompt_tokens: fields.optional_count("prompt_tokens")?,
             wall_ms: fields.optional_count("wall_ms")?,
+            refused: {
+                let outcome = fields.tag("outcome", ForkOutcome::from_tag)?;
+                let refused = fields.optional_string("refused")?;
+                if (outcome == ForkOutcome::Refused) != refused.is_some() {
+                    return Err(format!(
+                        "a fork settled `{}` {} `refused`: a fork names why it was never sent \
+                         exactly when it settled `refused`",
+                        outcome.tag(),
+                        if refused.is_some() {
+                            "carries"
+                        } else {
+                            "lacks"
+                        }
+                    ));
+                }
+                refused
+            },
         },
         Kind::Patch => {
             let op = fields.tag("op", PatchOp::from_tag)?;
@@ -4032,6 +4060,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::Lane && Lane::from_tag(tag) == Some(Lane::Interview) {
         return 5;
     }
+    if tags == Tags::ForkOutcome && ForkOutcome::from_tag(tag) == Some(ForkOutcome::Refused) {
+        return 7;
+    }
     if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::NothingToSeam) {
         return 6;
     }
@@ -4280,6 +4311,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("substrate", Text),
                 may_v7("model", Text),
                 may_v7("ask", Text),
+                may_v7("hazard", Text),
             ];
             F
         }
@@ -4289,6 +4321,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("outcome", Tag(Tags::ForkOutcome)),
                 may_v7("prompt_tokens", Count),
                 may_v7("wall_ms", Count),
+                may_v7("refused", Text),
             ];
             F
         }
@@ -5110,6 +5143,7 @@ fn to_value(line: &Line) -> Value {
             role,
             seat,
             ask,
+            hazard,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -5132,6 +5166,9 @@ fn to_value(line: &Line) -> Value {
             if let Some(ask) = ask {
                 put("ask", text(ask));
             }
+            if let Some(hazard) = hazard {
+                put("hazard", text(hazard));
+            }
             Kind::Fork
         }
         Event::ForkSettled {
@@ -5139,9 +5176,13 @@ fn to_value(line: &Line) -> Value {
             outcome,
             prompt_tokens,
             wall_ms,
+            refused,
         } => {
             put("fork", count(*fork));
             put("outcome", text(outcome.tag()));
+            if let Some(why) = refused {
+                put("refused", text(why));
+            }
             if let Some(tokens) = prompt_tokens {
                 put("prompt_tokens", count(*tokens));
             }
@@ -6456,6 +6497,7 @@ mod tests {
                     model: "small".to_owned(),
                 }),
                 ask: Some("judgment".to_owned()),
+                hazard: None,
             },
             Event::Request {
                 turn: 5,
@@ -6478,6 +6520,7 @@ mod tests {
                 outcome: ForkOutcome::Value,
                 prompt_tokens: Some(281),
                 wall_ms: Some(480),
+                refused: None,
             },
             Event::Patch {
                 fork: Some(fork),
@@ -7013,6 +7056,8 @@ mod tests {
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
                         || (tags == Tags::PatchOp && why.contains("`supersedes`"))
+                        || (tags == Tags::ForkOutcome
+                            && why.contains("exactly when it settled `refused`"))
                         || (tags == Tags::SeamReason && why.contains("a `window` seam names"))
                         || (tags == Tags::FailReason
                             && why.contains("carries a context overflow's sizes"))
@@ -7762,7 +7807,7 @@ mod tests {
         );
         assert_eq!(
             tags(ForkOutcome::ALL.iter().map(|it| it.tag()).collect()),
-            "value decline unparseable truncated failed cancelled"
+            "value decline unparseable truncated failed cancelled refused"
         );
         assert_eq!(
             tags(PatchOp::ALL.iter().map(|it| it.tag()).collect()),

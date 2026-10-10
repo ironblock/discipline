@@ -518,6 +518,10 @@ pub enum Event {
         seat: Option<log::ForkSeat>,
         /// Which ask of its set it sent (#595).
         ask: AskKind,
+        /// Whether it is sent to the trunk's own server with a prompt that
+        /// is not the trunk's prefix, and so may displace the trunk's cached
+        /// prefix there (#406).
+        displaces: bool,
     },
     /// How the fork ended: once per fork, after its call's last event.
     ForkSettled {
@@ -530,6 +534,8 @@ pub enum Event {
         prompt_tokens: Option<u64>,
         /// An offboard fork's call, wall time, in milliseconds (#570).
         wall_ms: Option<u64>,
+        /// Why a fork settled `refused` was never sent (#406): `pool`.
+        refused: Option<String>,
     },
     /// A seam fired, and the trunk was refilled from working memory (#493):
     /// the head with the working object rendered after it, and no turn of
@@ -920,6 +926,9 @@ pub struct Interview {
     /// How a fork answers (#610): in fields, the default, or through the
     /// self-capture tools.
     pub capture: crate::dogma::asks::Modality,
+    /// The output cap a fork's call is clamped from (#406): the regimen's
+    /// `fork_tail_tokens`, or `None`, the session's.
+    pub fork_tail: Option<u32>,
     /// Whether the model is offered `prune_output`, and when its prunes
     /// are applied (#612); `None`, the default, offers nothing.
     pub prune: Option<super::prune::PruneSeam>,
@@ -1571,8 +1580,14 @@ impl State {
     /// was added since; with none to go on, or a prompt that shrank (a seam),
     /// the whole estimate plus [`ESTIMATE_PAD`].
     fn sized(&mut self, shape: &mut RequestShape, ceiling: u32) -> u32 {
-        let estimate = estimate_of(shape);
         let prompt = self.prompt_of(shape);
+        self.sized_at(shape, ceiling, prompt)
+    }
+
+    /// [`State::sized`], for a request whose prompt is `prompt` (#406: a
+    /// fork's, which is not always the trunk's).
+    fn sized_at(&mut self, shape: &mut RequestShape, ceiling: u32, prompt: u64) -> u32 {
+        let estimate = estimate_of(shape);
         self.sent_estimate = Some(estimate);
         let cap = clamped(ceiling, shape.limits.context_window, prompt);
         shape.limits.max_output_tokens = cap;
@@ -1603,6 +1618,31 @@ impl State {
         match failure {
             TransportFailure::Timeout { .. } => None,
             _ => self.overflow(false),
+        }
+    }
+
+    /// How a fork's call on `shape` fits (#406). Its prompt: on the trunk's
+    /// server and the trunk's prefix, sized as the trunk's is, from the
+    /// trunk's measurement; otherwise the trunk's measurement says nothing
+    /// of it, and its estimate is all there is. Whether it may displace the
+    /// trunk's cache: on the trunk's server, off its prefix. Whether it is
+    /// refused unsent: its window leaves less than the clamp's floor (or
+    /// `ceiling`, its tail, if that is less), the room the trunk's own clamp
+    /// never goes below (#588).
+    fn fork_fit(&self, shape: &RequestShape, offboard: bool, ceiling: u32) -> ForkFit {
+        let before_the_ask = &shape.messages[..shape.messages.len() - 1];
+        let on_the_trunks_prefix = self.trunk.starts_with(before_the_ask);
+        let prompt = if !offboard && on_the_trunks_prefix {
+            self.prompt_of(shape)
+        } else {
+            estimate_of(shape)
+        };
+        ForkFit {
+            prompt,
+            displaces: !offboard && !on_the_trunks_prefix,
+            refused: shape.limits.context_window.is_some_and(|window| {
+                window.saturating_sub(prompt) < u64::from(ceiling).min(CLAMP_FLOOR)
+            }),
         }
     }
 
@@ -3227,6 +3267,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             role,
             seat,
             ask,
+            displaces,
         } => log::Event::Fork {
             lane: log::Lane::Interview,
             of_turn: *of_turn,
@@ -3241,17 +3282,20 @@ pub fn line_of(logged: &Logged) -> log::Line {
             role: (*role != Role::User).then(|| role.tag().to_owned()),
             seat: seat.clone(),
             ask: Some(ask.tag().to_owned()),
+            hazard: displaces.then(|| DISPLACES_TRUNK_CACHE.to_owned()),
         },
         Event::ForkSettled {
             fork,
             outcome,
             prompt_tokens,
             wall_ms,
+            refused,
         } => log::Event::ForkSettled {
             fork: *fork,
             outcome: *outcome,
             prompt_tokens: *prompt_tokens,
             wall_ms: *wall_ms,
+            refused: refused.clone(),
         },
         Event::Recalled {
             turn,
@@ -5465,6 +5509,41 @@ fn turn_over(template: &RequestShape, state: &mut State) {
     }
 }
 
+/// The least output the clamp leaves a request when its window has it
+/// (#588): Qwen Code's 4,000.
+pub const CLAMP_FLOOR: u64 = 4_000;
+
+/// The regimen key for a fork's tail (#406): the output cap a fork's call
+/// is clamped from, in place of the session's.
+pub const FORK_TAIL_TOKENS: &str = "fork_tail_tokens";
+
+/// The fork tail the regimen declares (#406), leniently: a positive whole
+/// number, or else none, the session's output cap.
+#[must_use]
+pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
+    match regimen.get(FORK_TAIL_TOKENS) {
+        Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => u32::try_from(*n).ok(),
+        _ => None,
+    }
+}
+
+/// How a fork's call fits its server ([`State::fork_fit`], #406).
+struct ForkFit {
+    /// Its prompt, as sized.
+    prompt: u64,
+    /// Whether it may displace the trunk's cached prefix.
+    displaces: bool,
+    /// Whether it is refused unsent, `pool`.
+    refused: bool,
+}
+
+/// Why a fork that would not fit its window was never sent (#406).
+const REFUSED_POOL: &str = "pool";
+
+/// The hazard a fork line names when its call, on the trunk's own server,
+/// does not share the trunk's prefix (#406).
+const DISPLACES_TRUNK_CACHE: &str = "may-displace-trunk-cache";
+
 /// The share of a `window` the output cap's sizing keeps clear of a
 /// prompt's estimate (#588): 5% of it, or 10,000 tokens if that is more.
 fn margin(window: i128) -> i128 {
@@ -5516,7 +5595,7 @@ pub fn clamped(ceiling: u32, window: Option<u64>, prompt: u64) -> u32 {
     let window = i128::from(window);
     let prompt = i128::from(prompt);
     let room = window - prompt - margin(window);
-    let floor = (window - prompt).clamp(1, 4_000);
+    let floor = (window - prompt).clamp(1, i128::from(CLAMP_FLOOR));
     let cap = i128::from(ceiling).min(room.max(floor));
     u32::try_from(cap).unwrap_or(ceiling)
 }
@@ -5633,13 +5712,36 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         turn_over(&shared.template, state);
         return None;
     };
+    fired.push_front(first);
     state.queued = fired.into_iter().map(|firing| (turn, at, firing)).collect();
-    Some(fire(shared, state, turn, at, first))
+    let next = fire_next(shared, state);
+    if next.is_none() {
+        turn_over(&shared.template, state);
+    }
+    next
+}
+
+/// The gap's next queued fork that is sent (#564, #406): a fork refused
+/// unsent for the pool settles at once, and the one after it fires. `None`
+/// when none is left.
+fn fire_next<S>(shared: &Shared<S>, state: &mut State) -> Option<Fired> {
+    while let Some((turn, at, firing)) = state.queued.pop_front() {
+        if let Some(fired) = fire(shared, state, turn, at, firing) {
+            return Some(fired);
+        }
+    }
+    None
 }
 
 /// One of the gap's forks, fired: born off the warm trunk -- what the view
 /// shows of it, then the question -- and never appended to it.
-fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Firing) -> Fired {
+fn fire<S>(
+    shared: &Shared<S>,
+    state: &mut State,
+    turn: u32,
+    at: u64,
+    firing: Firing,
+) -> Option<Fired> {
     let Firing {
         why,
         ask,
@@ -5672,6 +5774,18 @@ fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Fi
             model: seat.model.clone(),
         }
     });
+    // Its tail: the output cap, or the regimen's, clamped as the trunk's is
+    // (#588); refused unsent when its window leaves less than the floor.
+    let ceiling = state
+        .interview
+        .as_ref()
+        .and_then(|interview| interview.fork_tail)
+        .unwrap_or(shared.template.limits.max_output_tokens);
+    let ForkFit {
+        prompt,
+        displaces,
+        refused,
+    } = state.fork_fit(&shape, seat.is_some(), ceiling);
     let fork = state.push(Event::Forked {
         of_turn: turn,
         at,
@@ -5682,8 +5796,19 @@ fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Fi
         ask,
         role,
         seat,
+        displaces,
     });
-    let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
+    if refused {
+        state.push(Event::ForkSettled {
+            fork,
+            outcome: log::ForkOutcome::Refused,
+            prompt_tokens: None,
+            wall_ms: None,
+            refused: Some(REFUSED_POOL.to_owned()),
+        });
+        return None;
+    }
+    let max_tokens = state.sized_at(&mut shape, ceiling, prompt);
     let request = state.push(Event::Requested {
         turn,
         lane: Lane::Interview,
@@ -5698,13 +5823,13 @@ fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Fi
         cancel: cancel.clone(),
     });
     state.forking = Some(fork);
-    Fired {
+    Some(Fired {
         turn,
         fork,
         request,
         shape,
         cancel,
-    }
+    })
 }
 
 /// The gap's fork, on the turn's own thread: its one call streamed into the
@@ -5888,6 +6013,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
         outcome,
         prompt_tokens,
         wall_ms,
+        refused: None,
     });
     for patch in patches {
         state.push(patch);
@@ -5896,10 +6022,7 @@ fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
     if outcome == log::ForkOutcome::Cancelled || state.ending {
         state.queued.clear();
     }
-    let next = state
-        .queued
-        .pop_front()
-        .map(|(turn, at, firing)| fire(shared, &mut state, turn, at, firing));
+    let next = fire_next(shared, &mut state);
     if next.is_none() {
         turn_over(&shared.template, &mut state);
     }
@@ -6218,6 +6341,7 @@ fn crashed_fork(template: &RequestShape, state: &mut State, why: String) {
             outcome: log::ForkOutcome::Failed,
             prompt_tokens: None,
             wall_ms: None,
+            refused: None,
         });
     }
     turn_over(template, state);
@@ -7685,6 +7809,7 @@ pub(in crate::drive) mod tests {
                     model: "small".to_owned(),
                 }),
                 ask: AskKind::Judgment,
+                displaces: false,
             },
             Event::Requested {
                 turn: 1,
@@ -7698,6 +7823,7 @@ pub(in crate::drive) mod tests {
                 outcome: log::ForkOutcome::Value,
                 prompt_tokens: Some(281),
                 wall_ms: Some(480),
+                refused: None,
             },
             Event::Patched {
                 fork: Some(20),
@@ -8076,6 +8202,7 @@ pub(in crate::drive) mod tests {
                     model: "small".to_owned(),
                 }),
                 ask: Some("judgment".to_owned()),
+                hazard: None,
             },
             log::Event::Request {
                 turn: 1,
@@ -8089,6 +8216,7 @@ pub(in crate::drive) mod tests {
                 outcome: log::ForkOutcome::Value,
                 prompt_tokens: Some(281),
                 wall_ms: Some(480),
+                refused: None,
             },
             log::Event::Patch {
                 fork: Some(20),
@@ -10710,6 +10838,7 @@ pub(in crate::drive) mod tests {
             self_capture: None,
             asks: &crate::dogma::asks::V3,
             capture: crate::dogma::asks::Modality::Fields,
+            fork_tail: None,
         }
     }
 
@@ -11468,6 +11597,107 @@ pub(in crate::drive) mod tests {
     /// #570: a seated session's fork is made to the seat, naming its model,
     /// shown the last turn when the regimen does not say, and its line names
     /// the seat; the trunk's server sees only the trunk.
+    /// A scoping session over a `window`-token context, its interview
+    /// shaped by `shape_it`, playing an earlier turn, the scoped turn and
+    /// its fork's answer; the log once the fork settled (#406).
+    fn forked_over(
+        window: u64,
+        shape_it: impl FnOnce(&mut Interview),
+    ) -> (Session<Canned>, Vec<Logged>) {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        shape_it(&mut interview);
+        let mut shape = template();
+        shape.limits.context_window = Some(window);
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&["first answer"]),
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session.ask("an earlier turn", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        (session, log)
+    }
+
+    /// The fork's request's output cap, when it was sent.
+    fn fork_cap(log: &[Logged]) -> Option<u32> {
+        log.iter().find_map(|logged| match &logged.event {
+            Event::Requested {
+                lane: Lane::Interview,
+                max_tokens,
+                ..
+            } => Some(*max_tokens),
+            _ => None,
+        })
+    }
+
+    /// #406: a fork whose prompt leaves its window less than the clamp's
+    /// floor is never sent -- `refused`, `pool` -- and the session goes on;
+    /// one with room is sent with the output cap, clamped as the trunk's is.
+    #[test]
+    fn a_fork_that_would_not_fit_its_window_is_refused_unsent() {
+        let (session, log) = forked_over(1_000, |_| {});
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Refused]);
+        assert_eq!(fork_cap(&log), None, "never sent");
+        assert_eq!(
+            session.shared.transport.sent().len(),
+            2,
+            "the trunk's two turns only"
+        );
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::ForkSettled { refused: Some(why), .. } if why == "pool"
+        )));
+        assert_eq!(session.settlement(), Settlement::Awaiting);
+        reads_whole(&session);
+        let (_, log) = forked_over(1_000_000, |_| {});
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
+        assert_eq!(fork_cap(&log), Some(template().limits.max_output_tokens));
+    }
+
+    /// #406: `fork_tail_tokens` is the cap a fork is clamped from.
+    #[test]
+    fn a_forks_tail_is_the_regimens_when_it_declares_one() {
+        let (_, log) = forked_over(1_000_000, |interview| interview.fork_tail = Some(48));
+        assert_eq!(fork_cap(&log), Some(48));
+    }
+
+    /// #406: a fork on the trunk's own server whose view is not the trunk's
+    /// prefix says it may displace the trunk's cache; one on the whole
+    /// trunk does not.
+    #[test]
+    fn a_fork_off_the_trunks_prefix_on_its_server_names_the_hazard() {
+        let hazard = |log: &[Logged]| {
+            log.iter().find_map(|logged| match &logged.event {
+                Event::Forked { displaces, .. } => Some(*displaces),
+                _ => None,
+            })
+        };
+        let (session, log) = forked_over(1_000_000, |interview| {
+            interview.view = Some(ForkView::Last(1));
+        });
+        assert_eq!(hazard(&log), Some(true));
+        let lines = whole_log(&session);
+        assert!(lines.iter().any(|line| matches!(
+            &line.event,
+            log::Event::Fork { hazard: Some(h), .. } if h == "may-displace-trunk-cache"
+        )));
+        let (_, log) = forked_over(1_000_000, |_| {});
+        assert_eq!(hazard(&log), Some(false));
+    }
+
     #[test]
     fn a_seated_fork_runs_on_its_seat_and_says_so() {
         let session = Session::open_with(
@@ -11509,6 +11739,12 @@ pub(in crate::drive) mod tests {
             .expect("one fork request, to the seat");
         assert_eq!(fork.model, "small");
         assert_eq!(fork.limits.context_window, Some(8192));
+        // #406: sized from its own estimate, not the trunk's padded one, so
+        // an 8,192-token seat leaves it the session's whole output cap.
+        assert_eq!(
+            fork.limits.max_output_tokens,
+            template().limits.max_output_tokens
+        );
         // Undeclared, offboard: the head and the last turn, then the ask.
         let trunk = session.trunk();
         let head = template().messages.len();

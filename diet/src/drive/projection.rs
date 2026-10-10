@@ -2675,6 +2675,7 @@ mod tests {
             role: None,
             seat: None,
             ask: None,
+            hazard: None,
         };
         let call = |turn: u32, fork: u64| {
             [
@@ -2719,6 +2720,7 @@ mod tests {
             outcome: log::ForkOutcome::Value,
             prompt_tokens: None,
             wall_ms: None,
+            refused: None,
         });
         events.extend(["d1", "d2", "d3"].map(|id| patch(8, id)));
         events.extend(answered(2, 17, Some(warm()), None));
@@ -2730,6 +2732,7 @@ mod tests {
             outcome: log::ForkOutcome::Decline,
             prompt_tokens: None,
             wall_ms: None,
+            refused: None,
         });
         let lines = numbered(events);
         let document: String = lines.iter().map(|line| log::render(line) + "\n").collect();

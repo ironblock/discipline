@@ -172,6 +172,7 @@ export type ForkOutcome =
   | "truncated"
   | "failed"
   | "cancelled"
+  | "refused"
 ;
 
 export type PatchOp =
@@ -508,6 +509,7 @@ export type ForkLine = {
   trigger?: string;
   role?: string;
   ask?: string;
+  hazard?: string;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
@@ -518,6 +520,7 @@ export type ForkSettledLine = {
   outcome: ForkOutcome;
   prompt_tokens?: number;
   wall_ms?: number;
+  refused?: string;
 };
 
 export type PatchLine = {
