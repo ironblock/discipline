@@ -8652,10 +8652,7 @@ pub(in crate::drive) mod tests {
             .map(|logged| format!("q/{}", logged.seq))
             .collect();
         assert_eq!(forks.len(), 2);
-        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
-        super::super::projection::project(&lines, &regime(), None)
-            .expect("the log projects")
-            .events
+        record_read_back(&session)
             .into_iter()
             .filter(|event| matches!(
                 event,
@@ -8664,14 +8661,41 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
-    /// #157, from the seam smoke run (q/2142): a whole-trunk fork's head is
-    /// the trunk's, so the second fork's request -- its head moved by the
-    /// turns between -- is verified against the rebuilt trunk and writes no
-    /// prefix row; a `last_turn` fork's head is not rebuilt, and its move is
-    /// still named unattributed.
+    /// The record `session`'s log projects to, rendered and read back as
+    /// serve does before it writes one (#654's run 2 lost its record to a
+    /// row the reader refused).
+    fn record_read_back<S: Streaming>(session: &Session<S>) -> Vec<crate::formats::record::Event> {
+        use crate::formats::record::{self, Record};
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        let events = super::super::projection::project(&lines, &regime(), None)
+            .expect("the log projects")
+            .events;
+        let rendered = record::render(&Record {
+            events: events.clone(),
+        });
+        record::parse(&rendered)
+            .unwrap_or_else(|why| panic!("the projected record does not read back: {why:?}"));
+        events
+    }
+
+    /// #157, from the seam smoke runs: a whole-trunk fork's head is the
+    /// trunk's, so the second fork's request -- its head moved by the turns
+    /// between -- is verified against the rebuilt trunk and its move named
+    /// as the trunk's are, attributed (run 1's q/2142 was named
+    /// `unattributed`; run 2's audit lane named nothing, and the record was
+    /// refused); a `last_turn` fork's head is not rebuilt, and its move is
+    /// named unattributed. Either way the record reads back.
     #[test]
-    fn a_whole_trunk_forks_head_is_verified_against_the_trunk_and_writes_no_row() {
-        assert_eq!(fork_prefix_rows(None), []);
+    fn a_whole_trunk_forks_head_move_is_attributed_and_the_record_reads_back() {
+        let rows = fork_prefix_rows(None);
+        assert!(
+            matches!(
+                &rows[..],
+                [crate::formats::record::Event::PrefixChanged { reason, .. }]
+                    if *reason != crate::formats::record::PrefixReason::Unattributed
+            ),
+            "{rows:?}"
+        );
         let rows = fork_prefix_rows(Some(ForkView::Last(1)));
         assert!(
             matches!(
@@ -13196,6 +13220,60 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
         let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
         super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+    }
+
+    /// #654's seam smoke run 2: a session with the audit on and two seams --
+    /// two requests on the `audit` lane, the trunk moved between them --
+    /// writes a record that reads back, the audit lane's move named.
+    #[test]
+    fn two_audited_seams_write_a_record_that_reads_back() {
+        let session = three_decisions_then(
+            |seams| seams.audit = true,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["the next answer"]),
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+            ],
+        );
+        session.declare_seam(None).expect("admitted");
+        wait_until(&session, "seam one", seamed);
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "seam two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Seamed { .. }))
+                .count()
+                == 2
+                && seamed(log)
+        });
+        let audits: Vec<String> = log
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Audit,
+                        ..
+                    }
+                )
+            })
+            .map(|logged| format!("q/{}", logged.seq))
+            .collect();
+        assert_eq!(audits.len(), 2);
+        let rows = record_read_back(&session);
+        assert!(
+            rows.iter().any(|event| matches!(
+                event,
+                crate::formats::record::Event::PrefixChanged { at_request, .. } if *at_request == audits[1]
+            )),
+            "the audit lane's move is named"
+        );
     }
 
     /// #504: an answer that is not the ask's audit -- prose, or a line short
