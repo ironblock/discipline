@@ -241,6 +241,8 @@ export interface Fork extends At {
   /** An offboard seat's registry id, when the fork ran off the warm trunk (log v7, #615); with the model it served. */
   readonly substrate?: string;
   readonly model?: string;
+  /** What triggered it (log v7, #620): `turn_end`, or `call:<class>:<id>` for a call that warranted it mid-turn. */
+  readonly trigger?: string;
 }
 
 /** How a fork ended. */

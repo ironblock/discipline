@@ -42,6 +42,8 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         alarm={outcome ? alarmOf(outcome.level) : undefined}
         stats={[
           // An offboard seat (#615): where it ran, and what reading the trunk cold cost there. A warm fork names none.
+          // What triggered it (#620): the turn's end, or a call that warranted it mid-turn.
+          node.trigger !== undefined && { value: <span className="ex-branch__trigger">{node.trigger}</span>, title: 'what triggered this fork' },
           node.seat && {
             value: (
               <span className="ex-branch__seat">

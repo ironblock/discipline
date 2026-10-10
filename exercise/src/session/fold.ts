@@ -196,6 +196,10 @@ export interface ToolNode extends Provenance {
   readonly refusal?: ToolRefusal;
   /** What a self-capture call did (log v7's `capture`, #619): its outcome, the entries it wrote, and why when it did not. */
   readonly capture?: { readonly outcome: string; readonly entries: readonly string[]; readonly why?: string };
+  /** The background job it started (the call's `background`, #614), and how the job ended once it has (`background.ended`). */
+  readonly background?: { readonly job: string; readonly status?: string; readonly exit?: number };
+  /** Running, it is near its timeout (log v7's `timeout.near`, #613): its timeout, and when the warning came. */
+  readonly nearTimeout?: { readonly timeoutMs: number; readonly at: number };
   /** The policy it failed under: the Seatbelt profile's sha256. */
   readonly policy?: string;
   readonly ms?: number;
@@ -240,6 +244,8 @@ export interface BranchNode extends Provenance, Partial<Generation> {
   readonly prefixTokens?: number;
   /** The offboard seat it ran on (#615): the registry's id and model, with its cold prefill and wall time. Absent when warm. */
   readonly seat?: { readonly substrate: string; readonly model: string; readonly promptTokens?: number; readonly wallMs?: number };
+  /** What triggered it (#620): `turn_end`, or `call:<class>:<id>`. */
+  readonly trigger?: string;
   readonly outcome?: ForkOutcome;
   readonly patches: readonly Folded<PatchNode>[];
 }
@@ -504,6 +510,9 @@ export function fold(lines: readonly LogLine[]): Session {
   const deliveries = new Map<number, LineOf<'delivered'>>();
   const recalls = new Map<number, LineOf<'recalled'>>();
   const notices = new Map<number, LineOf<'notice'>>();
+  // Background jobs' ends, by job (#614); calls warned near their timeout, by `<request>/<call id>` (#613).
+  const backgroundEnds = new Map<string, LineOf<'background.ended'>>();
+  const nearTimeouts = new Map<string, LineOf<'timeout.near'>>();
   const prunes = new Map<number, LineOf<'pruned'>[]>();
   const reminders = new Map<number, LineOf<'reminded'>>();
   // Self-capture's outcomes, by the call they belong to: `<request>/<call id>`.
@@ -710,13 +719,14 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'notice':
         notices.set(e.turn, e);
         break;
-      // A background job's end (#614): what it said reaches the model as the next ask's notice; the end itself is
-      // folded into no node yet.
+      // A background job's end (#614): onto the call that started it; what it said reaches the model as the next ask's
+      // notice.
       case 'background.ended':
+        backgroundEnds.set(e.job, e);
         break;
-      // A call near its timeout (#613): the surface's warning to draw, which the model never sees; folded into no
-      // node yet.
+      // A call near its timeout (#613): the surface's warning, which the model never sees -- onto the running call.
       case 'timeout.near':
+        nearTimeouts.set(`${e.request}/${e.call}`, e);
         break;
       case 'pruned':
         prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
@@ -880,6 +890,9 @@ export function fold(lines: readonly LogLine[]): Session {
             call: c.id !== undefined ? { request: c.request, id: c.id } : undefined,
             startedAt,
             running: line === undefined && !notBegun.has(slot.call) && !unanswered.has(slot.call),
+            ...(line === undefined && c.id !== undefined && nearTimeouts.has(`${c.request}/${c.id}`)
+              ? { nearTimeout: { timeoutMs: nearTimeouts.get(`${c.request}/${c.id}`)!.timeout_ms, at: nearTimeouts.get(`${c.request}/${c.id}`)!.t } }
+              : {}),
             ...(line === undefined && unanswered.has(slot.call) ? { writing: true as const } : line === undefined && notBegun.has(slot.call) ? { waiting: true as const } : {}),
             ...(line
               ? {
@@ -895,6 +908,12 @@ export function fold(lines: readonly LogLine[]): Session {
                   ...(line.stdout !== undefined ? { output: line.stdout } : {}),
                   ...(line.stderr ? { stderr: line.stderr } : {}),
                   ...(line.reason !== undefined ? { refusal: line.reason } : {}),
+                  ...(line.background !== undefined
+                    ? (() => {
+                        const ended = backgroundEnds.get(line.background);
+                        return { background: { job: line.background, ...(ended ? { status: ended.status } : {}), ...(ended?.exit !== undefined ? { exit: ended.exit } : {}) } };
+                      })()
+                    : {}),
                   ...(captures.has(`${c.request}/${line.id}`)
                     ? (() => {
                         const k = captures.get(`${c.request}/${line.id}`)!;
@@ -965,6 +984,7 @@ export function fold(lines: readonly LogLine[]): Session {
       why: fork.why,
       question: fork.question,
       ...(fork.prefix_tokens !== undefined ? { prefixTokens: fork.prefix_tokens } : {}),
+      ...(fork.trigger !== undefined ? { trigger: fork.trigger } : {}),
       ...(fork.substrate !== undefined && fork.model !== undefined
         ? {
             seat: {
