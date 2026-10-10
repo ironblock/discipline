@@ -233,13 +233,14 @@ export const MemoryDrawer: Story = {
     await userEvent.click(tab);
     await expect(tab.getAttribute('aria-expanded')).toBe('true');
     await expect(q(canvasElement, '.ex-session__memory .ex-memory')?.closest('[inert]')).toBeNull();
-    // Open, it covers only its panels: the edge-to-edge strip under them passes a click through to what is beneath --
-    // the composer's buttons among it (the T1 smoke run met cancel swallowed there).
+    // Open, it covers only its panels, and however tall they grow it stops above the composer: a click on the composer
+    // under the drawer's span reaches the composer (the T1 smoke run met cancel swallowed there, the operator-edits
+    // run scope answer and send).
     await waitFor(async () => expect(drawer().getBoundingClientRect().right).toBeLessThanOrEqual(window.innerWidth + 1));
     const aside = drawer().getBoundingClientRect();
-    const panels = (q(canvasElement, '.ex-session__memory .ex-drawer__body') as HTMLElement).getBoundingClientRect();
-    await expect(aside.bottom - panels.bottom).toBeGreaterThan(20);
-    const under = document.elementFromPoint(aside.left + aside.width / 2, panels.bottom + 10);
+    const composer = (q(canvasElement, '.ex-session__composer') as HTMLElement).getBoundingClientRect();
+    await expect(aside.bottom).toBeLessThanOrEqual(composer.top + 1);
+    const under = document.elementFromPoint(aside.left + aside.width / 2, composer.top + composer.height / 2);
     await expect(drawer().contains(under)).toBe(false);
     await userEvent.keyboard('{Escape}');
     await expect(tab.getAttribute('aria-expanded')).toBe('false');

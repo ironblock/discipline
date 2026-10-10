@@ -110,6 +110,19 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
   const needBars = useRef<HTMLDivElement>(null);
   const [drawer, setDrawer] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  // The composer's height, kept on the session as `--ex-composer-height`: the drawer stops above it (session.css), so
+  // however tall its panels grow, the composer's buttons under its right edge stay reachable.
+  const composerStrip = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const strip = composerStrip.current;
+    const host = root.current;
+    if (!strip || !host || typeof ResizeObserver === 'undefined') return;
+    const keep = () => host.style.setProperty('--ex-composer-height', `${strip.offsetHeight}px`);
+    keep();
+    const observer = new ResizeObserver(keep);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, []);
   useLayoutEffect(() => {
     const el = root.current;
     const probe = need.current;
@@ -603,7 +616,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
               ))}
             </div>
             {/* The composer: its own width from the trunk's left edge, whatever the lanes (--composer-width). */}
-            <div className="ex-session__composer" data-waiting={approving.waiting ? '' : undefined}>
+            <div ref={composerStrip} className="ex-session__composer" data-waiting={approving.waiting ? '' : undefined}>
               {approving.waiting && approving.decide ? <ApprovalPrompt key={`${approving.waiting.request}/${approving.waiting.id}`} prompt={approving.waiting} decide={approving.decide} /> : null}
               <Composer
                 key={session.phase}

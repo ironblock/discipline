@@ -184,7 +184,8 @@
   z-index: 5;
   top: calc(var(--ex-pinned-top, 0px) + 2.6rem);
   right: 0;
-  bottom: 0;
+  /* Above the composer, never over it (SessionView keeps its height). */
+  bottom: var(--ex-composer-height, 0px);
   width: min(calc(var(--memory-width) + 2rem), calc(100vw - 3rem));
   margin: 0;
   padding: 0.75rem 1rem 1rem;
