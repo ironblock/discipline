@@ -6,6 +6,9 @@ import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-c
 import toolCallRefused from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-refused.jsonl?raw';
 import approvalsOff from '../../../diet/formats/log/fixtures/valid/a-v7-call-that-ran-with-approvals-off.jsonl?raw';
 import phaseMoved from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-moved-a-phase.jsonl?raw';
+import deliveredNote from '../../../diet/formats/log/fixtures/valid/a-v7-imperative-delivery-after-an-ask.jsonl?raw';
+import recalledNote from '../../../diet/formats/log/fixtures/valid/a-v7-recall-after-an-ask.jsonl?raw';
+import refillMessage from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-refill-is-a-message.jsonl?raw';
 import leversDeclared from '../../../diet/formats/log/fixtures/valid/a-v7-session-declaring-its-levers.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
@@ -15,6 +18,7 @@ import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
 import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { TANGENT_OPEN } from '../drive/served/tangent.ts';
+import { SELF_CAPTURE } from '../drive/served/self-capture.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
@@ -446,6 +450,59 @@ export const ServedNothingToBackground: Story = {
   play: async ({ canvasElement }) => {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="tool"]').length).toBe(1));
     await expect([...canvasElement.querySelectorAll('button')].some((b) => b.textContent === 'move to background')).toBe(false);
+  },
+};
+
+/** The harness's note on an ask, as drawn: under the operator's words, named as the harness's, never as theirs. */
+const harnessNote = async (root: HTMLElement, note: string) =>
+  waitFor(async () => {
+    const found = root.querySelector<HTMLElement>(`.ex-trunk .ex-harness-note[data-note="${note}"]`);
+    await expect(found).not.toBeNull();
+    return found!;
+  });
+
+/** `?drive`, log v7 (#574): the fork-delivery note sent after turn 2's ask, drawn as the harness's. */
+export const ServedDeliveredNote: Story = {
+  name: '?drive: the fork-delivery note after an ask, marked as the harness’s',
+  args: { drive: true, web: serving(deliveredNote) },
+  play: async ({ canvasElement }) => {
+    const note = await harnessNote(canvasElement, 'delivered');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · fork delivery · imperative');
+    await expect(note.textContent).toContain('Working record');
+  },
+};
+
+/** `?drive`, log v7 (#574): archive recall's note, drawn as the harness's. */
+export const ServedRecalledNote: Story = {
+  name: '?drive: the recall note after an ask, marked as the harness’s',
+  args: { drive: true, web: serving(recalledNote) },
+  play: async ({ canvasElement }) => {
+    const note = await harnessNote(canvasElement, 'recalled');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · recall · literal');
+  },
+};
+
+/** `?drive` (#574): self-capture's reminder note, and its call on the trunk with what it recorded. */
+export const ServedSelfCapture: Story = {
+  name: '?drive: self-capture’s reminder and its recorded call',
+  args: { drive: true, web: serving(SELF_CAPTURE.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const note = await harnessNote(canvasElement, 'reminded');
+    await expect(note.querySelector('.ex-harness-note__label')?.textContent).toBe('harness · self-capture reminder');
+    const call = canvasElement.querySelector<HTMLElement>('.ex-trunk [data-tone="tool"]');
+    await expect(call?.querySelector('.ex-capture')?.textContent).toBe('self-capture · recorded r10/c1/fact');
+  },
+};
+
+/** `?drive`, log v7 (#604): the seam's refill sent as a user message -- the harness's summary, not the operator's ask. */
+export const ServedRefillSummary: Story = {
+  name: '?drive: the seam’s refill message is labelled as the harness’s summary',
+  args: { drive: true, web: serving(refillMessage) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="system"]').length).toBeGreaterThan(1));
+    const labels = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="system"] .ex-block__label')].map((l) => l.textContent ?? '');
+    await expect(labels.some((l) => l.startsWith('harness summary'))).toBe(true);
+    await expect(labels.some((l) => l.startsWith('user'))).toBe(false);
   },
 };
 
