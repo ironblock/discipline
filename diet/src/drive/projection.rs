@@ -308,6 +308,7 @@ pub fn project_in(
                 template_kwargs,
                 fork_delivery,
                 tool_output,
+                levers,
                 ..
             },
         ..
@@ -341,7 +342,9 @@ pub fn project_in(
         fork_delivery: *fork_delivery,
         // The tool output cap, as `session.start` names it (#554).
         tool_output: *tool_output,
-        levers: None,
+        // Each lever's state, as `session.start` names it (#573): the
+        // record's start says what the log says.
+        levers: levers.clone(),
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -1536,6 +1539,7 @@ mod tests {
             fork_delivery: None,
             reasoning_effort_default: None,
             instruction_files: None,
+            levers: None,
             tool_output: None,
             phases: None,
             phase_transitions: None,
