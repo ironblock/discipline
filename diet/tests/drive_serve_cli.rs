@@ -1106,6 +1106,41 @@ fn a_drive_server_given_a_base_url_asks_its_chat_completions() {
 }
 
 #[test]
+fn a_drive_server_sends_the_substrates_declared_template_kwargs() {
+    // The reasoning ruling: Qwen's convention keeps reasoning in history, so
+    // the floor's entry declares `preserve_thinking` and serve sends it on
+    // every request; with thinking on and no level, the log names the
+    // template's default.
+    let id = "accel24-tabbyapi-exl3-qwen38-27b-3p00";
+    let hardware = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .expect("registered")
+        .hardware_fingerprint;
+    let regimen = file_holding(
+        "regimen",
+        &format!(
+            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"{id}\"\n\
+             substrate_reasoning = \"on\"\nsubstrate_hardware = \"{hardware}\"\n\
+             [sampler]\nseed = 7\n"
+        ),
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub = Stub::serving(vec![tabby_model_card(163_840), warm()]).expect("loopback");
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let _served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["template_kwargs"],
+        serde_json::json!({"enable_thinking": true, "preserve_thinking": true}),
+        "{start_line}"
+    );
+    assert_eq!(
+        start_line["reasoning_effort_default"], "xhigh",
+        "{start_line}"
+    );
+}
+
+#[test]
 fn a_drive_server_says_when_its_log_flag_emptied_a_file() {
     // Ruled on #230: the file is truncated, as the scripted path's output is,
     // and the announcement says so.
@@ -1673,11 +1708,29 @@ fn a_drive_server_that_fails_to_bind_leaves_an_earlier_record_and_sidecar_as_the
     );
 }
 
-#[test]
-fn a_drive_servers_default_cap_leaves_room_for_reasoning() {
-    // #290, measured (5969377550): 512 cut off three reasoning turns.
-    let stub = Stub::serving(vec![Act::Raw(ANSWERED.to_vec())]).expect("loopback");
-    let served = start(&stub.url(), &[]);
+/// The bodies one asked turn sends, served with `extra` flags and, when
+/// given, the dev loop's regimen with `top` added at its top level.
+fn one_turns_bodies(extra: &[&str], top: Option<&str>) -> Vec<String> {
+    let stub = Stub::serving_with_props(
+        vec![Act::Raw(ANSWERED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let regimen = top.map(|top| {
+        let whole = std::fs::read_to_string(dev_loop()).expect("the dev loop's regimen");
+        let (before, sampler) = whole
+            .split_once("\n[sampler]\n")
+            .expect("the dev loop declares a sampler table last");
+        file_holding("regimen", &format!("{before}\n{top}\n[sampler]\n{sampler}"))
+    });
+    let path = regimen
+        .as_ref()
+        .map(|file| file.0.to_string_lossy().into_owned());
+    let mut args: Vec<&str> = extra.to_vec();
+    if let Some(path) = path.as_deref() {
+        args.extend(["--regimen", path]);
+    }
+    let served = start(&stub.url(), &args);
     let address = served.listening.clone();
     let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
     assert_eq!(status(&reply), 200, "{reply}");
@@ -1687,12 +1740,30 @@ fn a_drive_servers_default_cap_leaves_room_for_reasoning() {
         |read| read.contains(r#""reason":"final""#),
     );
     drop(served);
-    let sent = stub.received();
-    assert!(
-        sent.iter()
-            .any(|body| body.contains(r#""max_tokens":8192"#)),
-        "{sent:?}"
-    );
+    stub.received()
+}
+
+#[test]
+fn a_drive_servers_output_cap_is_the_flag_else_the_regimens_else_the_votes_default() {
+    // #569: the flag beats the regimen, which beats the default (64,000, the
+    // harness vote); a regimen value that is not a positive integer is unset.
+    for (extra, top, cap) in [
+        (&[][..], None, 64_000),
+        (&[][..], Some("max_output_tokens = 1234"), 1234),
+        (
+            &["--max-output-tokens", "777"][..],
+            Some("max_output_tokens = 1234"),
+            777,
+        ),
+        (&[][..], Some("max_output_tokens = 0"), 64_000),
+    ] {
+        let sent = one_turns_bodies(extra, top);
+        let want = format!(r#""max_tokens":{cap}"#);
+        assert!(
+            sent.iter().any(|body| body.contains(&want)),
+            "{extra:?} {top:?}: {sent:?}"
+        );
+    }
 }
 
 #[test]

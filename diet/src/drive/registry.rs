@@ -15,7 +15,7 @@
 //! the registry the way #162's registry tests do. By rule, every field read
 //! here stays a one-line `key = "value"` string -- `equipment`,
 //! `engine_name`, `engine_identity`, `engine_commit`, `engine_build_info`,
-//! `engine_check`, `dialect`,
+//! `engine_check`, `dialect`, `template_preserve_thinking`, `template_default_effort`,
 //! `weights_kind`, `weights_acts_sha256`, `weights_main`, `weights_draft`,
 //! `weights_projector` and `hardware_fingerprint` -- or, for a multi-shard
 //! `weights_main`, a one-line list of quoted digests. A field written another
@@ -178,6 +178,14 @@ pub struct Identity {
     /// The client dialect its server speaks, by name, when the registry
     /// says (#496); llama.cpp's otherwise.
     pub dialect: Option<String>,
+    /// The template kwargs the model's own convention needs, as the registry
+    /// declares them (`template_preserve_thinking`): Qwen keeps its
+    /// reasoning in history, and without it the model loops. Sent on every
+    /// request rather than left to a server-side default.
+    pub template_preserve_thinking: Option<bool>,
+    /// The reasoning effort the chat template renders when a request names
+    /// none (`template_default_effort`), so a record can name it.
+    pub template_default_effort: Option<String>,
     /// What kind of server answers (#509): `local`, one we run and can
     /// reason about, unless the entry says otherwise. An `api` -- a server
     /// we neither control nor see into -- is to come; nearly every field
@@ -240,6 +248,18 @@ pub fn identity(document: &str, id: &str) -> Result<Identity, String> {
         chat_template_sha256: table.strings.get("chat_template_sha256").cloned(),
         engine_check: table.strings.get("engine_check").cloned(),
         dialect: table.strings.get("dialect").cloned(),
+        template_preserve_thinking: match table.strings.get("template_preserve_thinking") {
+            None => None,
+            Some(value) if value == "true" => Some(true),
+            Some(value) if value == "false" => Some(false),
+            Some(value) => {
+                return Err(format!(
+                    "the registry's `template_preserve_thinking` for `{id}` is \"{value}\", not \
+                     \"true\" or \"false\": the entry is malformed"
+                ));
+            }
+        },
+        template_default_effort: table.strings.get("template_default_effort").cloned(),
         server_kind: table.strings.get("server_kind").cloned(),
         served: table
             .strings

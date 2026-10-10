@@ -214,6 +214,7 @@ export interface Serving {
 export interface TemplateKwargs {
   enable_thinking?: boolean;
   reasoning_effort?: string;
+  preserve_thinking?: boolean;
 }
 
 export interface Unsent {
@@ -277,6 +278,7 @@ export type SessionStartLine = {
   unsent?: Unsent;
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
+  reasoning_effort_default?: string;
   tool_output?: ToolOutputState;
   tool_output_max_lines?: number;
   tool_output_max_bytes?: number;

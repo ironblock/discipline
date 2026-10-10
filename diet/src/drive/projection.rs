@@ -457,6 +457,9 @@ fn kwargs_of(
         if let Some(effort) = &kwargs.reasoning_effort {
             sent.insert("reasoning_effort".to_owned(), Value::String(effort.clone()));
         }
+        if let Some(preserve) = kwargs.preserve_thinking {
+            sent.insert("preserve_thinking".to_owned(), Value::Boolean(preserve));
+        }
     }
     sent
 }
@@ -483,6 +486,17 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
             }
         })
         .collect()
+}
+
+/// `tools` with `bash` as it was declared before its description (#558),
+/// when `tools` declares `bash`.
+fn earlier_bash(tools: &[ToolDefinition]) -> Option<Vec<ToolDefinition>> {
+    let at = tools
+        .iter()
+        .position(|tool| tool.name == super::tool_loop::BASH)?;
+    let mut earlier = tools.to_vec();
+    earlier[at] = super::tool_loop::bash_tool_before_its_description();
+    Some(earlier)
 }
 
 impl<'a> Walk<'a> {
@@ -1016,24 +1030,33 @@ impl<'a> Walk<'a> {
         for step in self.steps.get(&turn).into_iter().flatten() {
             messages.extend(step.messages());
         }
-        let rebuilt = Head::of(&RequestShape {
-            model: self.model.clone(),
-            messages,
-            sampler: SamplerCard::empty(),
-            limits: Limits {
-                attempt: std::time::Duration::ZERO,
-                call: std::time::Duration::ZERO,
-                max_output_tokens: 0,
-                retries: 0,
-            },
-            grammar: None,
-            // From `session.start` (R1), and ASSERTED by the digest check
-            // below: a kwarg the log cannot carry leaves the head unverified.
-            template_kwargs: self.template_kwargs.clone(),
-            // The session's declared tools, from `session.start` (#472).
-            tools: self.tools.clone().unwrap_or_default(),
-        });
-        let verified = (rebuilt.digest() == logged).then_some(rebuilt);
+        let tools = self.tools.clone().unwrap_or_default();
+        let head = |tools: Vec<ToolDefinition>| {
+            Head::of(&RequestShape {
+                model: self.model.clone(),
+                messages: messages.clone(),
+                sampler: SamplerCard::empty(),
+                limits: Limits {
+                    attempt: std::time::Duration::ZERO,
+                    call: std::time::Duration::ZERO,
+                    max_output_tokens: 0,
+                    retries: 0,
+                },
+                grammar: None,
+                // From `session.start` (R1), and ASSERTED by the digest check
+                // below: a kwarg the log cannot carry leaves the head unverified.
+                template_kwargs: self.template_kwargs.clone(),
+                // The session's declared tools, from `session.start` (#472).
+                tools,
+            })
+        };
+        // A log written before `bash` carried its description (#558) sent
+        // the definition I0 captured: its heads rebuild with that one, and
+        // the digest still decides.
+        let verified = std::iter::once(tools.clone())
+            .chain(earlier_bash(&tools))
+            .map(head)
+            .find(|rebuilt| rebuilt.digest() == logged);
         // A head whose attachment could not be read back is never verified,
         // whatever the digest of what the rebuild could reach.
         let verified = verified.filter(|_| unrebuilt.is_none());
@@ -1437,6 +1460,7 @@ mod tests {
             unsent: None,
             approvals_off: None,
             fork_delivery: None,
+            reasoning_effort_default: None,
             tool_output: None,
         }
     }
