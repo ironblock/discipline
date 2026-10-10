@@ -466,6 +466,7 @@ export type ForkLine = {
   at: number;
   why: Warrant;
   question: string;
+  view?: string;
 };
 
 export type ForkSettledLine = {
@@ -506,6 +507,10 @@ export type SeamLine = {
   carried_outputs?: number;
   carried_output_bytes?: number;
   placement?: RenderPlacement;
+  render_budget_tokens?: number;
+  render_over_budget?: string;
+  render_tokens?: number;
+  render_reduced?: number;
 };
 
 export type DeliveredLine = {

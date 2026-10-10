@@ -479,6 +479,8 @@ pub enum Event {
         why: log::Warrant,
         /// What it asks.
         question: String,
+        /// What it saw of the trunk (#567).
+        view: ForkView,
     },
     /// How the fork ended: once per fork, after its call's last event.
     ForkSettled {
@@ -518,6 +520,8 @@ pub enum Event {
         /// The section after the render carrying them, when it carried any,
         /// and how many it carried.
         outputs: Option<(String, u64)>,
+        /// The render's budget and what it did (#565), when declared.
+        render_budget: Option<log::RenderBudget>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -738,6 +742,64 @@ pub struct Interview {
     /// The regimen's phase graph (#563), read as the scripted drive reads
     /// it; empty when it declares none.
     pub phases: crate::seam::phase::PhaseGraph,
+    /// What a fork sees of the trunk (#567): all of it, or its last whole
+    /// turns after the head.
+    pub view: ForkView,
+}
+
+/// What a fork sees of the trunk (#567).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ForkView {
+    /// The whole warm trunk: today's, the default.
+    #[default]
+    Trunk,
+    /// The head -- everything before the first turn -- then the last this
+    /// many whole turns.
+    Last(u32),
+}
+
+impl ForkView {
+    /// The regimen's word for it: `trunk`, `last_turn`, or `last:N`.
+    #[must_use]
+    pub fn word(self) -> String {
+        match self {
+            Self::Trunk => "trunk".to_owned(),
+            Self::Last(1) => "last_turn".to_owned(),
+            Self::Last(n) => format!("last:{n}"),
+        }
+    }
+}
+
+/// The regimen key for what a fork sees of the trunk (#567).
+pub const FORK_VIEW: &str = "fork_view";
+
+/// The fork view the regimen declares, leniently: `"last_turn"`, or
+/// `"last:N"` with N a positive whole number; anything else is the trunk.
+#[must_use]
+pub fn fork_view(regimen: &Regimen) -> ForkView {
+    let Some(crate::formats::regimen::Value::String(word)) = regimen.get(FORK_VIEW) else {
+        return ForkView::Trunk;
+    };
+    if word == "last_turn" {
+        return ForkView::Last(1);
+    }
+    word.strip_prefix("last:")
+        .and_then(|n| n.parse::<u32>().ok())
+        .filter(|n| *n > 0)
+        .map_or(ForkView::Trunk, ForkView::Last)
+}
+
+/// What a fork under `view` sees of `trunk`, whose first `head` messages
+/// are the session's head (#567): all of it, or the head -- the system
+/// message and everything before the first turn, so that much of the prefix
+/// still meets the cache -- then the last whole turns.
+fn viewed(trunk: &[Message], head: usize, view: ForkView) -> Vec<Message> {
+    let ForkView::Last(n) = view else {
+        return trunk.to_vec();
+    };
+    let head = head.min(trunk.len());
+    let turns = crate::seam::render::last_turns(&trunk[head..], n as usize);
+    trunk[..head].iter().chain(turns).cloned().collect()
 }
 
 /// The rule that warrants a fork after `turn` settled `final`, and the
@@ -2211,12 +2273,16 @@ pub fn line_of(logged: &Logged) -> log::Line {
             at,
             why,
             question,
+            view,
         } => log::Event::Fork {
             lane: log::Lane::Interview,
             of_turn: *of_turn,
             at: *at,
             why: *why,
             question: question.clone(),
+            // Absent is the tail (#568): a tail fork's line is as before.
+            // Absent is the whole trunk (#567).
+            view: (*view != ForkView::Trunk).then(|| view.word()),
         },
         Event::ForkSettled { fork, outcome } => log::Event::ForkSettled {
             fork: *fork,
@@ -2257,6 +2323,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             phase,
             tool_outputs,
             outputs,
+            render_budget,
         } => log::Event::Seam {
             phase: phase.clone(),
             at_turn: *at_turn,
@@ -2284,6 +2351,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             carried_output_bytes: outputs.as_ref().map(|(text, _)| text.len() as u64),
             // A user message after the head (#597).
             placement: Some(log::RenderPlacement::Message),
+            render_budget: render_budget.clone(),
         },
     };
     log::Line {
@@ -3237,7 +3305,20 @@ fn refill_trunk(
     let Some(interview) = state.interview.as_ref() else {
         unreachable!("a seam is refused or not due when the session keeps no working memory");
     };
-    let render = crate::seam::render::render(&interview.object, state.phase.as_deref());
+    // The render, under the regimen's budget when it declares one (#565).
+    let budget = interview.seams.render_budget;
+    let rendered = crate::seam::render::rendered(&interview.object, state.phase.as_deref(), budget);
+    let render_budget = budget.map(|budget| log::RenderBudget {
+        tokens: budget.tokens,
+        over: match budget.over {
+            crate::seam::render::OverBudget::Tier => "tier",
+            crate::seam::render::OverBudget::Elide => "elide",
+        }
+        .to_owned(),
+        rendered: rendered.tokens,
+        reduced: rendered.reduced,
+    });
+    let render = rendered.text;
     let carried_entries = interview.object.live().count() as u64;
     // The head a trunk request on `messages` carries: `Head::of` leaves
     // out a request's last message, its ask, so one stands in for it.
@@ -3301,6 +3382,7 @@ fn refill_trunk(
         phase,
         tool_outputs,
         outputs,
+        render_budget,
     });
 }
 
@@ -3598,7 +3680,11 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         return None;
     };
     let mut shape = shared.template.clone();
-    shape.messages.clone_from(&state.trunk);
+    let view = state
+        .interview
+        .as_ref()
+        .map_or(ForkView::Trunk, |interview| interview.view);
+    shape.messages = viewed(&state.trunk, shared.template.messages.len(), view);
     shape
         .messages
         .push(Message::new(Role::User, question.clone()));
@@ -3607,6 +3693,7 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         at,
         why,
         question,
+        view,
     });
     let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
     let request = state.push(Event::Requested {
@@ -5324,6 +5411,7 @@ pub(in crate::drive) mod tests {
                 at: 3,
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
+                view: ForkView::Last(2),
             },
             Event::Requested {
                 turn: 1,
@@ -5359,6 +5447,7 @@ pub(in crate::drive) mod tests {
                 phase: None,
                 tool_outputs: log::SeamToolOutputs::Evict,
                 outputs: None,
+                render_budget: None,
             },
             Event::Delivered {
                 turn: 2,
@@ -5625,6 +5714,7 @@ pub(in crate::drive) mod tests {
                 at: 3,
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
+                view: Some("last:2".to_owned()),
             },
             log::Event::Request {
                 turn: 1,
@@ -5664,6 +5754,7 @@ pub(in crate::drive) mod tests {
                 carried_outputs: None,
                 carried_output_bytes: None,
                 placement: Some(log::RenderPlacement::Message),
+                render_budget: None,
             },
             log::Event::Delivered {
                 turn: 2,
@@ -7928,6 +8019,7 @@ pub(in crate::drive) mod tests {
             seams: crate::seam::policy::Served::default(),
             delivery: log::ForkDelivery::Seam,
             phases: crate::seam::phase::PhaseGraph::none(),
+            view: ForkView::Trunk,
         }
     }
 
@@ -7959,6 +8051,7 @@ pub(in crate::drive) mod tests {
                     at,
                     why,
                     question,
+                    ..
                 } => Some((logged.seq, *of_turn, *at, *why, question.clone())),
                 _ => None,
             })
@@ -8370,6 +8463,121 @@ pub(in crate::drive) mod tests {
         assert_eq!(delivered[0].template, "FORK_NOTE_ADVISORY");
     }
 
+    /// #567: a narrow view keeps the head whole and the last whole turns,
+    /// each from its user message; the trunk view is the trunk.
+    #[test]
+    fn a_forks_view_keeps_the_head_and_cuts_at_whole_turns() {
+        let call = {
+            let mut said = Message::new(Role::Assistant, "");
+            said.tool_calls = vec![crate::client::shape::ToolCall {
+                id: "c".to_owned(),
+                name: "bash".to_owned(),
+                arguments: "{}".to_owned(),
+            }];
+            said
+        };
+        let head = template().messages;
+        let mut trunk = head.clone();
+        trunk.extend([user("one"), Message::new(Role::Assistant, "a")]);
+        trunk.extend([
+            user("two"),
+            call,
+            Message::tool_result("c".to_owned(), "out".to_owned()),
+            Message::new(Role::Assistant, "b"),
+        ]);
+        trunk.extend([user("three"), Message::new(Role::Assistant, "c")]);
+        assert_eq!(viewed(&trunk, head.len(), ForkView::Trunk), trunk);
+        let last = viewed(&trunk, head.len(), ForkView::Last(1));
+        assert_eq!(last[..head.len()], head[..], "the head is unchanged");
+        assert_eq!(last[head.len()..], trunk[trunk.len() - 2..]);
+        let two = viewed(&trunk, head.len(), ForkView::Last(2));
+        assert_eq!(
+            two[head.len()],
+            user("two"),
+            "a turn starts at its user message"
+        );
+        assert_eq!(
+            two.len(),
+            head.len() + 6,
+            "the call and its result stay together"
+        );
+        assert_eq!(viewed(&trunk, head.len(), ForkView::Last(9)), trunk);
+    }
+
+    /// #567: the regimen's words, read leniently.
+    #[test]
+    fn the_fork_view_is_read_leniently() {
+        let read = |text: &str| fork_view(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), ForkView::Trunk);
+        assert_eq!(read("fork_view = \"trunk\"\n"), ForkView::Trunk);
+        assert_eq!(read("fork_view = \"last_turn\"\n"), ForkView::Last(1));
+        assert_eq!(read("fork_view = \"last:3\"\n"), ForkView::Last(3));
+        for unread in ["last:0", "last:x", "everything"] {
+            assert_eq!(
+                read(&format!("fork_view = \"{unread}\"\n")),
+                ForkView::Trunk
+            );
+        }
+        assert_eq!(ForkView::Last(1).word(), "last_turn");
+        assert_eq!(ForkView::Last(3).word(), "last:3");
+    }
+
+    /// #567: a served fork under `last_turn` sees the head and the turn it
+    /// follows, not the one before; under the trunk it sees the whole trunk,
+    /// as before; its `fork` line names a narrow view.
+    #[test]
+    fn a_served_fork_sees_the_view_its_regimen_declares() {
+        for view in [ForkView::Trunk, ForkView::Last(1)] {
+            let mut interview = interviewing(&[log::Warrant::Scoping]);
+            interview.view = view;
+            let session = Session::open_with(
+                Canned::new([
+                    deltas(&["first answer"]),
+                    deltas(&[SCOPED]),
+                    deltas(&[DECIDED]),
+                ]),
+                template(),
+                None,
+                None,
+                None,
+                Some(interview),
+            );
+            session.ask("an earlier turn", None).expect("accepted");
+            wait_until(&session, "turn one", settled);
+            let trunk_before = session.trunk();
+            session
+                .ask_marked("what are we building?", None, true)
+                .expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+            let sent = session.shared.transport.sent();
+            let fork = &sent.last().expect("the fork's request").messages;
+            let ask = fork.last().expect("its ask");
+            let seen = &fork[..fork.len() - 1];
+            let trunk = session.trunk();
+            match view {
+                ForkView::Trunk => assert_eq!(seen, &trunk[..], "the whole trunk, as before"),
+                ForkView::Last(_) => {
+                    let head = template().messages.len();
+                    assert_eq!(seen[..head], trunk[..head]);
+                    assert_eq!(seen[head..], trunk[trunk_before.len()..]);
+                    assert!(!seen.iter().any(|m| m.content == "an earlier turn"));
+                }
+            }
+            assert_eq!(ask.role, Role::User);
+            let lines = whole_log(&session);
+            let named = lines.iter().find_map(|line| match &line.event {
+                log::Event::Fork { view, .. } => Some(view.clone()),
+                _ => None,
+            });
+            assert_eq!(
+                named.expect("a fork line"),
+                (view != ForkView::Trunk).then(|| view.word())
+            );
+        }
+    }
+
     #[test]
     fn a_forks_add_patches_are_not_delivered_mid_turn() {
         let mut interview = interviewing(&[log::Warrant::Scoping]);
@@ -8695,6 +8903,7 @@ pub(in crate::drive) mod tests {
                     at_trunk_tokens: None,
                     tail_tokens,
                     outputs: state,
+                    render_budget: None,
                 },
                 ..interviewing(&[log::Warrant::Read])
             }),
@@ -9025,6 +9234,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: None,
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -9080,6 +9290,7 @@ pub(in crate::drive) mod tests {
                     at_trunk_tokens: None,
                     tail_tokens,
                     outputs: log::SeamToolOutputs::Evict,
+                    render_budget: None,
                 })),
             )
         };
@@ -9150,6 +9361,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: Some(200),
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -9180,6 +9392,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: Some(245),
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -9221,6 +9434,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: Some(100),
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -9264,6 +9478,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: None,
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -9295,6 +9510,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: None,
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -9326,6 +9542,55 @@ pub(in crate::drive) mod tests {
     /// that, and the log says so: the seam line carries the render, what was
     /// carried, and the head's digest either side, which the projection's
     /// rebuild of the next request's head checks.
+    /// #565: a seam under the regimen's render budget refills from the
+    /// budgeted render, and its `seam` line names the budget, the tokens the
+    /// render ran to, and how many entries it reduced.
+    #[test]
+    fn a_seam_under_a_render_budget_records_the_budget_and_what_it_reduced() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.seams.render_budget = Some(crate::seam::render::Budget {
+            tokens: 1,
+            over: crate::seam::render::OverBudget::Elide,
+        });
+        let session = Session::open_with(
+            Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        let opened_by = settling_seq(&log, 1);
+        session
+            .declare_seam(Some(gap(opened_by, GapEnd::Seam)))
+            .expect("admitted");
+        let lines = whole_log(&session);
+        let seam = lines
+            .iter()
+            .find_map(|line| match &line.event {
+                log::Event::Seam {
+                    render,
+                    render_budget,
+                    ..
+                } => Some((render.clone(), render_budget.clone())),
+                _ => None,
+            })
+            .expect("a seam line");
+        let (render, Some(budget)) = seam.clone() else {
+            panic!("the seam names its budget: {seam:?}");
+        };
+        assert_eq!((budget.tokens, budget.over.as_str()), (1, "elide"));
+        assert_eq!(budget.reduced, 3, "the three decisions, elided: {render}");
+        assert!(render.ends_with("3 older entries elided\n"), "{render}");
+        assert_eq!(budget.rendered, (render.chars().count() as u64).div_ceil(4));
+    }
+
     #[test]
     #[allow(clippy::too_many_lines)]
     fn a_declared_seam_refills_the_trunk_from_working_memory_and_the_next_ask_runs_on_it() {
@@ -9418,6 +9683,7 @@ pub(in crate::drive) mod tests {
                 carried_outputs: None,
                 carried_output_bytes: None,
                 placement: Some(log::RenderPlacement::Message),
+                render_budget: None,
             }
         );
 
