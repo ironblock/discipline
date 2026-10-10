@@ -20,7 +20,10 @@
 //! * **`TabbyAPI` `be74bf0`**, `GET /v1/model` (`endpoints/core/router.py:128`;
 //!   `endpoints/core/types/model.py:11-54`): `id` (the model directory's
 //!   name) and, under `parameters`, `max_seq_len`, `cache_size`,
-//!   `cache_mode`, `max_batch_size`, `chunk_size` and `use_vision`. Never
+//!   `cache_mode`, `max_batch_size`, `chunk_size`, `use_vision`, and the
+//!   active chat template -- its name, `prompt_template`, and its text,
+//!   compared as `chat_template_sha256` by digest (#509's follow-up: the
+//!   template is part of the system under test). Never
 //!   `rope_scale` or `rope_alpha`, which always read their defaults, nor
 //!   `draft`, which `model_info()` never fills.
 //!
@@ -116,6 +119,17 @@ const DRAFT: &str = "draft";
 
 /// The engine's report on `field`, as text, when it makes one.
 fn reported(engine: Engine, field: &str, report: &serde_json::Value) -> Option<String> {
+    // The template the engine renders with, by the digest of its text:
+    // `TabbyAPI` reports the active template's text and its name (the file's
+    // stem, `common/templating.py` at `be74bf0`) at `/v1/model`.
+    if (engine, field) == (Engine::TabbyApi, "chat_template_sha256") {
+        return report
+            .get("parameters")
+            .and_then(|parameters| parameters.get("prompt_template_content"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|template| !template.is_empty())
+            .map(|template| crate::digest::sha256_hex(template.as_bytes()));
+    }
     let at = match (engine, field) {
         (Engine::LlamaCpp, "model") => report.get("model_alias"),
         (Engine::LlamaCpp, "n_ctx") => report
@@ -129,7 +143,7 @@ fn reported(engine: Engine, field: &str, report: &serde_json::Value) -> Option<S
         (
             Engine::TabbyApi,
             "max_seq_len" | "cache_size" | "cache_mode" | "max_batch_size" | "chunk_size"
-            | "use_vision",
+            | "use_vision" | "prompt_template",
         ) => report
             .get("parameters")
             .and_then(|parameters| parameters.get(field)),
@@ -409,6 +423,50 @@ mod tests {
                 ("served_rope_scale", FieldProvenance::Declared),
             ]
         );
+    }
+
+    /// `TabbyAPI` reports the template it renders with: its name and, by
+    /// digest, its text. Another template -- a community one -- contradicts
+    /// the declaration; an empty text reports nothing.
+    #[test]
+    fn tabbyapi_corroborates_the_template_it_renders_with_and_refuses_another() {
+        let stock = "{{ stock }}";
+        let declared = identity(&format!(
+            "dialect = \"tabbyapi\"\nserved_prompt_template = \"chat_template\"\n\
+             served_chat_template_sha256 = \"{}\"\n",
+            crate::digest::sha256_hex(stock.as_bytes())
+        ));
+        let card = |name: &str, text: &str| {
+            serde_json::json!({
+                "id": "m",
+                "parameters": {"prompt_template": name, "prompt_template_content": text},
+            })
+        };
+        let fields = corroborated("s", &declared, Some(&card("chat_template", stock)))
+            .expect("the stock template");
+        assert_eq!(
+            provenance(&fields),
+            [
+                ("served_chat_template_sha256", FieldProvenance::Corroborated),
+                ("served_prompt_template", FieldProvenance::Corroborated),
+            ]
+        );
+        let refused = corroborated(
+            "s",
+            &declared,
+            Some(&card("chat_template", "{{ community }}")),
+        )
+        .expect_err("another template");
+        assert!(
+            refused.contains("`served_chat_template_sha256`"),
+            "{refused}"
+        );
+        let refused = corroborated("s", &declared, Some(&card("qwen-sharp", stock)))
+            .expect_err("another template, by name");
+        assert!(refused.contains("`served_prompt_template`"), "{refused}");
+        let fields = corroborated("s", &declared, Some(&card("chat_template", "")))
+            .expect("an empty text reports nothing");
+        assert_eq!(fields[0].provenance, FieldProvenance::Declared);
     }
 
     /// An engine that reported nothing leaves every field declared.
