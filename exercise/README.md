@@ -121,10 +121,11 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
   (`?theme=paper&mode=light&connectors=sweep`). Each is a toolbar switch in
   Storybook.
 - **"What diet can't emit yet"** outlines everything on screen drawn from
-  a field `diet` does not write yet -- a session's arm, slots, phases, a
-  seam's pre-warm, the ratify and extraction lanes (`NEEDS` in
-  `src/drive/log.ts`) -- naming what it is. A session `diet` drove outlines
-  nothing.
+  a field `diet` does not write yet -- a session's arm and system prompt
+  size (#678), the server's slots (#677), the surface's pre-v5 fork shape
+  and the ratify and extraction lanes of its recorded sessions (#427)
+  (`NEEDS` in `src/drive/log.ts`, each need with the ticket that closes
+  it) -- naming what it is. A session `diet` drove outlines nothing.
 
 ## How it is put together
 

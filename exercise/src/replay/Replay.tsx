@@ -12,7 +12,7 @@ import './replay.css';
 
 /** What the page does not show yet, and whose it is to add (#32, rulings 5-7). */
 const GAPS = [
-  'The first driven session under #117 is not recorded yet; it will be a results directory (#177).',
+  'Sessions driven through diet are committed under runs/ in the repository, each saying who drove it; this page does not show them yet.',
   'Reading a diet log in the browser waits on diet’s own reader (#78), so these are migrated recordings, not logs.',
 ];
 
