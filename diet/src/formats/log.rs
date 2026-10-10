@@ -680,6 +680,15 @@ pub struct NoteLine {
     pub template: String,
 }
 
+/// One instruction file a session's system prompt carries (v7, #559).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstructionFile {
+    /// Its path relative to the worktree: never absolute, never a home's.
+    pub path: String,
+    /// The sha256 of its bytes.
+    pub sha256: String,
+}
+
 /// One field of the served configuration (v7, #509).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServedField {
@@ -778,6 +787,10 @@ pub enum Event {
         /// chat template renders by default, as the registry declares it
         /// (v7): what the model was asked for, named.
         reasoning_effort_default: Option<String>,
+        /// The instruction files the system prompt carries (v7, #559): each
+        /// by its path relative to the worktree and its digest. Their text
+        /// is in `head`.
+        instruction_files: Option<Vec<InstructionFile>>,
         /// The cap tool outputs arrived under (v7, #554), when the session
         /// runs tools.
         tool_output: Option<ToolOutput>,
@@ -2235,6 +2248,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     None => None,
                     Some(_) => Some(fields.string("reasoning_effort_default")?),
                 },
+                instruction_files: fields.instruction_files("instruction_files")?,
                 tool_output: tool_output(&fields)?,
             }
         }
@@ -2995,6 +3009,9 @@ pub enum Holds {
     /// A `delivered` line's `lines` (v7): a non-empty list of objects of
     /// the keys [`DELIVERED_LINE`] declares.
     DeliveredLines,
+    /// A `session.start`'s `instruction_files` (v7): a non-empty list of
+    /// objects of the keys [`INSTRUCTION_FILE`] declares.
+    InstructionFiles,
     /// A `session.start`'s [`Unsent`] (v7): an object of the keys [`UNSENT`]
     /// declares.
     Unsent,
@@ -3158,6 +3175,13 @@ pub const DELIVERED_LINE: &[Field] = &[
     must_v7("template", Holds::Text),
 ];
 
+/// The keys of each of a `session.start`'s `instruction_files`. Arrived in
+/// v7.
+pub const INSTRUCTION_FILE: &[Field] = &[
+    must_v7("path", Holds::Text),
+    must_v7("sha256", Holds::Digest),
+];
+
 /// The keys of a `session.start`'s `unsent`: what the regime declares and
 /// no request carries. Arrived in v7.
 pub const UNSENT: &[Field] = &[must_v7("budget_tokens", Holds::Count)];
@@ -3275,6 +3299,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Serving => Some(SERVING),
         Holds::TemplateKwargs => Some(TEMPLATE_KWARGS),
         Holds::Unsent => Some(UNSENT),
+        Holds::InstructionFiles => Some(INSTRUCTION_FILE),
         Holds::DeliveredLines => Some(DELIVERED_LINE),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
@@ -3367,6 +3392,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
                 may_v7("reasoning_effort_default", Text),
+                may_v7("instruction_files", Holds::InstructionFiles),
                 may_v7("tool_output", Tag(Tags::ToolOutputState)),
                 may_v7("tool_output_max_lines", Holds::Count),
                 may_v7("tool_output_max_bytes", Holds::Count),
@@ -3608,6 +3634,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Serving => "Serving".to_owned(),
         Holds::TemplateKwargs => "TemplateKwargs".to_owned(),
         Holds::Unsent => "Unsent".to_owned(),
+        Holds::InstructionFiles => "InstructionFile[]".to_owned(),
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
@@ -3707,6 +3734,7 @@ pub fn typescript() -> String {
         ("Serving", SERVING),
         ("TemplateKwargs", TEMPLATE_KWARGS),
         ("Unsent", UNSENT),
+        ("InstructionFile", INSTRUCTION_FILE),
         ("NoteLine", DELIVERED_LINE),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
@@ -3814,10 +3842,27 @@ fn to_value(line: &Line) -> Value {
             fork_delivery,
             reasoning_effort_default,
             tool_output,
+            instruction_files,
         } => {
             put("version", Value::Integer(*version));
             if let Some(effort) = reasoning_effort_default {
                 put("reasoning_effort_default", text(effort));
+            }
+            if let Some(files) = instruction_files {
+                put(
+                    "instruction_files",
+                    Value::Array(
+                        files
+                            .iter()
+                            .map(|file| {
+                                Value::Object(BTreeMap::from([
+                                    ("path".to_owned(), text(&file.path)),
+                                    ("sha256".to_owned(), text(&file.sha256)),
+                                ]))
+                            })
+                            .collect(),
+                    ),
+                );
             }
             if let Some(delivery) = fork_delivery {
                 put("fork_delivery", text(delivery.tag()));
@@ -4813,6 +4858,48 @@ impl Fields<'_> {
         Ok(kwargs)
     }
 
+    /// A `session.start`'s `instruction_files` (v7, #559), when carried: a
+    /// non-empty list of `{path, sha256}`, each path relative -- never
+    /// absolute, never a home's.
+    fn instruction_files(&self, key: &str) -> Result<Option<Vec<InstructionFile>>, String> {
+        let Some(value) = self.0.get(key) else {
+            return Ok(None);
+        };
+        let Value::Array(entries) = value else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a session that injected none carries no `{key}`"
+            ));
+        }
+        let mut files = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !INSTRUCTION_FILE.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            let path = inner.string("path").map_err(at)?;
+            if path.starts_with('/') || path.starts_with('~') || path.contains('\\') {
+                return Err(at(format!(
+                    "`path` is `{path}`: relative to the worktree, never absolute or a home's"
+                )));
+            }
+            files.push(InstructionFile {
+                path,
+                sha256: inner.digest("sha256").map_err(at)?,
+            });
+        }
+        Ok(Some(files))
+    }
+
     /// A `session.start`'s `unsent` (v7, R1): an object of [`UNSENT`]'s keys.
     fn unsent(&self, key: &str) -> Result<Unsent, String> {
         let inner = Fields(self.object(key, UNSENT)?);
@@ -4895,6 +4982,7 @@ mod tests {
                 approvals_off: None,
                 fork_delivery: None,
                 reasoning_effort_default: None,
+                instruction_files: None,
                 tool_output: Some(ToolOutput {
                     state: ToolOutputState::Capped,
                     max_lines: Some(2000),
@@ -5253,7 +5341,10 @@ mod tests {
             (Holds::Text, Value::String(_)) | (Holds::Flag, Value::Boolean(_)) => true,
             (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
             (Holds::WorkingDirectory, Value::String(cwd)) => is_a_working_directory(cwd),
-            (Holds::Files | Holds::Served | Holds::DeliveredLines, Value::Array(entries)) => {
+            (
+                Holds::Files | Holds::Served | Holds::DeliveredLines | Holds::InstructionFiles,
+                Value::Array(entries),
+            ) => {
                 let declared = object_fields(holds).expect("a list of objects");
                 !entries.is_empty()
                     && entries.iter().all(|entry| match entry {
@@ -5463,6 +5554,7 @@ mod tests {
             ("serving", SERVING),
             ("template_kwargs", TEMPLATE_KWARGS),
             ("unsent", UNSENT),
+            ("instruction_files", INSTRUCTION_FILE),
             ("lines", DELIVERED_LINE),
             ("tool_call", TOOL_CALL_PIECE),
             ("approval", APPROVAL),

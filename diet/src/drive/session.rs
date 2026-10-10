@@ -247,6 +247,9 @@ pub enum Event {
         /// The template's default level, when thinking is on and none is
         /// sent.
         reasoning_effort_default: Option<String>,
+        /// The instruction files the system prompt carries (#559), by path
+        /// and digest: empty when none were injected.
+        instruction_files: Vec<log::InstructionFile>,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -673,7 +676,11 @@ pub fn interview_warrant(regimen: &Regimen) -> Result<Vec<log::Warrant>, String>
 pub type Declared = (
     Option<log::SubstrateClaim>,
     Option<Interview>,
-    (Option<log::Unsent>, Option<String>),
+    (
+        Option<log::Unsent>,
+        Option<String>,
+        Vec<log::InstructionFile>,
+    ),
 );
 
 /// What the capture gap runs under (#374): the rules that warrant its fork,
@@ -1155,7 +1162,13 @@ impl<S: Streaming + 'static> Session<S> {
     /// before any.
     #[must_use]
     pub fn open(transport: S, template: RequestShape) -> Self {
-        Self::opened_as(transport, template, None, None, (None, None, (None, None)))
+        Self::opened_as(
+            transport,
+            template,
+            None,
+            None,
+            (None, None, (None, None, Vec::new())),
+        )
     }
 
     /// [`Session::open`], declaring what serves it -- the dialect it speaks
@@ -1168,7 +1181,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             Some(serving),
             None,
-            (None, None, (None, None)),
+            (None, None, (None, None, Vec::new())),
         )
     }
 
@@ -1186,7 +1199,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             Some(tools),
-            (None, None, (None, None)),
+            (None, None, (None, None, Vec::new())),
         )
     }
 
@@ -1209,7 +1222,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             tools,
-            (claim, interview, (None, None)),
+            (claim, interview, (None, None, Vec::new())),
         )
     }
 
@@ -1237,7 +1250,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, (unsent, reasoning_effort_default)): Declared,
+        (claim, interview, (unsent, reasoning_effort_default, instruction_files)): Declared,
     ) -> Self {
         // A head is the trunk before any turn; a tool result answers a call
         // made in one, and the log's head has no word for it (`role_of`).
@@ -1306,6 +1319,7 @@ impl<S: Streaming + 'static> Session<S> {
             approvals_off: tools.as_ref().is_some_and(|tools| tools.approvals_off),
             fork_delivery,
             reasoning_effort_default,
+            instruction_files,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
         });
         Self {
@@ -1852,7 +1866,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             fork_delivery,
             reasoning_effort_default,
             tool_output,
+            instruction_files,
         } => log::Event::SessionStart {
+            // #559: by path and digest, their text in `head`; nothing when none.
+            instruction_files: Some(instruction_files.clone()).filter(|files| !files.is_empty()),
             fork_delivery: *fork_delivery,
             reasoning_effort_default: reasoning_effort_default.clone(),
             tool_output: tool_output.map(tool_output_of),
@@ -4759,6 +4776,7 @@ pub(in crate::drive) mod tests {
             fork_delivery: None,
             reasoning_effort_default: None,
             tool_output: None,
+            instruction_files: _,
         } = &log[0].event
         else {
             panic!("the log does not begin with the session: {log:#?}");
@@ -4859,6 +4877,10 @@ pub(in crate::drive) mod tests {
                 fork_delivery: Some(log::ForkDelivery::Advisory),
                 reasoning_effort_default: Some("xhigh".to_owned()),
                 tool_output: Some(crate::drive::output::OutputCap::DEFAULT),
+                instruction_files: vec![log::InstructionFile {
+                    path: "AGENTS.md".to_owned(),
+                    sha256: "e".repeat(64),
+                }],
             },
             Event::Asked {
                 turn: 1,
@@ -5132,6 +5154,10 @@ pub(in crate::drive) mod tests {
                 approvals_off: Some(true),
                 fork_delivery: Some(log::ForkDelivery::Advisory),
                 reasoning_effort_default: Some("xhigh".to_owned()),
+                instruction_files: Some(vec![log::InstructionFile {
+                    path: "AGENTS.md".to_owned(),
+                    sha256: "e".repeat(64),
+                }]),
                 tool_output: Some(log::ToolOutput {
                     state: log::ToolOutputState::Capped,
                     max_lines: Some(2000),

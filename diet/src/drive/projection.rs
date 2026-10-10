@@ -1462,6 +1462,7 @@ mod tests {
             approvals_off: None,
             fork_delivery: None,
             reasoning_effort_default: None,
+            instruction_files: None,
             tool_output: None,
         }
     }
