@@ -509,9 +509,29 @@ impl Dialect {
     /// `tabbyapi`. `None` for any other name.
     #[must_use]
     pub fn named(name: &str) -> Option<Self> {
-        [Self::llama_cpp(), Self::tabbyapi()]
-            .into_iter()
-            .find(|dialect| dialect.name == name)
+        [
+            Self::llama_cpp(),
+            Self::tabbyapi(),
+            Self::anthropic_messages(),
+        ]
+        .into_iter()
+        .find(|dialect| dialect.name == name)
+    }
+
+    /// Anthropic's Messages API (#555). Its stream is read by
+    /// [`super::anthropic`], not through these paths, so it declares none:
+    /// the name is what the journal and `session.start` carry.
+    #[must_use]
+    pub fn anthropic_messages() -> Self {
+        Self {
+            name: super::anthropic::DIALECT.to_owned(),
+            sampler_echo: None,
+            prompt_tokens: None,
+            cached_tokens: None,
+            finish_reason: None,
+            reasoning: None,
+            timings: None,
+        }
     }
 }
 

@@ -369,9 +369,12 @@ fn checked(
 /// An `engine_check` other than `declared`, or a declared `engine_commit`
 /// that is not 40 lowercase hex digits.
 fn declared(id: &str, identity: &Identity) -> Result<Option<Passed>, String> {
+    // A hosted API reports no build to check (#555): its engine is the one
+    // its entry declares -- the API version -- whatever `engine_check` says.
+    let api = identity.server_kind.as_deref() == Some("api");
     match identity.engine_check.as_deref() {
-        None => Ok(None),
-        Some("declared") => {
+        None if !api => Ok(None),
+        None | Some("declared") => {
             let (field, build) = match identity.engine_commit.as_deref() {
                 Some(commit) if commit.len() != 40 || !commit.chars().all(is_hex) => {
                     return Err(format!(

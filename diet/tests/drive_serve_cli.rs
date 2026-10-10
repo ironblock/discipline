@@ -87,6 +87,7 @@ fn start(endpoint: &str, extra: &[&str]) -> Served {
 fn start_with(endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
     let head = file_holding("head", HEAD);
     let mut child = Command::new(DRIVE)
+        .env_remove("ANTHROPIC_API_KEY")
         .envs(env.iter().copied())
         .args([
             "serve",
@@ -362,7 +363,10 @@ fn a_drive_server_binds_loopback_by_default_and_listen_takes_an_ip() {
 /// killed rather than left serving.
 fn run_briefly(endpoint: &str, extra: &[&str]) -> (Option<i32>, String) {
     let head = file_holding("head", HEAD);
+    // A hosted entry reads its key from here when no file is given (#555):
+    // the machine's own must never decide a test.
     let mut child = Command::new(DRIVE)
+        .env_remove("ANTHROPIC_API_KEY")
         .args(["serve", "--endpoint", endpoint, "--model", "m", "--head"])
         .arg(&head.0)
         .args(extra)
@@ -3615,4 +3619,125 @@ fn a_drive_server_refuses_an_https_endpoint_but_for_an_api_entry() {
     let (code, said) = run_briefly("https://127.0.0.1:9/v1", &[]);
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains("without a regimen"), "{said}");
+}
+
+// ---------------------------------------------------------------------------
+// a hosted API, rehearsed (#555)
+// ---------------------------------------------------------------------------
+
+/// CONSTRUCTED, not captured: one Anthropic Messages answer, its usage a
+/// five-minute cache write.
+const HOSTED_ANSWER: &[u8] = include_bytes!("../client/fixtures/anthropic-constructed-answer.http");
+
+/// A regimen on the hosted-API rehearsal substrate.
+fn hosted_regimen() -> HeadFile {
+    let hardware =
+        diet::drive::registry::identity(diet::drive::registry::REGISTRY, "stub-hosted-api")
+            .expect("the rehearsal entry")
+            .hardware_fingerprint;
+    file_holding(
+        "regimen",
+        &format!(
+            "arm = \"a\"\ndogma_version = 0\nsubstrate = \"stub-hosted-api\"\n\
+             substrate_reasoning = \"on\"\nsubstrate_hardware = \"{hardware}\"\n\
+             [reasoning]\neffort = \"low\"\nbudget_tokens = \"none\"\n\
+             [sampler]\ntemperature = 1\n"
+        ),
+    )
+}
+
+#[test]
+fn a_drive_server_on_a_hosted_api_entry_speaks_its_messages_api_with_the_key() {
+    let stub = Stub::serving(vec![Act::Raw(HOSTED_ANSWER.to_vec())]).expect("loopback");
+    let regimen = hosted_regimen();
+    let path = regimen.0.to_string_lossy().into_owned();
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--key-file",
+            &key_path,
+            "--log",
+            &logged,
+        ],
+    );
+    assert_eq!(served.substrate.as_deref(), Some("stub-hosted-api"));
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hello?"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let read = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains("turn.settled") && read.contains(r#""to":"awaiting""#),
+    );
+    assert!(read.contains("Hello from the stub."), "{read}");
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+
+    // No engine request: the one request is the turn's, to the Messages API.
+    let heads = stub.heads();
+    assert_eq!(heads.len(), 1, "{heads:#?}");
+    let head = heads[0].to_ascii_lowercase();
+    for line in [
+        "x-api-key: sk-rehearsal\r\n",
+        "anthropic-version: 2023-06-01\r\n",
+        "anthropic-beta: interleaved-thinking-2025-05-14\r\n",
+    ] {
+        assert!(head.contains(line), "{line}: {head}");
+    }
+    assert!(!head.contains("authorization:"), "{head}");
+    let body = log_line_object(&stub.received()[0]);
+    assert_eq!(
+        (
+            &body["thinking"]["type"],
+            &body["output_config"]["effort"],
+            &body["system"][0]["cache_control"]
+        ),
+        (
+            &serde_json::json!("adaptive"),
+            &serde_json::json!("low"),
+            &serde_json::json!({"type": "ephemeral"})
+        ),
+        "{body}"
+    );
+    assert!(body.get("chat_template_kwargs").is_none(), "{body}");
+
+    let lines = std::fs::read_to_string(&log_file.0).expect("the log");
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["serving"]["dialect"], "anthropic-messages",
+        "{start_line}"
+    );
+    let response = lines
+        .lines()
+        .map(log_line_object)
+        .find(|line| line["kind"] == "response")
+        .expect("a response line");
+    assert_eq!(
+        response["usage"],
+        serde_json::json!({
+            "prompt_tokens": 533, "completion_tokens": 7, "cached_tokens": 0,
+            "cache_creation_tokens": 512, "cache_creation_5m_tokens": 512,
+            "cache_creation_1h_tokens": 0,
+        }),
+        "{response}"
+    );
+}
+
+#[test]
+fn a_drive_server_on_a_hosted_api_entry_needs_its_key() {
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = hosted_regimen();
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("neither --key-file nor ANTHROPIC_API_KEY") && !said.contains("listening"),
+        "{said}"
+    );
 }

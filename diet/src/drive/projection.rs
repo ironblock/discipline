@@ -251,10 +251,18 @@ fn output_tokens(
 
 /// A turn's `prefill_tokens` from its trunk response's `timings`, on a
 /// cited engine: `prompt_n + cache_n`, both as the server reported them.
+/// A hosted API's response, which carries `usage` and no timings, says it
+/// directly: its whole prompt, uncached, read and written (#555).
 fn prefill_tokens(
     timings: Option<&log::Timings>,
+    usage: Option<&log::Usage>,
     engine: Option<Engine>,
 ) -> Result<Count, &'static str> {
+    if let (None, Some(usage)) = (timings, usage)
+        && usage.cache_creation_tokens.is_some()
+    {
+        return Count::new(usage.prompt_tokens).map_err(|_| "a count past the record's bound");
+    }
     if engine.is_none() {
         return Err("equality unmeasured for this engine");
     }
@@ -426,6 +434,10 @@ struct Walk<'a> {
     calls: BTreeMap<String, (u64, Option<String>)>,
     /// The results the model pruned (#612), in the order it pruned them.
     pruned: Vec<Pruned>,
+    /// Each fork's call, by its request's `seq`, and what its responses'
+    /// usage counted: cache reads over whole prompts (#555).
+    fork_calls: BTreeMap<u64, u64>,
+    fork_cache: BTreeMap<u64, (u64, u64)>,
     /// A lane's substrate where a fork's line names an offboard seat
     /// (#570): its requests and its fork rows name it, not the trunk's.
     seated: BTreeMap<Lane, String>,
@@ -617,6 +629,8 @@ impl<'a> Walk<'a> {
             side_heads: BTreeMap::new(),
             calls: BTreeMap::new(),
             pruned: Vec::new(),
+            fork_calls: BTreeMap::new(),
+            fork_cache: BTreeMap::new(),
             seated: BTreeMap::new(),
         }
     }
@@ -727,8 +741,14 @@ impl<'a> Walk<'a> {
                 turn,
                 lane,
                 head_sha256,
+                fork,
                 ..
-            } => self.request(line.seq, *turn, *lane, head_sha256.as_deref())?,
+            } => {
+                if let Some(fork) = fork {
+                    self.fork_calls.insert(line.seq, *fork);
+                }
+                self.request(line.seq, *turn, *lane, head_sha256.as_deref())?;
+            }
             // A capped call is not an answer (#290, ruled 5969297103): no
             // row, its text named, and nothing put on the rebuilt trunk.
             Line::Response {
@@ -976,6 +996,7 @@ impl<'a> Walk<'a> {
         }
         self.forks.insert(seq);
         self.events.push(Event::Fork {
+            cache_read_share: None,
             id: format!("f/{seq}"),
             lane: lane.tag().to_owned(),
             substrate: self.substrate_of(lane),
@@ -1148,18 +1169,21 @@ impl<'a> Walk<'a> {
         if let Some(files) = files {
             self.ask_files.insert(turn, files.clone());
         }
-        let trunk_timings =
-            self.trunk_of
-                .get(&turn)
-                .and_then(|request| match self.outcome.get(request) {
-                    // A capped call's prompt was still prefilled: the cap
-                    // bounds the output, not the prompt (#313's review).
-                    Some(Line::Response { timings, .. }) => timings.as_ref(),
-                    _ => None,
-                });
+        let (trunk_timings, trunk_usage) = self
+            .trunk_of
+            .get(&turn)
+            .and_then(|request| match self.outcome.get(request) {
+                // A capped call's prompt was still prefilled: the cap
+                // bounds the output, not the prompt (#313's review).
+                Some(Line::Response { timings, usage, .. }) => {
+                    Some((timings.as_ref(), usage.as_ref()))
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
         match (
             self.turns_broken,
-            prefill_tokens(trunk_timings, self.engine),
+            prefill_tokens(trunk_timings, trunk_usage, self.engine),
         ) {
             (false, Ok(prefill_tokens)) => {
                 self.events.push(Event::Turn {
@@ -1641,8 +1665,31 @@ impl<'a> Walk<'a> {
         timings: Option<&log::Timings>,
         usage: Option<&log::Usage>,
     ) {
+        // A fork's cache share, over its responses' usage (#555).
+        if let (Some(&fork), Some(usage)) = (self.fork_calls.get(&to_request), usage)
+            && usage.cached_tokens.is_some()
+        {
+            let (read, prompt) = self.fork_cache.entry(fork).or_default();
+            *read += usage.cached_tokens.unwrap_or(0);
+            *prompt += usage.prompt_tokens;
+            let share = cache_read_share(*read, *prompt);
+            let id = format!("f/{fork}");
+            if let Some(Event::Fork {
+                cache_read_share, ..
+            }) = self
+                .events
+                .iter_mut()
+                .find(|event| matches!(event, Event::Fork { id: row, .. } if *row == id))
+            {
+                *cache_read_share = share;
+            }
+        }
         match output_tokens(usage, timings, self.engine) {
             Ok(output_tokens) => self.events.push(Event::Response {
+                cache_read: usage.and_then(|usage| usage.cached_tokens),
+                cache_creation: usage.and_then(|usage| usage.cache_creation_tokens),
+                cache_creation_5m: usage.and_then(|usage| usage.cache_creation_5m_tokens),
+                cache_creation_1h: usage.and_then(|usage| usage.cache_creation_1h_tokens),
                 id: format!("{}#response", request_id(to_request)),
                 to_request: request_id(to_request),
                 output_tokens,
@@ -1657,6 +1704,21 @@ impl<'a> Walk<'a> {
             ),
         }
     }
+}
+
+/// `read` over `prompt` to four places, half up, as a record decimal; none
+/// for an empty prompt (#555).
+fn cache_read_share(read: u64, prompt: u64) -> Option<record::json::Decimal> {
+    if prompt == 0 {
+        return None;
+    }
+    let ten_thousandths =
+        (u128::from(read) * 10_000 * 2 + u128::from(prompt)) / (2 * u128::from(prompt));
+    record::json::Decimal::new(&format!(
+        "{}.{:04}",
+        ten_thousandths / 10_000,
+        ten_thousandths % 10_000
+    ))
 }
 
 #[cfg(test)]

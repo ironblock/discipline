@@ -297,6 +297,16 @@ measured_by = "computed by canned::replay_digest() and canned::hardware_fingerpr
 serves = "diet-drive canned"
 acts_sha256 = "2087aa015ae2a2a05b36adedc25902d605ac2b2c461ef9139747a25ca1e566f8"
 
+[equipment.stub-hosted-api]
+display_name = "the hosted-API rehearsal endpoint"
+entry_type = "hosted-api"
+hardware_fingerprint = "e2f4ca82432821d2f721a5dc9ece9a6bebeb16292c0f45da9ced80613626fbf0"
+role = "the loopback stub playing a hosted API's Messages stream (#555): constructed Anthropic events, never a provider's, so a hosted session is rehearsed end to end without a live call"
+measured = "2026-10-10"
+measured_by = "computed as check-fingerprints.py's digest_of over the hosted-api type's fields"
+provider = "diet-drive stub"
+api_host = "localhost"
+
 [equipment.canned-loopback]
 display_name = "the canned loopback server"
 entry_type = "canned-server"
@@ -1114,6 +1124,22 @@ reproducible_because = "replay the captures and the same bytes play again; exact
 engine_single_digest_suffices = "the digest is of the acts, not of an executable: the server is this repository's own code, and the captures are the whole of what it plays"
 engine_build_info = "canned-7336cc7fed1f2e64c6095c49f73317c9b30be3ba8d22d7cf3bf8fc2bc62c6966"
 engine_build_info_is = "derived, not read from a server: canned::replay_tools_build_info(), \"canned-\" + the acts digest; what `diet-drive replay` reports at GET /props"
+
+[substrate.stub-hosted-api]
+equipment = "stub-hosted-api"
+description = "the hosted-API rehearsal substrate (#555): this crate's loopback stub playing constructed Anthropic Messages events, never a provider's model; a rehearsal substrate for a hosted session's wiring when no live call is allowed, and never a claim substrate: every answer is a constructed one"
+pinned = true
+server_kind = "api"
+dialect = "anthropic-messages"
+engine_name = "anthropic-messages"
+engine_identity = "2023-06-01"
+engine_identity_is = "the anthropic-version header every request carries: a hosted API reports no build, so its engine is the API version it is spoken to at"
+engine_betas = "interleaved-thinking-2025-05-14"
+thinking = "adaptive"
+weights_kind = "hosted"
+weights_provider = "diet-drive stub"
+weights_model_id = "a-hosted-model"
+weights_version_or_date_observed = "constructed"
 
 # The drive endpoint's engine commit and weights on this host's CPU, served for #29's I0
 # captures (a streamed tool call and its turn 2); not a claim substrate.

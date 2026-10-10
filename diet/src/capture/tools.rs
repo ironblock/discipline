@@ -2216,6 +2216,10 @@ mod tests {
 
     fn response(id: &str, to: &str, text: &str) -> Event {
         Event::Response {
+            cache_read: None,
+            cache_creation: None,
+            cache_creation_5m: None,
+            cache_creation_1h: None,
             id: id.to_owned(),
             to_request: to.to_owned(),
             output_tokens: Count::new(1).expect("a small count"),
