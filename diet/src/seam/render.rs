@@ -115,6 +115,56 @@ pub fn refill(head: &[Message], render: &str) -> Vec<Message> {
     trunk
 }
 
+/// A message's estimated tokens: its characters -- content, reasoning, each
+/// tool call's name and arguments, each image's encoding -- divided by four,
+/// rounded up. The harnesses compared estimate the same way, none with a
+/// tokenizer (#552; Pi `compaction.ts` 298-349, `OpenCode` 2 `util/token.ts`
+/// 3-5); Pi's rounding up, which never undercounts.
+#[must_use]
+pub fn estimated_tokens(message: &Message) -> u64 {
+    let chars = message.content.chars().count()
+        + message.reasoning.as_ref().map_or(0, |r| r.chars().count())
+        + message
+            .tool_calls
+            .iter()
+            .map(|call| call.name.chars().count() + call.arguments.chars().count())
+            .sum::<usize>()
+        + message
+            .images
+            .iter()
+            .map(|image| image.data_uri().len())
+            .sum::<usize>();
+    u64::try_from(chars.div_ceil(4)).unwrap_or(u64::MAX)
+}
+
+/// The recent tail of `turns` -- the trunk after its head -- a seam keeps
+/// after the refill (#552): whole turns, from the newest back, while their
+/// estimated tokens stay within `budget`. A turn starts at its user message:
+/// the tail never starts at an assistant reply or a tool result, so no call
+/// is parted from its result, and the chat template driven here refuses a
+/// conversation with no user message after the system one. The turn that
+/// would cross the budget is not kept (the budget is a ceiling); with no
+/// whole turn within it, or a budget of 0, the tail is empty -- the total
+/// refill (#505).
+#[must_use]
+pub fn tail(turns: &[Message], budget: u64) -> &[Message] {
+    let mut start = turns.len();
+    let mut spent = 0_u64;
+    let mut since = 0_u64;
+    for (at, message) in turns.iter().enumerate().rev() {
+        since = since.saturating_add(estimated_tokens(message));
+        if message.role == Role::User {
+            if spent.saturating_add(since) > budget {
+                break;
+            }
+            spent += since;
+            since = 0;
+            start = at;
+        }
+    }
+    &turns[start..]
+}
+
 /// `text` with everything that could forge a row escaped out of it.
 ///
 /// **The render owns the grammar of the prompt it emits, and it used to have
@@ -187,3 +237,80 @@ pub fn working_set_bytes(object: &WorkingObject) -> u64 {
 /// [`working_set_bytes`] against what is actually emitted -- can find the
 /// section without re-deriving the header's shape.
 pub const WORKING_SET_HEADER: &str = "# working set\n";
+
+#[cfg(test)]
+mod tail_tests {
+    use super::{Message, Role, estimated_tokens, tail};
+    use crate::client::shape::ToolCall;
+
+    fn user(text: &str) -> Message {
+        Message::new(Role::User, text)
+    }
+
+    fn turn(ask: &str, chars: usize) -> Vec<Message> {
+        let mut call = Message::new(Role::Assistant, "");
+        call.tool_calls = vec![ToolCall {
+            id: "c".to_owned(),
+            name: "bash".to_owned(),
+            arguments: "{}".to_owned(),
+        }];
+        vec![
+            user(ask),
+            call,
+            Message::tool_result("c".to_owned(), "x".repeat(chars)),
+            Message::new(Role::Assistant, "done"),
+        ]
+    }
+
+    fn tokens(messages: &[Message]) -> u64 {
+        messages.iter().map(estimated_tokens).sum()
+    }
+
+    /// A message's estimate is its characters over four, rounded up, its
+    /// tool calls' names and arguments counted.
+    #[test]
+    fn a_messages_tokens_are_its_characters_over_four_rounded_up() {
+        assert_eq!(estimated_tokens(&user("abcde")), 2);
+        let mut call = Message::new(Role::Assistant, "");
+        call.tool_calls = vec![ToolCall {
+            id: "c".to_owned(),
+            name: "bash".to_owned(),
+            arguments: "{\"command\":\"ls\"}".to_owned(),
+        }];
+        assert_eq!(estimated_tokens(&call), 5);
+    }
+
+    /// Whole turns from the newest back, within the budget; the turn that
+    /// would cross it is not kept; a budget of 0, or one no whole turn fits,
+    /// keeps nothing.
+    #[test]
+    fn the_tail_is_whole_turns_from_the_newest_back_within_the_budget() {
+        let turns: Vec<Message> = [turn("one", 400), turn("two", 400), turn("three", 400)].concat();
+        let one_turn = tokens(&turn("three", 400));
+        assert!(tail(&turns, 0).is_empty());
+        assert!(
+            tail(&turns, one_turn - 1).is_empty(),
+            "the crossing turn is not kept"
+        );
+        let kept = tail(&turns, one_turn);
+        assert_eq!(kept.len(), 4);
+        assert_eq!(kept[0], user("three"));
+        let kept = tail(&turns, one_turn * 2 + 5);
+        assert_eq!(kept.len(), 8);
+        assert_eq!(kept[0], user("two"));
+        assert_eq!(tail(&turns, u64::MAX).len(), turns.len());
+    }
+
+    /// Turns that start mid-way (a trunk whose first kept message is not an
+    /// ask) are never cut into: the tail starts only at a user message.
+    #[test]
+    fn the_tail_never_starts_at_a_reply_or_a_tool_result() {
+        let mut turns = turn("one", 10);
+        turns.remove(0);
+        assert!(
+            tail(&turns, u64::MAX).is_empty(),
+            "{:?}",
+            tail(&turns, u64::MAX)
+        );
+    }
+}

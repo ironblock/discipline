@@ -1312,6 +1312,14 @@ pub enum Event {
         at_turn: u32,
         /// How large the render was.
         rendered_bytes: Count,
+        /// The compaction depth it ran at (#552): estimated tokens of
+        /// recent whole turns it could keep. Absent, the total refill.
+        tail_tokens: Option<u64>,
+        /// How many whole turns of the old trunk it kept, beside
+        /// `tail_tokens`.
+        carried_turns: Option<u64>,
+        /// Their estimated tokens, beside `tail_tokens`.
+        carried_tokens: Option<u64>,
     },
     /// A tool was called.
     ToolCall {
@@ -2465,6 +2473,9 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             id: take_string(&mut members, of, "id")?,
             at_turn: take_u32(&mut members, of, "at_turn")?,
             rendered_bytes: take_u64(&mut members, of, "rendered_bytes")?,
+            tail_tokens: take_optional_count(&mut members, of, "tail_tokens")?,
+            carried_turns: take_optional_count(&mut members, of, "carried_turns")?,
+            carried_tokens: take_optional_count(&mut members, of, "carried_tokens")?,
         },
         Kind::ToolCall => tool_call(&mut members, of)?,
         Kind::Rejected => Event::Rejected {
@@ -4030,6 +4041,25 @@ fn take_tool_output(
     }))
 }
 
+/// An optional non-negative integer.
+fn take_optional_count(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+    field: &'static str,
+) -> Result<Option<u64>, ParseError> {
+    take_optional_integer(members, of, field)?
+        .map(|n| {
+            u64::try_from(n).map_err(|_| {
+                ParseError::from(SchemaError::WrongType {
+                    of,
+                    field: field.to_owned(),
+                    want: "a non-negative integer",
+                })
+            })
+        })
+        .transpose()
+}
+
 fn take_optional_integer(
     members: &mut BTreeMap<String, Value>,
     of: &'static str,
@@ -4884,10 +4914,18 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
         Event::Seam {
             at_turn,
             rendered_bytes,
+            tail_tokens,
+            carried_turns,
+            carried_tokens,
             ..
         } => {
             members.put_u32("at_turn", *at_turn);
             members.put_count("rendered_bytes", *rendered_bytes);
+            let count =
+                |n: &Option<u64>| n.map(|n| Value::Integer(i64::try_from(n).unwrap_or(i64::MAX)));
+            members.put_optional("tail_tokens", count(tail_tokens));
+            members.put_optional("carried_turns", count(carried_turns));
+            members.put_optional("carried_tokens", count(carried_tokens));
         }
         Event::Rejected {
             lane,

@@ -614,9 +614,7 @@ impl<'a> Walk<'a> {
             // A seam (v6, #493): its row, and the trunk refilled exactly as
             // the session refills it, so the next request's head is rebuilt
             // and checked like any other.
-            Line::Seam {
-                at_turn, render, ..
-            } => self.seam(line.seq, *at_turn, render),
+            Line::Seam { .. } => self.seam(line),
             // Forks' patches delivered (v7): the note follows its turn's ask
             // on the rebuilt trunk, as it does on the session's.
             Line::Delivered { turn, text, .. } => {
@@ -798,8 +796,31 @@ impl<'a> Walk<'a> {
     /// refilled from `render` through [`crate::seam::render::refill`]. The
     /// row is named rather than written when that turn has no row; the
     /// trunk is refilled either way, since the session's was.
-    fn seam(&mut self, seq: u64, at_turn: u32, render: &str) {
+    fn seam(&mut self, line: &log::Line) {
+        let Line::Seam {
+            at_turn,
+            render,
+            tail_tokens,
+            ..
+        } = &line.event
+        else {
+            return;
+        };
+        let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
+        // The tail the session kept after the refill (#552), cut from the
+        // rebuilt trunk by the same function.
+        let turns = self.trunk.get(self.head.len()..).unwrap_or_default();
+        let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+        let carried_turns = kept
+            .iter()
+            .filter(|message| message.role == Role::User)
+            .count() as u64;
+        let carried_tokens = kept
+            .iter()
+            .map(crate::seam::render::estimated_tokens)
+            .sum::<u64>();
         self.trunk = crate::seam::render::refill(&self.head, render);
+        self.trunk.extend(kept);
         // An attachment the old trunk carried and could not be read back is
         // not on the refilled one.
         self.trunk_unrebuilt = None;
@@ -825,10 +846,14 @@ impl<'a> Walk<'a> {
             );
             return;
         };
+        let tailed = tail_tokens > 0;
         self.events.push(Event::Seam {
             id: format!("s/{seq}"),
             at_turn,
             rendered_bytes,
+            tail_tokens: tailed.then_some(tail_tokens),
+            carried_turns: tailed.then_some(carried_turns),
+            carried_tokens: tailed.then_some(carried_tokens),
         });
     }
 
@@ -1523,6 +1548,8 @@ mod tests {
             render: render.to_owned(),
             carried_entries: 1,
             carried_turns: 0,
+            tail_tokens: None,
+            carried_tokens: None,
         });
         let projection = project(
             &numbered(events),
@@ -1539,6 +1566,48 @@ mod tests {
             "{:#?}",
             projection.events
         );
+        validates(&projection);
+    }
+
+    /// A seam that kept a tail (#552): its row names the depth and what
+    /// the projection's own cut of the rebuilt trunk kept -- the turn before
+    /// it, whole -- and the record validates.
+    #[test]
+    fn a_seam_that_kept_a_tail_names_its_depth_and_what_it_kept() {
+        let mut events = vec![start()];
+        events.extend(answered(1, 3, Some(warm()), None));
+        events.push(Line::Seam {
+            at_turn: 1,
+            reason: log::SeamReason::Operator,
+            prefix_hash_before: "a".repeat(64),
+            prefix_hash_after: "b".repeat(64),
+            frame: crate::seam::render::FRAME_VERSION.to_owned(),
+            render: "# working set\n".to_owned(),
+            carried_entries: 1,
+            carried_turns: 1,
+            tail_tokens: Some(10_000),
+            carried_tokens: Some(1),
+        });
+        let projection = project(
+            &numbered(events),
+            &regime(),
+            Some(Engine::Commit("e7051ef")),
+        )
+        .expect("projected");
+        let row = projection
+            .events
+            .iter()
+            .find_map(|event| match event {
+                Event::Seam {
+                    tail_tokens,
+                    carried_turns,
+                    carried_tokens,
+                    ..
+                } => Some((*tail_tokens, *carried_turns, carried_tokens.is_some())),
+                _ => None,
+            })
+            .expect("a seam row");
+        assert_eq!(row, (Some(10_000), Some(1), true));
         validates(&projection);
     }
 
