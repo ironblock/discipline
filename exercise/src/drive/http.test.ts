@@ -211,11 +211,12 @@ describe('HttpTransport: commands', () => {
     expect(posted).toEqual([{ kind: 'cancel', turn: 2 }]);
   });
 
-  it('declares a seam without a phase: which one is the drive’s to say', async () => {
+  it('declares a seam with the phase picked, and without one when none was (log v7, #563)', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });
     await transport.dispatch({ kind: 'seam', to: 'build' });
-    expect(posted).toEqual([{ kind: 'declare-seam' }]);
+    await transport.dispatch({ kind: 'seam' });
+    expect(posted).toEqual([{ kind: 'declare-seam', phase: 'build' }, { kind: 'declare-seam' }]);
   });
 
   it('posts an end as serve.rs takes it (#289)', async () => {

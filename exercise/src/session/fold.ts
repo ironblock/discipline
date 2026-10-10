@@ -316,6 +316,8 @@ export interface Session {
   readonly slots: number;
   readonly trunkSlot: number;
   readonly phase: string;
+  /** The phases the logged graph allows a seam to move to from the current one (#563): none without a graph. */
+  readonly phaseMoves: readonly string[];
   readonly eras: readonly Era[];
   /** Branches keyed by the trunk node they came from. */
   readonly branches: ReadonlyMap<string, readonly Folded<BranchNode>[]>;
@@ -455,6 +457,7 @@ export function fold(lines: readonly LogLine[]): Session {
       trunkSlot: 0,
       phase: '',
       tangentsOpened: 0,
+      phaseMoves: [],
       eras: [],
       gaps: [],
       branches: new Map(),
@@ -518,7 +521,8 @@ export function fold(lines: readonly LogLine[]): Session {
   const cappedTurns = new Set<number>();
   const gaps: Folded<GapNode>[] = [];
   let lastSettled: number | undefined;
-  let phase = start.phase ?? '';
+  // The phase it opens in: the graph's opening phase (log v7, #563), or a placed recording's own `phase`.
+  let phase = start.opening_phase ?? start.phase ?? '';
   let openTurn: number | undefined;
   let lastAskSeq = -1;
   // The state as the log says it, when it says it (`diet` logs every move; a script logs only the end).
@@ -965,6 +969,7 @@ export function fold(lines: readonly LogLine[]): Session {
     ...(openTangent !== undefined
       ? { tangent: { id: openTangent, entries: [...entries.values()].filter((x) => x.tangent === openTangent && x.state === 'live').map((x) => x.id) } }
       : {}),
+    phaseMoves: (start.phase_transitions ?? []).filter((move) => move.from === phase).map((move) => move.to),
     eras: builtEras,
     branches,
     memory,

@@ -575,6 +575,28 @@ pub enum Event {
         /// The tangent it was made under (#22), when one was open.
         tangent: Option<String>,
     },
+    /// A self-capture call and what it came to (#609).
+    Captured {
+        /// The trunk request whose answer made the call.
+        request: u64,
+        /// The call's id.
+        call: String,
+        /// The tool.
+        tool: String,
+        /// What it came to (the log's words).
+        outcome: String,
+        /// The entries it wrote or ruled on.
+        entries: Vec<String>,
+        /// Why, when dropped or refused.
+        why: Option<String>,
+    },
+    /// The self-capture reminder, as a note after turn `turn`'s ask (#609).
+    Reminded {
+        /// The turn.
+        turn: u32,
+        /// The note as sent.
+        text: String,
+    },
     /// A tangent opened (#22).
     TangentOpened {
         /// Its id.
@@ -802,6 +824,61 @@ pub struct Interview {
     /// What a fork sees of the trunk (#567): all of it, or its last whole
     /// turns after the head.
     pub view: ForkView,
+    /// Self-capture (#609): the contract's tools offered from the first
+    /// request, and the cadence of silent turns its reminder fires after;
+    /// `None` when off.
+    pub self_capture: Option<crate::capture::tools::Cadence>,
+}
+
+/// `shape`'s tools with self-capture's after them, when `interview` has it
+/// on (#609): declared from the first request and never changed. With it off
+/// `shape` is left exactly as it was.
+///
+/// # Panics
+///
+/// If the pinned contract does not read, which `dogma::capture`'s and
+/// `capture::tools`' tests hold it always does.
+pub fn declare_self_capture(shape: &mut RequestShape, interview: Option<&Interview>) {
+    if interview.is_some_and(|interview| interview.self_capture.is_some()) {
+        let contract = crate::capture::tools::contract()
+            .expect("the pinned contract reads: `dogma::capture`'s tests hold it");
+        shape
+            .tools
+            .extend(crate::capture::tools::definitions(&contract));
+    }
+}
+
+/// The regimen key that turns self-capture on (#609).
+pub const SELF_CAPTURE: &str = "self_capture";
+
+/// The regimen key for the self-capture reminder's cadence (#609).
+pub const SELF_CAPTURE_CADENCE: &str = "self_capture_cadence";
+
+/// Self-capture as the regimen declares it, leniently (#609): on for
+/// `self_capture = true` or `"on"`, with `self_capture_cadence` silent
+/// turns between reminders when it is a positive whole number, else the
+/// module's default; off otherwise.
+#[must_use]
+pub fn self_capture(regimen: &Regimen) -> Option<crate::capture::tools::Cadence> {
+    use crate::capture::tools::Cadence;
+    use crate::formats::regimen::Value as Word;
+    let on = match regimen.get(SELF_CAPTURE) {
+        Some(Word::Boolean(on)) => *on,
+        Some(Word::String(word)) => word == "on",
+        _ => false,
+    };
+    if !on {
+        return None;
+    }
+    let every = match regimen.get(SELF_CAPTURE_CADENCE) {
+        Some(Word::Integer(n)) if *n > 0 => u32::try_from(*n).ok(),
+        _ => None,
+    };
+    Some(
+        every
+            .and_then(|n| Cadence::every(n).ok())
+            .unwrap_or(Cadence::DEFAULT),
+    )
 }
 
 /// What a fork sees of the trunk (#567).
@@ -1027,6 +1104,15 @@ struct State {
     /// The open tangent (#22), and the trunk at its fork point, which its
     /// close restores.
     tangent: Option<(crate::object::tangent::Tangent, Vec<Message>)>,
+    /// The self-capture reminder (#609), when self-capture is on.
+    reminder: Option<crate::capture::tools::Reminder>,
+    /// Whether the turn in flight elected `update_record`.
+    recorded_this_turn: bool,
+    /// The self-capture calls the turn in flight has made: each one's
+    /// position in the lane's emission for the turn.
+    captures_this_turn: u32,
+    /// The reminder due at the next ask, when the cadence fired.
+    reminder_due: Option<String>,
     /// Patches waiting to be delivered at the next trunk request, under a
     /// mid-turn fork delivery: each op and the entry text its line names.
     undelivered: Vec<(log::PatchOp, String, String)>,
@@ -1299,6 +1385,19 @@ impl State {
     }
 
     fn after_the_turn(&mut self) {
+        // The self-capture reminder (#609): a turn that recorded nothing
+        // counts toward the cadence, and a cadence that comes round leaves a
+        // note for the next ask.
+        let recorded = std::mem::take(&mut self.recorded_this_turn);
+        self.captures_this_turn = 0;
+        let turn = self.turns;
+        if let Some(ask) = self
+            .reminder
+            .as_mut()
+            .and_then(|reminder| reminder.observe(turn, recorded))
+        {
+            self.reminder_due = Some(ask.text());
+        }
         self.move_to(Settlement::Awaiting);
         if self.ending {
             self.ending = false;
@@ -1510,6 +1609,13 @@ impl<S: Streaming + 'static> Session<S> {
             pending_gap: None,
             phase: phase_at_open.clone(),
             tangent: None,
+            reminder: interview
+                .as_ref()
+                .and_then(|interview| interview.self_capture)
+                .map(crate::capture::tools::Reminder::on),
+            recorded_this_turn: false,
+            captures_this_turn: 0,
+            reminder_due: None,
             undelivered: Vec::new(),
             archive: super::archive::Archive::default(),
             recovered: BTreeMap::new(),
@@ -1655,6 +1761,18 @@ impl<S: Streaming + 'static> Session<S> {
         // Archive recall (#566): what earlier seams dropped that this ask
         // names, as one note after it (and after any delivered note).
         if let Some(note) = state.recall(turn, &opening[0].content) {
+            shape.messages.push(note.clone());
+            opening.push(note);
+        }
+        // The self-capture reminder (#609), when its cadence came round: an
+        // advisory note after the ask (and after any other note), never in
+        // the system prompt.
+        if let Some(text) = state.reminder_due.take() {
+            state.push(Event::Reminded {
+                turn,
+                text: text.clone(),
+            });
+            let note = Message::new(Role::User, text);
             shape.messages.push(note.clone());
             opening.push(note);
         }
@@ -2580,6 +2698,25 @@ pub fn line_of(logged: &Logged) -> log::Line {
             supersedes: supersedes.clone(),
             tangent: tangent.clone(),
         },
+        Event::Captured {
+            request,
+            call,
+            tool,
+            outcome,
+            entries,
+            why,
+        } => log::Event::Capture {
+            request: *request,
+            call: call.clone(),
+            tool: tool.clone(),
+            outcome: outcome.clone(),
+            entries: entries.clone(),
+            why: why.clone(),
+        },
+        Event::Reminded { turn, text } => log::Event::Reminded {
+            turn: *turn,
+            text: text.clone(),
+        },
         Event::TangentOpened {
             id,
             at_turn,
@@ -3304,6 +3441,146 @@ fn shown_capped(tools: &Tools, whole: &str, line: &mut ToolLine) -> String {
 /// its result under the session's cap, or -- a stop having killed its
 /// helper -- the cancel's result; the step limit refuses it as it refuses
 /// `bash`.
+/// One self-capture call (#609): its arguments through the contract and,
+/// for `update_record`, the groundedness gate against what the model saw
+/// (`capture::tools::apply_call`); its patches applied to working memory,
+/// stamped with an open tangent; a `capture` line logged; and the result the
+/// model is shown -- the outcome, and the entry id it can cite later.
+fn capture_call<S>(
+    shared: &Shared<S>,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> (ToolLine, Option<String>) {
+    use crate::capture::tools::{self, CaptureTool};
+    let line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+    let mut state = shared.lock();
+    let index = state.captures_this_turn;
+    state.captures_this_turn += 1;
+    let seen = seen_by(&state.log, turn);
+    // A served call's id is the model's, and the model may reuse one across
+    // turns; the request's sequence number makes the entry's id the record's.
+    let id = format!("r{request}/{}", call.id);
+    let applied = crate::formats::record::json::line(&call.arguments)
+        .map_err(|why| format!("the arguments are not a JSON object: {why}"))
+        .and_then(|args| {
+            tools::apply_call(&id, turn, &call.name, &args, index, seen.contract_input())
+                .map_err(|why| why.to_string())
+        });
+    let tangent = state
+        .tangent
+        .as_ref()
+        .map(|(tangent, _)| tangent.id().to_owned());
+    let (outcome, entries, why) = match applied {
+        Err(why) => ("refused", Vec::new(), Some(why)),
+        Ok(effect) => {
+            let mut patches = effect.patches;
+            for patch in &mut patches {
+                let at = match patch {
+                    Patch::Add { provenance, .. }
+                    | Patch::Supersede { provenance, .. }
+                    | Patch::Resolve { provenance, .. }
+                    | Patch::Retire { provenance, .. }
+                    | Patch::Park { provenance, .. } => provenance,
+                };
+                at.tangent.clone_from(&tangent);
+            }
+            let entries: Vec<String> = patches
+                .iter()
+                .map(|patch| match patch {
+                    Patch::Add { id, .. } | Patch::Supersede { id, .. } => id.as_str().to_owned(),
+                    Patch::Resolve { target, .. }
+                    | Patch::Retire { target, .. }
+                    | Patch::Park { target, .. } => target.as_str().to_owned(),
+                })
+                .collect();
+            let refused = state.interview.as_mut().map_or_else(
+                || Some("the session keeps no working memory".to_owned()),
+                |interview| {
+                    patches
+                        .iter()
+                        .find_map(|patch| interview.object.apply(patch).err())
+                        .map(|why| why.to_string())
+                },
+            );
+            match (refused, CaptureTool::from_tag(&call.name)) {
+                (Some(why), _) => ("refused", Vec::new(), Some(why)),
+                (None, Some(CaptureTool::UpdateRecord)) if entries.is_empty() => (
+                    "dropped",
+                    Vec::new(),
+                    Some("the groundedness gate kept nothing of it".to_owned()),
+                ),
+                (None, Some(CaptureTool::UpdateRecord)) => ("recorded", entries, None),
+                (None, Some(CaptureTool::ResolveEntry)) if entries.is_empty() => {
+                    ("judged", Vec::new(), None)
+                }
+                (None, Some(CaptureTool::ResolveEntry)) => ("resolved", entries, None),
+                (None, _) => ("proposed", Vec::new(), None),
+            }
+        }
+    };
+    if call.name == CaptureTool::UpdateRecord.tag() && outcome == "recorded" {
+        state.recorded_this_turn = true;
+    }
+    let shown = match (&why, entries.first()) {
+        (Some(why), _) => format!("{outcome}: {why}"),
+        (None, Some(entry)) => format!("{outcome}: {entry}"),
+        (None, None) => outcome.to_owned(),
+    };
+    state.push(Event::Captured {
+        request,
+        call: call.id.clone(),
+        tool: call.name.clone(),
+        outcome: outcome.to_owned(),
+        entries,
+        why,
+    });
+    drop(state);
+    shared.changed.notify_all();
+    (line, Some(shown))
+}
+
+/// What the model saw by turn `turn`, as the groundedness gate reads it
+/// (#609): that turn's trunk prose and non-capture tool output as the
+/// source, every earlier turn's as the session prefix -- from the log, as
+/// `capture::tools::Seen::of_turn` reads a record.
+fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
+    use crate::capture::tools::CaptureTool;
+    let mut trunk_turn = BTreeMap::new();
+    let (mut source, mut prefix) = (String::new(), String::new());
+    let mut file = |at: u32, text: &str| {
+        let bucket = match at.cmp(&turn) {
+            std::cmp::Ordering::Equal => &mut source,
+            std::cmp::Ordering::Less => &mut prefix,
+            std::cmp::Ordering::Greater => return,
+        };
+        bucket.push_str(text);
+        bucket.push('\n');
+    };
+    for logged in log {
+        match &logged.event {
+            Event::Requested {
+                turn: at,
+                lane: Lane::Trunk,
+                ..
+            } => {
+                trunk_turn.insert(logged.seq, *at);
+            }
+            Event::Answered { request, text, .. } | Event::Called { request, text, .. } => {
+                if let Some(at) = trunk_turn.get(request) {
+                    file(*at, text);
+                }
+            }
+            Event::ToolCalled(line) if CaptureTool::from_tag(&line.name).is_none() => {
+                if let Some(shown) = &line.shown {
+                    file(line.turn, shown);
+                }
+            }
+            _ => {}
+        }
+    }
+    crate::capture::tools::Seen::from_parts(source, prefix)
+}
+
 fn standard_call(
     tools: &Tools,
     cancel: &Cancel,
@@ -3370,6 +3647,11 @@ fn one_call<S: Streaming>(
         .tools
         .iter()
         .any(|tool| tool.name == call.name);
+    // Self-capture (#609): the contract's tools write working memory and
+    // nothing else, so no gate, no confinement and no approval decide them.
+    if declared && crate::capture::tools::CaptureTool::from_tag(&call.name).is_some() {
+        return capture_call(shared, (turn, request), call);
+    }
     // The standard surface's tools (#557), each run under the session's
     // confinement; no gate decides them.
     if declared
@@ -5861,6 +6143,18 @@ pub(in crate::drive) mod tests {
                 prefix_intact: true,
                 rolled_back: 2,
             },
+            Event::Captured {
+                request: 3,
+                call: "call-c".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "dropped".to_owned(),
+                entries: Vec::new(),
+                why: Some("the groundedness gate kept nothing of it".to_owned()),
+            },
+            Event::Reminded {
+                turn: 2,
+                text: "Anything you meant to record?".to_owned(),
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -5893,9 +6187,11 @@ pub(in crate::drive) mod tests {
                 Event::Recalled { .. } => 25,
                 Event::TangentOpened { .. } => 26,
                 Event::TangentClosed { .. } => 27,
+                Event::Captured { .. } => 28,
+                Event::Reminded { .. } => 29,
             });
         }
-        assert_eq!(kinds.len(), 28, "a variant has no sample");
+        assert_eq!(kinds.len(), 30, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -6195,6 +6491,18 @@ pub(in crate::drive) mod tests {
                 parked: vec!["interview-t2-1".to_owned()],
                 prefix_intact: true,
                 rolled_back: 2,
+            },
+            log::Event::Capture {
+                request: 3,
+                call: "call-c".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "dropped".to_owned(),
+                entries: Vec::new(),
+                why: Some("the groundedness gate kept nothing of it".to_owned()),
+            },
+            log::Event::Reminded {
+                turn: 2,
+                text: "Anything you meant to record?".to_owned(),
             },
         ]
     }
@@ -8451,6 +8759,7 @@ pub(in crate::drive) mod tests {
             phases: crate::seam::phase::PhaseGraph::none(),
             recall: super::super::archive::Recall::Off,
             view: ForkView::Trunk,
+            self_capture: None,
         }
     }
 
@@ -9175,6 +9484,192 @@ pub(in crate::drive) mod tests {
             session.open_tangent("t/2"),
             Err(Rejected::Refused(Refusal::TangentOpen))
         ));
+    }
+
+    /// A session with self-capture on, every `every` silent turns, and the
+    /// contract's tools declared, playing `acts`.
+    fn self_capturing(acts: Vec<Vec<Step>>, every: u32) -> Session<Canned> {
+        let mut interview = interviewing(&[]);
+        interview.self_capture =
+            Some(crate::capture::tools::Cadence::every(every).expect("a cadence"));
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
+    }
+
+    fn record(id: &str, field: &str, content: &str) -> Step {
+        Step::call(
+            0,
+            id,
+            "update_record",
+            &serde_json::json!({ "field": field, "content": content }).to_string(),
+        )
+    }
+
+    fn captures(log: &[Logged]) -> Vec<(String, Vec<String>)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Captured {
+                    outcome, entries, ..
+                } => Some((outcome.clone(), entries.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #609: with self-capture off the request's tools are exactly as they
+    /// were; on, the contract's three follow them, from the first request.
+    #[test]
+    fn self_capture_off_leaves_the_tools_byte_identical_and_on_adds_the_contracts() {
+        let before = looping();
+        let mut off = before.clone();
+        declare_self_capture(&mut off, Some(&interviewing(&[log::Warrant::Scoping])));
+        declare_self_capture(&mut off, None);
+        assert_eq!(off.tools, before.tools);
+        let mut on_interview = interviewing(&[]);
+        on_interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut on = before.clone();
+        declare_self_capture(&mut on, Some(&on_interview));
+        let names: Vec<&str> = on.tools.iter().map(|tool| tool.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "bash",
+                "update_record",
+                "resolve_entry",
+                "propose_phase_transition"
+            ]
+        );
+        assert_eq!(on.tools[0], before.tools[0]);
+    }
+
+    /// #609: a fact the model said this turn, recorded through
+    /// `update_record`, enters working memory as the self-capture lane, is
+    /// logged as a `capture` line, and the model is shown the entry's id.
+    #[test]
+    fn a_self_capture_call_records_a_grounded_fact_and_logs_it() {
+        let session = self_capturing(
+            vec![
+                vec![
+                    Step::Delta("The parser drops blank lines before it tokenizes.".to_owned()),
+                    record(
+                        "call-1",
+                        "fact",
+                        "The parser drops blank lines before it tokenizes.",
+                    ),
+                ],
+                deltas(&["done"]),
+            ],
+            3,
+        );
+        session
+            .ask("how does the parser treat blank lines?", None)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let recorded = captures(&log);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].0, "recorded");
+        let entry = recorded[0].1[0].clone();
+        assert!(
+            entry.starts_with('r') && entry.ends_with("/call-1/fact"),
+            "{entry}"
+        );
+        let held = session.shared.lock();
+        let object = &held.interview.as_ref().expect("working memory").object;
+        let kept = object
+            .entry(&crate::object::EntryId::new(&entry).expect("an id"))
+            .expect("recorded");
+        assert_eq!(kept.provenances[0].lane, crate::capture::tools::LANE);
+        drop(held);
+        let shown = lines(&log)[0].shown.clone();
+        assert_eq!(shown, Some(format!("recorded: {entry}")));
+        reads_whole(&session);
+    }
+
+    /// #609: content the model never saw is dropped by the groundedness
+    /// gate, nothing is written, and the drop is logged with why.
+    #[test]
+    fn an_ungrounded_self_capture_is_dropped_and_says_so() {
+        let session = self_capturing(
+            vec![
+                vec![
+                    Step::Delta("Looking at it now.".to_owned()),
+                    record(
+                        "call-1",
+                        "fact",
+                        "The cache is flushed every ninety seconds.",
+                    ),
+                ],
+                deltas(&["done"]),
+            ],
+            3,
+        );
+        session
+            .ask("what about the cache?", None)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert_eq!(captures(&log), [("dropped".to_owned(), Vec::new())]);
+        let held = session.shared.lock();
+        assert_eq!(
+            held.interview
+                .as_ref()
+                .expect("memory")
+                .object
+                .live()
+                .count(),
+            0
+        );
+    }
+
+    /// #609: after the cadence of silent turns the next ask carries the
+    /// reminder as a note after it, logged; the system prompt is untouched.
+    #[test]
+    fn the_self_capture_reminder_is_a_note_after_the_next_ask() {
+        let session = self_capturing(vec![deltas(&["one"]), deltas(&["two"])], 1);
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let reminder = crate::capture::tools::AskKind::Reminder.opening();
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Reminded { turn: 2, text } if text == reminder
+        )));
+        let sent = session.shared.transport.sent();
+        let second = &sent[1].messages;
+        assert_eq!(second.last().map(|m| m.content.as_str()), Some(reminder));
+        assert_eq!(second[second.len() - 2].content, "second");
+        assert_eq!(
+            second[0], sent[0].messages[0],
+            "the system prompt is unchanged"
+        );
+        reads_whole(&session);
+    }
+
+    /// #609: the regimen's words, read leniently.
+    #[test]
+    fn self_capture_is_read_leniently() {
+        let read = |text: &str| self_capture(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), None);
+        assert_eq!(read("self_capture = false\n"), None);
+        assert_eq!(
+            read("self_capture = true\n"),
+            Some(crate::capture::tools::Cadence::DEFAULT)
+        );
+        assert_eq!(
+            read("self_capture = \"on\"\nself_capture_cadence = 5\n")
+                .map(crate::capture::tools::Cadence::interval),
+            Some(5)
+        );
+        assert_eq!(
+            read("self_capture = true\nself_capture_cadence = 0\n"),
+            Some(crate::capture::tools::Cadence::DEFAULT)
+        );
     }
 
     #[test]

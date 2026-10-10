@@ -82,8 +82,8 @@ export function App({
       {...(transport.file ? { files: transport.file } : {})}
       approving={{ waiting, decide }}
       composer={{
-        // The canned script's phases; `diet`'s drive declares none yet, so under `?drive` a refill names no phase.
-        phases: drive ? [] : PHASES,
+        // The canned script's phases; under `?drive`, the moves the logged phase graph allows from where the session is (#563).
+        phases: drive ? session.phaseMoves : PHASES,
         dispatch,
         // Tangents are the served drive's (#608): the canned script plays none.
         tangents: drive === true,

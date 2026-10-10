@@ -251,10 +251,10 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
           {ending ? 'end the session?' : 'end'}
         </button>
         <span className="ex-composer__phase">
-          <span className="ex-composer__label">phase</span> {phases.length === 0 ? 'not declared' : phase || 'not said'}
+          <span className="ex-composer__label">phase</span> {phase || (phases.length === 0 ? 'not declared' : 'not said')}
         </span>
         <span className="ex-composer__seam">
-          {/* `diet`'s drive declares no phases yet (its declare-seam takes none): there, a refill offers no move to make. */}
+          {/* The moves the graph allows from here (#563); with none -- no graph, or the last phase -- a refill names no phase. */}
           {phases.length > 0 ? (
             <>
               <span className="ex-composer__label" aria-hidden="true">move to</span>
