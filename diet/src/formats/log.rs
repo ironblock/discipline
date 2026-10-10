@@ -224,6 +224,11 @@ vocabulary! {
         /// A tangent closed: its entries disposed and the trunk rolled back
         /// to the fork point (v7, #22).
         TangentClose => "tangent.close",
+        /// A self-capture call the model elected, and what it wrote to
+        /// working memory (v7, #609).
+        Capture => "capture",
+        /// The self-capture reminder, as a note after an ask (v7, #609).
+        Reminded => "reminded",
     }
 }
 
@@ -1208,6 +1213,33 @@ pub enum Event {
         prefix_intact: bool,
         /// How many messages the rollback took off the trunk.
         rolled_back: u64,
+    },
+    /// A self-capture call (v7, #609): the model elected one of the
+    /// contract's tools, and this is what it came to in working memory.
+    Capture {
+        /// The `seq` of the trunk `request` whose answer made the call.
+        request: u64,
+        /// The call's id.
+        call: String,
+        /// The tool.
+        tool: String,
+        /// What it came to: `recorded`, `dropped` (the groundedness gate
+        /// kept nothing), `resolved`, `judged` (a verdict that changes no
+        /// entry), `proposed` (advisory, writes nothing) or `refused` (the
+        /// contract or the object refused it).
+        outcome: String,
+        /// The entries it wrote or ruled on, by id.
+        entries: Vec<String>,
+        /// Why, when it was dropped or refused.
+        why: Option<String>,
+    },
+    /// The self-capture reminder (v7, #609): an advisory note after turn
+    /// `turn`'s ask, when the model had recorded nothing for the cadence.
+    Reminded {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
@@ -2668,6 +2700,18 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 tangent: fields.optional_string("tangent")?,
             }
         }
+        Kind::Capture => Event::Capture {
+            request: fields.count("request")?,
+            call: fields.string("call")?,
+            tool: fields.string("tool")?,
+            outcome: fields.string("outcome")?,
+            entries: fields.optional_strings("entries")?.unwrap_or_default(),
+            why: fields.optional_string("why")?,
+        },
+        Kind::Reminded => Event::Reminded {
+            turn: fields.turn("turn")?,
+            text: fields.string("text")?,
+        },
         Kind::TangentOpen => Event::TangentOpen {
             id: fields.string("id")?,
             at_turn: fields.turn("at_turn")?,
@@ -3609,7 +3653,12 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         Kind::Seam => 6,
-        Kind::Delivered | Kind::Recalled | Kind::TangentOpen | Kind::TangentClose => 7,
+        Kind::Delivered
+        | Kind::Recalled
+        | Kind::TangentOpen
+        | Kind::TangentClose
+        | Kind::Capture
+        | Kind::Reminded => 7,
         _ => 0,
     }
 }
@@ -3875,6 +3924,21 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v5("supersedes", Text),
                 may_v7("tangent", Text),
             ];
+            F
+        }
+        Kind::Capture => {
+            const F: &[Field] = &[
+                must_v7("request", Count),
+                must_v7("call", Text),
+                must_v7("tool", Text),
+                must_v7("outcome", Text),
+                must_v7("entries", Holds::Strings),
+                may_v7("why", Text),
+            ];
+            F
+        }
+        Kind::Reminded => {
+            const F: &[Field] = &[must_v7("turn", Count), must_v7("text", Text)];
             F
         }
         Kind::TangentOpen => {
@@ -4643,6 +4707,32 @@ fn to_value(line: &Line) -> Value {
                 put("tangent", text(tangent));
             }
             Kind::Patch
+        }
+        Event::Capture {
+            request,
+            call,
+            tool,
+            outcome,
+            entries,
+            why,
+        } => {
+            put("request", count(*request));
+            put("call", text(call));
+            put("tool", text(tool));
+            put("outcome", text(outcome));
+            put(
+                "entries",
+                Value::Array(entries.iter().map(|id| text(id)).collect()),
+            );
+            if let Some(why) = why {
+                put("why", text(why));
+            }
+            Kind::Capture
+        }
+        Event::Reminded { turn, text: note } => {
+            put("turn", count(u64::from(*turn)));
+            put("text", text(note));
+            Kind::Reminded
         }
         Event::TangentOpen {
             id,
@@ -5861,6 +5951,26 @@ mod tests {
                 prefix_intact: true,
                 rolled_back: 0,
             },
+            Event::Capture {
+                request: 3,
+                call: "call-c".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "recorded".to_owned(),
+                entries: vec!["r3/call-c".to_owned()],
+                why: None,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-d".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "dropped".to_owned(),
+                entries: Vec::new(),
+                why: Some("the groundedness gate kept nothing of it".to_owned()),
+            },
+            Event::Reminded {
+                turn: 5,
+                text: "Anything you meant to record?".to_owned(),
+            },
         ]);
         events
             .into_iter()
@@ -7012,7 +7122,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled tangent.open tangent.close"
+             fork.settled patch seam delivered recalled tangent.open tangent.close capture reminded"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
