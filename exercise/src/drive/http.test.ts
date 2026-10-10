@@ -233,6 +233,17 @@ describe('HttpTransport: commands', () => {
     expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'seam' }]);
   });
 
+  it('posts the operator’s edit and flag as serve takes them (#150), and reads a refusal', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), body['kind'] === 'flag-entry' ? new Response('{"refused":"not-live"}', { status: 409 }) : new Response('{}', { status: 200 })) });
+    await expect(transport.dispatch({ kind: 'edit-entry', id: 'd2', content: 'a tracker for two teams' })).resolves.toEqual({ ok: true });
+    await expect(transport.dispatch({ kind: 'flag-entry', id: 'd1', note: 'still true?' })).resolves.toEqual({ ok: false, refused: 'not-live' });
+    expect(posted).toEqual([
+      { kind: 'edit-entry', id: 'd2', content: 'a tracker for two teams' },
+      { kind: 'flag-entry', id: 'd1', note: 'still true?' },
+    ]);
+  });
+
   it('posts an end as serve.rs takes it (#289)', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });

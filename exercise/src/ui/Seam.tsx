@@ -15,6 +15,15 @@ export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
       <div className="ex-seam__label">
         <span className="ex-seam__kind">refill</span>
         {/* An automatic seam (#633): fired by the window, at the size that fired it -- not declared by anyone. */}
+        {/* The operator's changes the refill carried, and the flags it left unaddressed (#150). */}
+        {node.operatorChanges || node.unaddressed ? (
+          <span className="ex-seam__operator" title="what you changed in working memory since the last seam, and the flags this seam did not address">
+            {[
+              ...(node.operatorChanges ? [`operator: ${node.operatorChanges.map((c) => `${c.kind} ${c.entry}`).join(', ')}`] : []),
+              ...(node.unaddressed ? [`unaddressed: ${node.unaddressed.join(', ')}`] : []),
+            ].join(' · ')}
+          </span>
+        ) : null}
         {node.size ? (
           <span className="ex-seam__size" title="an automatic seam: the prompt neared the window, so the trunk was refilled before the next request">
             automatic · {tokens(node.size.promptTokens)} of a {tokens(node.size.window)} window

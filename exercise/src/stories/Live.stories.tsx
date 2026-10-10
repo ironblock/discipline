@@ -18,6 +18,7 @@ import poolRefused from '../../../diet/formats/log/fixtures/valid/a-v7-fork-refu
 import backgroundCalls from '../../../diet/formats/log/fixtures/valid/a-v7-call-started-in-the-background.jsonl?raw';
 import triggeredForks from '../../../diet/formats/log/fixtures/valid/a-v7-gap-with-two-triggered-forks.jsonl?raw';
 import auditedSeam from '../../../diet/formats/log/fixtures/valid/a-v7-seam-audited-on-its-lane-and-warmed.jsonl?raw';
+import operatorEdits from '../../../diet/formats/log/fixtures/valid/a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -757,5 +758,48 @@ export const ServedPhaseRuled: Story = {
     await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
     await expect(canvasElement.querySelector('.ex-composer__proposal')).toBeNull();
     await expect(canvasElement.querySelector('.ex-trunk .ex-ruled')?.textContent).toBe('ruled · continue → build');
+  },
+};
+
+/** `?drive`, log v7 (#150): the operator's edited entry, their flag on it, the model's writes refused over it, and the seam's account. */
+export const ServedOperatorEdits: Story = {
+  name: '?drive: the operator’s edit and flag in working memory, and what the seam left unaddressed',
+  args: { drive: true, web: serving(operatorEdits) },
+  play: async ({ canvasElement }) => {
+    const entry = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-memory__entry[data-lane="operator"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(entry.querySelector('.ex-memory__flag')?.textContent).toBe('flag · is one team enough?');
+    await expect(entry.querySelector('.ex-memory__refused')?.textContent).toBe('refused: retire by self-capture, supersede by fork 7');
+    const seam = canvasElement.querySelector<HTMLElement>('.ex-seam');
+    await expect(seam?.querySelector('.ex-seam__operator')?.textContent).toBe('operator: edit d2, flag d2 · unaddressed: d2');
+  },
+};
+
+/** `?drive` (#150): a live entry's edit and flag actions post the operator's commands. */
+export const ServedEditAndFlag: Story = {
+  name: '?drive: edit and flag a working-memory entry',
+  args: { drive: true, web: posting(operatorEdits) },
+  play: async ({ canvasElement }) => {
+    const entry = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-memory__entry[data-state="live"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    const id = entry.id.replace('memory/', '');
+    await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="edit"]')!);
+    const field = entry.querySelector<HTMLTextAreaElement>('textarea[aria-label^="edit"]')!;
+    await userEvent.clear(field);
+    await userEvent.type(field, 'a tracker for two teams');
+    posted.length = 0;
+    await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="save"]')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'edit-entry', id, content: 'a tracker for two teams' }]));
+    await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="flag"]')!);
+    await userEvent.type(entry.querySelector<HTMLInputElement>('input[aria-label^="flag"]')!, 'check with the team');
+    posted.length = 0;
+    await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="send-flag"]')!);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'flag-entry', id, note: 'check with the team' }]));
   },
 };

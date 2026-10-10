@@ -10,12 +10,14 @@
 //!
 //! A record's `response.output_tokens` and `turn.prefill_tokens` are
 //! derived from the server's `timings` (`predicted_n`; `prompt_n +
-//! cache_n`) ONLY for an engine in [`CITED`]: the engines on which the
-//! server's `usage` was measured equal to its `timings`, on every capture
-//! ([`MEASUREMENT`]). For any other engine they are unspellable --
-//! "equality unmeasured for this engine" -- and never a derived number. A
-//! response carrying `usage` (a dialect whose server reports no timings,
-//! log v2) gives `output_tokens` as the server's own `completion_tokens`.
+//! cache_n`) for an engine in [`CITED`]: the engines on which the server's
+//! `usage` was measured equal to its `timings`, on every capture
+//! ([`MEASUREMENT`]). For any other engine they are the server's own
+//! `usage` (`completion_tokens`; `prompt_tokens`) when the response carries
+//! it (#645), and never a number derived from timings nobody measured
+//! equal. Each count names what counted it (`output_from`,
+//! `prefill_from`). A count neither gives is absent, named in the sidecar,
+//! and its row is kept: no later row is lost with it (#645).
 //!
 //! # Head changes
 //!
@@ -37,7 +39,9 @@ use crate::client::shape::{
 };
 use crate::formats::log::{self, Event as Line, Lane};
 use crate::formats::record::json::Decimal;
-use crate::formats::record::{self, Count, Event, Execution, PrefixReason, Regime, Source};
+use crate::formats::record::{
+    self, Count, CountSource, Event, Execution, PrefixReason, Regime, Source,
+};
 
 use super::registry::Identity;
 
@@ -158,6 +162,32 @@ pub fn sidecar_value(projection: &Projection) -> crate::formats::record::json::V
         })
         .collect();
     fields.insert("unspellable".to_owned(), Value::Array(items));
+    // What the read-back repaired, and why it refused, when it did (#645):
+    // absent otherwise, so a record that read back first time has the
+    // sidecar it always had.
+    if !projection.repairs.is_empty() {
+        fields.insert(
+            "repairs".to_owned(),
+            Value::Array(
+                projection
+                    .repairs
+                    .iter()
+                    .map(|repair| {
+                        Value::Object(BTreeMap::from([
+                            (
+                                "at_request".to_owned(),
+                                Value::String(repair.at_request.clone()),
+                            ),
+                            ("why".to_owned(), Value::String(repair.why.clone())),
+                        ]))
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    if let Some(refusal) = &projection.refusal {
+        fields.insert("refusal".to_owned(), Value::String(refusal.clone()));
+    }
     Value::Object(fields)
 }
 
@@ -184,6 +214,141 @@ pub struct Projection {
     pub unspellable: Vec<Unspellable>,
     /// The cited engine the counts were derived on, or `None` when none was.
     pub engine: Option<Engine>,
+    /// What [`read_back`] repaired before the record read back (#645): a
+    /// row the projection should have written, added in its honest form.
+    pub repairs: Vec<Repair>,
+    /// Why the record did not read back, when it did not and nothing in
+    /// [`read_back`]'s table could repair it (#645): the projected rows are
+    /// kept beside it, never passed off as a record.
+    pub refusal: Option<String>,
+}
+
+/// What [`kept`] wrote for a projection (#645).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Kept {
+    /// The record, which read back, as written.
+    Record(String),
+    /// The projected rows that did not read back, kept at `path` beside the
+    /// record and never passed off as one, and the reader's refusal.
+    Refused {
+        /// Where they were kept: `<record>.refused.jsonl`.
+        path: String,
+        /// The rows, as written there.
+        rows: String,
+        /// The reader's refusal, in words.
+        refusal: String,
+    },
+}
+
+/// `projection` kept beside the record at `path` (#645): read back through
+/// [`read_back`]'s repairs and written to `record`; or, refused, its rows
+/// written to `<path>.refused.jsonl` with `record` left empty -- so the
+/// projection is never lost. Either way the sidecar, `<path>.unspellable.json`,
+/// names the repairs or the refusal; it is returned with its path.
+///
+/// # Errors
+///
+/// A file that could not be written.
+pub fn kept(
+    projection: &mut Projection,
+    path: &str,
+    record: &mut std::fs::File,
+) -> Result<(Kept, String, String), String> {
+    let kept = match read_back(projection) {
+        Ok(text) => {
+            record
+                .set_len(0)
+                .and_then(|()| std::io::Write::write_all(record, text.as_bytes()))
+                .map_err(|why| format!("{path}: {why}"))?;
+            Kept::Record(text)
+        }
+        Err(refusal) => {
+            projection.refusal = Some(refusal.clone());
+            let rows = crate::formats::record::render(&crate::formats::record::Record {
+                events: projection.events.clone(),
+            });
+            let refused = format!("{path}.refused.jsonl");
+            std::fs::write(&refused, &rows).map_err(|why| format!("{refused}: {why}"))?;
+            record.set_len(0).map_err(|why| format!("{path}: {why}"))?;
+            Kept::Refused {
+                path: refused,
+                rows,
+                refusal,
+            }
+        }
+    };
+    let sidecar = sidecar(projection) + "\n";
+    let sidecar_path = format!("{path}.unspellable.json");
+    std::fs::write(&sidecar_path, &sidecar).map_err(|why| format!("{sidecar_path}: {why}"))?;
+    Ok((kept, sidecar_path, sidecar))
+}
+
+/// A row [`read_back`] added (#645): which refusal it answered, and what.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Repair {
+    /// The request it was added at.
+    pub at_request: String,
+    /// The refusal it answered, and the row it added, as a sentence.
+    pub why: String,
+}
+
+/// The record `projection`'s rows render to, read back by
+/// [`crate::formats::record::parse`] -- after the repairs its table allows,
+/// each recorded in [`Projection::repairs`] (#645). The table holds only
+/// refusals of a MISSING row, whose honest form is known: a `prefix.changed`
+/// the record's reader proves was owed and the projection did not write
+/// (`ChangeNotNamed`) is added at its request as `unattributed`, which is
+/// what the projection writes for a move it cannot attribute. Every other
+/// refusal is a row that contradicts the record, which no repair can make
+/// true: it is the `Err`, in words, and nothing is repaired around it.
+///
+/// # Errors
+///
+/// The reader's refusal that the table does not repair.
+pub fn read_back(projection: &mut Projection) -> Result<String, String> {
+    use crate::formats::record::{
+        self, ParseError, PrefixChangeError, PrefixReason, Record, StructureError,
+    };
+    // Each repair adds a row the reader proved owed; a reader that asked for
+    // more than one per row would be a loop, not a repair.
+    for _ in 0..=projection.events.len() {
+        let text = record::render(&Record {
+            events: projection.events.clone(),
+        });
+        let Err(refusal) = record::parse(&text) else {
+            return Ok(text);
+        };
+        let ParseError::Structure(StructureError::PrefixChange(
+            PrefixChangeError::ChangeNotNamed { at_request, lane },
+        )) = &refusal
+        else {
+            return Err(format!("{refusal:?}"));
+        };
+        let Some(at) = projection
+            .events
+            .iter()
+            .position(|event| matches!(event, Event::Request { id, .. } if id == at_request))
+        else {
+            return Err(format!("{refusal:?}"));
+        };
+        projection.events.insert(
+            at + 1,
+            Event::PrefixChanged {
+                id: format!("{at_request}#prefix"),
+                at_request: at_request.clone(),
+                reason: PrefixReason::Unattributed,
+                diff: Vec::new(),
+            },
+        );
+        projection.repairs.push(Repair {
+            at_request: at_request.clone(),
+            why: format!(
+                "the reader proved a move of lane `{lane}`'s head at `{at_request}` that no \
+                 row named (ChangeNotNamed); added as `unattributed`"
+            ),
+        });
+    }
+    Err("a repair the reader kept asking for".to_owned())
 }
 
 /// The client's role for a log's.
@@ -230,50 +395,60 @@ fn timings_of(timings: &log::Timings) -> Option<record::Timings> {
     })
 }
 
-/// A response's `output_tokens`, or why it has none: the server's own
-/// `usage` count when it sent one, else `predicted_n` on a cited engine.
+/// A response's `output_tokens` and what counted it, or why it has none
+/// (#645): `predicted_n` on a cited engine, else the server's own `usage`.
 fn output_tokens(
     usage: Option<&log::Usage>,
     timings: Option<&log::Timings>,
     engine: Option<Engine>,
-) -> Result<Count, &'static str> {
+) -> Result<(Count, CountSource), &'static str> {
+    let bounded = |n: u64| Count::new(n).map_err(|_| "a count past the record's bound");
+    if engine.is_some()
+        && let Some(predicted) = timings.and_then(|timings| timings.predicted_n)
+    {
+        return Ok((bounded(predicted)?, CountSource::Timings));
+    }
     if let Some(usage) = usage {
-        return Count::new(usage.completion_tokens).map_err(|_| "a count past the record's bound");
+        return Ok((bounded(usage.completion_tokens)?, CountSource::Usage));
     }
-    if engine.is_none() {
-        return Err("equality unmeasured for this engine");
-    }
-    let predicted = timings
-        .and_then(|timings| timings.predicted_n)
-        .ok_or("the server reported no predicted_n")?;
-    Count::new(predicted).map_err(|_| "a count past the record's bound")
+    Err(if engine.is_some() {
+        "the server reported no predicted_n and no usage"
+    } else {
+        "equality unmeasured for this engine, and the server reported no usage"
+    })
 }
 
-/// A turn's `prefill_tokens` from its trunk response's `timings`, on a
-/// cited engine: `prompt_n + cache_n`, both as the server reported them.
-/// A hosted API's response, which carries `usage` and no timings, says it
-/// directly: its whole prompt, uncached, read and written (#555).
+/// A turn's `prefill_tokens` and what counted it, or why it has none
+/// (#645): on a cited engine its trunk response's `prompt_n + cache_n`,
+/// both as the server reported them; else the server's own `usage`
+/// `prompt_tokens`, the cached share included. A hosted API's response,
+/// which carries `usage` and no timings, is counted the same way: its
+/// whole prompt, uncached, read and written (#555).
 fn prefill_tokens(
-    timings: Option<&log::Timings>,
     usage: Option<&log::Usage>,
+    timings: Option<&log::Timings>,
     engine: Option<Engine>,
-) -> Result<Count, &'static str> {
-    if let (None, Some(usage)) = (timings, usage)
-        && usage.cache_creation_tokens.is_some()
+) -> Result<(Count, CountSource), &'static str> {
+    if engine.is_some()
+        && let Some((Some(prompt), Some(cache))) =
+            timings.map(|timings| (timings.prompt_n, timings.cache_n))
     {
-        return Count::new(usage.prompt_tokens).map_err(|_| "a count past the record's bound");
+        return prompt
+            .checked_add(cache)
+            .and_then(|total| Count::new(total).ok())
+            .map(|count| (count, CountSource::Timings))
+            .ok_or("a count past the record's bound");
     }
-    if engine.is_none() {
-        return Err("equality unmeasured for this engine");
+    if let Some(usage) = usage {
+        return Count::new(usage.prompt_tokens)
+            .map(|count| (count, CountSource::Usage))
+            .map_err(|_| "a count past the record's bound");
     }
-    let timings = timings.ok_or("its trunk response carried no timings")?;
-    let (Some(prompt), Some(cache)) = (timings.prompt_n, timings.cache_n) else {
-        return Err("the server reported no prompt_n or no cache_n");
-    };
-    prompt
-        .checked_add(cache)
-        .and_then(|total| Count::new(total).ok())
-        .ok_or("a count past the record's bound")
+    Err(if engine.is_some() {
+        "its trunk response carried no prompt_n and cache_n, and no usage"
+    } else {
+        "equality unmeasured for this engine, and the server reported no usage"
+    })
 }
 
 /// The record `lines` project to, under `regime`, on `engine`.
@@ -318,6 +493,7 @@ pub fn project_in(
                 tool_output,
                 levers,
                 bash_timeout_ms,
+                notes_in_the_ask,
                 ..
             },
         ..
@@ -335,6 +511,8 @@ pub fn project_in(
     walk.tools = tools_of(tools.as_deref().unwrap_or_default(), *bash_timeout_ms);
     walk.template_kwargs = kwargs_of(template_kwargs.as_ref());
     walk.model.clone_from(model);
+    // Where its notes ride (#609): in the ask's message, from this build on.
+    walk.notes_in_the_ask = notes_in_the_ask.unwrap_or(false);
     walk.head = head
         .iter()
         .map(|message| Message::new(role_of(message.role), message.content.clone()))
@@ -360,6 +538,8 @@ pub fn project_in(
         events,
         unspellable: walk.unspellable,
         engine,
+        repairs: Vec::new(),
+        refusal: None,
     })
 }
 
@@ -373,9 +553,6 @@ struct Walk<'a> {
     engine: Option<Engine>,
     events: Vec<Event>,
     unspellable: Vec<Unspellable>,
-    /// Whether a turn row could not be spelled: turn rows run from 1
-    /// without a gap, so none after it can be either.
-    turns_broken: bool,
     /// The kinds with no row at all, named once each.
     named_kinds: BTreeSet<&'static str>,
     /// The model the session's requests name, from its first line.
@@ -403,6 +580,8 @@ struct Walk<'a> {
     ask_files: BTreeMap<u32, Vec<log::RecordedFile>>,
     /// Each turn's notes after its ask (v7): its `delivered` and `recalled` lines.
     notes: BTreeMap<u32, Vec<String>>,
+    /// Whether the log's notes ride in their ask's message (#609).
+    notes_in_the_ask: bool,
     /// The tools the session's requests declared, rebuilt from
     /// `session.start`'s names (#472), or why they cannot be.
     tools: Result<Vec<ToolDefinition>, String>,
@@ -428,7 +607,7 @@ struct Walk<'a> {
     /// Each lane but the trunk's last logged head digest (v5, #374): a live
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
-    side_heads: BTreeMap<Lane, String>,
+    side_heads: BTreeMap<Lane, (String, Option<Head>)>,
     /// The forks whose head is the trunk's own (#157): a whole-trunk view,
     /// on the trunk's server -- what [`Walk::side_head_change`] can rebuild.
     whole_trunk_forks: BTreeSet<u64>,
@@ -608,7 +787,6 @@ impl<'a> Walk<'a> {
             engine,
             events: Vec::new(),
             unspellable: Vec::new(),
-            turns_broken: false,
             named_kinds: BTreeSet::new(),
             tangent_trunk: None,
             model: String::new(),
@@ -622,6 +800,7 @@ impl<'a> Walk<'a> {
             recording: None,
             ask_files: BTreeMap::new(),
             notes: BTreeMap::new(),
+            notes_in_the_ask: false,
             tools: Ok(Vec::new()),
             template_kwargs: BTreeMap::new(),
             stepped,
@@ -716,6 +895,8 @@ impl<'a> Walk<'a> {
             Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
             Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
+            Line::Flag { .. } => log::Kind::Flag,
+            Line::PatchRefused { .. } => log::Kind::PatchRefused,
             // The trunk's own self-capture patch (#609), fork-less.
             Line::Patch { .. } => log::Kind::Patch,
             _ => log::Kind::Progress,
@@ -731,6 +912,8 @@ impl<'a> Walk<'a> {
         }
     }
 
+    // One arm per kind, exhaustive so a new kind cannot pass unhandled.
+    #[allow(clippy::too_many_lines)]
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
             // A prune (v7, #612): applied to the trunk by the seam that
@@ -833,6 +1016,10 @@ impl<'a> Walk<'a> {
             // The operator's ruling on a phase proposal (#124): a seam it
             // declares has its own row.
             | Line::PhaseRuled { .. }
+            // The operator's flag, and a model patch refused over the
+            // operator's entry (#150): the seam row names what was carried.
+            | Line::Flag { .. }
+            | Line::PatchRefused { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
             | Line::Patch { fork: None, .. } => self.no_row(line),
@@ -1059,12 +1246,15 @@ impl<'a> Walk<'a> {
             placement,
             fired,
             pruned,
+            operator_changes,
+            unaddressed,
             ..
         } = &line.event
         else {
             return;
         };
         let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
+        let (operator_changes, unaddressed) = (operator_changes.clone(), unaddressed.clone());
         // The tail the session kept after the refill (#552), cut from the
         // rebuilt trunk by the same function.
         let turns = self
@@ -1150,6 +1340,10 @@ impl<'a> Walk<'a> {
             prompt_tokens: fired.map(|fired| fired.prompt_tokens),
             window: fired.map(|fired| fired.window),
             pruned: (!applied.is_empty()).then_some(applied),
+            // The operator's changes it carried, and those left unaddressed
+            // (#150), as its line says.
+            operator_changes,
+            unaddressed,
         });
     }
 
@@ -1195,54 +1389,24 @@ impl<'a> Walk<'a> {
                 _ => None,
             })
             .unwrap_or_default();
-        match (
-            self.turns_broken,
-            prefill_tokens(trunk_timings, trunk_usage, self.engine),
-        ) {
-            (false, Ok(prefill_tokens)) => {
-                self.events.push(Event::Turn {
-                    index: turn,
-                    prefill_tokens,
-                    files: files.cloned(),
-                });
-                return;
-            }
-            (false, Err(why)) => {
-                self.turns_broken = true;
-                self.name(
-                    seq,
-                    "ask",
-                    format!("turn {turn}'s prefill_tokens: {why}"),
-                    None,
-                );
-            }
-            (true, _) => self.name(
-                seq,
-                "ask",
-                format!(
-                    "turn {turn} follows a turn the record could not spell, and turn rows run \
-                     from 1 without a gap"
-                ),
-                None,
-            ),
-        }
-        // Not written on a row: the files the operator attached are named,
-        // so a reference the record could not hold is not lost.
-        if let Some(files) = files {
-            let named: Vec<String> = files
-                .iter()
-                .map(|file| format!("{} sha256 {}", file.path, file.sha256))
-                .collect();
+        // The turn keeps its row whatever its count (#645): a count the log
+        // cannot spell is named, and no later row is lost with it.
+        let counted = prefill_tokens(trunk_usage, trunk_timings, self.engine);
+        if let Err(why) = counted {
             self.name(
                 seq,
                 "ask",
-                format!(
-                    "turn {turn}'s attached files ({}), which have no turn row to ride on",
-                    named.join(", ")
-                ),
+                format!("turn {turn}'s prefill_tokens: {why}"),
                 None,
             );
         }
+        let (prefill_tokens, prefill_from) = counted.ok().unzip();
+        self.events.push(Event::Turn {
+            index: turn,
+            prefill_tokens,
+            prefill_from,
+            files: files.cloned(),
+        });
     }
 
     fn request(
@@ -1302,10 +1466,8 @@ impl<'a> Walk<'a> {
                     .flatten()
                     .find_map(|step| step.unrebuilt.clone())
             });
-        messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
-        for note in notes {
-            messages.push(Message::new(Role::User, note));
-        }
+        let asked = asked.unwrap_or_else(|_| Message::new(Role::User, String::new()));
+        messages.extend(self.with_notes(asked, notes));
         for step in self.steps.get(&turn).into_iter().flatten() {
             messages.extend(step.messages());
         }
@@ -1321,6 +1483,7 @@ impl<'a> Walk<'a> {
                     max_output_tokens: 0,
                     retries: 0,
                     context_window: None,
+                    idle: None,
                 },
                 grammar: None,
                 // From `session.start` (R1), and ASSERTED by the digest check
@@ -1387,51 +1550,59 @@ impl<'a> Walk<'a> {
     }
 
     /// A side lane's head moving (v5, #374). A whole-trunk fork on the
-    /// trunk's own server sends the trunk as it stands, then its question, so
-    /// its head is rebuilt from the projected trunk and verified by digest
-    /// (#157): no row when it matches -- its move from the lane's last head
-    /// is the trunk's own growth. Any other side head -- one that does not
-    /// match, a `last:N` view, an offboard seat -- is not attributed here: a
-    /// move from the lane's last head is named `unattributed`, and the lane's
-    /// first head is no move at all.
+    /// trunk's own server sends the trunk as it stands, then its call's last
+    /// message, so its head is rebuilt from the projected trunk and verified
+    /// by digest (#157); a seam's audit (#504) is such a fork. A move between
+    /// two verified heads on a lane is attributed as the trunk's moves are --
+    /// the record names every move a lane's digests prove (`ChangeNotNamed`),
+    /// so a verified move is named, never left out. A move from or to a head
+    /// that is not rebuilt here (a `last:N` view, an offboard seat, one that
+    /// does not verify) is named `unattributed`; a lane's first head is no
+    /// move at all.
     fn side_head_change(&mut self, seq: u64, (lane, fork): (Lane, Option<u64>), logged: &str) {
-        let verified = fork.is_some_and(|fork| self.whole_trunk_forks.contains(&fork))
-            && self.rebuilds_the_trunk(logged);
-        let previous = self.side_heads.insert(lane, logged.to_owned());
-        if verified {
-            return;
-        }
-        let Some(previous) = previous else {
+        let verified = fork
+            .filter(|fork| self.whole_trunk_forks.contains(fork))
+            .and_then(|_| self.rebuilt_trunk_head(logged));
+        let previous = self
+            .side_heads
+            .insert(lane, (logged.to_owned(), verified.clone()));
+        let Some((previous_digest, previous_head)) = previous else {
             return;
         };
-        if previous == logged {
+        if previous_digest == logged {
             return;
         }
-        self.events.push(Event::PrefixChanged {
-            id: format!("{}#prefix", request_id(seq)),
-            at_request: request_id(seq),
+        let id = format!("{}#prefix", request_id(seq));
+        let at_request = request_id(seq);
+        let row = match (previous_head, verified) {
+            (Some(previous), Some(now)) => now
+                .change_from(&previous)
+                .map(|change| change.event(id.clone(), at_request.clone())),
+            _ => None,
+        };
+        self.events.push(row.unwrap_or(Event::PrefixChanged {
+            id,
+            at_request,
             reason: PrefixReason::Unattributed,
             diff: Vec::new(),
-        });
+        }));
     }
 
-    /// Whether `logged` is the head a request on the projected trunk carries
-    /// -- the trunk, then the request's own last message, which
+    /// The head a request on the projected trunk carries, when `logged` is
+    /// its digest -- the trunk, then the request's own last message, which
     /// `client::head` leaves out -- under the session's tools (or the `bash`
-    /// definition an older log sent, #558). Never, while the trunk carries
+    /// definition an older log sent, #558). Never while the trunk carries
     /// something the log cannot rebuild.
-    fn rebuilds_the_trunk(&self, logged: &str) -> bool {
+    fn rebuilt_trunk_head(&self, logged: &str) -> Option<Head> {
         if self.trunk_unrebuilt.is_some() {
-            return false;
+            return None;
         }
-        let Ok(tools) = self.tools.clone() else {
-            return false;
-        };
+        let tools = self.tools.clone().ok()?;
         let mut messages = self.trunk.clone();
         messages.push(Message::new(Role::User, String::new()));
         std::iter::once(tools.clone())
             .chain(earlier_bash(&tools))
-            .any(|tools| {
+            .map(|tools| {
                 Head::of(&RequestShape {
                     model: self.model.clone(),
                     messages: messages.clone(),
@@ -1442,14 +1613,28 @@ impl<'a> Walk<'a> {
                         max_output_tokens: 0,
                         retries: 0,
                         context_window: None,
+                        idle: None,
                     },
                     grammar: None,
                     template_kwargs: self.template_kwargs.clone(),
                     tools,
                 })
-                .digest()
-                    == logged
             })
+            .find(|rebuilt| rebuilt.digest() == logged)
+    }
+
+    /// A turn's ask and its notes as the session sent them (#609): the
+    /// notes in the ask's own message, before its words, for a log that
+    /// says so (`notes_in_the_ask`); an earlier log's, each a user message
+    /// of its own after the ask.
+    fn with_notes(&self, mut asked: Message, notes: Vec<String>) -> Vec<Message> {
+        if self.notes_in_the_ask {
+            asked.notes = notes;
+            return vec![asked];
+        }
+        std::iter::once(asked)
+            .chain(notes.into_iter().map(|note| Message::new(Role::User, note)))
+            .collect()
     }
 
     /// Turn `turn`'s user message as the session sent it: the ask's words,
@@ -1514,10 +1699,9 @@ impl<'a> Walk<'a> {
                 self.asks.get(&turn).cloned().unwrap_or_default(),
             )
         });
-        self.trunk.push(asked);
-        for note in self.notes.get(&turn).cloned().unwrap_or_default() {
-            self.trunk.push(Message::new(Role::User, note));
-        }
+        let notes = self.notes.get(&turn).cloned().unwrap_or_default();
+        let opening = self.with_notes(asked, notes);
+        self.trunk.extend(opening);
         let taken = self.steps.remove(&turn).unwrap_or_default();
         for step in taken.iter().take(steps) {
             if let Some(why) = &step.unrebuilt {
@@ -1744,25 +1928,24 @@ impl<'a> Walk<'a> {
                 *cache_read_share = share;
             }
         }
-        match output_tokens(usage, timings, self.engine) {
-            Ok(output_tokens) => self.events.push(Event::Response {
-                cache_read: usage.and_then(|usage| usage.cached_tokens),
-                cache_creation: usage.and_then(|usage| usage.cache_creation_tokens),
-                cache_creation_5m: usage.and_then(|usage| usage.cache_creation_5m_tokens),
-                cache_creation_1h: usage.and_then(|usage| usage.cache_creation_1h_tokens),
-                id: format!("{}#response", request_id(to_request)),
-                to_request: request_id(to_request),
-                output_tokens,
-                text: Some(text.to_owned()),
-                timings: timings.and_then(timings_of),
-            }),
-            Err(why) => self.name(
-                seq,
-                "response",
-                format!("output_tokens: {why}"),
-                Some(text.to_owned()),
-            ),
+        // The response keeps its row whatever its count (#645).
+        let counted = output_tokens(usage, timings, self.engine);
+        if let Err(why) = counted {
+            self.name(seq, "response", format!("output_tokens: {why}"), None);
         }
+        let (output_tokens, output_from) = counted.ok().unzip();
+        self.events.push(Event::Response {
+            cache_read: usage.and_then(|usage| usage.cached_tokens),
+            cache_creation: usage.and_then(|usage| usage.cache_creation_tokens),
+            cache_creation_5m: usage.and_then(|usage| usage.cache_creation_5m_tokens),
+            cache_creation_1h: usage.and_then(|usage| usage.cache_creation_1h_tokens),
+            id: format!("{}#response", request_id(to_request)),
+            to_request: request_id(to_request),
+            output_tokens,
+            output_from,
+            text: Some(text.to_owned()),
+            timings: timings.and_then(timings_of),
+        });
     }
 }
 
@@ -1837,6 +2020,7 @@ mod tests {
             phase_transitions: None,
             opening_phase: None,
             fork_asks: None,
+            notes_in_the_ask: None,
         }
     }
 
@@ -1947,6 +2131,69 @@ mod tests {
         record::parse(&rendered).unwrap_or_else(|why| panic!("{why:?}\n{rendered}"));
     }
 
+    /// A TabbyAPI-shaped log (#645): each response carries the server's
+    /// `timings` and its `usage`. On an uncited engine every turn and
+    /// response is counted by `usage` and says so; on a cited one by
+    /// `timings`, as before; and nothing goes unspelled either way.
+    #[test]
+    fn a_response_with_usage_counts_every_row_on_an_uncited_engine() {
+        let mut lines = a_real_session_log_timed(Some(warm_client()));
+        for line in &mut lines {
+            if let Line::Response { usage, .. } = &mut line.event {
+                *usage = Some(log::Usage {
+                    prompt_tokens: 2647,
+                    completion_tokens: 904,
+                    cached_tokens: None,
+                    cache_creation_tokens: None,
+                    cache_creation_5m_tokens: None,
+                    cache_creation_1h_tokens: None,
+                });
+            }
+        }
+        let counted = |engine: Option<Engine>| {
+            let projection = project(&lines, &regime(), engine).expect("projected");
+            assert!(
+                projection.unspellable.is_empty(),
+                "{:?}",
+                projection.unspellable
+            );
+            validates(&projection);
+            projection
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    Event::Turn {
+                        prefill_tokens,
+                        prefill_from,
+                        ..
+                    } => Some(("turn", prefill_tokens.map(Count::get), *prefill_from)),
+                    Event::Response {
+                        output_tokens,
+                        output_from,
+                        ..
+                    } => Some(("response", output_tokens.map(Count::get), *output_from)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let by_usage = counted(None);
+        assert_eq!(by_usage.len(), 4, "{by_usage:?}");
+        assert!(
+            by_usage.iter().all(|(kind, count, from)| {
+                *from == Some(CountSource::Usage)
+                    && *count == Some(if *kind == "turn" { 2647 } else { 904 })
+            }),
+            "{by_usage:?}"
+        );
+        let by_timings = counted(Some(Engine::Commit("e7051ef")));
+        assert!(
+            by_timings
+                .iter()
+                .all(|(_, _, from)| *from == Some(CountSource::Timings)),
+            "{by_timings:?}"
+        );
+    }
+
     #[test]
     fn on_a_cited_engine_the_counts_derive_from_timings() {
         let projection = project(
@@ -1968,7 +2215,7 @@ mod tests {
                     index,
                     prefill_tokens,
                     ..
-                } => Some((*index, prefill_tokens.get())),
+                } => Some((*index, prefill_tokens.map_or(0, Count::get))),
                 _ => None,
             })
             .collect();
@@ -1981,7 +2228,7 @@ mod tests {
                     to_request,
                     output_tokens,
                     ..
-                } => Some((to_request.clone(), output_tokens.get())),
+                } => Some((to_request.clone(), output_tokens.map_or(0, Count::get))),
                 _ => None,
             })
             .collect();
@@ -2004,28 +2251,41 @@ mod tests {
             None,
         )
         .expect("projected");
-        assert!(
-            !projection
-                .events
-                .iter()
-                .any(|event| matches!(event, Event::Turn { .. } | Event::Response { .. })),
-            "never a derived number: {:?}",
+        // Every turn and response keeps its row (#645), its count absent:
+        // never a number derived from timings nobody measured equal.
+        let counts: Vec<(&str, Option<u64>)> = projection
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Turn { prefill_tokens, .. } => {
+                    Some(("turn", prefill_tokens.map(Count::get)))
+                }
+                Event::Response { output_tokens, .. } => {
+                    Some(("response", output_tokens.map(Count::get)))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            counts,
+            [
+                ("turn", None),
+                ("response", None),
+                ("turn", None),
+                ("response", None)
+            ],
+            "{:?}",
             projection.events
         );
-        let named: Vec<(&str, bool)> = projection
+        let named: Vec<&str> = projection
             .unspellable
             .iter()
-            .map(|item| (item.kind, item.text.is_some()))
+            .map(|item| item.kind)
             .collect();
         assert_eq!(
             named,
-            [
-                ("ask", false),
-                ("response", true),
-                ("ask", false),
-                ("response", true)
-            ],
-            "each turn and each response, the answer's text kept"
+            ["ask", "response", "ask", "response"],
+            "each count, named"
         );
         assert!(
             projection.unspellable[1]
@@ -2043,6 +2303,8 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Seam {
+            operator_changes: None,
+            unaddressed: None,
             at_turn: 1,
             reason: log::SeamReason::Operator,
             prefix_hash_before: "a".repeat(64),
@@ -2090,6 +2352,8 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Seam {
+            operator_changes: None,
+            unaddressed: None,
             at_turn: 1,
             reason: log::SeamReason::Operator,
             prefix_hash_before: "a".repeat(64),
@@ -2153,7 +2417,7 @@ mod tests {
         let projection = project(&numbered(events), &regime(), None).expect("projected");
         assert!(projection.events.iter().any(|event| matches!(
             event,
-            Event::Response { output_tokens, .. } if output_tokens.get() == 2
+            Event::Response { output_tokens, .. } if output_tokens.map_or(0, Count::get) == 2
         )));
         validates(&projection);
     }
@@ -2321,6 +2585,7 @@ mod tests {
                 max_output_tokens: 64,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs,
@@ -2440,7 +2705,7 @@ mod tests {
                     index,
                     prefill_tokens,
                     ..
-                } => Some((*index, prefill_tokens.get())),
+                } => Some((*index, prefill_tokens.map_or(0, Count::get))),
                 _ => None,
             })
             .collect();
@@ -2950,6 +3215,72 @@ mod tests {
             })
             .collect();
         assert_eq!(moves, vec![("q/30", PrefixReason::Unattributed)]);
+    }
+
+    /// #645: a record the reader refuses for a MISSING row -- a lane's move
+    /// no `prefix.changed` names -- is repaired in the row's honest form,
+    /// `unattributed`, the repair named, and the record reads back.
+    #[test]
+    fn a_missing_prefix_row_is_repaired_and_the_record_reads_back() {
+        let mut projection = two_forks();
+        projection.events.retain(
+            |event| !matches!(event, Event::PrefixChanged { at_request, .. } if at_request == "q/30"),
+        );
+        let text = read_back(&mut projection).expect("repaired");
+        record::parse(&text).expect("it reads back");
+        assert_eq!(
+            projection
+                .repairs
+                .iter()
+                .map(|repair| repair.at_request.as_str())
+                .collect::<Vec<_>>(),
+            ["q/30"]
+        );
+        assert!(projection.events.iter().any(|event| matches!(
+            event,
+            Event::PrefixChanged { at_request, reason: PrefixReason::Unattributed, .. }
+                if at_request == "q/30"
+        )));
+        assert!(sidecar(&projection).contains("\"repairs\""));
+    }
+
+    /// #645: a record the reader refuses for a row that CONTRADICTS it is
+    /// never repaired: its rows are kept at `<record>.refused.jsonl`, the
+    /// refusal named in the sidecar, and no record is written.
+    #[test]
+    fn a_contradicting_row_keeps_the_rows_beside_an_empty_record() {
+        let mut projection = two_forks();
+        let start = projection.events[0].clone();
+        projection.events.push(start);
+        let dir = std::env::temp_dir().join(format!("diet-kept-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("a directory");
+        let path = dir.join("session.record.jsonl");
+        let path = path.to_str().expect("utf-8");
+        let mut record = std::fs::File::create(path).expect("the record");
+        let (kept, sidecar_path, sidecar) = kept(&mut projection, path, &mut record).expect("kept");
+        let Kept::Refused {
+            path: refused,
+            rows,
+            refusal: _,
+        } = kept
+        else {
+            panic!("a second start is refused, not repaired");
+        };
+        assert_eq!(refused, format!("{path}.refused.jsonl"));
+        assert_eq!(std::fs::read_to_string(&refused).expect("the rows"), rows);
+        assert!(rows.lines().count() >= projection.events.len());
+        assert_eq!(
+            std::fs::metadata(path).expect("the record").len(),
+            0,
+            "no record"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&sidecar_path).expect("the sidecar"),
+            sidecar
+        );
+        assert!(sidecar.contains("\"refusal\""), "{sidecar}");
+        assert!(projection.repairs.is_empty(), "nothing repaired around it");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A call's files (#372): the line's `files` on the row, by reference,

@@ -549,6 +549,50 @@ pub fn output_cap(flag: Option<u32>, regimen: Option<&Regimen>) -> (u32, &'stati
         })
 }
 
+/// The longest silence a streamed call sits through, in milliseconds (#569).
+/// `0` turns it off.
+pub const STREAM_IDLE_TIMEOUT_MS: &str = "stream_idle_timeout_ms";
+
+/// [`STREAM_IDLE_TIMEOUT_MS`] undeclared: 300 s, by the vote. Pi bounds a
+/// stream by `httpIdleTimeoutMs`, 300 000 (undici's `headersTimeout` and
+/// `bodyTimeout`); `OpenCode` 2 by `headerTimeout` and `chunkTimeout`, both
+/// 300 000; both re-arm on every chunk, and neither bounds the total. Qwen
+/// Code, not needed for a tie, has the same two at 120 s and 240 s and a
+/// 900 s total per attempt.
+pub const DEFAULT_STREAM_IDLE_TIMEOUT_MS: u64 = 300_000;
+
+/// How long a streamed call may go silent before it is a timeout: the
+/// regimen's [`STREAM_IDLE_TIMEOUT_MS`], else [`DEFAULT_STREAM_IDLE_TIMEOUT_MS`];
+/// `None` for `0`, which turns it off, as Pi's `0` and `OpenCode` 2's
+/// `false` do.
+///
+/// # Errors
+///
+/// A value that is not a whole number of milliseconds, zero or more.
+pub fn stream_idle(regimen: Option<&Regimen>) -> Result<Option<std::time::Duration>, String> {
+    let ms = match regimen.and_then(|regimen| regimen.get(STREAM_IDLE_TIMEOUT_MS)) {
+        None => DEFAULT_STREAM_IDLE_TIMEOUT_MS,
+        Some(regimen::Value::Integer(n)) if *n >= 0 => n.unsigned_abs(),
+        Some(_) => {
+            return Err(format!(
+                "`{STREAM_IDLE_TIMEOUT_MS}` takes a whole number of milliseconds, \
+                 0 for none ({DEFAULT_STREAM_IDLE_TIMEOUT_MS} undeclared)"
+            ));
+        }
+    };
+    Ok((ms > 0).then(|| std::time::Duration::from_millis(ms)))
+}
+
+/// The stream deadline lever, in [`serve_levers`]' words: `idle:<ms>ms` --
+/// each silence bounded, the total not -- or `off`.
+fn stream_deadline_lever(regimen: &Regimen) -> String {
+    match stream_idle(Some(regimen)) {
+        Ok(Some(idle)) => format!("idle:{}ms", idle.as_millis()),
+        Ok(None) => "off".to_owned(),
+        Err(_) => UNDECLARED.to_owned(),
+    }
+}
+
 /// The step limit at the regimen's top level (#569), leniently: a positive
 /// integer, or `None`. `[limits] max_steps` is still read beneath it.
 #[must_use]
@@ -664,6 +708,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("tool_surface".to_owned(), surface),
         ("background_commands".to_owned(), background_lever(regimen)),
         ("bash_timeout".to_owned(), timeout_lever(regimen)),
+        ("stream_deadline".to_owned(), stream_deadline_lever(regimen)),
         ("tool_call_text_fallback".to_owned(), text_fallback),
         (
             "instruction_files".to_owned(),
@@ -943,6 +988,41 @@ fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4
 #[cfg(test)]
 mod tests {
     use super::{UNDECLARED, regime_of, serve_levers};
+
+    /// #569: a serve call's deadline is the silence it sits through, 300 s
+    /// undeclared (Pi and `OpenCode` 2), the regimen's in milliseconds, `0`
+    /// for none; anything else is refused. The start row names it.
+    #[test]
+    fn the_stream_deadline_is_idle_300s_by_the_vote_and_the_regimens_to_set() {
+        use super::stream_idle;
+        use crate::formats::regimen;
+        use std::time::Duration;
+        let read = |text: &str| regimen::parse(text).expect("a regimen");
+        let lever =
+            |text: &str| serve_levers(&read(text), (8192, "default"))["stream_deadline"].clone();
+        assert_eq!(stream_idle(None), Ok(Some(Duration::from_secs(300))));
+        assert_eq!(
+            stream_idle(Some(&read("substrate = \"x\"\n"))),
+            Ok(Some(Duration::from_secs(300)))
+        );
+        assert_eq!(lever("substrate = \"x\"\n"), "idle:300000ms");
+        let set = "stream_idle_timeout_ms = 900000\n";
+        assert_eq!(
+            stream_idle(Some(&read(set))),
+            Ok(Some(Duration::from_secs(900)))
+        );
+        assert_eq!(lever(set), "idle:900000ms");
+        let off = "stream_idle_timeout_ms = 0\n";
+        assert_eq!(stream_idle(Some(&read(off))), Ok(None));
+        assert_eq!(lever(off), "off");
+        for wrong in [
+            "stream_idle_timeout_ms = -1\n",
+            "stream_idle_timeout_ms = \"300s\"\n",
+        ] {
+            assert!(stream_idle(Some(&read(wrong))).is_err(), "{wrong}");
+            assert_eq!(lever(wrong), UNDECLARED);
+        }
+    }
 
     /// #124: a regimen that declares phases and turns self-capture on arms
     /// the model's proposal, ratified by the operator; either alone does not.

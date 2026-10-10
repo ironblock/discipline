@@ -219,6 +219,9 @@ export const refusalOf = registry<Refusal>({
   'no-tangent': { label: 'not taken: no tangent is open', level: 'quiet' },
   'bad-tangent': { label: 'not taken: a tangent needs working memory, and a new id', level: 'warn' },
   'not-the-scope': { label: 'not taken: rule on exactly the tangent’s entries', level: 'warn' },
+  empty: { label: 'not taken: say something -- the edit or note is empty', level: 'quiet' },
+  'unknown-entry': { label: 'not taken: working memory has no such entry', level: 'warn' },
+  'not-live': { label: 'not taken: that entry is no longer live', level: 'quiet' },
   'no-proposal': { label: 'not taken: no phase proposal waits on a ruling', level: 'quiet' },
   'nothing-running': { label: 'not taken: no command is running to move', level: 'quiet' },
   // A seam's phase the graph would not take (#563).

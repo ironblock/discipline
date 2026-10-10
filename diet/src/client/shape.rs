@@ -82,6 +82,13 @@ pub struct Message {
     /// 5989411005). Only [`attach`] adds one, and only after the bytes are
     /// checked against the file the log names, so an image here is always
     /// the bytes its reference describes.
+    /// Notes the harness attaches to this user message (#609, run 3): the
+    /// fork delivery, recall, background notices and the self-capture
+    /// reminder, each sent as a text part BEFORE the operator's words, which
+    /// come last -- Qwen Code's order (`client.ts`, `requestToSend =
+    /// [...systemReminders, ...requestToSend]`). Empty on every other
+    /// message, which goes out as it always did.
+    pub notes: Vec<String>,
     pub images: Vec<Image>,
     /// The signature a hosted model signed `reasoning` with (#555): sent
     /// back with it, verbatim; `None` from a server that signs nothing.
@@ -207,6 +214,7 @@ impl Message {
             reasoning: None,
             tool_calls: Vec::new(),
             tool_call_id: None,
+            notes: Vec::new(),
             images: Vec::new(),
             reasoning_signature: None,
             redacted: Vec::new(),
@@ -368,6 +376,12 @@ pub struct Limits {
     /// request's `max_output_tokens` is clamped to the room the prompt leaves
     /// ([`crate::drive::session`]); with none, nothing is clamped.
     pub context_window: Option<u64>,
+    /// The longest silence a streamed call sits through (#569): connect,
+    /// write and every read are each given this much, re-armed by whatever
+    /// arrives, and none of them past [`Limits::call`]. `None` leaves
+    /// [`Limits::call`] the only bound. Pi and `OpenCode` 2 both bound a
+    /// stream this way -- 300 s between chunks, and no total.
+    pub idle: Option<Duration>,
 }
 
 /// How the server was configured to serve.
@@ -728,6 +742,7 @@ mod tests {
                 max_output_tokens: 16,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

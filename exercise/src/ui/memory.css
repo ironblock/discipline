@@ -137,3 +137,29 @@
   color: var(--ink-faint);
   font: var(--size-chrome) / 1 var(--font-chrome);
 }
+
+/* The operator's flag on an entry, the model's writes refused over it (#150), and the operator's edit and flag actions. */
+.ex-memory__flag,
+.ex-memory__refused,
+.ex-memory__refusal {
+  grid-column: 2;
+  color: var(--warn);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}
+
+.ex-memory__refused {
+  color: var(--ink-faint);
+}
+
+.ex-memory__actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+}
+
+.ex-memory__actions textarea,
+.ex-memory__actions input {
+  flex: 1 1 100%;
+}

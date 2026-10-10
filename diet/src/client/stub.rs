@@ -59,6 +59,10 @@ pub enum Act {
     /// cancel is seen from the SERVER's side of the socket, where "the
     /// client stopped" actually has to land.
     StreamThenHold(Vec<String>),
+    /// Answer `200` as an event stream, one chunk per piece, each sent this
+    /// long after the one before; then end the stream and close. A server
+    /// still working -- slow, never silent -- for longer than any one gap.
+    Trickle(Duration, Vec<String>),
 }
 
 /// What an [`Act::StreamThenHold`] saw of its client while it held.
@@ -429,8 +433,24 @@ fn act_on(stream: &mut TcpStream, act: &Act) -> Option<Held> {
             let _ = stream.flush();
         }
         Act::StreamThenHold(pieces) => return Some(stream_then_hold(stream, pieces)),
+        Act::Trickle(gap, pieces) => trickle(stream, *gap, pieces),
     }
     None
+}
+
+/// Stream `pieces` as chunks, `gap` apart, then end the stream.
+fn trickle(stream: &mut TcpStream, gap: Duration, pieces: &[String]) {
+    let _ = stream.write_all(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\
+          Transfer-Encoding: chunked\r\nConnection: close\r\n\r\n",
+    );
+    for piece in pieces {
+        thread::sleep(gap);
+        let _ = stream.write_all(format!("{:x}\r\n{piece}\r\n", piece.len()).as_bytes());
+        let _ = stream.flush();
+    }
+    let _ = stream.write_all(b"0\r\n\r\n");
+    let _ = stream.flush();
 }
 
 /// Stream `pieces` as chunks, then wait for the client to hang up.

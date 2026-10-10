@@ -110,6 +110,10 @@ vocabulary! {
         Background => "background",
         /// Rule on the model's pending phase proposal (#124).
         RatifyPhase => "ratify-phase",
+        /// Correct a working-memory entry (#150).
+        EditEntry => "edit-entry",
+        /// Flag a working-memory entry (#150).
+        FlagEntry => "flag-entry",
     }
 }
 
@@ -153,6 +157,12 @@ vocabulary! {
         /// A phase ruling named no pending proposal (#124): none is pending,
         /// or the call it names is not the one that is.
         NoProposal => "no-proposal",
+        /// An edit or flag naming no entry working memory holds (#150).
+        UnknownEntry => "unknown-entry",
+        /// An edit or flag naming an entry no longer live (#150).
+        NotLive => "not-live",
+        /// An edit with no content, or a flag with no note (#150).
+        Empty => "empty",
     }
 }
 
@@ -289,6 +299,9 @@ pub enum Event {
         /// Each lever's state, as the record's start row names them (#573):
         /// `serve_levers`' one reading, when a regimen was read.
         levers: Option<BTreeMap<String, String>>,
+        /// Whether a turn's notes ride in its ask's user message (#609):
+        /// always, from this build on.
+        notes_in_the_ask: bool,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -602,6 +615,10 @@ pub enum Event {
         fired: Option<log::SeamFired>,
         /// The calls whose pruned results it replaced (#612), when any.
         pruned: Option<Vec<String>>,
+        /// The operator's edits and flags it carried (#150), when any.
+        operator_changes: Option<Vec<log::OperatorChange>>,
+        /// Of those, the entries no answer addressed (#150): carried on.
+        unaddressed: Option<Vec<String>>,
         /// The pre-warm's timings (#504), when the refilled trunk was sent
         /// once and the call finished.
         warm: Option<Timings>,
@@ -621,6 +638,28 @@ pub enum Event {
         bytes: u64,
         /// Its reference line (#596).
         text: String,
+    },
+    /// The operator flagged an entry (#150): a note on it, the entry
+    /// unchanged, kept until a seam addresses it.
+    Flagged {
+        /// The latest turn.
+        turn: u32,
+        /// The entry.
+        entry: String,
+        /// The operator's note.
+        note: String,
+    },
+    /// A model's patch refused (#150): it targeted an entry the operator
+    /// wrote. The fold went on.
+    PatchRefused {
+        /// The fork whose answer made it, when one did.
+        fork: Option<u64>,
+        /// The lane that made it, when no fork did.
+        lane: Option<String>,
+        /// What it would have done.
+        op: log::PatchOp,
+        /// The entry it targeted.
+        entry: String,
     },
     /// Archived items recalled after an ask (#566): one note, which stays
     /// on the trunk.
@@ -1765,6 +1804,9 @@ struct State {
     promotable: Option<Arc<Mutex<Option<super::background::Job>>>>,
     /// The results the model pruned (#612), in the order it pruned them.
     pruned: Vec<Prune>,
+    /// The operator's edits and flags since a seam last addressed them
+    /// (#150): each entry and `edit` or `flag`, in order.
+    operator_pending: Vec<(String, String)>,
     /// Whether the trunk carries a seam's refill message after the head
     /// (#597): the turns start after it.
     refilled: bool,
@@ -1833,6 +1875,7 @@ impl State {
             queued: std::collections::VecDeque::new(),
             recording: tools.and_then(|t| t.recording.clone()),
             pruned: Vec::new(),
+            operator_pending: Vec::new(),
             refilled: false,
             jobs: BTreeMap::new(),
             notices: Vec::new(),
@@ -2006,10 +2049,10 @@ impl State {
         let text = super::archive::note(&found);
         let items = found
             .iter()
-            .map(|(item, score)| log::RecalledItem {
-                key: item.key.clone(),
-                sha256: item.sha256(),
-                score: *score,
+            .map(|found| log::RecalledItem {
+                key: found.item.key.clone(),
+                sha256: found.item.sha256(),
+                score: found.score,
             })
             .collect();
         self.push(Event::Recalled {
@@ -2099,7 +2142,9 @@ impl State {
                 CommandKind::OpenTangent
                 | CommandKind::CloseTangent
                 | CommandKind::Background
-                | CommandKind::RatifyPhase => {
+                | CommandKind::RatifyPhase
+                | CommandKind::EditEntry
+                | CommandKind::FlagEntry => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -2168,9 +2213,49 @@ impl State {
     }
 
     fn move_to(&mut self, to: Settlement) {
+        if to == Settlement::Ended {
+            self.stop_jobs();
+        }
         let from = self.settlement;
         self.settlement = to;
         self.push(Event::Settled { from, to });
+    }
+
+    /// Stop every running background job as the session ends (#614), and
+    /// log each one's end: `ended` is the log's last line (#291), so a job
+    /// the session's end kills is logged `cancelled` before it, with the
+    /// output it wrote so far. Its reaper then logs nothing more. An
+    /// admitted `end`'s gap stays immediately before its outcome.
+    fn stop_jobs(&mut self) {
+        use super::background::Status;
+        let gap = self.pending_gap.take();
+        let mut ends = Vec::new();
+        for job in self.jobs.values_mut() {
+            if job.status != Status::Running {
+                continue;
+            }
+            job.stopping = true;
+            job.status = Status::Cancelled;
+            super::background::stop_group(job.pid);
+            job.write_status();
+            let output = std::fs::read(&job.output).unwrap_or_default();
+            let files: Vec<log::RecordedFile> = self
+                .recording
+                .as_deref()
+                .and_then(|dir| super::attach::kept_whole(dir, &output, "text/plain").ok())
+                .into_iter()
+                .collect();
+            ends.push(Event::BackgroundEnded {
+                job: job.id.clone(),
+                status: log::BackgroundStatus::Cancelled,
+                exit: None,
+                files,
+            });
+        }
+        for end in ends {
+            self.push(end);
+        }
+        self.pending_gap = gap;
     }
 
     fn refuse(&mut self, command: CommandKind, because: Refusal) -> Refusal {
@@ -2394,6 +2479,7 @@ impl<S: Streaming + 'static> Session<S> {
             reasoning_effort_default,
             instruction_files,
             levers,
+            notes_in_the_ask: true,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             bash_timeout_ms: bash_timeout_of(tools.as_ref(), &template),
             phases,
@@ -2538,38 +2624,35 @@ impl<S: Streaming + 'static> Session<S> {
         state.move_to(Settlement::Turn);
         let mut shape = self.shared.template.clone();
         shape.messages.clone_from(&state.trunk);
-        shape.messages.push(message.clone());
-        // The fork delivery lever: what forks patched since the last
-        // request, as one note after the ask; it joins the trunk with it.
-        let mut opening = vec![message];
+        // The harness's notes ride in the ask's own user message, BEFORE the
+        // operator's words, which the model answers last (#609, run 3: a
+        // reminder sent as the last message was answered and the ask never
+        // was) -- Qwen Code's order, its system reminders ahead of the user's
+        // prompt in one user turn. In the order they are logged: the fork
+        // delivery lever's patches; archive recall (#566), what earlier
+        // seams dropped that this ask names; background commands that ended
+        // since (#614), Qwen Code's `<task-notification>`s; and the
+        // self-capture reminder (#609), when its cadence came round, never
+        // in the system prompt.
+        let mut message = message;
         if let Some(note) = state.deliver(turn) {
-            shape.messages.push(note.clone());
-            opening.push(note);
+            message.notes.push(note.content);
         }
-        // Archive recall (#566): what earlier seams dropped that this ask
-        // names, as one note after it (and after any delivered note).
-        if let Some(note) = state.recall(turn, &opening[0].content) {
-            shape.messages.push(note.clone());
-            opening.push(note);
+        if let Some(note) = state.recall(turn, &message.content) {
+            message.notes.push(note.content);
         }
-        // Background commands that ended since (#614): their notifications,
-        // as one note after it, Qwen Code's `<task-notification>`s.
         if let Some(note) = state.notify(turn) {
-            shape.messages.push(note.clone());
-            opening.push(note);
+            message.notes.push(note.content);
         }
-        // The self-capture reminder (#609), when its cadence came round: an
-        // advisory note after the ask (and after any other note), never in
-        // the system prompt.
         if let Some(text) = state.reminder_due.take() {
             state.push(Event::Reminded {
                 turn,
                 text: text.clone(),
             });
-            let note = Message::new(Role::User, text);
-            shape.messages.push(note.clone());
-            opening.push(note);
+            message.notes.push(text);
         }
+        shape.messages.push(message.clone());
+        let opening = vec![message];
         // Pushed here, under the lock that admits the ask, and never on the
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
@@ -2967,6 +3050,98 @@ impl<S: Streaming + 'static> Session<S> {
         Ok(())
     }
 
+    /// Correct working-memory entry `id` with `content` (#150): the
+    /// operator's edit, written as the object writes every correction -- a
+    /// new entry superseding `id`, on the operator's lane -- and logged as
+    /// its `patch` line. It is carried to the next seam as a change for the
+    /// model to address.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Ended`]; [`Refusal::InFlight`] while a turn or a capture is
+    /// in flight; [`Refusal::Empty`] for no content; [`Refusal::UnknownEntry`]
+    /// for an id working memory does not hold, or none kept;
+    /// [`Refusal::NotLive`] for one no longer live.
+    pub fn edit_entry(&self, id: &str, content: &str) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let because = operator_refusal(&state, id, content);
+        if let Some(because) = because {
+            let refused = state.refuse(CommandKind::EditEntry, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+        state.admit()?;
+        let seq = state.log.len();
+        let turn = state.turns;
+        let tangent = state
+            .tangent
+            .as_ref()
+            .map(|(tangent, _)| tangent.id().to_owned());
+        let (Ok(voids), Ok(new)) = (
+            crate::object::EntryId::new(id),
+            crate::object::EntryId::new(&format!("operator-{seq}")),
+        ) else {
+            unreachable!("an id the object holds, and one this session coins");
+        };
+        let patch = Patch::Supersede {
+            id: new.clone(),
+            content: content.to_owned(),
+            voids,
+            provenance: crate::object::Provenance {
+                turn,
+                lane: crate::object::OPERATOR.to_owned(),
+                fork: None,
+                tangent,
+                index: 0,
+            },
+        };
+        let Some(interview) = state.interview.as_mut() else {
+            unreachable!("a live entry was checked above");
+        };
+        if interview.object.apply(&patch).is_err() {
+            unreachable!("a live entry superseded by new content");
+        }
+        let line = patched(None, &patch, &interview.object);
+        state.push(line);
+        state
+            .operator_pending
+            .push((new.as_str().to_owned(), "edit".to_owned()));
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Flag working-memory entry `id` with the operator's `note` (#150): an
+    /// annotation, the entry unchanged, logged as a `flag` line and carried
+    /// to the next seam for the model to address.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::edit_entry`], `note` standing for its content.
+    pub fn flag_entry(&self, id: &str, note: &str) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        if let Some(because) = operator_refusal(&state, id, note) {
+            let refused = state.refuse(CommandKind::FlagEntry, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+        state.admit()?;
+        let turn = state.turns;
+        state.push(Event::Flagged {
+            turn,
+            entry: id.to_owned(),
+            note: note.to_owned(),
+        });
+        state
+            .operator_pending
+            .push((id.to_owned(), "flag".to_owned()));
+        drop(state);
+        self.shared.changed.notify_all();
+        Ok(())
+    }
+
     /// End the session.
     ///
     /// # Errors
@@ -3328,9 +3503,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             phases,
             instruction_files,
             levers,
+            notes_in_the_ask,
         } => log::Event::SessionStart {
             bash_timeout_ms: *bash_timeout_ms,
             levers: levers.clone(),
+            notes_in_the_ask: notes_in_the_ask.then_some(true),
             // #563: the graph, and the phase it opens in; nothing when none.
             phases: phases.as_ref().map(|(names, _, _)| names.clone()),
             phase_transitions: phases.as_ref().map(|(_, moves, _)| moves.clone()),
@@ -3810,6 +3987,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             render_budget,
             fired,
             pruned,
+            operator_changes,
+            unaddressed,
             warm,
         } => log::Event::Seam {
             fired: *fired,
@@ -3844,6 +4023,25 @@ pub fn line_of(logged: &Logged) -> log::Line {
             placement: Some(log::RenderPlacement::Message),
             render_budget: render_budget.clone(),
             pruned: pruned.clone(),
+            operator_changes: operator_changes.clone(),
+            unaddressed: unaddressed.clone(),
+        },
+        Event::Flagged { turn, entry, note } => log::Event::Flag {
+            turn: *turn,
+            entry: entry.clone(),
+            note: note.clone(),
+        },
+        Event::PatchRefused {
+            fork,
+            lane,
+            op,
+            entry,
+        } => log::Event::PatchRefused {
+            fork: *fork,
+            lane: lane.clone(),
+            op: *op,
+            entry: entry.clone(),
+            reason: OPERATOR_ENTRY.to_owned(),
         },
         Event::Pruned {
             turn,
@@ -3961,6 +4159,8 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::CloseTangent => log::Command::CloseTangent,
         CommandKind::Background => log::Command::Background,
         CommandKind::RatifyPhase => log::Command::RatifyPhase,
+        CommandKind::EditEntry => log::Command::EditEntry,
+        CommandKind::FlagEntry => log::Command::FlagEntry,
     }
 }
 
@@ -3981,6 +4181,9 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::BadTangent => log::Refusal::BadTangent,
         Refusal::NotTheScope => log::Refusal::NotTheScope,
         Refusal::NothingRunning => log::Refusal::NothingRunning,
+        Refusal::UnknownEntry => log::Refusal::UnknownEntry,
+        Refusal::NotLive => log::Refusal::NotLive,
+        Refusal::Empty => log::Refusal::Empty,
     }
 }
 
@@ -4582,14 +4785,19 @@ fn capture_call<S>(
             let refused = state.interview.as_mut().map_or_else(
                 || Some("the session keeps no working memory".to_owned()),
                 |interview| {
-                    let refused = patches
+                    // An entry the operator wrote is theirs (#150).
+                    let (kept, refusals) = guarded(&patches, &interview.object, None);
+                    let refused = kept
                         .iter()
                         .find_map(|patch| interview.object.apply(patch).err())
                         .map(|why| why.to_string());
                     if refused.is_none() {
-                        lines = patches
-                            .iter()
-                            .map(|patch| patched(None, patch, &interview.object))
+                        lines = refusals
+                            .into_iter()
+                            .chain(
+                                kept.iter()
+                                    .map(|patch| patched(None, patch, &interview.object)),
+                            )
                             .collect();
                     }
                     refused
@@ -4738,7 +4946,7 @@ fn capture_outcome(
 }
 
 /// What the model saw by turn `turn`, as the groundedness gate reads it
-/// (#609): that turn's trunk prose and non-capture tool output as the
+/// (#609): that turn's ask, trunk prose and non-capture tool output as the
 /// source, every earlier turn's as the session prefix -- from the log, as
 /// `capture::tools::Seen::of_turn` reads a record.
 fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
@@ -4756,6 +4964,8 @@ fn seen_by(log: &[Logged], turn: u32) -> crate::capture::tools::Seen {
     };
     for logged in log {
         match &logged.event {
+            // The operator's ask: the model saw it (#609, run 3).
+            Event::Asked { turn: at, text, .. } => file(*at, text),
             Event::Requested {
                 turn: at,
                 lane: Lane::Trunk,
@@ -5675,6 +5885,7 @@ fn refilled(
     state.turns_at_seam = state.turns;
     state.trunk_tokens = None;
     let pruned = prunes_applied(state);
+    let (operator_changes, unaddressed) = operator_carried(state);
     let at_turn = state.turns;
     Event::Seamed {
         at_turn,
@@ -5692,8 +5903,106 @@ fn refilled(
         render_budget,
         fired,
         pruned,
+        operator_changes,
+        unaddressed,
         warm: None,
     }
+}
+
+/// Why an operator edit or flag of `id` with `text` is refused, if it is.
+fn operator_refusal(state: &State, id: &str, text: &str) -> Option<Refusal> {
+    if state.settlement == Settlement::Ended {
+        return Some(Refusal::Ended);
+    }
+    if matches!(state.settlement, Settlement::Turn | Settlement::Capture) {
+        return Some(Refusal::InFlight);
+    }
+    if text.trim().is_empty() {
+        return Some(Refusal::Empty);
+    }
+    let entry = state.interview.as_ref().and_then(|interview| {
+        crate::object::EntryId::new(id).ok().and_then(|id| {
+            interview
+                .object
+                .entry(&id)
+                .map(|entry| entry.state.is_live())
+        })
+    });
+    match entry {
+        None => Some(Refusal::UnknownEntry),
+        Some(false) => Some(Refusal::NotLive),
+        Some(true) => None,
+    }
+}
+
+/// Why a model's patch is refused (#150): its target is the operator's.
+const OPERATOR_ENTRY: &str = "operator-entry";
+
+/// The operator's changes a seam carries (#150), each still live, and the
+/// ones no answer addressed. Until the reconciling ask's words are
+/// approved, the model is shown each change only as the render's plain
+/// entry text, so none is addressed and each is carried to the next seam.
+fn operator_carried(state: &mut State) -> (Option<Vec<log::OperatorChange>>, Option<Vec<String>>) {
+    let live = |id: &str| {
+        state.interview.as_ref().is_some_and(|interview| {
+            crate::object::EntryId::new(id)
+                .ok()
+                .and_then(|id| interview.object.entry(&id))
+                .is_some_and(|entry| entry.state.is_live())
+        })
+    };
+    let pending: Vec<(String, String)> = state
+        .operator_pending
+        .iter()
+        .filter(|(entry, _)| live(entry))
+        .cloned()
+        .collect();
+    state.operator_pending.clone_from(&pending);
+    if pending.is_empty() {
+        return (None, None);
+    }
+    let changes = pending
+        .iter()
+        .map(|(entry, kind)| log::OperatorChange {
+            entry: entry.clone(),
+            kind: kind.clone(),
+        })
+        .collect();
+    let unaddressed = pending.into_iter().map(|(entry, _)| entry).collect();
+    (Some(changes), Some(unaddressed))
+}
+
+/// `patches`, less each one a model lane made that targets an entry the
+/// operator wrote (#150), with the refusal each of those is logged as.
+fn guarded(
+    patches: &[Patch],
+    object: &WorkingObject,
+    fork: Option<u64>,
+) -> (Vec<Patch>, Vec<Event>) {
+    let mut kept = Vec::new();
+    let mut refused = Vec::new();
+    for patch in patches {
+        let (op, target) = match patch {
+            Patch::Add { .. } => (log::PatchOp::Add, None),
+            Patch::Supersede { voids, .. } => (log::PatchOp::Supersede, Some(voids)),
+            Patch::Resolve { target, .. } => (log::PatchOp::Resolve, Some(target)),
+            Patch::Retire { target, .. } => (log::PatchOp::Retire, Some(target)),
+            Patch::Park { target, .. } => (log::PatchOp::Park, Some(target)),
+        };
+        let theirs = patch.provenance().lane != crate::object::OPERATOR;
+        match target {
+            Some(target) if theirs && object.by_operator(target) => {
+                refused.push(Event::PatchRefused {
+                    fork,
+                    lane: fork.is_none().then(|| patch.provenance().lane.clone()),
+                    op,
+                    entry: target.as_str().to_owned(),
+                });
+            }
+            _ => kept.push(patch.clone()),
+        }
+    }
+    (kept, refused)
 }
 
 /// A seam `reason` fired (#504): refilled now; or, when the regimen asks
@@ -7230,6 +7539,13 @@ fn applied(state: &mut State, patches: &[Patch], fork: u64) -> (log::ForkOutcome
     let Some(interview) = state.interview.as_mut() else {
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
+    // A patch on an entry the operator wrote is refused (#150), the rest
+    // folded.
+    let (kept, refused) = guarded(patches, &interview.object, Some(fork));
+    if kept.is_empty() {
+        return (log::ForkOutcome::Decline, refused);
+    }
+    let patches = kept.as_slice();
     // The entry each delivered line names, read before the patches apply:
     // a supersede's voided entry, a verdict's target. An `add` names none
     // and is carried at the seam only (no measured sentence fits it).
@@ -7252,9 +7568,13 @@ fn applied(state: &mut State, patches: &[Patch], fork: u64) -> (log::ForkOutcome
     if interview.object.apply_turn(patches).is_err() {
         return (log::ForkOutcome::Unparseable, Vec::new());
     }
-    let lines = patches
-        .iter()
-        .map(|patch| patched(Some(fork), patch, &interview.object))
+    let lines = refused
+        .into_iter()
+        .chain(
+            patches
+                .iter()
+                .map(|patch| patched(Some(fork), patch, &interview.object)),
+        )
         .collect();
     state.undelivered.extend(named);
     (log::ForkOutcome::Value, lines)
@@ -7535,6 +7855,7 @@ pub(in crate::drive) mod tests {
                 max_output_tokens: 64,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
@@ -7590,6 +7911,14 @@ pub(in crate::drive) mod tests {
 
     fn user(text: &str) -> Message {
         Message::new(Role::User, text)
+    }
+
+    /// A user message carrying the harness's `notes` before its words
+    /// (#609).
+    fn noted(text: &str, notes: &[&str]) -> Message {
+        let mut message = Message::new(Role::User, text);
+        message.notes = notes.iter().map(|note| (*note).to_owned()).collect();
+        message
     }
 
     fn assistant(text: &str) -> Message {
@@ -8377,10 +8706,7 @@ pub(in crate::drive) mod tests {
             .map(|logged| format!("q/{}", logged.seq))
             .collect();
         assert_eq!(forks.len(), 2);
-        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
-        super::super::projection::project(&lines, &regime(), None)
-            .expect("the log projects")
-            .events
+        record_read_back(&session)
             .into_iter()
             .filter(|event| matches!(
                 event,
@@ -8389,14 +8715,41 @@ pub(in crate::drive) mod tests {
             .collect()
     }
 
-    /// #157, from the seam smoke run (q/2142): a whole-trunk fork's head is
-    /// the trunk's, so the second fork's request -- its head moved by the
-    /// turns between -- is verified against the rebuilt trunk and writes no
-    /// prefix row; a `last_turn` fork's head is not rebuilt, and its move is
-    /// still named unattributed.
+    /// The record `session`'s log projects to, rendered and read back as
+    /// serve does before it writes one (#654's run 2 lost its record to a
+    /// row the reader refused).
+    fn record_read_back<S: Streaming>(session: &Session<S>) -> Vec<crate::formats::record::Event> {
+        use crate::formats::record::{self, Record};
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        let events = super::super::projection::project(&lines, &regime(), None)
+            .expect("the log projects")
+            .events;
+        let rendered = record::render(&Record {
+            events: events.clone(),
+        });
+        record::parse(&rendered)
+            .unwrap_or_else(|why| panic!("the projected record does not read back: {why:?}"));
+        events
+    }
+
+    /// #157, from the seam smoke runs: a whole-trunk fork's head is the
+    /// trunk's, so the second fork's request -- its head moved by the turns
+    /// between -- is verified against the rebuilt trunk and its move named
+    /// as the trunk's are, attributed (run 1's q/2142 was named
+    /// `unattributed`; run 2's audit lane named nothing, and the record was
+    /// refused); a `last_turn` fork's head is not rebuilt, and its move is
+    /// named unattributed. Either way the record reads back.
     #[test]
-    fn a_whole_trunk_forks_head_is_verified_against_the_trunk_and_writes_no_row() {
-        assert_eq!(fork_prefix_rows(None), []);
+    fn a_whole_trunk_forks_head_move_is_attributed_and_the_record_reads_back() {
+        let rows = fork_prefix_rows(None);
+        assert!(
+            matches!(
+                &rows[..],
+                [crate::formats::record::Event::PrefixChanged { reason, .. }]
+                    if *reason != crate::formats::record::PrefixReason::Unattributed
+            ),
+            "{rows:?}"
+        );
         let rows = fork_prefix_rows(Some(ForkView::Last(1)));
         assert!(
             matches!(
@@ -9199,6 +9552,7 @@ pub(in crate::drive) mod tests {
                     "v3".to_owned(),
                 )])),
                 fork_asks: Some(&crate::dogma::asks::V4),
+                notes_in_the_ask: true,
             },
             Event::Asked {
                 turn: 1,
@@ -9402,6 +9756,8 @@ pub(in crate::drive) mod tests {
                 tangent: Some("t/1".to_owned()),
             },
             Event::Seamed {
+                operator_changes: None,
+                unaddressed: None,
                 at_turn: 1,
                 reason: crate::seam::Reason::Operator,
                 prefix_hash_before: "c".repeat(64),
@@ -9503,6 +9859,17 @@ pub(in crate::drive) mod tests {
                 template: crate::dogma::Template::AuditQHuman,
                 question: "audit the notes".to_owned(),
             },
+            Event::Flagged {
+                turn: 2,
+                entry: "interview-t1-0".to_owned(),
+                note: "check this".to_owned(),
+            },
+            Event::PatchRefused {
+                fork: Some(20),
+                lane: None,
+                op: log::PatchOp::Supersede,
+                entry: "operator-9".to_owned(),
+            },
             Event::PhaseRuled {
                 call: "call-p".to_owned(),
                 choice: PhaseChoice::Continue,
@@ -9550,9 +9917,11 @@ pub(in crate::drive) mod tests {
                 Event::Skipped { .. } => 34,
                 Event::Audited { .. } => 35,
                 Event::PhaseRuled { .. } => 36,
+                Event::Flagged { .. } => 37,
+                Event::PatchRefused { .. } => 38,
             });
         }
-        assert_eq!(kinds.len(), 37, "a variant has no sample");
+        assert_eq!(kinds.len(), 39, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -9614,6 +9983,7 @@ pub(in crate::drive) mod tests {
                     name: "v4".to_owned(),
                     digest: Some(crate::dogma::asks::V4.digest()),
                 }),
+                notes_in_the_ask: Some(true),
             },
             log::Event::Ask {
                 turn: 1,
@@ -9834,6 +10204,8 @@ pub(in crate::drive) mod tests {
                 tangent: Some("t/1".to_owned()),
             },
             log::Event::Seam {
+                operator_changes: None,
+                unaddressed: None,
                 at_turn: 1,
                 reason: log::SeamReason::Operator,
                 prefix_hash_before: "c".repeat(64),
@@ -9945,6 +10317,18 @@ pub(in crate::drive) mod tests {
                 seat: None,
                 ask: Some("audit_q_human".to_owned()),
                 hazard: None,
+            },
+            log::Event::Flag {
+                turn: 2,
+                entry: "interview-t1-0".to_owned(),
+                note: "check this".to_owned(),
+            },
+            log::Event::PatchRefused {
+                fork: Some(20),
+                lane: None,
+                op: log::PatchOp::Supersede,
+                entry: "operator-9".to_owned(),
+                reason: "operator-entry".to_owned(),
             },
             log::Event::PhaseRuled {
                 call: "call-p".to_owned(),
@@ -10417,12 +10801,13 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "ask cancel declare-seam end open-tangent close-tangent background ratify-phase"
+            "ask cancel declare-seam end open-tangent close-tangent background ratify-phase \
+             edit-entry flag-entry"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty"
         );
         assert_eq!(
             tags(
@@ -10785,18 +11170,16 @@ pub(in crate::drive) mod tests {
         let log = wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
         let sent = session.shared.transport.sent();
         let last = &sent.last().expect("a request").messages;
-        let note = &last[last.len() - 1];
-        assert_eq!(last[last.len() - 2].content, "is it ready?");
-        assert_eq!(note.role, Role::User);
-        assert!(
-            note.content
-                .starts_with(&format!("<task-notification>\n<task-id>{id}</task-id>"))
-        );
-        assert!(note.content.contains("<status>completed</status>"));
-        assert!(
-            note.content
-                .contains("<output-tail truncated=\"false\">ready\n</output-tail>")
-        );
+        // The notice rides in the ask's own message, before its words (#609).
+        let asked = &last[last.len() - 1];
+        assert_eq!(asked.content, "is it ready?");
+        assert_eq!(asked.role, Role::User);
+        let [note] = asked.notes.as_slice() else {
+            panic!("one notice: {asked:?}");
+        };
+        assert!(note.starts_with(&format!("<task-notification>\n<task-id>{id}</task-id>")));
+        assert!(note.contains("<status>completed</status>"));
+        assert!(note.contains("<output-tail truncated=\"false\">ready\n</output-tail>"));
         reads_whole(&session);
         every_head_rebuilds(&log);
         session.end_commands();
@@ -10870,6 +11253,72 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
         every_head_rebuilds(&log);
         tidy(&[&tree]);
+    }
+
+    /// A job still running when the session ends (#614) is stopped, and its
+    /// end is logged `cancelled` before the session's `ended`, which stays
+    /// the log's last line (#291): a reader that waits for `ended` sees no
+    /// job left running. Its reaper logs nothing after.
+    #[test]
+    fn a_job_the_sessions_end_stops_is_logged_ended_before_ended() {
+        let tree = scratch("bg-end");
+        let recording = scratch("bg-end-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let session = backgrounding(
+            &tree,
+            Some(&recording),
+            vec![
+                vec![in_the_background("call-1", "echo serving; sleep 30")],
+                deltas(&["started"]),
+            ],
+        );
+        session.ask("start it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let id = lines(&log)[0].background.clone().expect("a job");
+        let pid = session.shared.lock().jobs[&id].pid;
+        assert!(ended_jobs(&log).is_empty());
+        session.end(None).expect("ended");
+        let log = wait_until(&session, "the end", |log| {
+            log.last().is_some_and(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Settled {
+                        to: Settlement::Ended,
+                        ..
+                    }
+                )
+            })
+        });
+        assert_eq!(
+            ended_jobs(&log),
+            [(id.clone(), log::BackgroundStatus::Cancelled, None)]
+        );
+        let at = log
+            .iter()
+            .position(|logged| matches!(logged.event, Event::BackgroundEnded { .. }))
+            .expect("the job's end");
+        assert_eq!(at, log.len() - 2, "the job's end, then `ended`");
+        let (_, status) = super::super::background::files_of(&recording.join("background"), &id);
+        assert!(
+            std::fs::read_to_string(&status)
+                .expect("a status file")
+                .contains("\"status\":\"cancelled\"")
+        );
+        // The group is gone, and its reaper logged nothing after `ended`.
+        let until = Instant::now() + Duration::from_secs(5);
+        while std::process::Command::new("/bin/kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .is_ok_and(|out| out.status.success())
+        {
+            assert!(Instant::now() < until, "job {pid} still runs");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(session.shared.lock().log.len(), log.len());
+        reads_whole(&session);
+        session.end_commands();
+        tidy(&[&tree, &recording]);
     }
 
     /// The operator moves a running call to the background (#614): it
@@ -12570,6 +13019,7 @@ pub(in crate::drive) mod tests {
                 max_output_tokens: 512,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::from([(
@@ -12749,6 +13199,202 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
         let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
         super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+    }
+
+    /// Each live entry's id and content.
+    fn live_entries(session: &Session<Canned>) -> Vec<(String, String)> {
+        session
+            .shared
+            .lock()
+            .interview
+            .as_ref()
+            .expect("memory")
+            .object
+            .live()
+            .map(|entry| (entry.id.as_str().to_owned(), entry.content.clone()))
+            .collect()
+    }
+
+    /// The seam's operator changes and the entries it left unaddressed.
+    fn carried(log: &[Logged]) -> (Option<Vec<log::OperatorChange>>, Option<Vec<String>>) {
+        log.iter()
+            .find_map(|logged| match &logged.event {
+                Event::Seamed {
+                    operator_changes,
+                    unaddressed,
+                    ..
+                } => Some((operator_changes.clone(), unaddressed.clone())),
+                _ => None,
+            })
+            .expect("the seam")
+    }
+
+    /// #150: the operator edits one decision -- a new entry, on the
+    /// operator's lane, superseding it -- and flags another; edits and flags
+    /// of an entry gone or unknown, or with nothing to say, are refused. The
+    /// audit's answer that would rewrite the operator's entry is refused per
+    /// patch and the rest of the fold goes on; the seam records both changes
+    /// as carried and, with the reconciling ask not yet approved, unaddressed.
+    #[test]
+    fn the_operators_edits_and_flags_are_theirs_and_a_seam_carries_them() {
+        let session = three_decisions_then(
+            |seams| seams.audit = true,
+            vec![deltas(&[
+                "1. KEEP\n2. UPDATE: the model's own take\n3. UPDATE: a model rewrite of the operator's note\n",
+            ])],
+        );
+        let before = live_entries(&session);
+        let (edited, flagged) = (before[1].0.clone(), before[0].0.clone());
+        assert_eq!(
+            session.edit_entry("no-such-entry", "x"),
+            Err(Rejected::Refused(Refusal::UnknownEntry))
+        );
+        assert_eq!(
+            session.flag_entry(&flagged, "   "),
+            Err(Rejected::Refused(Refusal::Empty))
+        );
+        session
+            .edit_entry(&edited, "decision: for the one team that files bugs")
+            .expect("an edit");
+        assert_eq!(
+            session.edit_entry(&edited, "again"),
+            Err(Rejected::Refused(Refusal::NotLive)),
+            "the edited entry is superseded"
+        );
+        session
+            .flag_entry(&flagged, "is this still true?")
+            .expect("a flag");
+        let after = live_entries(&session);
+        let operator = after
+            .iter()
+            .find(|(_, content)| content == "decision: for the one team that files bugs")
+            .expect("the operator's entry")
+            .0
+            .clone();
+        assert!(
+            session
+                .shared
+                .lock()
+                .interview
+                .as_ref()
+                .expect("memory")
+                .object
+                .by_operator(&crate::object::EntryId::new(&operator).expect("an id"))
+        );
+
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the seam", seamed);
+        // The audit listed the operator's entry third; its UPDATE of it is
+        // refused, and the UPDATE of the model's own second note folded.
+        let question = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited { question, .. } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("an audit");
+        assert!(
+            question.contains("3. decision: for the one team that files bugs"),
+            "{question}"
+        );
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PatchRefused { op: log::PatchOp::Supersede, entry, .. } if *entry == operator
+        )));
+        let held: Vec<String> = live_entries(&session)
+            .into_iter()
+            .map(|(_, content)| content)
+            .collect();
+        assert!(held.contains(&"decision: for the one team that files bugs".to_owned()));
+        assert!(held.contains(&"the model's own take".to_owned()));
+        assert!(
+            !held
+                .iter()
+                .any(|content| content.contains("a model rewrite"))
+        );
+        // The edit's patch line names the operator's lane; the flag its own.
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Patched { lane: Some(lane), supersedes: Some(voids), .. }
+                if lane == crate::object::OPERATOR && *voids == edited
+        )));
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::Flagged { entry, note, .. } if *entry == flagged && note == "is this still true?"
+        )));
+        assert_eq!(
+            carried(&log),
+            (
+                Some(vec![
+                    log::OperatorChange {
+                        entry: operator.clone(),
+                        kind: "edit".to_owned()
+                    },
+                    log::OperatorChange {
+                        entry: flagged.clone(),
+                        kind: "flag".to_owned()
+                    },
+                ]),
+                Some(vec![operator, flagged])
+            )
+        );
+        reads_whole(&session);
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+    }
+
+    /// #654's seam smoke run 2: a session with the audit on and two seams --
+    /// two requests on the `audit` lane, the trunk moved between them --
+    /// writes a record that reads back, the audit lane's move named.
+    #[test]
+    fn two_audited_seams_write_a_record_that_reads_back() {
+        let session = three_decisions_then(
+            |seams| seams.audit = true,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["the next answer"]),
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+            ],
+        );
+        session.declare_seam(None).expect("admitted");
+        wait_until(&session, "seam one", seamed);
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "seam two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::Seamed { .. }))
+                .count()
+                == 2
+                && seamed(log)
+        });
+        let audits: Vec<String> = log
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        lane: Lane::Audit,
+                        ..
+                    }
+                )
+            })
+            .map(|logged| format!("q/{}", logged.seq))
+            .collect();
+        assert_eq!(audits.len(), 2);
+        let rows = record_read_back(&session);
+        assert!(
+            rows.iter().any(|event| matches!(
+                event,
+                crate::formats::record::Event::PrefixChanged { at_request, .. } if *at_request == audits[1]
+            )),
+            "the audit lane's move is named"
+        );
     }
 
     /// #504: an answer that is not the ask's audit -- prose, or a line short
@@ -13199,17 +13845,13 @@ pub(in crate::drive) mod tests {
                     .expect("one hole")
             };
             let note = format!("{}\n{}", line("the schema is per-team"), line("no login"));
-            // The first request: the ask, then the note at the tail.
+            // The first request: the ask's own message carries the note,
+            // before its words (#609).
             let first = &sent[0].messages;
-            assert_eq!(&first[first.len() - 2..], &[user("go"), user(&note)]);
-            // The second: the note stayed on the trunk after its ask.
+            assert_eq!(first.last(), Some(&noted("go", &[&note])));
+            // The second: the note stayed on the trunk in its ask.
             let second = &sent[1].messages;
-            assert!(
-                second
-                    .windows(2)
-                    .any(|pair| pair == [user("go"), user(&note)]),
-                "{second:#?}"
-            );
+            assert!(second.contains(&noted("go", &[&note])), "{second:#?}");
             assert_eq!(second.last(), Some(&user("again")));
             // The projection rebuilds both heads with the note, from the log.
             let lines: Vec<log::Line> = log.iter().map(line_of).collect();
@@ -14663,6 +15305,29 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// #609, run 3: the operator's ask is what the model saw too, so a fact
+    /// quoted from it grounds -- the gate's source counts the turn's ask.
+    #[test]
+    fn a_fact_quoted_from_the_operators_ask_is_grounded() {
+        let session = self_capturing(
+            vec![
+                vec![
+                    Step::Delta("Noted.".to_owned()),
+                    record("call-1", "fact", "the dev server must use port 5180"),
+                ],
+                deltas(&["done"]),
+            ],
+            3,
+        );
+        session
+            .ask("Remember: the dev server must use port 5180", None)
+            .expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        let recorded = captures(&log);
+        assert_eq!(recorded.len(), 1, "{recorded:?}");
+        assert_eq!(recorded[0].0, "recorded", "{recorded:?}");
+    }
+
     /// #609: content the model never saw is dropped by the groundedness
     /// gate, nothing is written, and the drop is logged with why.
     #[test]
@@ -14836,7 +15501,9 @@ pub(in crate::drive) mod tests {
     }
 
     /// #609: after the cadence of silent turns the next ask carries the
-    /// reminder as a note after it, logged; the system prompt is untouched.
+    /// reminder, logged, in its own message before the operator's words --
+    /// the ask is what the model answers last (run 3); the system prompt is
+    /// untouched.
     #[test]
     fn the_self_capture_reminder_is_a_note_after_the_next_ask() {
         let session = self_capturing(vec![deltas(&["one"]), deltas(&["two"])], 1);
@@ -14855,9 +15522,10 @@ pub(in crate::drive) mod tests {
             Event::Reminded { turn: 2, text } if text == reminder
         )));
         let sent = session.shared.transport.sent();
+        // In the ask's own message, before its words, so the ask is what
+        // the model answers (#609, run 3).
         let second = &sent[1].messages;
-        assert_eq!(second.last().map(|m| m.content.as_str()), Some(reminder));
-        assert_eq!(second[second.len() - 2].content, "second");
+        assert_eq!(second.last(), Some(&noted("second", &[reminder])));
         assert_eq!(
             second[0], sent[0].messages[0],
             "the system prompt is unchanged"
@@ -15385,14 +16053,13 @@ pub(in crate::drive) mod tests {
                 "{text}"
             );
             assert!(text.contains(SCOPED), "{text}");
-            // The note follows the ask, on the request and on the trunk.
-            let n = asked.messages.len();
+            // The note rides in the ask's message, before its words, on the
+            // request and on the trunk (#609).
             assert_eq!(
-                asked.messages[n - 2].content,
-                "how should the `schema` look?"
+                asked.messages.last(),
+                Some(&noted("how should the `schema` look?", &[text]))
             );
-            assert_eq!(&asked.messages[n - 1].content, text);
-            assert!(session.trunk().iter().any(|m| &m.content == text));
+            assert!(session.trunk().iter().any(|m| m.notes.contains(text)));
             let projected =
                 crate::drive::projection::project(&lines, &regime(), None).expect("projected");
             assert!(
@@ -16504,6 +17171,8 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             line_of(&log[seam]).event,
             log::Event::Seam {
+                operator_changes: None,
+                unaddressed: None,
                 at_turn: 1,
                 reason: log::SeamReason::Operator,
                 prefix_hash_before: prefix_hash_before.clone(),

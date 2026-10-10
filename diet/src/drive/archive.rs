@@ -125,45 +125,173 @@ impl Archive {
         }
     }
 
-    /// The [`TOP`] items holding the most of `query`'s anchors, each with how
-    /// many it holds; ties to the most recently archived. Empty when the
-    /// query has no anchor or no item holds one.
+    /// The [`TOP`] items `query`'s anchors find, best first, each with how
+    /// many anchors it holds and the byte offset its note centres on.
+    ///
+    /// **Ranked, in order, by:** the distinct anchors it holds (in its text
+    /// or title); then whether its text DEFINES one -- the anchor right
+    /// after a definition keyword (`def`, `fn`, `class`, ...), the item a
+    /// question about that name most wants; then how often the anchors
+    /// occur in it; then recency. Recency first among equals let newer
+    /// mentions crowd out an older archive's definition (seam smoke run 3:
+    /// turn 3's `def heading_slug` lost to newer items holding the same
+    /// two anchors).
+    ///
+    /// **Centred on** the densest cluster: the hit with the most distinct
+    /// anchors in the window a note around it would keep, a definition
+    /// among equals, then the earliest. Not the rarest anchor: rarity is a
+    /// fact about the whole archive, and the window is about this item --
+    /// the region that answers most of the question. Empty when the query
+    /// has no anchor or no item holds one.
     #[must_use]
-    pub fn literal(&self, query: &str) -> Vec<(&Item, u64)> {
+    pub fn literal(&self, query: &str) -> Vec<Found<'_>> {
         let anchors = literal::anchors(query);
         if anchors.is_empty() {
             return Vec::new();
         }
-        let mut scored: Vec<(usize, &Item, u64)> = self
+        let mut scored: Vec<(usize, Scored<'_>)> = self
             .items
             .iter()
             .enumerate()
-            .map(|(at, item)| {
-                let held = anchors
-                    .iter()
-                    .filter(|anchor| {
-                        !literal::find(&anchor.text, &item.text).is_empty()
-                            || !literal::find(&anchor.text, &item.title).is_empty()
-                    })
-                    .count() as u64;
-                (at, item, held)
-            })
-            .filter(|(_, _, held)| *held > 0)
+            .filter_map(|(at, item)| scored(item, &anchors).map(|scored| (at, scored)))
             .collect();
-        scored.sort_by(|a, b| b.2.cmp(&a.2).then(b.0.cmp(&a.0)));
+        scored.sort_by(|(a_at, a), (b_at, b)| {
+            b.held
+                .cmp(&a.held)
+                .then(b.defines.cmp(&a.defines))
+                .then(b.hits.len().cmp(&a.hits.len()))
+                .then(b_at.cmp(a_at))
+        });
         scored
             .into_iter()
             .take(TOP)
-            .map(|(_, item, held)| (item, held))
+            .map(|(_, scored)| Found {
+                item: scored.item,
+                score: scored.held,
+                at: centre(&scored.hits),
+            })
             .collect()
     }
 }
 
+/// The keywords a name is defined after, in the languages a session's
+/// tools show: `def` and `class` (Python), `fn`, `struct`, `enum`, `trait`
+/// (Rust), `function`, `class`, `interface`, `type`, `const` (TypeScript),
+/// `func` (Go).
+const DEFINING: &[&str] = &[
+    "def",
+    "class",
+    "fn",
+    "struct",
+    "enum",
+    "trait",
+    "function",
+    "interface",
+    "type",
+    "const",
+    "func",
+];
+
+/// One anchor's occurrence in an item's text: where, which anchor, and
+/// whether it is a definition.
+#[derive(Debug, Clone, Copy)]
+struct Hit {
+    offset: usize,
+    anchor: usize,
+    defines: bool,
+}
+
+/// An item and what the query's anchors find in it.
+struct Scored<'a> {
+    item: &'a Item,
+    held: u64,
+    defines: bool,
+    hits: Vec<Hit>,
+}
+
+/// What `anchors` find in `item`, or `None` when it holds none.
+fn scored<'a>(item: &'a Item, anchors: &[literal::Anchor]) -> Option<Scored<'a>> {
+    let mut hits = Vec::new();
+    let mut held = 0;
+    for (index, anchor) in anchors.iter().enumerate() {
+        let in_text = literal::find(&anchor.text, &item.text);
+        if !in_text.is_empty() || !literal::find(&anchor.text, &item.title).is_empty() {
+            held += 1;
+        }
+        hits.extend(in_text.into_iter().map(|hit| Hit {
+            offset: hit.offset,
+            anchor: index,
+            defines: defined_at(&item.text, hit.offset),
+        }));
+    }
+    (held > 0).then(|| Scored {
+        item,
+        held,
+        defines: hits.iter().any(|hit| hit.defines),
+        hits,
+    })
+}
+
+/// Whether the word right before byte `at` of `text` is a [`DEFINING`]
+/// keyword.
+fn defined_at(text: &str, at: usize) -> bool {
+    let before = text[..at].trim_end();
+    let word = before
+        .rsplit(|c: char| !(c.is_alphanumeric() || c == '_'))
+        .next()
+        .unwrap_or_default();
+    before.len() < at && DEFINING.contains(&word)
+}
+
+/// The hit a note centres on: the most distinct anchors within the window
+/// [`window`] keeps around it (a quarter of [`MAX_BODY_CHARS`] before,
+/// the rest after, counted in bytes), a definition among equals, then the
+/// earliest. `None` for no hit in the text.
+fn centre(hits: &[Hit]) -> Option<usize> {
+    let before = MAX_BODY_CHARS / 4;
+    let after = MAX_BODY_CHARS - before;
+    hits.iter()
+        .map(|hit| {
+            let near: std::collections::BTreeSet<usize> = hits
+                .iter()
+                .filter(|other| {
+                    other.offset + before >= hit.offset && other.offset < hit.offset + after
+                })
+                .map(|other| other.anchor)
+                .collect();
+            (
+                near.len(),
+                hit.defines,
+                std::cmp::Reverse(hit.offset),
+                hit.offset,
+            )
+        })
+        .max()
+        .map(|(.., offset)| offset)
+}
+
+/// An item a literal recall found (#566).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Found<'a> {
+    /// The item.
+    pub item: &'a Item,
+    /// How many of the query's anchors it holds.
+    pub score: u64,
+    /// The byte offset in its text its note centres on ([`Archive::literal`]);
+    /// `None` when it holds the anchors only in its title.
+    pub at: Option<usize>,
+}
+
 /// The note a recall sends: Qwen Code's "Relevant memory" block, each item
-/// under its title and key, its text truncated past [`MAX_BODY_CHARS`],
-/// wrapped as a system reminder. Empty for no items.
+/// under its title and key, wrapped as a system reminder; empty for no
+/// items. A text past [`MAX_BODY_CHARS`] is cut to a window of that many
+/// characters around its first match -- a quarter of it before, so the
+/// match keeps its lead-in -- each elided end marked `[…]`. Cut from the
+/// start, the match could fall outside what was sent (seam smoke run 2:
+/// the matched definition was cut off, and the model rightly said it could
+/// not confirm it existed).
 #[must_use]
-pub fn note(items: &[(&Item, u64)]) -> String {
+pub fn note(items: &[Found<'_>]) -> String {
     if items.is_empty() {
         return String::new();
     }
@@ -175,15 +303,16 @@ pub fn note(items: &[(&Item, u64)]) -> String {
             .to_owned(),
         String::new(),
     ];
-    for (item, _) in items {
+    for found in items {
+        let item = found.item;
+        let lead = item.text.len() - item.text.trim_start().len();
         let text = item.text.trim();
         let body = if text.chars().count() <= MAX_BODY_CHARS {
             text.to_owned()
         } else {
-            let cut: String = text.chars().take(MAX_BODY_CHARS).collect();
             format!(
                 "{}\n\n> NOTE: Relevant memory truncated for prompt budget.",
-                cut.trim_end()
+                window(text, found.at.map(|at| at.saturating_sub(lead)))
             )
         };
         lines.push(format!("### {} ({})", item.title, item.key));
@@ -194,6 +323,27 @@ pub fn note(items: &[(&Item, u64)]) -> String {
     format!(
         "<system-reminder>\n{}\n</system-reminder>",
         lines.join("\n")
+    )
+}
+
+/// [`MAX_BODY_CHARS`] characters of `text` around the byte offset `at` --
+/// from the start when there is none -- a quarter of them before it, the
+/// window kept inside the text, each end that elides text marked `[…]`.
+fn window(text: &str, at: Option<usize>) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let at = at
+        .filter(|at| text.is_char_boundary(*at))
+        .map_or(0, |at| text[..at].chars().count());
+    let start = at
+        .saturating_sub(MAX_BODY_CHARS / 4)
+        .min(chars.len().saturating_sub(MAX_BODY_CHARS));
+    let end = (start + MAX_BODY_CHARS).min(chars.len());
+    let cut: String = chars[start..end].iter().collect();
+    format!(
+        "{}{}{}",
+        if start > 0 { "[…] " } else { "" },
+        cut.trim(),
+        if end < chars.len() { " […]" } else { "" }
     )
 }
 
@@ -227,7 +377,7 @@ mod tests {
         let hits: Vec<(&str, u64)> = archive
             .literal("where is parse_regimen in src/regimen.rs")
             .into_iter()
-            .map(|(item, held)| (item.key.as_str(), held))
+            .map(|found| (found.item.key.as_str(), found.score))
             .collect();
         assert_eq!(hits, [("a", 2), ("e", 1), ("d", 1)]);
         assert!(
@@ -245,19 +395,137 @@ mod tests {
             " we chose parse_regimen \n",
         );
         let second = item("entry/e-1", "a retired entry", &long);
-        let text = note(&[(&first, 1), (&second, 1)]);
+        let found = |item, score| Found {
+            item,
+            score,
+            at: None,
+        };
+        let text = note(&[found(&first, 1), found(&second, 1)]);
         assert_eq!(
             text,
             format!(
                 "<system-reminder>\n## Relevant memory\n\nUse the following memories only when \
                  they are directly relevant to the current request. Verify file/function claims \
                  before relying on them.\n\n### an answer (seam-2/message-1)\n\nwe chose \
-                 parse_regimen\n\n### a retired entry (entry/e-1)\n\n{}\n\n> NOTE: Relevant memory \
+                 parse_regimen\n\n### a retired entry (entry/e-1)\n\n{} […]\n\n> NOTE: Relevant memory \
                  truncated for prompt budget.\n\n</system-reminder>",
                 "x".repeat(MAX_BODY_CHARS)
             )
         );
         assert_eq!(note(&[]), "");
+    }
+
+    /// #566, seam smoke run 2: a match past the first [`MAX_BODY_CHARS`]
+    /// characters is in the note -- a window around it, a quarter before,
+    /// both elided ends marked -- not cut off with the rest.
+    #[test]
+    fn a_long_items_note_keeps_the_window_around_its_match() {
+        let before = "a".repeat(MAX_BODY_CHARS * 2);
+        let after = "z".repeat(MAX_BODY_CHARS);
+        let mut archive = Archive::default();
+        archive.push(item(
+            "seam-1/message-3",
+            "a tool result",
+            &format!(
+                "{before} fn local_path(root: &Path) -> PathBuf {{ root.join(\"x\") }} {after}"
+            ),
+        ));
+        let found = archive.literal("does local_path exist?");
+        let [hit] = found.as_slice() else {
+            panic!("one item: {found:?}");
+        };
+        assert_eq!(hit.at, Some(MAX_BODY_CHARS * 2 + 4));
+        let text = note(&found);
+        assert!(
+            text.contains("fn local_path(root: &Path) -> PathBuf"),
+            "{text}"
+        );
+        let body = text
+            .split("\n\n")
+            .find(|part| part.contains("local_path"))
+            .expect("the body");
+        assert!(
+            body.starts_with("[…] a") && body.ends_with("z […]"),
+            "{body}"
+        );
+        let kept = body.trim_start_matches("[…] ").trim_end_matches(" […]");
+        assert!(
+            kept.chars().count() <= MAX_BODY_CHARS,
+            "{}",
+            kept.chars().count()
+        );
+        // The anchor itself sits a quarter of the window in.
+        let lead = kept.find("local_path").expect("the match");
+        assert_eq!(kept[..lead].chars().count(), MAX_BODY_CHARS / 4);
+    }
+
+    /// #566, seam smoke run 3: among items holding the same anchors, the
+    /// one that defines the asked name comes first however old it is; then
+    /// the one where the anchors occur most; recency only after both.
+    #[test]
+    fn a_tie_goes_to_the_definition_then_the_most_occurrences_then_recency() {
+        let mut archive = Archive::default();
+        archive.push(item(
+            "seam-1/message-7",
+            "a tool result",
+            "render.py:\ndef heading_slug(text):\n    return text.lower()",
+        ));
+        archive.push(item(
+            "seam-8/message-45",
+            "an answer",
+            "render.py calls heading_slug twice; heading_slug is unchanged",
+        ));
+        archive.push(item(
+            "seam-8/message-46",
+            "an answer",
+            "render.py still uses heading_slug",
+        ));
+        archive.push(item(
+            "seam-8/message-50",
+            "an answer",
+            "heading_slug in render.py is fine",
+        ));
+        let hits: Vec<(&str, u64)> = archive
+            .literal("the helper heading_slug from the very first version of render.py")
+            .into_iter()
+            .map(|found| (found.item.key.as_str(), found.score))
+            .collect();
+        assert_eq!(
+            hits,
+            [
+                ("seam-1/message-7", 2),
+                ("seam-8/message-45", 2),
+                ("seam-8/message-50", 2)
+            ]
+        );
+    }
+
+    /// #566, seam smoke run 3: the note centres on the region holding the
+    /// most of the asked anchors, a definition among equals -- not on the
+    /// first mention of any of them.
+    #[test]
+    fn a_note_centres_on_the_densest_region_not_the_first_mention() {
+        let filler = "a ".repeat(MAX_BODY_CHARS);
+        let text = format!(
+            "see heading_slug below\n{filler}\nrender.py:\ndef heading_slug(text):\n{filler}"
+        );
+        let definition = text.find("heading_slug(").expect("the definition");
+        let mut archive = Archive::default();
+        archive.push(item("seam-1/message-7", "a tool result", &text));
+        let found = archive.literal("heading_slug in render.py");
+        let [hit] = found.as_slice() else {
+            panic!("one item: {found:?}");
+        };
+        // render.py and the definition are in the window from either; of
+        // the two densest hits, the definition is the centre.
+        assert_eq!(hit.at, Some(definition));
+        assert!(text.find("render.py") < Some(definition));
+        assert!(note(&found).contains("def heading_slug(text)"));
+        // Equal density: the definition, not the earlier mention.
+        let mut archive = Archive::default();
+        archive.push(item("seam-1/message-7", "a tool result", &text));
+        let found = archive.literal("where is heading_slug defined");
+        assert_eq!(found[0].at, Some(definition));
     }
 
     #[test]

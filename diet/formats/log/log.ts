@@ -29,6 +29,8 @@ export type Kind =
   | "seam"
   | "delivered"
   | "recalled"
+  | "flag"
+  | "patch.refused"
   | "pruned"
   | "phase.ruled"
   | "tangent.open"
@@ -63,6 +65,8 @@ export type Command =
   | "close-tangent"
   | "background"
   | "ratify-phase"
+  | "edit-entry"
+  | "flag-entry"
 ;
 
 export type Refusal =
@@ -82,6 +86,9 @@ export type Refusal =
   | "not-the-scope"
   | "nothing-running"
   | "no-proposal"
+  | "unknown-entry"
+  | "not-live"
+  | "empty"
 ;
 
 export type FailReason =
@@ -299,6 +306,11 @@ export interface RecalledItem {
   score: number;
 }
 
+export interface OperatorChange {
+  entry: string;
+  kind: string;
+}
+
 export interface ToolCallPiece {
   index: number;
   id?: string;
@@ -351,6 +363,7 @@ export type SessionStartLine = {
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
   levers?: Record<string, string>;
+  notes_in_the_ask?: boolean;
   fork_asks?: string;
   fork_asks_digest?: string;
   reasoning_effort_default?: string;
@@ -424,10 +437,12 @@ export type ResponseLine = {
   text: string;
   finish_reason?: string;
   reasoning?: string;
+  timings?: Timings;
+  usage?: Usage;
   capped?: boolean;
   reasoning_signature?: string;
   redacted?: string[];
-} & ({ timings?: Timings; usage?: never } | { usage?: Usage; timings?: never });
+};
 
 export type CancelledLine = {
   seq: number;
@@ -575,6 +590,8 @@ export type SeamLine = {
   prompt_tokens?: number;
   window?: number;
   pruned?: string[];
+  operator_changes?: OperatorChange[];
+  unaddressed?: string[];
   warm?: Timings;
 };
 
@@ -596,6 +613,26 @@ export type RecalledLine = {
   recall: RecallState;
   text: string;
   items: RecalledItem[];
+};
+
+export type FlagLine = {
+  seq: number;
+  t: number;
+  kind: "flag";
+  turn: number;
+  entry: string;
+  note: string;
+};
+
+export type PatchRefusedLine = {
+  seq: number;
+  t: number;
+  kind: "patch.refused";
+  fork?: number;
+  lane?: string;
+  op: PatchOp;
+  entry: string;
+  reason: string;
 };
 
 export type PrunedLine = {
@@ -723,6 +760,8 @@ export type LogLine =
   | SeamLine
   | DeliveredLine
   | RecalledLine
+  | FlagLine
+  | PatchRefusedLine
   | PrunedLine
   | PhaseRuledLine
   | TangentOpenLine

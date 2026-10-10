@@ -40,7 +40,7 @@ target/debug/diet-drive serve --endpoint "$DIET_ENDPOINT" --model <served model 
 **`--log` and `--record` are part of the drive, not options to it.** The drive exists to produce a recording, and a session run without them is a rehearsal. The two outputs:
 
 - **`--log`** is the session's log, written as each line is appended. It holds byte for byte what `GET /events` streams.
-- **`--record`** is the session's record, written once when the session ends. It is projected from the log, with `session.record.jsonl.unspellable.json` beside it naming what the record cannot spell. Both digests are reported on stdout.
+- **`--record`** is the session's record, written once when the session ends. It is projected from the log, with `session.record.jsonl.unspellable.json` beside it naming what the record cannot spell. Both digests are reported on stdout. The record is read back before it is written. A row the reader proves missing (a `prefix.changed` it owes) is added as `unattributed`, and the repair is named in the sidecar's `repairs`. Any other refusal leaves the record empty and keeps the projected rows at `session.record.jsonl.refused.jsonl`, with the refusal in the sidecar and on the end line, and serve exits as for a record it could not write (#645).
 
 If a file already holds something, naming it empties it. The first stdout line says so (`log_truncated`, `record_truncated`), and a failure after the emptying names what it emptied. A start refused for its usage, its regimen or the engine check empties nothing: those refusals come first.
 

@@ -639,7 +639,13 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
               </button>
             ) : null}
             <div className="ex-drawer__body" inert={drawer && !drawerOpen}>
-              <Memory entries={session.memory} seenThrough={seenThrough} onSeen={() => setSeenThrough(session.events - 1)} />
+              <Memory
+                entries={session.memory}
+                seenThrough={seenThrough}
+                onSeen={() => setSeenThrough(session.events - 1)}
+                // The served drive takes the operator's edits and flags (#150); the canned script and a replay do not.
+                {...(composer.tangents && composer.dispatch ? { act: composer.dispatch } : {})}
+              />
               <Receipt receipt={session.receipt} />
             </div>
           </aside>

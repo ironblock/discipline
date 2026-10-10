@@ -603,6 +603,7 @@ mod tests {
                 max_output_tokens: 64,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: BTreeMap::new(),

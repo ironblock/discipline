@@ -583,6 +583,7 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
             reasoning_signature: None,
             redacted: Vec::new(),
             tool_error: false,
+            notes: Vec::new(),
         }];
         // Immediately before the call, like `Heads::about_to_call`: what a
         // cache lifetime is compared against is the gap between two
@@ -884,6 +885,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             reasoning_signature: None,
             redacted: Vec::new(),
             tool_error: false,
+            notes: Vec::new(),
         }];
         asking
             .template_kwargs
@@ -957,6 +959,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 reasoning_signature: None,
                 redacted: Vec::new(),
                 tool_error: false,
+                notes: Vec::new(),
             },
             Message {
                 role: Role::User,
@@ -968,6 +971,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 reasoning_signature: None,
                 redacted: Vec::new(),
                 tool_error: false,
+                notes: Vec::new(),
             },
         ];
         // THE LINT, before the call. The main lane is the one whose head
@@ -996,7 +1000,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
 
         events.push(Event::Turn {
             index,
-            prefill_tokens: prefill,
+            prefill_tokens: Some(prefill),
+            prefill_from: None,
             files: None,
         });
         prefill_total = prefill_total.saturating_add(prefill);
@@ -1046,6 +1051,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 reasoning_signature: None,
                 redacted: Vec::new(),
                 tool_error: false,
+                notes: Vec::new(),
             }];
             linted_head(&asking, index, INTERVIEW)?;
             heads.about_to_call(INTERVIEW);
@@ -1227,6 +1233,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 prompt_tokens: None,
                 window: None,
                 pruned: None,
+                operator_changes: None,
+                unaddressed: None,
             });
             seams.push(seam);
         }
@@ -1246,7 +1254,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
     events.push(Event::Summary {
         summary: Summary::Drive {
             turns,
-            prefill_tokens_total: prefill_total,
+            prefill_tokens_total: Some(prefill_total),
         },
         product_sha256: crate::digest::sha256_hex(product.as_bytes()),
     });
@@ -1531,6 +1539,7 @@ mod tests {
                 // nothing.
                 retries: 1,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
@@ -1932,8 +1941,8 @@ mod tests {
         };
         assert_eq!(*turns, 3);
         assert_eq!(
-            prefill_tokens_total.get(),
-            1800,
+            prefill_tokens_total.map(Count::get),
+            Some(1800),
             "three turns at the 600 the canned server reported; the record's own \
              parser refuses a summary that disagrees with its rows, so this is \
              asserting the number rather than the agreement"

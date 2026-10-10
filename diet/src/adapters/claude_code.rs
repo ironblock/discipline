@@ -131,7 +131,7 @@
 use std::collections::BTreeMap;
 
 use super::{Adapted, Adapter, Census, Drift};
-use crate::formats::record::{CompactionSource, Count, Event, json::Value};
+use crate::formats::record::{CompactionSource, Count, CountSource, Event, json::Value};
 
 /// The Claude Code session-log adapter.
 #[derive(Debug, Clone, Copy, Default)]
@@ -534,16 +534,16 @@ impl Run {
         let prefill = if let Some(counted) = prefill_after(rest)? {
             counted
         } else {
-            // The record's `Turn::prefill_tokens` is a `Count`, not an
-            // `Option<Count>`, so there is no way to say "the log did not
-            // say". The zero goes in and is declared, which is the only
-            // honest option without a change to `diet/formats/`.
+            // The zero goes in and is declared in the census. (Since #645 a
+            // record can leave the count absent; this adapter keeps its
+            // declared assumption, which its census pins.)
             self.census.assumed_one(PREFILL_ASSUMED);
             Count::default()
         };
         self.events.push(Event::Turn {
             index: self.turn,
-            prefill_tokens: prefill,
+            prefill_tokens: Some(prefill),
+            prefill_from: None,
             files: None,
         });
         self.events.push(Event::Request {
@@ -700,7 +700,8 @@ impl Run {
             cache_creation_1h: None,
             id: format!("a/{}", self.events.len()),
             to_request: format!("u/{}", self.turn),
-            output_tokens: count_of(at_row, "message.usage.output_tokens", tokens)?,
+            output_tokens: Some(count_of(at_row, "message.usage.output_tokens", tokens)?),
+            output_from: Some(CountSource::Usage),
             text: (!spoke.trim().is_empty()).then_some(spoke),
             timings: None,
         });
@@ -1458,7 +1459,9 @@ mod tests {
             .events
             .iter()
             .find_map(|e| match e {
-                Event::Turn { prefill_tokens, .. } => Some(prefill_tokens.get()),
+                Event::Turn { prefill_tokens, .. } => {
+                    prefill_tokens.map(crate::formats::record::Count::get)
+                }
                 _ => None,
             })
             .expect("one turn opened");
@@ -1497,7 +1500,9 @@ mod tests {
             .events
             .iter()
             .find_map(|e| match e {
-                Event::Turn { prefill_tokens, .. } => Some(prefill_tokens.get()),
+                Event::Turn { prefill_tokens, .. } => {
+                    prefill_tokens.map(crate::formats::record::Count::get)
+                }
                 _ => None,
             })
             .expect("one turn opened");
@@ -1582,8 +1587,8 @@ mod tests {
             panic!("the turn is there")
         };
         assert_eq!(
-            prefill_tokens.get(),
-            2 + 22468 + 38639,
+            prefill_tokens.map(crate::formats::record::Count::get),
+            Some(2 + 22468 + 38639),
             "cached tokens were still fed to the model; `input_tokens` alone would \
              record a prefill of 2 for a turn that prefilled sixty-one thousand"
         );
@@ -1839,7 +1844,10 @@ mod tests {
                     output_tokens,
                     text,
                     ..
-                } => Some((output_tokens.get(), text.as_deref())),
+                } => Some((
+                    output_tokens.map_or(0, crate::formats::record::Count::get),
+                    text.as_deref(),
+                )),
                 _ => None,
             })
             .collect();
@@ -1908,7 +1916,9 @@ mod tests {
             .events
             .iter()
             .filter_map(|event| match event {
-                Event::Turn { prefill_tokens, .. } => Some(prefill_tokens.get()),
+                Event::Turn { prefill_tokens, .. } => {
+                    prefill_tokens.map(crate::formats::record::Count::get)
+                }
                 _ => None,
             })
             .collect();

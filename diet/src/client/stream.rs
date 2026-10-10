@@ -565,7 +565,18 @@ impl Streaming for HttpStream {
         let timeout = || TransportFailure::Timeout {
             after: started.elapsed(),
         };
-        let remaining = || left_before(deadline, Instant::now());
+        // Each wait -- the connect, the write, every read -- is given the
+        // idle budget, re-armed by whatever arrives, and never past the
+        // call's deadline (#569).
+        let remaining = || {
+            let now = Instant::now();
+            let deadline = shape
+                .limits
+                .idle
+                .and_then(|idle| now.checked_add(idle))
+                .map_or(deadline, |idle| idle.min(deadline));
+            left_before(deadline, now)
+        };
 
         // A stop already asked for is honoured before anything is opened.
         // One asked for DURING the connect is not: `std` offers no way to
@@ -577,7 +588,8 @@ impl Streaming for HttpStream {
         }
         // Over TLS for an `https` endpoint (#555): the handshake is part
         // of the connect, and the stopper below shuts the socket under it.
-        let mut socket = super::tls::connect(&self.endpoint, &self.trust, deadline, started)?;
+        let connect_by = Instant::now() + remaining().ok_or_else(timeout)?;
+        let mut socket = super::tls::connect(&self.endpoint, &self.trust, connect_by, started)?;
 
         // The stopper: a second handle on the same socket, shut from
         // whichever thread asks. Shutting it is what makes a read blocked
@@ -883,6 +895,26 @@ impl Reading {
         // choices when it was not (`wire.rs`, `streaming_body`).
         if let Some(timings) = value.get("timings").filter(|timings| timings.is_object()) {
             self.timings = Some(Timings::read(timings));
+        }
+        // The server's own counts on the usage chunk (#645), as the
+        // OpenAI-compatible servers send them when `include_usage` is
+        // asked for: both counts, and the cached share where named.
+        if let Some(usage) = value.get("usage").filter(|usage| usage.is_object())
+            && let (Some(prompt), Some(completion)) = (
+                usage.get("prompt_tokens").and_then(Value::as_u64),
+                usage.get("completion_tokens").and_then(Value::as_u64),
+            )
+        {
+            let cached = usage
+                .pointer("/prompt_tokens_details/cached_tokens")
+                .and_then(Value::as_u64);
+            let counts = super::anthropic::Usage {
+                input_tokens: Some(prompt.saturating_sub(cached.unwrap_or(0))),
+                output_tokens: Some(completion),
+                cache_read_input_tokens: cached,
+                ..super::anthropic::Usage::default()
+            };
+            on_delta(Piece::Usage(&counts));
         }
         if let Some(choice) = value
             .get("choices")
@@ -1323,6 +1355,7 @@ mod tests {
                 max_output_tokens: 16,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
@@ -1556,7 +1589,9 @@ mod tests {
             Piece::Reasoning(reasoning) => {
                 panic!("reasoning where only text was sent: {reasoning:?}")
             }
-            Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+            // The server's counts (#645): no text.
+            Piece::Usage(_) => String::new(),
+            Piece::Signature(_) | Piece::Redacted(_) => {
                 panic!("a hosted piece from an OpenAI stream")
             }
             Piece::Progress(progress) => panic!("progress where only text was sent: {progress:?}"),
@@ -1589,7 +1624,9 @@ mod tests {
                 pieces.push(match piece {
                     Piece::Reasoning(reasoning) => (true, reasoning.to_owned()),
                     Piece::Text(text) => (false, text.to_owned()),
-                    Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                    // The server's counts (#645), read apart.
+                    Piece::Usage(_) => return,
+                    Piece::Signature(_) | Piece::Redacted(_) => {
                         panic!("a hosted piece from an OpenAI stream")
                     }
                     Piece::Progress(progress) => {
@@ -1948,7 +1985,9 @@ mod tests {
                 owned.push(match piece {
                     Piece::Text(text) => (0, text.to_owned(), None),
                     Piece::Reasoning(text) => (1, text.to_owned(), None),
-                    Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                    // The server's counts (#645), read apart.
+                    Piece::Usage(_) => return,
+                    Piece::Signature(_) | Piece::Redacted(_) => {
                         panic!("a hosted piece from an OpenAI stream")
                     }
                     Piece::Progress(progress) => (2, String::new(), Some(progress)),
@@ -2032,7 +2071,9 @@ mod tests {
         let ended = reading
             .feed(raw.as_bytes(), usize::MAX, &mut |piece| {
                 pieces.push(match piece {
-                    Piece::Signature(_) | Piece::Redacted(_) | Piece::Usage(_) => {
+                    // The server's counts (#645), read apart.
+                    Piece::Usage(_) => return,
+                    Piece::Signature(_) | Piece::Redacted(_) => {
                         panic!("a hosted piece from an OpenAI stream")
                     }
                     Piece::Progress(progress) => format!("progress {}", progress.processed),
@@ -2168,7 +2209,16 @@ mod tests {
         let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
         let transport = HttpStream::new(endpoint(&stub));
         let mut pieces = Vec::new();
+        let mut counts = None;
         let ended = transport.stream(&shape(), deadline(), &Cancel::new(), &mut |piece| {
+            if let Piece::Usage(usage) = piece {
+                counts = Some((
+                    usage.prompt_tokens(),
+                    usage.output_tokens,
+                    usage.cache_read_input_tokens,
+                ));
+                return;
+            }
             pieces.push(text(piece));
         });
         assert_eq!(
@@ -2179,6 +2229,9 @@ mod tests {
             })
         );
         assert_eq!(pieces, CAPTURED_PIECES);
+        // The server's own counts off its usage chunk (#645): 29 prompt
+        // tokens, 28 of them cached, and 6 generated.
+        assert_eq!(counts, Some((Some(29), Some(6), Some(28))));
         let sent = stub.received();
         assert!(
             sent[0].contains(r#""stream":true"#) && sent[0].contains(r#""include_usage":true"#),
@@ -2296,7 +2349,9 @@ mod tests {
         for byte in CAPTURED {
             if let Some(done) = reading
                 .feed(std::slice::from_ref(byte), usize::MAX, &mut |piece| {
-                    pieces.push(text(piece));
+                    if !matches!(piece, Piece::Usage(_)) {
+                        pieces.push(text(piece));
+                    }
                 })
                 .expect("the captured bytes are a well-formed stream")
             {
@@ -2475,6 +2530,65 @@ mod tests {
             "the client left after {after:?}"
         );
         drop(cancel);
+    }
+
+    /// #569: the idle budget bounds each silence, not the call. A server
+    /// that goes quiet past it is a timeout, long before the call's deadline.
+    #[test]
+    fn a_silence_past_the_idle_budget_is_a_timeout_before_the_deadline() {
+        let piece =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"Hel"},"finish_reason":null}]}"#;
+        let stub = Stub::serving(vec![Act::StreamThenHold(vec![format!("{piece}\n\n")])])
+            .expect("loopback");
+        let mut idle = shape();
+        idle.limits.idle = Some(Duration::from_millis(300));
+        let started = Instant::now();
+        let mut seen = Vec::new();
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &idle,
+            Instant::now() + Duration::from_secs(10),
+            &Cancel::new(),
+            &mut |piece| seen.push(format!("{piece:?}")),
+        );
+        assert!(
+            matches!(ended, Err(TransportFailure::Timeout { .. })),
+            "{ended:?}"
+        );
+        assert_eq!(seen.len(), 1, "the piece before the silence: {seen:?}");
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "{:?}",
+            started.elapsed()
+        );
+    }
+
+    /// #569: whatever arrives re-arms the idle budget, so a stream slower in
+    /// total than the budget -- never silent that long -- runs to its end.
+    #[test]
+    fn a_stream_that_never_goes_quiet_outlasts_its_idle_budget() {
+        let piece =
+            r#"data: {"choices":[{"index":0,"delta":{"content":"a"},"finish_reason":null}]}"#;
+        let mut pieces = vec![format!("{piece}\n\n"); 6];
+        pieces.push("data: [DONE]\n\n".to_owned());
+        let stub = Stub::serving(vec![Act::Trickle(Duration::from_millis(100), pieces)])
+            .expect("loopback");
+        let mut idle = shape();
+        idle.limits.idle = Some(Duration::from_millis(400));
+        let started = Instant::now();
+        let mut answer = String::new();
+        let ended = HttpStream::new(endpoint(&stub)).stream(
+            &idle,
+            deadline(),
+            &Cancel::new(),
+            &mut |piece| {
+                if let Piece::Text(text) = piece {
+                    answer.push_str(text);
+                }
+            },
+        );
+        assert!(ended.is_ok(), "{ended:?}");
+        assert_eq!(answer, "aaaaaa");
+        assert!(started.elapsed() > Duration::from_millis(400));
     }
 
     #[test]

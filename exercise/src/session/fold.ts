@@ -281,6 +281,9 @@ export interface SeamNode extends Provenance {
   readonly carried?: { readonly entries: number; readonly turns: number };
   /** An automatic seam's size (log v7, #633): the prompt it was fired at, and the window that fired it. */
   readonly size?: { readonly promptTokens: number; readonly window: number };
+  /** What the operator changed in working memory since the last seam (log v7, #150), and the flags this seam left open. */
+  readonly operatorChanges?: readonly { readonly entry: string; readonly kind: string }[];
+  readonly unaddressed?: readonly string[];
 }
 
 export interface Era {
@@ -313,6 +316,10 @@ export interface MemoryEntry extends Provenance {
   readonly lane?: string;
   /** The tangent it was born in (a patch's `tangent`, #608): what that tangent's close rules on. */
   readonly tangent?: string;
+  /** The operator's flag on it (log v7's `flag`, #150): their note, kept until a seam addresses it. Folded, not yet drawn. */
+  readonly flag?: string;
+  /** The model's writes refused over this operator entry (log v7's `patch.refused`, #150): each op, and who tried it. */
+  readonly refusedWrites?: readonly { readonly op: string; readonly by: string }[];
 }
 
 export type SessionState = 'connecting' | 'awaiting' | 'turn' | 'capture' | 'ratify' | 'ended';
@@ -744,6 +751,18 @@ export function fold(lines: readonly LogLine[]): Session {
         entries.set(e.entry.id, { ...old, ...base, op: e.op, from: [...old.from, e.seq] });
         break;
       }
+      // The operator's flag (#150): a note on the entry, its state unchanged.
+      case 'flag': {
+        const flagged = entries.get(e.entry);
+        if (flagged) entries.set(e.entry, { ...flagged, flag: e.note });
+        break;
+      }
+      // A model's patch refused over the operator's entry (#150): nothing in working memory changed.
+      case 'patch.refused': {
+        const target = entries.get(e.entry);
+        if (target) entries.set(e.entry, { ...target, refusedWrites: [...(target.refusedWrites ?? []), { op: e.op, by: e.fork !== undefined ? `fork ${e.fork}` : (e.lane ?? 'the model') }] });
+        break;
+      }
       case 'delivered':
         deliveries.set(e.turn, e);
         break;
@@ -1009,6 +1028,8 @@ export function fold(lines: readonly LogLine[]): Session {
             : {}),
           ...(seamLine.warm ? { warm: seamLine.warm } : {}),
           ...(seamLine.prompt_tokens !== undefined && seamLine.window !== undefined ? { size: { promptTokens: seamLine.prompt_tokens, window: seamLine.window } } : {}),
+          ...(seamLine.operator_changes !== undefined && seamLine.operator_changes.length > 0 ? { operatorChanges: seamLine.operator_changes } : {}),
+          ...(seamLine.unaddressed !== undefined && seamLine.unaddressed.length > 0 ? { unaddressed: seamLine.unaddressed } : {}),
           ...provenance(seamLine),
         })
       : undefined;

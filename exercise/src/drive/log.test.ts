@@ -56,6 +56,15 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(answer?.kind === 'assistant' && answer.text).toBe(response?.kind === 'response' ? response.text : undefined);
   });
 
+  it("carries the operator's edit and flag onto working memory (v7, #150)", () => {
+    const file = 'a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl';
+    const memory = fold(logOf(file)).memory;
+    const edited = memory.find((entry) => entry.id === 'd2');
+    expect(edited?.lane).toBe('operator');
+    expect(edited?.flag).toBe('is one team enough?');
+    expect(memory.find((entry) => entry.id === 'd1')?.state).toBe('superseded');
+  });
+
   it('carries a prune on the turn that made it (v7, #612)', () => {
     const file = 'a-v7-prune-applied-at-the-turns-seam.jsonl';
     const line = logOf(file).find((l) => l.kind === 'pruned');
@@ -298,6 +307,21 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(ruled.phase).toBe('build');
     const call = ruled.eras[0]?.nodes.find((n) => n.kind === 'tool' && n.tool === 'propose_phase_transition');
     expect(call?.kind === 'tool' && call.ruled).toEqual({ choice: 'continue', to: 'build' });
+  });
+
+  it('folds the operator’s edit and flag, the model writes refused over that entry, and the seam’s account of them (#150, #655)', () => {
+    const session = fold(logOf('a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl'));
+    expect([...session.unknown.keys()]).toEqual([]);
+    const d2 = session.memory.find((e) => e.id === 'd2');
+    expect([d2?.lane, d2?.flag, d2?.refusedWrites]).toEqual([
+      'operator',
+      'is one team enough?',
+      [
+        { op: 'retire', by: 'self-capture' },
+        { op: 'supersede', by: 'fork 7' },
+      ],
+    ]);
+    expect(session.eras[1]?.seam).toMatchObject({ operatorChanges: [{ entry: 'd2', kind: 'edit' }, { entry: 'd2', kind: 'flag' }], unaddressed: ['d2'] });
   });
 
   it('takes the state from the log: an ended session is ended', () => {

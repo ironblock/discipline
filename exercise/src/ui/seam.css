@@ -41,3 +41,8 @@
 .ex-seam__size {
   color: var(--warn);
 }
+
+/* The operator's changes the refill carried, and the flags it left open (#150). */
+.ex-seam__operator {
+  color: var(--warn);
+}

@@ -377,7 +377,15 @@ fn serve(args: &[String]) -> ExitCode {
             sha256: file.sha256.clone(),
         })
         .collect();
-    let mut shape = trunk(model, system, max_output_tokens, sampler);
+    // The regimen's, else the default (#569); no regimen, the default.
+    let stream_idle = match read_at_start.as_ref() {
+        Some(read) => read.stream_idle,
+        None => match diet::drive::regimen::stream_idle(None) {
+            Ok(idle) => idle,
+            Err(why) => return fail(EXIT_INPUT, &why),
+        },
+    };
+    let mut shape = trunk(model, system, max_output_tokens, sampler, stream_idle);
     // The regime's reasoning state, on every request, the forks' included
     // (R1): a clone of the trunk carries it.
     // A budget no template variable carries is recorded and announced as
@@ -717,6 +725,7 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
     // The log was written as each line was appended; the record is written
     // here, once, after `ended` and before the server stops -- in order, on
     // this thread, so nothing races the exit (#315's second review).
+    let mut record_refused = false;
     if let Some((regime, (path, file))) = running.record {
         match written_record(
             session,
@@ -724,11 +733,14 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
             (&path, file),
             running.recording.as_deref(),
         ) {
-            Ok(report) => {
+            Ok((report, refused)) => {
                 let _ = std::io::Write::write_all(
                     &mut std::io::stdout().lock(),
                     format!("{report}\n").as_bytes(),
                 );
+                // Refused, the rows were kept and the line says where; the
+                // exit still says the record was not written (#645).
+                record_refused = refused;
             }
             Err(why) => {
                 return fail(
@@ -760,6 +772,9 @@ fn ended(session: &Session<HttpStream>, running: Running) -> ExitCode {
     }
     session.end_commands();
     running.server.finish(std::time::Duration::from_secs(5));
+    if record_refused {
+        return ExitCode::from(EXIT_OUTPUT);
+    }
     ExitCode::SUCCESS
 }
 
@@ -1527,6 +1542,8 @@ struct ReadAtStart {
     levers: BTreeMap<String, String>,
     /// The output cap the session runs at, and where it came from.
     output_cap: (u32, &'static str),
+    /// How long a streamed call may go silent (#569); `None` for unbounded.
+    stream_idle: Option<std::time::Duration>,
 }
 
 /// Project the ended session, check the record reads back, and write it and
@@ -1536,9 +1553,9 @@ fn written_record(
     (regime, read_at_start): (&diet::formats::record::Regime, Option<&ReadAtStart>),
     (path, mut file): (&str, std::fs::File),
     recording: Option<&std::path::Path>,
-) -> Result<String, String> {
+) -> Result<(String, bool), String> {
     use diet::drive::projection;
-    use diet::formats::record::{self, Record};
+    use diet::formats::record;
     let engine =
         diet::drive::registry::identity(diet::drive::registry::REGISTRY, &regime.substrates[0].id)
             .ok()
@@ -1560,40 +1577,58 @@ fn written_record(
     // the working memory at the session's end, kept beside the record as
     // FILE.product.txt so `sha256sum` recomputes the digest the row claims.
     let product = session.product();
+    // A total only when every turn's count was spelled (#645).
     let (turns, prefill) = projected
         .events
         .iter()
-        .fold((0u32, 0u64), |(n, total), event| match event {
-            record::Event::Turn { prefill_tokens, .. } => (n + 1, total + prefill_tokens.get()),
+        .fold((0u32, Some(0u64)), |(n, total), event| match event {
+            record::Event::Turn { prefill_tokens, .. } => (
+                n + 1,
+                total
+                    .zip(*prefill_tokens)
+                    .map(|(total, count)| total + count.get()),
+            ),
             _ => (n, total),
         });
     projected.events.push(record::Event::Summary {
         summary: record::Summary::Drive {
             turns,
-            prefill_tokens_total: record::Count::new(prefill)
+            prefill_tokens_total: prefill
+                .map(record::Count::new)
+                .transpose()
                 .map_err(|why| format!("prefill_tokens_total: {why:?}"))?,
         },
         product_sha256: diet::digest::sha256_hex(product.as_bytes()),
     });
     let product_path = format!("{path}.product.txt");
     std::fs::write(&product_path, &product).map_err(|why| format!("{product_path}: {why}"))?;
-    let text = record::render(&Record {
-        events: projected.events.clone(),
-    });
-    record::parse(&text)
-        .map_err(|why| format!("the projected record does not read back: {why:?}"))?;
-    let sidecar = projection::sidecar(&projected) + "\n";
-    let sidecar_path = format!("{path}.unspellable.json");
-    file.set_len(0)
-        .and_then(|()| std::io::Write::write_all(&mut file, text.as_bytes()))
-        .map_err(|why| format!("{path}: {why}"))?;
-    std::fs::write(&sidecar_path, &sidecar).map_err(|why| format!("{sidecar_path}: {why}"))?;
-    let mut report = BTreeMap::from([
-        ("record".to_owned(), Value::String(path.to_owned())),
-        (
-            "record_sha256".to_owned(),
-            Value::String(diet::digest::sha256_hex(text.as_bytes())),
-        ),
+    // Read back through the repairs the table allows; refused, the rows are
+    // kept beside the record and the line says so (#645).
+    let (kept, sidecar_path, sidecar) = projection::kept(&mut projected, path, &mut file)?;
+    let refused = matches!(kept, projection::Kept::Refused { .. });
+    let mut report = match kept {
+        projection::Kept::Record(text) => BTreeMap::from([
+            ("record".to_owned(), Value::String(path.to_owned())),
+            (
+                "record_sha256".to_owned(),
+                Value::String(diet::digest::sha256_hex(text.as_bytes())),
+            ),
+        ]),
+        projection::Kept::Refused {
+            path: kept_at,
+            rows,
+            refusal,
+        } => BTreeMap::from([
+            ("record".to_owned(), Value::String(path.to_owned())),
+            ("record_refused".to_owned(), Value::String(refusal)),
+            ("refused".to_owned(), Value::String(kept_at)),
+            (
+                "refused_sha256".to_owned(),
+                Value::String(diet::digest::sha256_hex(rows.as_bytes())),
+            ),
+        ]),
+    };
+    report.extend([
         ("sidecar".to_owned(), Value::String(sidecar_path)),
         (
             "sidecar_sha256".to_owned(),
@@ -1610,17 +1645,28 @@ fn written_record(
     }
     let mut out = String::new();
     json::render(&Value::Object(report), &mut out);
-    Ok(out)
+    Ok((out, refused))
 }
+
+/// A serve call's total: none, by the vote (#569). A day, not unbounded, only
+/// because a deadline is an instant and an instant has to be finite; `idle`
+/// is what ends a call that has stopped.
+const NO_TOTAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 /// The session's trunk: the system message and the sampler pins, and
 /// nothing else fixed yet. Every request -- each turn's, each tool step's,
 /// the interview fork's -- is this template's clone, so each carries `sampler`.
+///
+/// Each call is bounded by `idle`, the longest silence it sits through, and
+/// not by its total (#569): Pi and `OpenCode` 2 bound a stream so, and a
+/// fixed 180 s total cut a turn whose reasoning was still arriving (seam
+/// smoke run 3). [`NO_TOTAL`] stands in for the total the vote has none of.
 fn trunk(
     model: String,
     system: String,
     max_output_tokens: u32,
     sampler: SamplerCard,
+    idle: Option<std::time::Duration>,
 ) -> RequestShape {
     RequestShape {
         model,
@@ -1628,10 +1674,11 @@ fn trunk(
         sampler,
         limits: Limits {
             attempt: std::time::Duration::from_secs(60),
-            call: std::time::Duration::from_secs(180),
+            call: NO_TOTAL,
             max_output_tokens,
             retries: 0,
             context_window: None,
+            idle,
         },
         grammar: None,
         template_kwargs: BTreeMap::new(),
@@ -1882,6 +1929,8 @@ fn registered_regime(
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let regimen =
         regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
+    let stream_idle = diet::drive::regimen::stream_idle(Some(&regimen))
+        .map_err(|why| format!("{path}: {why}"))?;
     diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
         .map(|regime| {
             let output_cap = diet::drive::regimen::output_cap(flag, Some(&regimen));
@@ -1891,6 +1940,7 @@ fn registered_regime(
                     regimen_sha256: diet::digest::sha256_hex(text.as_bytes()),
                     levers: diet::drive::regimen::serve_levers(&regimen, output_cap),
                     output_cap,
+                    stream_idle,
                 },
             )
         })
@@ -2433,6 +2483,7 @@ fn shape(regime: &Regime) -> RequestShape {
             max_output_tokens: 512,
             retries: 1,
             context_window: None,
+            idle: None,
         },
         grammar: None,
         template_kwargs: std::collections::BTreeMap::new(),

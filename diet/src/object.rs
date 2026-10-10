@@ -48,6 +48,10 @@ use std::fmt;
 use crate::formats::record::json::{self, Value};
 use crate::formats::record::{Regime, regime_value};
 
+/// The operator's lane (#150): an entry they wrote, by an edit or a
+/// tangent's ruling, changes only by them.
+pub const OPERATOR: &str = "operator";
+
 /// An entry's identity.
 ///
 /// A newtype rather than a `String`, so that an entry id and a lane name
@@ -494,6 +498,15 @@ impl WorkingObject {
     #[must_use]
     pub fn entry(&self, id: &EntryId) -> Option<&Entry> {
         self.entries.get(&self.canonical(id)?)
+    }
+
+    /// Whether the operator wrote the entry `id` names, as its latest
+    /// provenance says (#150): such an entry changes only by the operator.
+    #[must_use]
+    pub fn by_operator(&self, id: &EntryId) -> bool {
+        self.entry(id)
+            .and_then(|entry| entry.provenances.last())
+            .is_some_and(|provenance| provenance.lane == OPERATOR)
     }
 
     /// The entry `id` names, resolving an alias to the entry that holds its
