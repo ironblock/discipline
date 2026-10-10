@@ -122,6 +122,22 @@ impl PhaseGraph {
         &self.order
     }
 
+    /// Every allowed move, `(from, to)`, by `from` in declared order and then
+    /// by `to`.
+    #[must_use]
+    pub fn transitions(&self) -> Vec<(String, String)> {
+        self.order
+            .iter()
+            .flat_map(|from| {
+                self.edges
+                    .get(from)
+                    .into_iter()
+                    .flatten()
+                    .map(move |to| (from.clone(), to.clone()))
+            })
+            .collect()
+    }
+
     /// What this graph says about moving from `from` to `to`.
     #[must_use]
     pub fn decide(&self, from: Option<&str>, to: &str) -> Decision {

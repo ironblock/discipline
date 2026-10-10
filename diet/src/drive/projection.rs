@@ -1471,6 +1471,9 @@ mod tests {
             reasoning_effort_default: None,
             instruction_files: None,
             tool_output: None,
+            phases: None,
+            phase_transitions: None,
+            opening_phase: None,
         }
     }
 
@@ -1657,6 +1660,7 @@ mod tests {
             carried_turns: 0,
             tail_tokens: None,
             carried_tokens: None,
+            phase: None,
             tool_outputs: None,
             outputs: None,
             carried_outputs: None,
@@ -1698,6 +1702,7 @@ mod tests {
             carried_turns: 1,
             tail_tokens: Some(10_000),
             carried_tokens: Some(1),
+            phase: None,
             tool_outputs: None,
             outputs: None,
             carried_outputs: None,

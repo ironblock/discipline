@@ -488,6 +488,25 @@ pub fn top_level_max_steps(regimen: &Regimen) -> Option<u32> {
 /// The word a lever is written with when nothing says its state: the lever
 /// exists in docs/program.md §2, and this run cannot describe where it sat.
 pub const UNDECLARED: &str = "undeclared";
+/// The phase graph a served session moves on (#563), as the start row names
+/// it beside `seam_trigger`: `none`, or its phases and allowed moves; a graph
+/// serve would refuse is undeclared.
+fn phase_graph_lever(regimen: &Regimen) -> String {
+    match crate::seam::policy::phase_graph(regimen) {
+        Ok(graph) if graph.is_empty() => "none".to_owned(),
+        Ok(graph) => format!(
+            "phases:{};transitions:{}",
+            graph.phases().join(","),
+            graph
+                .transitions()
+                .iter()
+                .map(|(from, to)| format!("{from}>{to}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Err(_) => UNDECLARED.to_owned(),
+    }
+}
 
 /// The state of each lever (docs/program.md §2) a session `serve` runs
 /// under `regimen`, with `output_cap` its output cap and where that came
@@ -561,6 +580,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers.join("+")),
+        ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         ("fork_warrant".to_owned(), warrant.clone()),
         ("fork_delivery".to_owned(), delivery),
         ("tool_output_disposition".to_owned(), disposition),

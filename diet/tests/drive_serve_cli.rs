@@ -2686,6 +2686,45 @@ fn a_drive_server_names_the_fork_delivery_its_regimen_declares() {
 }
 
 #[test]
+fn a_drive_server_runs_a_regimens_phase_graph() {
+    // #563: serve reads `phases` and `phase_transitions` (it refused them,
+    // #520), logs the graph and the phase it opens in, and takes a phase on
+    // `declare-seam` -- refused here as `nothing-to-seam`, with no turn yet,
+    // rather than as a body it cannot read.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nphases = [\"plan\", \"build\"]\n\
+         [phase_transitions]\nplan = [\"build\"]\n",
+        "seed = 7\n",
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["phases"],
+        serde_json::json!(["plan", "build"]),
+        "{start_line}"
+    );
+    assert_eq!(
+        start_line["phase_transitions"],
+        serde_json::json!([{"from": "plan", "to": "build"}]),
+        "{start_line}"
+    );
+    assert_eq!(start_line["opening_phase"], "plan", "{start_line}");
+    let address = served.listening.clone();
+    let reply = post(
+        &address,
+        &address,
+        r#"{"kind":"declare-seam","phase":"build"}"#,
+    );
+    assert_eq!(status(&reply), 409, "{reply}");
+    assert!(reply.contains("nothing-to-seam"), "{reply}");
+}
+
+#[test]
 fn a_drive_server_refuses_a_sampler_key_it_cannot_pin_before_it_listens() {
     // No acts and no `/props`: a server that got as far as the engine check
     // would be refused with exit 1, and one that listened would not exit.
