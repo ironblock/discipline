@@ -44,7 +44,7 @@ Each lever has states; the current build sits at one of them; the experiments mo
 - **Framing.** Anything delivered to the model as an instruction is acted on about half the time regardless of model capability; anything advisory is ignored. Precision beats recall for everything that reaches the model (#142, #114).
 - **Provenance.** Every number carries its regime (`results/AGENTS.md`); a claim's rule ratified after its window opened makes it post-hoc (`scripts/check-results.py`).
 - **Hygiene.** Identity is a person or a host, not a shape; a scanner cannot read an image, so images carry an author's declaration (#372).
-- **Distribution matching.** The harness presents tools in the shape the model was trained on and never forbids what the model is trained to do first (`git status`). The fenced-code-block era confounds every mimicry number before native tool calls (#20).
+- **Distribution matching.** The harness presents tools in the shape the model was trained on and never forbids what the model is trained to do first (`git status`). The fenced-code-block era confounds every mimicry number before native tool calls (#20). **Reasoning follows the model's own convention, and is not a lever** (the maintainer, 2026-10-09). Qwen keeps its reasoning in history (`preserve_thinking`), and 90–95% of its tokens are chain of thought, not prose. Without the reasoning preserved it can loop: if its last thought was "next, B", it attends back to that after the tool result and thinks "now, B" even when the result *was* B, a discontinuity in its trajectory.
 
 ## 4. Substrates and admission
 
