@@ -169,10 +169,10 @@ use super::record::vocabulary;
 struct LogParser;
 
 /// The version this module writes, as `session.start` states it.
-pub const VERSION: i64 = 7;
+pub const VERSION: i64 = 8;
 
 /// Every version this module reads.
-pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7];
+pub const READS: &[i64] = &[0, 1, 2, 3, 4, 5, 6, 7, 8];
 
 /// How recent an input event must be, at the moment a turn settles, for the
 /// person to count as already present: `notice` is then zero (Q4 (a), ruled
@@ -1813,7 +1813,15 @@ impl std::error::Error for LogError {}
 /// When the text is not one object line of the record's value space, or the
 /// object is not a line of any version this reader reads.
 pub fn line(text: &str) -> Result<Line, String> {
-    let object = json::line(text).map_err(|err| err.to_string())?;
+    line_of(text, VERSION)
+}
+
+/// [`line`], in a log declaring `declared`: its words respelled from the
+/// declared version's spelling to the current one (#583).
+fn line_of(text: &str, declared: i64) -> Result<Line, String> {
+    let mut object = json::line(text).map_err(|err| err.to_string())?;
+    let declared = super::spelling::declared(&object).unwrap_or(declared);
+    super::spelling::to_current(&mut object, declared)?;
     from_object(&object)
 }
 
@@ -2125,15 +2133,24 @@ fn parse_complete(text: &str) -> Result<Vec<Line>, LogError> {
     let log_lines = document
         .flatten()
         .filter(|pair| pair.as_rule() == Rule::log_line);
+    // The version the first line declares (#583): each line is read in its
+    // spelling. A log whose first line declares none is refused by `check`.
+    let mut declared = VERSION;
     for (index, pair) in log_lines.enumerate() {
         let object = pair
             .into_inner()
             .find(|inner| inner.as_rule() == Rule::object)
             .map_or("", |object| object.as_str());
-        lines.push(line(object).map_err(|why| LogError {
+        let read = line_of(object, declared).map_err(|why| LogError {
             line: index + 1,
             why,
-        })?);
+        })?;
+        if index == 0
+            && let Event::SessionStart { version, .. } = &read.event
+        {
+            declared = *version;
+        }
+        lines.push(read);
     }
     check(&lines)?;
     Ok(lines)
@@ -2156,11 +2173,17 @@ pub fn render(line: &Line) -> String {
 pub fn project(source: &str) -> Result<Value, String> {
     read(source)
         .map(|read| {
+            // In the spelling the log declared (#583).
+            let declared = begins_with_the_session(&read.lines).unwrap_or(VERSION);
+            let events = read.lines.iter().map(|line| match to_value(line) {
+                Value::Object(mut object) => {
+                    super::spelling::to_declared(&mut object, declared);
+                    Value::Object(object)
+                }
+                other => other,
+            });
             Value::Object(BTreeMap::from([
-                (
-                    "events".to_owned(),
-                    Value::Array(read.lines.iter().map(to_value).collect()),
-                ),
+                ("events".to_owned(), Value::Array(events.collect())),
                 (
                     "torn".to_owned(),
                     Value::Integer(i64::try_from(read.torn).unwrap_or(i64::MAX)),
@@ -6794,6 +6817,74 @@ impl Fields<'_> {
 mod tests {
     use super::*;
 
+    /// A committed v7 fixture, read from disk as it was written.
+    fn v7_fixture(name: &str) -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("formats/log/fixtures/valid")
+                .join(name),
+        )
+        .expect("the fixture")
+    }
+
+    /// #583: a log declaring v7 or earlier spells the boundary `seam`, and
+    /// one spelling it `meditation` -- v8's word -- is refused, naming both.
+    #[test]
+    fn a_v7_log_in_v8_spellings_is_refused() {
+        let v7 = v7_fixture("a-v7-seam-that-kept-a-tail.jsonl");
+        assert!(super::parse(&v7).is_ok(), "the v7 fixture reads as written");
+        let respelled = v7.replace(r#""kind":"seam""#, r#""kind":"meditation""#);
+        assert_ne!(respelled, v7);
+        let refused = super::parse(&respelled).expect_err("v8's spelling in a v7 log");
+        assert!(
+            refused.why.contains("`meditation`") && refused.why.contains("`seam`"),
+            "{refused}"
+        );
+        let gap = v7_fixture("a-v6-seam-the-operator-declared.jsonl");
+        if gap.contains(r#""ended_by":"seam""#) {
+            let respelled = gap.replace(r#""ended_by":"seam""#, r#""ended_by":"meditation""#);
+            assert!(
+                super::parse(&respelled).is_err(),
+                "a v6 gap ended by `meditation`"
+            );
+        }
+    }
+
+    /// #583: a log declaring v8 spells it `meditation`, and one spelling it
+    /// `seam` is refused, naming both.
+    #[test]
+    fn a_v8_log_in_v7_spellings_is_refused() {
+        let v7 = v7_fixture("a-v7-seam-that-kept-a-tail.jsonl");
+        let v8_old = v7.replacen(r#""version":7"#, r#""version":8"#, 1);
+        assert_ne!(v8_old, v7);
+        let refused = super::parse(&v8_old).expect_err("v7's spelling in a v8 log");
+        assert!(
+            refused.why.contains("`seam`") && refused.why.contains("`meditation`"),
+            "{refused}"
+        );
+        let v8 = v8_old.replace(r#""kind":"seam""#, r#""kind":"meditation""#);
+        assert!(super::parse(&v8).is_ok(), "v8 in its own spelling reads");
+    }
+
+    /// #583: a v7 log projects in the spelling it was written in, so a
+    /// committed log's projection is the one it always had.
+    #[test]
+    fn a_v7_log_projects_in_its_own_spelling() {
+        let v7 = v7_fixture("a-v7-seam-that-kept-a-tail.jsonl");
+        let projected = super::project(&v7).expect("it projects");
+        let mut text = String::new();
+        crate::formats::record::json::render(&projected, &mut text);
+        assert!(text.contains(r#""kind":"seam""#), "{text}");
+        assert!(!text.contains(r#""kind":"meditation""#), "{text}");
+    }
+
+    /// #583: this module writes v8.
+    #[test]
+    fn this_module_writes_v8_and_reads_every_version_before_it() {
+        assert_eq!(super::VERSION, 8);
+        assert_eq!(super::READS, &[0, 1, 2, 3, 4, 5, 6, 7, 8]);
+    }
+
     fn start() -> Line {
         Line {
             seq: 0,
@@ -7710,6 +7801,11 @@ mod tests {
         let with = |tag: &str| {
             let mut changed = object.clone();
             changed.insert(key.to_owned(), Value::String(tag.to_owned()));
+            // A tag is probed in this version's spelling (#583): a start
+            // line taken from an older fixture is read as this version's.
+            if changed.contains_key("version") {
+                changed.insert("version".to_owned(), Value::Integer(VERSION));
+            }
             let mut rendered = String::new();
             json::render(&Value::Object(changed), &mut rendered);
             line(&rendered).map_or_else(
@@ -7935,7 +8031,19 @@ mod tests {
         *levers = None;
         *fork_asks = None;
         *notes_in_the_ask = None;
-        let document: String = lines.iter().map(|line| render(line) + "\n").collect();
+        // Written as a v0 log spells it (#583).
+        let document: String = lines
+            .iter()
+            .map(|line| {
+                let Value::Object(mut object) = to_value(line) else {
+                    unreachable!("a line is an object");
+                };
+                crate::formats::spelling::to_declared(&mut object, 0);
+                let mut out = String::new();
+                json::render(&Value::Object(object), &mut out);
+                out + "\n"
+            })
+            .collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");
         for line in &lines {
