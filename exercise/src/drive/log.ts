@@ -293,6 +293,10 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
 
 /** Forks' patches delivered after an ask (v7, the fork delivery lever). */
 export type Delivered = V0.DeliveredLine;
+/** Self-capture's reminder, a note after an ask (v7, #619): the harness's words, not the operator's. */
+export type Reminded = V0.RemindedLine;
+/** What a self-capture call did (v7, #619), logged beside its `tool_call` line: its outcome and the entries it wrote. */
+export type Capture = V0.CaptureLine;
 /** Archived items recalled after an ask (v7, the archive recall lever, #566). */
 export type Recalled = V0.RecalledLine;
 
@@ -317,6 +321,8 @@ export type LogLine =
   | Seam
   | Delivered
   | Recalled
+  | Reminded
+  | Capture
   | TangentOpen
   | TangentClose;
 
