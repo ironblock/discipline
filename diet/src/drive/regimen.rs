@@ -683,6 +683,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             "seam_warm".to_owned(),
             seam_work_lever(regimen, crate::seam::policy::SEAM_WARM),
         ),
+        ("reconcile_gate".to_owned(), reconcile_gate_lever(regimen)),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         (
             "archive_recall".to_owned(),
@@ -945,6 +946,26 @@ fn seam_work_lever(regimen: &Regimen, key: &str) -> String {
     if on { "on" } else { "off" }.to_owned()
 }
 
+/// The reconcile gate lever's word (#150): `carry` or `refuse`, as the
+/// served policy reads it; [`UNDECLARED`] for a value serve refuses.
+fn reconcile_gate_lever(regimen: &Regimen) -> String {
+    match crate::seam::policy::Served::from_regimen(regimen, Some(u64::MAX)) {
+        Ok(served) if served.reconcile_gate == crate::seam::policy::ReconcileGate::Refuse => {
+            "refuse".to_owned()
+        }
+        Ok(_) => "carry".to_owned(),
+        Err(
+            crate::seam::policy::PolicyError::NotAGate
+            | crate::seam::policy::PolicyError::GateWithoutAudit,
+        ) => UNDECLARED.to_owned(),
+        // Another key's fault, which serve refuses on its own account.
+        Err(_) => match regimen.get(crate::seam::policy::RECONCILE_GATE) {
+            Some(regimen::Value::String(word)) if word == "refuse" => "refuse".to_owned(),
+            _ => "carry".to_owned(),
+        },
+    }
+}
+
 /// The fork memory share lever's word (#406): the tail a fork's call is
 /// clamped from, `tail:output-cap` or the regimen's `tail:<tokens>`; a fork
 /// that would not fit its window is refused unsent either way.
@@ -1010,6 +1031,25 @@ fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4
 #[cfg(test)]
 mod tests {
     use super::{UNDECLARED, regime_of, serve_levers};
+
+    /// #150's gate on the start row: `carry`, `refuse`, or undeclared for
+    /// a value serve refuses.
+    #[test]
+    fn the_start_row_names_the_reconcile_gate() {
+        use crate::formats::regimen;
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                ["reconcile_gate"]
+                .clone()
+        };
+        assert_eq!(lever(""), "carry");
+        assert_eq!(
+            lever("seam_audit = \"on\"\nreconcile_gate = \"refuse\"\n"),
+            "refuse"
+        );
+        assert_eq!(lever("reconcile_gate = \"refuse\"\n"), UNDECLARED);
+        assert_eq!(lever("reconcile_gate = \"hold\"\n"), UNDECLARED);
+    }
 
     /// #569: a serve call's deadline is the silence it sits through, 300 s
     /// undeclared (Pi and `OpenCode` 2), the regimen's in milliseconds, `0`

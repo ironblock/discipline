@@ -325,6 +325,8 @@ export type Recalled = V0.RecalledLine;
 export type Flag = V0.FlagLine;
 /** A model's patch refused over an entry the operator wrote (v7, #150): the fold went on. */
 export type PatchRefused = V0.PatchRefusedLine;
+/** A seam held for the operator under `reconcile_gate = "refuse"` (v7, #150): no refill; `refill-anyway` refills. Folded, not yet drawn. */
+export type SeamHeld = V0.SeamHeldLine;
 /** A background command's end (v7, #614). Folded, not yet drawn. */
 export type BackgroundEnded = V0.BackgroundEndedLine;
 /** Ended background commands' notifications delivered after an ask (v7, #614). */
@@ -368,6 +370,7 @@ export type LogLine =
   | ForkSkipped
   | Flag
   | PatchRefused
+  | SeamHeld
   | PhaseRuled;
 
 /** The operator's ruling on the model's phase proposal (log v7, #651): `seam` (a seam follows), `continue`, or `stay`. */

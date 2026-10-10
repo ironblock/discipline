@@ -812,6 +812,8 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       // A fork screened out of its gap (#611): no branch to draw; folded into no node yet.
       case 'fork.skipped':
+      // A seam held for the operator (#150's gate): drawn by the surface's own change.
+      case 'seam.held':
         break;
       case 'pruned':
         prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
