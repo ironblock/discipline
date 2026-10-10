@@ -27,9 +27,9 @@ The prototype's first milestone. Each piece of the harness shown working **once,
 | Interview fork | a fork in the idle gap lands a patch that shows in the working-memory panel | — |
 | Seam | a declared seam renders, refills from working memory, and one ask after it settles | — |
 | Cancel and end | an in-flight call is cancelled; the session ends with confirm and serve exits | — |
-| Record | the log parses, the record is projected from it and names the engine that ran, the receipt renders, and the results directory is committed, digest-pinned and hygiene-scanned | — |
+| Record | the log parses, the record is projected from it and names the engine that ran, the receipt renders, and the run directory is committed, digest-pinned and hygiene-scanned | — |
 
-A row's evidence is a results directory, or a line in one, filled from the recording. Its README says truthfully who drove the run, the maintainer or an agent. A row counts once the maintainer approves its evidence. The milestone is done when every row counts.
+A row's evidence is a run directory under `runs/`, or a line in one, filled from the recording: a driven session kept as evidence that a piece works, not a claim about the program, which belongs in `results/` (the maintainer, 2026-10-10). Its README says truthfully who drove the run, the maintainer or an agent. A row counts once the maintainer approves its evidence. The milestone is done when every row counts.
 
 ## v0.2.0 — every lever live
 
