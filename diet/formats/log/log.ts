@@ -421,7 +421,7 @@ export type RequestFailedLine = {
   message: string;
   status?: number;
   partial?: string;
-};
+} & ({ prompt_tokens: number; window: number; inferred: boolean } | { prompt_tokens?: never; window?: never; inferred?: never });
 
 export type TurnSettledLine = {
   seq: number;
@@ -510,12 +510,11 @@ export type PatchLine = {
   seq: number;
   t: number;
   kind: "patch";
-  fork: number;
   op: PatchOp;
   entry: PatchEntry;
   supersedes?: string;
   tangent?: string;
-};
+} & ({ fork: number; lane?: never } | { lane: string; fork?: never });
 
 export type SeamLine = {
   seq: number;

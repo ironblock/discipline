@@ -614,6 +614,39 @@ impl<'a> Walk<'a> {
         });
     }
 
+    /// A failed call, named: the record has no row for one. An overflow's
+    /// why carries its prompt as sized and the window (#616), and whether
+    /// the engine said so or its size did.
+    fn failed(
+        &mut self,
+        seq: u64,
+        reason: log::FailReason,
+        message: &str,
+        overflow: Option<log::Overflow>,
+    ) {
+        let sizes = overflow.map_or_else(String::new, |overflow| {
+            format!(
+                ", {}: a prompt of {} tokens as sized, against a window of {}",
+                if overflow.inferred {
+                    "told from its size"
+                } else {
+                    "as the engine said"
+                },
+                overflow.prompt_tokens,
+                overflow.window
+            )
+        });
+        self.name(
+            seq,
+            "request.failed",
+            format!(
+                "a failed call ({}{sizes}): the record has no row for one",
+                reason.tag()
+            ),
+            Some(message.to_owned()),
+        );
+    }
+
     /// A tangent's line (v7, #22): its open keeps the rebuilt trunk as the
     /// fork point, its close restores it, and neither has a row.
     fn tangent(&mut self, line: &log::Line) {
@@ -710,19 +743,16 @@ impl<'a> Walk<'a> {
                 request, partial, ..
             } => self.cancelled_call(line.seq, *request, partial),
             Line::RequestFailed {
-                reason, message, ..
-            } => self.name(
-                line.seq,
-                "request.failed",
-                format!(
-                    "a failed call ({}): the record has no row for one",
-                    reason.tag()
-                ),
-                Some(message.clone()),
-            ),
+                reason,
+                message,
+                overflow,
+                ..
+            } => self.failed(line.seq, *reason, message, *overflow),
             // A fork (v5, #374): its row, and its patches as one capture row.
             Line::Fork { .. } => self.fork(line),
-            Line::Patch { fork, .. } => self.patch(line.seq, *fork),
+            Line::Patch {
+                fork: Some(fork), ..
+            } => self.patch(line.seq, *fork),
             // The record's fork row carries no outcome: a fork that settled
             // `value` is carried by its capture row, and any other outcome is
             // named with its word.
@@ -748,7 +778,10 @@ impl<'a> Walk<'a> {
             Line::IdleGap { .. }
             | Line::Refused { .. }
             | Line::Progress { .. }
-            | Line::Capture { .. } => self.no_row(line),
+            | Line::Capture { .. }
+            // The trunk's own self-capture patch (#609): no fork row to
+            // count it on, as its `capture` line has none.
+            | Line::Patch { fork: None, .. } => self.no_row(line),
             // A tool call (v3, #302): its row carries how it ran under the
             // log's own words, so the record says what confined it.
             Line::ToolCall { .. }
@@ -1949,12 +1982,18 @@ mod tests {
             ),
             (
                 2,
+                // #616: TabbyAPI's abort, told an overflow from its size.
                 Line::RequestFailed {
                     request: 7,
-                    reason: FailReason::Server,
-                    message: "busy".to_owned(),
-                    status: Some(503),
+                    reason: FailReason::ContextOverflow,
+                    message: "Chat completion aborted.".to_owned(),
+                    status: Some(500),
                     partial: None,
+                    overflow: Some(log::Overflow {
+                        prompt_tokens: 161_840,
+                        window: 163_840,
+                        inferred: true,
+                    }),
                 },
             ),
         ] {
@@ -2001,6 +2040,13 @@ mod tests {
         assert!(
             kinds.contains(&"cancelled") && kinds.contains(&"request.failed"),
             "{kinds:?}"
+        );
+        assert!(
+            projection.unspellable.iter().any(|item| item.why
+                == "a failed call (context_overflow, told from its size: a prompt of 161840 \
+                    tokens as sized, against a window of 163840): the record has no row for one"),
+            "{:?}",
+            projection.unspellable
         );
         // The unanswered request by its own seq and reason: every request
         // here is also named for its unrebuildable head, so a bare "request"
@@ -2602,7 +2648,8 @@ mod tests {
             ]
         };
         let patch = |fork: u64, id: &str| Line::Patch {
-            fork,
+            fork: Some(fork),
+            lane: None,
             op: log::PatchOp::Add,
             entry: log::PatchEntry {
                 id: id.to_owned(),

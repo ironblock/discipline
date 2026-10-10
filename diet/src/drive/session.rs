@@ -420,6 +420,8 @@ pub enum Event {
         class: Option<Rejection>,
         /// What arrived before the refusal.
         partial: String,
+        /// Its prompt against the window, when it overflowed it (#616).
+        overflow: Option<log::Overflow>,
     },
     /// The turn's own thread panicked, or could not be started, before it
     /// could settle. Neither its ask nor anything that arrived is on the
@@ -438,6 +440,9 @@ pub enum Event {
     Failed {
         /// The sequence number of the [`Event::Requested`] that failed.
         request: u64,
+        /// Its prompt against the window, when it overflowed it (#616):
+        /// never for a timeout.
+        overflow: Option<log::Overflow>,
         /// How it failed.
         failure: TransportFailure,
         /// What arrived before it failed.
@@ -594,8 +599,11 @@ pub enum Event {
     /// One entry the fork's answer patched into the session's working
     /// object, after the fork settled `value`.
     Patched {
-        /// The sequence number of its [`Event::Forked`].
-        fork: u64,
+        /// The sequence number of its [`Event::Forked`]; `None` for a patch
+        /// the trunk's own self-capture call made (#609).
+        fork: Option<u64>,
+        /// The lane that made it, when no fork did: `self-capture`.
+        lane: Option<String>,
         /// What it did.
         op: log::PatchOp,
         /// The entry.
@@ -1267,6 +1275,9 @@ struct State {
     /// The estimated tokens of the latest request's messages, as it was
     /// sized (#588).
     sent_estimate: Option<u64>,
+    /// The latest request's prompt as sized, its output cap, and the window
+    /// it was sized against (#616): what tells an overflow from its size.
+    last_sized: Option<(u64, u32, Option<u64>)>,
     /// The latest measured prompt (prefilled plus cached tokens) and the
     /// estimate of the request it measured: what the next request's prompt
     /// is sized from (#588).
@@ -1319,7 +1330,34 @@ impl State {
         self.sent_estimate = Some(estimate);
         let cap = clamped(ceiling, shape.limits.context_window, prompt);
         shape.limits.max_output_tokens = cap;
+        self.last_sized = Some((prompt, cap, shape.limits.context_window));
         cap
+    }
+
+    /// The latest request's prompt against the window, when it overflowed it
+    /// (#616): the server's typed refusal said so (`engine`), or -- the
+    /// refusal naming no kind -- the prompt and its output cap reached into
+    /// the window's margin ([`margin`]), which the sizing keeps clear. `None`
+    /// when serve knows no window.
+    fn overflow(&self, engine: bool) -> Option<log::Overflow> {
+        let (prompt, cap, window) = self.last_sized?;
+        let window = window?;
+        let at_the_edge =
+            i128::from(prompt) + i128::from(cap) > i128::from(window) - margin(i128::from(window));
+        (engine || at_the_edge).then_some(log::Overflow {
+            prompt_tokens: prompt,
+            window,
+            inferred: !engine,
+        })
+    }
+
+    /// [`State::overflow`] for a call that failed in transport: never a
+    /// timeout, which is the clock's and not the prompt's.
+    fn failed_overflow(&self, failure: &TransportFailure) -> Option<log::Overflow> {
+        match failure {
+            TransportFailure::Timeout { .. } => None,
+            _ => self.overflow(false),
+        }
     }
 
     fn push(&mut self, event: Event) -> u64 {
@@ -1739,6 +1777,7 @@ impl<S: Streaming + 'static> Session<S> {
             turns_at_seam: 0,
             trunk_tokens: None,
             sent_estimate: None,
+            last_sized: None,
             measured_prompt: None,
             step_tokens: None,
             ran: Vec::new(),
@@ -2716,21 +2755,26 @@ pub fn line_of(logged: &Logged) -> log::Line {
             body,
             class,
             partial,
+            overflow,
         } => log::Event::RequestFailed {
             request: *request,
-            reason: match class {
-                Some(Rejection::ContextOverflow) => log::FailReason::ContextOverflow,
-                None => log::FailReason::Server,
+            reason: match (class, overflow) {
+                (Some(Rejection::ContextOverflow), _) | (None, Some(_)) => {
+                    log::FailReason::ContextOverflow
+                }
+                (None, None) => log::FailReason::Server,
             },
             message: body.clone(),
             status: Some(*status),
             partial: arrived(partial),
+            overflow: *overflow,
         },
         Event::Failed {
             request,
             failure,
             partial,
-        } => failed_line(*request, failure, partial),
+            overflow,
+        } => failed_line(*request, failure, partial, *overflow),
         Event::Crashed {
             request,
             partial,
@@ -2741,6 +2785,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             message: why.clone(),
             status: None,
             partial: arrived(partial),
+            overflow: None,
         },
         Event::IdleGap(gap) => gap_line(gap),
         Event::ToolCallPiece {
@@ -2864,12 +2909,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
         },
         Event::Patched {
             fork,
+            lane,
             op,
             entry,
             supersedes,
             tangent,
         } => log::Event::Patch {
             fork: *fork,
+            lane: lane.clone(),
             op: *op,
             entry: entry.clone(),
             supersedes: supersedes.clone(),
@@ -3013,18 +3060,26 @@ fn timings_line(timings: &Timings) -> log::Timings {
     }
 }
 
-/// A failed call's line: a timeout is `timeout`, every other transport
+/// A failed call's line: a timeout is `timeout`, one whose prompt
+/// overflowed the window `context_overflow` (#616), every other transport
 /// failure `transport`, and the failure's own words are the message.
-fn failed_line(request: u64, failure: &TransportFailure, partial: &str) -> log::Event {
+fn failed_line(
+    request: u64,
+    failure: &TransportFailure,
+    partial: &str,
+    overflow: Option<log::Overflow>,
+) -> log::Event {
     log::Event::RequestFailed {
         request,
-        reason: match failure {
-            TransportFailure::Timeout { .. } => log::FailReason::Timeout,
-            _ => log::FailReason::Transport,
+        reason: match (failure, overflow) {
+            (TransportFailure::Timeout { .. }, _) => log::FailReason::Timeout,
+            (_, Some(_)) => log::FailReason::ContextOverflow,
+            (_, None) => log::FailReason::Transport,
         },
         message: failure.to_string(),
         status: None,
         partial: arrived(partial),
+        overflow,
     }
 }
 
@@ -3331,10 +3386,12 @@ fn step<S: Streaming>(
             body,
             class,
         }) => {
+            let overflow = state.overflow(class == Some(Rejection::ContextOverflow));
             state.push(Event::Rejected {
                 request,
                 status,
                 body,
+                overflow,
                 class,
                 partial,
             });
@@ -3347,8 +3404,10 @@ fn step<S: Streaming>(
         }
         Err(failure) => {
             let reason = settle_reason_of(&failure);
+            let overflow = state.failed_overflow(&failure);
             state.push(Event::Failed {
                 request,
+                overflow,
                 failure,
                 partial,
             });
@@ -3649,16 +3708,26 @@ fn capture_call<S>(
     use crate::capture::tools::CaptureTool;
     let line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
     let mut state = shared.lock();
+    // Each patch it applied, as the `patch` line a fork's would be: one
+    // place for every working-memory change.
+    let mut lines = Vec::new();
     let (outcome, entries, why) = match capture_patches(&mut state, (turn, request), call) {
         Err(why) => ("refused", Vec::new(), Some(why)),
         Ok(patches) => {
             let refused = state.interview.as_mut().map_or_else(
                 || Some("the session keeps no working memory".to_owned()),
                 |interview| {
-                    patches
+                    let refused = patches
                         .iter()
                         .find_map(|patch| interview.object.apply(patch).err())
-                        .map(|why| why.to_string())
+                        .map(|why| why.to_string());
+                    if refused.is_none() {
+                        lines = patches
+                            .iter()
+                            .map(|patch| patched(None, patch, &interview.object))
+                            .collect();
+                    }
+                    refused
                 },
             );
             capture_outcome(&call.name, refused, entries_of(&patches))
@@ -3681,6 +3750,9 @@ fn capture_call<S>(
         why,
         fork: None,
     });
+    for patch in lines {
+        state.push(patch);
+    }
     drop(state);
     shared.changed.notify_all();
     (line, Some(shown))
@@ -4538,7 +4610,7 @@ fn read_excerpts(log: &[Logged]) -> Vec<(u32, String)> {
                 entry,
                 ..
             } => {
-                let turn = reads.get(fork)?;
+                let turn = reads.get(fork.as_ref()?)?;
                 Some((*turn, entry.text.strip_prefix(&prefix)?.to_owned()))
             }
             _ => None,
@@ -4579,6 +4651,12 @@ fn turn_over(template: &RequestShape, state: &mut State) {
     }
 }
 
+/// The share of a `window` the output cap's sizing keeps clear of a
+/// prompt's estimate (#588): 5% of it, or 10,000 tokens if that is more.
+fn margin(window: i128) -> i128 {
+    (window * 5 / 100).max(10_000)
+}
+
 /// The pad added to a prompt that is wholly estimated (#588): Qwen Code's,
 /// for the system prompt and tool definitions an estimate misses
 /// (`qc:packages/core/src/core/llm-chat.ts:729`, `ESTIMATE_CLAMP_OVERHEAD_PAD`).
@@ -4598,8 +4676,7 @@ pub fn clamped(ceiling: u32, window: Option<u64>, prompt: u64) -> u32 {
     };
     let window = i128::from(window);
     let prompt = i128::from(prompt);
-    let margin = (window * 5 / 100).max(10_000);
-    let room = window - prompt - margin;
+    let room = window - prompt - margin(window);
     let floor = (window - prompt).clamp(1, 4_000);
     let cap = i128::from(ceiling).min(room.max(floor));
     u32::try_from(cap).unwrap_or(ceiling)
@@ -4908,18 +4985,22 @@ fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
             class,
         }) => {
             // The server refused the fork's call: `failed`, never retried.
+            let overflow = state.overflow(class == Some(Rejection::ContextOverflow));
             state.push(Event::Rejected {
                 request,
                 status,
                 body,
+                overflow,
                 class,
                 partial,
             });
             log::ForkOutcome::Failed
         }
         Err(failure) => {
+            let overflow = state.failed_overflow(&failure);
             state.push(Event::Failed {
                 request,
+                overflow,
                 failure,
                 partial,
             });
@@ -5095,7 +5176,7 @@ fn applied(state: &mut State, patches: &[Patch], fork: u64) -> (log::ForkOutcome
     }
     let lines = patches
         .iter()
-        .map(|patch| patched(fork, patch, &interview.object))
+        .map(|patch| patched(Some(fork), patch, &interview.object))
         .collect();
     state.undelivered.extend(named);
     (log::ForkOutcome::Value, lines)
@@ -5150,7 +5231,7 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
 
 /// One applied patch as its log line: its op, its entry -- the patch's own
 /// content, or for a verdict on an entry that entry's -- and what it voided.
-fn patched(fork: u64, patch: &Patch, object: &WorkingObject) -> Event {
+fn patched(fork: Option<u64>, patch: &Patch, object: &WorkingObject) -> Event {
     let held = |id: &crate::object::EntryId| {
         object
             .entry(id)
@@ -5173,6 +5254,8 @@ fn patched(fork: u64, patch: &Patch, object: &WorkingObject) -> Event {
     };
     Event::Patched {
         fork,
+        // A fork's patch is named by its fork; the trunk's own by its lane.
+        lane: fork.is_none().then(|| patch.provenance().lane.clone()),
         op,
         entry: log::PatchEntry {
             id: id.as_str().to_owned(),
@@ -5679,7 +5762,8 @@ pub(in crate::drive) mod tests {
             == Event::Failed {
                 request: 3,
                 failure: failure.clone(),
-                partial: "par".to_owned()
+                partial: "par".to_owned(),
+                overflow: None,
             }));
         assert!(
             !log.iter()
@@ -5704,7 +5788,8 @@ pub(in crate::drive) mod tests {
                 status: 503,
                 body: "busy".to_owned(),
                 class: None,
-                partial: "par".to_owned()
+                partial: "par".to_owned(),
+                overflow: None,
             }));
         assert!(
             !log.iter()
@@ -5860,6 +5945,100 @@ pub(in crate::drive) mod tests {
             }
         )));
         assert_eq!(session.trunk(), [Message::new(Role::System, HEAD)]);
+    }
+
+    /// The `request.failed` line of a session over a `window`-token
+    /// context whose only call ends as `step`.
+    fn failed_over(window: u64, step: Step) -> log::Event {
+        let mut shape = template();
+        shape.limits.context_window = Some(window);
+        let session = Session::open(Canned::new([vec![step]]), shape);
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "the turn to settle", settled);
+        whole_log(&session)
+            .into_iter()
+            .find_map(|line| {
+                matches!(line.event, log::Event::RequestFailed { .. }).then_some(line.event)
+            })
+            .expect("a failed call")
+    }
+
+    /// #616: a refusal that names no kind, or a dropped connection, whose
+    /// prompt and output cap reached into the window's margin is a context
+    /// overflow told from the sizes -- `inferred`, with the prompt as sized
+    /// and the window; the same failure with room to spare stays `server`
+    /// or `transport`, and a timeout is the clock's whatever the size. A
+    /// first call's prompt is wholly estimated: the estimate plus
+    /// [`ESTIMATE_PAD`], so over 30,000 tokens it is at the edge, and over
+    /// 1,000,000 it is not.
+    #[test]
+    fn a_failure_at_the_windows_edge_is_an_overflow_told_from_its_size() {
+        let aborted = || Step::Reject(500, "Chat completion aborted.".to_owned());
+        let log::Event::RequestFailed {
+            reason, overflow, ..
+        } = failed_over(30_000, aborted())
+        else {
+            unreachable!()
+        };
+        assert_eq!(reason, log::FailReason::ContextOverflow);
+        let overflow = overflow.expect("its sizes");
+        assert!(overflow.inferred);
+        assert_eq!(overflow.window, 30_000);
+        assert!(overflow.prompt_tokens > ESTIMATE_PAD, "{overflow:?}");
+        let log::Event::RequestFailed {
+            reason, overflow, ..
+        } = failed_over(1_000_000, aborted())
+        else {
+            unreachable!()
+        };
+        assert_eq!((reason, overflow), (log::FailReason::Server, None));
+        let dropped = || Step::Fail(TransportFailure::Connect("reset".to_owned()));
+        assert!(matches!(
+            failed_over(30_000, dropped()),
+            log::Event::RequestFailed {
+                reason: log::FailReason::ContextOverflow,
+                overflow: Some(log::Overflow { inferred: true, .. }),
+                ..
+            }
+        ));
+        assert!(matches!(
+            failed_over(1_000_000, dropped()),
+            log::Event::RequestFailed {
+                reason: log::FailReason::Transport,
+                overflow: None,
+                ..
+            }
+        ));
+        assert!(matches!(
+            failed_over(
+                30_000,
+                Step::Fail(TransportFailure::Timeout {
+                    after: Duration::from_secs(1)
+                })
+            ),
+            log::Event::RequestFailed {
+                reason: log::FailReason::Timeout,
+                overflow: None,
+                ..
+            }
+        ));
+    }
+
+    /// #616: the engine's typed refusal is an overflow whatever the size,
+    /// and with the window known it carries the sizes, not `inferred`.
+    #[test]
+    fn an_engines_typed_overflow_carries_the_sizes_it_was_sent_at() {
+        let typed = r#"{"error":{"code":400,"type":"exceed_context_size_error"}}"#;
+        let log::Event::RequestFailed {
+            reason, overflow, ..
+        } = failed_over(1_000_000, Step::Reject(400, typed.to_owned()))
+        else {
+            unreachable!()
+        };
+        assert_eq!(reason, log::FailReason::ContextOverflow);
+        let overflow = overflow.expect("its sizes");
+        assert!(!overflow.inferred);
+        assert_eq!(overflow.window, 1_000_000);
     }
 
     /// A transport that panics mid-call: the one thing a turn's thread can
@@ -6531,6 +6710,7 @@ pub(in crate::drive) mod tests {
                 body: "busy".to_owned(),
                 class: None,
                 partial: "Hel".to_owned(),
+                overflow: None,
             },
             Event::Rejected {
                 request: 3,
@@ -6538,6 +6718,7 @@ pub(in crate::drive) mod tests {
                 body: "too long".to_owned(),
                 class: Some(Rejection::ContextOverflow),
                 partial: String::new(),
+                overflow: None,
             },
             Event::Crashed {
                 request: 3,
@@ -6550,6 +6731,7 @@ pub(in crate::drive) mod tests {
                     after: Duration::from_secs(5),
                 },
                 partial: "Hel".to_owned(),
+                overflow: None,
             },
             Event::TurnSettled {
                 turn: 1,
@@ -6637,7 +6819,8 @@ pub(in crate::drive) mod tests {
                 wall_ms: Some(480),
             },
             Event::Patched {
-                fork: 20,
+                fork: Some(20),
+                lane: None,
                 op: log::PatchOp::Add,
                 entry: log::PatchEntry {
                     id: "interview-t1-0".to_owned(),
@@ -6891,6 +7074,7 @@ pub(in crate::drive) mod tests {
                 message: "busy".to_owned(),
                 status: Some(503),
                 partial: Some("Hel".to_owned()),
+                overflow: None,
             },
             log::Event::RequestFailed {
                 request: 3,
@@ -6898,6 +7082,7 @@ pub(in crate::drive) mod tests {
                 message: "too long".to_owned(),
                 status: Some(400),
                 partial: None,
+                overflow: None,
             },
             // Nothing arrived before this crash: no `partial` at all.
             log::Event::RequestFailed {
@@ -6906,6 +7091,7 @@ pub(in crate::drive) mod tests {
                 message: "a panic".to_owned(),
                 status: None,
                 partial: None,
+                overflow: None,
             },
             log::Event::RequestFailed {
                 request: 3,
@@ -6916,6 +7102,7 @@ pub(in crate::drive) mod tests {
                 .to_string(),
                 status: None,
                 partial: Some("Hel".to_owned()),
+                overflow: None,
             },
             log::Event::TurnSettled {
                 turn: 1,
@@ -7007,7 +7194,8 @@ pub(in crate::drive) mod tests {
                 wall_ms: Some(480),
             },
             log::Event::Patch {
-                fork: 20,
+                fork: Some(20),
+                lane: None,
                 op: log::PatchOp::Add,
                 entry: log::PatchEntry {
                     id: "interview-t1-0".to_owned(),
@@ -7280,13 +7468,19 @@ pub(in crate::drive) mod tests {
         assert_eq!(written, expected);
         // A connection that failed is `transport`, not `timeout`.
         assert_eq!(
-            failed_line(3, &TransportFailure::Connect("refused".to_owned()), ""),
+            failed_line(
+                3,
+                &TransportFailure::Connect("refused".to_owned()),
+                "",
+                None
+            ),
             log::Event::RequestFailed {
                 request: 3,
                 reason: log::FailReason::Transport,
                 message: TransportFailure::Connect("refused".to_owned()).to_string(),
                 status: None,
                 partial: None,
+                overflow: None,
             }
         );
     }
@@ -10362,6 +10556,29 @@ pub(in crate::drive) mod tests {
             .expect("recorded");
         assert_eq!(kept.provenances[0].lane, crate::capture::tools::LANE);
         drop(held);
+        // One place for every working-memory change: a `patch` line, named
+        // by its lane rather than a fork, carrying the entry's text.
+        let patch_lines: Vec<(Option<u64>, Option<String>, log::PatchEntry)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Patched {
+                    fork, lane, entry, ..
+                } => Some((*fork, lane.clone(), entry.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            patch_lines,
+            [(
+                None,
+                Some(crate::capture::tools::LANE.to_owned()),
+                log::PatchEntry {
+                    id: entry.clone(),
+                    text: "The parser drops blank lines before it tokenizes.".to_owned(),
+                    category: None,
+                }
+            )]
+        );
         let shown = lines(&log)[0].shown.clone();
         assert_eq!(shown, Some(format!("recorded: {entry}")));
         reads_whole(&session);
