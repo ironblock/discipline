@@ -661,6 +661,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("substrate_rung".to_owned(), word("substrate")),
         ("tool_surface".to_owned(), surface),
         ("background_commands".to_owned(), background_lever(regimen)),
+        ("bash_timeout".to_owned(), timeout_lever(regimen)),
         ("tool_call_text_fallback".to_owned(), text_fallback),
         (
             "instruction_files".to_owned(),
@@ -747,6 +748,22 @@ fn tangent_closure_lever(regimen: &Regimen) -> String {
     } else {
         UNDECLARED.to_owned()
     }
+}
+
+/// The bash timeout lever (#613): the default in milliseconds, `off` for
+/// none; undeclared where the regimen runs no commands.
+fn timeout_lever(regimen: &Regimen) -> String {
+    crate::drive::tool_loop::declared(regimen)
+        .ok()
+        .flatten()
+        .map_or_else(
+            || UNDECLARED.to_owned(),
+            |declared| {
+                declared
+                    .timeout_ms
+                    .map_or_else(|| "off".to_owned(), |ms| format!("{ms}ms"))
+            },
+        )
 }
 
 /// The background commands lever (#614): on unless the regimen turns them
@@ -982,6 +999,25 @@ mod tests {
             lever("approval = \"none\"\nbackground_commands = \"off\"\n"),
             "off"
         );
+        assert_eq!(lever(""), UNDECLARED);
+    }
+
+    /// The default timeout (#613): 120000 ms unless the regimen says, 0
+    /// for none, and undeclared where it runs no commands.
+    #[test]
+    fn the_bash_timeout_lever_names_the_default_or_off() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("bash_timeout")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever("approval = \"none\"\n"), "120000ms");
+        assert_eq!(
+            lever("approval = \"none\"\nbash_timeout_ms = 30000\n"),
+            "30000ms"
+        );
+        assert_eq!(lever("approval = \"none\"\nbash_timeout_ms = 0\n"), "off");
         assert_eq!(lever(""), UNDECLARED);
     }
 
