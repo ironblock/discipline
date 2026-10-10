@@ -4,6 +4,7 @@
 {"kind":"request","lane":"trunk","seq":3,"t":15,"turn":1}
 {"kind":"delta","request":3,"seq":4,"t":20,"text":"The parser drops blank lines before it tokenizes."}
 {"finish_reason":"stop","kind":"response","seq":5,"t":25,"text":"The parser drops blank lines before it tokenizes.","to_request":3}
-{"entry":{"id":"r3/call-1/fact","text":"The parser drops blank lines before it tokenizes."},"kind":"patch","lane":"self-capture","op":"add","seq":6,"t":30}
-{"kind":"turn.settled","reason":"final","seq":7,"t":35,"turn":1}
-{"from":"turn","kind":"settlement","seq":8,"t":40,"to":"awaiting"}
+{"call":"call-1","entries":["r3/call-1/fact"],"kind":"capture","outcome":"recorded","request":3,"seq":6,"t":30,"tool":"update_record"}
+{"entry":{"id":"r3/call-1/fact","text":"The parser drops blank lines before it tokenizes."},"kind":"patch","lane":"self-capture","op":"add","seq":7,"t":35}
+{"kind":"turn.settled","reason":"final","seq":8,"t":40,"turn":1}
+{"from":"turn","kind":"settlement","seq":9,"t":45,"to":"awaiting"}
