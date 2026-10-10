@@ -941,34 +941,16 @@ fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
     );
 }
 
-/// What `TabbyAPI`'s `GET /v1/model` answers for the 3.8 line's config r2
-/// (`endpoints/core/types/model.py:11-54` at `be74bf0`), with `cache_size`
-/// as given.
+/// What `TabbyAPI`'s `GET /v1/model` answered for the 3.8 line's config r2,
+/// as the r2 window captured it (Track 4's committed record), with
+/// `cache_size` as given: the active template's name and text among it.
 fn tabby_model_card(cache_size: u64) -> Act {
-    Act::Answer(
-        serde_json::json!({
-            "id": "Qwen3.8-27B-exl3-3.00bpw-img1024",
-            "object": "model",
-            "created": 1,
-            "owned_by": "tabbyAPI",
-            "logging": null,
-            "parameters": {
-                "max_seq_len": 163_840,
-                "cache_size": cache_size,
-                "cache_mode": "8,8",
-                "rope_scale": 1.0,
-                "rope_alpha": 1.0,
-                "max_batch_size": 2,
-                "chunk_size": 2048,
-                "prompt_template": "chat_template",
-                "prompt_template_content": "",
-                "use_vision": true,
-                "draft": null,
-            },
-            "meta": null,
-        })
-        .to_string(),
-    )
+    let mut card: serde_json::Value = serde_json::from_str(include_str!(
+        "../../substrates/measurements/2026-10-05-accel24-tabbyapi-exl3-27b-r2/window/raw/model.json"
+    ))
+    .expect("the captured model card");
+    card["parameters"]["cache_size"] = serde_json::Value::from(cache_size);
+    Act::Answer(card.to_string())
 }
 
 #[test]
@@ -1021,10 +1003,15 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
             {"field": "engine_commit", "value": commit, "provenance": "declared"},
             corroborated("served_cache_mode", "8,8"),
             corroborated("served_cache_size", "163840"),
+            corroborated(
+                "served_chat_template_sha256",
+                "c3cf9e34abf4f9e36c2d72165aa9c132d3e2a725b6c2586aaa3a8af9d7a81041"
+            ),
             corroborated("served_chunk_size", "2048"),
             corroborated("served_max_batch_size", "2"),
             corroborated("served_max_seq_len", "163840"),
             corroborated("served_model", "Qwen3.8-27B-exl3-3.00bpw-img1024"),
+            corroborated("served_prompt_template", "chat_template"),
             corroborated("served_use_vision", "true"),
             {
                 "field": "served_draft", "value": "true", "provenance": "corroborated",
