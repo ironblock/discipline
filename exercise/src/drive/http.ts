@@ -233,6 +233,8 @@ export class HttpTransport implements DriveTransport {
         return { kind: 'open-tangent', id: command.id };
       case 'close-tangent':
         return { kind: 'close-tangent', dispositions: command.dispositions };
+      case 'background':
+        return { kind: 'background' };
     }
   }
 

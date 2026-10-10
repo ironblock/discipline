@@ -800,6 +800,7 @@ fn serving_interview(
             recall: diet::drive::archive::Recall::of(&read),
             view: session::fork_view(&read),
             self_capture,
+            asks: session::fork_asks(&read),
         }),
     )
 }

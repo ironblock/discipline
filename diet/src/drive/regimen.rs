@@ -619,6 +619,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             "fork_input_view".to_owned(),
             crate::drive::session::fork_view(regimen).word(),
         ),
+        ("fork_asks".to_owned(), fork_asks_lever(regimen)),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
         ("step_and_output_limits".to_owned(), limits),
         ("extraction_seat".to_owned(), "warm-model".to_owned()),
@@ -639,6 +640,12 @@ fn render_budget_lever(regimen: &Regimen) -> String {
             format!("{}:{over}", budget.tokens)
         },
     )
+}
+
+/// The fork ask set lever's word (#595): the set's name and digest.
+fn fork_asks_lever(regimen: &Regimen) -> String {
+    let set = crate::drive::session::fork_asks(regimen);
+    format!("{}:{}", set.name, set.digest())
 }
 
 /// The tangent closure lever's word (#22): `operator` where there is
