@@ -325,6 +325,7 @@ export type SessionStartLine = {
   unsent?: Unsent;
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
+  levers?: Record<string, string>;
   reasoning_effort_default?: string;
   phases?: string[];
   phase_transitions?: PhaseMove[];

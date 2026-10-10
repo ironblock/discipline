@@ -1590,6 +1590,60 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
     let _ = std::fs::remove_file(&sidecar);
 }
 
+/// #573: the log's `session.start` carries the same `levers` as the
+/// record's start row -- one reading of the regimen, written to both, the
+/// window clamp's word included.
+#[test]
+fn a_drive_servers_log_and_record_start_carry_the_same_levers() {
+    let stub = Stub::serving_with_props(
+        vec![Act::Raw(ANSWERED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let record = file_holding("record", "");
+    let log = file_holding("log", "");
+    let record_path = record.0.to_string_lossy().into_owned();
+    let log_path = log.0.to_string_lossy().into_owned();
+    let served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            &dev_loop(),
+            "--record",
+            &record_path,
+            "--log",
+            &log_path,
+        ],
+    );
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains(r#""to":"awaiting""#),
+    );
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    served
+        .said
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the record's report");
+    let logged = first_logged_line(&log.0);
+    let written = std::fs::read_to_string(&record.0).expect("the record");
+    let start_row = log_line_object(written.lines().next().expect("a start row"));
+    assert_eq!(logged["kind"], "session.start", "{logged}");
+    assert!(
+        logged["levers"]["step_and_output_limits"]
+            .as_str()
+            .is_some_and(|word| word.ends_with(":unclamped")),
+        "{logged}"
+    );
+    assert_eq!(logged["levers"], start_row["levers"], "{logged}\n{written}");
+    let _ = std::fs::remove_file(format!("{record_path}.unspellable.json"));
+    let _ = std::fs::remove_file(format!("{record_path}.product.txt"));
+}
+
 #[test]
 fn a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts() {
     // Left in place until the session ends, an earlier run's record would

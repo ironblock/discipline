@@ -891,6 +891,10 @@ pub enum Event {
         approvals_off: Option<bool>,
         /// The fork delivery lever's state (v7), for a session that forks.
         fork_delivery: Option<ForkDelivery>,
+        /// Each lever's state the session runs at (v7, #573), by lever, in
+        /// `docs/program.md` §2's words: the record's start row's `levers`,
+        /// from the same reading, so the two agree by construction.
+        levers: Option<BTreeMap<String, String>>,
         /// With thinking on and no `reasoning_effort` sent, the level the
         /// chat template renders by default, as the registry declares it
         /// (v7): what the model was asked for, named.
@@ -2471,6 +2475,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     off => off,
                 },
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
+                levers: fields.optional_words("levers")?,
                 reasoning_effort_default: match object.get("reasoning_effort_default") {
                     None => None,
                     Some(_) => Some(fields.string("reasoning_effort_default")?),
@@ -3347,6 +3352,9 @@ pub enum Holds {
     Serving,
     /// A list of text (v3).
     Strings,
+    /// An object of names to words (v7, #573): a `session.start`'s
+    /// `levers`, each lever's state in the program's words.
+    Words,
     /// A `delta`'s tool-call fragment: an object of the keys
     /// [`TOOL_CALL_PIECE`] declares (v3).
     ToolCallPiece,
@@ -3760,6 +3768,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("unsent", Holds::Unsent),
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
+                may_v7("levers", Holds::Words),
                 may_v7("reasoning_effort_default", Text),
                 may_v7("phases", Holds::Strings),
                 may_v7("phase_transitions", Holds::PhaseMoves),
@@ -4068,6 +4077,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::RecalledItems => "RecalledItem[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
+        Holds::Words => "Record<string, string>".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
         Holds::Entry => "PatchEntry".to_owned(),
@@ -4273,6 +4283,7 @@ fn to_value(line: &Line) -> Value {
             unsent,
             approvals_off,
             fork_delivery,
+            levers,
             reasoning_effort_default,
             tool_output,
             phases,
@@ -4311,6 +4322,17 @@ fn to_value(line: &Line) -> Value {
                                     ("sha256".to_owned(), text(&file.sha256)),
                                 ]))
                             })
+                            .collect(),
+                    ),
+                );
+            }
+            if let Some(levers) = levers {
+                put(
+                    "levers",
+                    Value::Object(
+                        levers
+                            .iter()
+                            .map(|(lever, state)| (lever.clone(), text(state)))
                             .collect(),
                     ),
                 );
@@ -5089,6 +5111,22 @@ impl Fields<'_> {
     }
 
     /// A list of text, when carried (v3).
+    /// An object of names to words, when carried (v7, #573).
+    fn optional_words(&self, key: &str) -> Result<Option<BTreeMap<String, String>>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::Object(words)) => words
+                .iter()
+                .map(|(name, word)| match word {
+                    Value::String(word) => Ok((name.clone(), word.clone())),
+                    _ => Err(format!("`{key}`'s `{name}` is not a word")),
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .map(Some),
+            Some(_) => Err(format!("`{key}` is not an object")),
+        }
+    }
+
     fn optional_strings(&self, key: &str) -> Result<Option<Vec<String>>, String> {
         match self.0.get(key) {
             None => Ok(None),
@@ -5615,6 +5653,10 @@ mod tests {
                 fork_delivery: None,
                 reasoning_effort_default: None,
                 instruction_files: None,
+                levers: Some(BTreeMap::from([
+                    ("fork-asks".to_owned(), "v3".to_owned()),
+                    ("tangent-closure".to_owned(), "off".to_owned()),
+                ])),
                 tool_output: Some(ToolOutput {
                     state: ToolOutputState::Capped,
                     max_lines: Some(2000),
@@ -6041,6 +6083,9 @@ mod tests {
             }
             (Holds::Strings, Value::Array(items)) => {
                 items.iter().all(|item| matches!(item, Value::String(_)))
+            }
+            (Holds::Words, Value::Object(words)) => {
+                words.values().all(|word| matches!(word, Value::String(_)))
             }
             (Holds::Tag(tags), Value::String(tag)) => tags.tags().contains(&tag.as_str()),
             (Holds::Head, Value::Array(messages)) => messages.iter().all(|m| match m {
@@ -6613,6 +6658,7 @@ mod tests {
         let Event::SessionStart {
             version,
             tool_output,
+            levers,
             ..
         } = &mut lines[0].event
         else {
@@ -6622,6 +6668,7 @@ mod tests {
         // A v7 key on the first line would be the one named; the check is of
         // what arrived in v1, further down.
         *tool_output = None;
+        *levers = None;
         let document: String = lines.iter().map(|line| render(line) + "\n").collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");
