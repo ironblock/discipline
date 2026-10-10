@@ -120,7 +120,11 @@
 //! `none`, under which no gate decided a call and nothing prompted. A v7
 //! `seam` may carry `tail_tokens`, the compaction depth it ran at, and
 //! `carried_tokens`, the estimated tokens of the whole turns it kept after
-//! the refill (#552); absent, the total refill, and `carried_turns` 0.
+//! the refill (#552); absent, the total refill, and `carried_turns` 0. A
+//! v7 `seam` may carry `tool_outputs`, the seam's tool-output state (#553),
+//! and, when it carried any, `outputs` -- the section of the refill after
+//! the render, as sent -- with `carried_outputs`, the outputs it carried,
+//! and `carried_output_bytes`, the section's bytes; absent, `evict`.
 //!
 //! # A torn final line
 //!
@@ -274,6 +278,29 @@ vocabulary! {
         Advisory => "advisory",
         /// The same, framed as an instruction.
         Imperative => "imperative",
+    }
+}
+
+vocabulary! {
+    /// What a seam's refill carries of the tool outputs it compacts away
+    /// (v7, #553): those in the turns before the kept tail.
+    SeamToolOutputs {
+        /// Nothing: today's behaviour, the default.
+        Evict => "evict",
+        /// A line per output naming its tool, arguments, size and sha256,
+        /// the whole saved by digest in the recording.
+        Reference => "reference",
+        /// The verbatim excerpts the read fork quoted from each output.
+        Salient => "salient",
+        /// Each output as the trunk had it, after the cap.
+        Keep => "keep",
+    }
+}
+
+impl Default for SeamToolOutputs {
+    /// `evict`: today's behaviour.
+    fn default() -> Self {
+        Self::Evict
     }
 }
 
@@ -1108,6 +1135,16 @@ pub enum Event {
         /// a move the graph allowed; absent when the session stayed in its
         /// phase.
         phase: Option<PhaseMove>,
+        /// What it carried of the tool outputs it compacted away (v7,
+        /// #553). Absent is `evict`.
+        tool_outputs: Option<SeamToolOutputs>,
+        /// The section of the refill after the render carrying them, as
+        /// sent (v7, #553): present exactly when it carried any.
+        outputs: Option<String>,
+        /// How many outputs the section carried (v7, #553).
+        carried_outputs: Option<u64>,
+        /// The section's bytes (v7, #553).
+        carried_output_bytes: Option<u64>,
     },
 }
 
@@ -2525,6 +2562,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 None => None,
                 Some(_) => Some(fields.phase_move("phase")?),
             },
+            tool_outputs: fields.optional_tag("tool_outputs", SeamToolOutputs::from_tag)?,
+            outputs: fields.optional_string("outputs")?,
+            carried_outputs: fields.optional_count("carried_outputs")?,
+            carried_output_bytes: fields.optional_count("carried_output_bytes")?,
         },
     };
     Ok(Line {
@@ -2941,6 +2982,8 @@ pub enum Tags {
     ForkDelivery,
     /// [`ToolOutputState`] (v7).
     ToolOutputState,
+    /// [`SeamToolOutputs`] (v7).
+    SeamToolOutputs,
 }
 
 impl Tags {
@@ -2969,6 +3012,7 @@ impl Tags {
         Self::Framing,
         Self::ForkDelivery,
         Self::ToolOutputState,
+        Self::SeamToolOutputs,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -2998,6 +3042,7 @@ impl Tags {
             Self::Framing => "Framing",
             Self::ForkDelivery => "ForkDelivery",
             Self::ToolOutputState => "ToolOutputState",
+            Self::SeamToolOutputs => "SeamToolOutputs",
         }
     }
 
@@ -3031,6 +3076,7 @@ impl Tags {
             Self::Framing => of(Framing::ALL, Framing::tag),
             Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
             Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
+            Self::SeamToolOutputs => of(SeamToolOutputs::ALL, SeamToolOutputs::tag),
         }
     }
 }
@@ -3646,6 +3692,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("tail_tokens", Count),
                 may_v7("carried_tokens", Count),
                 may_v7("phase", Holds::PhaseMove),
+                may_v7("tool_outputs", Tag(Tags::SeamToolOutputs)),
+                may_v7("outputs", Text),
+                may_v7("carried_outputs", Count),
+                may_v7("carried_output_bytes", Count),
             ];
             F
         }
@@ -4364,6 +4414,10 @@ fn to_value(line: &Line) -> Value {
             tail_tokens,
             carried_tokens,
             phase,
+            tool_outputs,
+            outputs,
+            carried_outputs,
+            carried_output_bytes,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             if let Some(moved) = phase {
@@ -4381,6 +4435,18 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(tokens) = carried_tokens {
                 put("carried_tokens", count(*tokens));
+            }
+            if let Some(state) = tool_outputs {
+                put("tool_outputs", text(state.tag()));
+            }
+            if let Some(section) = outputs {
+                put("outputs", text(section));
+            }
+            if let Some(n) = carried_outputs {
+                put("carried_outputs", count(*n));
+            }
+            if let Some(n) = carried_output_bytes {
+                put("carried_output_bytes", count(*n));
             }
             Kind::Seam
         }

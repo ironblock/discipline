@@ -513,6 +513,11 @@ pub enum Event {
         /// The phases it moved between (#563), when the operator named a
         /// move the graph allowed.
         phase: Option<log::PhaseMove>,
+        /// What it carried of the tool outputs it compacted away (#553).
+        tool_outputs: log::SeamToolOutputs,
+        /// The section after the render carrying them, when it carried any,
+        /// and how many it carried.
+        outputs: Option<(String, u64)>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -698,6 +703,24 @@ pub type Declared = (
         Vec<log::InstructionFile>,
     ),
 );
+
+/// The phase graph `interview` runs under, as `session.start` names it
+/// (#563): its phases, its allowed moves and the phase it opens in, the
+/// graph's first; `None` when it declares none.
+#[allow(clippy::type_complexity)]
+fn phases_of(interview: Option<&Interview>) -> Option<(Vec<String>, Vec<log::PhaseMove>, String)> {
+    let graph = &interview?.phases;
+    let first = graph.first()?.to_owned();
+    Some((
+        graph.phases().to_vec(),
+        graph
+            .transitions()
+            .into_iter()
+            .map(|(from, to)| log::PhaseMove { from, to })
+            .collect(),
+        first,
+    ))
+}
 
 /// What the capture gap runs under (#374): the rules that warrant its fork,
 /// and the working object the fork's patches are applied to.
@@ -913,6 +936,9 @@ struct State {
     /// A turn that fails after a step keeps it on the trunk, as `max_steps`
     /// does, rather than losing the commands it ran.
     ran: Vec<Message>,
+    /// The recording directory, when the session keeps one: where a seam's
+    /// `reference` saves an output's whole (#553).
+    recording: Option<std::path::PathBuf>,
 }
 
 /// A prompt waiting on the operator, and the answer when one arrives.
@@ -1282,27 +1308,8 @@ impl<S: Streaming + 'static> Session<S> {
         );
         let trunk = template.messages.clone();
         let fork_delivery = interview.as_ref().map(|interview| interview.delivery);
-        let graph = interview
-            .as_ref()
-            .map(|interview| interview.phases.clone())
-            .filter(|graph| !graph.is_empty());
-        let phase_at_open = graph
-            .as_ref()
-            .and_then(|graph| graph.first().map(str::to_owned));
-        let phases = graph
-            .as_ref()
-            .zip(phase_at_open.clone())
-            .map(|(graph, first)| {
-                (
-                    graph.phases().to_vec(),
-                    graph
-                        .transitions()
-                        .into_iter()
-                        .map(|(from, to)| log::PhaseMove { from, to })
-                        .collect(),
-                    first,
-                )
-            });
+        let phases = phases_of(interview.as_ref());
+        let phase_at_open = phases.as_ref().map(|(_, _, first)| first.clone());
         let opened = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| {
@@ -1346,6 +1353,7 @@ impl<S: Streaming + 'static> Session<S> {
             answered: None,
             interview,
             forking: None,
+            recording: tools.as_ref().and_then(|t| t.recording.clone()),
         };
         state.push(Event::Started {
             opened,
@@ -2243,6 +2251,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             carried_turns,
             carried_tokens,
             phase,
+            tool_outputs,
+            outputs,
         } => log::Event::Seam {
             phase: phase.clone(),
             at_turn: *at_turn,
@@ -2262,6 +2272,12 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // (#552); a total compaction writes neither.
             tail_tokens: (*tail_tokens > 0).then_some(*tail_tokens),
             carried_tokens: (*tail_tokens > 0).then_some(*carried_tokens),
+            // The state always (#553); the section, its count and its
+            // bytes when it carried any.
+            tool_outputs: Some(*tool_outputs),
+            outputs: outputs.as_ref().map(|(text, _)| text.clone()),
+            carried_outputs: outputs.as_ref().map(|(_, n)| *n),
+            carried_output_bytes: outputs.as_ref().map(|(text, _)| text.len() as u64),
         },
     };
     log::Line {
@@ -3242,7 +3258,23 @@ fn refill_trunk(
         .iter()
         .map(crate::seam::render::estimated_tokens)
         .sum::<u64>();
-    let mut refilled = crate::seam::render::refill(&template.messages, &render);
+    // What the refill carries of the outputs it compacts away (#553): those
+    // before the kept tail, which stays as it sat.
+    let tool_outputs = interview.seams.outputs;
+    let compacted = &turns[..turns.len() - kept.len()];
+    let outputs = crate::seam::outputs::section(
+        tool_outputs,
+        &compacted_outputs(
+            &state.log,
+            compacted,
+            tool_outputs,
+            state.recording.as_deref(),
+        ),
+    );
+    let sent = outputs
+        .as_ref()
+        .map_or_else(|| render.clone(), |(text, _)| format!("{render}{text}"));
+    let mut refilled = crate::seam::render::refill(&template.messages, &sent);
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
@@ -3260,7 +3292,146 @@ fn refill_trunk(
         carried_turns,
         carried_tokens,
         phase,
+        tool_outputs,
+        outputs,
     });
+}
+
+/// The outputs in `compacted` -- the trunk's turns a seam compacts away --
+/// in call order, each with its call, its turn and what `state` needs of
+/// it (#553): its whole saved by digest for `reference`, the read fork's
+/// excerpts quoted from it for `salient`. Each result is matched to its
+/// `tool_call` line in log order, by call id and what it was shown.
+fn compacted_outputs(
+    log: &[Logged],
+    compacted: &[Message],
+    state: log::SeamToolOutputs,
+    recording: Option<&std::path::Path>,
+) -> Vec<crate::seam::outputs::Output> {
+    use crate::seam::outputs::Output;
+    let lines: Vec<&ToolLine> = log
+        .iter()
+        .filter_map(|logged| match &logged.event {
+            Event::ToolCalled(line) => Some(line.as_ref()),
+            _ => None,
+        })
+        .collect();
+    let mut cursor = 0;
+    let mut calls: &[crate::client::shape::ToolCall] = &[];
+    let mut outputs = Vec::new();
+    let mut files = Vec::new();
+    for message in compacted {
+        if message.role == Role::Assistant {
+            calls = &message.tool_calls;
+            continue;
+        }
+        if message.role != Role::Tool {
+            continue;
+        }
+        let Some(call) = calls
+            .iter()
+            .find(|call| Some(&call.id) == message.tool_call_id.as_ref())
+        else {
+            continue;
+        };
+        let Some(at) = lines.iter().skip(cursor).position(|line| {
+            line.id == call.id && line.shown.as_deref() == Some(message.content.as_str())
+        }) else {
+            continue;
+        };
+        let line = lines[cursor + at];
+        cursor += at + 1;
+        files.push(line.files.first().cloned());
+        outputs.push(Output {
+            turn: line.turn,
+            name: call.name.clone(),
+            arguments: call.arguments.clone(),
+            shown: message.content.clone(),
+            images: message
+                .images
+                .iter()
+                .map(|image| image.media_type().to_owned())
+                .collect(),
+            saved: None,
+            excerpts: Vec::new(),
+        });
+    }
+    if state == log::SeamToolOutputs::Reference {
+        for (output, file) in outputs.iter_mut().zip(files) {
+            output.saved = Some(saved_whole(&output.shown, file, recording));
+        }
+    }
+    if state == log::SeamToolOutputs::Salient {
+        for (turn, excerpt) in read_excerpts(log) {
+            let quoted = excerpt.trim();
+            if let Some(output) = outputs.iter_mut().find(|output| {
+                output.turn == turn && !quoted.is_empty() && output.shown.contains(quoted)
+            }) {
+                output.excerpts.push(quoted.to_owned());
+            }
+        }
+    }
+    outputs
+}
+
+/// An output's whole, by digest: the copy its line already names (a
+/// capped output's whole, #554, or `read`'s image, #557), else `shown`
+/// saved now; unsaved, its size and digest alone, with no recording.
+fn saved_whole(
+    shown: &str,
+    file: Option<log::RecordedFile>,
+    recording: Option<&std::path::Path>,
+) -> crate::seam::outputs::Saved {
+    let file = file.or_else(|| {
+        recording
+            .and_then(|dir| super::attach::kept_whole(dir, shown.as_bytes(), "text/plain").ok())
+    });
+    match (file, recording) {
+        (Some(file), Some(dir)) => crate::seam::outputs::Saved {
+            bytes: file.bytes,
+            sha256: file.sha256,
+            path: Some(dir.join(&file.path).to_string_lossy().into_owned()),
+        },
+        _ => crate::seam::outputs::Saved {
+            bytes: shown.len() as u64,
+            sha256: crate::digest::sha256_hex(shown.as_bytes()),
+            path: None,
+        },
+    }
+}
+
+/// Each excerpt a `read` fork quoted (the dogma's `EXCERPT`, folded as an
+/// `evidence` entry), with the turn the fork followed, in log order.
+fn read_excerpts(log: &[Logged]) -> Vec<(u32, String)> {
+    let prefix = format!(
+        "{}: ",
+        crate::formats::interview::FieldKind::Evidence.canonical_tag()
+    );
+    let reads: BTreeMap<u64, u32> = log
+        .iter()
+        .filter_map(|logged| match &logged.event {
+            Event::Forked {
+                of_turn,
+                why: log::Warrant::Read,
+                ..
+            } => Some((logged.seq, *of_turn)),
+            _ => None,
+        })
+        .collect();
+    log.iter()
+        .filter_map(|logged| match &logged.event {
+            Event::Patched {
+                fork,
+                op: log::PatchOp::Add,
+                entry,
+                ..
+            } => {
+                let turn = reads.get(fork)?;
+                Some((*turn, entry.text.strip_prefix(&prefix)?.to_owned()))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// The turn is over: back to awaiting, or on to ended; then, while
@@ -5179,6 +5350,8 @@ pub(in crate::drive) mod tests {
                 carried_turns: 0,
                 carried_tokens: 0,
                 phase: None,
+                tool_outputs: log::SeamToolOutputs::Evict,
+                outputs: None,
             },
             Event::Delivered {
                 turn: 2,
@@ -5479,6 +5652,10 @@ pub(in crate::drive) mod tests {
                 tail_tokens: None,
                 carried_tokens: None,
                 phase: None,
+                tool_outputs: Some(log::SeamToolOutputs::Evict),
+                outputs: None,
+                carried_outputs: None,
+                carried_output_bytes: None,
             },
             log::Event::Delivered {
                 turn: 2,
@@ -8469,6 +8646,220 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// A session whose first turn reads `notes.md` and draws a read fork
+    /// quoting `line two`, whose second runs `echo tail`, and which seams
+    /// every `every` turns at `tail_tokens` under `state` (#553).
+    fn seaming_outputs(
+        tree: &Path,
+        state: log::SeamToolOutputs,
+        (every, tail_tokens): (u32, u64),
+        recording: Option<&Path>,
+    ) -> Session<Canned> {
+        let notes: String = std::iter::once("line one\nline two\n".to_owned())
+            .chain((0..60).map(|n| format!("filler line {n}\n")))
+            .collect();
+        std::fs::write(tree.join("notes.md"), notes).expect("the notes");
+        let mut tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["cat", "echo"],
+            None,
+            Decider::Decline,
+        );
+        tools.recording = recording.map(Path::to_path_buf);
+        Session::open_with(
+            Canned::new([
+                vec![bash("call-1", "cat notes.md")],
+                deltas(&["It says line two."]),
+                deltas(&["EXCERPT: line two\n"]),
+                vec![bash("call-2", "echo tail")],
+                deltas(&["ok"]),
+                deltas(&["next"]),
+                deltas(&["after"]),
+            ]),
+            looping(),
+            None,
+            Some(tools),
+            None,
+            Some(Interview {
+                seams: crate::seam::policy::Served {
+                    every_turns: Some(every),
+                    at_trunk_tokens: None,
+                    tail_tokens,
+                    outputs: state,
+                },
+                ..interviewing(&[log::Warrant::Read])
+            }),
+        )
+    }
+
+    /// The seam line's tool-output fields: its state, its section, how many
+    /// outputs and how many bytes it carried.
+    fn seam_outputs_of(
+        log: &[Logged],
+    ) -> (
+        Option<log::SeamToolOutputs>,
+        Option<String>,
+        Option<u64>,
+        Option<u64>,
+    ) {
+        log.iter()
+            .find_map(|logged| match line_of(logged).event {
+                log::Event::Seam {
+                    tool_outputs,
+                    outputs,
+                    carried_outputs,
+                    carried_output_bytes,
+                    ..
+                } => Some((tool_outputs, outputs, carried_outputs, carried_output_bytes)),
+                _ => None,
+            })
+            .expect("a seam line")
+    }
+
+    /// Runs `seaming_outputs`' turns through the seam and one ask after it:
+    /// the log, and the request that ask sent.
+    fn through_the_seam(session: &Session<Canned>, turns: u32) -> (Vec<Logged>, RequestShape) {
+        session.ask("read the notes", None).expect("accepted");
+        // Settled, or -- at a cadence of one -- seamed after the fork.
+        wait_until(session, "the first turn and its fork", |log| {
+            !fork_outcomes(log).is_empty() && (settled(log) || !seams_in(log).is_empty())
+        });
+        if turns == 2 {
+            session.ask("echo something", None).expect("accepted");
+        }
+        wait_until(session, "the seam", |log| !seams_in(log).is_empty());
+        session.ask("go on", None).expect("accepted");
+        let log = wait_until(session, "the turn after the seam", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == turns as usize + 1
+        });
+        reads_whole(session);
+        let sent = session.shared.transport.sent();
+        (log, sent.last().expect("a request").clone())
+    }
+
+    /// `evict`, the default: the refill carries nothing of the outputs it
+    /// compacts away, and the seam line names the state alone (#553).
+    #[test]
+    fn evict_carries_no_tool_output_across_the_seam() {
+        let tree = scratch("seam-evict");
+        let session = seaming_outputs(&tree, log::SeamToolOutputs::Evict, (1, 0), None);
+        let (log, sent) = through_the_seam(&session, 1);
+        assert_eq!(
+            seam_outputs_of(&log),
+            (Some(log::SeamToolOutputs::Evict), None, None, None)
+        );
+        assert!(
+            !sent.messages[0]
+                .content
+                .contains(crate::seam::outputs::HEADER)
+        );
+        // Nothing of turn 1 after the refill: the next ask follows the head.
+        assert_eq!(sent.messages[template().messages.len()].content, "go on");
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// `keep`: each compacted output as the trunk had it, after the render,
+    /// in call order; the kept tail's outputs are untouched -- not in the
+    /// section, and still on the trunk as they sat (#553).
+    #[test]
+    fn keep_carries_the_compacted_outputs_and_leaves_the_kept_tail_alone() {
+        let tree = scratch("seam-keep");
+        let session = seaming_outputs(&tree, log::SeamToolOutputs::Keep, (2, 100), None);
+        let (log, sent) = through_the_seam(&session, 2);
+        let (state, section, carried, bytes) = seam_outputs_of(&log);
+        let section = section.expect("a section");
+        assert_eq!(state, Some(log::SeamToolOutputs::Keep));
+        assert_eq!(carried, Some(1));
+        assert_eq!(bytes, Some(section.len() as u64));
+        let notes = std::fs::read_to_string(tree.join("notes.md")).expect("the notes");
+        assert_eq!(
+            section,
+            format!(
+                "\n# tool outputs\nThe following tool results were produced before context was \
+                 compacted, in call order:\n\n- turn 1: bash args={{\"command\":\"cat notes.md\"}}\n\
+                 [Tool result]: {notes}"
+            )
+        );
+        assert!(sent.messages[0].content.ends_with(&section));
+        assert!(
+            !section.contains("echo tail"),
+            "the kept tail is not carried"
+        );
+        let tail: Vec<&Message> = sent.messages[template().messages.len()..].iter().collect();
+        assert_eq!(tail[0].content, "echo something");
+        assert_eq!(tail[2].role, Role::Tool);
+        assert_eq!(
+            tail[2].content, "tail\n",
+            "the kept tail's output as it sat"
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// `reference`: one line per compacted output naming its tool,
+    /// arguments, size and sha256, its whole saved by digest in the
+    /// recording at the path the line gives (#553).
+    #[test]
+    fn reference_names_each_output_and_saves_its_whole_by_digest() {
+        let tree = scratch("seam-reference");
+        let recording = scratch("seam-reference-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let session = seaming_outputs(
+            &tree,
+            log::SeamToolOutputs::Reference,
+            (1, 0),
+            Some(&recording),
+        );
+        let (log, sent) = through_the_seam(&session, 1);
+        let notes = std::fs::read_to_string(tree.join("notes.md")).expect("the notes");
+        let sha256 = crate::digest::sha256_hex(notes.as_bytes());
+        let saved = recording.join("files").join(&sha256);
+        let (state, section, carried, _) = seam_outputs_of(&log);
+        let section = section.expect("a section");
+        assert_eq!(state, Some(log::SeamToolOutputs::Reference));
+        assert_eq!(carried, Some(1));
+        assert!(
+            section.ends_with(&format!(
+                "- turn 1: bash args={{\"command\":\"cat notes.md\"}}: {} bytes, sha256 {sha256}, \
+                 saved at {}\n",
+                notes.len(),
+                saved.display()
+            )),
+            "{section}"
+        );
+        assert_eq!(std::fs::read_to_string(&saved).expect("saved whole"), notes);
+        assert!(sent.messages[0].content.ends_with(&section));
+        every_head_rebuilds(&log);
+        tidy(&[&tree, &recording]);
+    }
+
+    /// `salient`: the excerpt the read fork quoted from the output, and
+    /// nothing for an output no fork quoted (#553).
+    #[test]
+    fn salient_carries_the_read_forks_excerpts_and_nothing_else() {
+        let tree = scratch("seam-salient");
+        let session = seaming_outputs(&tree, log::SeamToolOutputs::Salient, (2, 0), None);
+        let (log, sent) = through_the_seam(&session, 2);
+        let (state, section, carried, _) = seam_outputs_of(&log);
+        let section = section.expect("a section");
+        assert_eq!(state, Some(log::SeamToolOutputs::Salient));
+        assert_eq!(carried, Some(1));
+        assert_eq!(
+            section,
+            "\n# tool outputs\nThe following excerpts were quoted from tool results produced \
+             before context was compacted, in call order:\n\n- turn 1: bash \
+             args={\"command\":\"cat notes.md\"}\n[Tool result excerpt]: line two\n"
+        );
+        assert!(sent.messages[0].content.ends_with(&section));
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
     /// The seam lines in `log`, as the log writes them: turn and reason.
     fn seams_in(log: &[Logged]) -> Vec<(u32, log::SeamReason)> {
         log.iter()
@@ -8518,6 +8909,7 @@ pub(in crate::drive) mod tests {
                 every_turns: Some(1),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
+                outputs: log::SeamToolOutputs::Evict,
             })),
         );
         session
@@ -8572,6 +8964,7 @@ pub(in crate::drive) mod tests {
                     every_turns: Some(1),
                     at_trunk_tokens: None,
                     tail_tokens,
+                    outputs: log::SeamToolOutputs::Evict,
                 })),
             )
         };
@@ -8594,6 +8987,8 @@ pub(in crate::drive) mod tests {
                     tail_tokens,
                     carried_turns,
                     carried_tokens,
+                    tool_outputs: Some(log::SeamToolOutputs::Evict),
+                    outputs: None,
                     ..
                 } => Some((tail_tokens, carried_turns, carried_tokens)),
                 _ => None,
@@ -8638,6 +9033,7 @@ pub(in crate::drive) mod tests {
                 every_turns: Some(5),
                 at_trunk_tokens: Some(200),
                 tail_tokens: 0,
+                outputs: log::SeamToolOutputs::Evict,
             })),
         );
         session
@@ -8667,6 +9063,7 @@ pub(in crate::drive) mod tests {
                 every_turns: None,
                 at_trunk_tokens: Some(245),
                 tail_tokens: 0,
+                outputs: log::SeamToolOutputs::Evict,
             })),
         );
         session
@@ -8707,6 +9104,7 @@ pub(in crate::drive) mod tests {
                 every_turns: None,
                 at_trunk_tokens: Some(100),
                 tail_tokens: 0,
+                outputs: log::SeamToolOutputs::Evict,
             })),
         );
         session
@@ -8749,6 +9147,7 @@ pub(in crate::drive) mod tests {
                 every_turns: Some(1),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
+                outputs: log::SeamToolOutputs::Evict,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -8779,6 +9178,7 @@ pub(in crate::drive) mod tests {
                 every_turns: Some(2),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
+                outputs: log::SeamToolOutputs::Evict,
             })),
         );
         session
@@ -8897,6 +9297,10 @@ pub(in crate::drive) mod tests {
                 tail_tokens: None,
                 carried_tokens: None,
                 phase: None,
+                tool_outputs: Some(log::SeamToolOutputs::Evict),
+                outputs: None,
+                carried_outputs: None,
+                carried_output_bytes: None,
             }
         );
 

@@ -36,6 +36,10 @@ pub const SEAM_AT_CONTEXT_FRACTION: &str = "seam_at_context_fraction";
 /// trunk's most recent whole turns a served seam keeps after the refill.
 /// Absent or 0 is the total refill (#505).
 pub const SEAM_TAIL_TOKENS: &str = "seam_tail_tokens";
+/// What a served seam's refill carries of the tool outputs it compacts away
+/// (#553): `evict` (the default), `reference`, `salient` or `keep`, read
+/// leniently -- any other value is unset.
+pub const SEAM_TOOL_OUTPUTS: &str = "seam_tool_outputs";
 /// The ordered list of phases the work moves through.
 pub const PHASES: &str = "phases";
 /// The table of allowed transitions, one array per phase.
@@ -140,6 +144,16 @@ impl fmt::Display for PolicyError {
 
 impl Error for PolicyError {}
 
+/// [`SEAM_TOOL_OUTPUTS`] read, leniently: a state's word, or `evict`.
+#[must_use]
+pub fn seam_tool_outputs(regimen: &Regimen) -> crate::formats::log::SeamToolOutputs {
+    use crate::formats::log::SeamToolOutputs;
+    match regimen.get(SEAM_TOOL_OUTPUTS) {
+        Some(Value::String(word)) => SeamToolOutputs::from_tag(word).unwrap_or_default(),
+        _ => SeamToolOutputs::default(),
+    }
+}
+
 impl Policy {
     /// Read the policy `regimen` declares.
     ///
@@ -240,6 +254,9 @@ pub struct Served {
     /// The compaction depth: estimated tokens of recent whole turns a seam
     /// keeps after the refill ([`SEAM_TAIL_TOKENS`]); 0, the total refill.
     pub tail_tokens: u64,
+    /// What a seam carries of the tool outputs it compacts away
+    /// ([`SEAM_TOOL_OUTPUTS`]).
+    pub outputs: crate::formats::log::SeamToolOutputs,
 }
 
 impl Served {
@@ -290,6 +307,7 @@ impl Served {
             every_turns,
             at_trunk_tokens,
             tail_tokens,
+            outputs: seam_tool_outputs(regimen),
         })
     }
 
@@ -400,6 +418,7 @@ mod tests {
                 every_turns: Some(4),
                 at_trunk_tokens: Some(96_000),
                 tail_tokens: 0,
+                outputs: crate::formats::log::SeamToolOutputs::Evict,
             })
         );
         assert_eq!(
@@ -408,6 +427,7 @@ mod tests {
                 every_turns: None,
                 at_trunk_tokens: Some(8192),
                 tail_tokens: 0,
+                outputs: crate::formats::log::SeamToolOutputs::Evict,
             })
         );
         for bad in ["0.0", "1.5", "-0.2", "\"half\""] {
@@ -439,6 +459,7 @@ mod tests {
             every_turns: Some(3),
             at_trunk_tokens: Some(1000),
             tail_tokens: 0,
+            outputs: crate::formats::log::SeamToolOutputs::Evict,
         };
         assert_eq!(policy.due(2, Some(999)), None);
         assert_eq!(policy.due(2, None), None);

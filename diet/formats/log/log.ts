@@ -189,6 +189,13 @@ export type ToolOutputState =
   | "keep"
 ;
 
+export type SeamToolOutputs =
+  | "evict"
+  | "reference"
+  | "salient"
+  | "keep"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -489,6 +496,10 @@ export type SeamLine = {
   tail_tokens?: number;
   carried_tokens?: number;
   phase?: PhaseMove;
+  tool_outputs?: SeamToolOutputs;
+  outputs?: string;
+  carried_outputs?: number;
+  carried_output_bytes?: number;
 };
 
 export type DeliveredLine = {
