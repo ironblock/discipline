@@ -1,0 +1,7 @@
+<interview>
+{imperative}
+You are in {cwd}.
+You last edited {last_edited}.
+You said: "{intent}"
+You just changed something. What did the change establish, and what did it depend on being true? Record each thing with update_record, under the field learned, evidence or stuck. If there is nothing to record, call nothing.
+</interview>

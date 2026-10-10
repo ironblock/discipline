@@ -368,6 +368,14 @@ fn serve(args: &[String]) -> ExitCode {
         }
         _ => Vec::new(),
     };
+    // The fork ask set's priming (#598): what an interview is, in the
+    // system prompt from the session's start and never changed after.
+    let priming = regimen_file
+        .as_deref()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|text| regimen::parse(&text).ok())
+        .and_then(|read| session::priming(&read));
+    let system = session::primed(&system, priming);
     let system = diet::drive::instructions::into_system(&system, &instructions);
     let instruction_files: Vec<_> = instructions
         .iter()

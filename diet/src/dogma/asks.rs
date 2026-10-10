@@ -81,8 +81,18 @@ pub const T1: AskSet = AskSet {
         "judgment", "outcome", "reminder"),
 };
 
+/// t1's asks, each wrapped in `<interview>` tags, with the priming paragraph
+/// the system prompt carries from the session's start saying what the tags
+/// mean (#598): the maintainer's approval of the drafted wording.
+pub const T2: AskSet = AskSet {
+    name: "t2",
+    modality: Modality::Tools,
+    files: set_files!("t2": "api_surface", "change", "finding", "generic", "imperative",
+        "judgment", "outcome", "priming", "reminder"),
+};
+
 /// Every set, in the order they were added.
-pub const SETS: &[&AskSet] = &[&V3, &V4, &T1];
+pub const SETS: &[&AskSet] = &[&V3, &V4, &T1, &T2];
 
 /// The set a served regimen that names none runs: v3, today's asks, by the
 /// maintainer's decision (2026-10-09); v4 is selectable beside it.
@@ -143,7 +153,7 @@ impl AskSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{DEFAULT, Modality, SETS, T1, V3, V4, set};
+    use super::{DEFAULT, Modality, SETS, T1, T2, V3, V4, set};
     use crate::dogma::MANIFEST;
     use std::collections::BTreeSet;
     use std::path::Path;
@@ -244,5 +254,39 @@ mod tests {
             let changed = V4.text(file) != Some(*text);
             assert_eq!(changed, *file == "judgment", "{file}");
         }
+    }
+
+    /// #598: t2 is t1 with each ask wrapped in `<interview>` tags -- the
+    /// imperative unwrapped, since it is filled inside an ask -- and a
+    /// priming paragraph; no other set primes.
+    #[test]
+    fn t2_is_t1_wrapped_in_interview_tags_with_a_priming_paragraph() {
+        for (file, text) in T1.files() {
+            let wrapped = T2.text(file).expect("t2 has every t1 file");
+            if *file == "imperative" {
+                assert_eq!(wrapped, *text);
+            } else {
+                assert_eq!(
+                    wrapped,
+                    format!("<interview>\n{text}</interview>\n"),
+                    "{file}"
+                );
+            }
+        }
+        assert_eq!(T2.files().len(), T1.files().len() + 1);
+        assert_eq!(T2.modality, Modality::Tools);
+        assert_eq!(
+            T2.priming(),
+            Some(
+                "This session may be forked to interview you about your work. An interview \
+                 question arrives as a user message inside <interview> tags. Answer it with the \
+                 record tools (update_record, resolve_entry), from what this session has \
+                 established; it is not a new request from the operator.\n"
+            )
+        );
+        for set in [&V3, &V4, &T1] {
+            assert_eq!(set.priming(), None, "{}", set.name);
+        }
+        assert_eq!(super::set("t2"), Some(&T2));
     }
 }

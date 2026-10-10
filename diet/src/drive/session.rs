@@ -1306,6 +1306,26 @@ pub fn interview_role(regimen: &Regimen) -> Role {
     }
 }
 
+/// The priming paragraph a session under `regimen` opens with (#598): its
+/// fork ask set's, when the regimen warrants forks and the set carries one.
+/// It joins the system prompt once, at the session's start, and is never
+/// changed after.
+#[must_use]
+pub fn priming(regimen: &Regimen) -> Option<&'static str> {
+    let forks = interview_warrant(regimen).is_ok_and(|rules| !rules.is_empty());
+    forks.then(|| fork_asks(regimen).priming()).flatten()
+}
+
+/// `head`, the system prompt, with `priming` after it and a blank line
+/// (#598); `head` as it is with none.
+#[must_use]
+pub fn primed(head: &str, priming: Option<&str>) -> String {
+    match priming {
+        Some(priming) => format!("{}\n\n{}", head.trim_end(), priming.trim()),
+        None => head.to_owned(),
+    }
+}
+
 /// The regimen key for the fork ask set (#595).
 pub const FORK_ASKS: &str = "fork_asks";
 
@@ -15268,6 +15288,81 @@ pub(in crate::drive) mod tests {
             )),
             "the patch line names the cited id and the entry that replaces it"
         );
+    }
+
+    /// #598: a session primes only when it forks under a set that primes --
+    /// t2 -- and the priming follows the system prompt after a blank line,
+    /// once; v3, v4 and t1 never prime.
+    #[test]
+    fn a_session_is_primed_only_when_it_forks_under_t2() {
+        let read = |text: &str| priming(&regimen::parse(text).expect("a regimen"));
+        let forks = "interview_warrant = [\"scoping\"]\n";
+        assert_eq!(
+            read(&format!("fork_asks = \"t2\"\n{forks}")),
+            crate::dogma::asks::T2.priming()
+        );
+        assert!(crate::dogma::asks::T2.priming().is_some());
+        assert_eq!(read("fork_asks = \"t2\"\n"), None, "no fork, no priming");
+        for set in ["v3", "v4", "t1"] {
+            assert_eq!(
+                read(&format!("fork_asks = \"{set}\"\n{forks}")),
+                None,
+                "{set}"
+            );
+        }
+        assert_eq!(read(forks), None, "the default set does not prime");
+        assert_eq!(
+            primed("the head\n", Some("the priming\n")),
+            "the head\n\nthe priming"
+        );
+        assert_eq!(primed("the head", None), "the head");
+    }
+
+    /// #598: a primed session's system prompt is the same bytes on every
+    /// request it sends, the trunk's and its forks', from the first to the
+    /// last: the priming is never added, moved or changed mid-session.
+    #[test]
+    fn a_primed_sessions_system_prompt_is_unchanged_across_the_session() {
+        let system = primed(HEAD, crate::dogma::asks::T2.priming());
+        let mut shape = template();
+        shape.messages = vec![Message::new(Role::System, system.clone())];
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.capture = crate::dogma::asks::Modality::Tools;
+        interview.asks = &crate::dogma::asks::T2;
+        declare_self_capture(&mut shape, Some(&interview));
+        let session = Session::open_with(
+            Canned::new([
+                deltas(&[SCOPED]),
+                deltas(&["nothing to record"]),
+                deltas(&["second answer"]),
+                deltas(&["nothing again"]),
+            ]),
+            shape,
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        for ask in ["what are we building?", "and then?"] {
+            session.ask_marked(ask, None, true).expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+        }
+        let sent = session.shared.transport.sent();
+        assert!(sent.len() >= 3, "{} requests", sent.len());
+        for request in &sent {
+            assert_eq!(request.messages[0].role, Role::System);
+            assert_eq!(request.messages[0].content, system);
+        }
+        assert!(system.ends_with("it is not a new request from the operator."));
+        let fork_ask = sent
+            .iter()
+            .filter_map(|request| request.messages.last())
+            .find(|message| message.content.starts_with("<interview>\n"))
+            .expect("a fork's ask in the tags");
+        assert!(fork_ask.content.trim_end().ends_with("</interview>"));
     }
 
     /// #595: the set is read from the regimen leniently, v3 by default.
