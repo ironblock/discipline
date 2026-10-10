@@ -2700,7 +2700,27 @@ fn one_call<S: Streaming>(
     let mut line = parsed(ToolLine::of(request, turn, call, log::ToolOutcome::Ran));
     line.approval = approval;
     let profiled = tools.confinement.isolation() != crate::isolation::Isolation::None;
-    match tools.confinement.run(&tools.policy, &tools.worktree, &run) {
+    // A stop reaches a running call: its whole process group is killed, and
+    // the turn settles `cancelled` (#551).
+    match tools
+        .confinement
+        .run_until(&tools.policy, &tools.worktree, &run, &|| cancel.is_asked())
+    {
+        Ok(ran) if ran.cancelled => {
+            line.outcome = log::ToolOutcome::Cancelled;
+            line.confined = Some(ran.confined.clone());
+            line.isolation = Some(isolation_word(ran.isolation));
+            line.network = Some(network_word(ran.network));
+            line.stdout = Some(log::Output {
+                text: ran.stdout.clone(),
+                bytes: ran.stdout_bytes,
+            });
+            line.stderr = Some(log::Output {
+                text: ran.stderr.clone(),
+                bytes: ran.stderr_bytes,
+            });
+            (line, None)
+        }
         Ok(ran) => {
             let denied = ran.denials().iter().any(|d| d.kind.is_unambiguous());
             if profiled && ran.exit != Some(0) && denied {
@@ -5720,6 +5740,88 @@ pub(in crate::drive) mod tests {
         let trunk = session.trunk();
         assert_eq!(trunk.len(), 1 + 1 + 2, "{trunk:#?}");
         assert_eq!(trunk[2], call_message("call-1", "touch a"));
+        tidy(&[&tree]);
+    }
+
+    /// A cancel reaches a call that is running (#551): its process group is
+    /// killed, the call is logged `cancelled`, and the turn settles
+    /// `cancelled` within seconds.
+    #[test]
+    fn a_cancel_stops_a_running_call_and_settles_the_turn_cancelled() {
+        let tree = scratch("cancel-running-call");
+        let session = Session::open_looping(
+            Canned::new([vec![bash("call-1", "sleep 600")], deltas(&["never"])]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["sleep"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        session.ask("wait", None).expect("accepted");
+        wait_until(&session, "the call to be made", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::Called { .. }))
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        let asked = Instant::now();
+        session.cancel(1, None).expect("the turn is in flight");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert!(
+            asked.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            asked.elapsed()
+        );
+        assert_eq!(settled_as(&log), Some(SettleReason::Cancelled));
+        let written = lines(&log);
+        assert_eq!(written.len(), 1);
+        assert_eq!(written[0].outcome, log::ToolOutcome::Cancelled);
+        tidy(&[&tree]);
+    }
+
+    /// A call that leaves a server running in the background returns, and a
+    /// later call in the same session still runs (#551): the server's held
+    /// pipes do not poison the next call.
+    #[test]
+    fn a_call_after_a_backgrounded_server_still_runs() {
+        let tree = scratch("after-background");
+        let session = Session::open_looping(
+            Canned::new([
+                vec![bash("call-1", "sleep 30 & echo started")],
+                vec![bash("call-2", "echo second")],
+                deltas(&["done"]),
+            ]),
+            looping(),
+            None,
+            tools(
+                Confinement::Unconfined,
+                &tree,
+                &["sleep", "echo"],
+                None,
+                Decider::Decline,
+            ),
+        );
+        let asked = Instant::now();
+        session.ask("serve", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert!(
+            asked.elapsed() < Duration::from_secs(10),
+            "{:?}",
+            asked.elapsed()
+        );
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        let written = lines(&log);
+        assert_eq!(written.len(), 2, "{written:?}");
+        assert!(
+            written.iter().all(|l| l.outcome == log::ToolOutcome::Ran),
+            "{written:?}"
+        );
+        let said = |line: &ToolLine| line.stdout.as_ref().map(|out| out.text.clone());
+        assert_eq!(said(&written[0]).as_deref(), Some("started\n"));
+        assert_eq!(said(&written[1]).as_deref(), Some("second\n"));
         tidy(&[&tree]);
     }
 
