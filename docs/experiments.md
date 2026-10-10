@@ -28,8 +28,8 @@
 | the same parity fire on the candidate rung | admission × substrate | supported; comparison inconclusive, its sign negative | `results/2026-10-01-extraction-acceptance-parity-candidate/` |
 | judge seat, zero-shot (#165 → #499) | decision model | refuted for the zero-shot model (26.7% four-way, near chance); the Sonnet judges agree (Fleiss κ 0.886 and 0.969) | `results/2026-10-03-laya-calibration-bound/` |
 | judge seat, state lengths (#165) | decision model | refuted: the hypothesis that the archive's 90th-percentile judge state fits laya-en's state budget under both of #165's questions | `results/2026-10-02-judge-state-lengths/` |
-| confabulation on nulls (notebook era) | fork warrant | supported: a generative interview fired where nothing capture-worthy happened confabulates an entry in most calls | `results/2026-07-29-confabulation-on-nulls/` |
-| extraction acceptance inverts (notebook era) | admission (the archived row the parity fires reproduce) | supported | `results/2026-08-10-extraction-acceptance-inverts/` |
+| confabulation on nulls (the predecessor's notebook era) | fork warrant | the predecessor's, not a result: it reported that a generative interview fired where nothing capture-worthy happened confabulates an entry in most calls | `results/2026-07-29-confabulation-on-nulls/` |
+| extraction acceptance inverts (the predecessor's notebook era) | admission (the archived row the parity fires reproduce) | the predecessor's, not a result | `results/2026-08-10-extraction-acceptance-inverts/` |
 | depth probe on the 3.6 floor (#143, an admission cell) | substrate | `pass`: no cliff at 0.5, 0.9 or 0.95 of the 160,000-token pool (deepest 151,622 tokens) | `substrates/admission/accel24-beellama-qwen27b-q4kxl/7c254834cc2c/depth/` |
 
 ## Wanted, by the piece each waits on
