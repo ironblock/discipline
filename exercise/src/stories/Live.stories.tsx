@@ -21,6 +21,7 @@ import auditedSeam from '../../../diet/formats/log/fixtures/valid/a-v7-seam-audi
 import operatorEdits from '../../../diet/formats/log/fixtures/valid/a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl?raw';
 import seamBackground from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-listed-a-running-background-command.jsonl?raw';
 import seamHeld from '../../../diet/formats/log/fixtures/valid/a-v7-seam-held-for-the-operator-then-refilled-anyway.jsonl?raw';
+import tailKeptNone from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-tail-kept-no-turn.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
@@ -817,6 +818,20 @@ export const ServedSeamBackground: Story = {
     await expect(job.querySelector('.ex-seam__job-command')?.textContent).toBe('python3 -m http.server 8765');
     await expect(job.querySelector('.ex-seam__job-since')?.textContent).toBe('no output since it started');
     await expect(job.querySelector('.ex-seam__job-output')?.textContent).toBe('background/shell-bg_0123abcd.output');
+  },
+};
+
+/** `?drive`, log v7 (#693): a compaction tail that kept no turn warns the operator, in the maintainer's words. */
+export const ServedTailKeptNoTurn: Story = {
+  name: '?drive: a seam whose tail kept no turn warns the operator',
+  args: { drive: true, web: serving(tailKeptNone) },
+  play: async ({ canvasElement }) => {
+    const warning = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-seam .ex-seam__zero');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(warning.textContent).toBe('Zero turns retained: last turn was 27 against budget 20');
   },
 };
 

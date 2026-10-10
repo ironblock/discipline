@@ -24,6 +24,12 @@ export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
             ].join(' · ')}
           </span>
         ) : null}
+        {/* A tail that kept no turn (#693), in the maintainer's words: the newest turn outgrew the tail's budget. */}
+        {node.zeroTurns ? (
+          <span className="ex-seam__zero" title="the compaction tail keeps whole turns, newest first; the newest was larger than its budget, so none was kept">
+            {`Zero turns retained: last turn was ${node.zeroTurns.newest} against budget ${node.zeroTurns.budget}`}
+          </span>
+        ) : null}
         {/* Refilled over the operator's unaddressed changes (#150's gate): their call, not the reconcile's. */}
         {node.refilledAnyway ? (
           <span className="ex-seam__anyway" title="the reconcile left your changes unaddressed, and you refilled anyway">
