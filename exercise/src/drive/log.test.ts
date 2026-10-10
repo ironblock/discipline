@@ -324,6 +324,15 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(session.eras[1]?.seam).toMatchObject({ operatorChanges: [{ entry: 'd2', kind: 'edit' }, { entry: 'd2', kind: 'flag' }], unaddressed: ['d2'] });
   });
 
+  it('folds a seam’s list of the background commands still running, each job’s id, command, since-state and output file (#614, #667)', () => {
+    const session = fold(logOf('a-v7-seam-that-listed-a-running-background-command.jsonl'));
+    expect([...session.unknown.keys()]).toEqual([]);
+    const seam = session.eras.find((era) => era.seam)?.seam;
+    expect(seam?.background).toEqual([
+      { id: 'bg_0123abcd', command: 'python3 -m http.server 8765', since: 'no output since it started', output: 'background/shell-bg_0123abcd.output' },
+    ]);
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });

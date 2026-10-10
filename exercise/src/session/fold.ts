@@ -284,6 +284,34 @@ export interface SeamNode extends Provenance {
   /** What the operator changed in working memory since the last seam (log v7, #150), and the flags this seam left open. */
   readonly operatorChanges?: readonly { readonly entry: string; readonly kind: string }[];
   readonly unaddressed?: readonly string[];
+  /** The background commands still running at this seam (log v7, #614), as the refill listed them after its summary. */
+  readonly background?: readonly BackgroundListed[];
+}
+
+/** One background command a seam's refill listed as still running. */
+export interface BackgroundListed {
+  readonly id: string;
+  readonly command: string;
+  /** Whether it printed since it started, or since the last seam that listed it. */
+  readonly since: string;
+  readonly output: string;
+}
+
+/** The text diet escaped for the list's elements (`background.rs` `escaped`). */
+const unescaped = (text: string): string =>
+  text.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&amp;', '&');
+
+/**
+ * A seam's `background` block (`<background-tasks>`), read back into its rows:
+ * `- [running, <since>] <id>: <command>` then `  output file: <path>`, as
+ * `running_at_seam` in diet's `background.rs` writes them.
+ */
+export function backgroundListed(text: string): BackgroundListed[] {
+  const rows: BackgroundListed[] = [];
+  for (const m of text.matchAll(/^- \[running, ([^\]]+)\] ([^:\n]+): (.*)\n {2}output file: (.*)$/gm)) {
+    rows.push({ id: unescaped(m[2]!), command: unescaped(m[3]!), since: m[1]!, output: unescaped(m[4]!) });
+  }
+  return rows;
 }
 
 export interface Era {
@@ -1030,6 +1058,7 @@ export function fold(lines: readonly LogLine[]): Session {
           ...(seamLine.prompt_tokens !== undefined && seamLine.window !== undefined ? { size: { promptTokens: seamLine.prompt_tokens, window: seamLine.window } } : {}),
           ...(seamLine.operator_changes !== undefined && seamLine.operator_changes.length > 0 ? { operatorChanges: seamLine.operator_changes } : {}),
           ...(seamLine.unaddressed !== undefined && seamLine.unaddressed.length > 0 ? { unaddressed: seamLine.unaddressed } : {}),
+          ...(seamLine.background !== undefined ? { background: backgroundListed(seamLine.background) } : {}),
           ...provenance(seamLine),
         })
       : undefined;
