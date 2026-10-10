@@ -23,7 +23,7 @@ export interface SessionHeaderProps {
 const CURTAIN = ['closed', 'condensed', 'open'] as const;
 
 /** The levers the header names, in order, and what each state means on hover. */
-const LEVERS: readonly { readonly lever: keyof Levers; readonly label: string; readonly title: (state: string | undefined) => string }[] = [
+const LEVERS: readonly { readonly lever: Exclude<keyof Levers, 'table'>; readonly label: string; readonly title: (state: string | undefined) => string }[] = [
   {
     lever: 'approvals',
     label: 'approvals',
@@ -56,6 +56,20 @@ export function SessionHeader({ session, link = 'live', linkWhy, surface, room =
         </span>
       ) : null}
       <span className="ex-header__item ex-header__model">{session.model}</span>
+      {/* Every lever's state, as the session's first line declares the table (#623): the whole of it, on asking. */}
+      {session.levers.table ? (
+        <details className="ex-header__item ex-header__levers">
+          <summary title="every lever's state this session ran at, as its first line declares them">levers</summary>
+          <dl>
+            {Object.entries(session.levers.table).map(([lever, state]) => (
+              <div key={lever} data-lever-row={lever} data-undeclared={state === 'undeclared' ? '' : undefined}>
+                <dt>{lever.replaceAll('_', ' ')}</dt>
+                <dd>{state}</dd>
+              </div>
+            ))}
+          </dl>
+        </details>
+      ) : null}
       {/* The lever states the session ran under, as its first line declares them (#573); what it does not declare says so. */}
       {LEVERS.map(({ lever, label, title }) => (
         <span key={lever} className="ex-header__item ex-header__lever" data-lever={lever} data-undeclared={session.levers[lever] === undefined ? '' : undefined} title={title(session.levers[lever])}>

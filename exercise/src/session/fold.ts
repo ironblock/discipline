@@ -349,6 +349,11 @@ export interface Levers {
   readonly forkDelivery?: string;
   /** The reasoning state on the wire (`template_kwargs`): thinking on or off, and the effort, as sent. */
   readonly reasoning?: string;
+  /**
+   * Every lever's state, as `session.start`'s `levers` declares it (#623): the record's start row, read from the log.
+   * Words, shown as given, `undeclared` among them. Absent from a log written before it.
+   */
+  readonly table?: Readonly<Record<string, string>>;
 }
 
 export function leversOf(start: LineOf<'session.start'>): Levers {
@@ -361,6 +366,7 @@ export function leversOf(start: LineOf<'session.start'>): Levers {
     ...(start.approvals_off === true ? { approvals: 'off' as const } : start.version >= 7 ? { approvals: 'gate' as const } : {}),
     ...(start.fork_delivery !== undefined ? { forkDelivery: start.fork_delivery } : {}),
     ...(reasoning.length > 0 ? { reasoning: reasoning.join(' · ') } : {}),
+    ...(start.levers !== undefined ? { table: start.levers } : {}),
   };
 }
 
