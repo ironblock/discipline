@@ -87,6 +87,7 @@ pub mod journal;
 pub mod shape;
 pub mod stream;
 pub mod stub;
+pub mod tls;
 pub mod transport;
 pub mod wire;
 pub mod xml_fallback;

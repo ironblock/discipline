@@ -481,6 +481,9 @@ fn serve(args: &[String]) -> ExitCode {
     let substrate = regime
         .as_ref()
         .map(|regime| regime.substrates[0].id.as_str());
+    if let Err(why) = tls_only_for_an_api(&trunk_endpoint, substrate) {
+        return fail(EXIT_INPUT, &why);
+    }
     let engine = match substrate
         .map(|id| diet::drive::engine::check_served(&transport, id))
         .transpose()
@@ -496,14 +499,16 @@ fn serve(args: &[String]) -> ExitCode {
     };
     // The offboard seat, checked as the trunk's server is (#570), before
     // anything binds.
-    let seat = match offboard_seat(
+    // With it, the chat template it reports: where a fork's ask is rendered.
+    let (seat, seat_template) = match offboard_seat(
         regime.as_ref(),
         seat,
         &trunk_endpoint,
         (&dialect, &shape),
         regimen_file.as_deref(),
     ) {
-        Ok(seat) => seat,
+        Ok(Some((seat, template))) => (Some(seat), template),
+        Ok(None) => (None, None),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     // What the announcement prints and the log's `session.start` claims,
@@ -524,25 +529,38 @@ fn serve(args: &[String]) -> ExitCode {
     // this window (#588); the record's lever says whether it was.
     let window = confirmed.as_ref().and_then(|confirmed| confirmed.window);
     // The interview's role (#599): a role but `user` runs only where the
-    // served template renders it, refused before anything binds.
+    // served template renders it, refused before anything binds -- the
+    // offboard seat's template when forks go there, else the trunk's.
     if let Some(role) = interview
         .as_ref()
         .map(|interview| interview.role)
         .filter(|role| *role != diet::client::shape::Role::User)
     {
-        let template = confirmed
-            .as_ref()
-            .and_then(|confirmed| confirmed.template.as_deref());
+        let (template, whose) = if seat.is_some() {
+            (seat_template.as_deref(), "the extraction seat")
+        } else {
+            (
+                confirmed
+                    .as_ref()
+                    .and_then(|confirmed| confirmed.template.as_deref()),
+                "the server",
+            )
+        };
         let refused = template.map_or_else(
             || {
                 Err(format!(
-                    "the server reports no chat template, so a `{}` interview ask cannot be confirmed to render",
+                    "{whose} reports no chat template, so a `{}` interview ask cannot be confirmed to render",
                     role.tag()
                 ))
             },
             |template| diet::drive::template_roles::renders(template, role.tag()),
         );
         if let Err(why) = refused {
+            let why = if seat.is_some() {
+                format!("the extraction seat: {why}")
+            } else {
+                why
+            };
             return fail(
                 EXIT_INPUT,
                 &format!("`interview_role = \"{}\"`: {why}", role.tag()),
@@ -788,7 +806,7 @@ fn served_session(
     // `bash` alone, or `bash` and the standard set; then `prune_output`
     // when the regimen offers it (#612).
     if let Some(tools) = tools.as_ref() {
-        shape.tools = tools.surface.tools();
+        shape.tools = tools.surface.tools_with(tools.background);
         if declared
             .1
             .as_ref()
@@ -816,11 +834,15 @@ fn served_session(
     })
 }
 
+/// An offboard seat, and the chat template its server reports.
+type Seated = (session::Offboard<HttpStream>, Option<String>);
+
 /// The offboard extraction seat the regime declares (#570), reached by
 /// `serve`'s seat flags: its server, checked against the registry's entry
 /// as the trunk's is -- its engine, then [`confirmations`]' model, settings
-/// and warming, asked as a fork asks it -- and the model a fork names.
-/// `None` for a warm seat.
+/// and warming, asked as a fork asks it -- and the model a fork names,
+/// beside the chat template the seat reports, which a fork's ask renders
+/// through (#599). `None` for a warm seat.
 ///
 /// # Errors
 ///
@@ -834,7 +856,7 @@ fn offboard_seat(
     trunk: &Endpoint,
     (dialect, shape): (&Dialect, &RequestShape),
     regimen: Option<&str>,
-) -> Result<Option<session::Offboard<HttpStream>>, String> {
+) -> Result<Option<Seated>, String> {
     let seat = regime.and_then(|regime| regime.substrates.get(1));
     let Some(seat) = seat else {
         return match (&given.endpoint, &given.model, &given.key_file) {
@@ -857,6 +879,7 @@ fn offboard_seat(
         Ok(endpoint) => chat_endpoint(endpoint),
         Err(why) => return Err(format!("{endpoint} is not an endpoint: {why}")),
     };
+    tls_only_for_an_api(&endpoint, Some(id))?;
     if endpoint == *trunk {
         return Err(format!(
             "--seat-endpoint is the trunk's own endpoint: a seat on the executor's server is \
@@ -881,17 +904,55 @@ fn offboard_seat(
         .map_err(|why| format!("the extraction seat: {why}"))?;
     let mut asked = shape.clone();
     asked.model.clone_from(&model);
-    let Confirmed { window, .. } = confirmations(&transport, id, &passed, &asked)
+    let Confirmed {
+        window, template, ..
+    } = confirmations(&transport, id, &passed, &asked)
         .map_err(|why| format!("the extraction seat: {why}"))?;
-    Ok(Some(session::Offboard {
-        transport,
-        substrate: id.to_owned(),
-        model,
-        // The window the seat reports, else the one its entry declares.
-        context_window: window.map(|(tokens, _)| tokens).or_else(|| {
-            diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
-        }),
-    }))
+    Ok(Some((
+        session::Offboard {
+            transport,
+            substrate: id.to_owned(),
+            model,
+            // The window the seat reports, else the one its entry declares.
+            context_window: window.map(|(tokens, _)| tokens).or_else(|| {
+                diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
+            }),
+        },
+        template,
+    )))
+}
+
+/// An `https` endpoint is a hosted API's (#555): served for a substrate the
+/// registry declares `server_kind = "api"`, and refused for any other, or
+/// for none. A server we run is reached in the clear on a network we own;
+/// one we reach over TLS is one we do not, and its entry has to say so.
+///
+/// # Errors
+///
+/// An `https` endpoint with no substrate, or one whose entry is not `api`.
+fn tls_only_for_an_api(endpoint: &Endpoint, substrate: Option<&str>) -> Result<(), String> {
+    if !endpoint.tls {
+        return Ok(());
+    }
+    let api = substrate
+        .map(|id| {
+            let identity = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)?;
+            diet::drive::served::ServerKind::of(id, &identity)
+                .map(|kind| kind == diet::drive::served::ServerKind::Api)
+        })
+        .transpose()?;
+    match (substrate, api) {
+        (Some(_), Some(true)) => Ok(()),
+        (Some(id), _) => Err(format!(
+            "an https endpoint is a hosted API's, and `{id}`'s entry is not \
+             `server_kind = \"api\"`: a server we run is reached at its http address"
+        )),
+        (None, _) => Err(
+            "an https endpoint is a hosted API's, and without a regimen there is no \
+             registry entry to say this one is"
+                .to_owned(),
+        ),
+    }
 }
 
 /// The dialect the registry names for substrate `id` (#496): llama.cpp's
@@ -1004,6 +1065,9 @@ fn serving_interview(
             self_capture,
             asks,
             capture,
+            // #564: when a fork fires, and on what; one per gap unless declared.
+            cadence: session::interview_cadence(&read),
+            threshold_bytes: session::interview_threshold_bytes(&read),
             role: session::interview_role(&read),
             // #612: whether the model may prune its tool results; off unless
             // declared.
@@ -1174,6 +1238,8 @@ fn serving_tools(
         // names (#554, #557).
         read_tool: declared.surface.read_tool(),
         surface: declared.surface,
+        // #614: on unless the regimen turns it off.
+        background: declared.background,
     }))
 }
 
