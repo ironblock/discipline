@@ -363,6 +363,15 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(attaching) => attaching,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
+    // Where a capped tool output is kept whole (#554): the recording's
+    // directory, absolute, since the pointer is read from the worktree.
+    let mut tools = tools;
+    if let Some(tools) = tools.as_mut() {
+        tools.recording = attaching
+            .recording
+            .as_ref()
+            .map(|dir| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone()));
+    }
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
         Err(why) => return fail(EXIT_INPUT, &why),
@@ -860,6 +869,11 @@ fn serving_tools(
         store: Some(store),
         approval_policy: declared.approval_policy,
         approvals_off: declared.approvals_off,
+        output_cap: declared.output_cap,
+        // Set once the recording's directory is known (`serve`).
+        recording: None,
+        // `bash` is the one tool the session declares.
+        read_tool: None,
     }))
 }
 

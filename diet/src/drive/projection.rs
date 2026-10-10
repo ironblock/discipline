@@ -307,6 +307,7 @@ pub fn project_in(
                 tools,
                 template_kwargs,
                 fork_delivery,
+                tool_output,
                 ..
             },
         ..
@@ -338,6 +339,8 @@ pub fn project_in(
         regimen_sha256: None,
         // The fork delivery lever's state, as `session.start` names it.
         fork_delivery: *fork_delivery,
+        // The tool output cap, as `session.start` names it (#554).
+        tool_output: *tool_output,
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -1336,6 +1339,7 @@ mod tests {
             unsent: None,
             approvals_off: None,
             fork_delivery: None,
+            tool_output: None,
         }
     }
 
