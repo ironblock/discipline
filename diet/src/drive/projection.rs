@@ -429,6 +429,9 @@ struct Walk<'a> {
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
     side_heads: BTreeMap<Lane, String>,
+    /// The forks whose head is the trunk's own (#157): a whole-trunk view,
+    /// on the trunk's server -- what [`Walk::side_head_change`] can rebuild.
+    whole_trunk_forks: BTreeSet<u64>,
     /// Each call's latest `tool_call` line, by its id: its row and what the
     /// trunk carried as its result (#612).
     calls: BTreeMap<String, (u64, Option<String>)>,
@@ -627,6 +630,7 @@ impl<'a> Walk<'a> {
             trunk_unrebuilt: None,
             refilled: false,
             side_heads: BTreeMap::new(),
+            whole_trunk_forks: BTreeSet::new(),
             calls: BTreeMap::new(),
             pruned: Vec::new(),
             fork_calls: BTreeMap::new(),
@@ -747,7 +751,7 @@ impl<'a> Walk<'a> {
                 if let Some(fork) = fork {
                     self.fork_calls.insert(line.seq, *fork);
                 }
-                self.request(line.seq, *turn, *lane, head_sha256.as_deref())?;
+                self.request(line.seq, (*turn, *lane, *fork), head_sha256.as_deref())?;
             }
             // A capped call is not an answer (#290, ruled 5969297103): no
             // row, its text named, and nothing put on the rebuilt trunk.
@@ -970,12 +974,18 @@ impl<'a> Walk<'a> {
             lane,
             of_turn,
             seat,
+            view,
             ..
         } = &forked.event
         else {
             return;
         };
         let (seq, lane, of_turn) = (forked.seq, *lane, *of_turn);
+        // A whole-trunk fork on the trunk's own server: its head is the
+        // trunk's, and its request's head can be rebuilt (#157).
+        if view.is_none() && seat.is_none() {
+            self.whole_trunk_forks.insert(seq);
+        }
         // The lane's requests name the seat whether or not this row can be
         // written.
         if let Some(seat) = seat {
@@ -1234,8 +1244,7 @@ impl<'a> Walk<'a> {
     fn request(
         &mut self,
         seq: u64,
-        turn: u32,
-        lane: Lane,
+        (turn, lane, fork): (u32, Lane, Option<u64>),
         head_sha256: Option<&str>,
     ) -> Result<(), String> {
         let Some(head_sha256) = head_sha256 else {
@@ -1256,7 +1265,7 @@ impl<'a> Walk<'a> {
             self.turn_of.insert(seq, turn);
             self.head_change(seq, turn, head_sha256);
         } else {
-            self.side_head_change(seq, lane, head_sha256);
+            self.side_head_change(seq, (lane, fork), head_sha256);
         }
         if !self.outcome.contains_key(&seq) {
             self.name(
@@ -1373,12 +1382,22 @@ impl<'a> Walk<'a> {
         }));
     }
 
-    /// A side lane's head moving (v5, #374): named as unattributed, since the
-    /// log holds an interview request's digest and not the head it hashed --
-    /// the trunk's warm tail and the fork's question -- so the move cannot be
-    /// rebuilt and attributed as the trunk's is.
-    fn side_head_change(&mut self, seq: u64, lane: Lane, logged: &str) {
-        let Some(previous) = self.side_heads.insert(lane, logged.to_owned()) else {
+    /// A side lane's head moving (v5, #374). A whole-trunk fork on the
+    /// trunk's own server sends the trunk as it stands, then its question, so
+    /// its head is rebuilt from the projected trunk and verified by digest
+    /// (#157): no row when it matches -- its move from the lane's last head
+    /// is the trunk's own growth. Any other side head -- one that does not
+    /// match, a `last:N` view, an offboard seat -- is not attributed here: a
+    /// move from the lane's last head is named `unattributed`, and the lane's
+    /// first head is no move at all.
+    fn side_head_change(&mut self, seq: u64, (lane, fork): (Lane, Option<u64>), logged: &str) {
+        let verified = fork.is_some_and(|fork| self.whole_trunk_forks.contains(&fork))
+            && self.rebuilds_the_trunk(logged);
+        let previous = self.side_heads.insert(lane, logged.to_owned());
+        if verified {
+            return;
+        }
+        let Some(previous) = previous else {
             return;
         };
         if previous == logged {
@@ -1390,6 +1409,43 @@ impl<'a> Walk<'a> {
             reason: PrefixReason::Unattributed,
             diff: Vec::new(),
         });
+    }
+
+    /// Whether `logged` is the head a request on the projected trunk carries
+    /// -- the trunk, then the request's own last message, which
+    /// `client::head` leaves out -- under the session's tools (or the `bash`
+    /// definition an older log sent, #558). Never, while the trunk carries
+    /// something the log cannot rebuild.
+    fn rebuilds_the_trunk(&self, logged: &str) -> bool {
+        if self.trunk_unrebuilt.is_some() {
+            return false;
+        }
+        let Ok(tools) = self.tools.clone() else {
+            return false;
+        };
+        let mut messages = self.trunk.clone();
+        messages.push(Message::new(Role::User, String::new()));
+        std::iter::once(tools.clone())
+            .chain(earlier_bash(&tools))
+            .any(|tools| {
+                Head::of(&RequestShape {
+                    model: self.model.clone(),
+                    messages: messages.clone(),
+                    sampler: SamplerCard::empty(),
+                    limits: Limits {
+                        attempt: std::time::Duration::ZERO,
+                        call: std::time::Duration::ZERO,
+                        max_output_tokens: 0,
+                        retries: 0,
+                        context_window: None,
+                    },
+                    grammar: None,
+                    template_kwargs: self.template_kwargs.clone(),
+                    tools,
+                })
+                .digest()
+                    == logged
+            })
     }
 
     /// Turn `turn`'s user message as the session sent it: the ask's words,
