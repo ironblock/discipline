@@ -848,12 +848,21 @@ fn interview_role_lever(regimen: &Regimen) -> String {
         .to_owned()
 }
 
-/// The self-capture lever's word (#609): `off`, or `on:every:<n>` with the
-/// reminder's cadence of silent turns.
+/// The self-capture lever's word (#609): `off`, or
+/// `on:every:<n>:<set>:<digest>` with the reminder's cadence of silent turns
+/// and the contract set offered, by name and digest.
 fn self_capture_lever(regimen: &Regimen) -> String {
     crate::drive::session::self_capture(regimen).map_or_else(
         || "off".to_owned(),
-        |cadence| format!("on:every:{}", cadence.interval()),
+        |cadence| {
+            let set = crate::drive::session::self_capture_contract(regimen);
+            format!(
+                "on:every:{}:{}:{}",
+                cadence.interval(),
+                set.name,
+                set.digest()
+            )
+        },
     )
 }
 
@@ -1022,6 +1031,27 @@ mod tests {
             assert!(stream_idle(Some(&read(wrong))).is_err(), "{wrong}");
             assert_eq!(lever(wrong), UNDECLARED);
         }
+    }
+
+    /// #609's c2: the self-capture lever names the contract set and its
+    /// digest, c1 unless the regimen names another.
+    #[test]
+    fn the_self_capture_lever_names_its_contract_set() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["self_capture"]
+                .clone()
+        };
+        assert_eq!(lever(""), "off");
+        let c1 = crate::dogma::capture::C1.digest();
+        let c2 = crate::dogma::capture::C2.digest();
+        assert_eq!(
+            lever("self_capture = true\n"),
+            format!("on:every:3:c1:{c1}")
+        );
+        assert_eq!(
+            lever("self_capture = true\nself_capture_contract = \"c2\"\n"),
+            format!("on:every:3:c2:{c2}")
+        );
     }
 
     /// #124: a regimen that declares phases and turns self-capture on arms

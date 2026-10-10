@@ -93,7 +93,10 @@ pub mod vocabulary;
 ///   answer instruction asking for the self-capture tools instead of
 ///   fields, its modality `tools`, the maintainer's approval as drafted ("Good
 ///   starting point"). No template and no set already pinned changed.
-pub const VERSION: u32 = 6;
+/// * 7, 2026-10-10: self-capture set `c2` joined (#609, [`capture`]): c1's
+///   contract with a description on every parameter, the maintainer's
+///   approval of the wording. No template and no set already pinned changed.
+pub const VERSION: u32 = 7;
 
 /// The digest of `diet/dogma/MANIFEST.tsv` that [`VERSION`] was declared
 /// against.
@@ -103,7 +106,7 @@ pub const VERSION: u32 = 6;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "0a854941d094d0b0";
+pub const MANIFEST_DIGEST: &str = "bea5c829492bcafc";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///

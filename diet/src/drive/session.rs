@@ -1042,6 +1042,9 @@ pub struct Interview {
     /// request, and the cadence of silent turns its reminder fires after;
     /// `None` when off.
     pub self_capture: Option<crate::capture::tools::Cadence>,
+    /// The contract set self-capture offers (#609): the regimen's
+    /// `self_capture_contract`, else `c1`.
+    pub capture_contract: &'static crate::dogma::capture::CaptureSet,
     /// How a fork answers (#610): in fields, the default, or through the
     /// self-capture tools.
     pub capture: crate::dogma::asks::Modality,
@@ -1145,8 +1148,8 @@ pub fn interview_threshold_bytes(regimen: &Regimen) -> Option<u64> {
 /// If the pinned contract does not read, which `dogma::capture`'s and
 /// `capture::tools`' tests hold it always does.
 pub fn declare_self_capture(shape: &mut RequestShape, interview: Option<&Interview>) {
-    if interview.is_some_and(|interview| interview.self_capture.is_some()) {
-        let contract = crate::capture::tools::contract()
+    if let Some(interview) = interview.filter(|interview| interview.self_capture.is_some()) {
+        let contract = crate::capture::tools::contract_of(interview.capture_contract)
             .expect("the pinned contract reads: `dogma::capture`'s tests hold it");
         shape
             .tools
@@ -1159,6 +1162,21 @@ pub const SELF_CAPTURE: &str = "self_capture";
 
 /// The regimen key for the self-capture reminder's cadence (#609).
 pub const SELF_CAPTURE_CADENCE: &str = "self_capture_cadence";
+
+/// The regimen key for the self-capture contract set (#609's c2).
+pub const SELF_CAPTURE_CONTRACT: &str = "self_capture_contract";
+
+/// The self-capture contract set the regimen names, leniently: a set by
+/// its name, or else [`crate::dogma::capture::DEFAULT`], `c1`.
+#[must_use]
+pub fn self_capture_contract(regimen: &Regimen) -> &'static crate::dogma::capture::CaptureSet {
+    match regimen.get(SELF_CAPTURE_CONTRACT) {
+        Some(crate::formats::regimen::Value::String(name)) => {
+            crate::dogma::capture::set(name).unwrap_or(crate::dogma::capture::DEFAULT)
+        }
+        _ => crate::dogma::capture::DEFAULT,
+    }
+}
 
 /// Self-capture as the regimen declares it, leniently (#609): on for
 /// `self_capture = true` or `"on"`, with `self_capture_cadence` silent
@@ -13077,6 +13095,7 @@ pub(in crate::drive) mod tests {
             skip_self_recorded: false,
             prune: None,
             self_capture: None,
+            capture_contract: crate::dogma::capture::DEFAULT,
             asks: &crate::dogma::asks::V3,
             capture: crate::dogma::asks::Modality::Fields,
             fork_tail: None,
@@ -15543,6 +15562,46 @@ pub(in crate::drive) mod tests {
             "the system prompt is unchanged"
         );
         reads_whole(&session);
+    }
+
+    /// #609's c2: the session's contract set is the one declared, so c2's
+    /// parameter descriptions reach the request and c1's absence of them
+    /// stays as it was.
+    #[test]
+    fn self_capture_declares_the_sessions_contract_set() {
+        use crate::formats::record::json::Value;
+        let described = |set| {
+            let mut interview = interviewing(&[]);
+            interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+            interview.capture_contract = set;
+            let mut shape = looping();
+            declare_self_capture(&mut shape, Some(&interview));
+            let Value::Object(schema) = &shape.tools[1].schema else {
+                panic!("an object schema");
+            };
+            let Some(Value::Object(properties)) = schema.get("properties") else {
+                panic!("properties");
+            };
+            properties
+                .values()
+                .filter(|property| {
+                    matches!(property, Value::Object(p) if p.contains_key("description"))
+                })
+                .count()
+        };
+        assert_eq!(described(&crate::dogma::capture::C1), 0);
+        assert_eq!(described(&crate::dogma::capture::C2), 3);
+    }
+
+    /// #609's c2: the set is read from the regimen leniently, c1 by default.
+    #[test]
+    fn the_self_capture_contract_is_read_leniently_and_defaults_to_c1() {
+        let read =
+            |text: &str| self_capture_contract(&regimen::parse(text).expect("a regimen")).name;
+        assert_eq!(read(""), "c1");
+        assert_eq!(read("self_capture_contract = \"c2\"\n"), "c2");
+        assert_eq!(read("self_capture_contract = \"c9\"\n"), "c1");
+        assert_eq!(read("self_capture_contract = 2\n"), "c1");
     }
 
     /// #609: the regimen's words, read leniently.

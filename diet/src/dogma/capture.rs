@@ -41,8 +41,40 @@ pub const C1: CaptureSet = CaptureSet {
     ],
 };
 
+/// c1's contract with a description on every parameter (the maintainer's
+/// approval of 2026-10-10): the vote found that `OpenCode` 2 and Qwen Code
+/// both describe each parameter, worded in Qwen Code's lowercase fragments.
+/// The tools, their descriptions and their parameters' types are c1's; the
+/// reminder and sweep words are c1's, byte for byte.
+pub const C2: CaptureSet = CaptureSet {
+    name: "c2",
+    files: &[
+        (
+            "contract.jsonl",
+            include_str!("../../dogma/self-capture/c2/contract.jsonl"),
+        ),
+        (
+            "reminder.txt",
+            include_str!("../../dogma/self-capture/c2/reminder.txt"),
+        ),
+        (
+            "sweep.txt",
+            include_str!("../../dogma/self-capture/c2/sweep.txt"),
+        ),
+    ],
+};
+
 /// Every set, in the order they were added.
-pub const SETS: &[&CaptureSet] = &[&C1];
+pub const SETS: &[&CaptureSet] = &[&C1, &C2];
+
+/// The set a session offers when its regimen names none: c1, today's.
+pub const DEFAULT: &CaptureSet = &C1;
+
+/// The set called `name`, if there is one.
+#[must_use]
+pub fn set(name: &str) -> Option<&'static CaptureSet> {
+    SETS.iter().copied().find(|set| set.name == name)
+}
 
 impl CaptureSet {
     /// The text of the file `name`, if the set has one.
@@ -87,7 +119,7 @@ impl CaptureSet {
 
 #[cfg(test)]
 mod tests {
-    use super::{C1, SETS};
+    use super::{C1, C2, DEFAULT, SETS, set};
     use crate::dogma::MANIFEST;
     use std::collections::BTreeSet;
     use std::path::Path;
@@ -153,5 +185,23 @@ mod tests {
             Some("Anything you meant to record?")
         );
         assert!(C1.contract().contains("\"tool\":\"update_record\""));
+    }
+
+    /// c2 changes the contract alone: its reminder and sweep are c1's.
+    #[test]
+    fn c2_keeps_c1s_reminder_and_sweep() {
+        for file in ["reminder.txt", "sweep.txt"] {
+            assert_eq!(C2.text(file), C1.text(file), "{file}");
+        }
+        assert_ne!(C2.contract(), C1.contract());
+    }
+
+    /// A set is found by its name, and c1 is the default.
+    #[test]
+    fn a_set_is_found_by_name_and_c1_is_the_default() {
+        assert_eq!(set("c1"), Some(&C1));
+        assert_eq!(set("c2"), Some(&C2));
+        assert_eq!(set("c3"), None);
+        assert_eq!(DEFAULT, &C1);
     }
 }
