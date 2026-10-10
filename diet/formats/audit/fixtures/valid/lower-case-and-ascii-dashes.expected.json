@@ -1,0 +1,18 @@
+{
+  "lines": [
+    {
+      "n": 1,
+      "verdict": "keep"
+    },
+    {
+      "n": 2,
+      "reason": "no longer true",
+      "verdict": "remove"
+    },
+    {
+      "n": 3,
+      "of": 1,
+      "verdict": "dup"
+    }
+  ]
+}
