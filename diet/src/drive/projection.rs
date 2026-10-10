@@ -2412,6 +2412,7 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Seam {
+            newest_turn_tokens: None,
             refilled_anyway: None,
             operator_changes: None,
             unaddressed: None,
@@ -2463,6 +2464,7 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Seam {
+            newest_turn_tokens: None,
             refilled_anyway: None,
             operator_changes: None,
             unaddressed: None,

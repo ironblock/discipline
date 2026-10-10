@@ -632,6 +632,9 @@ pub enum Event {
         operator_changes: Option<Vec<log::OperatorChange>>,
         /// Of those, the entries no answer addressed (#150): carried on.
         unaddressed: Option<Vec<String>>,
+        /// The newest turn's estimated tokens when the tail was asked for
+        /// and kept no turn (#693).
+        newest_turn_tokens: Option<u64>,
         /// The operator refilled it over the changes it was held for
         /// (#150's gate): `Some(true)`, or `None`.
         refilled_anyway: Option<bool>,
@@ -4122,6 +4125,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             pruned,
             operator_changes,
             unaddressed,
+            newest_turn_tokens,
             refilled_anyway,
             warm,
         } => log::Event::Seam {
@@ -4153,6 +4157,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             pruned: pruned.clone(),
             operator_changes: operator_changes.clone(),
             unaddressed: unaddressed.clone(),
+            newest_turn_tokens: *newest_turn_tokens,
             refilled_anyway: *refilled_anyway,
         },
         Event::SeamHeld {
@@ -6014,10 +6019,7 @@ fn refilled(
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
     let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
-    let carried_turns = kept
-        .iter()
-        .filter(|message| message.role == Role::User)
-        .count() as u64;
+    let (carried_turns, newest_turn_tokens) = tail_kept(&kept, turns, tail_tokens);
     let carried_tokens = kept
         .iter()
         .map(crate::seam::render::estimated_tokens)
@@ -6080,9 +6082,25 @@ fn refilled(
         pruned,
         operator_changes,
         unaddressed,
+        newest_turn_tokens,
         refilled_anyway: None,
         warm: None,
     }
+}
+
+/// How many whole turns the tail `kept` of `turns` holds; and, when a tail
+/// was asked for (`tail_tokens` above 0) and kept none (#693), the newest
+/// turn's estimated tokens, for the operator's warning -- "you got what you
+/// asked for".
+fn tail_kept(kept: &[Message], turns: &[Message], tail_tokens: u64) -> (u64, Option<u64>) {
+    let carried_turns = kept
+        .iter()
+        .filter(|message| message.role == Role::User)
+        .count() as u64;
+    let unkept = (tail_tokens > 0 && carried_turns == 0)
+        .then(|| crate::seam::render::newest_turn_tokens(turns))
+        .flatten();
+    (carried_turns, unkept)
 }
 
 impl Event {
@@ -10387,6 +10405,7 @@ pub(in crate::drive) mod tests {
                 tangent: Some("t/1".to_owned()),
             },
             Event::Seamed {
+                newest_turn_tokens: None,
                 refilled_anyway: None,
                 operator_changes: None,
                 unaddressed: None,
@@ -10844,6 +10863,7 @@ pub(in crate::drive) mod tests {
                 tangent: Some("t/1".to_owned()),
             },
             log::Event::Seam {
+                newest_turn_tokens: None,
                 refilled_anyway: None,
                 operator_changes: None,
                 unaddressed: None,
@@ -18183,7 +18203,9 @@ pub(in crate::drive) mod tests {
     /// old trunk's most recent whole turn after the refill, as it sat on the
     /// trunk; the seam line names the depth and what it kept; the next ask
     /// runs on head, render and tail; the projection rebuilds every head. A
-    /// budget no whole turn fits keeps none.
+    /// budget no whole turn fits keeps none, and its seam line names the
+    /// newest turn's size for the operator's warning (#693); one that kept a
+    /// turn names none.
     #[test]
     fn a_seam_with_a_tail_budget_keeps_the_most_recent_whole_turns() {
         let tailed = |tail_tokens: u64| {
@@ -18232,13 +18254,19 @@ pub(in crate::drive) mod tests {
                     carried_tokens,
                     tool_outputs: Some(log::SeamToolOutputs::Evict),
                     outputs: None,
+                    newest_turn_tokens,
                     ..
-                } => Some((tail_tokens, carried_turns, carried_tokens)),
+                } => Some((
+                    tail_tokens,
+                    carried_turns,
+                    carried_tokens,
+                    newest_turn_tokens,
+                )),
                 _ => None,
             })
             .expect("a seam line");
         let estimated: u64 = kept.iter().map(crate::seam::render::estimated_tokens).sum();
-        assert_eq!(seam, (Some(10_000), 1, Some(estimated)));
+        assert_eq!(seam, (Some(10_000), 1, Some(estimated), None));
 
         session.ask("build it", None).expect("accepted");
         let log = wait_until(&session, "the second seam", |log| seams_in(log).len() == 2);
@@ -18248,13 +18276,25 @@ pub(in crate::drive) mod tests {
         assert_eq!(session.shared.transport.sent()[2].messages, expected);
         every_head_rebuilds(&log);
 
-        // A budget no whole turn fits: the total refill.
+        // A budget no whole turn fits: the total refill, and the newest
+        // turn's size on the seam line (#693, levers run A's seam 2804).
         let session = tailed(1);
         session
             .ask_marked("what are we building?", None, true)
             .expect("accepted");
-        wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
         assert_eq!(session.trunk().len(), template().messages.len() + 1);
+        let warned = log.iter().find_map(|logged| match line_of(logged).event {
+            log::Event::Seam {
+                tail_tokens,
+                carried_turns,
+                newest_turn_tokens,
+                ..
+            } => Some((tail_tokens, carried_turns, newest_turn_tokens)),
+            _ => None,
+        });
+        assert_eq!(warned, Some((Some(1), 0, Some(estimated))));
+        reads_whole(&session);
     }
 
     /// A budget: the trunk call reports 18 prefilled, 160 reused and 66
@@ -18603,6 +18643,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             line_of(&log[seam]).event,
             log::Event::Seam {
+                newest_turn_tokens: None,
                 refilled_anyway: None,
                 operator_changes: None,
                 unaddressed: None,

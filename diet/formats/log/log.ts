@@ -599,6 +599,7 @@ export type SeamLine = {
   pruned?: string[];
   operator_changes?: OperatorChange[];
   unaddressed?: string[];
+  newest_turn_tokens?: number;
   refilled_anyway?: boolean;
   warm?: Timings;
 };
