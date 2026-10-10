@@ -292,6 +292,30 @@ pub fn tail(turns: &[Message], budget: u64) -> &[Message] {
     &turns[start..]
 }
 
+/// The last `n` whole turns of `turns` (#567), each starting at its user
+/// message as [`tail`]'s do, so no call is parted from its result; all of
+/// them when there are fewer, none when `n` is 0.
+#[must_use]
+pub fn last_turns(turns: &[Message], n: usize) -> &[Message] {
+    if n == 0 {
+        return &turns[turns.len()..];
+    }
+    let mut seen = 0;
+    for (at, message) in turns.iter().enumerate().rev() {
+        if message.role == Role::User {
+            seen += 1;
+            if seen == n {
+                return &turns[at..];
+            }
+        }
+    }
+    let first = turns
+        .iter()
+        .position(|message| message.role == Role::User)
+        .unwrap_or(turns.len());
+    &turns[first..]
+}
+
 /// `text` with everything that could forge a row escaped out of it.
 ///
 /// **The render owns the grammar of the prompt it emits, and it used to have
