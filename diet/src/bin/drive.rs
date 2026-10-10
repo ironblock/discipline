@@ -639,9 +639,10 @@ fn served_session(
         Option<u64>,
     ),
 ) -> std::sync::Arc<Session<HttpStream>> {
-    // A session that runs commands declares the one tool they run through.
-    if tools.is_some() {
-        shape.tools = vec![tool_loop::bash_tool()];
+    // A session that runs commands declares its surface's tools (#557):
+    // `bash` alone, or `bash` and the standard set.
+    if let Some(tools) = tools.as_ref() {
+        shape.tools = tools.surface.tools();
     }
     std::sync::Arc::new(Session::open_declaring(
         transport,
@@ -872,8 +873,10 @@ fn serving_tools(
         output_cap: declared.output_cap,
         // Set once the recording's directory is known (`serve`).
         recording: None,
-        // `bash` is the one tool the session declares.
-        read_tool: None,
+        // The read tool the surface offers, which a capped output's notice
+        // names (#554, #557).
+        read_tool: declared.surface.read_tool(),
+        surface: declared.surface,
     }))
 }
 

@@ -2672,6 +2672,35 @@ fn shown_capped(tools: &Tools, whole: &str, line: &mut ToolLine) -> String {
     shown
 }
 
+/// A standard tool's call (#557), to its line and what the model is shown:
+/// its result under the session's cap, or -- a stop having killed its
+/// helper -- the cancel's result; the step limit refuses it as it refuses
+/// `bash`.
+fn standard_call(
+    tools: &Tools,
+    cancel: &Cancel,
+    (turn, request): (u32, u64),
+    call: &Call,
+    last: bool,
+) -> (ToolLine, Option<String>) {
+    if last {
+        let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Refused);
+        line.reason = Some(log::ToolRefusal::MaxSteps);
+        return (line, None);
+    }
+    match super::standard::run(&call.name, &call.arguments, tools, &|| cancel.is_asked()) {
+        super::standard::Done::Shown(result) => {
+            let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+            let shown = shown_capped(tools, &result, &mut line);
+            (line, Some(shown))
+        }
+        super::standard::Done::Cancelled(_) => {
+            let line = ToolLine::of(request, turn, call, log::ToolOutcome::Cancelled);
+            (line, Some(CANCELLED_CALL.to_owned()))
+        }
+    }
+}
+
 /// One call, to its line and what the model is shown of it (`None` when
 /// nothing goes back: an undeclared tool, the step limit, a stop).
 #[allow(clippy::too_many_lines)]
@@ -2692,6 +2721,14 @@ fn one_call<S: Streaming>(
         .tools
         .iter()
         .any(|tool| tool.name == call.name);
+    // The standard surface's tools (#557), each run under the session's
+    // confinement; no gate decides them.
+    if declared
+        && super::standard::is_standard(&call.name)
+        && let Some(tools) = shared.tools.as_ref()
+    {
+        return standard_call(tools, cancel, (turn, request), call, last);
+    }
     let Some(tools) = shared
         .tools
         .as_ref()
@@ -5526,6 +5563,7 @@ pub(in crate::drive) mod tests {
             output_cap: crate::drive::output::OutputCap::DEFAULT,
             recording: None,
             read_tool: None,
+            surface: tool_loop::ToolSurface::Bash,
         }
     }
 
@@ -6344,6 +6382,79 @@ pub(in crate::drive) mod tests {
         };
         assert_eq!(*tool_output, Some(OutputCap::Keep));
         tidy(&[&tree, &recording]);
+    }
+
+    /// The standard surface (#557): the request declares `bash` and the
+    /// standard tools with their descriptions; the model writes, reads and
+    /// edits a file in the worktree; each call is a line under its tool's
+    /// name with the result it was shown; the log reads whole and the
+    /// projection rebuilds every head from the declared names.
+    #[test]
+    fn the_standard_surface_writes_reads_and_edits_and_every_head_rebuilds() {
+        let tree = scratch("standard-surface");
+        let write = r#"{"path":"notes.txt","content":"alpha\nbeta\n"}"#;
+        let read = r#"{"path":"notes.txt"}"#;
+        let edit = r#"{"file_path":"notes.txt","old_string":"beta","new_string":"gamma"}"#;
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        let session = Session::open_looping(
+            Canned::new([
+                vec![Step::call(0, "call-1", "write", write)],
+                vec![Step::call(0, "call-2", "read", read)],
+                vec![Step::call(0, "call-3", "edit", edit)],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("keep notes", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        reads_whole(&session);
+        let written = lines(&log);
+        let names: Vec<&str> = written.iter().map(|line| line.name.as_str()).collect();
+        assert_eq!(names, ["write", "read", "edit"]);
+        assert!(
+            written
+                .iter()
+                .all(|line| line.outcome == log::ToolOutcome::Ran)
+        );
+        assert_eq!(
+            written[0].shown.as_deref(),
+            Some("Successfully created and wrote to new file: notes.txt.")
+        );
+        assert_eq!(written[1].shown.as_deref(), Some("alpha\nbeta\n"));
+        assert!(
+            written[2]
+                .shown
+                .as_deref()
+                .is_some_and(|shown| shown.starts_with("The file: notes.txt has been updated."))
+        );
+        assert_eq!(
+            std::fs::read_to_string(tree.join("notes.txt")).expect("the file"),
+            "alpha\ngamma\n"
+        );
+        let sent = session.shared.transport.sent();
+        let declared: Vec<(&str, bool)> = sent[0]
+            .tools
+            .iter()
+            .map(|tool| (tool.name.as_str(), tool.description.is_some()))
+            .collect();
+        assert_eq!(
+            declared,
+            [
+                ("bash", false),
+                ("read", true),
+                ("write", true),
+                ("edit", true)
+            ]
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
     }
 
     /// A turn that fails on its first request ran nothing, and keeps nothing:

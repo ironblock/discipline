@@ -14,6 +14,8 @@ It's primarily a library, but exists primarily to apply a `regimen` - a fixed co
 
 **A seam can keep a recent tail** (#552): a regimen's `seam_tail_tokens = N` keeps the old trunk's most recent whole turns, within N estimated tokens (characters ÷ 4), after the refill, as they sat on the trunk. A tail starts only at a user message, and the turn that would cross N is not kept. 0, the default, is the total refill. The seam line and the record's seam row name the depth and what was kept.
 
+**The tool surface** (#557): a regimen's `tool_surface = "standard"` offers `read`, `write` and `edit` beside `bash`, shaped as the compared harnesses shape them. `bash` alone is the default. Every tool runs through the session's confinement, as `bash` does, and no approval gate decides them; each call is logged under its tool's name.
+
 **Two binaries**, built from the repository root with `cargo build -p discipline-diet`:
 
 - `diet` is the command-line reader of every format (`diet check-log`, `diet check-record`, ...). Anything outside this library that reads a format goes through it.
