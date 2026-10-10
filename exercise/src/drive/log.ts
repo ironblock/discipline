@@ -17,13 +17,16 @@ import type * as V0 from '../../../diet/formats/log/log.ts';
 /**
  * What the surface draws that `diet` does not write yet, by what it is: the "what diet can't emit yet" overlay
  * outlines a line carrying any of it (`needsOf`). Every kind is `diet`'s now (#503); what is left is fields. One source.
+ *
+ * Each need names the open ticket that closes it, and that ticket's Done-when says to remove the need from here
+ * (`exercise/AGENTS.md`). The lines that carry these are the surface's own placed sessions: `diet` writes none.
  */
 export const NEEDS = {
-  record: 'the arm a session runs, and its system prompt’s size in tokens, on its start',
-  slots: 'the server’s slots, and the one that served each call',
-  phases: 'phases: the one a session opens in, and the move a seam makes',
-  lanes: 'the ratify and extraction side lanes',
-} as const;
+  record: { what: 'the arm a session runs, and its system prompt’s size in tokens, on its start', ticket: 678 },
+  slots: { what: 'the server’s slots, the one the trunk is pinned to, and the one that served each call', ticket: 677 },
+  forks: { what: 'a side call’s slot and the prefix it shared, in the surface’s pre-v5 fork shape', ticket: 427 },
+  lanes: { what: 'the ratify and extraction side lanes of the surface’s recorded and authored sessions', ticket: 427 },
+} as const satisfies Readonly<Record<string, { readonly what: string; readonly ticket: number }>>;
 
 export type Need = keyof typeof NEEDS;
 
@@ -131,7 +134,10 @@ export type SessionStart = V0.SessionStartLine & {
   readonly slots?: number;
   /** AHEAD (`slots`): the slot the trunk is pinned to. */
   readonly trunk_slot?: number;
-  /** AHEAD (`phases`): the phase the session opens in. `diet` writes it as `opening_phase` (v7, #563). */
+  /**
+   * The phase the session opens in, as a placed log spells it. `diet` writes it as `opening_phase` (v7, #563), which a
+   * placed log, declaring v3 or v4, may not carry; the fold reads either. Not a need: `diet` writes the phase.
+   */
   readonly phase?: string;
   /** AHEAD (`record`): the system prompt's size in tokens. */
   readonly system_tokens?: number;
@@ -227,7 +233,7 @@ export type FileRef = V0.RecordedFile;
 export interface Fork extends At {
   readonly kind: 'fork';
   readonly lane: ForkLane;
-  /** AHEAD (`slots`): `diet`'s fork line names no slot; the surface puts such a fork beside the trunk. */
+  /** AHEAD (`forks`): `diet`'s fork line names no slot; the surface puts such a fork beside the trunk. */
   readonly slot?: number;
   readonly of_turn: number;
   /** The `seq` of the trunk line it branches from: a `request` (its answer), or a tool call's first fragment. */
@@ -235,7 +241,7 @@ export interface Fork extends At {
   /** What `diet` noticed that made it ask. */
   readonly why: string;
   readonly question: string;
-  /** AHEAD (`slots`): prefix tokens shared with the trunk, the warm tail it forked from. `diet`'s fork line does not say. */
+  /** AHEAD (`forks`): prefix tokens shared with the trunk, the warm tail it forked from. `diet`'s fork line does not say. */
   readonly prefix_tokens?: number;
   /** An offboard seat's registry id, when the fork ran off the warm trunk (log v7, #615); with the model it served. */
   readonly substrate?: string;
@@ -384,14 +390,13 @@ export function needsOf(line: LogLine): Need[] {
     case 'session.start':
       has('record', line.arm, line.system_tokens);
       has('slots', line.slots, line.trunk_slot);
-      has('phases', line.phase);
       break;
     case 'request':
       has('slots', line.slot);
       if (AHEAD_LANES.has(line.lane)) out.push('lanes');
       break;
     case 'fork':
-      has('slots', line.slot, line.prefix_tokens);
+      has('forks', line.slot, line.prefix_tokens);
       if (AHEAD_LANES.has(line.lane)) out.push('lanes');
       break;
     case 'seam':

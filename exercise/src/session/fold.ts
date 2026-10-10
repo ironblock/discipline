@@ -626,6 +626,7 @@ export function fold(lines: readonly LogLine[]): Session {
   const gaps: Folded<GapNode>[] = [];
   let lastSettled: number | undefined;
   // The phase it opens in: the graph's opening phase (log v7, #563), or a placed recording's own `phase`.
+  // `phase` is a placed log's spelling of `opening_phase`: it declares v3 or v4, before the key arrived (v7, #563).
   let phase = start.opening_phase ?? start.phase ?? '';
   let proposal: { call: string; from?: string; to: string; reason?: string } | undefined;
   const rulings = new Map<string, LineOf<'phase.ruled'>>();
