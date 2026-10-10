@@ -55,13 +55,12 @@ use std::fmt;
 
 use super::{Entry, EntryId, ObjectError, Patch, Provenance, WorkingObject};
 
-/// The lane a closure files its own patches under.
-///
-/// The canonical lane, not a lane of the tangent's own. A tangent is a scope
-/// over the object, not a producer of content, and coining a lane name for
-/// it would put a second name in the record for something the record already
-/// says: the patches carry the tangent in their provenance.
-const CLOSING_LANE: &str = "main";
+/// The lane a closure files its own patches under: the operator's, whose
+/// ruling they are (#150, ruled by Dispatch 2026-10-10). Not a lane of the
+/// tangent's own: a tangent is a scope over the object, not a producer of
+/// content, and the patches carry the tangent in their provenance. A log
+/// written before #150 filed them under `main`, and rebuilds as written.
+const CLOSING_LANE: &str = super::OPERATOR;
 
 /// What the closure does with an entry the tangent created.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -893,12 +892,12 @@ mod tests {
         );
     }
 
-    // The lane a closure files under is the canonical one: a tangent is a
-    // scope over the object, not a producer of content, and the tangent it
-    // closed is already in the provenance, so a lane of its own would be a
-    // second name for what the provenance already says.
+    // The lane a closure files under is the operator's, whose ruling it is
+    // (#150): not a lane of the tangent's own, since a tangent is a scope
+    // over the object and the tangent it closed is already in the
+    // provenance.
     #[test]
-    fn a_closure_files_its_ruling_in_the_canonical_lane() {
+    fn a_closure_files_its_ruling_in_the_operators_lane() {
         let object = closed_over_a_dropped_fact();
         let entry = object.entry(&id("t1")).expect("the dropped entry");
         let ruling = entry
@@ -906,9 +905,9 @@ mod tests {
             .last()
             .expect("the closure recorded a provenance of its own");
         assert_eq!(
-            ruling.lane, "main",
-            "the closure filed its ruling under a lane the record does not \
-             already have: {ruling:?}"
+            ruling.lane,
+            super::super::OPERATOR,
+            "the closure filed its ruling under another lane: {ruling:?}"
         );
         assert_eq!(
             ruling.tangent.as_deref(),

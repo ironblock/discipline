@@ -313,6 +313,10 @@ export type Reminded = V0.RemindedLine;
 export type Capture = V0.CaptureLine;
 /** Archived items recalled after an ask (v7, the archive recall lever, #566). */
 export type Recalled = V0.RecalledLine;
+/** The operator flagged a working-memory entry (v7, #150): a note on it, the entry unchanged. */
+export type Flag = V0.FlagLine;
+/** A model's patch refused over an entry the operator wrote (v7, #150): the fold went on. */
+export type PatchRefused = V0.PatchRefusedLine;
 /** A background command's end (v7, #614). Folded, not yet drawn. */
 export type BackgroundEnded = V0.BackgroundEndedLine;
 /** Ended background commands' notifications delivered after an ask (v7, #614). */
@@ -354,6 +358,8 @@ export type LogLine =
   | Notice
   | TimeoutNear
   | ForkSkipped
+  | Flag
+  | PatchRefused
   | PhaseRuled;
 
 /** The operator's ruling on the model's phase proposal (log v7, #651): `seam` (a seam follows), `continue`, or `stay`. */

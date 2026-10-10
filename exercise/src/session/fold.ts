@@ -313,6 +313,8 @@ export interface MemoryEntry extends Provenance {
   readonly lane?: string;
   /** The tangent it was born in (a patch's `tangent`, #608): what that tangent's close rules on. */
   readonly tangent?: string;
+  /** The operator's flag on it (log v7's `flag`, #150): their note, kept until a seam addresses it. Folded, not yet drawn. */
+  readonly flag?: string;
 }
 
 export type SessionState = 'connecting' | 'awaiting' | 'turn' | 'capture' | 'ratify' | 'ended';
@@ -744,6 +746,15 @@ export function fold(lines: readonly LogLine[]): Session {
         entries.set(e.entry.id, { ...old, ...base, op: e.op, from: [...old.from, e.seq] });
         break;
       }
+      // The operator's flag (#150): a note on the entry, its state unchanged.
+      case 'flag': {
+        const flagged = entries.get(e.entry);
+        if (flagged) entries.set(e.entry, { ...flagged, flag: e.note });
+        break;
+      }
+      // A model's patch refused over the operator's entry (#150): nothing in working memory changed.
+      case 'patch.refused':
+        break;
       case 'delivered':
         deliveries.set(e.turn, e);
         break;

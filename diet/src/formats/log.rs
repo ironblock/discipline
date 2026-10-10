@@ -225,6 +225,10 @@ vocabulary! {
         Delivered => "delivered",
         /// Archived items recalled at the tail of a trunk request (v7, #566).
         Recalled => "recalled",
+        /// The operator flagged a working-memory entry (v7, #150).
+        Flag => "flag",
+        /// A model's patch refused: its target is the operator's (v7, #150).
+        PatchRefused => "patch.refused",
         /// A tool result the model pruned, replaced at a later seam (v7,
         /// #612).
         Pruned => "pruned",
@@ -457,6 +461,10 @@ vocabulary! {
         Background => "background",
         /// Rule on the model's pending phase proposal (v7, #124).
         RatifyPhase => "ratify-phase",
+        /// The operator corrected a working-memory entry (v7, #150).
+        EditEntry => "edit-entry",
+        /// The operator flagged a working-memory entry (v7, #150).
+        FlagEntry => "flag-entry",
     }
 }
 
@@ -500,6 +508,12 @@ vocabulary! {
         /// A phase ruling named no pending proposal (v7, #124): none is
         /// pending, or the call it names is not the one that is.
         NoProposal => "no-proposal",
+        /// An edit or flag naming no entry working memory holds (v7, #150).
+        UnknownEntry => "unknown-entry",
+        /// An edit or flag naming an entry no longer live (v7, #150).
+        NotLive => "not-live",
+        /// An edit with no content, or a flag with no note (v7, #150).
+        Empty => "empty",
     }
 }
 
@@ -847,6 +861,16 @@ pub struct TemplateKwargs {
 pub struct Unsent {
     /// `[reasoning]`'s token budget: no chat template variable carries one.
     pub budget_tokens: u64,
+}
+
+/// One of the operator's changes a seam carried (v7, #150): the entry, and
+/// `edit` or `flag`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperatorChange {
+    /// The entry: an edit's new entry, or the entry flagged.
+    pub entry: String,
+    /// `edit` or `flag`.
+    pub kind: String,
 }
 
 /// One item a recall carried (v7, #566): its archive key, the digest of its
@@ -1324,6 +1348,30 @@ pub enum Event {
         /// was written with.
         lines: Vec<NoteLine>,
     },
+    /// The operator flagged an entry (v7, #150): a note on it, kept until a
+    /// seam addresses it. The entry is unchanged.
+    Flag {
+        /// The latest turn when it was flagged.
+        turn: u32,
+        /// The entry flagged.
+        entry: String,
+        /// The operator's note.
+        note: String,
+    },
+    /// A model's patch refused (v7, #150): its target is an entry the
+    /// operator wrote, which changes only by the operator. The fold went on.
+    PatchRefused {
+        /// The fork whose answer made it, when one did.
+        fork: Option<u64>,
+        /// The lane that made it, when no fork did.
+        lane: Option<String>,
+        /// What it would have done.
+        op: PatchOp,
+        /// The entry it targeted.
+        entry: String,
+        /// Why: `operator-entry`.
+        reason: String,
+    },
     /// Archived items recalled (v7, #566): one note after turn `turn`'s
     /// ask, at the tail of its first request, which stays on the trunk.
     Recalled {
@@ -1535,6 +1583,11 @@ pub enum Event {
         /// The calls whose results the model pruned that this seam replaced
         /// with their `pruned` lines' text (v7, #612).
         pruned: Option<Vec<String>>,
+        /// The operator's edits and flags this seam carried (v7, #150).
+        operator_changes: Option<Vec<OperatorChange>>,
+        /// Of those, the entries the model's answer did not address (v7,
+        /// #150): carried to the next seam.
+        unaddressed: Option<Vec<String>>,
     },
 }
 
@@ -3196,6 +3249,18 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             bytes: fields.count("bytes")?,
             text: fields.string("text")?,
         },
+        Kind::Flag => Event::Flag {
+            turn: fields.turn("turn")?,
+            entry: fields.string("entry")?,
+            note: fields.string("note")?,
+        },
+        Kind::PatchRefused => Event::PatchRefused {
+            fork: fields.optional_count("fork")?,
+            lane: fields.optional_string("lane")?,
+            op: fields.tag("op", PatchOp::from_tag)?,
+            entry: fields.string("entry")?,
+            reason: fields.string("reason")?,
+        },
         Kind::Recalled => Event::Recalled {
             turn: fields.turn("turn")?,
             recall: fields.tag("recall", RecallState::from_tag)?,
@@ -3229,6 +3294,11 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
             placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
             pruned: fields.optional_strings("pruned")?,
+            operator_changes: match object.get("operator_changes") {
+                None => None,
+                Some(_) => Some(fields.operator_changes("operator_changes")?),
+            },
+            unaddressed: fields.optional_strings("unaddressed")?,
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -3854,6 +3924,9 @@ pub enum Holds {
     /// A `recalled` line's `items` (v7): a non-empty list of objects of the
     /// keys [`RECALLED_ITEM`] declares.
     RecalledItems,
+    /// A seam's `operator_changes` (v7, #150): a non-empty list of objects
+    /// of the keys [`OPERATOR_CHANGE`] declares.
+    OperatorChanges,
     /// A seam's `phase` (v7): an object of [`PHASE_MOVE`]'s keys.
     PhaseMove,
     /// A `session.start`'s `phase_transitions` (v7): a list of such objects.
@@ -4020,6 +4093,10 @@ pub const TEMPLATE_KWARGS: &[Field] = &[
     may_v7("preserve_thinking", Holds::Flag),
 ];
 
+/// The keys of each of a seam's `operator_changes`. Arrived in v7.
+pub const OPERATOR_CHANGE: &[Field] =
+    &[must_v7("entry", Holds::Text), must_v7("kind", Holds::Text)];
+
 /// The keys of each of a `recalled` line's `items`. Arrived in v7.
 pub const RECALLED_ITEM: &[Field] = &[
     must_v7("key", Holds::Text),
@@ -4167,6 +4244,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::InstructionFiles => Some(INSTRUCTION_FILE),
         Holds::DeliveredLines => Some(DELIVERED_LINE),
         Holds::RecalledItems => Some(RECALLED_ITEM),
+        Holds::OperatorChanges => Some(OPERATOR_CHANGE),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
@@ -4186,6 +4264,8 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Seam => 6,
         Kind::Delivered
         | Kind::Recalled
+        | Kind::Flag
+        | Kind::PatchRefused
         | Kind::Pruned
         | Kind::PhaseRuled
         | Kind::TangentOpen
@@ -4249,13 +4329,20 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
                     | Refusal::BadTangent
                     | Refusal::NotTheScope
                     | Refusal::NoProposal
+                    | Refusal::UnknownEntry
+                    | Refusal::NotLive
+                    | Refusal::Empty
             )
         });
     let tangent_command = tags == Tags::Command
         && Command::from_tag(tag).is_some_and(|command| {
             matches!(
                 command,
-                Command::OpenTangent | Command::CloseTangent | Command::RatifyPhase
+                Command::OpenTangent
+                    | Command::CloseTangent
+                    | Command::RatifyPhase
+                    | Command::EditEntry
+                    | Command::FlagEntry
             )
         });
     if tangent_refusal || tangent_command {
@@ -4583,6 +4670,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("prompt_tokens", Count),
                 may_v7("window", Count),
                 may_v7("pruned", Holds::Strings),
+                may_v7("operator_changes", Holds::OperatorChanges),
+                may_v7("unaddressed", Holds::Strings),
                 may_v7("warm", Holds::Timings),
             ];
             F
@@ -4620,6 +4709,24 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("status", Tag(Tags::BackgroundStatus)),
                 may_v7("exit", Count),
                 may_v7("files", Holds::Files),
+            ];
+            F
+        }
+        Kind::Flag => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("entry", Text),
+                must_v7("note", Text),
+            ];
+            F
+        }
+        Kind::PatchRefused => {
+            const F: &[Field] = &[
+                may_v7("fork", Count),
+                may_v7("lane", Text),
+                must_v7("op", Tag(Tags::PatchOp)),
+                must_v7("entry", Text),
+                must_v7("reason", Text),
             ];
             F
         }
@@ -4708,6 +4815,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::InstructionFiles => "InstructionFile[]".to_owned(),
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::RecalledItems => "RecalledItem[]".to_owned(),
+        Holds::OperatorChanges => "OperatorChange[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::Words => "Record<string, string>".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
@@ -4811,6 +4919,7 @@ pub fn typescript() -> String {
         ("InstructionFile", INSTRUCTION_FILE),
         ("NoteLine", DELIVERED_LINE),
         ("RecalledItem", RECALLED_ITEM),
+        ("OperatorChange", OPERATOR_CHANGE),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
@@ -5544,6 +5653,8 @@ fn to_value(line: &Line) -> Value {
             render_budget,
             fired,
             pruned,
+            operator_changes,
+            unaddressed,
             warm,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
@@ -5595,6 +5706,28 @@ fn to_value(line: &Line) -> Value {
                 put(
                     "pruned",
                     Value::Array(calls.iter().map(|call| text(call)).collect()),
+                );
+            }
+            if let Some(changes) = operator_changes {
+                put(
+                    "operator_changes",
+                    Value::Array(
+                        changes
+                            .iter()
+                            .map(|change| {
+                                Value::Object(BTreeMap::from([
+                                    ("entry".to_owned(), text(&change.entry)),
+                                    ("kind".to_owned(), text(&change.kind)),
+                                ]))
+                            })
+                            .collect(),
+                    ),
+                );
+            }
+            if let Some(entries) = unaddressed {
+                put(
+                    "unaddressed",
+                    Value::Array(entries.iter().map(|entry| text(entry)).collect()),
                 );
             }
             Kind::Seam
@@ -5681,6 +5814,30 @@ fn to_value(line: &Line) -> Value {
                 ),
             );
             Kind::Recalled
+        }
+        Event::Flag { turn, entry, note } => {
+            put("turn", count(u64::from(*turn)));
+            put("entry", text(entry));
+            put("note", text(note));
+            Kind::Flag
+        }
+        Event::PatchRefused {
+            fork,
+            lane,
+            op,
+            entry,
+            reason,
+        } => {
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
+            }
+            if let Some(lane) = lane {
+                put("lane", text(lane));
+            }
+            put("op", text(op.tag()));
+            put("entry", text(entry));
+            put("reason", text(reason));
+            Kind::PatchRefused
         }
         Event::PhaseRuled {
             call,
@@ -6091,6 +6248,36 @@ impl Fields<'_> {
             });
         }
         Ok(items)
+    }
+
+    fn operator_changes(&self, key: &str) -> Result<Vec<OperatorChange>, String> {
+        let Value::Array(entries) = self.get(key)? else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: it is absent when there are none"
+            ));
+        }
+        let mut changes = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !OPERATOR_CHANGE.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            changes.push(OperatorChange {
+                entry: inner.string("entry").map_err(at)?,
+                kind: inner.string("kind").map_err(at)?,
+            });
+        }
+        Ok(changes)
     }
 
     fn delivered_lines(&self, key: &str) -> Result<Vec<NoteLine>, String> {
@@ -6946,6 +7133,7 @@ mod tests {
                 | Holds::Served
                 | Holds::DeliveredLines
                 | Holds::RecalledItems
+                | Holds::OperatorChanges
                 | Holds::PhaseMoves
                 | Holds::InstructionFiles,
                 Value::Array(entries),
@@ -7167,6 +7355,7 @@ mod tests {
             ("instruction_files", INSTRUCTION_FILE),
             ("lines", DELIVERED_LINE),
             ("items", RECALLED_ITEM),
+            ("operator_changes", OPERATOR_CHANGE),
             ("tool_call", TOOL_CALL_PIECE),
             ("approval", APPROVAL),
             ("files", RECORDED_FILE),
@@ -8081,7 +8270,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
+             fork.settled patch seam delivered recalled flag patch.refused pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -8090,7 +8279,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight seam-not-built nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

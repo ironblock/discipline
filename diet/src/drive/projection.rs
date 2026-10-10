@@ -726,6 +726,8 @@ impl<'a> Walk<'a> {
             Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
             Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
+            Line::Flag { .. } => log::Kind::Flag,
+            Line::PatchRefused { .. } => log::Kind::PatchRefused,
             // The trunk's own self-capture patch (#609), fork-less.
             Line::Patch { .. } => log::Kind::Patch,
             _ => log::Kind::Progress,
@@ -741,6 +743,8 @@ impl<'a> Walk<'a> {
         }
     }
 
+    // One arm per kind, exhaustive so a new kind cannot pass unhandled.
+    #[allow(clippy::too_many_lines)]
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
             // A prune (v7, #612): applied to the trunk by the seam that
@@ -843,6 +847,10 @@ impl<'a> Walk<'a> {
             // The operator's ruling on a phase proposal (#124): a seam it
             // declares has its own row.
             | Line::PhaseRuled { .. }
+            // The operator's flag, and a model patch refused over the
+            // operator's entry (#150): the seam row names what was carried.
+            | Line::Flag { .. }
+            | Line::PatchRefused { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
             | Line::Patch { fork: None, .. } => self.no_row(line),
@@ -1069,12 +1077,15 @@ impl<'a> Walk<'a> {
             placement,
             fired,
             pruned,
+            operator_changes,
+            unaddressed,
             ..
         } = &line.event
         else {
             return;
         };
         let (seq, at_turn, tail_tokens) = (line.seq, *at_turn, tail_tokens.unwrap_or(0));
+        let (operator_changes, unaddressed) = (operator_changes.clone(), unaddressed.clone());
         // The tail the session kept after the refill (#552), cut from the
         // rebuilt trunk by the same function.
         let turns = self
@@ -1160,6 +1171,10 @@ impl<'a> Walk<'a> {
             prompt_tokens: fired.map(|fired| fired.prompt_tokens),
             window: fired.map(|fired| fired.window),
             pruned: (!applied.is_empty()).then_some(applied),
+            // The operator's changes it carried, and those left unaddressed
+            // (#150), as its line says.
+            operator_changes,
+            unaddressed,
         });
     }
 
@@ -2098,6 +2113,8 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Seam {
+            operator_changes: None,
+            unaddressed: None,
             at_turn: 1,
             reason: log::SeamReason::Operator,
             prefix_hash_before: "a".repeat(64),
@@ -2145,6 +2162,8 @@ mod tests {
         let mut events = vec![start()];
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Seam {
+            operator_changes: None,
+            unaddressed: None,
             at_turn: 1,
             reason: log::SeamReason::Operator,
             prefix_hash_before: "a".repeat(64),

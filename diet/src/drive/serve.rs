@@ -851,6 +851,15 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
+            // The operator's edit and flag of a working-memory entry (#150).
+            Command::EditEntry(id, content) => match self.session.edit_entry(&id, &content) {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
+            Command::FlagEntry(id, note) => match self.session.flag_entry(&id, &note) {
+                Ok(()) => (200, BTreeMap::new()),
+                Err(rejection) => rejected(rejection),
+            },
             // The job the running call becomes (#614).
             Command::Background => match self.session.background() {
                 Ok(job) => (
@@ -888,6 +897,10 @@ enum Command {
     Background,
     /// Rule on the pending phase proposal its call names (#124).
     RatifyPhase(String, crate::drive::session::PhaseChoice),
+    /// Correct the entry with this id to this content (#150).
+    EditEntry(String, String),
+    /// Flag the entry with this id with this note (#150).
+    FlagEntry(String, String),
 }
 
 impl Command {
@@ -915,6 +928,10 @@ impl Command {
             // #124: the proposal's call and the operator's choice; a ruling
             // ends no idle gap.
             CommandKind::RatifyPhase => &["kind", "call", "choice"],
+            // #150: the entry and the operator's text; an edit or a flag
+            // ends no idle gap.
+            CommandKind::EditEntry => &["kind", "id", "content"],
+            CommandKind::FlagEntry => &["kind", "id", "note"],
         };
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
@@ -983,12 +1000,26 @@ impl Command {
                 }
                 _ => None,
             },
+            CommandKind::EditEntry => {
+                entry_and(object, "content").map(|(id, text)| Self::EditEntry(id, text))
+            }
+            CommandKind::FlagEntry => {
+                entry_and(object, "note").map(|(id, text)| Self::FlagEntry(id, text))
+            }
         }?;
         Some(Posted {
             command,
             gap,
             scoping,
         })
+    }
+}
+
+/// An operator edit's or flag's entry `id` and its `key`'s text (#150).
+fn entry_and(object: &BTreeMap<String, Value>, key: &str) -> Option<(String, String)> {
+    match (object.get("id"), object.get(key)) {
+        (Some(Value::String(id)), Some(Value::String(text))) => Some((id.clone(), text.clone())),
+        _ => None,
     }
 }
 
@@ -1434,6 +1465,33 @@ mod tests {
             r#"{"kind":"ratify-phase","call":"call-p","choice":"maybe"}"#,
             r#"{"kind":"ratify-phase","choice":"seam"}"#,
             r#"{"kind":"ratify-phase","call":"call-p","choice":"seam","idle_gap":{}}"#,
+        ] {
+            assert!(read(refused).is_none(), "{refused}");
+        }
+    }
+
+    /// #150: `edit-entry` takes the entry and its new content, `flag-entry`
+    /// the entry and the operator's note; a missing key, a stray one or an
+    /// idle gap is no command.
+    #[test]
+    fn the_operators_edit_and_flag_read_their_entry_and_text_and_nothing_else() {
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"edit-entry","id":"d1","content":"a tracker for one team"}"#),
+            Some(Command::EditEntry(id, content)) if id == "d1" && content == "a tracker for one team"
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"flag-entry","id":"d1","note":"still true?"}"#),
+            Some(Command::FlagEntry(id, note)) if id == "d1" && note == "still true?"
+        ));
+        for refused in [
+            r#"{"kind":"edit-entry","id":"d1"}"#,
+            r#"{"kind":"edit-entry","id":"d1","note":"x"}"#,
+            r#"{"kind":"flag-entry","id":"d1","content":"x"}"#,
+            r#"{"kind":"flag-entry","id":"d1","note":"x","idle_gap":{}}"#,
         ] {
             assert!(read(refused).is_none(), "{refused}");
         }

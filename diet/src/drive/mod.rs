@@ -1228,6 +1228,8 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 prompt_tokens: None,
                 window: None,
                 pruned: None,
+                operator_changes: None,
+                unaddressed: None,
             });
             seams.push(seam);
         }
