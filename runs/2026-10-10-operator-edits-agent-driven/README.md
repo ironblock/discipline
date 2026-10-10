@@ -58,6 +58,7 @@
    - The projection's seam row carries `"unaddressed": []`, and the record reader requires a non-empty list. So the success case, every change addressed, empties the record.
    - `diet check-record record.refused.jsonl` says the same: "a `seam` row's `unaddressed` is not a non-empty list of strings".
    - The log is whole, and `diet check-log` accepts it.
+   - Fixed by #688 (merged as #694): a seam with every change addressed now projects without `unaddressed`.
 2. **A refused supersede also loses the write's new content.** The model's `update_record` was refused for superseding the operator's entry, and its new entry (the new date format) was not added beside it. Capture 731 still says `recorded`.
 3. **The open working-memory drawer covers the composer's right-hand buttons** (scope answer, send) at the browser pane's width. The operator closed it to mark the ask.
 
