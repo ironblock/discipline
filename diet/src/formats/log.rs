@@ -718,6 +718,17 @@ pub enum Piece {
     },
 }
 
+/// The offboard seat a `fork`'s call ran on (v7, #570): the registry id of
+/// its substrate and the model its request named. Its two keys come
+/// together or not at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkSeat {
+    /// The seat's registry id.
+    pub substrate: String,
+    /// The model the fork's request named.
+    pub model: String,
+}
+
 /// The fork ask set a session asks in (v7, #595), by name and digest.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForkAsks {
@@ -1170,6 +1181,9 @@ pub enum Event {
         /// What it saw of the trunk (v7, #567): `last_turn` or `last:N`;
         /// absent is the whole trunk.
         view: Option<String>,
+        /// Where its call ran (v7, #570): an offboard seat's substrate and
+        /// model, together; absent is the trunk's own server, warm.
+        seat: Option<ForkSeat>,
         /// Which ask of its set it sent (v7, #595): the router kind's tag.
         ask: Option<String>,
     },
@@ -1179,6 +1193,12 @@ pub enum Event {
         fork: u64,
         /// How.
         outcome: ForkOutcome,
+        /// The prompt tokens an offboard fork's server evaluated -- its
+        /// `prompt_n`, the prefill -- as it reported them (v7, #570).
+        prompt_tokens: Option<u64>,
+        /// An offboard fork's call, wall time from request to its end, in
+        /// milliseconds (v7, #570).
+        wall_ms: Option<u64>,
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
@@ -2377,7 +2397,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             } => forks
                 .fork(line.seq, (*lane, *of_turn, *forked_at), turns, &trunk)
                 .map_err(|why| at(index, why))?,
-            Event::ForkSettled { fork, outcome } => forks
+            Event::ForkSettled { fork, outcome, .. } => forks
                 .settle(*fork, *outcome)
                 .map_err(|why| at(index, why))?,
             Event::Patch { fork, .. } => forks.patch(*fork).map_err(|why| at(index, why))?,
@@ -2752,11 +2772,21 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             why: fields.tag("why", Warrant::from_tag)?,
             question: fields.string("question")?,
             view: fields.optional_string("view")?,
+            // Built only when its two keys are carried ([`all_or_none`]).
+            seat: match (
+                fields.optional_string("substrate")?,
+                fields.optional_string("model")?,
+            ) {
+                (Some(substrate), Some(model)) => Some(ForkSeat { substrate, model }),
+                _ => None,
+            },
             ask: fields.optional_string("ask")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
             outcome: fields.tag("outcome", ForkOutcome::from_tag)?,
+            prompt_tokens: fields.optional_count("prompt_tokens")?,
+            wall_ms: fields.optional_count("wall_ms")?,
         },
         Kind::Patch => {
             let op = fields.tag("op", PatchOp::from_tag)?;
@@ -3997,6 +4027,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("why", Tag(Tags::Warrant)),
                 must_v5("question", Text),
                 may_v7("view", Text),
+                may_v7("substrate", Text),
+                may_v7("model", Text),
                 may_v7("ask", Text),
             ];
             F
@@ -4005,6 +4037,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             const F: &[Field] = &[
                 must_v5("fork", Count),
                 must_v5("outcome", Tag(Tags::ForkOutcome)),
+                may_v7("prompt_tokens", Count),
+                may_v7("wall_ms", Count),
             ];
             F
         }
@@ -4118,6 +4152,7 @@ pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
         Kind::SessionStart => &["substrate", "registry_sha256"],
         // A context overflow's sizes (v7, #616).
         Kind::RequestFailed => &["prompt_tokens", "window", "inferred"],
+        Kind::Fork => &["substrate", "model"],
         _ => &[],
     }
 }
@@ -4788,6 +4823,7 @@ fn to_value(line: &Line) -> Value {
             why,
             question,
             view,
+            seat,
             ask,
         } => {
             put("lane", text(lane.tag()));
@@ -4798,14 +4834,29 @@ fn to_value(line: &Line) -> Value {
             if let Some(view) = view {
                 put("view", text(view));
             }
+            if let Some(seat) = seat {
+                put("substrate", text(&seat.substrate));
+                put("model", text(&seat.model));
+            }
             if let Some(ask) = ask {
                 put("ask", text(ask));
             }
             Kind::Fork
         }
-        Event::ForkSettled { fork, outcome } => {
+        Event::ForkSettled {
+            fork,
+            outcome,
+            prompt_tokens,
+            wall_ms,
+        } => {
             put("fork", count(*fork));
             put("outcome", text(outcome.tag()));
+            if let Some(tokens) = prompt_tokens {
+                put("prompt_tokens", count(*tokens));
+            }
+            if let Some(wall) = wall_ms {
+                put("wall_ms", count(*wall));
+            }
             Kind::ForkSettled
         }
         Event::Patch {
@@ -6053,6 +6104,10 @@ mod tests {
                 why: Warrant::Scoping,
                 question: "what did the operator decide".to_owned(),
                 view: Some("last:2".to_owned()),
+                seat: Some(ForkSeat {
+                    substrate: "cpu-seat".to_owned(),
+                    model: "small".to_owned(),
+                }),
                 ask: Some("judgment".to_owned()),
             },
             Event::Request {
@@ -6074,6 +6129,8 @@ mod tests {
             Event::ForkSettled {
                 fork,
                 outcome: ForkOutcome::Value,
+                prompt_tokens: Some(281),
+                wall_ms: Some(480),
             },
             Event::Patch {
                 fork,
