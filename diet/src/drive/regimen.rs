@@ -678,10 +678,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers),
-        (
-            "seam_audit".to_owned(),
-            seam_work_lever(regimen, crate::seam::policy::SEAM_AUDIT),
-        ),
+        ("seam_audit".to_owned(), seam_audit_lever(regimen)),
         (
             "seam_warm".to_owned(),
             seam_work_lever(regimen, crate::seam::policy::SEAM_WARM),
@@ -922,6 +919,22 @@ fn reasoning_lever(regimen: &Regimen) -> String {
     }
 }
 
+/// The seam audit lever's word: `off`, `on`, or, where forks answer
+/// through the record tools (#610), `on:<set>:<digest>`, the tools-route
+/// audit set it asks in.
+fn seam_audit_lever(regimen: &Regimen) -> String {
+    let on = seam_work_lever(regimen, crate::seam::policy::SEAM_AUDIT);
+    if on == "on"
+        && crate::drive::session::capture_modality(regimen)
+            == Ok(crate::dogma::asks::Modality::Tools)
+    {
+        let set = crate::dogma::audits::DEFAULT;
+        format!("on:{}:{}", set.name, set.digest())
+    } else {
+        on
+    }
+}
+
 /// A seam's audit or pre-warm lever's word (#504): `on` or `off`.
 fn seam_work_lever(regimen: &Regimen, key: &str) -> String {
     let on = match regimen.get(key) {
@@ -1052,6 +1065,23 @@ mod tests {
             lever("self_capture = true\nself_capture_contract = \"c2\"\n"),
             format!("on:every:3:c2:{c2}")
         );
+    }
+
+    /// #610: the seam audit lever names the tools-route audit set where
+    /// forks answer through the record tools, and is `on` otherwise.
+    #[test]
+    fn the_seam_audit_lever_names_the_tools_route_set() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (64, "default"))["seam_audit"]
+                .clone()
+        };
+        assert_eq!(lever(""), "off");
+        assert_eq!(lever("seam_audit = \"on\"\n"), "on");
+        assert_eq!(
+            lever("seam_audit = \"on\"\ncapture_modality = \"tools\"\n"),
+            format!("on:t1:{}", crate::dogma::audits::T1.digest())
+        );
+        assert_eq!(lever("capture_modality = \"tools\"\n"), "off");
     }
 
     /// #124: a regimen that declares phases and turns self-capture on arms

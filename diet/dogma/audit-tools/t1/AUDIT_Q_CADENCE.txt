@@ -1,0 +1,5 @@
+We've reached a scheduled checkpoint (a cadence fired — this is not necessarily a phase boundary), so I want to audit our working notes ({category}).
+
+{items}
+
+Use update_record and resolve_entry to update your working memory, if needed.

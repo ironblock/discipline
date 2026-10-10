@@ -55,3 +55,6 @@ fork-asks/t1/imperative	cf7ae8f170047df5	29
 fork-asks/t1/judgment	a4da4b8db8e532b8	413
 fork-asks/t1/outcome	dc328c8ca04596df	308
 fork-asks/t1/reminder	4a4a7a8c4d759496	240
+audit-tools/t1/AUDIT_Q	b5e4d23dacd91983	165
+audit-tools/t1/AUDIT_Q_CADENCE	af07f4b05c7c3228	239
+audit-tools/t1/AUDIT_Q_HUMAN	08c8bb084d45f524	195

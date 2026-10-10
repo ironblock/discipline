@@ -51,6 +51,7 @@ use std::error::Error;
 use std::fmt;
 
 pub mod asks;
+pub mod audits;
 pub mod capture;
 pub mod vocabulary;
 
@@ -96,6 +97,11 @@ pub mod vocabulary;
 /// * 7, 2026-10-10: self-capture set `c2` joined (#609, [`capture`]): c1's
 ///   contract with a description on every parameter, the maintainer's
 ///   approval of the wording. No template and no set already pinned changed.
+/// * 8, 2026-10-10: tools-route audit set `t1` joined ([`audits`]): the
+///   three pinned audit asks' openings, the notes as `<id>\t<note>` lines,
+///   and one instruction naming the record tools, the maintainer's wording,
+///   asked by a session whose forks answer through the tools. No template and
+///   no set already pinned changed.
 /// * 9, 2026-10-10: the audit asks' reconciling variants joined (#150):
 ///   `AUDIT_Q_RECONCILE`, `AUDIT_Q_CADENCE_RECONCILE` and
 ///   `AUDIT_Q_HUMAN_RECONCILE`, each its ask with one sentence saying what
@@ -112,7 +118,7 @@ pub const VERSION: u32 = 9;
 /// that recomputes it fails until both lines are edited together. Without it
 /// the manifest could be regenerated after an edit and the version left at
 /// what it was, which is a bump that never happened.
-pub const MANIFEST_DIGEST: &str = "e2a19c70b200c692";
+pub const MANIFEST_DIGEST: &str = "a1a60a121f483469";
 
 /// The per-model operating points, as TOML text, exactly as pinned.
 ///
@@ -732,6 +738,8 @@ mod tests {
             .filter(|line| !line.starts_with("self-capture/"))
             // The fork ask sets' lines, held by `asks`' own test.
             .filter(|line| !line.starts_with("fork-asks/"))
+            // The tools-route audit sets' lines, held by `audits`' own test.
+            .filter(|line| !line.starts_with("audit-tools/"))
             .map(|line| {
                 let mut fields = line.split('\t');
                 let name = fields.next().expect("a manifest line starts with a name");
