@@ -83,6 +83,15 @@ pub struct Message {
     /// checked against the file the log names, so an image here is always
     /// the bytes its reference describes.
     pub images: Vec<Image>,
+    /// The signature a hosted model signed `reasoning` with (#555): sent
+    /// back with it, verbatim; `None` from a server that signs nothing.
+    pub reasoning_signature: Option<String>,
+    /// Thinking the provider redacted, each block's opaque data, in order
+    /// (#555): sent back as it came.
+    pub redacted: Vec<String>,
+    /// Whether a [`Role::Tool`] result reports a failed call (#555): what a
+    /// hosted API's `is_error` says.
+    pub tool_error: bool,
 }
 
 /// One image a message carries, as the wire sends it: its media type and
@@ -106,6 +115,12 @@ impl Image {
     #[must_use]
     pub fn media_type(&self) -> &str {
         &self.media_type
+    }
+
+    /// Its bytes, in standard base64, padded.
+    #[must_use]
+    pub fn base64(&self) -> &str {
+        &self.base64
     }
 }
 
@@ -193,6 +208,9 @@ impl Message {
             tool_calls: Vec::new(),
             tool_call_id: None,
             images: Vec::new(),
+            reasoning_signature: None,
+            redacted: Vec::new(),
+            tool_error: false,
         }
     }
 
