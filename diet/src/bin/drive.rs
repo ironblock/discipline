@@ -891,6 +891,7 @@ fn serving_tools(
         store: Some(store),
         approval_policy: declared.approval_policy,
         approvals_off: declared.approvals_off,
+        text_fallback: declared.text_fallback,
         output_cap: declared.output_cap,
         // Set once the recording's directory is known (`serve`).
         recording: None,

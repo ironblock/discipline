@@ -1311,6 +1311,7 @@ impl<'a> Walk<'a> {
             arguments,
             shown,
             files,
+            recovered_from,
             ..
         } = line
         else {
@@ -1330,6 +1331,15 @@ impl<'a> Walk<'a> {
             };
             if step.unrebuilt.is_none() {
                 step.unrebuilt = why.map(|why| format!("call {id}'s image: {why}"));
+            }
+            // A call recovered from the answer's text (#560): the session put
+            // what was left of the answer on the trunk, and so does this --
+            // the same recovery, once, at the step's first call.
+            if recovered_from.is_some()
+                && step.calls.is_empty()
+                && let Some(recovery) = crate::client::xml_fallback::try_recover(&step.said.content)
+            {
+                step.said.content = recovery.remaining;
             }
             step.calls.push((
                 ToolCall {
@@ -2197,6 +2207,7 @@ mod tests {
                 approval: None,
                 files: None,
                 shown: None,
+                recovered_from: None,
             }
         };
         let mut events = vec![start()];
@@ -2282,6 +2293,7 @@ mod tests {
                 approval: None,
                 files: None,
                 shown: None,
+                recovered_from: None,
             },
         );
         events.extend(turn);
@@ -2482,6 +2494,7 @@ mod tests {
                 approval: None,
                 files: Some(vec![file.clone()]),
                 shown: None,
+                recovered_from: None,
             },
         );
         events.extend(turn);

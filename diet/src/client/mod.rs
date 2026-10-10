@@ -89,6 +89,7 @@ pub mod stream;
 pub mod stub;
 pub mod transport;
 pub mod wire;
+pub mod xml_fallback;
 
 use std::time::{Duration, Instant};
 
