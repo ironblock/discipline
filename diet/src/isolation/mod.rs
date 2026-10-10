@@ -725,6 +725,24 @@ impl Confinement {
         argv: &[String],
         stop: &dyn Fn() -> bool,
     ) -> Result<Ran, NotRun> {
+        self.run_with_input(policy, worktree, argv, None, stop)
+    }
+
+    /// [`Self::run_until`], with `input` on the command's standard input
+    /// when there is one (#557: a file tool's write, fed to a confined
+    /// helper, so the kernel judges the path as it judges `bash`'s).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run`].
+    pub fn run_with_input(
+        &self,
+        policy: &Policy,
+        worktree: &Path,
+        argv: &[String],
+        input: Option<&[u8]>,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<Ran, NotRun> {
         // The CALLER's argv, not the composed one. Under `Sandbox` the composed
         // vector is never empty, so this guard only ever fired for
         // `Unconfined` -- and an empty command under the sandbox ran the runner
@@ -770,7 +788,11 @@ impl Confinement {
             command
                 .args(rest)
                 .current_dir(worktree)
-                .stdin(Stdio::null())
+                .stdin(if input.is_some() {
+                    Stdio::piped()
+                } else {
+                    Stdio::null()
+                })
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
             match self {
@@ -786,6 +808,15 @@ impl Confinement {
         .map_err(|why| NotRun::Runner {
             said: format!("{program} could not be run: {why}"),
         })?;
+        if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+            let input = input.to_vec();
+            // On a thread of its own: a command that reads slowly, or not at
+            // all, must not hold the drive while it writes.
+            std::thread::spawn(move || {
+                use std::io::Write as _;
+                let _ = stdin.write_all(&input);
+            });
+        }
         let output = collected(&mut child, stop).map_err(|why| NotRun::Runner {
             said: format!("{program} could not be waited on: {why}"),
         })?;

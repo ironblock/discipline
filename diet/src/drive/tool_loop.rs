@@ -152,6 +152,7 @@ pub fn bash_tool() -> ToolDefinition {
     ]));
     ToolDefinition {
         name: BASH.to_owned(),
+        description: None,
         schema: Value::Object(BTreeMap::from([
             (
                 "properties".to_owned(),
@@ -1348,6 +1349,55 @@ pub struct Declared {
     /// `[tool_output]`: the cap on what the model is shown of a tool's
     /// output (#554), the convention's default when the table is absent.
     pub output_cap: OutputCap,
+    /// `tool_surface`: the tools the model is offered (#557).
+    pub surface: ToolSurface,
+}
+
+/// The tool surface lever (#557): the tools the model is offered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ToolSurface {
+    /// `bash` alone: today's, the default.
+    #[default]
+    Bash,
+    /// `bash`, then the standard set: `read`, `write`, `edit`.
+    Standard,
+}
+
+impl ToolSurface {
+    /// The tools a request declares under this surface, in order.
+    #[must_use]
+    pub fn tools(self) -> Vec<ToolDefinition> {
+        let mut tools = vec![bash_tool()];
+        if self == Self::Standard {
+            tools.extend(super::standard::definitions());
+        }
+        tools
+    }
+
+    /// The read tool the surface offers, by name, when it offers one.
+    #[must_use]
+    pub fn read_tool(self) -> Option<String> {
+        (self == Self::Standard).then(|| super::standard::READ.to_owned())
+    }
+}
+
+/// The regimen's key for the tool surface (#557).
+pub const TOOL_SURFACE: &str = "tool_surface";
+
+/// `tool_surface` read: `bash` (the default) or `standard`.
+///
+/// # Errors
+///
+/// Any other value.
+pub fn tool_surface(regimen: &Regimen) -> Result<ToolSurface, String> {
+    match regimen.get(TOOL_SURFACE) {
+        None => Ok(ToolSurface::Bash),
+        Some(regimen::Value::String(word)) if word == "bash" => Ok(ToolSurface::Bash),
+        Some(regimen::Value::String(word)) if word == "standard" => Ok(ToolSurface::Standard),
+        Some(_) => Err(format!(
+            "`{TOOL_SURFACE}` takes \"bash\" (the default) or \"standard\""
+        )),
+    }
 }
 
 /// The regimen's table for the cap on tool output (#554).
@@ -1400,6 +1450,7 @@ pub fn output_cap(regimen: &Regimen) -> Result<OutputCap, String> {
 /// string.
 pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
     let output_cap = output_cap(regimen)?;
+    let surface = tool_surface(regimen)?;
     let max_steps = match regimen.get(LIMITS) {
         None => None,
         Some(regimen::Value::Table(limits)) => match limits.get(MAX_STEPS) {
@@ -1438,6 +1489,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             approval_policy,
             approvals_off,
             output_cap,
+            surface,
         }));
     };
     let regimen::Value::Array(items) = value else {
@@ -1460,6 +1512,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         approval_policy,
         approvals_off,
         output_cap,
+        surface,
     }))
 }
 
@@ -1824,6 +1877,8 @@ pub struct Tools {
     /// The session's read tool, by name, when it offers one: what the cap's
     /// notice tells the model to read the whole output with.
     pub read_tool: Option<String>,
+    /// The tools the model is offered (#557).
+    pub surface: ToolSurface,
 }
 
 vocabulary! {
@@ -1997,6 +2052,31 @@ pub fn prompt_of(judged: &Judged, request: u64, turn: u32, call: &str, cwd: &str
 #[cfg(test)]
 pub(in crate::drive) mod tests {
     use super::*;
+
+    /// `tool_surface` (#557): absent or `bash`, today's single tool;
+    /// `standard`, `bash` and the standard set, with `read` as the read tool
+    /// a capped output's notice names; anything else refused.
+    #[test]
+    fn the_tool_surface_is_bash_or_standard() {
+        let read = |text: &str| tool_surface(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), Ok(ToolSurface::Bash));
+        assert_eq!(read("tool_surface = \"bash\"\n"), Ok(ToolSurface::Bash));
+        assert_eq!(
+            read("tool_surface = \"standard\"\n"),
+            Ok(ToolSurface::Standard)
+        );
+        assert!(read("tool_surface = \"everything\"\n").is_err());
+        let names = |surface: ToolSurface| -> Vec<String> {
+            surface.tools().into_iter().map(|tool| tool.name).collect()
+        };
+        assert_eq!(names(ToolSurface::Bash), ["bash"]);
+        assert_eq!(
+            names(ToolSurface::Standard),
+            ["bash", "read", "write", "edit"]
+        );
+        assert_eq!(ToolSurface::Bash.read_tool(), None);
+        assert_eq!(ToolSurface::Standard.read_tool().as_deref(), Some("read"));
+    }
 
     /// `[tool_output]` (#554): absent, the convention's default cap; `cap =
     /// false`, the output kept whole; limits set by `max_lines` and
@@ -2895,6 +2975,7 @@ pub(in crate::drive) mod tests {
                 approval_policy: Some("ask".to_owned()),
                 approvals_off: false,
                 output_cap: OutputCap::DEFAULT,
+                surface: ToolSurface::Bash,
             }))
         );
         // The approval lever's `none`: commands run with no allow set.
@@ -2906,6 +2987,7 @@ pub(in crate::drive) mod tests {
                 approval_policy: None,
                 approvals_off: true,
                 output_cap: OutputCap::DEFAULT,
+                surface: ToolSurface::Bash,
             }))
         );
         assert!(read("approval = \"ask\"\n").is_err());

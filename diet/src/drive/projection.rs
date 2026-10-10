@@ -471,6 +471,11 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
         .map(|name| {
             if name == super::tool_loop::BASH {
                 Ok(super::tool_loop::bash_tool())
+            } else if let Some(tool) = super::standard::definitions()
+                .into_iter()
+                .find(|tool| tool.name == *name)
+            {
+                Ok(tool)
             } else {
                 Err(format!(
                     "the session declared `{name}`, a tool with no definition here"

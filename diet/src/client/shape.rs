@@ -517,6 +517,9 @@ impl Dialect {
 pub struct ToolDefinition {
     /// What the tool calls itself. What a `tool_moved` delta names.
     pub name: String,
+    /// What the model is told the tool does, when the tool says (#557):
+    /// on the wire as the function's `description`, so the head covers it.
+    pub description: Option<String>,
     /// The parameters it declares.
     pub schema: crate::formats::record::json::Value,
 }
