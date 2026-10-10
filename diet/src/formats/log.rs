@@ -124,7 +124,11 @@
 //! v7 `seam` may carry `tool_outputs`, the seam's tool-output state (#553),
 //! and, when it carried any, `outputs` -- the section of the refill after
 //! the render, as sent -- with `carried_outputs`, the outputs it carried,
-//! and `carried_output_bytes`, the section's bytes; absent, `evict`.
+//! and `carried_output_bytes`, the section's bytes; absent, `evict`. A
+//! v7 `seam` may carry `placement`, where the refill put the render (#597):
+//! `message`, a user message after the head, which is never changed;
+//! absent, `system`, appended to the head's system message, as every seam
+//! before #597 did.
 //!
 //! # A torn final line
 //!
@@ -278,6 +282,16 @@ vocabulary! {
         Advisory => "advisory",
         /// The same, framed as an instruction.
         Imperative => "imperative",
+    }
+}
+
+vocabulary! {
+    /// Where a seam's refill put the render (v7, #597).
+    RenderPlacement {
+        /// Appended to the head's system message: every seam before #597.
+        System => "system",
+        /// A user message after the head, which stays as the session sent it.
+        Message => "message",
     }
 }
 
@@ -1145,6 +1159,8 @@ pub enum Event {
         carried_outputs: Option<u64>,
         /// The section's bytes (v7, #553).
         carried_output_bytes: Option<u64>,
+        /// Where the refill put the render (v7, #597). Absent is `system`.
+        placement: Option<RenderPlacement>,
     },
 }
 
@@ -2566,6 +2582,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             outputs: fields.optional_string("outputs")?,
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
+            placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
         },
     };
     Ok(Line {
@@ -2984,6 +3001,8 @@ pub enum Tags {
     ToolOutputState,
     /// [`SeamToolOutputs`] (v7).
     SeamToolOutputs,
+    /// [`RenderPlacement`] (v7).
+    RenderPlacement,
 }
 
 impl Tags {
@@ -3013,6 +3032,7 @@ impl Tags {
         Self::ForkDelivery,
         Self::ToolOutputState,
         Self::SeamToolOutputs,
+        Self::RenderPlacement,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -3043,6 +3063,7 @@ impl Tags {
             Self::ForkDelivery => "ForkDelivery",
             Self::ToolOutputState => "ToolOutputState",
             Self::SeamToolOutputs => "SeamToolOutputs",
+            Self::RenderPlacement => "RenderPlacement",
         }
     }
 
@@ -3077,6 +3098,7 @@ impl Tags {
             Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
             Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
             Self::SeamToolOutputs => of(SeamToolOutputs::ALL, SeamToolOutputs::tag),
+            Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
         }
     }
 }
@@ -3696,6 +3718,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("outputs", Text),
                 may_v7("carried_outputs", Count),
                 may_v7("carried_output_bytes", Count),
+                may_v7("placement", Tag(Tags::RenderPlacement)),
             ];
             F
         }
@@ -4418,6 +4441,7 @@ fn to_value(line: &Line) -> Value {
             outputs,
             carried_outputs,
             carried_output_bytes,
+            placement,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             if let Some(moved) = phase {
@@ -4447,6 +4471,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(n) = carried_output_bytes {
                 put("carried_output_bytes", count(*n));
+            }
+            if let Some(placement) = placement {
+                put("placement", text(placement.tag()));
             }
             Kind::Seam
         }

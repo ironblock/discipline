@@ -196,6 +196,11 @@ export type SeamToolOutputs =
   | "keep"
 ;
 
+export type RenderPlacement =
+  | "system"
+  | "message"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -500,6 +505,7 @@ export type SeamLine = {
   outputs?: string;
   carried_outputs?: number;
   carried_output_bytes?: number;
+  placement?: RenderPlacement;
 };
 
 export type DeliveredLine = {
