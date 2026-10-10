@@ -1195,6 +1195,10 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 id: seam_ids.take(),
                 at_turn: index,
                 rendered_bytes,
+                // The scripted drive refills totally.
+                tail_tokens: None,
+                carried_turns: None,
+                carried_tokens: None,
             });
             seams.push(seam);
         }

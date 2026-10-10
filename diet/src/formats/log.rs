@@ -117,7 +117,10 @@
 //! regime declares and no request carries (`budget_tokens`), recorded rather
 //! than refused. And v7 adds the [`ApprovalScope`] `off` and a
 //! `session.start`'s `approvals_off`, `true` or absent: the approval lever's
-//! `none`, under which no gate decided a call and nothing prompted.
+//! `none`, under which no gate decided a call and nothing prompted. A v7
+//! `seam` may carry `tail_tokens`, the compaction depth it ran at, and
+//! `carried_tokens`, the estimated tokens of the whole turns it kept after
+//! the refill (#552); absent, the total refill, and `carried_turns` 0.
 //!
 //! # A torn final line
 //!
@@ -1036,6 +1039,13 @@ pub enum Event {
         carried_entries: u64,
         /// How many turns of the old trunk the refill carried.
         carried_turns: u64,
+        /// The compaction depth the seam ran at (v7, #552): the estimated
+        /// tokens of recent whole turns it could keep. Absent is 0, the
+        /// total refill.
+        tail_tokens: Option<u64>,
+        /// The estimated tokens of the turns it kept (v7, #552), beside
+        /// `tail_tokens`.
+        carried_tokens: Option<u64>,
     },
 }
 
@@ -2419,6 +2429,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             render: fields.string("render")?,
             carried_entries: fields.count("carried_entries")?,
             carried_turns: fields.count("carried_turns")?,
+            tail_tokens: fields.optional_count("tail_tokens")?,
+            carried_tokens: fields.optional_count("carried_tokens")?,
         },
     };
     Ok(Line {
@@ -3498,6 +3510,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v6("render", Text),
                 must_v6("carried_entries", Count),
                 must_v6("carried_turns", Count),
+                may_v7("tail_tokens", Count),
+                may_v7("carried_tokens", Count),
             ];
             F
         }
@@ -4158,6 +4172,8 @@ fn to_value(line: &Line) -> Value {
             render,
             carried_entries,
             carried_turns,
+            tail_tokens,
+            carried_tokens,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             put("reason", text(reason.tag()));
@@ -4167,6 +4183,12 @@ fn to_value(line: &Line) -> Value {
             put("render", text(render));
             put("carried_entries", count(*carried_entries));
             put("carried_turns", count(*carried_turns));
+            if let Some(tokens) = tail_tokens {
+                put("tail_tokens", count(*tokens));
+            }
+            if let Some(tokens) = carried_tokens {
+                put("carried_tokens", count(*tokens));
+            }
             Kind::Seam
         }
         Event::Delivered {

@@ -479,6 +479,13 @@ pub enum Event {
         render: String,
         /// How many entries the render carried.
         carried_entries: u64,
+        /// The compaction depth the seam ran at (#552): estimated tokens of
+        /// recent whole turns it could keep; 0, the total refill.
+        tail_tokens: u64,
+        /// How many whole turns of the old trunk it kept.
+        carried_turns: u64,
+        /// Their estimated tokens.
+        carried_tokens: u64,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -2046,6 +2053,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             prefix_hash_after,
             render,
             carried_entries,
+            tail_tokens,
+            carried_turns,
+            carried_tokens,
         } => log::Event::Seam {
             at_turn: *at_turn,
             reason: match reason {
@@ -2059,8 +2069,11 @@ pub fn line_of(logged: &Logged) -> log::Line {
             frame: crate::seam::render::FRAME_VERSION.to_owned(),
             render: render.clone(),
             carried_entries: *carried_entries,
-            // A total compaction: no turn of the old trunk is carried.
-            carried_turns: 0,
+            carried_turns: *carried_turns,
+            // The depth, and what it kept, on a seam that could keep a tail
+            // (#552); a total compaction writes neither.
+            tail_tokens: (*tail_tokens > 0).then_some(*tail_tokens),
+            carried_tokens: (*tail_tokens > 0).then_some(*carried_tokens),
         },
     };
     log::Line {
@@ -2905,7 +2918,24 @@ fn refill_trunk(template: &RequestShape, state: &mut State, reason: crate::seam:
         crate::client::head::Head::of(&shape).digest().to_owned()
     };
     let prefix_hash_before = digest(&state.trunk);
-    let refilled = crate::seam::render::refill(&template.messages, &render);
+    // The compaction depth (#552): the most recent whole turns, within the
+    // regimen's budget, kept after the refill as they sat on the trunk.
+    let tail_tokens = interview.seams.tail_tokens;
+    let turns = state
+        .trunk
+        .get(template.messages.len()..)
+        .unwrap_or_default();
+    let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+    let carried_turns = kept
+        .iter()
+        .filter(|message| message.role == Role::User)
+        .count() as u64;
+    let carried_tokens = kept
+        .iter()
+        .map(crate::seam::render::estimated_tokens)
+        .sum::<u64>();
+    let mut refilled = crate::seam::render::refill(&template.messages, &render);
+    refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
     state.turns_at_seam = state.turns;
@@ -2918,6 +2948,9 @@ fn refill_trunk(template: &RequestShape, state: &mut State, reason: crate::seam:
         prefix_hash_after,
         render,
         carried_entries,
+        tail_tokens,
+        carried_turns,
+        carried_tokens,
     });
 }
 
@@ -4655,6 +4688,9 @@ pub(in crate::drive) mod tests {
                 prefix_hash_after: "d".repeat(64),
                 render: "# regime\n".to_owned(),
                 carried_entries: 1,
+                tail_tokens: 0,
+                carried_turns: 0,
+                carried_tokens: 0,
             },
             Event::Delivered {
                 turn: 2,
@@ -4940,6 +4976,8 @@ pub(in crate::drive) mod tests {
                 render: "# regime\n".to_owned(),
                 carried_entries: 1,
                 carried_turns: 0,
+                tail_tokens: None,
+                carried_tokens: None,
             },
             log::Event::Delivered {
                 turn: 2,
@@ -7228,6 +7266,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: Some(1),
                 at_trunk_tokens: None,
+                tail_tokens: 0,
             })),
         );
         session
@@ -7260,6 +7299,75 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
+    /// The compaction depth (#552): a seam with a tail budget keeps the
+    /// old trunk's most recent whole turn after the refill, as it sat on the
+    /// trunk; the seam line names the depth and what it kept; the next ask
+    /// runs on head, render and tail; the projection rebuilds every head. A
+    /// budget no whole turn fits keeps none.
+    #[test]
+    fn a_seam_with_a_tail_budget_keeps_the_most_recent_whole_turns() {
+        let tailed = |tail_tokens: u64| {
+            Session::open_with(
+                Canned::new([
+                    deltas(&[SCOPED]),
+                    deltas(&[DECIDED]),
+                    deltas(&["started on the schema"]),
+                ]),
+                template(),
+                None,
+                None,
+                None,
+                Some(seaming(crate::seam::policy::Served {
+                    every_turns: Some(1),
+                    at_trunk_tokens: None,
+                    tail_tokens,
+                })),
+            )
+        };
+        let session = tailed(10_000);
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        let trunk = session.trunk();
+        let kept = [
+            user("what are we building?"),
+            Message::new(Role::Assistant, SCOPED),
+        ];
+        assert_eq!(trunk[trunk.len() - 2..], kept[..], "{trunk:#?}");
+        assert_eq!(trunk.len(), template().messages.len() + 2);
+        let seam = log
+            .iter()
+            .find_map(|logged| match line_of(logged).event {
+                log::Event::Seam {
+                    tail_tokens,
+                    carried_turns,
+                    carried_tokens,
+                    ..
+                } => Some((tail_tokens, carried_turns, carried_tokens)),
+                _ => None,
+            })
+            .expect("a seam line");
+        let estimated: u64 = kept.iter().map(crate::seam::render::estimated_tokens).sum();
+        assert_eq!(seam, (Some(10_000), 1, Some(estimated)));
+
+        session.ask("build it", None).expect("accepted");
+        let log = wait_until(&session, "the second seam", |log| seams_in(log).len() == 2);
+        reads_whole(&session);
+        let mut expected = trunk.clone();
+        expected.push(user("build it"));
+        assert_eq!(session.shared.transport.sent()[2].messages, expected);
+        every_head_rebuilds(&log);
+
+        // A budget no whole turn fits: the total refill.
+        let session = tailed(1);
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the seam", |log| !seams_in(log).is_empty());
+        assert_eq!(session.trunk().len(), template().messages.len());
+    }
+
     /// A budget: the trunk call reports 18 prefilled, 160 reused and 66
     /// generated, 244 tokens, against a limit of 200, so the seam fires
     /// `budget` though the cadence (every 5 turns) has not come round. The
@@ -7278,6 +7386,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: Some(5),
                 at_trunk_tokens: Some(200),
+                tail_tokens: 0,
             })),
         );
         session
@@ -7306,6 +7415,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: None,
                 at_trunk_tokens: Some(245),
+                tail_tokens: 0,
             })),
         );
         session
@@ -7345,6 +7455,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: None,
                 at_trunk_tokens: Some(100),
+                tail_tokens: 0,
             })),
         );
         session
@@ -7386,6 +7497,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: Some(1),
                 at_trunk_tokens: None,
+                tail_tokens: 0,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -7415,6 +7527,7 @@ pub(in crate::drive) mod tests {
             Some(seaming(crate::seam::policy::Served {
                 every_turns: Some(2),
                 at_trunk_tokens: None,
+                tail_tokens: 0,
             })),
         );
         session
@@ -7530,6 +7643,8 @@ pub(in crate::drive) mod tests {
                 render: render.clone(),
                 carried_entries: 3,
                 carried_turns: 0,
+                tail_tokens: None,
+                carried_tokens: None,
             }
         );
 
