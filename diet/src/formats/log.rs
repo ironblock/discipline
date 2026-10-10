@@ -229,6 +229,9 @@ vocabulary! {
         Recalled => "recalled",
         /// The operator flagged a working-memory entry (v7, #150).
         Flag => "flag",
+        /// A seam held for the operator: an operator change still
+        /// unaddressed under `reconcile_gate = "refuse"` (v7, #150).
+        SeamHeld => "seam.held",
         /// A model's patch refused: its target is the operator's (v7, #150).
         PatchRefused => "patch.refused",
         /// A tool result the model pruned, replaced at a later seam (v7,
@@ -467,6 +470,8 @@ vocabulary! {
         EditEntry => "edit-entry",
         /// The operator flagged a working-memory entry (v7, #150).
         FlagEntry => "flag-entry",
+        /// The operator refilled a held seam anyway (v7, #150's gate).
+        RefillAnyway => "refill-anyway",
     }
 }
 
@@ -516,6 +521,10 @@ vocabulary! {
         NotLive => "not-live",
         /// An edit with no content, or a flag with no note (v7, #150).
         Empty => "empty",
+        /// An ask while a seam is held for the operator (v7, #150's gate).
+        SeamHeld => "seam-held",
+        /// A refill-anyway with no seam held (v7, #150's gate).
+        NothingHeld => "nothing-held",
     }
 }
 
@@ -1369,6 +1378,18 @@ pub enum Event {
         /// The operator's note.
         note: String,
     },
+    /// A seam held for the operator (v7, #150's gate): under
+    /// `reconcile_gate = "refuse"` an operator change was still unaddressed
+    /// after the reconciling audit and its one re-ask, so the trunk was not
+    /// refilled. The operator edits and seams again, or refills anyway.
+    SeamHeld {
+        /// The latest turn, settled, which the seam follows.
+        at_turn: u32,
+        /// What fired the seam.
+        reason: SeamReason,
+        /// The entries whose changes no answer addressed.
+        unaddressed: Vec<String>,
+    },
     /// A model's patch refused (v7, #150): its target is an entry the
     /// operator wrote, which changes only by the operator. The fold went on.
     PatchRefused {
@@ -1607,6 +1628,9 @@ pub enum Event {
         /// (`tail_tokens` above 0) and kept no turn (v7, #693): what did not
         /// fit, for the operator's warning.
         newest_turn_tokens: Option<u64>,
+        /// The operator refilled this seam over the changes it was held for
+        /// (v7, #150's gate): `true`, or absent.
+        refilled_anyway: Option<bool>,
     },
 }
 
@@ -3279,6 +3303,16 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             entry: fields.string("entry")?,
             note: fields.string("note")?,
         },
+        Kind::SeamHeld => Event::SeamHeld {
+            at_turn: fields.turn("at_turn")?,
+            reason: fields.tag("reason", SeamReason::from_tag)?,
+            unaddressed: fields
+                .optional_strings("unaddressed")?
+                .filter(|left| !left.is_empty())
+                .ok_or_else(|| {
+                    "a `seam.held` names the entries it was held over: a non-empty list".to_owned()
+                })?,
+        },
         Kind::PatchRefused => Event::PatchRefused {
             fork: fields.optional_count("fork")?,
             lane: fields.optional_string("lane")?,
@@ -3326,6 +3360,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             },
             unaddressed: fields.optional_strings("unaddressed")?,
             newest_turn_tokens: fields.optional_count("newest_turn_tokens")?,
+            refilled_anyway: fields.optional_flag("refilled_anyway")?,
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -4293,6 +4328,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Delivered
         | Kind::Recalled
         | Kind::Flag
+        | Kind::SeamHeld
         | Kind::PatchRefused
         | Kind::Pruned
         | Kind::PhaseRuled
@@ -4360,6 +4396,8 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
                     | Refusal::UnknownEntry
                     | Refusal::NotLive
                     | Refusal::Empty
+                    | Refusal::SeamHeld
+                    | Refusal::NothingHeld
             )
         });
     let tangent_command = tags == Tags::Command
@@ -4371,6 +4409,7 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
                     | Command::RatifyPhase
                     | Command::EditEntry
                     | Command::FlagEntry
+                    | Command::RefillAnyway
             )
         });
     if tangent_refusal || tangent_command {
@@ -4705,6 +4744,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("operator_changes", Holds::OperatorChanges),
                 may_v7("unaddressed", Holds::Strings),
                 may_v7("newest_turn_tokens", Count),
+                may_v7("refilled_anyway", Holds::Flag),
                 may_v7("warm", Holds::Timings),
             ];
             F
@@ -4750,6 +4790,14 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v7("turn", Count),
                 must_v7("entry", Text),
                 must_v7("note", Text),
+            ];
+            F
+        }
+        Kind::SeamHeld => {
+            const F: &[Field] = &[
+                must_v7("at_turn", Count),
+                must_v7("reason", Tag(Tags::SeamReason)),
+                must_v7("unaddressed", Holds::Strings),
             ];
             F
         }
@@ -5698,6 +5746,7 @@ fn to_value(line: &Line) -> Value {
             operator_changes,
             unaddressed,
             newest_turn_tokens,
+            refilled_anyway,
             warm,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
@@ -5781,6 +5830,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(tokens) = newest_turn_tokens {
                 put("newest_turn_tokens", count(*tokens));
+            }
+            if let Some(anyway) = refilled_anyway {
+                put("refilled_anyway", Value::Boolean(*anyway));
             }
             Kind::Seam
         }
@@ -5872,6 +5924,19 @@ fn to_value(line: &Line) -> Value {
             put("entry", text(entry));
             put("note", text(note));
             Kind::Flag
+        }
+        Event::SeamHeld {
+            at_turn,
+            reason,
+            unaddressed,
+        } => {
+            put("at_turn", count(u64::from(*at_turn)));
+            put("reason", text(reason.tag()));
+            put(
+                "unaddressed",
+                Value::Array(unaddressed.iter().map(|entry| text(entry)).collect()),
+            );
+            Kind::SeamHeld
         }
         Event::PatchRefused {
             fork,
@@ -8332,7 +8397,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled flag patch.refused pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
+             fork.settled patch seam delivered recalled flag seam.held patch.refused pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -8341,7 +8406,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight seam-not-built nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty seam-held nothing-held"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

@@ -114,6 +114,8 @@ vocabulary! {
         EditEntry => "edit-entry",
         /// Flag a working-memory entry (#150).
         FlagEntry => "flag-entry",
+        /// Refill a held seam anyway (#150's gate).
+        RefillAnyway => "refill-anyway",
     }
 }
 
@@ -163,6 +165,11 @@ vocabulary! {
         NotLive => "not-live",
         /// An edit with no content, or a flag with no note (#150).
         Empty => "empty",
+        /// An ask while a seam is held for the operator (#150's gate): the
+        /// trunk was not refilled, and an ask would answer on it.
+        SeamHeld => "seam-held",
+        /// A refill-anyway with no seam held (#150's gate).
+        NothingHeld => "nothing-held",
     }
 }
 
@@ -628,6 +635,9 @@ pub enum Event {
         /// The newest turn's estimated tokens when the tail was asked for
         /// and kept no turn (#693).
         newest_turn_tokens: Option<u64>,
+        /// The operator refilled it over the changes it was held for
+        /// (#150's gate): `Some(true)`, or `None`.
+        refilled_anyway: Option<bool>,
         /// The pre-warm's timings (#504), when the refilled trunk was sent
         /// once and the call finished.
         warm: Option<Timings>,
@@ -650,6 +660,17 @@ pub enum Event {
     },
     /// The operator flagged an entry (#150): a note on it, the entry
     /// unchanged, kept until a seam addresses it.
+    /// A seam held for the operator (#150's gate): an operator change no
+    /// answer addressed under `reconcile_gate = "refuse"`, after the
+    /// reconciling audit and its one re-ask; the trunk is not refilled.
+    SeamHeld {
+        /// The latest turn, settled, which the seam follows.
+        at_turn: u32,
+        /// What fired it.
+        reason: crate::seam::Reason,
+        /// The entries whose changes stay unaddressed.
+        unaddressed: Vec<String>,
+    },
     Flagged {
         /// The latest turn.
         turn: u32,
@@ -1823,6 +1844,9 @@ struct State {
     /// A seam queued for its audit or pre-warm (#504), until [`seam_work`]
     /// takes it.
     seam_pending: Option<PendingSeam>,
+    /// A seam held for the operator (#150's gate): `reconcile_gate =
+    /// "refuse"` and an operator change no answer addressed.
+    held: Option<PendingSeam>,
     /// The pre-warm in flight (#504), which an ask cancels.
     warming: Option<Cancel>,
     /// The model's phase proposal awaiting the operator's ruling (#124).
@@ -1882,6 +1906,7 @@ impl State {
             last_sized: None,
             overflow_retried: None,
             seam_pending: None,
+            held: None,
             warming: None,
             proposal: None,
             measured_prompt: None,
@@ -2195,7 +2220,8 @@ impl State {
                 | CommandKind::Background
                 | CommandKind::RatifyPhase
                 | CommandKind::EditEntry
-                | CommandKind::FlagEntry => {
+                | CommandKind::FlagEntry
+                | CommandKind::RefillAnyway => {
                     unreachable!("a tangent, background or phase ruling carries no idle gap")
                 }
             };
@@ -2651,6 +2677,12 @@ impl<S: Streaming + 'static> Session<S> {
                 .unwrap_or_else(PoisonError::into_inner);
         }
         match state.settlement {
+            // The trunk a held seam did not refill (#150's gate).
+            Settlement::Awaiting if state.held.is_some() => {
+                let refused = state.refuse(CommandKind::Ask, Refusal::SeamHeld);
+                self.shared.changed.notify_all();
+                return Err(Rejected::Refused(refused));
+            }
             Settlement::Awaiting => {}
             Settlement::Turn | Settlement::Capture => {
                 let refused = state.refuse(CommandKind::Ask, Refusal::InFlight);
@@ -3194,6 +3226,51 @@ impl<S: Streaming + 'static> Session<S> {
         });
         drop(state);
         self.shared.changed.notify_all();
+        Ok(())
+    }
+
+    /// Refill the seam held for the operator anyway (#150's gate): the
+    /// refill the seam would have made, with no audit and no gate, its pre-
+    /// warm when the regimen asks for one, and its seam line marked
+    /// `refilled_anyway` beside the changes it carried unaddressed.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`], [`Refusal::InFlight`], and
+    /// [`Refusal::NothingHeld`] when no seam is held.
+    pub fn refill_anyway(&self) -> Result<(), Rejected> {
+        let mut state = self.shared.lock();
+        let because = match state.settlement {
+            Settlement::Ended => Some(Refusal::Ended),
+            Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
+            Settlement::Awaiting if state.held.is_none() => Some(Refusal::NothingHeld),
+            Settlement::Awaiting => None,
+        };
+        if let Some(because) = because {
+            let refused = state.refuse(CommandKind::RefillAnyway, because);
+            drop(state);
+            self.shared.changed.notify_all();
+            return Err(Rejected::Refused(refused));
+        }
+        state.admit()?;
+        let Some(PendingSeam { reason, to, .. }) = state.held.take() else {
+            unreachable!("a held seam was checked above");
+        };
+        state.seam_pending = Some(PendingSeam {
+            reason,
+            to,
+            anyway: true,
+        });
+        state.move_to(Settlement::Capture);
+        drop(state);
+        self.shared.changed.notify_all();
+        let shared = Arc::clone(&self.shared);
+        let spawned = std::thread::Builder::new()
+            .name("diet-seam".to_owned())
+            .spawn(move || seam_work(&shared));
+        if spawned.is_err() {
+            seam_work(&self.shared);
+        }
         Ok(())
     }
 
@@ -4049,20 +4126,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
             operator_changes,
             unaddressed,
             newest_turn_tokens,
+            refilled_anyway,
             warm,
         } => log::Event::Seam {
             fired: *fired,
             warm: warm.as_ref().map(timings_line),
             phase: phase.clone(),
             at_turn: *at_turn,
-            reason: match reason {
-                crate::seam::Reason::Operator => log::SeamReason::Operator,
-                crate::seam::Reason::Phase => log::SeamReason::Phase,
-                crate::seam::Reason::Budget => log::SeamReason::Budget,
-                crate::seam::Reason::Cadence => log::SeamReason::Cadence,
-                crate::seam::Reason::Window => log::SeamReason::Window,
-                crate::seam::Reason::Prune => log::SeamReason::Prune,
-            },
+            reason: seam_reason_of(*reason),
             prefix_hash_before: prefix_hash_before.clone(),
             prefix_hash_after: prefix_hash_after.clone(),
             frame: crate::seam::render::FRAME_VERSION.to_owned(),
@@ -4087,6 +4158,16 @@ pub fn line_of(logged: &Logged) -> log::Line {
             operator_changes: operator_changes.clone(),
             unaddressed: unaddressed.clone(),
             newest_turn_tokens: *newest_turn_tokens,
+            refilled_anyway: *refilled_anyway,
+        },
+        Event::SeamHeld {
+            at_turn,
+            reason,
+            unaddressed,
+        } => log::Event::SeamHeld {
+            at_turn: *at_turn,
+            reason: seam_reason_of(*reason),
+            unaddressed: unaddressed.clone(),
         },
         Event::Flagged { turn, entry, note } => log::Event::Flag {
             turn: *turn,
@@ -4211,6 +4292,18 @@ fn role_of(role: Role) -> log::Role {
     }
 }
 
+/// A seam's reason in the log's words.
+fn seam_reason_of(reason: crate::seam::Reason) -> log::SeamReason {
+    match reason {
+        crate::seam::Reason::Operator => log::SeamReason::Operator,
+        crate::seam::Reason::Phase => log::SeamReason::Phase,
+        crate::seam::Reason::Budget => log::SeamReason::Budget,
+        crate::seam::Reason::Cadence => log::SeamReason::Cadence,
+        crate::seam::Reason::Window => log::SeamReason::Window,
+        crate::seam::Reason::Prune => log::SeamReason::Prune,
+    }
+}
+
 fn command_of(command: CommandKind) -> log::Command {
     match command {
         CommandKind::Ask => log::Command::Ask,
@@ -4223,6 +4316,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::RatifyPhase => log::Command::RatifyPhase,
         CommandKind::EditEntry => log::Command::EditEntry,
         CommandKind::FlagEntry => log::Command::FlagEntry,
+        CommandKind::RefillAnyway => log::Command::RefillAnyway,
     }
 }
 
@@ -4246,6 +4340,8 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::UnknownEntry => log::Refusal::UnknownEntry,
         Refusal::NotLive => log::Refusal::NotLive,
         Refusal::Empty => log::Refusal::Empty,
+        Refusal::SeamHeld => log::Refusal::SeamHeld,
+        Refusal::NothingHeld => log::Refusal::NothingHeld,
     }
 }
 
@@ -5987,6 +6083,7 @@ fn refilled(
         operator_changes,
         unaddressed,
         newest_turn_tokens,
+        refilled_anyway: None,
         warm: None,
     }
 }
@@ -6217,7 +6314,13 @@ fn seam(
         refill_trunk(template, state, (reason, None), to);
         return false;
     }
-    state.seam_pending = Some(PendingSeam { reason, to });
+    // A seam declared again over a held one replaces it (#150's gate).
+    state.held = None;
+    state.seam_pending = Some(PendingSeam {
+        reason,
+        to,
+        anyway: false,
+    });
     state.move_to(Settlement::Capture);
     true
 }
@@ -6233,16 +6336,44 @@ fn seam(
 /// Nothing when nothing is queued.
 fn seam_work<S: Streaming>(shared: &Shared<S>) {
     let mut state = shared.lock();
-    let Some(PendingSeam { reason, to }) = state.seam_pending.take() else {
+    let Some(PendingSeam { reason, to, anyway }) = state.seam_pending.take() else {
         return;
     };
-    if let Some(fired) = audit_fired(&shared.template, &mut state, reason) {
-        drop(state);
-        shared.changed.notify_all();
-        audited(shared, fired);
-        state = shared.lock();
+    if !anyway {
+        state = audit_and_gate(shared, state, reason);
+        if let Some(left) = left_unaddressed(&state)
+            .filter(|_| refusing(&state) && crate::seam::pinned_ask(reason).is_some())
+        {
+            // Held for the operator (#150's gate): no refill, and the line
+            // naming what is left, under the lock that moves to `awaiting`.
+            state.held = Some(PendingSeam {
+                reason,
+                to,
+                anyway: false,
+            });
+            state.move_to(Settlement::Awaiting);
+            let at_turn = state.turns;
+            state.push(Event::SeamHeld {
+                at_turn,
+                reason,
+                unaddressed: left,
+            });
+            if state.ending {
+                state.ending = false;
+                state.move_to(Settlement::Ended);
+            }
+            drop(state);
+            shared.changed.notify_all();
+            return;
+        }
     }
     let mut seamed = refilled(&shared.template, &mut state, (reason, None), to);
+    if let Event::Seamed {
+        refilled_anyway, ..
+    } = &mut seamed
+    {
+        *refilled_anyway = anyway.then_some(true);
+    }
     let warm = state
         .interview
         .as_ref()
@@ -6280,6 +6411,63 @@ fn seam_work<S: Streaming>(shared: &Shared<S>) {
     shared.changed.notify_all();
 }
 
+/// A seam's audit, made and folded (#504); then, under `reconcile_gate =
+/// "refuse"` with an operator change still unaddressed (#150), the same
+/// reconciling ask once more over only the notes whose changes are left.
+fn audit_and_gate<'a, S: Streaming>(
+    shared: &'a Shared<S>,
+    mut state: std::sync::MutexGuard<'a, State>,
+    reason: crate::seam::Reason,
+) -> std::sync::MutexGuard<'a, State> {
+    if let Some(fired) = audit_fired(&shared.template, &mut state, reason, None) {
+        drop(state);
+        shared.changed.notify_all();
+        audited(shared, fired);
+        state = shared.lock();
+    }
+    let Some(left) = left_unaddressed(&state).filter(|_| refusing(&state)) else {
+        return state;
+    };
+    if let Some(fired) = audit_fired(&shared.template, &mut state, reason, Some(&left)) {
+        drop(state);
+        shared.changed.notify_all();
+        audited(shared, fired);
+        state = shared.lock();
+    }
+    state
+}
+
+/// Whether the session's regimen refuses to refill over an unaddressed
+/// operator change (#150's gate).
+fn refusing(state: &State) -> bool {
+    state.interview.as_ref().is_some_and(|interview| {
+        interview.seams.reconcile_gate == crate::seam::policy::ReconcileGate::Refuse
+    })
+}
+
+/// The entries of the operator's pending changes, still live, that no
+/// audit at this seam addressed (#150), in order; `None` when there are none.
+fn left_unaddressed(state: &State) -> Option<Vec<String>> {
+    let live = |id: &str| {
+        state.interview.as_ref().is_some_and(|interview| {
+            crate::object::EntryId::new(id)
+                .ok()
+                .and_then(|id| interview.object.entry(&id))
+                .is_some_and(|entry| entry.state.is_live())
+        })
+    };
+    let mut left: Vec<String> = Vec::new();
+    for change in &state.operator_pending {
+        if live(&change.entry)
+            && !state.operator_addressed.contains(&change.entry)
+            && !left.contains(&change.entry)
+        {
+            left.push(change.entry.clone());
+        }
+    }
+    (!left.is_empty()).then_some(left)
+}
+
 /// A seam's audit, fired (#504): its fork line and its request, when the
 /// regimen asks for one, the dogma pins an ask for `reason`, working memory
 /// holds an entry, and the latest turn settled `final` -- the audit is cut
@@ -6288,14 +6476,18 @@ fn audit_fired(
     template: &RequestShape,
     state: &mut State,
     reason: crate::seam::Reason,
+    only: Option<&[String]>,
 ) -> Option<AuditFired> {
     let interview = state
         .interview
         .as_ref()
         .filter(|interview| interview.seams.audit)?;
+    // The gate's re-ask (#150) puts the same ask over only the notes whose
+    // changes are left: `only`.
     let items: Vec<(crate::object::EntryId, String)> = interview
         .object
         .live()
+        .filter(|entry| only.is_none_or(|only| only.iter().any(|id| id == entry.id.as_str())))
         .map(|entry| (entry.id.clone(), entry.content.clone()))
         .collect();
     // #610: a session whose forks answer through the record tools audits
@@ -6534,7 +6726,11 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
                 lines = patched;
                 // Parsed: every marked note had its line (#150).
                 if outcome != log::ForkOutcome::Unparseable {
-                    state.operator_addressed.clone_from(&marked);
+                    for entry in marked {
+                        if !state.operator_addressed.contains(&entry) {
+                            state.operator_addressed.push(entry);
+                        }
+                    }
                 }
                 outcome
             }
@@ -7011,6 +7207,8 @@ pub fn fork_tail(regimen: &Regimen) -> Option<u32> {
 struct PendingSeam {
     reason: crate::seam::Reason,
     to: Option<String>,
+    /// The operator's refill-anyway (#150's gate): no audit, no gate.
+    anyway: bool,
 }
 
 /// A seam's audit, fired ([`audit_fired`], #504).
@@ -10208,6 +10406,7 @@ pub(in crate::drive) mod tests {
             },
             Event::Seamed {
                 newest_turn_tokens: None,
+                refilled_anyway: None,
                 operator_changes: None,
                 unaddressed: None,
                 at_turn: 1,
@@ -10329,6 +10528,11 @@ pub(in crate::drive) mod tests {
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
             },
+            Event::SeamHeld {
+                at_turn: 2,
+                reason: crate::seam::Reason::Operator,
+                unaddressed: vec!["interview-t1-0".to_owned()],
+            },
         ];
         let mut kinds = std::collections::BTreeSet::new();
         for event in &events {
@@ -10372,9 +10576,10 @@ pub(in crate::drive) mod tests {
                 Event::PhaseRuled { .. } => 36,
                 Event::Flagged { .. } => 37,
                 Event::PatchRefused { .. } => 38,
+                Event::SeamHeld { .. } => 39,
             });
         }
-        assert_eq!(kinds.len(), 39, "a variant has no sample");
+        assert_eq!(kinds.len(), 40, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -10659,6 +10864,7 @@ pub(in crate::drive) mod tests {
             },
             log::Event::Seam {
                 newest_turn_tokens: None,
+                refilled_anyway: None,
                 operator_changes: None,
                 unaddressed: None,
                 at_turn: 1,
@@ -10791,6 +10997,11 @@ pub(in crate::drive) mod tests {
                 choice: "continue".to_owned(),
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
+            },
+            log::Event::SeamHeld {
+                at_turn: 2,
+                reason: log::SeamReason::Operator,
+                unaddressed: vec!["interview-t1-0".to_owned()],
             },
         ]
     }
@@ -11258,12 +11469,12 @@ pub(in crate::drive) mod tests {
                     .collect::<Vec<_>>()
             ),
             "ask cancel declare-seam end open-tangent close-tangent background ratify-phase \
-             edit-entry flag-entry"
+             edit-entry flag-entry refill-anyway"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty seam-held nothing-held"
         );
         assert_eq!(
             tags(
@@ -13580,6 +13791,150 @@ pub(in crate::drive) mod tests {
                     }
                 )
             })
+    }
+
+    /// #150's definition of done, item 2, under `reconcile_gate = "refuse"`:
+    /// the operator flags an entry and the model's audit answer ignores it
+    /// -- two lines for three notes, so no note is addressed. The seam
+    /// re-asks the same reconciling ask once, over the flagged note alone;
+    /// that answer ignores it too, so the seam holds, names the flag, and
+    /// refills nothing. An ask is refused while it holds. The operator's
+    /// refill anyway refills, carries the flag unaddressed, and is logged on
+    /// the seam line; the log reads back and the record reads back.
+    #[test]
+    fn under_the_refuse_gate_an_ignored_flag_is_re_asked_once_then_held_until_refilled_anyway() {
+        let session = three_decisions_then(
+            |seams| {
+                seams.audit = true;
+                seams.reconcile_gate = crate::seam::policy::ReconcileGate::Refuse;
+            },
+            vec![deltas(&["1. KEEP\n2. KEEP\n"]), deltas(&["nothing to say"])],
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the hold", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::SeamHeld { .. }))
+        });
+        // Asked twice, the second time over the flagged note alone, in the
+        // approved reconciling words.
+        let asked: Vec<(crate::dogma::Template, String)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Audited {
+                    template, question, ..
+                } => Some((*template, question.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(asked.len(), 2, "{asked:?}");
+        assert!(
+            asked
+                .iter()
+                .all(|(template, _)| *template == crate::dogma::Template::AuditQHumanReconcile)
+        );
+        assert!(asked[1].1.contains("Output 1 lines"), "{}", asked[1].1);
+        assert!(
+            asked[1].1.ends_with(" [flagged: still so?]"),
+            "{}",
+            asked[1].1
+        );
+        assert!(
+            log.iter().any(|logged| matches!(
+                &logged.event,
+                Event::SeamHeld { unaddressed, .. } if *unaddressed == [flagged.clone()]
+            )),
+            "held, naming the flag"
+        );
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Seamed { .. }))
+        );
+        assert_eq!(session.settlement(), Settlement::Awaiting);
+        assert_eq!(
+            session.ask("go on", None),
+            Err(Rejected::Refused(Refusal::SeamHeld))
+        );
+        session.refill_anyway().expect("refilled anyway");
+        let log = wait_until(&session, "the refill", seamed);
+        assert_eq!(
+            every_carried(&log),
+            [(
+                Some(vec![log::OperatorChange {
+                    entry: flagged.clone(),
+                    kind: "flag".to_owned(),
+                }]),
+                Some(vec![flagged.clone()])
+            )]
+        );
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::Seamed {
+                refilled_anyway: Some(true),
+                ..
+            }
+        )));
+        assert_eq!(
+            session.refill_anyway(),
+            Err(Rejected::Refused(Refusal::NothingHeld))
+        );
+        reads_whole(&session);
+        record_read_back(&session);
+    }
+
+    /// The same session under `reconcile_gate = "carry"`, the default: one
+    /// audit, the seam refills, and the flag is recorded `unaddressed`.
+    #[test]
+    fn under_the_carry_gate_an_ignored_flag_refills_and_is_recorded_unaddressed() {
+        let session = three_decisions_then(
+            |seams| seams.audit = true,
+            vec![deltas(&["1. KEEP\n2. KEEP\n"])],
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the seam", seamed);
+        assert_eq!(audited_templates(&log).len(), 1);
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::SeamHeld { .. }))
+        );
+        assert_eq!(
+            every_carried(&log),
+            [(
+                Some(vec![log::OperatorChange {
+                    entry: flagged.clone(),
+                    kind: "flag".to_owned(),
+                }]),
+                Some(vec![flagged])
+            )]
+        );
+        reads_whole(&session);
+    }
+
+    /// Under `refuse`, a re-ask that addresses the change refills: the
+    /// gate holds only what stays unaddressed.
+    #[test]
+    fn under_the_refuse_gate_a_re_ask_that_addresses_the_change_refills() {
+        let session = three_decisions_then(
+            |seams| {
+                seams.audit = true;
+                seams.reconcile_gate = crate::seam::policy::ReconcileGate::Refuse;
+            },
+            vec![deltas(&["1. KEEP\n2. KEEP\n"]), deltas(&["1. KEEP\n"])],
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "the seam", seamed);
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::SeamHeld { .. }))
+        );
+        assert_eq!(every_carried(&log)[0].1, Some(Vec::new()));
+        record_read_back(&session);
     }
 
     /// A background command still running at a seam (#614) is listed after
@@ -17468,6 +17823,7 @@ pub(in crate::drive) mod tests {
             None,
             Some(Interview {
                 seams: crate::seam::policy::Served {
+                    reconcile_gate: crate::seam::policy::ReconcileGate::Carry,
                     every_turns: Some(every),
                     at_trunk_tokens: None,
                     tail_tokens,
@@ -17802,6 +18158,7 @@ pub(in crate::drive) mod tests {
             None,
             None,
             Some(seaming(crate::seam::policy::Served {
+                reconcile_gate: crate::seam::policy::ReconcileGate::Carry,
                 every_turns: Some(1),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
@@ -17863,6 +18220,7 @@ pub(in crate::drive) mod tests {
                 None,
                 None,
                 Some(seaming(crate::seam::policy::Served {
+                    reconcile_gate: crate::seam::policy::ReconcileGate::Carry,
                     every_turns: Some(1),
                     at_trunk_tokens: None,
                     tail_tokens,
@@ -17955,6 +18313,7 @@ pub(in crate::drive) mod tests {
             None,
             None,
             Some(seaming(crate::seam::policy::Served {
+                reconcile_gate: crate::seam::policy::ReconcileGate::Carry,
                 every_turns: Some(5),
                 at_trunk_tokens: Some(200),
                 tail_tokens: 0,
@@ -17989,6 +18348,7 @@ pub(in crate::drive) mod tests {
             None,
             None,
             Some(seaming(crate::seam::policy::Served {
+                reconcile_gate: crate::seam::policy::ReconcileGate::Carry,
                 every_turns: None,
                 at_trunk_tokens: Some(245),
                 tail_tokens: 0,
@@ -18034,6 +18394,7 @@ pub(in crate::drive) mod tests {
             None,
             None,
             Some(seaming(crate::seam::policy::Served {
+                reconcile_gate: crate::seam::policy::ReconcileGate::Carry,
                 every_turns: None,
                 at_trunk_tokens: Some(100),
                 tail_tokens: 0,
@@ -18081,6 +18442,7 @@ pub(in crate::drive) mod tests {
             None,
             None,
             Some(seaming(crate::seam::policy::Served {
+                reconcile_gate: crate::seam::policy::ReconcileGate::Carry,
                 every_turns: Some(1),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
@@ -18116,6 +18478,7 @@ pub(in crate::drive) mod tests {
             None,
             None,
             Some(seaming(crate::seam::policy::Served {
+                reconcile_gate: crate::seam::policy::ReconcileGate::Carry,
                 every_turns: Some(2),
                 at_trunk_tokens: None,
                 tail_tokens: 0,
@@ -18281,6 +18644,7 @@ pub(in crate::drive) mod tests {
             line_of(&log[seam]).event,
             log::Event::Seam {
                 newest_turn_tokens: None,
+                refilled_anyway: None,
                 operator_changes: None,
                 unaddressed: None,
                 at_turn: 1,

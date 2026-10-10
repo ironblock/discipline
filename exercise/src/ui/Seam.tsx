@@ -24,6 +24,12 @@ export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
             ].join(' · ')}
           </span>
         ) : null}
+        {/* Refilled over the operator's unaddressed changes (#150's gate): their call, not the reconcile's. */}
+        {node.refilledAnyway ? (
+          <span className="ex-seam__anyway" title="the reconcile left your changes unaddressed, and you refilled anyway">
+            refilled anyway
+          </span>
+        ) : null}
         {node.size ? (
           <span className="ex-seam__size" title="an automatic seam: the prompt neared the window, so the trunk was refilled before the next request">
             automatic · {tokens(node.size.promptTokens)} of a {tokens(node.size.window)} window

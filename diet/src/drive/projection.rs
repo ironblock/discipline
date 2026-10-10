@@ -918,6 +918,7 @@ impl<'a> Walk<'a> {
             Line::TimeoutNear { .. } => log::Kind::TimeoutNear,
             Line::ForkSkipped { .. } => log::Kind::ForkSkipped,
             Line::Flag { .. } => log::Kind::Flag,
+            Line::SeamHeld { .. } => log::Kind::SeamHeld,
             Line::PatchRefused { .. } => log::Kind::PatchRefused,
             // The trunk's own self-capture patch (#609), fork-less.
             Line::Patch { .. } => log::Kind::Patch,
@@ -1042,6 +1043,9 @@ impl<'a> Walk<'a> {
             // operator's entry (#150): the seam row names what was carried.
             | Line::Flag { .. }
             | Line::PatchRefused { .. }
+            // A seam held for the operator (#150's gate): the trunk was
+            // not refilled, so no seam row; the one that refills has it.
+            | Line::SeamHeld { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
             | Line::Patch { fork: None, .. } => self.no_row(line),
@@ -2409,6 +2413,7 @@ mod tests {
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Seam {
             newest_turn_tokens: None,
+            refilled_anyway: None,
             operator_changes: None,
             unaddressed: None,
             at_turn: 1,
@@ -2460,6 +2465,7 @@ mod tests {
         events.extend(answered(1, 3, Some(warm()), None));
         events.push(Line::Seam {
             newest_turn_tokens: None,
+            refilled_anyway: None,
             operator_changes: None,
             unaddressed: None,
             at_turn: 1,

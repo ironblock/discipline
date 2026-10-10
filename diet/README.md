@@ -22,6 +22,13 @@ It's primarily a library, but exists primarily to apply a `regimen` - a fixed co
 
 **The operator's edits and flags are reconciled at the next seam** (#150). `edit-entry` and `flag-entry` change a live note, and the model's lanes cannot rewrite what the operator wrote. Each pending change is marked on its note, ` [edited by the operator]` or ` [flagged: <note>]`, in the next seam's refill and, with `seam_audit = "on"`, in its audit, which is then the trigger's reconciling ask (`AUDIT_Q_HUMAN_RECONCILE`, `AUDIT_Q_RECONCILE`, `AUDIT_Q_CADENCE_RECONCILE`) asking the model to address each. An audit answer that parses addresses every marked note. The seam line records `operator_changes` and the `unaddressed` ones, which stay pending, marked again, at the seam after.
 
+**The reconcile gate** (#150): `reconcile_gate` decides whether a seam refills over an operator change no audit addressed, and the start row names it.
+- `carry`, the default, refills and records the change `unaddressed`, carried to the next seam.
+- `refuse`, which needs `seam_audit` on and the fields route:
+  - The seam puts the same reconciling ask once more, over only the notes whose changes are left.
+  - If any change is still left, the seam is held and logs `seam.held` naming those entries. An ask is refused `seam-held`.
+  - The operator edits and declares the seam again, or posts `{"kind":"refill-anyway"}`. That refills, carrying them unaddressed, and marks the seam line `refilled_anyway`. With no seam held it is refused `nothing-held`.
+
 **The model can propose a phase move, and the operator rules on it** (#124). With self-capture on and phases declared, the model's `propose_phase_transition` call is ruled by the phase graph at once. A refused move is a `capture` line with outcome `refused` and why the graph's word, and the model is shown that word. An allowed move is the session's one pending proposal, and nothing moves until the operator rules. `{"kind":"ratify-phase","call":"<the call's id>","choice":"seam"|"continue"|"stay"}` rules on it:
 - `seam` declares the seam that moves to the proposed phase.
 - `continue` moves the phase and keeps the trunk.

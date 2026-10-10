@@ -284,6 +284,8 @@ export interface SeamNode extends Provenance {
   /** What the operator changed in working memory since the last seam (log v7, #150), and the flags this seam left open. */
   readonly operatorChanges?: readonly { readonly entry: string; readonly kind: string }[];
   readonly unaddressed?: readonly string[];
+  /** The operator refilled it anyway over changes the reconcile left unaddressed (log v7, #150's gate). */
+  readonly refilledAnyway?: true;
   /** The background commands still running at this seam (log v7, #614), as the refill listed them after its summary. */
   readonly background?: readonly BackgroundListed[];
 }
@@ -404,6 +406,8 @@ export interface Session {
   readonly tangentsOpened: number;
   /** The model's phase proposal waiting on the operator's ruling (#124, #651): its call, the move, and its reason. */
   readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string };
+  /** A seam held for the operator (#150's gate, #698): its turn, why it was declared, and the changes left unaddressed. */
+  readonly held?: { readonly atTurn: number; readonly reason: string; readonly unaddressed: readonly string[] };
   /** What each slot is serving right now, and for which lane; absent when idle. */
   readonly occupancy: readonly (Holder | undefined)[];
   /** Session time of the last event. */
@@ -629,6 +633,7 @@ export function fold(lines: readonly LogLine[]): Session {
   // `phase` is a placed log's spelling of `opening_phase`: it declares v3 or v4, before the key arrived (v7, #563).
   let phase = start.opening_phase ?? start.phase ?? '';
   let proposal: { call: string; from?: string; to: string; reason?: string } | undefined;
+  let held: { atTurn: number; reason: string; unaddressed: readonly string[] } | undefined;
   const rulings = new Map<string, LineOf<'phase.ruled'>>();
   let openTurn: number | undefined;
   let lastAskSeq = -1;
@@ -813,6 +818,10 @@ export function fold(lines: readonly LogLine[]): Session {
       // A fork screened out of its gap (#611): no branch to draw; folded into no node yet.
       case 'fork.skipped':
         break;
+      // A seam held for the operator (#150's gate): it waits on them until the next seam line, the refill.
+      case 'seam.held':
+        held = { atTurn: e.at_turn, reason: e.reason, unaddressed: e.unaddressed };
+        break;
       case 'pruned':
         prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
         break;
@@ -834,6 +843,7 @@ export function fold(lines: readonly LogLine[]): Session {
         if (e.choice === 'continue') phase = e.to;
         break;
       case 'seam': {
+        held = undefined;
         for (const call of e.pruned ?? []) replacedBySeam.add(call);
         if (e.phase) phase = e.phase.to;
         // What the model was sent after the seam -- `diet`'s `seam::render::refill`, whose output the record's head
@@ -1060,6 +1070,7 @@ export function fold(lines: readonly LogLine[]): Session {
           ...(seamLine.operator_changes !== undefined && seamLine.operator_changes.length > 0 ? { operatorChanges: seamLine.operator_changes } : {}),
           ...(seamLine.unaddressed !== undefined && seamLine.unaddressed.length > 0 ? { unaddressed: seamLine.unaddressed } : {}),
           ...(seamLine.background !== undefined ? { background: backgroundListed(seamLine.background) } : {}),
+          ...(seamLine.refilled_anyway ? { refilledAnyway: true as const } : {}),
           ...provenance(seamLine),
         })
       : undefined;
@@ -1173,6 +1184,7 @@ export function fold(lines: readonly LogLine[]): Session {
     phase,
     tangentsOpened,
     ...(proposal ? { proposal } : {}),
+    ...(held ? { held } : {}),
     ...(openTangent !== undefined
       ? { tangent: { id: openTangent, entries: [...entries.values()].filter((x) => x.tangent === openTangent && x.state === 'live').map((x) => x.id) } }
       : {}),
