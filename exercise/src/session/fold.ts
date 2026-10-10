@@ -69,6 +69,11 @@ export interface UserNode extends Provenance {
    * and how it matched. Folded, not yet drawn.
    */
   readonly recalled?: { readonly recall: string; readonly text: string };
+  /**
+   * The tool results the model pruned in this turn (log v7's `pruned`, #612): each call, the bytes a later seam
+   * removes, and the reference line it carries instead. Folded, not yet drawn.
+   */
+  readonly pruned?: readonly { readonly call: string; readonly bytes: number; readonly text: string }[];
   /** The files the operator attached to the ask (log v5's `ask.files`, #372): read by digest, never by path. */
   readonly files?: readonly FileRef[];
   /** The operator marked it the scope answer (the `ask` line's `scoping`, log v5, #453): its turn warrants the interview fork. */
@@ -468,6 +473,7 @@ export function fold(lines: readonly LogLine[]): Session {
   const asks = new Map<number, LineOf<'ask'>>();
   const deliveries = new Map<number, LineOf<'delivered'>>();
   const recalls = new Map<number, LineOf<'recalled'>>();
+  const prunes = new Map<number, LineOf<'pruned'>[]>();
   const firstRequestOfTurn = new Map<number, number>();
   // Each call, keyed by the `seq` of its first fragment (or of its line, where none streamed); found by its request and index.
   const calls = new Map<number, { request: number; t: number; first?: LineOf<'delta'>; id?: string; name?: Tool; args: string; line?: LineOf<'tool_call'> }>();
@@ -659,6 +665,9 @@ export function fold(lines: readonly LogLine[]): Session {
       case 'recalled':
         recalls.set(e.turn, e);
         break;
+      case 'pruned':
+        prunes.set(e.turn, [...(prunes.get(e.turn) ?? []), e]);
+        break;
       case 'seam': {
         if (e.phase) phase = e.phase.to;
         // What the model was sent after the seam -- `diet`'s `seam::render::refill`, whose output the record's head
@@ -753,6 +762,9 @@ export function fold(lines: readonly LogLine[]): Session {
               : {}),
             ...(recalls.has(slot.turn)
               ? { recalled: { recall: recalls.get(slot.turn)!.recall, text: recalls.get(slot.turn)!.text } }
+              : {}),
+            ...(prunes.has(slot.turn)
+              ? { pruned: prunes.get(slot.turn)!.map(({ call, bytes, text }) => ({ call, bytes, text })) }
               : {}),
             ...provenance(ask, first?.response),
           });

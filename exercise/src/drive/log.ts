@@ -288,6 +288,8 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
 export type Delivered = V0.DeliveredLine;
 /** Archived items recalled after an ask (v7, the archive recall lever, #566). */
 export type Recalled = V0.RecalledLine;
+/** A tool result the model pruned, replaced at a later seam (v7, `prune_output`, #612). */
+export type Pruned = V0.PrunedLine;
 
 export type LogLine =
   | SessionStart
@@ -309,7 +311,8 @@ export type LogLine =
   | Patch
   | Seam
   | Delivered
-  | Recalled;
+  | Recalled
+  | Pruned;
 
 export type Kind = LogLine['kind'];
 

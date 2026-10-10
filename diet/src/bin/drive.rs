@@ -400,6 +400,15 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(tools) => tools,
         Err((code, why)) => return fail(code, &why),
     };
+    // A prune has nothing to prune in a session that runs no tools (#612).
+    if tools.is_none() && interview.as_ref().is_some_and(|i| i.prune.is_some()) {
+        return fail(
+            EXIT_INPUT,
+            "`model_pruning = \"on\"` needs a session that runs commands: it prunes tool \
+             results, and this one makes no tool calls (give it `--worktree` and \
+             `allowed_commands`)",
+        );
+    }
     // What an ask's named PNGs are checked against and copied to (#372):
     // the policy the commands run under, or the regimen's when it runs
     // none, and the recording's directory.
@@ -707,9 +716,17 @@ fn served_session(
     declared: session::Declared,
 ) -> std::sync::Arc<Session<HttpStream>> {
     // A session that runs commands declares its surface's tools (#557):
-    // `bash` alone, or `bash` and the standard set.
+    // `bash` alone, or `bash` and the standard set; then `prune_output`
+    // when the regimen offers it (#612).
     if let Some(tools) = tools.as_ref() {
         shape.tools = tools.surface.tools();
+        if declared
+            .1
+            .as_ref()
+            .is_some_and(|interview| interview.prune.is_some())
+        {
+            shape.tools.push(diet::drive::prune::definition());
+        }
     }
     std::sync::Arc::new(Session::open_declaring(
         transport,
@@ -776,6 +793,12 @@ fn serving_interview(
              memory, so no seam could ever move between them"
         ));
     }
+    if rules.is_empty() && diet::drive::prune::of(&read).is_some() {
+        return Err(format!(
+            "{path} declares `model_pruning = \"on\"` and no `interview_warrant`: nothing \
+             fills working memory, so no seam could ever replace a pruned result"
+        ));
+    }
     if rules.is_empty() && seams.declares_a_trigger() {
         return Err(format!(
             "{path} declares a seam trigger and no `interview_warrant`: nothing fills \
@@ -791,6 +814,9 @@ fn serving_interview(
         // #566: how archived items are recalled; off unless declared.
         recall: diet::drive::archive::Recall::of(&read),
         view: session::fork_view(&read),
+        // #612: whether the model may prune its tool results; off unless
+        // declared.
+        prune: diet::drive::prune::of(&read),
     }))
 }
 

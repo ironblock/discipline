@@ -417,6 +417,11 @@ struct Walk<'a> {
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
     side_heads: BTreeMap<Lane, String>,
+    /// Each call's latest `tool_call` line, by its id: its row and what the
+    /// trunk carried as its result (#612).
+    calls: BTreeMap<String, (u64, Option<String>)>,
+    /// The results the model pruned (#612), in the order it pruned them.
+    pruned: Vec<Pruned>,
     /// The trunk at an open tangent's fork point (v7, #22): what its close
     /// rolls the rebuilt trunk back to, as the session's close does.
     tangent_trunk: Option<Vec<Message>>,
@@ -482,6 +487,7 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
                 Ok(super::tool_loop::bash_tool())
             } else if let Some(tool) = super::standard::definitions()
                 .into_iter()
+                .chain([super::prune::definition()])
                 .find(|tool| tool.name == *name)
             {
                 Ok(tool)
@@ -503,6 +509,26 @@ fn earlier_bash(tools: &[ToolDefinition]) -> Option<Vec<ToolDefinition>> {
     let mut earlier = tools.to_vec();
     earlier[at] = super::tool_loop::bash_tool_before_its_description();
     Some(earlier)
+}
+
+/// A result the model pruned (#612), as its `pruned` line names it.
+#[derive(Debug, Clone)]
+struct Pruned {
+    call: String,
+    shown: String,
+    text: String,
+    output: record::PrunedOutput,
+    applied: bool,
+}
+
+impl Pruned {
+    /// Whether `message` is the result it prunes, as the trunk carried it
+    /// or as a seam already replaced it: the session's own test.
+    fn is(&self, message: &Message) -> bool {
+        message.role == Role::Tool
+            && message.tool_call_id.as_deref() == Some(self.call.as_str())
+            && (message.content == self.shown || message.content == self.text)
+    }
 }
 
 impl<'a> Walk<'a> {
@@ -560,6 +586,8 @@ impl<'a> Walk<'a> {
             trunk_unrebuilt: None,
             refilled: false,
             side_heads: BTreeMap::new(),
+            calls: BTreeMap::new(),
+            pruned: Vec::new(),
         }
     }
 
@@ -599,6 +627,9 @@ impl<'a> Walk<'a> {
 
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
+            // A prune (v7, #612): applied to the trunk by the seam that
+            // lists its call, as the session applies it.
+            Line::Pruned { .. } => self.pruned_line(line),
             Line::Ask {
                 turn, text, files, ..
             } => {
@@ -849,6 +880,33 @@ impl<'a> Walk<'a> {
         });
     }
 
+    /// A `pruned` line (#612), kept until the seam that lists its call: the
+    /// pruned call's row and what the trunk carried as its result.
+    fn pruned_line(&mut self, line: &log::Line) {
+        let Line::Pruned {
+            call,
+            sha256,
+            bytes,
+            text,
+            ..
+        } = &line.event
+        else {
+            return;
+        };
+        let (row, shown) = self.calls.get(call).cloned().unwrap_or_default();
+        self.pruned.push(Pruned {
+            call: call.clone(),
+            shown: shown.unwrap_or_default(),
+            text: text.clone(),
+            output: record::PrunedOutput {
+                tool_call: format!("t/{row}"),
+                sha256: sha256.clone(),
+                bytes: *bytes,
+            },
+            applied: false,
+        });
+    }
+
     /// A seam's row, `s/<seq>`, at the turn it follows, and the trunk
     /// refilled from `render` and the section of tool outputs it carried
     /// through [`crate::seam::render::refill`]. The
@@ -861,6 +919,7 @@ impl<'a> Walk<'a> {
             tail_tokens,
             outputs,
             placement,
+            pruned,
             ..
         } = &line.event
         else {
@@ -873,7 +932,26 @@ impl<'a> Walk<'a> {
             .trunk
             .get(self.head.len() + usize::from(self.refilled)..)
             .unwrap_or_default();
-        let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+        let mut kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+        // The prunes this seam applied (#612), then each pruned result in
+        // the kept tail replaced by its line, as the session replaces it.
+        let mut applied = Vec::new();
+        for call in pruned.iter().flatten() {
+            if let Some(prune) = self
+                .pruned
+                .iter_mut()
+                .find(|prune| !prune.applied && prune.call == *call)
+            {
+                prune.applied = true;
+                applied.push(prune.output.clone());
+            }
+        }
+        for message in &mut kept {
+            if let Some(prune) = self.pruned.iter().find(|prune| prune.is(message)) {
+                message.content.clone_from(&prune.text);
+                message.images.clear();
+            }
+        }
         let carried_turns = kept
             .iter()
             .filter(|message| message.role == Role::User)
@@ -929,6 +1007,7 @@ impl<'a> Walk<'a> {
             tail_tokens: tailed.then_some(tail_tokens),
             carried_turns: tailed.then_some(carried_turns),
             carried_tokens: tailed.then_some(carried_tokens),
+            pruned: (!applied.is_empty()).then_some(applied),
         });
     }
 
@@ -1284,6 +1363,9 @@ impl<'a> Walk<'a> {
             let ran = self.steps.get(turn).map_or(0, Vec::len).saturating_sub(1);
             self.onto_the_trunk(*turn, ran);
             return;
+        }
+        if let Line::ToolCall { id, shown, .. } = &line.event {
+            self.calls.insert(id.clone(), (line.seq, shown.clone()));
         }
         self.step_call(&line.event);
         self.tool_call_line(line.seq, &line.event);
@@ -1716,6 +1798,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            pruned: None,
         });
         let projection = project(
             &numbered(events),
@@ -1760,6 +1843,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            pruned: None,
         });
         let projection = project(
             &numbered(events),
@@ -2397,6 +2481,42 @@ mod tests {
             .map(|u| u.text.as_deref())
             .collect();
         assert_eq!(named, vec![Some("ls -la (")]);
+    }
+
+    /// #612: a seam that applied a prune names it on its row -- the pruned
+    /// call's row, its whole's sha256, the bytes it removed -- and the
+    /// projection reads the log's own fixture to say so.
+    #[test]
+    fn a_seam_row_names_each_prune_it_applied() {
+        let text = include_str!(
+            "../../formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl"
+        );
+        let lines = log::parse(text).expect("the fixture reads");
+        let projected =
+            project(&lines, &regime(), Some(Engine::Commit("e7051ef"))).expect("projected");
+        let rows: Vec<_> = projected
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Seam { pruned, .. } => Some(pruned.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [Some(vec![record::PrunedOutput {
+                tool_call: "t/6".to_owned(),
+                sha256: crate::digest::sha256_hex(b"line 1\nline 2\n"),
+                bytes: 14,
+            }])],
+            "{:#?}",
+            projected.unspellable
+        );
+        let tool = projected.events.iter().any(|event| {
+            matches!(event, Event::ToolCall { id, tool, .. } if id == "t/6" && tool == "bash")
+        });
+        assert!(tool, "the row it names is the pruned call's");
+        validates(&projected);
     }
 
     /// A v5 session with two forks, projected and validated: turn 1's
