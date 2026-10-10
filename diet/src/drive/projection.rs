@@ -414,6 +414,9 @@ struct Walk<'a> {
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
     side_heads: BTreeMap<Lane, String>,
+    /// A lane's substrate where a fork's line names an offboard seat
+    /// (#570): its requests and its fork rows name it, not the trunk's.
+    seated: BTreeMap<Lane, String>,
 }
 
 /// One tool step of a turn (#472): what the model said, its calls, and what
@@ -552,6 +555,7 @@ impl<'a> Walk<'a> {
             steps: BTreeMap::new(),
             trunk_unrebuilt: None,
             side_heads: BTreeMap::new(),
+            seated: BTreeMap::new(),
         }
     }
 
@@ -624,12 +628,12 @@ impl<'a> Walk<'a> {
                 Some(message.clone()),
             ),
             // A fork (v5, #374): its row, and its patches as one capture row.
-            Line::Fork { lane, of_turn, .. } => self.fork(line.seq, *lane, *of_turn),
+            Line::Fork { .. } => self.fork(line),
             Line::Patch { fork, .. } => self.patch(line.seq, *fork),
             // The record's fork row carries no outcome: a fork that settled
             // `value` is carried by its capture row, and any other outcome is
             // named with its word.
-            Line::ForkSettled { fork, outcome } => self.fork_settled(line.seq, *fork, *outcome),
+            Line::ForkSettled { fork, outcome, .. } => self.fork_settled(line.seq, *fork, *outcome),
             // A seam (v6, #493): its row, and the trunk refilled exactly as
             // the session refills it, so the next request's head is rebuilt
             // and checked like any other.
@@ -790,7 +794,27 @@ impl<'a> Walk<'a> {
     /// A fork's row, `f/<seq>`, off the turn it follows: served on the
     /// regime's substrate, like every row this projection writes. Named
     /// rather than written when that turn has no row.
-    fn fork(&mut self, seq: u64, lane: Lane, of_turn: u32) {
+    /// The substrate `lane`'s rows name: its seat's, else the trunk's.
+    fn substrate_of(&self, lane: Lane) -> String {
+        self.seated.get(&lane).unwrap_or(&self.substrate).clone()
+    }
+
+    fn fork(&mut self, forked: &log::Line) {
+        let Line::Fork {
+            lane,
+            of_turn,
+            seat,
+            ..
+        } = &forked.event
+        else {
+            return;
+        };
+        let (seq, lane, of_turn) = (forked.seq, *lane, *of_turn);
+        // The lane's requests name the seat whether or not this row can be
+        // written.
+        if let Some(seat) = seat {
+            self.seated.insert(lane, seat.substrate.clone());
+        }
         let turned = self
             .events
             .iter()
@@ -808,7 +832,7 @@ impl<'a> Walk<'a> {
         self.events.push(Event::Fork {
             id: format!("f/{seq}"),
             lane: lane.tag().to_owned(),
-            substrate: self.substrate.clone(),
+            substrate: self.substrate_of(lane),
             of_turn,
         });
     }
@@ -990,7 +1014,7 @@ impl<'a> Walk<'a> {
         self.events.push(Event::Request {
             id: request_id(seq),
             lane: lane.tag().to_owned(),
-            substrate: self.substrate.clone(),
+            substrate: self.substrate_of(lane),
             retry_of: None,
             text: None,
             head_sha256: Some(head_sha256.to_owned()),
@@ -2361,6 +2385,7 @@ mod tests {
             why,
             question: "what did the operator decide".to_owned(),
             view: None,
+            seat: None,
         };
         let call = |turn: u32, fork: u64| {
             [
@@ -2401,6 +2426,8 @@ mod tests {
         events.push(Line::ForkSettled {
             fork: 8,
             outcome: log::ForkOutcome::Value,
+            prompt_tokens: None,
+            wall_ms: None,
         });
         events.extend(["d1", "d2", "d3"].map(|id| patch(8, id)));
         events.extend(answered(2, 17, Some(warm()), None));
@@ -2410,6 +2437,8 @@ mod tests {
         events.push(Line::ForkSettled {
             fork: 29,
             outcome: log::ForkOutcome::Decline,
+            prompt_tokens: None,
+            wall_ms: None,
         });
         let lines = numbered(events);
         let document: String = lines.iter().map(|line| log::render(line) + "\n").collect();

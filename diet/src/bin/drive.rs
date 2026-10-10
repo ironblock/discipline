@@ -86,7 +86,8 @@ fn serve_usage() -> String {
          \x20                       [--listen IP] [--port N] [--auth-file FILE] [--regimen FILE]\n\
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
-         \x20                       [--worktree DIR]\n\n",
+         \x20                       [--worktree DIR]\n\
+         \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\n",
     );
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
     out.push_str("--listen's address:\n");
@@ -138,6 +139,11 @@ fn serve_usage() -> String {
     out.push_str("\"decline\"}: 204, or 409 {\"refused\": \"nothing-waiting\"|\"stale\"|...}.\n");
     out.push_str("After the session the receipt is written beside the record (or the log),\n");
     out.push_str("as FILE.receipt.json.\n");
+    out.push_str("A regimen declaring `extraction_seat = \"offboard:<registry id>\"` runs its\n");
+    out.push_str("interview forks on a second server: --seat-endpoint and --seat-model are\n");
+    out.push_str("then required (--seat-key-file as --key-file), the seat's engine is checked\n");
+    out.push_str("against that entry as the trunk's is, and its endpoint may not be the\n");
+    out.push_str("trunk's. A fork there sees the last turn unless `fork_view` says otherwise.\n");
     out
 }
 
@@ -157,6 +163,16 @@ struct ServeArgs {
     /// `--max-output-tokens`, when given: it beats the regimen's (#569).
     max_output_tokens: Option<u32>,
     worktree: Option<String>,
+    /// `--seat-endpoint`, `--seat-model` and `--seat-key-file` (#570).
+    seat: SeatArgs,
+}
+
+/// Where an offboard extraction seat is reached, as `serve`'s flags say.
+#[derive(Default)]
+struct SeatArgs {
+    endpoint: Option<String>,
+    model: Option<String>,
+    key_file: Option<String>,
 }
 
 /// Whether `args` asks for the usage: `--help` or `-h` where a flag goes.
@@ -187,6 +203,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut allowed_origins = Vec::new();
     let mut max_output_tokens = None;
     let mut worktree = None;
+    let mut seat = SeatArgs::default();
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -201,6 +218,15 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
             true
         } else if flag == "--key-file" {
             key_file = Some(value.clone());
+            true
+        } else if flag == "--seat-endpoint" {
+            seat.endpoint = Some(value.clone());
+            true
+        } else if flag == "--seat-model" {
+            seat.model = Some(value.clone());
+            true
+        } else if flag == "--seat-key-file" {
+            seat.key_file = Some(value.clone());
             true
         } else if flag == "--auth-file" {
             auth_file = Some(value.clone());
@@ -255,6 +281,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         allowed_origins,
         max_output_tokens,
         worktree,
+        seat,
     })
 }
 
@@ -281,6 +308,7 @@ fn serve(args: &[String]) -> ExitCode {
         allowed_origins,
         max_output_tokens,
         worktree,
+        seat,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
@@ -429,6 +457,7 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(listen) => listen,
         Err(refused) => return refused,
     };
+    let trunk_endpoint = endpoint.clone();
     let mut transport = HttpStream::new(endpoint);
     if let Some(key_file) = key_file {
         match key_file_in_declared_path(regimen_file.as_deref(), &key_file)
@@ -454,6 +483,18 @@ fn serve(args: &[String]) -> ExitCode {
     // (#496); llama.cpp's without a regimen, or where the entry names none.
     let dialect = match substrate.map(served_dialect).transpose() {
         Ok(dialect) => dialect.unwrap_or_else(Dialect::llama_cpp),
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    // The offboard seat, checked as the trunk's server is (#570), before
+    // anything binds.
+    let seat = match offboard_seat(
+        regime.as_ref(),
+        seat,
+        &trunk_endpoint,
+        (&dialect, &shape),
+        regimen_file.as_deref(),
+    ) {
+        Ok(seat) => seat,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     // What the announcement prints and the log's `session.start` claims,
@@ -502,7 +543,7 @@ fn serve(args: &[String]) -> ExitCode {
         Err(refused) => return refused,
     };
     let session = served_session(
-        transport,
+        (transport, seat),
         (shape, dialect),
         tools,
         (
@@ -701,7 +742,7 @@ fn outputs(
 /// (#292): its transport speaks llama-server's dialect, and nobody declared
 /// how many streams the server serves.
 fn served_session(
-    transport: HttpStream,
+    (transport, seat): (HttpStream, Option<session::Offboard<HttpStream>>),
     (mut shape, dialect): (RequestShape, Dialect),
     tools: Option<Tools>,
     declared: session::Declared,
@@ -711,7 +752,7 @@ fn served_session(
     if let Some(tools) = tools.as_ref() {
         shape.tools = tools.surface.tools();
     }
-    std::sync::Arc::new(Session::open_declaring(
+    let session = Session::open_declaring(
         transport,
         shape,
         Some(Serving {
@@ -720,7 +761,89 @@ fn served_session(
         }),
         tools,
         declared,
-    ))
+    );
+    std::sync::Arc::new(match seat {
+        Some(seat) => session.seated(seat),
+        None => session,
+    })
+}
+
+/// The offboard extraction seat the regime declares (#570), reached by
+/// `serve`'s seat flags: its server, checked against the registry's entry
+/// as the trunk's is -- its engine, then [`confirmations`]' model, settings
+/// and warming, asked as a fork asks it -- and the model a fork names.
+/// `None` for a warm seat.
+///
+/// # Errors
+///
+/// An offboard seat without its endpoint or model; seat flags for a warm
+/// one; a seat at the trunk's own endpoint, which is the warm seat under
+/// another name; a seat whose dialect is not the trunk's, since one session
+/// reads its servers one way; an unreadable key; a failed engine check.
+fn offboard_seat(
+    regime: Option<&Regime>,
+    given: SeatArgs,
+    trunk: &Endpoint,
+    (dialect, shape): (&Dialect, &RequestShape),
+    regimen: Option<&str>,
+) -> Result<Option<session::Offboard<HttpStream>>, String> {
+    let seat = regime.and_then(|regime| regime.substrates.get(1));
+    let Some(seat) = seat else {
+        return match (&given.endpoint, &given.model, &given.key_file) {
+            (None, None, None) => Ok(None),
+            _ => Err(
+                "--seat-endpoint, --seat-model and --seat-key-file reach an offboard seat, and \
+                 the regimen declares none: `extraction_seat = \"offboard:<registry id>\"`"
+                    .to_owned(),
+            ),
+        };
+    };
+    let id = seat.id.as_str();
+    let (Some(endpoint), Some(model)) = (given.endpoint, given.model) else {
+        return Err(format!(
+            "the regimen seats its forks offboard on `{id}`: --seat-endpoint and --seat-model \
+             say where and as what"
+        ));
+    };
+    let endpoint = match Endpoint::parse(&endpoint) {
+        Ok(endpoint) => chat_endpoint(endpoint),
+        Err(why) => return Err(format!("{endpoint} is not an endpoint: {why}")),
+    };
+    if endpoint == *trunk {
+        return Err(format!(
+            "--seat-endpoint is the trunk's own endpoint: a seat on the executor's server is \
+             `warm`, not `offboard:{id}`"
+        ));
+    }
+    let seat_dialect = served_dialect(id)?;
+    if seat_dialect.name != dialect.name {
+        return Err(format!(
+            "`{id}` speaks `{}` and the trunk's server `{}`: one session reads its servers \
+             one way",
+            seat_dialect.name, dialect.name
+        ));
+    }
+    let mut transport = HttpStream::new(endpoint);
+    if let Some(key_file) = given.key_file {
+        let bearer = key_file_in_declared_path(regimen, &key_file)
+            .map_or_else(|| bearer_from(&key_file), Err)?;
+        transport = transport.with_bearer(bearer);
+    }
+    let passed = diet::drive::engine::check_served(&transport, id)
+        .map_err(|why| format!("the extraction seat: {why}"))?;
+    let mut asked = shape.clone();
+    asked.model.clone_from(&model);
+    let (_, _, window) = confirmations(&transport, id, &passed, &asked)
+        .map_err(|why| format!("the extraction seat: {why}"))?;
+    Ok(Some(session::Offboard {
+        transport,
+        substrate: id.to_owned(),
+        model,
+        // The window the seat reports, else the one its entry declares.
+        context_window: window.map(|(tokens, _)| tokens).or_else(|| {
+            diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
+        }),
+    }))
 }
 
 /// The dialect the registry names for substrate `id` (#496): llama.cpp's
@@ -790,7 +913,12 @@ fn serving_interview(
         phases,
         // #566: how archived items are recalled; off unless declared.
         recall: diet::drive::archive::Recall::of(&read),
-        view: session::fork_view(&read),
+        // Undeclared is left to the seat (#570): the whole trunk warm, the
+        // last turn offboard.
+        view: read
+            .get(session::FORK_VIEW)
+            .is_some()
+            .then(|| session::fork_view(&read)),
     }))
 }
 
