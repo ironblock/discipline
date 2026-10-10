@@ -159,6 +159,13 @@ export const seamReasonOf = registry<SeamReason>({
   phase: { label: 'phase', level: 'quiet' },
   cadence: { label: 'cadence', level: 'quiet' },
   budget: { label: 'over budget', level: 'warn' },
+  window: { label: 'the window', level: 'warn' },
+  prune: { label: 'the model pruned output', level: 'quiet' },
+});
+
+/** A hazard a fork was sent knowing (#637). */
+export const hazardOf = registry<string>({
+  'may-displace-trunk-cache': { label: 'may displace the trunk’s cache', level: 'warn' },
 });
 
 /** Why a generation stopped. The expected ones draw nothing; the rest say so. */

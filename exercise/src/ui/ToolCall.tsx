@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 
 import type { AssistantNode, Folded, ToolNode } from '../session/fold.ts';
 import { Block } from './Block.tsx';
-import { bytes, count, lines, took } from './format.ts';
+import { bytes, count, lines, size, took } from './format.ts';
 import { Copy } from './Copy.tsx';
 import { alarmOf, approvalOf, callOf, callOutcomeOf, callRefusalOf, heldOf } from './sets.ts';
 import { usePromptOf } from './Approval.tsx';
@@ -150,6 +150,12 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       {node.stderr ? <pre className="ex-tool__output ex-tool__stderr">{node.stderr}</pre> : null}
       {node.files ? <FileResults files={node.files} /> : null}
       {/* What a self-capture call did to working memory (#619): its outcome, and the entries it wrote or why not. */}
+      {/* Output the model pruned (#630): kept whole until the turn's seam replaces it by its pointer. */}
+      {node.pruned ? (
+        <p className="ex-pruned" data-replaced={node.pruned.replaced ? '' : undefined}>
+          {`pruned by the model (${size(node.pruned.bytes)}) · ${node.pruned.replaced ? 'replaced by its pointer at the seam' : 'replaced when this turn ends'}`}
+        </p>
+      ) : null}
       {/* A call run in the background (#614): its job, and how the job ended once it has. */}
       {node.background ? (
         <p className="ex-background" data-status={node.background.status} title="run in the background: the turn went on while it ran">

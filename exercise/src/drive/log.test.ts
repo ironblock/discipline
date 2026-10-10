@@ -252,6 +252,21 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(session.memory.map((e) => [e.id, e.text, e.state, e.lane])).toEqual([['r3/call-1/fact', 'The parser drops blank lines before it tokenizes.', 'live', 'self-capture']]);
   });
 
+  it('folds an overflow with its sizes and who told it, a window seam with its size, a pruned call’s replacement, and a fork refused for the pool (#628, #633, #630, #637)', () => {
+    const answerOf = (file: string) => fold(logOf(file)).eras.flatMap((e) => e.nodes).find((n) => n.kind === 'assistant');
+    const inferred = answerOf('a-v7-overflow-told-from-the-prompts-size.jsonl');
+    expect(inferred?.kind === 'assistant' && inferred.failure?.overflow).toEqual({ promptTokens: 161840, window: 163840, inferred: true });
+    const reported = answerOf('a-context-overflow.jsonl');
+    expect(reported?.kind === 'assistant' && reported.failure?.reason).toBe('context_overflow');
+    expect(reported?.kind === 'assistant' && reported.failure?.overflow).toBeUndefined();
+    const windowed = fold(logOf('a-v7-window-seam-under-the-turn-it-makes-fit.jsonl'));
+    expect(windowed.eras[1]?.seam).toMatchObject({ reason: 'window', size: { promptTokens: 150000, window: 163840 } });
+    const pruned = fold(logOf('a-v7-prune-applied-at-the-turns-seam.jsonl')).eras[0]?.nodes.find((n) => n.kind === 'tool' && n.tool === 'bash');
+    expect(pruned?.kind === 'tool' && pruned.pruned).toEqual({ bytes: 14, replaced: true });
+    const [refused] = [...fold(logOf('a-v7-fork-refused-for-the-pool-and-one-that-may-displace-the-trunk-cache.jsonl')).branches.values()].flat();
+    expect([refused?.outcome, refused?.refused, refused?.hazard]).toEqual(['refused', 'pool', 'may-displace-trunk-cache']);
+  });
+
   it('folds a call moved to the background with its job and how it ended, the harness’s notice, and a fork’s trigger (#614, #620)', () => {
     const session = fold(logOf('a-v7-call-started-in-the-background.jsonl'));
     expect([...session.unknown.keys()]).toEqual([]);

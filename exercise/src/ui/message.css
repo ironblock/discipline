@@ -64,3 +64,10 @@
   color: var(--ink-faint);
   font: var(--size-chrome) / 1.4 var(--font-chrome);
 }
+
+/* An overflow's sizes and who told it (#628). */
+.ex-overflow {
+  margin: 0.3rem 0 0;
+  color: var(--ink-faint);
+  font: var(--size-chrome) / 1.4 var(--font-chrome);
+}
