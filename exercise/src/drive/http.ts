@@ -233,6 +233,10 @@ export class HttpTransport implements DriveTransport {
         return { kind: 'open-tangent', id: command.id };
       case 'close-tangent':
         return { kind: 'close-tangent', dispositions: command.dispositions };
+      case 'edit-entry':
+        return { kind: 'edit-entry', id: command.id, content: command.content };
+      case 'flag-entry':
+        return { kind: 'flag-entry', id: command.id, note: command.note };
       case 'ratify-phase':
         return { kind: 'ratify-phase', call: command.call, choice: command.choice };
       case 'background':

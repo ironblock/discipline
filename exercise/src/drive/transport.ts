@@ -41,6 +41,10 @@ export type Command =
   | { readonly kind: 'open-tangent'; readonly id: string }
   /** Close the open tangent: each of its live entries kept, dropped or parked -- exactly those, no more. */
   | { readonly kind: 'close-tangent'; readonly dispositions: Readonly<Record<string, Disposition>> }
+  /** The operator rewrites a live working-memory entry (#150, #655): it supersedes, and the model may not overwrite it. */
+  | { readonly kind: 'edit-entry'; readonly id: string; readonly content: string }
+  /** The operator flags a live entry with a note (#150, #655), kept until a seam addresses it. */
+  | { readonly kind: 'flag-entry'; readonly id: string; readonly note: string }
   /** The operator's ruling on the model's phase proposal (#124, #651): refill now, move without a seam, or stay. */
   | { readonly kind: 'ratify-phase'; readonly call: string; readonly choice: PhaseChoice }
   /** Move the running foreground command to the background (#614): it keeps running, and the turn goes on. */
@@ -124,6 +128,10 @@ export type Refusal = Open<
   | 'nothing-running'
   /** A ruling with no proposal waiting on it (#651). */
   | 'no-proposal'
+  /** `diet`'s answers to the operator's edit or flag (#150, #655): an empty edit or note, no such entry, one not live. */
+  | 'empty'
+  | 'unknown-entry'
+  | 'not-live'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };
