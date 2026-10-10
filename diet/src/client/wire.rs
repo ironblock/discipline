@@ -299,13 +299,20 @@ fn message(message: &super::shape::Message, out: &mut String) {
     out.push_str(",\"content\":");
     if message.content.is_empty() && !message.tool_calls.is_empty() {
         out.push_str("null");
-    } else if message.images.is_empty() {
+    } else if message.images.is_empty() && message.notes.is_empty() {
         string(&message.content, out);
     } else {
-        // The operator's attachments (#372): each image as an `image_url`
-        // part with its data URI, in order, then the words as a `text` part
-        // -- the shape #373's vision cell sent and the engine accepted.
+        // The harness's notes first, each a `text` part (#609, Qwen Code's
+        // order); then the operator's attachments (#372), each image as an
+        // `image_url` part with its data URI, in order; then the words as a
+        // `text` part -- the shape #373's vision cell sent and the engine
+        // accepted.
         out.push('[');
+        for note in &message.notes {
+            out.push_str("{\"type\":\"text\",\"text\":");
+            string(note, out);
+            out.push_str("},");
+        }
         for image in &message.images {
             out.push_str("{\"type\":\"image_url\",\"image_url\":{\"url\":");
             string(&image.data_uri(), out);
@@ -868,6 +875,39 @@ mod tests {
                 r#"{"url":"data:image/png;base64,iVBORw0KGgo="}},"#,
                 r#"{"type":"text","text":"look"}]}],"max_tokens":64}"#,
             )
+        );
+    }
+
+    /// #609, from seam smoke run 3: the harness's notes go out in the ask's
+    /// own user message, each a text part BEFORE the operator's words, which
+    /// come last -- Qwen Code's order; a message with no notes goes out as
+    /// the plain string it always did.
+    #[test]
+    fn notes_go_out_as_text_parts_before_the_asks_words() {
+        let mut asked = Message::new(Role::User, "fix the link check");
+        asked.notes = vec!["Anything you meant to record?".to_owned()];
+        let rendered = body(&RequestShape {
+            messages: vec![Message::new(Role::System, "sys"), asked],
+            ..shape(SamplerCard::empty())
+        });
+        assert_eq!(
+            rendered,
+            concat!(
+                r#"{"model":"a-model","messages":[{"role":"system","content":"sys"},"#,
+                r#"{"role":"user","content":[{"type":"text","text":"Anything you meant to record?"},"#,
+                r#"{"type":"text","text":"fix the link check"}]}],"max_tokens":64}"#,
+            )
+        );
+        let plain = body(&RequestShape {
+            messages: vec![
+                Message::new(Role::System, "sys"),
+                Message::new(Role::User, "fix the link check"),
+            ],
+            ..shape(SamplerCard::empty())
+        });
+        assert!(
+            plain.contains(r#"{"role":"user","content":"fix the link check"}"#),
+            "{plain}"
         );
     }
 

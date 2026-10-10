@@ -493,6 +493,7 @@ pub fn project_in(
                 tool_output,
                 levers,
                 bash_timeout_ms,
+                notes_in_the_ask,
                 ..
             },
         ..
@@ -510,6 +511,8 @@ pub fn project_in(
     walk.tools = tools_of(tools.as_deref().unwrap_or_default(), *bash_timeout_ms);
     walk.template_kwargs = kwargs_of(template_kwargs.as_ref());
     walk.model.clone_from(model);
+    // Where its notes ride (#609): in the ask's message, from this build on.
+    walk.notes_in_the_ask = notes_in_the_ask.unwrap_or(false);
     walk.head = head
         .iter()
         .map(|message| Message::new(role_of(message.role), message.content.clone()))
@@ -577,6 +580,8 @@ struct Walk<'a> {
     ask_files: BTreeMap<u32, Vec<log::RecordedFile>>,
     /// Each turn's notes after its ask (v7): its `delivered` and `recalled` lines.
     notes: BTreeMap<u32, Vec<String>>,
+    /// Whether the log's notes ride in their ask's message (#609).
+    notes_in_the_ask: bool,
     /// The tools the session's requests declared, rebuilt from
     /// `session.start`'s names (#472), or why they cannot be.
     tools: Result<Vec<ToolDefinition>, String>,
@@ -795,6 +800,7 @@ impl<'a> Walk<'a> {
             recording: None,
             ask_files: BTreeMap::new(),
             notes: BTreeMap::new(),
+            notes_in_the_ask: false,
             tools: Ok(Vec::new()),
             template_kwargs: BTreeMap::new(),
             stepped,
@@ -1460,10 +1466,8 @@ impl<'a> Walk<'a> {
                     .flatten()
                     .find_map(|step| step.unrebuilt.clone())
             });
-        messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
-        for note in notes {
-            messages.push(Message::new(Role::User, note));
-        }
+        let asked = asked.unwrap_or_else(|_| Message::new(Role::User, String::new()));
+        messages.extend(self.with_notes(asked, notes));
         for step in self.steps.get(&turn).into_iter().flatten() {
             messages.extend(step.messages());
         }
@@ -1617,6 +1621,20 @@ impl<'a> Walk<'a> {
             .find(|rebuilt| rebuilt.digest() == logged)
     }
 
+    /// A turn's ask and its notes as the session sent them (#609): the
+    /// notes in the ask's own message, before its words, for a log that
+    /// says so (`notes_in_the_ask`); an earlier log's, each a user message
+    /// of its own after the ask.
+    fn with_notes(&self, mut asked: Message, notes: Vec<String>) -> Vec<Message> {
+        if self.notes_in_the_ask {
+            asked.notes = notes;
+            return vec![asked];
+        }
+        std::iter::once(asked)
+            .chain(notes.into_iter().map(|note| Message::new(Role::User, note)))
+            .collect()
+    }
+
     /// Turn `turn`'s user message as the session sent it: the ask's words,
     /// and each attached file read back from the recording and attached
     /// through [`crate::client::attach`], in the line's order (#372).
@@ -1679,10 +1697,9 @@ impl<'a> Walk<'a> {
                 self.asks.get(&turn).cloned().unwrap_or_default(),
             )
         });
-        self.trunk.push(asked);
-        for note in self.notes.get(&turn).cloned().unwrap_or_default() {
-            self.trunk.push(Message::new(Role::User, note));
-        }
+        let notes = self.notes.get(&turn).cloned().unwrap_or_default();
+        let opening = self.with_notes(asked, notes);
+        self.trunk.extend(opening);
         let taken = self.steps.remove(&turn).unwrap_or_default();
         for step in taken.iter().take(steps) {
             if let Some(why) = &step.unrebuilt {
@@ -2001,6 +2018,7 @@ mod tests {
             phase_transitions: None,
             opening_phase: None,
             fork_asks: None,
+            notes_in_the_ask: None,
         }
     }
 

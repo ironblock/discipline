@@ -583,6 +583,7 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
             reasoning_signature: None,
             redacted: Vec::new(),
             tool_error: false,
+            notes: Vec::new(),
         }];
         // Immediately before the call, like `Heads::about_to_call`: what a
         // cache lifetime is compared against is the gap between two
@@ -884,6 +885,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             reasoning_signature: None,
             redacted: Vec::new(),
             tool_error: false,
+            notes: Vec::new(),
         }];
         asking
             .template_kwargs
@@ -957,6 +959,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 reasoning_signature: None,
                 redacted: Vec::new(),
                 tool_error: false,
+                notes: Vec::new(),
             },
             Message {
                 role: Role::User,
@@ -968,6 +971,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 reasoning_signature: None,
                 redacted: Vec::new(),
                 tool_error: false,
+                notes: Vec::new(),
             },
         ];
         // THE LINT, before the call. The main lane is the one whose head
@@ -1047,6 +1051,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 reasoning_signature: None,
                 redacted: Vec::new(),
                 tool_error: false,
+                notes: Vec::new(),
             }];
             linted_head(&asking, index, INTERVIEW)?;
             heads.about_to_call(INTERVIEW);
