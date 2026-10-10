@@ -38,6 +38,9 @@ vocabulary! {
         /// A tool call's result, sent back to the model: `OpenAI`'s shape,
         /// answering the call its `tool_call_id` names (#29 Q9).
         Tool => "tool",
+        /// The interview's ask, where the regimen asks it in this role and
+        /// the served template renders it (#599).
+        Developer => "developer",
     }
 }
 
@@ -606,7 +609,7 @@ mod tests {
     fn the_shapes_vocabularies_are_the_words_the_wire_carries() {
         assert_eq!(
             Role::ALL.iter().map(|role| role.tag()).collect::<Vec<_>>(),
-            ["system", "user", "assistant", "tool"]
+            ["system", "user", "assistant", "tool", "developer"]
         );
         assert_eq!(
             SamplerSetting::ALL

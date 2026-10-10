@@ -499,14 +499,16 @@ fn serve(args: &[String]) -> ExitCode {
     };
     // The offboard seat, checked as the trunk's server is (#570), before
     // anything binds.
-    let seat = match offboard_seat(
+    // With it, the chat template it reports: where a fork's ask is rendered.
+    let (seat, seat_template) = match offboard_seat(
         regime.as_ref(),
         seat,
         &trunk_endpoint,
         (&dialect, &shape),
         regimen_file.as_deref(),
     ) {
-        Ok(seat) => seat,
+        Ok(Some((seat, template))) => (Some(seat), template),
+        Ok(None) => (None, None),
         Err(why) => return fail(EXIT_INPUT, &why),
     };
     // What the announcement prints and the log's `session.start` claims,
@@ -525,7 +527,46 @@ fn serve(args: &[String]) -> ExitCode {
     };
     // Each request's output cap is clamped to the room its prompt leaves in
     // this window (#588); the record's lever says whether it was.
-    let window = confirmed.as_ref().and_then(|(_, _, window)| *window);
+    let window = confirmed.as_ref().and_then(|confirmed| confirmed.window);
+    // The interview's role (#599): a role but `user` runs only where the
+    // served template renders it, refused before anything binds -- the
+    // offboard seat's template when forks go there, else the trunk's.
+    if let Some(role) = interview
+        .as_ref()
+        .map(|interview| interview.role)
+        .filter(|role| *role != diet::client::shape::Role::User)
+    {
+        let (template, whose) = if seat.is_some() {
+            (seat_template.as_deref(), "the extraction seat")
+        } else {
+            (
+                confirmed
+                    .as_ref()
+                    .and_then(|confirmed| confirmed.template.as_deref()),
+                "the server",
+            )
+        };
+        let refused = template.map_or_else(
+            || {
+                Err(format!(
+                    "{whose} reports no chat template, so a `{}` interview ask cannot be confirmed to render",
+                    role.tag()
+                ))
+            },
+            |template| diet::drive::template_roles::renders(template, role.tag()),
+        );
+        if let Err(why) = refused {
+            let why = if seat.is_some() {
+                format!("the extraction seat: {why}")
+            } else {
+                why
+            };
+            return fail(
+                EXIT_INPUT,
+                &format!("`interview_role = \"{}\"`: {why}", role.tag()),
+            );
+        }
+    }
     shape.limits.context_window = window.map(|(tokens, _)| tokens);
     if let Some(levers) = read_at_start.as_mut().map(|read| &mut read.levers) {
         levers
@@ -541,7 +582,7 @@ fn serve(args: &[String]) -> ExitCode {
     let claim = substrate.zip(engine.as_ref()).map(|(id, passed)| {
         let fields = confirmed
             .as_ref()
-            .map(|(fields, _, _)| fields.clone())
+            .map(|confirmed| confirmed.fields.clone())
             .unwrap_or_default();
         passed.claim_with(id, &registry_sha256, fields)
     });
@@ -603,7 +644,7 @@ fn serve(args: &[String]) -> ExitCode {
             substrate.map(|id| (id, registry_sha256.as_str())),
             engine
                 .as_ref()
-                .zip(confirmed.as_ref().map(|(_, warmed, _)| *warmed)),
+                .zip(confirmed.as_ref().map(|confirmed| confirmed.warmed)),
             log_path.as_deref().zip(running.log_held),
             record_file.as_deref().zip(running.record_held),
             unsent_budget,
@@ -765,7 +806,7 @@ fn served_session(
     // `bash` alone, or `bash` and the standard set; then `prune_output`
     // when the regimen offers it (#612).
     if let Some(tools) = tools.as_ref() {
-        shape.tools = tools.surface.tools();
+        shape.tools = tools.surface.tools_with(tools.background);
         if declared
             .1
             .as_ref()
@@ -793,11 +834,15 @@ fn served_session(
     })
 }
 
+/// An offboard seat, and the chat template its server reports.
+type Seated = (session::Offboard<HttpStream>, Option<String>);
+
 /// The offboard extraction seat the regime declares (#570), reached by
 /// `serve`'s seat flags: its server, checked against the registry's entry
 /// as the trunk's is -- its engine, then [`confirmations`]' model, settings
-/// and warming, asked as a fork asks it -- and the model a fork names.
-/// `None` for a warm seat.
+/// and warming, asked as a fork asks it -- and the model a fork names,
+/// beside the chat template the seat reports, which a fork's ask renders
+/// through (#599). `None` for a warm seat.
 ///
 /// # Errors
 ///
@@ -811,7 +856,7 @@ fn offboard_seat(
     trunk: &Endpoint,
     (dialect, shape): (&Dialect, &RequestShape),
     regimen: Option<&str>,
-) -> Result<Option<session::Offboard<HttpStream>>, String> {
+) -> Result<Option<Seated>, String> {
     let seat = regime.and_then(|regime| regime.substrates.get(1));
     let Some(seat) = seat else {
         return match (&given.endpoint, &given.model, &given.key_file) {
@@ -859,17 +904,22 @@ fn offboard_seat(
         .map_err(|why| format!("the extraction seat: {why}"))?;
     let mut asked = shape.clone();
     asked.model.clone_from(&model);
-    let (_, _, window) = confirmations(&transport, id, &passed, &asked)
+    let Confirmed {
+        window, template, ..
+    } = confirmations(&transport, id, &passed, &asked)
         .map_err(|why| format!("the extraction seat: {why}"))?;
-    Ok(Some(session::Offboard {
-        transport,
-        substrate: id.to_owned(),
-        model,
-        // The window the seat reports, else the one its entry declares.
-        context_window: window.map(|(tokens, _)| tokens).or_else(|| {
-            diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
-        }),
-    }))
+    Ok(Some((
+        session::Offboard {
+            transport,
+            substrate: id.to_owned(),
+            model,
+            // The window the seat reports, else the one its entry declares.
+            context_window: window.map(|(tokens, _)| tokens).or_else(|| {
+                diet::drive::registry::serving_context(diet::drive::registry::REGISTRY, id)
+            }),
+        },
+        template,
+    )))
 }
 
 /// An `https` endpoint is a hosted API's (#555): served for a substrate the
@@ -1015,6 +1065,10 @@ fn serving_interview(
             self_capture,
             asks,
             capture,
+            // #564: when a fork fires, and on what; one per gap unless declared.
+            cadence: session::interview_cadence(&read),
+            threshold_bytes: session::interview_threshold_bytes(&read),
+            role: session::interview_role(&read),
             // #612: whether the model may prune its tool results; off unless
             // declared.
             prune: diet::drive::prune::of(&read),
@@ -1182,6 +1236,8 @@ fn serving_tools(
         // names (#554, #557).
         read_tool: declared.surface.read_tool(),
         surface: declared.surface,
+        // #614: on unless the regimen turns it off.
+        background: declared.background,
     }))
 }
 
@@ -1587,13 +1643,18 @@ impl Warmed {
     }
 }
 
-/// What the start confirmed of a server: each served field, how it was
-/// warmed, and its context window and where that was read (#588).
-type Confirmed = (
-    Vec<diet::formats::log::ServedField>,
-    Warmed,
-    Option<(u64, &'static str)>,
-);
+/// What the start confirmed of a server.
+struct Confirmed {
+    /// Each served field, corroborated or declared.
+    fields: Vec<diet::formats::log::ServedField>,
+    /// How it was warmed.
+    warmed: Warmed,
+    /// Its context window, and where that was read (#588).
+    window: Option<(u64, &'static str)>,
+    /// The chat template it reports rendering with (#599), when it reports
+    /// one.
+    template: Option<String>,
+}
 
 /// What the start confirms of substrate `id`'s server beyond its engine
 /// (#509): each declared `served_*` field and the chat template's digest,
@@ -1616,7 +1677,12 @@ fn confirmations(
         identity.weights,
         diet::formats::record::Weights::Canned { .. }
     ) {
-        return Ok((Vec::new(), Warmed::NotApplicable, None));
+        return Ok(Confirmed {
+            fields: Vec::new(),
+            warmed: Warmed::NotApplicable,
+            window: None,
+            template: None,
+        });
     }
     // The window each request's output cap is clamped to (#588).
     let serving_context =
@@ -1625,7 +1691,12 @@ fn confirmations(
         let mut fields = served::corroborated(id, &identity, None)?;
         fields.extend(served::draft_corroborated(id, &identity, None)?);
         let window = served::window(&identity, None, serving_context);
-        return Ok((fields, Warmed::NotApplicable, window));
+        return Ok(Confirmed {
+            fields,
+            warmed: Warmed::NotApplicable,
+            window,
+            template: None,
+        });
     }
     let engine = Engine::of(&identity);
     let report = match (&passed.props, engine) {
@@ -1647,15 +1718,18 @@ fn confirmations(
         served::probe(transport, shape)?
     };
     fields.extend(served::draft_corroborated(id, &identity, timings.as_ref())?);
-    Ok((
+    Ok(Confirmed {
         fields,
-        if warms {
+        warmed: if warms {
             Warmed::ByEngine
         } else {
             Warmed::ByServe
         },
         window,
-    ))
+        template: report
+            .as_ref()
+            .and_then(|report| served::template_of(engine, report)),
+    })
 }
 
 fn announcement(

@@ -1837,6 +1837,38 @@ fn diet_drive_usage_names_the_serve_form() {
 }
 
 #[test]
+fn a_drive_server_refuses_an_interview_role_its_server_reports_no_template_for() {
+    // #599: a role but `user` runs only where the served template renders
+    // it; the canned server reports no template, so `system` is refused
+    // before anything binds, and `user` starts as before.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = |role: &str| {
+        let whole = std::fs::read_to_string(dev_loop()).expect("the dev loop's regimen");
+        let (before, sampler) = whole
+            .split_once("\n[sampler]\n")
+            .expect("the dev loop declares a sampler table last");
+        file_holding(
+            "regimen",
+            &format!(
+                "{before}\ninterview_warrant = [\"scoping\"]\ninterview_role = \"{role}\"\n[sampler]\n{sampler}"
+            ),
+        )
+    };
+    let system = regimen("system");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &system.0.to_string_lossy()]);
+    assert!(
+        code.is_some_and(|code| code != 0),
+        "refused: {code:?} {said}"
+    );
+    assert!(
+        said.contains("interview_role") && said.contains("system"),
+        "{said}"
+    );
+    assert!(said.contains("reports no chat template"), "{said}");
+}
+
+#[test]
 fn a_drive_server_refuses_a_record_without_a_regimen() {
     let stub = Stub::serving(Vec::new()).expect("loopback");
     let path = std::env::temp_dir()
@@ -3372,6 +3404,40 @@ fn the_record_names_the_seat(written: &str) {
 }
 
 #[test]
+fn a_drive_server_checks_an_offboard_seats_template_for_the_interview_role() {
+    // #599 with #570: forks seated offboard ask through the seat's served
+    // template, so the role is checked there; the canned seat reports none,
+    // so a `developer` ask is refused before anything binds, naming the seat.
+    let trunk =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let seat = Stub::serving_with_props(Vec::new(), &diet::drive::canned::replay_build_info())
+        .expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nextraction_seat = \"offboard:canned-replay\"\n\
+         interview_role = \"developer\"\n",
+        "temperature = 0.6\n",
+    );
+    let (code, said) = run_briefly(
+        &trunk.url(),
+        &[
+            "--regimen",
+            &regimen.0.to_string_lossy(),
+            "--seat-endpoint",
+            &seat.url(),
+            "--seat-model",
+            "a-small-model",
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("interview_role")
+            && said.contains("the extraction seat reports no chat template")
+            && !said.contains("listening"),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_drive_server_refuses_an_offboard_seat_it_cannot_reach_as_declared() {
     let regimen = seated_regimen();
     let regimen_path = regimen.0.to_string_lossy().into_owned();
@@ -3482,7 +3548,8 @@ fn a_drive_server_offers_prune_output_only_where_a_prune_can_be_applied() {
     let start_line = first_logged_line(&log_file.0);
     assert_eq!(
         start_line["tools"],
-        serde_json::json!(["bash", "prune_output"]),
+        // `task_stop` with background commands, on by default (#614).
+        serde_json::json!(["bash", "task_stop", "prune_output"]),
         "{start_line}"
     );
 

@@ -106,6 +106,8 @@ vocabulary! {
         OpenTangent => "open-tangent",
         /// Close the open tangent (#22).
         CloseTangent => "close-tangent",
+        /// Move the running command to the background (#614).
+        Background => "background",
     }
 }
 
@@ -144,6 +146,8 @@ vocabulary! {
         /// A close whose dispositions are not exactly the tangent's entries
         /// (#22).
         NotTheScope => "not-the-scope",
+        /// A move to the background with no command running (#614).
+        NothingRunning => "nothing-running",
     }
 }
 
@@ -505,6 +509,11 @@ pub enum Event {
         question: String,
         /// What it saw of the trunk (#567).
         view: ForkView,
+        /// What fired it under the interview cadence (#564): `turn_end`,
+        /// or `call:<class>:<id>`.
+        trigger: String,
+        /// The role it asked in (#599).
+        role: Role,
         /// The offboard seat its call ran on (#570); `None` is warm.
         seat: Option<log::ForkSeat>,
         /// Which ask of its set it sent (#595).
@@ -555,6 +564,8 @@ pub enum Event {
         outputs: Option<(String, u64)>,
         /// The render's budget and what it did (#565), when declared.
         render_budget: Option<log::RenderBudget>,
+        /// The prompt that fired it and the window, on a `window` seam (#617).
+        fired: Option<log::SeamFired>,
         /// The calls whose pruned results it replaced (#612), when any.
         pruned: Option<Vec<String>>,
     },
@@ -576,6 +587,26 @@ pub enum Event {
     },
     /// Archived items recalled after an ask (#566): one note, which stays
     /// on the trunk.
+    /// A background command ended (#614): its job, how, its exit status,
+    /// and its output kept by digest.
+    BackgroundEnded {
+        /// The job's id.
+        job: String,
+        /// How it ended.
+        status: log::BackgroundStatus,
+        /// Its exit status, when it exited.
+        exit: Option<u64>,
+        /// Its output, kept in the recording by digest.
+        files: Vec<log::RecordedFile>,
+    },
+    /// Ended background commands' notifications, delivered after an ask
+    /// (#614): one note at the tail of its first request.
+    Notified {
+        /// The turn whose first request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
+    },
     Recalled {
         /// The turn whose first request carried it.
         turn: u32,
@@ -719,6 +750,8 @@ pub struct ToolLine {
     /// The text the call was recovered from, when the model wrote it as
     /// text rather than calling natively (#560).
     pub recovered_from: Option<String>,
+    /// The background job it started, or was moved into (#614).
+    pub background: Option<String>,
 }
 
 impl ToolLine {
@@ -746,6 +779,7 @@ impl ToolLine {
             files: Vec::new(),
             images: Vec::new(),
             recovered_from: None,
+            background: None,
         }
     }
 }
@@ -862,6 +896,10 @@ pub struct Interview {
     /// The regimen's phase graph (#563), read as the scripted drive reads
     /// it; empty when it declares none.
     pub phases: crate::seam::phase::PhaseGraph,
+    /// The role a fork's interview question is asked in (#599): `user`, the
+    /// default, or `system` or `developer` where the served template
+    /// renders it (serve checks at start).
+    pub role: Role,
     /// The ask set its forks ask in (#595).
     pub asks: &'static crate::dogma::asks::AskSet,
     /// How archived items are recalled at an ask (#566): off, the default.
@@ -870,6 +908,11 @@ pub struct Interview {
     /// turns after the head; `None` when the regimen does not say, which is
     /// the whole trunk warm and the last turn offboard (#570).
     pub view: Option<ForkView>,
+    /// When a fork fires, and on what (#564): one per gap, the default.
+    pub cadence: Cadence,
+    /// The output size, in bytes, a read must reach to fork (#564); `None`,
+    /// the default, gates nothing.
+    pub threshold_bytes: Option<u64>,
     /// Self-capture (#609): the contract's tools offered from the first
     /// request, and the cadence of silent turns its reminder fires after;
     /// `None` when off.
@@ -880,6 +923,74 @@ pub struct Interview {
     /// Whether the model is offered `prune_output`, and when its prunes
     /// are applied (#612); `None`, the default, offers nothing.
     pub prune: Option<super::prune::PruneSeam>,
+}
+
+/// The interview cadence (#564): when the capture gap's forks fire, and on
+/// what. Every state queues its forks into the gap, in call order, one
+/// after another; none fires mid-turn.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Cadence {
+    /// At most one fork per gap, under the warrant (#374): the judgment ask
+    /// on an operator-marked turn, else the class ask on the turn's last
+    /// read. Today's, the default.
+    #[default]
+    Gap,
+    /// A fork on every call that ran, under `read`: the class's ask where the
+    /// router routes the class to one, else its declared default (the
+    /// generic ask); then the judgment ask on a marked turn, under `scoping`.
+    PerCall,
+    /// A fork on every call the router routes to a class ask, under `read`;
+    /// then the judgment ask on a marked turn, under `scoping`.
+    PerClass,
+    /// The judgment ask at every turn's end, under `scoping`, marked or
+    /// not: the router's turn boundary.
+    TurnBoundary,
+}
+
+impl Cadence {
+    /// The regimen's word for it.
+    #[must_use]
+    pub fn word(self) -> &'static str {
+        match self {
+            Self::Gap => "gap",
+            Self::PerCall => "per_call",
+            Self::PerClass => "per_class",
+            Self::TurnBoundary => "turn_boundary",
+        }
+    }
+}
+
+/// The regimen key for the interview cadence (#564).
+pub const INTERVIEW_CADENCE: &str = "interview_cadence";
+
+/// The regimen key for the read fork's output threshold, in bytes (#564).
+pub const INTERVIEW_THRESHOLD_BYTES: &str = "interview_threshold_bytes";
+
+/// The cadence the regimen declares, leniently: a state's word, or `gap`.
+#[must_use]
+pub fn interview_cadence(regimen: &Regimen) -> Cadence {
+    let Some(crate::formats::regimen::Value::String(word)) = regimen.get(INTERVIEW_CADENCE) else {
+        return Cadence::Gap;
+    };
+    [
+        Cadence::Gap,
+        Cadence::PerCall,
+        Cadence::PerClass,
+        Cadence::TurnBoundary,
+    ]
+    .into_iter()
+    .find(|cadence| cadence.word() == word)
+    .unwrap_or_default()
+}
+
+/// The threshold the regimen declares, leniently: a positive whole number of
+/// bytes, or none.
+#[must_use]
+pub fn interview_threshold_bytes(regimen: &Regimen) -> Option<u64> {
+    match regimen.get(INTERVIEW_THRESHOLD_BYTES) {
+        Some(crate::formats::regimen::Value::Integer(n)) if *n > 0 => Some(n.unsigned_abs()),
+        _ => None,
+    }
 }
 
 /// `shape`'s tools with self-capture's after them, when `interview` has it
@@ -1012,6 +1123,22 @@ fn viewed(trunk: &[Message], head: usize, view: ForkView) -> Vec<Message> {
     trunk[..head].iter().chain(turns).cloned().collect()
 }
 
+/// The regimen key for the role the interview asks in (#599).
+pub const INTERVIEW_ROLE: &str = "interview_role";
+
+/// The interview role the regimen declares, leniently: `"system"` or
+/// `"developer"`, or else `user`.
+#[must_use]
+pub fn interview_role(regimen: &Regimen) -> Role {
+    match regimen.get(INTERVIEW_ROLE) {
+        Some(crate::formats::regimen::Value::String(word)) if word == "system" => Role::System,
+        Some(crate::formats::regimen::Value::String(word)) if word == "developer" => {
+            Role::Developer
+        }
+        _ => Role::User,
+    }
+}
+
 /// The regimen key for the fork ask set (#595).
 pub const FORK_ASKS: &str = "fork_asks";
 
@@ -1052,24 +1179,45 @@ pub fn fork_asks(regimen: &Regimen) -> &'static crate::dogma::asks::AskSet {
     }
 }
 
-/// The rule that warrants a fork after `turn` settled `final`, and the
-/// question it asks, or `None` (#374, the predicate ruled at 5985110649).
+/// One fork the cadence fires in a gap (#564): the rule that warranted it,
+/// what it asks, and what fired it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Firing {
+    why: log::Warrant,
+    /// Which ask of the session's set it sends (#595).
+    ask: AskKind,
+    question: String,
+    /// `turn_end`, or `call:<class>:<id>`.
+    trigger: String,
+}
+
+/// A fork's trigger at a turn's end.
+const TURN_END: &str = "turn_end";
+
+/// One call of the turn, as the router classed it.
+struct Routed {
+    id: String,
+    class: Class,
+    routing: Routing,
+    /// `bash`'s command, quoted back by the ask; a standard tool has none.
+    command: Option<String>,
+    /// Its output's size: what the threshold reads.
+    bytes: u64,
+}
+
+/// The forks to fire after `turn` settled `final`, in order, under the
+/// interview's cadence and warrant (#374, #564).
 ///
-/// (b) `scoping`: the turn's ask carried the operator's mark. The question
-/// is the router's turn-boundary ask, [`AskKind::Judgment`].
-///
-/// (a) `read`: one of the turn's `tool_call`s `ran` and the router's table
-/// classes it [`Class::DocumentRead`] or [`Class::SourceRead`]. The question
-/// is the ask the router routes that class to, quoting back the command.
-///
-/// Both quote back what the trunk last said it was about to do, as the
-/// router does. Scoping is checked first: it is the operator's own mark.
-fn warranted(
-    interview: &Interview,
-    log: &[Logged],
-    turn: u32,
-    answer: &str,
-) -> Option<(log::Warrant, AskKind, String)> {
+/// Under `gap`, at most one, as the predicate ruled at 5985110649: (b)
+/// `scoping`, the turn's ask carried the operator's mark, and the question
+/// is the router's turn-boundary ask, [`AskKind::Judgment`]; else (a)
+/// `read`, the turn's last call that `ran` and that the router's table
+/// classes [`Class::DocumentRead`] or [`Class::SourceRead`], and the
+/// question is the ask the router routes that class to. The other states
+/// are [`Cadence`]'s. Every ask quotes back what the trunk last said it was
+/// about to do, as the router does; a read under the threshold forks
+/// nothing.
+fn firings(interview: &Interview, log: &[Logged], turn: u32, answer: &str) -> Vec<Firing> {
     let rules = &interview.rules;
     let intent = router::stated_intent(answer);
     // The working record, for an ask in a set that shows it (#595).
@@ -1090,60 +1238,152 @@ fn warranted(
         );
         (kind, text)
     };
-    let scoping = log.iter().any(|logged| {
-        matches!(&logged.event, Event::Asked { turn: asked, scoping: true, .. } if *asked == turn)
-    });
-    if scoping && rules.contains(&log::Warrant::Scoping) {
-        let (kind, text) = ask(AskKind::Judgment, None);
-        return Some((log::Warrant::Scoping, kind, text));
-    }
-    if !rules.contains(&log::Warrant::Read) {
-        return None;
-    }
-    let mut table = Router::new().ok()?;
-    let read = log.iter().rev().find_map(|logged| {
-        let Event::ToolCalled(line) = &logged.event else {
-            return None;
-        };
-        if line.turn != turn || line.outcome != log::ToolOutcome::Ran {
-            return None;
+    let judgment = || {
+        let (kind, question) = ask(AskKind::Judgment, None);
+        Firing {
+            why: log::Warrant::Scoping,
+            ask: kind,
+            question,
+            trigger: TURN_END.to_owned(),
         }
-        // `bash`'s command, or a standard tool's own string arguments
-        // (#557): its `path` is what the router classes a read by.
-        let command = tool_loop::command_of(&line.arguments);
-        let args: BTreeMap<String, Value> = match &command {
-            Some(command) => {
-                BTreeMap::from([("command".to_owned(), Value::String(command.clone()))])
-            }
-            None => {
-                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&line.arguments)
-                    .ok()?
-                    .into_iter()
-                    .filter_map(|(key, value)| match value {
-                        serde_json::Value::String(text) => Some((key, Value::String(text))),
-                        _ => None,
-                    })
-                    .collect()
-            }
-        };
-        let decided = table.observe(&RecordEvent::ToolCall {
-            id: line.id.clone(),
-            at_turn: turn,
-            tool: line.name.clone(),
-            args: Some(args),
-            exit: None,
-            output: None,
-            exec: None,
+    };
+    let marked = rules.contains(&log::Warrant::Scoping)
+        && log.iter().any(|logged| {
+            matches!(&logged.event, Event::Asked { turn: asked, scoping: true, .. } if *asked == turn)
         });
-        let class = decided.first()?.class;
-        let Routing::Fork(kind) = class.routing() else {
-            return None;
-        };
-        READS.contains(&class).then_some((kind, command))
-    })?;
-    // A standard tool ran no command: the ask's `last_command` line drops.
-    let (kind, text) = ask(read.0, read.1);
-    Some((log::Warrant::Read, kind, text))
+    let calls = if rules.contains(&log::Warrant::Read) {
+        routed(log, turn)
+    } else {
+        Vec::new()
+    };
+    let enough = |call: &&Routed| {
+        !READS.contains(&call.class)
+            || interview
+                .threshold_bytes
+                .is_none_or(|bytes| call.bytes >= bytes)
+    };
+    let fork = |call: &Routed, kind: AskKind| {
+        let (kind, question) = ask(kind, call.command.clone());
+        Firing {
+            why: log::Warrant::Read,
+            ask: kind,
+            question,
+            trigger: format!("call:{}:{}", call.class.tag(), call.id),
+        }
+    };
+    let mut out: Vec<Firing> = match interview.cadence {
+        Cadence::Gap => {
+            if marked {
+                return vec![judgment()];
+            }
+            return calls
+                .iter()
+                .rev()
+                .filter(|call| READS.contains(&call.class))
+                .filter(enough)
+                .find_map(|call| match call.routing {
+                    Routing::Fork(kind) => Some(fork(call, kind)),
+                    Routing::Silent | Routing::Defer => None,
+                })
+                .into_iter()
+                .collect();
+        }
+        Cadence::TurnBoundary => {
+            return if rules.contains(&log::Warrant::Scoping) {
+                vec![judgment()]
+            } else {
+                Vec::new()
+            };
+        }
+        Cadence::PerClass => calls
+            .iter()
+            .filter(enough)
+            .filter_map(|call| match call.routing {
+                Routing::Fork(kind) => Some(fork(call, kind)),
+                Routing::Silent | Routing::Defer => None,
+            })
+            .collect(),
+        Cadence::PerCall => calls
+            .iter()
+            .filter(enough)
+            .map(|call| match call.routing {
+                Routing::Fork(kind) => fork(call, kind),
+                // The router's declared default for a call it would not
+                // interrupt: the generic ask.
+                Routing::Silent | Routing::Defer => fork(call, AskKind::Generic),
+            })
+            .collect(),
+    };
+    if marked {
+        out.push(judgment());
+    }
+    out
+}
+
+/// The forks the cadence chose, screened before any fires: where a routing
+/// state skips one, it is dropped here and the record says why. The first
+/// such state is #611's -- a fork the turn's own self-capture already
+/// covered -- and it lands with #609; until then every fork fires.
+fn screened(firings: Vec<Firing>) -> Vec<Firing> {
+    firings
+}
+
+/// The calls of `turn` that `ran`, in order, each classed by the router: a
+/// `bash` call by its command, a standard tool's by its own string
+/// arguments (#557), its `path` among them.
+fn routed(log: &[Logged], turn: u32) -> Vec<Routed> {
+    let Ok(mut table) = Router::new() else {
+        return Vec::new();
+    };
+    log.iter()
+        .filter_map(|logged| match &logged.event {
+            Event::ToolCalled(line)
+                if line.turn == turn && line.outcome == log::ToolOutcome::Ran =>
+            {
+                Some(line.as_ref())
+            }
+            _ => None,
+        })
+        .filter_map(|line| {
+            let command = tool_loop::command_of(&line.arguments);
+            let args: BTreeMap<String, Value> = match &command {
+                Some(command) => {
+                    BTreeMap::from([("command".to_owned(), Value::String(command.clone()))])
+                }
+                None => serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(
+                    &line.arguments,
+                )
+                .ok()?
+                .into_iter()
+                .filter_map(|(key, value)| match value {
+                    serde_json::Value::String(text) => Some((key, Value::String(text))),
+                    _ => None,
+                })
+                .collect(),
+            };
+            let decided = table.observe(&RecordEvent::ToolCall {
+                id: line.id.clone(),
+                at_turn: turn,
+                tool: line.name.clone(),
+                args: Some(args),
+                exit: None,
+                output: None,
+                exec: None,
+            });
+            let class = decided.first()?.class;
+            let bytes = match (&line.stdout, &line.stderr) {
+                (Some(out), err) => out.bytes + err.as_ref().map_or(0, |err| err.bytes),
+                (None, _) => line.shown.as_ref().map_or(0, |shown| shown.len() as u64),
+            };
+            Some(Routed {
+                id: line.id.clone(),
+                class,
+                routing: class.routing(),
+                command,
+                bytes,
+            })
+        })
+        .collect()
 }
 
 /// The router's classes that are a read under rule (a).
@@ -1267,6 +1507,9 @@ struct State {
     interview: Option<Interview>,
     /// The fork in flight in the capture gap, by its sequence number.
     forking: Option<u64>,
+    /// The gap's forks not yet fired (#564), in order: each fires once the
+    /// one before it settles; the turn and the trunk request they fork at.
+    queued: std::collections::VecDeque<(u32, u64, Firing)>,
     /// `turns` at the latest seam, or 0: what a cadence counts from.
     turns_at_seam: u32,
     /// The trunk's tokens as the latest trunk call measured them, cleared
@@ -1278,6 +1521,9 @@ struct State {
     /// The latest request's prompt as sized, its output cap, and the window
     /// it was sized against (#616): what tells an overflow from its size.
     last_sized: Option<(u64, u32, Option<u64>)>,
+    /// The turn that last seamed and went again after an overflow (#617):
+    /// once per turn.
+    overflow_retried: Option<u32>,
     /// The latest measured prompt (prefilled plus cached tokens) and the
     /// estimate of the request it measured: what the next request's prompt
     /// is sized from (#588).
@@ -1293,6 +1539,13 @@ struct State {
     /// The recording directory, when the session keeps one: where a seam's
     /// `reference` saves an output's whole (#553).
     recording: Option<std::path::PathBuf>,
+    /// The session's background jobs (#614), by id.
+    jobs: BTreeMap<String, super::background::Job>,
+    /// Ended jobs' notifications, waiting for the next ask (#614).
+    notices: Vec<String>,
+    /// The running foreground `bash` call's promotion (#614): the job it
+    /// becomes, once the operator asks.
+    promotable: Option<Arc<Mutex<Option<super::background::Job>>>>,
     /// The results the model pruned (#612), in the order it pruned them.
     pruned: Vec<Prune>,
     /// Whether the trunk carries a seam's refill message after the head
@@ -1318,15 +1571,8 @@ impl State {
     /// was added since; with none to go on, or a prompt that shrank (a seam),
     /// the whole estimate plus [`ESTIMATE_PAD`].
     fn sized(&mut self, shape: &mut RequestShape, ceiling: u32) -> u32 {
-        let estimate: u64 = shape
-            .messages
-            .iter()
-            .map(crate::seam::render::estimated_tokens)
-            .sum();
-        let prompt = match self.measured_prompt {
-            Some((measured, then)) if estimate >= then => measured + (estimate - then),
-            _ => estimate + ESTIMATE_PAD,
-        };
+        let estimate = estimate_of(shape);
+        let prompt = self.prompt_of(shape);
         self.sent_estimate = Some(estimate);
         let cap = clamped(ceiling, shape.limits.context_window, prompt);
         shape.limits.max_output_tokens = cap;
@@ -1357,6 +1603,18 @@ impl State {
         match failure {
             TransportFailure::Timeout { .. } => None,
             _ => self.overflow(false),
+        }
+    }
+
+    /// The prompt a request on `shape` would send, as [`State::sized`]
+    /// sizes it (#588): the latest measured prompt plus the estimate of what
+    /// was added since; with none to go on, or a prompt that shrank (a
+    /// seam), the whole estimate plus [`ESTIMATE_PAD`].
+    fn prompt_of(&self, shape: &RequestShape) -> u64 {
+        let estimate = estimate_of(shape);
+        match self.measured_prompt {
+            Some((measured, then)) if estimate >= then => measured + (estimate - then),
+            _ => estimate + ESTIMATE_PAD,
         }
     }
 
@@ -1436,6 +1694,18 @@ impl State {
     /// request, logged as turn `turn`'s `delivered` line, or `None` when
     /// none waits. One line per patch, each the (b′) sentence of the
     /// session's framing, pinned in the dogma.
+    fn notify(&mut self, turn: u32) -> Option<Message> {
+        if self.notices.is_empty() {
+            return None;
+        }
+        let text = std::mem::take(&mut self.notices).join("\n");
+        self.push(Event::Notified {
+            turn,
+            text: text.clone(),
+        });
+        Some(Message::new(Role::User, text))
+    }
+
     fn deliver(&mut self, turn: u32) -> Option<Message> {
         let delivery = self.interview.as_ref()?.delivery;
         let (framing, template) = match delivery {
@@ -1495,8 +1765,8 @@ impl State {
                 CommandKind::Cancel => GapEnd::Cancel,
                 CommandKind::DeclareSeam => GapEnd::Seam,
                 CommandKind::End => GapEnd::End,
-                CommandKind::OpenTangent | CommandKind::CloseTangent => {
-                    unreachable!("a tangent command carries no idle gap: it takes none")
+                CommandKind::OpenTangent | CommandKind::CloseTangent | CommandKind::Background => {
+                    unreachable!("a tangent or background command carries no idle gap")
                 }
             };
             if gap.ended_by != ends {
@@ -1598,6 +1868,9 @@ struct Shared<S> {
     changed: Condvar,
     /// What a call runs under, when the session runs commands.
     tools: Option<Tools>,
+    /// Where a started background job's child goes to be waited on (#614):
+    /// the session's reaper, when background commands are on.
+    reap: Mutex<Option<std::sync::mpsc::Sender<(String, std::process::Child)>>>,
     /// Where the interview fork runs when it is not the trunk's server
     /// (#570); `None` is warm.
     seat: Option<Offboard<S>>,
@@ -1752,12 +2025,7 @@ impl<S: Streaming + 'static> Session<S> {
         tools: Option<Tools>,
         (claim, interview, (unsent, reasoning_effort_default, instruction_files, levers)): Declared,
     ) -> Self {
-        // A head is the trunk before any turn; a tool result answers a call
-        // made in one, and the log's head has no word for it (`role_of`).
-        assert!(
-            template.messages.iter().all(|m| m.role != Role::Tool),
-            "a session's head holds no tool result"
-        );
+        a_head(&template.messages);
         let trunk = template.messages.clone();
         let fork_delivery = interview.as_ref().map(|interview| interview.delivery);
         let phases = phases_of(interview.as_ref());
@@ -1778,6 +2046,7 @@ impl<S: Streaming + 'static> Session<S> {
             trunk_tokens: None,
             sent_estimate: None,
             last_sized: None,
+            overflow_retried: None,
             measured_prompt: None,
             step_tokens: None,
             ran: Vec::new(),
@@ -1816,9 +2085,13 @@ impl<S: Streaming + 'static> Session<S> {
             answered: None,
             interview,
             forking: None,
+            queued: std::collections::VecDeque::new(),
             recording: tools.as_ref().and_then(|t| t.recording.clone()),
             pruned: Vec::new(),
             refilled: false,
+            jobs: BTreeMap::new(),
+            notices: Vec::new(),
+            promotable: None,
         };
         state.push(Event::Started {
             opened,
@@ -1842,16 +2115,23 @@ impl<S: Streaming + 'static> Session<S> {
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             phases,
         });
-        Self {
-            shared: Arc::new(Shared {
-                transport,
-                template,
-                state: Mutex::new(state),
-                changed: Condvar::new(),
-                tools,
-                seat: None,
-            }),
-        }
+        Self::sharing(Shared {
+            transport,
+            template,
+            state: Mutex::new(state),
+            changed: Condvar::new(),
+            tools,
+            reap: Mutex::new(None),
+            seat: None,
+        })
+    }
+
+    /// The session over `shared`, its reaper started when background
+    /// commands are on (#614).
+    fn sharing(shared: Shared<S>) -> Self {
+        let shared = Arc::new(shared);
+        start_reaper(&shared);
+        Self { shared }
     }
 
     /// This session, its interview fork seated offboard (#570): every fork's
@@ -1962,6 +2242,12 @@ impl<S: Streaming + 'static> Session<S> {
             shape.messages.push(note.clone());
             opening.push(note);
         }
+        // Background commands that ended since (#614): their notifications,
+        // as one note after it, Qwen Code's `<task-notification>`s.
+        if let Some(note) = state.notify(turn) {
+            shape.messages.push(note.clone());
+            opening.push(note);
+        }
         // The self-capture reminder (#609), when its cadence came round: an
         // advisory note after the ask (and after any other note), never in
         // the system prompt.
@@ -1978,6 +2264,8 @@ impl<S: Streaming + 'static> Session<S> {
         // turn's thread: a thread that cannot start still settles with a
         // `request.failed` that cites a request that exists (#117, R2c
         // finding 21).
+        // The automatic seam (#617), before the request is sized.
+        window_seam(&self.shared.template, &mut state, &mut shape, false);
         let max_tokens = state.sized(&mut shape, self.shared.template.limits.max_output_tokens);
         let request = state.push(Event::Requested {
             turn,
@@ -2152,7 +2440,7 @@ impl<S: Streaming + 'static> Session<S> {
         refill_trunk(
             &self.shared.template,
             &mut state,
-            crate::seam::Reason::Operator,
+            (crate::seam::Reason::Operator, None),
             to.map(str::to_owned),
         );
         drop(state);
@@ -2456,8 +2744,66 @@ impl<S: Streaming + 'static> Session<S> {
     /// End what the session's commands left running: every process group a
     /// command led, under Seatbelt. Called once, at the end.
     pub fn end_commands(&self) {
+        // Every running background job's process group (#614), as a stop.
+        {
+            let mut state = self.shared.lock();
+            for job in state.jobs.values_mut() {
+                if job.status == super::background::Status::Running {
+                    job.stopping = true;
+                    super::background::stop_group(job.pid);
+                }
+            }
+        }
         if let Some(tools) = &self.shared.tools {
             tools.confinement.end_session();
+        }
+    }
+
+    /// Move the running foreground `bash` call to the background (#614): it
+    /// returns at once, Qwen Code's promotion answer, and the command keeps
+    /// running under the session's confinement, its output written to a
+    /// file. Returns the job's id.
+    ///
+    /// # Errors
+    ///
+    /// Refused, and logged: [`Refusal::Ended`]; [`Refusal::NothingRunning`]
+    /// when no `bash` call is running, or one is already being moved.
+    pub fn background(&self) -> Result<String, Rejected> {
+        let mut state = self.shared.lock();
+        let slot = match (state.settlement, &state.promotable) {
+            (Settlement::Ended, _) => Err(Refusal::Ended),
+            (_, Some(slot)) => Ok(Arc::clone(slot)),
+            (_, None) => Err(Refusal::NothingRunning),
+        };
+        let asked = slot.and_then(|slot| {
+            let mut job = slot.lock().unwrap_or_else(PoisonError::into_inner);
+            if job.is_some() {
+                return Err(Refusal::NothingRunning);
+            }
+            let id = super::background::new_id();
+            let (output, status_file) =
+                super::background::files_of(&background_dir(&self.shared, &state), &id);
+            *job = Some(super::background::Job {
+                id: id.clone(),
+                command: String::new(),
+                cwd: String::new(),
+                pid: 0,
+                output,
+                status_file,
+                status: super::background::Status::Running,
+                exit: None,
+                stopping: false,
+            });
+            Ok(id)
+        });
+        match asked {
+            Ok(id) => Ok(id),
+            Err(because) => {
+                let refused = state.refuse(CommandKind::Background, because);
+                drop(state);
+                self.shared.changed.notify_all();
+                Err(Rejected::Refused(refused))
+            }
         }
     }
 
@@ -2826,6 +3172,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 files,
                 images: _,
                 recovered_from,
+                background,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -2848,8 +3195,24 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 files: (!files.is_empty()).then_some(files),
                 shown,
                 recovered_from,
+                background,
             }
         }
+        Event::BackgroundEnded {
+            job,
+            status,
+            exit,
+            files,
+        } => log::Event::BackgroundEnded {
+            job: job.clone(),
+            status: *status,
+            exit: *exit,
+            files: (!files.is_empty()).then(|| files.clone()),
+        },
+        Event::Notified { turn, text } => log::Event::Notice {
+            turn: *turn,
+            text: text.clone(),
+        },
         Event::TurnSettled { turn, reason } => log::Event::TurnSettled {
             turn: *turn,
             reason: settle_reason_in_the_log(*reason),
@@ -2860,6 +3223,8 @@ pub fn line_of(logged: &Logged) -> log::Line {
             why,
             question,
             view,
+            trigger,
+            role,
             seat,
             ask,
         } => log::Event::Fork {
@@ -2871,6 +3236,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // Absent is the tail (#568): a tail fork's line is as before.
             // Absent is the whole trunk (#567).
             view: (*view != ForkView::Trunk).then(|| view.word()),
+            trigger: Some(trigger.clone()),
+            // Absent is `user` (#599): a user-role fork's line is as before.
+            role: (*role != Role::User).then(|| role.tag().to_owned()),
             seat: seat.clone(),
             ask: Some(ask.tag().to_owned()),
         },
@@ -2983,8 +3351,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             tool_outputs,
             outputs,
             render_budget,
+            fired,
             pruned,
         } => log::Event::Seam {
+            fired: *fired,
             phase: phase.clone(),
             at_turn: *at_turn,
             reason: match reason {
@@ -2992,6 +3362,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 crate::seam::Reason::Phase => log::SeamReason::Phase,
                 crate::seam::Reason::Budget => log::SeamReason::Budget,
                 crate::seam::Reason::Cadence => log::SeamReason::Cadence,
+                crate::seam::Reason::Window => log::SeamReason::Window,
                 crate::seam::Reason::Prune => log::SeamReason::Prune,
             },
             prefix_hash_before: prefix_hash_before.clone(),
@@ -3112,6 +3483,9 @@ fn gap_line(gap: &IdleGap) -> log::Event {
 fn role_of(role: Role) -> log::Role {
     match role {
         Role::Tool => unreachable!("a head holds no tool result: `open` asserts it"),
+        Role::Developer => {
+            unreachable!("a head holds no developer message, a fork's ask alone: `open` asserts it")
+        }
         Role::System => log::Role::System,
         Role::User => log::Role::User,
         Role::Assistant => log::Role::Assistant,
@@ -3126,6 +3500,7 @@ fn command_of(command: CommandKind) -> log::Command {
         CommandKind::End => log::Command::End,
         CommandKind::OpenTangent => log::Command::OpenTangent,
         CommandKind::CloseTangent => log::Command::CloseTangent,
+        CommandKind::Background => log::Command::Background,
     }
 }
 
@@ -3144,6 +3519,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::NoTangent => log::Refusal::NoTangent,
         Refusal::BadTangent => log::Refusal::BadTangent,
         Refusal::NotTheScope => log::Refusal::NotTheScope,
+        Refusal::NothingRunning => log::Refusal::NothingRunning,
     }
 }
 
@@ -3395,6 +3771,14 @@ fn step<S: Streaming>(
                 class,
                 partial,
             });
+            // #617: an overflow seams once and goes again.
+            if overflow.is_some()
+                && let Some(next) = retried(&shared.template, &mut state, shape, turn)
+            {
+                drop(state);
+                shared.changed.notify_all();
+                return Some(next);
+            }
             state.keep_ran_steps();
             state.push(Event::TurnSettled {
                 turn,
@@ -3411,6 +3795,14 @@ fn step<S: Streaming>(
                 failure,
                 partial,
             });
+            // #617: an overflow seams once and goes again.
+            if overflow.is_some()
+                && let Some(next) = retried(&shared.template, &mut state, shape, turn)
+            {
+                drop(state);
+                shared.changed.notify_all();
+                return Some(next);
+            }
             state.keep_ran_steps();
             state.push(Event::TurnSettled { turn, reason });
             state.move_to(Settlement::Awaiting);
@@ -3538,6 +3930,8 @@ fn run_calls<S: Streaming>(
     state.ran.clone_from(exchange);
     shape.messages.push(said);
     shape.messages.extend(results);
+    // The automatic seam (#617), between the turn's steps too.
+    window_seam(&shared.template, &mut state, shape, false);
     let max_tokens = state.sized(shape, shared.template.limits.max_output_tokens);
     let next = state.push(Event::Requested {
         turn,
@@ -4063,6 +4457,19 @@ fn one_call<S: Streaming>(
     {
         return standard_call(tools, cancel, (turn, request), call, last);
     }
+    // `task_stop` (#614): no gate decides it; it stops a job the session
+    // started.
+    if declared
+        && call.name == super::background::TASK_STOP
+        && shared.tools.as_ref().is_some_and(|tools| tools.background)
+    {
+        if last {
+            let mut line = refused(log::ToolRefusal::MaxSteps);
+            line.reason = Some(log::ToolRefusal::MaxSteps);
+            return (line, None);
+        }
+        return task_stop_call(shared, (turn, request), call);
+    }
     let Some(tools) = shared
         .tools
         .as_ref()
@@ -4075,6 +4482,14 @@ fn one_call<S: Streaming>(
             refused(log::ToolRefusal::Unparsable),
             Some(tool_loop::refusal_text(log::ToolRefusal::Unparsable, "")),
         );
+    };
+    // In the background (#614): one bare trailing `&` comes off, as Qwen
+    // Code takes it off, before the gate judges the command.
+    let background = tools.background && tool_loop::background_of(&call.arguments);
+    let command = if background {
+        super::background::without_trailing_amp(&command)
+    } else {
+        command
     };
     let parsed = |mut line: ToolLine| {
         line.argv = Some(tool_loop::argv_of(&command));
@@ -4199,12 +4614,51 @@ fn one_call<S: Streaming>(
     let mut line = parsed(ToolLine::of(request, turn, call, log::ToolOutcome::Ran));
     line.approval = approval;
     let profiled = tools.confinement.isolation() != crate::isolation::Isolation::None;
+    if background {
+        return background_call(shared, tools, line, (&run, &command));
+    }
+    // A running call the operator can move to the background (#614), when
+    // background commands are on.
+    let slot = tools.background.then(|| {
+        let slot = Arc::new(Mutex::new(None));
+        shared.lock().promotable = Some(Arc::clone(&slot));
+        slot
+    });
     // A stop reaches a running call: its whole process group is killed, and
     // the turn settles `cancelled` (#551).
-    match tools
-        .confinement
-        .run_until(&tools.policy, &tools.worktree, &run, &|| cancel.is_asked())
-    {
+    let finished = match &slot {
+        Some(slot) => tools.confinement.run_promotable(
+            &tools.policy,
+            &tools.worktree,
+            &run,
+            &|| cancel.is_asked(),
+            &|| {
+                slot.lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .as_ref()
+                    .and_then(|job: &super::background::Job| {
+                        std::fs::File::create(&job.output).ok()
+                    })
+            },
+        ),
+        None => tools
+            .confinement
+            .run_until(&tools.policy, &tools.worktree, &run, &|| cancel.is_asked())
+            .map(crate::isolation::Finished::Ran),
+    };
+    if slot.is_some() {
+        shared.lock().promotable = None;
+    }
+    let finished = match finished {
+        Ok(crate::isolation::Finished::Promoted(ran, child)) => {
+            let job =
+                slot.and_then(|slot| slot.lock().unwrap_or_else(PoisonError::into_inner).take());
+            return promoted_call(shared, tools, line, (ran, child), (job, &command));
+        }
+        Ok(crate::isolation::Finished::Ran(ran)) => Ok(ran),
+        Err(not_run) => Err(not_run),
+    };
+    match finished {
         Ok(ran) if ran.cancelled => {
             // A cancelled line carries no streams (the log format's rule);
             // what the command printed before the cancel reaches the log as
@@ -4244,29 +4698,297 @@ fn one_call<S: Streaming>(
             let shown = shown_capped(tools, &ran.as_the_model_sees_it(), &mut line);
             (line, Some(shown))
         }
-        Err(not_run) => {
-            // It never ran: what would have run, and why it did not, as the
-            // command's own failure under its confinement.
-            let said = not_run.to_string();
-            let confined = tools
+        Err(not_run) => never_ran(tools, line, &run, &not_run),
+    }
+}
+
+/// Where the session's background jobs write (#614): the recording's
+/// `background/`, or, with no recording, a directory of the session's own
+/// under the system's temporary one.
+fn background_dir<S>(shared: &Shared<S>, state: &State) -> std::path::PathBuf {
+    let dir = shared
+        .tools
+        .as_ref()
+        .and_then(|tools| tools.recording.as_ref())
+        .map_or_else(
+            || {
+                let opened = match state.log.first() {
+                    Some(Logged {
+                        event: Event::Started { opened, .. },
+                        ..
+                    }) => *opened,
+                    _ => 0,
+                };
+                std::env::temp_dir()
+                    .join(format!("diet-background-{opened}-{}", std::process::id()))
+            },
+            |recording| recording.join("background"),
+        );
+    let _ = std::fs::create_dir_all(&dir);
+    dir
+}
+
+/// A started job, kept and handed to the reaper (#614).
+fn register<S>(shared: &Shared<S>, job: super::background::Job, child: std::process::Child) {
+    job.write_status();
+    let id = job.id.clone();
+    shared.lock().jobs.insert(id.clone(), job);
+    if let Some(reap) = shared
+        .reap
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+    {
+        let _ = reap.send((id, child));
+    }
+}
+
+/// A `bash` call that asked for the background (#614): started under the
+/// session's confinement, its output written to a file, and answered at
+/// once with Qwen Code's start text.
+fn background_call<S>(
+    shared: &Shared<S>,
+    tools: &Tools,
+    mut line: ToolLine,
+    (run, command): (&[String], &str),
+) -> (ToolLine, Option<String>) {
+    let dir = background_dir(shared, &shared.lock());
+    let id = super::background::new_id();
+    let (output, status_file) = super::background::files_of(&dir, &id);
+    let spawned = std::fs::File::create(&output)
+        .map_err(|why| crate::isolation::NotRun::Runner {
+            said: format!(
+                "the output file {} could not be made: {why}",
+                output.display()
+            ),
+        })
+        .and_then(|file| {
+            tools
                 .confinement
-                .compose(&tools.policy, &tools.worktree, &run);
-            line.outcome = log::ToolOutcome::CommandFailed;
-            line.policy = tools.confinement.policy_of(&confined);
-            line.confined = Some(confined);
-            line.isolation = Some(isolation_word(tools.confinement.isolation()));
-            line.network = Some(network_word(tools.policy.network));
+                .spawn_detached(&tools.policy, &tools.worktree, run, &file)
+        });
+    match spawned {
+        Ok((ran, child)) => {
+            let job = super::background::Job {
+                id: id.clone(),
+                command: command.to_owned(),
+                cwd: tools.cwd.clone(),
+                pid: child.id(),
+                output,
+                status_file,
+                status: super::background::Status::Running,
+                exit: None,
+                stopping: false,
+            };
+            let shown = super::background::started(&job);
+            line.confined = Some(ran.confined.clone());
+            line.isolation = Some(isolation_word(ran.isolation));
+            line.network = Some(network_word(ran.network));
             line.stdout = Some(log::Output {
                 text: String::new(),
                 bytes: 0,
             });
             line.stderr = Some(log::Output {
-                text: said.clone(),
-                bytes: said.len() as u64,
+                text: String::new(),
+                bytes: 0,
             });
-            (line, Some(said))
+            line.background = Some(id);
+            register(shared, job, child);
+            (line, Some(shown))
+        }
+        Err(not_run) => never_ran(tools, line, run, &not_run),
+    }
+}
+
+/// A running call the operator moved to the background (#614): what it
+/// printed until then on its line, Qwen Code's promotion text for the
+/// model, and the command left running as a job.
+fn promoted_call<S>(
+    shared: &Shared<S>,
+    tools: &Tools,
+    mut line: ToolLine,
+    (ran, child): (crate::isolation::Ran, std::process::Child),
+    (job, command): (Option<super::background::Job>, &str),
+) -> (ToolLine, Option<String>) {
+    let Some(mut job) = job else {
+        unreachable!("a call is promoted only once its job is set");
+    };
+    command.clone_into(&mut job.command);
+    job.cwd.clone_from(&tools.cwd);
+    job.pid = child.id();
+    let shown = super::background::promoted(&job);
+    line.confined = Some(ran.confined.clone());
+    line.isolation = Some(isolation_word(ran.isolation));
+    line.network = Some(network_word(ran.network));
+    line.stdout = Some(log::Output {
+        text: ran.stdout.clone(),
+        bytes: ran.stdout_bytes,
+    });
+    line.stderr = Some(log::Output {
+        text: ran.stderr.clone(),
+        bytes: ran.stderr_bytes,
+    });
+    line.background = Some(job.id.clone());
+    register(shared, job, child);
+    (line, Some(shown))
+}
+
+/// A command that never ran: what would have run, and why it did not, as
+/// the command's own failure under its confinement.
+fn never_ran(
+    tools: &Tools,
+    mut line: ToolLine,
+    run: &[String],
+    not_run: &crate::isolation::NotRun,
+) -> (ToolLine, Option<String>) {
+    let said = not_run.to_string();
+    let confined = tools
+        .confinement
+        .compose(&tools.policy, &tools.worktree, run);
+    line.outcome = log::ToolOutcome::CommandFailed;
+    line.policy = tools.confinement.policy_of(&confined);
+    line.confined = Some(confined);
+    line.isolation = Some(isolation_word(tools.confinement.isolation()));
+    line.network = Some(network_word(tools.policy.network));
+    line.stdout = Some(log::Output {
+        text: String::new(),
+        bytes: 0,
+    });
+    line.stderr = Some(log::Output {
+        text: said.clone(),
+        bytes: said.len() as u64,
+    });
+    (line, Some(said))
+}
+
+/// `task_stop` (#614): a running job's whole process group signalled, and
+/// Qwen Code's answers -- its cancellation requested, an id that names no
+/// job, or one no longer running.
+fn task_stop_call<S>(
+    shared: &Shared<S>,
+    (turn, request): (u32, u64),
+    call: &Call,
+) -> (ToolLine, Option<String>) {
+    use super::background::{self, Status};
+    let id = serde_json::from_str::<serde_json::Value>(&call.arguments)
+        .ok()
+        .and_then(|value| value.get("task_id")?.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    let mut state = shared.lock();
+    let shown = match state.jobs.get_mut(&id) {
+        None => background::not_found(&id),
+        Some(job) if job.status != Status::Running => background::not_running(job),
+        Some(job) => {
+            job.stopping = true;
+            background::stop_group(job.pid);
+            background::stopping(job)
+        }
+    };
+    drop(state);
+    (
+        ToolLine::of(request, turn, call, log::ToolOutcome::Ran),
+        Some(shown),
+    )
+}
+
+/// Background commands (#614), when they are on: one thread waits on every
+/// job, holding the session only weakly, so a dropped session ends it.
+fn start_reaper<S: Streaming + 'static>(shared: &Arc<Shared<S>>) {
+    if !shared.tools.as_ref().is_some_and(|tools| tools.background) {
+        return;
+    }
+    let (send, receive) = std::sync::mpsc::channel();
+    *shared.reap.lock().unwrap_or_else(PoisonError::into_inner) = Some(send);
+    let weak = Arc::downgrade(shared);
+    let _ = std::thread::Builder::new()
+        .name("diet-reaper".to_owned())
+        .spawn(move || reaper(&weak, &receive));
+}
+
+/// The session's reaper (#614): it waits on every background job's child,
+/// and logs each as it ends; it stops once the session is gone.
+fn reaper<S: Streaming + 'static>(
+    shared: &std::sync::Weak<Shared<S>>,
+    receive: &std::sync::mpsc::Receiver<(String, std::process::Child)>,
+) {
+    use std::sync::mpsc::RecvTimeoutError;
+    let mut running: Vec<(String, std::process::Child)> = Vec::new();
+    loop {
+        match receive.recv_timeout(Duration::from_millis(50)) {
+            Ok(job) => running.push(job),
+            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Disconnected) => {
+                if running.is_empty() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        running.extend(receive.try_iter());
+        let mut at = 0;
+        while at < running.len() {
+            match running[at].1.try_wait() {
+                Ok(None) => at += 1,
+                done => {
+                    let (id, _) = running.swap_remove(at);
+                    let Some(shared) = shared.upgrade() else {
+                        return;
+                    };
+                    ended(
+                        &shared,
+                        &id,
+                        done.ok().flatten().and_then(|status| status.code()),
+                    );
+                }
+            }
         }
     }
+}
+
+/// Job `id` ended with `code` (#614): its status file says so, its output
+/// is kept whole by digest, its end is logged, and its notification waits
+/// for the next ask.
+fn ended<S>(shared: &Shared<S>, id: &str, code: Option<i32>) {
+    use super::background::Status;
+    let recording = shared
+        .tools
+        .as_ref()
+        .and_then(|tools| tools.recording.clone());
+    let mut state = shared.lock();
+    let Some(job) = state.jobs.get_mut(id) else {
+        return;
+    };
+    job.exit = code;
+    job.status = if job.stopping {
+        Status::Cancelled
+    } else if code == Some(0) {
+        Status::Completed
+    } else {
+        Status::Failed
+    };
+    job.write_status();
+    let output = std::fs::read(&job.output).unwrap_or_default();
+    let note = super::background::notification(job, &output);
+    let status = match job.status {
+        Status::Completed => log::BackgroundStatus::Completed,
+        Status::Failed => log::BackgroundStatus::Failed,
+        Status::Running | Status::Cancelled => log::BackgroundStatus::Cancelled,
+    };
+    let files: Vec<log::RecordedFile> = recording
+        .and_then(|dir| super::attach::kept_whole(&dir, &output, "text/plain").ok())
+        .into_iter()
+        .collect();
+    state.notices.push(note);
+    if state.settlement != Settlement::Ended {
+        state.push(Event::BackgroundEnded {
+            job: id.to_owned(),
+            status,
+            exit: code.and_then(|code| u64::try_from(code).ok()),
+            files,
+        });
+    }
+    drop(state);
+    shared.changed.notify_all();
 }
 
 /// Refill the trunk from working memory for a seam `reason` fired (#493):
@@ -4277,7 +4999,7 @@ fn one_call<S: Streaming>(
 fn refill_trunk(
     template: &RequestShape,
     state: &mut State,
-    reason: crate::seam::Reason,
+    (reason, fired): (crate::seam::Reason, Option<log::SeamFired>),
     to: Option<String>,
 ) {
     // The move the graph allowed, made before the render, so the refill
@@ -4379,8 +5101,100 @@ fn refill_trunk(
         tool_outputs,
         outputs,
         render_budget,
+        fired,
         pruned,
     });
+}
+
+/// The automatic seam (#617), checked before every trunk request on
+/// `shape`: when serve knows the window, the regimen has not turned it off
+/// ([`crate::seam::policy::SEAM_WINDOW`]), no tangent is open, working
+/// memory holds an entry and the trunk holds turns the refill would drop,
+/// and the prompt as sized (#588) would leave less than
+/// [`crate::seam::policy::WINDOW_RESERVE`] -- or the output cap, if more --
+/// of the window: the trunk is refilled, and the turn's own messages so far
+/// ride after the refill as they rode after the trunk. Otherwise the request
+/// goes as it is, as Pi, `OpenCode` 2 and Qwen Code all send it when there is
+/// nothing to compact.
+fn window_seam(
+    template: &RequestShape,
+    state: &mut State,
+    shape: &mut RequestShape,
+    forced: bool,
+) -> bool {
+    let Some(window) = shape.limits.context_window else {
+        return false;
+    };
+    let Some(interview) = state.interview.as_ref() else {
+        return false;
+    };
+    if interview.seams.window_off
+        || state.tangent.is_some()
+        || interview.object.live().next().is_none()
+        || !shape.messages.starts_with(&state.trunk)
+    {
+        return false;
+    }
+    let turns = state
+        .trunk
+        .get(template.messages.len() + usize::from(state.refilled)..)
+        .unwrap_or_default();
+    if crate::seam::render::tail(turns, interview.seams.tail_tokens).len() == turns.len() {
+        return false;
+    }
+    let prompt = state.prompt_of(shape);
+    let reserve =
+        u64::from(template.limits.max_output_tokens).max(crate::seam::policy::WINDOW_RESERVE);
+    if !forced && prompt <= window.saturating_sub(reserve) {
+        return false;
+    }
+    let own = shape.messages.split_off(state.trunk.len());
+    refill_trunk(
+        template,
+        state,
+        (
+            crate::seam::Reason::Window,
+            Some(log::SeamFired {
+                prompt_tokens: prompt,
+                window,
+            }),
+        ),
+        None,
+    );
+    shape.messages.clone_from(&state.trunk);
+    shape.messages.extend(own);
+    true
+}
+
+/// After a trunk request that overflowed the window (#616), the automatic
+/// seam once more and the request again (#617), as Pi, `OpenCode` 2 and Qwen
+/// Code each compact and retry once after an overflow: the seam forced,
+/// whatever the sizing said, and the same messages sent on the refilled
+/// trunk. Once per turn; and not when the seam has nothing to refill from
+/// or nothing to drop, when the turn fails as it would have. The next
+/// request's sequence number when it was sent.
+fn retried(
+    template: &RequestShape,
+    state: &mut State,
+    shape: &mut RequestShape,
+    turn: u32,
+) -> Option<u64> {
+    if state.overflow_retried == Some(turn) || !window_seam(template, state, shape, true) {
+        return None;
+    }
+    state.overflow_retried = Some(turn);
+    let max_tokens = state.sized(shape, template.limits.max_output_tokens);
+    let next = state.push(Event::Requested {
+        turn,
+        lane: Lane::Trunk,
+        head_sha256: crate::client::head::Head::of(shape).digest().to_owned(),
+        fork: None,
+        max_tokens,
+    });
+    if let Some(flight) = state.flight.as_mut() {
+        flight.request = next;
+    }
+    Some(next)
 }
 
 /// Each pruned result in a seam's kept tail replaced in place by its line
@@ -4647,7 +5461,7 @@ fn turn_over(template: &RequestShape, state: &mut State) {
                 })
         });
     if let Some(reason) = due {
-        refill_trunk(template, state, reason, None);
+        refill_trunk(template, state, (reason, None), None);
     }
 }
 
@@ -4655,6 +5469,31 @@ fn turn_over(template: &RequestShape, state: &mut State) {
 /// prompt's estimate (#588): 5% of it, or 10,000 tokens if that is more.
 fn margin(window: i128) -> i128 {
     (window * 5 / 100).max(10_000)
+}
+
+/// That `messages` can open a session: a head is the trunk before any
+/// turn; a tool result answers a call made in one, and the log's head has
+/// no word for it or for a developer message (`role_of`).
+///
+/// # Panics
+///
+/// When it holds either.
+fn a_head(messages: &[Message]) {
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.role != Role::Tool && m.role != Role::Developer),
+        "a session's head holds no tool result and no developer message"
+    );
+}
+
+/// The estimated tokens of `shape`'s messages (#588).
+fn estimate_of(shape: &RequestShape) -> u64 {
+    shape
+        .messages
+        .iter()
+        .map(crate::seam::render::estimated_tokens)
+        .sum()
 }
 
 /// The pad added to a prompt that is wholly estimated (#588): Qwen Code's,
@@ -4783,15 +5622,34 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
             _ => None,
         })
         .unwrap_or_default();
-    let fired = state
+    let mut fired: std::collections::VecDeque<Firing> = state
         .interview
         .as_ref()
         .filter(|_| !state.ending)
-        .and_then(|interview| warranted(interview, &state.log, turn, answer));
-    let Some((why, kind, question)) = fired else {
+        .map(|interview| screened(firings(interview, &state.log, turn, answer)))
+        .unwrap_or_default()
+        .into();
+    let Some(first) = fired.pop_front() else {
         turn_over(&shared.template, state);
         return None;
     };
+    state.queued = fired.into_iter().map(|firing| (turn, at, firing)).collect();
+    Some(fire(shared, state, turn, at, first))
+}
+
+/// One of the gap's forks, fired: born off the warm trunk -- what the view
+/// shows of it, then the question -- and never appended to it.
+fn fire<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64, firing: Firing) -> Fired {
+    let Firing {
+        why,
+        ask,
+        question,
+        trigger,
+    } = firing;
+    let role = state
+        .interview
+        .as_ref()
+        .map_or(Role::User, |interview| interview.role);
     let mut shape = shared.template.clone();
     let declared = state
         .interview
@@ -4805,9 +5663,7 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         ForkView::Trunk
     });
     shape.messages = viewed(&state.trunk, shared.template.messages.len(), view);
-    shape
-        .messages
-        .push(Message::new(Role::User, question.clone()));
+    shape.messages.push(Message::new(role, question.clone()));
     let seat = shared.seat.as_ref().map(|seat| {
         shape.model.clone_from(&seat.model);
         shape.limits.context_window = seat.context_window;
@@ -4822,8 +5678,10 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         why,
         question,
         view,
+        trigger,
+        ask,
+        role,
         seat,
-        ask: kind,
     });
     let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
     let request = state.push(Event::Requested {
@@ -4840,13 +5698,13 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         cancel: cancel.clone(),
     });
     state.forking = Some(fork);
-    Some(Fired {
+    Fired {
         turn,
         fork,
         request,
         shape,
         cancel,
-    })
+    }
 }
 
 /// The gap's fork, on the turn's own thread: its one call streamed into the
@@ -4861,8 +5719,17 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
 /// run nor logged as a piece, and its answer is `unparseable` -- unless the
 /// fork answers through the capture tools (#610), when each call is logged
 /// as a piece and its capture calls are what it answered ([`captured`]).
-#[allow(clippy::too_many_lines)]
 fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
+    let mut next = Some(forked);
+    while let Some(forked) = next {
+        next = one_fork(shared, forked);
+    }
+}
+
+/// One of the gap's forks, run to its settling: then the next queued fork,
+/// fired, or -- none left, a stop, or an `end` -- back to `awaiting`.
+#[allow(clippy::too_many_lines)]
+fn one_fork<S: Streaming>(shared: &Shared<S>, forked: Fired) -> Option<Fired> {
     let Fired {
         turn,
         fork,
@@ -5025,9 +5892,20 @@ fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
     for patch in patches {
         state.push(patch);
     }
-    turn_over(&shared.template, &mut state);
+    // The gap's next fork (#564), unless a stop or an `end` came meanwhile.
+    if outcome == log::ForkOutcome::Cancelled || state.ending {
+        state.queued.clear();
+    }
+    let next = state
+        .queued
+        .pop_front()
+        .map(|(turn, at, firing)| fire(shared, &mut state, turn, at, firing));
+    if next.is_none() {
+        turn_over(&shared.template, &mut state);
+    }
     drop(state);
     shared.changed.notify_all();
+    next
 }
 
 /// A fork's answer through the capture tools (#610): each capture call run
@@ -6792,6 +7670,7 @@ pub(in crate::drive) mod tests {
                 files: Vec::new(),
                 images: Vec::new(),
                 recovered_from: None,
+                background: None,
             })),
             Event::Forked {
                 of_turn: 1,
@@ -6799,6 +7678,8 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
                 view: ForkView::Last(2),
+                trigger: "turn_end".to_owned(),
+                role: Role::Developer,
                 seat: Some(log::ForkSeat {
                     substrate: "cpu-seat".to_owned(),
                     model: "small".to_owned(),
@@ -6844,6 +7725,7 @@ pub(in crate::drive) mod tests {
                 tool_outputs: log::SeamToolOutputs::Evict,
                 outputs: None,
                 render_budget: None,
+                fired: None,
                 pruned: None,
             },
             Event::Recalled {
@@ -6886,6 +7768,16 @@ pub(in crate::drive) mod tests {
                 parked: vec!["interview-t2-1".to_owned()],
                 prefix_intact: true,
                 rolled_back: 2,
+            },
+            Event::BackgroundEnded {
+                job: "bg_0123abcd".to_owned(),
+                status: log::BackgroundStatus::Completed,
+                exit: Some(0),
+                files: Vec::new(),
+            },
+            Event::Notified {
+                turn: 2,
+                text: "<task-notification>\n</task-notification>".to_owned(),
             },
             Event::Captured {
                 request: 3,
@@ -6935,9 +7827,11 @@ pub(in crate::drive) mod tests {
                 Event::Pruned { .. } => 28,
                 Event::Captured { .. } => 29,
                 Event::Reminded { .. } => 30,
+                Event::BackgroundEnded { .. } => 31,
+                Event::Notified { .. } => 32,
             });
         }
-        assert_eq!(kinds.len(), 31, "a variant has no sample");
+        assert_eq!(kinds.len(), 33, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -7166,6 +8060,7 @@ pub(in crate::drive) mod tests {
                 files: None,
                 shown: None,
                 recovered_from: None,
+                background: None,
             },
             log::Event::Fork {
                 lane: log::Lane::Interview,
@@ -7174,6 +8069,8 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
                 view: Some("last:2".to_owned()),
+                trigger: Some("turn_end".to_owned()),
+                role: Some("developer".to_owned()),
                 seat: Some(log::ForkSeat {
                     substrate: "cpu-seat".to_owned(),
                     model: "small".to_owned(),
@@ -7223,6 +8120,7 @@ pub(in crate::drive) mod tests {
                 carried_output_bytes: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
+                fired: None,
                 pruned: None,
             },
             log::Event::Recalled {
@@ -7265,6 +8163,16 @@ pub(in crate::drive) mod tests {
                 parked: vec!["interview-t2-1".to_owned()],
                 prefix_intact: true,
                 rolled_back: 2,
+            },
+            log::Event::BackgroundEnded {
+                job: "bg_0123abcd".to_owned(),
+                status: log::BackgroundStatus::Completed,
+                exit: Some(0),
+                files: None,
+            },
+            log::Event::Notice {
+                turn: 2,
+                text: "<task-notification>\n</task-notification>".to_owned(),
             },
             log::Event::Capture {
                 request: 3,
@@ -7744,12 +8652,12 @@ pub(in crate::drive) mod tests {
                     .map(|it| it.tag())
                     .collect::<Vec<_>>()
             ),
-            "ask cancel declare-seam end open-tangent close-tangent"
+            "ask cancel declare-seam end open-tangent close-tangent background"
         );
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running"
         );
         assert_eq!(
             tags(
@@ -7825,6 +8733,7 @@ pub(in crate::drive) mod tests {
             recording: None,
             read_tool: None,
             surface: tool_loop::ToolSurface::Bash,
+            background: false,
         }
     }
 
@@ -7842,6 +8751,260 @@ pub(in crate::drive) mod tests {
             "bash",
             &format!("{{\"command\":{}}}", serde_json::Value::from(command)),
         )
+    }
+
+    /// A session whose `bash` runs in the background on request (#614),
+    /// approvals off, playing `replies`.
+    fn backgrounding(
+        tree: &Path,
+        recording: Option<&Path>,
+        replies: Vec<Vec<Step>>,
+    ) -> Session<Canned> {
+        let mut tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["sleep", "echo"],
+            None,
+            Decider::Decline,
+        );
+        tools.background = true;
+        tools.approvals_off = true;
+        tools.recording = recording.map(Path::to_path_buf);
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Bash.tools_with(true);
+        Session::open_looping(Canned::new(replies), shape, None, tools)
+    }
+
+    /// A `bash` call asking for the background.
+    fn in_the_background(id: &str, command: &str) -> Step {
+        Step::call(
+            0,
+            id,
+            "bash",
+            &serde_json::json!({"command": command, "is_background": true}).to_string(),
+        )
+    }
+
+    /// Each ended job: its id, how, and its exit status (#614).
+    fn ended_jobs(log: &[Logged]) -> Vec<(String, log::BackgroundStatus, Option<u64>)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::BackgroundEnded {
+                    job, status, exit, ..
+                } => Some((job.clone(), *status, *exit)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// How many turns have settled.
+    fn turns_settled(log: &[Logged]) -> usize {
+        log.iter()
+            .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+            .count()
+    }
+
+    /// A background call (#614) returns at once with Qwen Code's start
+    /// text, its bare trailing `&` taken off; the command runs on, its
+    /// status file says so, and when it ends its output is kept by digest,
+    /// its end is logged, and its notification follows the next ask --
+    /// every head rebuilding.
+    #[test]
+    fn a_background_call_returns_at_once_and_its_end_is_noticed_at_the_next_ask() {
+        let tree = scratch("bg-start");
+        let recording = scratch("bg-start-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let session = backgrounding(
+            &tree,
+            Some(&recording),
+            vec![
+                vec![in_the_background("call-1", "sleep 2; echo ready &")],
+                deltas(&["started"]),
+                deltas(&["it is ready"]),
+            ],
+        );
+        let asked = Instant::now();
+        session.ask("start it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        assert!(
+            asked.elapsed() < Duration::from_millis(1500),
+            "{:?}",
+            asked.elapsed()
+        );
+        let line = lines(&log).remove(0);
+        let id = line.background.clone().expect("a job");
+        assert_eq!(line.outcome, log::ToolOutcome::Ran);
+        assert_eq!(line.argv, Some(tool_loop::argv_of("sleep 2; echo ready")));
+        assert!(
+            line.shown.as_deref().is_some_and(
+                |shown| shown.starts_with(&format!("Background shell started.\nid: {id}\n"))
+            ),
+            "{:?}",
+            line.shown
+        );
+        let (output, status) =
+            super::super::background::files_of(&recording.join("background"), &id);
+        assert!(
+            std::fs::read_to_string(&status)
+                .expect("a status file")
+                .contains("\"status\":\"running\"")
+        );
+        let log = wait_until(&session, "the job's end", |log| ended_jobs(log).len() == 1);
+        assert_eq!(
+            ended_jobs(&log),
+            [(id.clone(), log::BackgroundStatus::Completed, Some(0))]
+        );
+        assert_eq!(
+            std::fs::read_to_string(&output).expect("its output"),
+            "ready\n"
+        );
+        assert!(
+            std::fs::read_to_string(&status)
+                .expect("a status file")
+                .contains("\"status\":\"completed\"")
+        );
+        session.ask("is it ready?", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
+        let sent = session.shared.transport.sent();
+        let last = &sent.last().expect("a request").messages;
+        let note = &last[last.len() - 1];
+        assert_eq!(last[last.len() - 2].content, "is it ready?");
+        assert_eq!(note.role, Role::User);
+        assert!(
+            note.content
+                .starts_with(&format!("<task-notification>\n<task-id>{id}</task-id>"))
+        );
+        assert!(note.content.contains("<status>completed</status>"));
+        assert!(
+            note.content
+                .contains("<output-tail truncated=\"false\">ready\n</output-tail>")
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        session.end_commands();
+        tidy(&[&tree, &recording]);
+    }
+
+    /// `task_stop` (#614): a running job's group stopped and the job ended
+    /// `cancelled`; an id that names no job, and one no longer running,
+    /// answered in Qwen Code's words. A turn's end leaves a job running.
+    #[test]
+    fn task_stop_cancels_a_running_job_and_answers_what_it_cannot_stop() {
+        let tree = scratch("bg-stop");
+        let session = backgrounding(
+            &tree,
+            None,
+            vec![
+                vec![in_the_background("call-1", "sleep 30")],
+                deltas(&["started"]),
+            ],
+        );
+        session.ask("start it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let id = lines(&log)[0].background.clone().expect("a job");
+        assert!(
+            ended_jobs(&log).is_empty(),
+            "the turn's end leaves it running"
+        );
+        let stop = |call: &str, id: &str| {
+            Step::call(
+                0,
+                call,
+                super::super::background::TASK_STOP,
+                &serde_json::json!({ "task_id": id }).to_string(),
+            )
+        };
+        let transport = &session.shared.transport;
+        transport.append(vec![stop("call-2", &id)]);
+        transport.append(vec![stop("call-3", "bg_nothere")]);
+        transport.append(deltas(&["stopped"]));
+        session.ask("stop it", None).expect("accepted");
+        let log = wait_until(&session, "the stop and the job's end", |log| {
+            turns_settled(log) == 2 && ended_jobs(log).len() == 1
+        });
+        let written = lines(&log);
+        assert!(
+            written[1]
+                .shown
+                .as_deref()
+                .is_some_and(|shown| shown.starts_with(&format!(
+                    "Cancellation requested for background shell \"{id}\""
+                ))),
+            "{:?}",
+            written[1].shown
+        );
+        assert_eq!(
+            written[2].shown.as_deref(),
+            Some("Error: No background task found with ID \"bg_nothere\".")
+        );
+        assert_eq!(ended_jobs(&log)[0].1, log::BackgroundStatus::Cancelled);
+        transport.append(vec![stop("call-4", &id)]);
+        transport.append(deltas(&["done"]));
+        session.ask("stop it again", None).expect("accepted");
+        let log = wait_until(&session, "the third turn", |log| turns_settled(log) == 3);
+        assert_eq!(
+            lines(&log)[3].shown.as_deref(),
+            Some(
+                format!("Error: Background shell \"{id}\" is not running (status: cancelled).")
+                    .as_str()
+            )
+        );
+        reads_whole(&session);
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// The operator moves a running call to the background (#614): it
+    /// answers at once with Qwen Code's promotion text and what it printed
+    /// so far, the command runs on as the job the command channel named,
+    /// and with nothing running the move is refused `nothing-running`.
+    #[test]
+    fn a_running_call_moved_to_the_background_returns_and_runs_on() {
+        let tree = scratch("bg-promote");
+        let session = backgrounding(
+            &tree,
+            None,
+            vec![
+                vec![bash("call-1", "echo early; sleep 2; echo late")],
+                deltas(&["moved on"]),
+            ],
+        );
+        assert!(matches!(
+            session.background(),
+            Err(Rejected::Refused(Refusal::NothingRunning))
+        ));
+        session.ask("run it", None).expect("accepted");
+        let started = Instant::now();
+        let job = loop {
+            if let Ok(job) = session.background() {
+                break job;
+            }
+            assert!(started.elapsed() < Duration::from_secs(5), "never running");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let line = lines(&log).remove(0);
+        assert_eq!(line.background.as_deref(), Some(job.as_str()));
+        assert!(
+            line.shown.as_deref().is_some_and(|shown| shown.starts_with(&format!(
+                "Foreground command \"echo early; sleep 2; echo late\" promoted to background as {job}."
+            ))),
+            "{:?}",
+            line.shown
+        );
+        let log = wait_until(&session, "the job's end", |log| ended_jobs(log).len() == 1);
+        assert_eq!(ended_jobs(&log)[0].1, log::BackgroundStatus::Completed);
+        let output = std::fs::read_to_string(
+            super::super::background::files_of(
+                &background_dir(&session.shared, &session.shared.lock()),
+                &job,
+            )
+            .0,
+        )
+        .expect("its output");
+        assert!(output.ends_with("late\n"), "{output:?}");
+        reads_whole(&session);
+        tidy(&[&tree]);
     }
 
     pub(in crate::drive) fn lines(log: &[Logged]) -> Vec<ToolLine> {
@@ -9539,7 +10702,10 @@ pub(in crate::drive) mod tests {
             delivery: log::ForkDelivery::Seam,
             phases: crate::seam::phase::PhaseGraph::none(),
             recall: super::super::archive::Recall::Off,
+            role: Role::User,
             view: None,
+            cadence: Cadence::Gap,
+            threshold_bytes: None,
             prune: None,
             self_capture: None,
             asks: &crate::dogma::asks::V3,
@@ -9580,6 +10746,194 @@ pub(in crate::drive) mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// Each fork's warrant and trigger, in order (#564).
+    fn triggers(log: &[Logged]) -> Vec<(log::Warrant, String)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Forked { why, trigger, .. } => Some((*why, trigger.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// A session whose one turn runs `commands` in order, then answers, and
+    /// whose gap forks under `cadence` and `threshold` with both warrants:
+    /// each fork answers with a learned line (#564).
+    fn cadenced(
+        tree: &Path,
+        commands: &[&str],
+        (cadence, threshold_bytes): (Cadence, Option<u64>),
+        forks: usize,
+    ) -> Session<Canned> {
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        std::fs::write(tree.join("lib.rs"), "pub fn f() {}\n").expect("a source");
+        let mut replies: Vec<Vec<Step>> = commands
+            .iter()
+            .enumerate()
+            .map(|(n, command)| vec![bash(&format!("call-{}", n + 1), command)])
+            .collect();
+        replies.push(deltas(&["Done. Next, I will write the schema."]));
+        replies.extend((0..forks).map(|_| deltas(&["LEARNED: something\n"])));
+        Session::open_with(
+            Canned::new(replies),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                tree,
+                &["cat", "echo"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(Interview {
+                cadence,
+                threshold_bytes,
+                ..interviewing(&[log::Warrant::Scoping, log::Warrant::Read])
+            }),
+        )
+    }
+
+    /// Runs `cadenced`'s one turn to the end of its gap: every fork settled.
+    fn through_the_gap(session: &Session<Canned>, forks: usize) -> Vec<Logged> {
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(session, "the gap's forks", |log| {
+            settled(log) && fork_outcomes(log).len() == forks
+        });
+        reads_whole(session);
+        log
+    }
+
+    /// `per_class` (#564): a fork on every call the router routes to a class
+    /// ask, in call order, each naming its call and class; a call it would
+    /// not interrupt forks nothing. The gap's forks run one after another,
+    /// and the log reads.
+    #[test]
+    fn per_class_forks_on_each_routed_call_in_call_order() {
+        let tree = scratch("cadence-per-class");
+        let session = cadenced(
+            &tree,
+            &["cat notes.md", "echo hi", "cat lib.rs"],
+            (Cadence::PerClass, None),
+            2,
+        );
+        let log = through_the_gap(&session, 2);
+        assert_eq!(
+            triggers(&log),
+            [
+                (log::Warrant::Read, "call:document-read:call-1".to_owned()),
+                (log::Warrant::Read, "call:source-read:call-3".to_owned()),
+            ]
+        );
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value; 2]);
+        let questions: Vec<String> = forks(&log).into_iter().map(|fork| fork.4).collect();
+        assert!(
+            questions[0].contains("You just read a document"),
+            "{questions:?}"
+        );
+        assert!(
+            questions[1].contains("You last ran: cat lib.rs"),
+            "{questions:?}"
+        );
+        every_head_rebuilds(&log);
+        tidy(&[&tree]);
+    }
+
+    /// `per_call` (#564): a fork on every call that ran -- the class's ask,
+    /// or the router's declared default, the generic ask, for one it would
+    /// not interrupt.
+    #[test]
+    fn per_call_forks_on_every_call_with_the_generic_ask_as_its_default() {
+        let tree = scratch("cadence-per-call");
+        let session = cadenced(
+            &tree,
+            &["cat notes.md", "echo hi"],
+            (Cadence::PerCall, None),
+            2,
+        );
+        let log = through_the_gap(&session, 2);
+        let found = triggers(&log);
+        assert_eq!(found[0].1, "call:document-read:call-1");
+        assert!(found[1].1.ends_with(":call-2"), "{found:?}");
+        let generic = router::Ask {
+            kind: AskKind::Generic,
+            intent: router::stated_intent("Done. Next, I will write the schema."),
+        }
+        .render(&Facts {
+            last_command: Some("echo hi".to_owned()),
+            ..Facts::default()
+        });
+        assert_eq!(forks(&log)[1].4, generic);
+        tidy(&[&tree]);
+    }
+
+    /// `turn_boundary` (#564): the judgment ask at the turn's end under
+    /// `scoping`, though the ask carried no mark; `gap` fires nothing for
+    /// the same turn with no read in it.
+    #[test]
+    fn turn_boundary_asks_judgment_at_every_turns_end() {
+        let tree = scratch("cadence-turn-boundary");
+        let session = cadenced(&tree, &["echo hi"], (Cadence::TurnBoundary, None), 1);
+        let log = through_the_gap(&session, 1);
+        assert_eq!(
+            triggers(&log),
+            [(log::Warrant::Scoping, "turn_end".to_owned())]
+        );
+        let session = cadenced(&tree, &["echo hi"], (Cadence::Gap, None), 0);
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(triggers(&log).is_empty());
+        tidy(&[&tree]);
+    }
+
+    /// The threshold (#564) gates a read: under it, the read forks nothing;
+    /// at it, the read forks as before, its trigger naming the call.
+    #[test]
+    fn a_read_under_the_threshold_forks_nothing() {
+        let tree = scratch("cadence-threshold");
+        // `notes.md` is seven bytes.
+        let session = cadenced(&tree, &["cat notes.md"], (Cadence::Gap, Some(8)), 0);
+        session.ask("look around", None).expect("accepted");
+        let log = wait_until(&session, "the turn", settled);
+        assert!(triggers(&log).is_empty(), "{:?}", triggers(&log));
+        let session = cadenced(&tree, &["cat notes.md"], (Cadence::Gap, Some(7)), 1);
+        let log = through_the_gap(&session, 1);
+        assert_eq!(
+            triggers(&log),
+            [(log::Warrant::Read, "call:document-read:call-1".to_owned())]
+        );
+        tidy(&[&tree]);
+    }
+
+    /// The cadence and the threshold read leniently (#564).
+    #[test]
+    fn the_cadence_and_threshold_read_leniently() {
+        let read = |text: &str| {
+            let regimen = regimen::parse(text).expect("a regimen");
+            (
+                interview_cadence(&regimen),
+                interview_threshold_bytes(&regimen),
+            )
+        };
+        assert_eq!(read(""), (Cadence::Gap, None));
+        assert_eq!(
+            read("interview_cadence = \"per_class\"\ninterview_threshold_bytes = 3000\n"),
+            (Cadence::PerClass, Some(3000))
+        );
+        assert_eq!(
+            read("interview_cadence = \"often\"\ninterview_threshold_bytes = 0\n"),
+            (Cadence::Gap, None)
+        );
+        assert_eq!(
+            read("interview_cadence = \"turn_boundary\"\n").0,
+            Cadence::TurnBoundary
+        );
+        assert_eq!(
+            read("interview_cadence = \"per_call\"\n").0,
+            Cadence::PerCall
+        );
     }
 
     fn fork_outcomes(log: &[Logged]) -> Vec<log::ForkOutcome> {
@@ -10293,6 +11647,55 @@ pub(in crate::drive) mod tests {
         assert_eq!(read("fork_asks = 3\n"), "v3");
     }
 
+    /// #599: a fork's ask goes in the interview's role, and its `fork` line
+    /// names a role but `user`; under `user` the line is as before.
+    #[test]
+    fn a_forks_ask_goes_in_the_interview_role_and_its_line_names_it() {
+        for role in [Role::User, Role::Developer] {
+            let mut interview = interviewing(&[log::Warrant::Scoping]);
+            interview.role = role;
+            let session = Session::open_with(
+                Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED])]),
+                template(),
+                None,
+                None,
+                None,
+                Some(interview),
+            );
+            session
+                .ask_marked("what are we building?", None, true)
+                .expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+            let sent = session.shared.transport.sent();
+            let ask = sent
+                .last()
+                .and_then(|fork| fork.messages.last())
+                .expect("the fork's ask");
+            assert_eq!(ask.role, role);
+            let lines = whole_log(&session);
+            let named = lines.iter().find_map(|line| match &line.event {
+                log::Event::Fork { role, .. } => Some(role.clone()),
+                _ => None,
+            });
+            assert_eq!(
+                named.expect("a fork line"),
+                (role != Role::User).then(|| role.tag().to_owned())
+            );
+        }
+    }
+
+    /// #599: the role is read leniently, `user` by default.
+    #[test]
+    fn the_interview_role_is_read_leniently() {
+        let read = |text: &str| interview_role(&regimen::parse(text).expect("a regimen"));
+        assert_eq!(read(""), Role::User);
+        assert_eq!(read("interview_role = \"system\"\n"), Role::System);
+        assert_eq!(read("interview_role = \"developer\"\n"), Role::Developer);
+        assert_eq!(read("interview_role = \"assistant\"\n"), Role::User);
+    }
+
     /// A session whose first scoping turn records three trunk decisions,
     /// then opens tangent `t/1`, whose scoping turn's fork records four.
     fn a_tangent_with_four_entries() -> (Session<Canned>, Vec<Message>) {
@@ -10470,6 +11873,288 @@ pub(in crate::drive) mod tests {
         let mut shape = template();
         declare_self_capture(&mut shape, Some(&interview));
         Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
+    }
+
+    /// A self-capturing session over a `window`-token context, its seam
+    /// policy `seams`, playing `acts` (#617).
+    fn windowed(
+        acts: Vec<Vec<Step>>,
+        window: u64,
+        seams: crate::seam::policy::Served,
+    ) -> Session<Canned> {
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.seams = seams;
+        let mut shape = template();
+        shape.limits.context_window = Some(window);
+        declare_self_capture(&mut shape, Some(&interview));
+        Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview))
+    }
+
+    /// The acts of #617's two turns: turn one records a fact the trunk said
+    /// and answers; turn two takes a step the server measures at
+    /// `measured` prompt tokens, then answers.
+    fn two_turns_measuring(measured: u64) -> Vec<Vec<Step>> {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let timings = |prompt: u64| {
+            Step::Timings(Timings {
+                prompt_n: Some(prompt),
+                cache_n: Some(0),
+                ..Timings::default()
+            })
+        };
+        vec![
+            vec![
+                Step::Delta(SAID.to_owned()),
+                record("call-1", "fact", SAID),
+                timings(1_000),
+            ],
+            vec![Step::Delta("done".to_owned()), timings(1_100)],
+            vec![
+                Step::Delta("Reading it now.".to_owned()),
+                record("call-2", "fact", "Reading it now."),
+                timings(measured),
+            ],
+            deltas(&["done again"]),
+        ]
+    }
+
+    fn window_seams(log: &[Logged]) -> Vec<(u64, u32, Option<log::SeamFired>)> {
+        log.iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Seamed {
+                    reason: crate::seam::Reason::Window,
+                    at_turn,
+                    fired,
+                    ..
+                } => Some((logged.seq, *at_turn, *fired)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// #617: before a step's request whose prompt would leave less than the
+    /// reserve of the window, the trunk is refilled from working memory --
+    /// under the turn, between its steps -- and the turn goes on: the next
+    /// request carries the refill, then the turn's own ask and step. The
+    /// seam names the prompt that fired it and the window, the log reads
+    /// back, and the record projects it.
+    #[test]
+    fn a_step_that_would_overflow_the_window_seams_first_and_the_turn_goes_on() {
+        let session = windowed(
+            two_turns_measuring(90_000),
+            100_000,
+            crate::seam::policy::Served::default(),
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+        });
+        let seams = window_seams(&log);
+        assert_eq!(seams.len(), 1, "{log:#?}");
+        let (at, at_turn, fired) = seams[0];
+        assert_eq!(at_turn, 2);
+        let fired = fired.expect("its sizes");
+        assert_eq!(fired.window, 100_000);
+        assert!(fired.prompt_tokens > 80_000, "{fired:?}");
+        // Under the turn: after its first request, before its next.
+        let turn_two_requests: Vec<u64> = log
+            .iter()
+            .filter(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Requested {
+                        turn: 2,
+                        lane: Lane::Trunk,
+                        ..
+                    }
+                )
+            })
+            .map(|logged| logged.seq)
+            .collect();
+        assert_eq!(turn_two_requests.len(), 2);
+        assert!(turn_two_requests[0] < at && at < turn_two_requests[1]);
+        // The request after it: the head, the refill, then turn two's ask
+        // and its step -- turn one is gone from it.
+        let sent = session.shared.transport.sent();
+        let after = &sent[3].messages;
+        assert!(
+            !after
+                .iter()
+                .any(|message| message.content == "how are blank lines treated?"),
+            "{after:#?}"
+        );
+        assert!(after.iter().any(|message| message.content == "second"));
+        reads_whole(&session);
+        let lines: Vec<log::Line> = session.events_from(0).iter().map(line_of).collect();
+        let projected = super::super::projection::project(
+            &lines,
+            &regime(),
+            Some(super::super::projection::Engine::Commit("e7051ef")),
+        )
+        .expect("the log projects");
+        let rendered = crate::formats::record::render(&crate::formats::record::Record {
+            events: projected.events.clone(),
+        });
+        crate::formats::record::parse(&rendered)
+            .unwrap_or_else(|why| panic!("the record does not read: {why:?}\n{rendered}"));
+        // The record's seam row names the prompt that fired it and the
+        // window.
+        assert!(
+            projected.events.iter().any(|event| matches!(
+                event,
+                crate::formats::record::Event::Seam {
+                    at_turn: 2,
+                    prompt_tokens: Some(prompt),
+                    window: Some(100_000),
+                    ..
+                } if *prompt == fired.prompt_tokens
+            )),
+            "{:#?}",
+            projected.events
+        );
+    }
+
+    /// #617: a request the engine refuses as an overflow is seamed once
+    /// and sent again on the refilled trunk -- the refusal logged, then the
+    /// seam, then the same turn's request again -- and the turn goes on. A
+    /// second overflow fails the turn: once per turn. With nothing in
+    /// working memory there is nothing to seam, and it fails as before.
+    #[test]
+    fn an_overflow_seams_once_and_goes_again() {
+        const TYPED: &str = r#"{"error":{"code":400,"type":"exceed_context_size_error"}}"#;
+        let refused = || vec![Step::Reject(400, TYPED.to_owned())];
+        let turn_two = |session: &Session<Canned>| {
+            session
+                .ask("how are blank lines treated?", None)
+                .expect("accepted");
+            wait_until(session, "turn one", settled);
+            session.ask("second", None).expect("accepted");
+            let log = wait_until(session, "turn two", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+            });
+            reads_whole(session);
+            log
+        };
+        let settled_as = |log: &[Logged]| {
+            log.iter()
+                .rev()
+                .find_map(|logged| match &logged.event {
+                    Event::TurnSettled { turn: 2, reason } => Some(*reason),
+                    _ => None,
+                })
+                .expect("turn two settled")
+        };
+        let mut acts = two_turns_measuring(1_000);
+        acts.truncate(2);
+        acts.push(refused());
+        acts.push(deltas(&["after the seam"]));
+        let once = windowed(acts, 1_000_000, crate::seam::policy::Served::default());
+        let log = turn_two(&once);
+        assert_eq!(settled_as(&log), SettleReason::Final);
+        let seams = window_seams(&log);
+        assert_eq!(seams.len(), 1, "{log:#?}");
+        let (at, _, fired) = seams[0];
+        assert_eq!(fired.map(|fired| fired.window), Some(1_000_000));
+        let refused_at = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Rejected { .. }))
+            .expect("the refusal")
+            .seq;
+        let again = log
+            .iter()
+            .filter(|logged| matches!(logged.event, Event::Requested { turn: 2, .. }))
+            .map(|logged| logged.seq)
+            .max()
+            .expect("a request");
+        assert!(refused_at < at && at < again, "{log:#?}");
+        let lines: Vec<log::Line> = once.events_from(0).iter().map(line_of).collect();
+        super::super::projection::project(&lines, &regime(), None).expect("the log projects");
+
+        let mut acts = two_turns_measuring(1_000);
+        acts.truncate(2);
+        acts.push(refused());
+        acts.push(refused());
+        let twice = windowed(acts, 1_000_000, crate::seam::policy::Served::default());
+        let log = turn_two(&twice);
+        assert_eq!(settled_as(&log), SettleReason::Failed);
+        assert_eq!(window_seams(&log).len(), 1);
+
+        let mut acts = two_turns_measuring(1_000);
+        acts.truncate(2);
+        acts[0][1] = record(
+            "call-1",
+            "fact",
+            "The cache is flushed every ninety seconds.",
+        );
+        acts.push(refused());
+        let empty = windowed(acts, 1_000_000, crate::seam::policy::Served::default());
+        let log = turn_two(&empty);
+        assert_eq!(settled_as(&log), SettleReason::Failed);
+        assert!(window_seams(&log).is_empty());
+    }
+
+    /// #617: with room in the window no seam fires; turned off by the
+    /// regimen none fires however full it is; and with nothing in working
+    /// memory the request goes as it is.
+    #[test]
+    fn no_window_seam_with_room_when_turned_off_or_with_nothing_to_refill_from() {
+        let run = |session: Session<Canned>| {
+            session
+                .ask("how are blank lines treated?", None)
+                .expect("accepted");
+            wait_until(&session, "turn one", settled);
+            session.ask("second", None).expect("accepted");
+            let log = wait_until(&session, "turn two", |log| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+            });
+            reads_whole(&session);
+            window_seams(&log).len()
+        };
+        let roomy = windowed(
+            two_turns_measuring(10_000),
+            100_000,
+            crate::seam::policy::Served::default(),
+        );
+        assert_eq!(run(roomy), 0);
+        let off = windowed(
+            two_turns_measuring(90_000),
+            100_000,
+            crate::seam::policy::Served {
+                window_off: true,
+                ..crate::seam::policy::Served::default()
+            },
+        );
+        assert_eq!(run(off), 0);
+        let mut acts = two_turns_measuring(90_000);
+        acts[0] = vec![
+            Step::Delta("Nothing worth keeping.".to_owned()),
+            record(
+                "call-1",
+                "fact",
+                "The cache is flushed every ninety seconds.",
+            ),
+        ];
+        acts[2][1] = record(
+            "call-2",
+            "fact",
+            "The cache is flushed every ninety seconds.",
+        );
+        let empty = windowed(acts, 100_000, crate::seam::policy::Served::default());
+        assert_eq!(run(empty), 0);
     }
 
     fn record(id: &str, field: &str, content: &str) -> Step {
@@ -11480,6 +13165,7 @@ pub(in crate::drive) mod tests {
                     tail_tokens,
                     outputs: state,
                     render_budget: None,
+                    window_off: false,
                 },
                 ..interviewing(&[log::Warrant::Read])
             }),
@@ -11811,6 +13497,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -11867,6 +13554,7 @@ pub(in crate::drive) mod tests {
                     tail_tokens,
                     outputs: log::SeamToolOutputs::Evict,
                     render_budget: None,
+                    window_off: false,
                 })),
             )
         };
@@ -11938,6 +13626,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -11969,6 +13658,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -12011,6 +13701,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -12055,6 +13746,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -12087,6 +13779,7 @@ pub(in crate::drive) mod tests {
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
                 render_budget: None,
+                window_off: false,
             })),
         );
         session
@@ -12260,6 +13953,7 @@ pub(in crate::drive) mod tests {
                 carried_output_bytes: None,
                 placement: Some(log::RenderPlacement::Message),
                 render_budget: None,
+                fired: None,
                 pruned: None,
             }
         );

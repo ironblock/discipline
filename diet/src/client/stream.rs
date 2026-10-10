@@ -1103,6 +1103,15 @@ impl Canned {
         }
     }
 
+    /// `reply` played after the replies already queued: for a script that
+    /// names what the session made, such as a background job's id (#614).
+    pub fn append(&self, reply: Vec<Step>) {
+        self.replies
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .extend(std::iter::once(reply));
+    }
+
     /// Every request sent so far, in order.
     #[must_use]
     pub fn sent(&self) -> Vec<RequestShape> {

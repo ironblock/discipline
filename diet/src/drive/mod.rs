@@ -96,6 +96,7 @@
 
 pub mod archive;
 pub mod attach;
+pub mod background;
 pub mod canned;
 pub mod engine;
 pub mod instructions;
@@ -110,6 +111,7 @@ pub mod served;
 pub mod session;
 pub mod shell_gate;
 pub mod standard;
+pub mod template_roles;
 pub mod tool_loop;
 
 use std::cell::Cell;
@@ -1204,6 +1206,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tail_tokens: None,
                 carried_turns: None,
                 carried_tokens: None,
+                // Never the window's: the scripted drive has none.
+                prompt_tokens: None,
+                window: None,
                 pruned: None,
             });
             seams.push(seam);

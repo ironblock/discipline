@@ -486,11 +486,18 @@ fn kwargs_of(
 /// the check: a definition that differs from what was sent leaves the head
 /// unverified, never wrongly verified.
 fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
+    // Background commands (#614) were on exactly when `task_stop` was
+    // declared: `bash` then took `is_background`.
+    let background = names
+        .iter()
+        .any(|name| name == super::background::TASK_STOP);
     names
         .iter()
         .map(|name| {
             if name == super::tool_loop::BASH {
-                Ok(super::tool_loop::bash_tool())
+                Ok(super::tool_loop::bash_tool_with(background))
+            } else if name == super::background::TASK_STOP {
+                Ok(super::background::task_stop_tool())
             } else if let Some(tool) = super::standard::definitions()
                 .into_iter()
                 .chain([super::prune::definition()])
@@ -678,6 +685,9 @@ impl<'a> Walk<'a> {
             Line::IdleGap { .. } => log::Kind::IdleGap,
             Line::Refused { .. } => log::Kind::Refused,
             Line::Capture { .. } => log::Kind::Capture,
+            Line::BackgroundEnded { .. } => log::Kind::BackgroundEnded,
+            // The trunk's own self-capture patch (#609), fork-less.
+            Line::Patch { .. } => log::Kind::Patch,
             _ => log::Kind::Progress,
         }
         .tag();
@@ -768,16 +778,19 @@ impl<'a> Walk<'a> {
             // on the rebuilt trunk, as it does on the session's.
             // Archived items recalled (v7, #566): a note after it too, in
             // the log's order.
-            // The self-capture reminder (v7, #609): a note after it too.
+            // Background commands' notices (v7, #614), the self-capture
+            // reminder (v7, #609): notes after it too, in the log's order.
             Line::Delivered { turn, text, .. }
             | Line::Recalled { turn, text, .. }
-            | Line::Reminded { turn, text } => {
+            | Line::Reminded { turn, text }
+            | Line::Notice { turn, text } => {
                 self.notes.entry(*turn).or_default().push(text.clone());
             }
             // Facts the record has no row for at all, named once per kind.
             Line::IdleGap { .. }
             | Line::Refused { .. }
             | Line::Progress { .. }
+            | Line::BackgroundEnded { .. }
             | Line::Capture { .. }
             // The trunk's own self-capture patch (#609): no fork row to
             // count it on, as its `capture` line has none.
@@ -996,6 +1009,7 @@ impl<'a> Walk<'a> {
             tail_tokens,
             outputs,
             placement,
+            fired,
             pruned,
             ..
         } = &line.event
@@ -1084,6 +1098,9 @@ impl<'a> Walk<'a> {
             tail_tokens: tailed.then_some(tail_tokens),
             carried_turns: tailed.then_some(carried_turns),
             carried_tokens: tailed.then_some(carried_tokens),
+            // An automatic seam names the prompt that fired it (#617).
+            prompt_tokens: fired.map(|fired| fired.prompt_tokens),
+            window: fired.map(|fired| fired.window),
             pruned: (!applied.is_empty()).then_some(applied),
         });
     }
@@ -1698,6 +1715,34 @@ mod tests {
         }
     }
 
+    /// #609: a trunk self-capture's `patch` line -- no fork -- has no record
+    /// row and is named as the `patch` line it is, never as `progress`.
+    #[test]
+    fn a_trunk_patch_is_named_a_patch_line() {
+        let mut events = vec![start()];
+        events.extend(answered(1, 3, None, None));
+        events.push(Line::Patch {
+            fork: None,
+            lane: Some("self-capture".to_owned()),
+            op: log::PatchOp::Add,
+            entry: log::PatchEntry {
+                id: "r3/call-1/fact".to_owned(),
+                text: "Hello".to_owned(),
+                category: None,
+            },
+            supersedes: None,
+            tangent: None,
+        });
+        let projection = project(&numbered(events), &regime(), None).expect("projected");
+        let kinds: Vec<&str> = projection
+            .unspellable
+            .iter()
+            .map(|item| item.kind)
+            .collect();
+        assert!(kinds.contains(&"patch"), "{kinds:?}");
+        assert!(!kinds.contains(&"progress"), "{kinds:?}");
+    }
+
     /// One answered turn, its request at `request`.
     fn answered(
         turn: u32,
@@ -1877,6 +1922,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            fired: None,
             pruned: None,
         });
         let projection = project(
@@ -1922,6 +1968,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            fired: None,
             pruned: None,
         });
         let projection = project(
@@ -2464,6 +2511,7 @@ mod tests {
                 files: None,
                 shown: None,
                 recovered_from: None,
+                background: None,
             }
         };
         let mut events = vec![start()];
@@ -2550,6 +2598,7 @@ mod tests {
                 files: None,
                 shown: None,
                 recovered_from: None,
+                background: None,
             },
         );
         events.extend(turn);
@@ -2622,6 +2671,8 @@ mod tests {
             why,
             question: "what did the operator decide".to_owned(),
             view: None,
+            trigger: None,
+            role: None,
             seat: None,
             ask: None,
         };
@@ -2797,6 +2848,7 @@ mod tests {
                 files: Some(vec![file.clone()]),
                 shown: None,
                 recovered_from: None,
+                background: None,
             },
         );
         events.extend(turn);

@@ -594,7 +594,7 @@ fn phase_graph_lever(regimen: &Regimen) -> String {
 /// has them.
 #[must_use]
 pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<String, String> {
-    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS, SEAM_TAIL_TOKENS};
+    use crate::seam::policy::SEAM_TAIL_TOKENS;
     let word = |key: &str| match regimen.get(key) {
         Some(regimen::Value::String(word)) => word.clone(),
         Some(regimen::Value::Integer(n)) => n.to_string(),
@@ -618,16 +618,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
         Some(_) => undeclared(),
     };
-    let mut triggers = vec!["operator-declared"];
-    if regimen.get(SEAM_EVERY_TURNS).is_some() {
-        triggers.push("cadence");
-    }
-    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
-        .iter()
-        .any(|key| regimen.get(key).is_some())
-    {
-        triggers.push("budget");
-    }
+    let triggers = seam_triggers(regimen);
     let [disposition, approval, surface, limits] = command_levers(regimen, output_cap);
     let reasoning = match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
         (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
@@ -651,7 +642,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     let pruning = crate::drive::prune::lever(regimen);
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
-        ("seam_trigger".to_owned(), triggers.join("+")),
+        ("seam_trigger".to_owned(), triggers),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         (
             "archive_recall".to_owned(),
@@ -669,6 +660,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("cache_lifetime".to_owned(), word(CACHE_TTL_KEY)),
         ("substrate_rung".to_owned(), word("substrate")),
         ("tool_surface".to_owned(), surface),
+        ("background_commands".to_owned(), background_lever(regimen)),
         ("tool_call_text_fallback".to_owned(), text_fallback),
         (
             "instruction_files".to_owned(),
@@ -682,12 +674,16 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
             "capture_modality".to_owned(),
             capture_modality_lever(regimen),
         ),
-        ("interview_routing_and_cadence".to_owned(), warrant),
+        (
+            "interview_routing_and_cadence".to_owned(),
+            cadence_lever(regimen),
+        ),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         ("fork_memory_share".to_owned(), undeclared()),
         ("fork_input_view".to_owned(), fork_input_view_lever(regimen)),
         ("fork_asks".to_owned(), fork_asks_lever(regimen)),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
+        ("interview_role".to_owned(), interview_role_lever(regimen)),
         ("step_and_output_limits".to_owned(), limits),
         ("extraction_seat".to_owned(), Seat::lever(regimen)),
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
@@ -724,6 +720,16 @@ fn render_budget_lever(regimen: &Regimen) -> String {
     )
 }
 
+/// The interview routing and cadence lever (#564): the cadence's word, and
+/// the read fork's output threshold when one is declared.
+fn cadence_lever(regimen: &Regimen) -> String {
+    let cadence = crate::drive::session::interview_cadence(regimen).word();
+    crate::drive::session::interview_threshold_bytes(regimen).map_or_else(
+        || cadence.to_owned(),
+        |bytes| format!("{cadence}:threshold:{bytes}-bytes"),
+    )
+}
+
 /// The fork ask set lever's word (#595): the set's name and digest.
 fn fork_asks_lever(regimen: &Regimen) -> String {
     let set = crate::drive::session::fork_asks(regimen);
@@ -738,6 +744,25 @@ fn tangent_closure_lever(regimen: &Regimen) -> String {
     } else {
         UNDECLARED.to_owned()
     }
+}
+
+/// The background commands lever (#614): on unless the regimen turns them
+/// off; undeclared where it runs no commands.
+fn background_lever(regimen: &Regimen) -> String {
+    crate::drive::tool_loop::declared(regimen)
+        .ok()
+        .flatten()
+        .map_or_else(
+            || UNDECLARED.to_owned(),
+            |declared| if declared.background { "on" } else { "off" }.to_owned(),
+        )
+}
+
+/// The interview role lever's word (#599): the role the regimen asks in.
+fn interview_role_lever(regimen: &Regimen) -> String {
+    crate::drive::session::interview_role(regimen)
+        .tag()
+        .to_owned()
 }
 
 /// The self-capture lever's word (#609): `off`, or `on:every:<n>` with the
@@ -757,6 +782,31 @@ fn instruction_files_lever(regimen: &Regimen) -> String {
         "off"
     }
     .to_owned()
+}
+
+/// The seam triggers a regimen leaves armed, in [`serve_levers`]' words:
+/// the operator's always, then the cadence and budget it declares, and the
+/// automatic seam unless it turns it off (#617).
+fn seam_triggers(regimen: &Regimen) -> String {
+    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS};
+    let mut triggers = vec!["operator-declared"];
+    if regimen.get(SEAM_EVERY_TURNS).is_some() {
+        triggers.push("cadence");
+    }
+    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
+        .iter()
+        .any(|key| regimen.get(key).is_some())
+    {
+        triggers.push("budget");
+    }
+    // The automatic seam (#617): on unless the regimen turns it off; it
+    // fires only where serve knows the window and keeps working memory.
+    if crate::seam::policy::Served::from_regimen(regimen, None)
+        .map_or(true, |served| !served.window_off)
+    {
+        triggers.push("window");
+    }
+    triggers.join("+")
 }
 
 /// The capture modality lever's word (#610): how a fork answers, `fields`
@@ -851,6 +901,23 @@ mod tests {
         assert_eq!(declared.max_steps, Some(40), "`[limits]` beneath it");
     }
 
+    /// The interview routing and cadence lever names the cadence (#564)
+    /// and, when declared, the read fork's threshold: no longer the warrant.
+    #[test]
+    fn the_interview_lever_names_the_cadence_and_its_threshold() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("interview_routing_and_cadence")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever("interview_warrant = [\"scoping\"]\n"), "gap");
+        assert_eq!(
+            lever("interview_cadence = \"per_class\"\ninterview_threshold_bytes = 3000\n"),
+            "per_class:threshold:3000-bytes"
+        );
+    }
+
     /// The tool-output disposition names the cap on arrival and, beside
     /// it, what a seam carries of the outputs it compacts away (#553):
     /// `evict` unless the regimen declares a state, an unknown word unset.
@@ -881,6 +948,28 @@ mod tests {
             disposition("seam_tool_outputs = \"keep\"\n[tool_output]\ncap = false\n"),
             "keep+seam:keep"
         );
+    }
+
+    /// Background commands (#614) are on unless the regimen turns them
+    /// off, and undeclared where it runs no commands.
+    #[test]
+    fn the_background_commands_lever_is_on_unless_turned_off() {
+        let lever = |text: &str| {
+            serve_levers(&regimen::parse(text).expect("a regimen"), (8192, "default"))
+                .get("background_commands")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(lever("approval = \"none\"\n"), "on");
+        assert_eq!(
+            lever("approval = \"none\"\nbackground_commands = false\n"),
+            "off"
+        );
+        assert_eq!(
+            lever("approval = \"none\"\nbackground_commands = \"off\"\n"),
+            "off"
+        );
+        assert_eq!(lever(""), UNDECLARED);
     }
 
     #[test]
@@ -930,7 +1019,10 @@ mod tests {
             &regimen::parse("seam_every_turns = 3\nseam_tail_tokens = 8000\n").expect("a regimen"),
             (8192, "default"),
         );
-        assert_eq!(at(&paced, "seam_trigger"), "operator-declared+cadence");
+        assert_eq!(
+            at(&paced, "seam_trigger"),
+            "operator-declared+cadence+window"
+        );
         assert_eq!(at(&paced, "compaction_depth"), "tail:8000");
     }
     use crate::formats::record::{Budget, Count, ReasoningControl};
