@@ -68,6 +68,14 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(era.nodes.map((n) => n.kind)).toEqual(['user', 'assistant']);
   });
 
+  it('a seam since #597 leaves the system prompt alone: the era opens on the user message carrying the render', () => {
+    const file = 'a-v7-seam-whose-refill-is-a-message.jsonl';
+    const line = logOf(file).find((l) => l.kind === 'seam');
+    const era = fold(logOf(file)).eras[1]!;
+    expect(era.system.placement).toBe('message');
+    expect(era.system.text).toBe(line?.kind === 'seam' ? `<summary>\n${line.render}\n</summary>` : undefined);
+  });
+
   it('folds a stopped call as cancelled, keeping what arrived', () => {
     const answer = fold(logOf('a-cancelled-turn.jsonl')).eras[0]?.nodes.find((n) => n.kind === 'assistant');
     expect(answer?.kind === 'assistant' && answer.progress).toBe('cancelled');
