@@ -790,6 +790,7 @@ fn serving_interview(
         phases,
         // #566: how archived items are recalled; off unless declared.
         recall: diet::drive::archive::Recall::of(&read),
+        view: session::fork_view(&read),
     }))
 }
 

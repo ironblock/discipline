@@ -1667,6 +1667,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            render_budget: None,
         });
         let projection = project(
             &numbered(events),
@@ -1709,6 +1710,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            render_budget: None,
         });
         let projection = project(
             &numbered(events),
@@ -2358,6 +2360,7 @@ mod tests {
             at,
             why,
             question: "what did the operator decide".to_owned(),
+            view: None,
         };
         let call = |turn: u32, fork: u64| {
             [
