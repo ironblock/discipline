@@ -10,6 +10,7 @@ import { PHASE_PROPOSED, PHASE_RULED_CONTINUE } from './served/phase-proposal.ts
 import { SELF_CAPTURE } from './served/self-capture.ts';
 import { TANGENT_CLOSED, TANGENT_OPEN } from './served/tangent.ts';
 import { needsOf } from './log.ts';
+import { respelled } from './spelling.ts';
 
 /**
  * `diet`'s own valid logs (`diet/formats/log/fixtures/valid/`), folded. A
@@ -26,12 +27,13 @@ import { needsOf } from './log.ts';
 const valid = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../../diet/formats/log/fixtures/valid');
 const fixtures = readdirSync(valid).filter((f) => f.endsWith('.jsonl')).sort();
 
+// Read as the surface reads them: a v7 log's `seam` is this vocabulary's `meditation` (#583).
 const logOf = (file: string): LogLine[] =>
   (
     JSON.parse(readFileSync(path.join(valid, file.replace(/\.jsonl$/, '.expected.json')), 'utf8')) as {
       events: LogLine[];
     }
-  ).events;
+  ).events.map(respelled);
 
 describe("diet's valid v0 logs, as the surface reads them", () => {
   it('finds the fixtures', () => {

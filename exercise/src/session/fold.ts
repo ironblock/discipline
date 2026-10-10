@@ -16,6 +16,7 @@ import type { Approval, Authority, FailReason, FileRef, ForkLane, ForkOutcome, I
 import { needsOf } from '../drive/log.ts';
 import { receiptOf } from './receipt.ts';
 import type { Receipt } from './receipt.ts';
+import { respelled } from '../drive/spelling.ts';
 
 declare const folded: unique symbol;
 
@@ -544,7 +545,9 @@ function unended(g: Generation): Omit<Generation, 'endedAt'> {
 }
 
 /** Fold a session's log. Pure; the same log always folds the same. */
-export function fold(lines: readonly LogLine[]): Session {
+export function fold(written: readonly LogLine[]): Session {
+  // A v7 log, or a recording, says `seam` where this vocabulary says `meditation` (#583).
+  const lines = written.map(respelled);
   const start = lines.find((e): e is LineOf<'session.start'> => e.kind === 'session.start');
   if (!start) {
     return {

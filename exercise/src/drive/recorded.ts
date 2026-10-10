@@ -19,6 +19,7 @@ import type { LogLine } from './log.ts';
 import { place } from './place.ts';
 import type { EventOf, Unplaced } from './script.ts';
 import type { Ack, DriveTransport } from './transport.ts';
+import { respelled } from './spelling.ts';
 
 export interface Recording {
   readonly title: string;
@@ -68,7 +69,8 @@ export function load(name: string, text: string, file = recordingPath(name)): Re
   for (const [i, e] of parsed.events.entries()) {
     if (typeof e?.kind !== 'string' || typeof e.t !== 'number') throw fail(`event ${i} has no kind or time`);
   }
-  return parsed as Recording;
+  // A recording says `seam` where this vocabulary says `meditation` (#583).
+  return { ...parsed, events: parsed.events.map(respelled) } as Recording;
 }
 
 /** The whole log, with synthesized deltas, placed in order. */
