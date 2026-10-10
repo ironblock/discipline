@@ -15,7 +15,7 @@ The maintainer, 2026-10-09: "Working prototype _with every theorized lever prese
 
 The prototype's first milestone. Each piece of the harness shown working **once, live, on the floor**. A passing test does not count. Using the pieces together is v0.2.0's.
 
-**Floor:** the 3.8 EXL3 line, config r2, on linux-pc (`accel24-tabbyapi-exl3-qwen38-27b-3p00`, #497), driven through TabbyAPI (#496). The 3.6 is retired; `diet/drive/BEGIN.md` names it until #497 lands.
+**Floor:** the 3.8 EXL3 line, config r2, on linux-pc (`accel24-tabbyapi-exl3-qwen38-27b-3p00`, #497), driven through TabbyAPI (#496). The 3.6 is retired.
 
 **Main evidence:** T1 ([`trajectories/t1.md`](trajectories/t1.md)). T1 has no seam; a short session of its own is fine for that row (#493).
 
