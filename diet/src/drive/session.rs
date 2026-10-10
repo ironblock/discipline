@@ -570,6 +570,9 @@ pub struct ToolLine {
     /// are checked against, for the result message: never logged, and
     /// taken off the line before it is.
     pub images: Vec<(log::RecordedFile, Vec<u8>)>,
+    /// The text the call was recovered from, when the model wrote it as
+    /// text rather than calling natively (#560).
+    pub recovered_from: Option<String>,
 }
 
 impl ToolLine {
@@ -596,6 +599,7 @@ impl ToolLine {
             shown: None,
             files: Vec::new(),
             images: Vec::new(),
+            recovered_from: None,
         }
     }
 }
@@ -842,6 +846,9 @@ struct State {
     /// Patches waiting to be delivered at the next trunk request, under a
     /// mid-turn fork delivery: each op and the entry text its line names.
     undelivered: Vec<(log::PatchOp, String, String)>,
+    /// The text each recovered call came from, by its id, until its line is
+    /// logged (#560).
+    recovered: BTreeMap<String, String>,
     /// Where each event is written as it is appended (see
     /// [`Session::write_through`]).
     sink: Option<Sink>,
@@ -1232,6 +1239,7 @@ impl<S: Streaming + 'static> Session<S> {
             carried: None,
             pending_gap: None,
             undelivered: Vec::new(),
+            recovered: BTreeMap::new(),
             sink: None,
             allowed: tools
                 .as_ref()
@@ -2026,6 +2034,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 shown,
                 files,
                 images: _,
+                recovered_from,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -2047,6 +2056,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 approval,
                 files: (!files.is_empty()).then_some(files),
                 shown,
+                recovered_from,
             }
         }
         Event::TurnSettled { turn, reason } => log::Event::TurnSettled {
@@ -2332,8 +2342,38 @@ fn step<S: Streaming>(
             shared.changed.notify_all();
         });
 
+    // #560: a turn that made no native call but wrote one in its answer, under
+    // a regimen that turns the fallback on, has the call recovered from its
+    // text, as Qwen Code does (`xml-tool-call-fallback.ts`, called at
+    // `llm-chat.ts` only for a finished turn with no native call). The log
+    // keeps the answer as the model wrote it; the trunk carries what is left
+    // of it, with the recovered calls.
+    let mut said_text = None;
+    let mut recovered = BTreeMap::new();
+    if let Ok(StreamEnded::Finished {
+        finish_reason: Some(reason),
+        ..
+    }) = &result
+        && calls.is_empty()
+        && !capped(Some(reason.as_str()))
+        && shared
+            .tools
+            .as_ref()
+            .is_some_and(|tools| tools.text_fallback)
+        && crate::client::xml_fallback::contains_xml_tool_calls(&partial)
+        && let Some(recovery) = crate::client::xml_fallback::try_recover(&partial)
+    {
+        for (index, call) in recovery.calls.iter().enumerate() {
+            let id = format!("recovered-{request}-{index}");
+            let arguments = serde_json::Value::Object(call.arguments.clone()).to_string();
+            calls.piece(index as u64, Some(&id), Some(&call.name), &arguments);
+            recovered.insert(id, call.source.clone());
+        }
+        said_text = Some(recovery.remaining);
+    }
     let mut state = shared.lock();
     state.flight = None;
+    state.recovered.extend(recovered);
     let mut forked = None;
     match result {
         Ok(StreamEnded::Finished {
@@ -2363,7 +2403,10 @@ fn step<S: Streaming>(
             });
             let calls = calls.into_calls();
             let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
-            let mut said = Message::new(Role::Assistant, partial.clone());
+            let mut said = Message::new(
+                Role::Assistant,
+                said_text.unwrap_or_else(|| partial.clone()),
+            );
             said.reasoning.clone_from(&reasoning);
             said.tool_calls = calls
                 .iter()
@@ -2526,7 +2569,10 @@ fn run_calls<S: Streaming>(
             }
             results.push(result);
         }
-        shared.lock().push(Event::ToolCalled(Box::new(line)));
+        let mut state = shared.lock();
+        line.recovered_from = state.recovered.remove(&line.id);
+        state.push(Event::ToolCalled(Box::new(line)));
+        drop(state);
         shared.changed.notify_all();
     }
     let mut state = shared.lock();
@@ -4771,6 +4817,7 @@ pub(in crate::drive) mod tests {
                 shown: None,
                 files: Vec::new(),
                 images: Vec::new(),
+                recovered_from: None,
             })),
             Event::Forked {
                 of_turn: 1,
@@ -5062,6 +5109,7 @@ pub(in crate::drive) mod tests {
                 }),
                 files: None,
                 shown: None,
+                recovered_from: None,
             },
             log::Event::Fork {
                 lane: log::Lane::Interview,
@@ -5646,6 +5694,7 @@ pub(in crate::drive) mod tests {
             store: None,
             approval_policy: None,
             approvals_off: false,
+            text_fallback: false,
             output_cap: crate::drive::output::OutputCap::DEFAULT,
             recording: None,
             read_tool: None,
@@ -6973,6 +7022,115 @@ pub(in crate::drive) mod tests {
                 ..
             }
         ));
+        tidy(&[&tree]);
+    }
+
+    /// The served template's own format, as the model would write it in its
+    /// answer rather than as a native call (#560).
+    const WRITTEN_CALL: &str = "Running it.\n<tool_call>\n<function=bash>\n\
+         <parameter=command>\ntouch made\n</parameter>\n</function>\n</tool_call>";
+
+    fn falling_back(tree: &Path, on: bool, answer: &str) -> Session<Canned> {
+        let mut loop_tools = tools(
+            Confinement::Unconfined,
+            tree,
+            &["touch"],
+            None,
+            Decider::Decline,
+        );
+        loop_tools.text_fallback = on;
+        Session::open_looping(
+            Canned::new([deltas(&[answer]), deltas(&["done"])]),
+            looping(),
+            None,
+            loop_tools,
+        )
+    }
+
+    /// #560, fallback on: a turn that wrote its call as text runs it, the
+    /// line says what text it came from, the trunk carries the answer with
+    /// the block taken out and the call as a call, and the projection
+    /// rebuilds that head.
+    #[test]
+    fn with_the_text_fallback_on_a_call_written_as_text_runs() {
+        let tree = scratch("text-fallback-on");
+        let session = falling_back(&tree, true, WRITTEN_CALL);
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written.len(), 1, "{log:#?}");
+        assert_eq!(written[0].outcome, log::ToolOutcome::Ran);
+        assert_eq!(written[0].name, "bash");
+        assert_eq!(written[0].arguments, r#"{"command":"touch made"}"#);
+        assert!(written[0].id.starts_with("recovered-"), "{}", written[0].id);
+        let source = written[0].recovered_from.as_deref().expect("recovered");
+        assert!(
+            source.starts_with("<function=bash>") && source.ends_with("</function>"),
+            "{source}"
+        );
+        assert!(tree.join("made").exists());
+        // The answer as the model wrote it stays in the log.
+        assert!(
+            log.iter()
+                .any(|l| matches!(&l.event, Event::Called { text, .. } if text == WRITTEN_CALL))
+        );
+        // The next request carries what was left, and the call as a call.
+        let sent = session.shared.transport.sent();
+        assert_eq!(sent.len(), 2);
+        let said = sent[1]
+            .messages
+            .iter()
+            .find(|message| message.role == Role::Assistant)
+            .expect("the step's message");
+        assert_eq!(said.content, "Running it.");
+        assert_eq!(said.tool_calls.len(), 1);
+        let lines_of: Vec<log::Line> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project(&lines_of, &regime(), None).expect("projected");
+        assert!(
+            !projected
+                .unspellable
+                .iter()
+                .any(|item| item.why.contains("rebuilt")),
+            "{:?}",
+            projected.unspellable
+        );
+        tidy(&[&tree]);
+    }
+
+    /// #560, fallback off (the default, as Pi and `OpenCode` 2 have it): the
+    /// same answer is an answer, and nothing runs.
+    #[test]
+    fn with_the_text_fallback_off_a_call_written_as_text_is_an_answer() {
+        let tree = scratch("text-fallback-off");
+        let session = falling_back(&tree, false, WRITTEN_CALL);
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        assert!(lines(&log).is_empty());
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        assert_eq!(session.shared.transport.sent().len(), 1);
+        assert!(!tree.join("made").exists());
+        tidy(&[&tree]);
+    }
+
+    /// #560: a malformed block -- its function never closes -- is not
+    /// dispatched, as Qwen Code leaves it inert: the turn is an answer.
+    #[test]
+    fn a_malformed_written_call_is_left_as_an_answer() {
+        let tree = scratch("text-fallback-malformed");
+        let session = falling_back(
+            &tree,
+            true,
+            "<function=bash><parameter=command>touch made</parameter>",
+        );
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        reads_whole(&session);
+        assert!(lines(&log).is_empty());
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        assert!(!tree.join("made").exists());
         tidy(&[&tree]);
     }
 
