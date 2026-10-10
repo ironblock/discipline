@@ -500,6 +500,8 @@ pub enum Event {
         question: String,
         /// What it saw of the trunk (#567).
         view: ForkView,
+        /// The offboard seat its call ran on (#570); `None` is warm.
+        seat: Option<log::ForkSeat>,
         /// Which ask of its set it sent (#595).
         ask: AskKind,
     },
@@ -509,6 +511,11 @@ pub enum Event {
         fork: u64,
         /// How.
         outcome: log::ForkOutcome,
+        /// An offboard fork's prompt tokens its server evaluated -- its
+        /// `prompt_n`, the prefill -- as it reported them (#570).
+        prompt_tokens: Option<u64>,
+        /// An offboard fork's call, wall time, in milliseconds (#570).
+        wall_ms: Option<u64>,
     },
     /// A seam fired, and the trunk was refilled from working memory (#493):
     /// the head with the working object rendered after it, and no turn of
@@ -836,8 +843,9 @@ pub struct Interview {
     /// How archived items are recalled at an ask (#566): off, the default.
     pub recall: super::archive::Recall,
     /// What a fork sees of the trunk (#567): all of it, or its last whole
-    /// turns after the head.
-    pub view: ForkView,
+    /// turns after the head; `None` when the regimen does not say, which is
+    /// the whole trunk warm and the last turn offboard (#570).
+    pub view: Option<ForkView>,
     /// Self-capture (#609): the contract's tools offered from the first
     /// request, and the cadence of silent turns its reminder fires after;
     /// `None` when off.
@@ -1507,6 +1515,24 @@ struct Shared<S> {
     changed: Condvar,
     /// What a call runs under, when the session runs commands.
     tools: Option<Tools>,
+    /// Where the interview fork runs when it is not the trunk's server
+    /// (#570); `None` is warm.
+    seat: Option<Offboard<S>>,
+}
+
+/// An offboard extraction seat (#570): the second server a fork's call is
+/// made to, the registry id it was checked as, the model its request names,
+/// and the context window it serves, when the registry declares one.
+#[derive(Debug)]
+pub struct Offboard<S> {
+    /// The seat's server.
+    pub transport: S,
+    /// Its registry id.
+    pub substrate: String,
+    /// The model a fork's request names.
+    pub model: String,
+    /// The context window a fork's output cap is clamped to.
+    pub context_window: Option<u64>,
 }
 
 impl<S> Shared<S> {
@@ -1738,8 +1764,25 @@ impl<S: Streaming + 'static> Session<S> {
                 state: Mutex::new(state),
                 changed: Condvar::new(),
                 tools,
+                seat: None,
             }),
         }
+    }
+
+    /// This session, its interview fork seated offboard (#570): every fork's
+    /// call is made to `seat`, naming its model, and the fork's log line
+    /// names both. The trunk is untouched.
+    ///
+    /// # Panics
+    ///
+    /// When the session is already shared: a seat is chosen before a
+    /// session serves anything.
+    #[must_use]
+    pub fn seated(mut self, seat: Offboard<S>) -> Self {
+        Arc::get_mut(&mut self.shared)
+            .expect("a session is seated before it is shared")
+            .seat = Some(seat);
+        self
     }
 
     /// Send an ask to the trunk. Returns the sequence number of its
@@ -2726,6 +2769,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             why,
             question,
             view,
+            seat,
             ask,
         } => log::Event::Fork {
             lane: log::Lane::Interview,
@@ -2736,11 +2780,19 @@ pub fn line_of(logged: &Logged) -> log::Line {
             // Absent is the tail (#568): a tail fork's line is as before.
             // Absent is the whole trunk (#567).
             view: (*view != ForkView::Trunk).then(|| view.word()),
+            seat: seat.clone(),
             ask: Some(ask.tag().to_owned()),
         },
-        Event::ForkSettled { fork, outcome } => log::Event::ForkSettled {
+        Event::ForkSettled {
+            fork,
+            outcome,
+            prompt_tokens,
+            wall_ms,
+        } => log::Event::ForkSettled {
             fork: *fork,
             outcome: *outcome,
+            prompt_tokens: *prompt_tokens,
+            wall_ms: *wall_ms,
         },
         Event::Recalled {
             turn,
@@ -4439,20 +4491,36 @@ fn gap<S>(shared: &Shared<S>, state: &mut State, turn: u32, at: u64) -> Option<F
         return None;
     };
     let mut shape = shared.template.clone();
-    let view = state
+    let declared = state
         .interview
         .as_ref()
-        .map_or(ForkView::Trunk, |interview| interview.view);
+        .and_then(|interview| interview.view);
+    // An offboard seat holds none of the trunk warm, so it is shown the last
+    // turn unless the regimen says otherwise (#570).
+    let view = declared.unwrap_or(if shared.seat.is_some() {
+        ForkView::Last(1)
+    } else {
+        ForkView::Trunk
+    });
     shape.messages = viewed(&state.trunk, shared.template.messages.len(), view);
     shape
         .messages
         .push(Message::new(Role::User, question.clone()));
+    let seat = shared.seat.as_ref().map(|seat| {
+        shape.model.clone_from(&seat.model);
+        shape.limits.context_window = seat.context_window;
+        log::ForkSeat {
+            substrate: seat.substrate.clone(),
+            model: seat.model.clone(),
+        }
+    });
     let fork = state.push(Event::Forked {
         of_turn: turn,
         at,
         why,
         question,
         view,
+        seat,
         ask: kind,
     });
     let max_tokens = state.sized(&mut shape, shared.template.limits.max_output_tokens);
@@ -4511,58 +4579,63 @@ fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
         .map(|interview| interview.capture)
         == Some(crate::dogma::asks::Modality::Tools);
     let mut calls = Calls::default();
-    let result = shared
-        .transport
-        .stream(&shape, deadline, &cancel, &mut |piece: Piece<'_>| {
-            // The fork's own pieces, each naming its call's request.
-            let event = match piece {
-                Piece::Text(piece) => {
-                    partial.push_str(piece);
-                    let text = piece.to_owned();
-                    Event::Delta { request, text }
-                }
-                Piece::Reasoning(piece) => {
-                    reasoning.push_str(piece);
-                    let text = piece.to_owned();
-                    Event::Reasoning { request, text }
-                }
-                Piece::Progress(frame) => Event::Progress {
+    let transport = shared
+        .seat
+        .as_ref()
+        .map_or(&shared.transport, |seat| &seat.transport);
+    let began = Instant::now();
+    let result = transport.stream(&shape, deadline, &cancel, &mut |piece: Piece<'_>| {
+        // The fork's own pieces, each naming its call's request.
+        let event = match piece {
+            Piece::Text(piece) => {
+                partial.push_str(piece);
+                let text = piece.to_owned();
+                Event::Delta { request, text }
+            }
+            Piece::Reasoning(piece) => {
+                reasoning.push_str(piece);
+                let text = piece.to_owned();
+                Event::Reasoning { request, text }
+            }
+            Piece::Progress(frame) => Event::Progress {
+                request,
+                progress: frame,
+            },
+            Piece::ToolCall {
+                index,
+                id,
+                name,
+                arguments,
+            } if tools => {
+                calls.piece(index, id, name, arguments);
+                Event::ToolCallPiece {
                     request,
-                    progress: frame,
-                },
-                Piece::ToolCall {
                     index,
-                    id,
-                    name,
-                    arguments,
-                } if tools => {
-                    calls.piece(index, id, name, arguments);
-                    Event::ToolCallPiece {
-                        request,
-                        index,
-                        id: id.map(str::to_owned),
-                        name: name.map(str::to_owned),
-                        arguments: arguments.to_owned(),
-                    }
+                    id: id.map(str::to_owned),
+                    name: name.map(str::to_owned),
+                    arguments: arguments.to_owned(),
                 }
-                Piece::ToolCall { .. } => {
-                    called = true;
-                    return;
-                }
-            };
-            shared.lock().push(event);
-            shared.changed.notify_all();
-        });
+            }
+            Piece::ToolCall { .. } => {
+                called = true;
+                return;
+            }
+        };
+        shared.lock().push(event);
+        shared.changed.notify_all();
+    });
     let mut state = shared.lock();
     state.flight = None;
     state.forking = None;
     let reasoning = Some(reasoning).filter(|thought| !thought.is_empty());
     let mut patches = Vec::new();
+    let mut prompt_tokens = None;
     let outcome = match result {
         Ok(StreamEnded::Finished {
             finish_reason,
             timings,
         }) => {
+            prompt_tokens = timings.as_ref().and_then(|timings| timings.prompt_n);
             let text = partial.clone();
             let cut = capped(finish_reason.as_deref());
             state.push(if cut {
@@ -4628,7 +4701,21 @@ fn interview<S: Streaming>(shared: &Shared<S>, forked: Fired) {
             log::ForkOutcome::Failed
         }
     };
-    state.push(Event::ForkSettled { fork, outcome });
+    // An offboard fork's cost, for the seat's prefill rate (#570).
+    let (prompt_tokens, wall_ms) = if shared.seat.is_some() {
+        (
+            prompt_tokens,
+            Some(u64::try_from(began.elapsed().as_millis()).unwrap_or(u64::MAX)),
+        )
+    } else {
+        (None, None)
+    };
+    state.push(Event::ForkSettled {
+        fork,
+        outcome,
+        prompt_tokens,
+        wall_ms,
+    });
     for patch in patches {
         state.push(patch);
     }
@@ -4943,6 +5030,8 @@ fn crashed_fork(template: &RequestShape, state: &mut State, why: String) {
         state.push(Event::ForkSettled {
             fork,
             outcome: log::ForkOutcome::Failed,
+            prompt_tokens: None,
+            wall_ms: None,
         });
     }
     turn_over(template, state);
@@ -6303,6 +6392,10 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
                 view: ForkView::Last(2),
+                seat: Some(log::ForkSeat {
+                    substrate: "cpu-seat".to_owned(),
+                    model: "small".to_owned(),
+                }),
                 ask: AskKind::Judgment,
             },
             Event::Requested {
@@ -6315,6 +6408,8 @@ pub(in crate::drive) mod tests {
             Event::ForkSettled {
                 fork: 20,
                 outcome: log::ForkOutcome::Value,
+                prompt_tokens: Some(281),
+                wall_ms: Some(480),
             },
             Event::Patched {
                 fork: 20,
@@ -6658,6 +6753,10 @@ pub(in crate::drive) mod tests {
                 why: log::Warrant::Scoping,
                 question: "what did you decide?".to_owned(),
                 view: Some("last:2".to_owned()),
+                seat: Some(log::ForkSeat {
+                    substrate: "cpu-seat".to_owned(),
+                    model: "small".to_owned(),
+                }),
                 ask: Some("judgment".to_owned()),
             },
             log::Event::Request {
@@ -6670,6 +6769,8 @@ pub(in crate::drive) mod tests {
             log::Event::ForkSettled {
                 fork: 20,
                 outcome: log::ForkOutcome::Value,
+                prompt_tokens: Some(281),
+                wall_ms: Some(480),
             },
             log::Event::Patch {
                 fork: 20,
@@ -9002,7 +9103,7 @@ pub(in crate::drive) mod tests {
             delivery: log::ForkDelivery::Seam,
             phases: crate::seam::phase::PhaseGraph::none(),
             recall: super::super::archive::Recall::Off,
-            view: ForkView::Trunk,
+            view: None,
             self_capture: None,
             asks: &crate::dogma::asks::V3,
             capture: crate::dogma::asks::Modality::Fields,
@@ -9515,7 +9616,7 @@ pub(in crate::drive) mod tests {
     fn a_served_fork_sees_the_view_its_regimen_declares() {
         for view in [ForkView::Trunk, ForkView::Last(1)] {
             let mut interview = interviewing(&[log::Warrant::Scoping]);
-            interview.view = view;
+            interview.view = Some(view);
             let session = Session::open_with(
                 Canned::new([
                     deltas(&["first answer"]),
@@ -9561,7 +9662,98 @@ pub(in crate::drive) mod tests {
                 named.expect("a fork line"),
                 (view != ForkView::Trunk).then(|| view.word())
             );
+            // A warm fork's settling line is as before #570.
+            assert!(lines.iter().any(|line| matches!(
+                line.event,
+                log::Event::ForkSettled {
+                    prompt_tokens: None,
+                    wall_ms: None,
+                    ..
+                }
+            )));
         }
+    }
+
+    /// #570: a seated session's fork is made to the seat, naming its model,
+    /// shown the last turn when the regimen does not say, and its line names
+    /// the seat; the trunk's server sees only the trunk.
+    #[test]
+    fn a_seated_fork_runs_on_its_seat_and_says_so() {
+        let session = Session::open_with(
+            Canned::new([deltas(&["first answer"]), deltas(&[SCOPED])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interviewing(&[log::Warrant::Scoping])),
+        )
+        .seated(Offboard {
+            transport: Canned::new([deltas(&[DECIDED])]),
+            substrate: "cpu-seat".to_owned(),
+            model: "small".to_owned(),
+            context_window: Some(8192),
+        });
+        session.ask("an earlier turn", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        let trunk_before = session.trunk();
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        assert_eq!(fork_outcomes(&log), [log::ForkOutcome::Value]);
+
+        let trunk_sent = session.shared.transport.sent();
+        assert_eq!(
+            trunk_sent.len(),
+            2,
+            "the trunk's server saw the two turns only"
+        );
+        assert!(trunk_sent.iter().all(|shape| shape.model == "a-model"));
+        let seat = &session.shared.seat.as_ref().expect("seated").transport;
+        let [fork] = seat
+            .sent()
+            .try_into()
+            .expect("one fork request, to the seat");
+        assert_eq!(fork.model, "small");
+        assert_eq!(fork.limits.context_window, Some(8192));
+        // Undeclared, offboard: the head and the last turn, then the ask.
+        let trunk = session.trunk();
+        let head = template().messages.len();
+        let seen = &fork.messages[..fork.messages.len() - 1];
+        assert_eq!(seen[..head], trunk[..head]);
+        assert_eq!(seen[head..], trunk[trunk_before.len()..]);
+
+        let lines = whole_log(&session);
+        let named = lines.iter().find_map(|line| match &line.event {
+            log::Event::Fork { view, seat, .. } => Some((view.clone(), seat.clone())),
+            _ => None,
+        });
+        assert_eq!(
+            named.expect("a fork line"),
+            (
+                Some("last_turn".to_owned()),
+                Some(log::ForkSeat {
+                    substrate: "cpu-seat".to_owned(),
+                    model: "small".to_owned(),
+                })
+            )
+        );
+        // Its cost: the wall time always, the prompt as its server reports
+        // it, which this one does not.
+        let cost = lines.iter().find_map(|line| match &line.event {
+            log::Event::ForkSettled {
+                prompt_tokens,
+                wall_ms,
+                ..
+            } => Some((*prompt_tokens, *wall_ms)),
+            _ => None,
+        });
+        assert!(
+            matches!(cost, Some((None, Some(_)))),
+            "an offboard fork's cost: {cost:?}"
+        );
     }
 
     /// #595: under ask set v4 the scoping fork's judgment ask shows the
