@@ -307,6 +307,12 @@ pub fn digest_of(acts: &[Act]) -> String {
                     piece(&mut canonical, chunk);
                 }
             }
+            Act::Trickle(gap, chunks) => {
+                let _ = write!(canonical, "trickle;{};{};", gap.as_nanos(), chunks.len());
+                for chunk in chunks {
+                    piece(&mut canonical, chunk);
+                }
+            }
             Act::Raw(bytes) => {
                 // Hex rather than a lossy decode: two different byte strings
                 // that are not UTF-8 must not canonicalise alike.

@@ -376,6 +376,12 @@ pub struct Limits {
     /// request's `max_output_tokens` is clamped to the room the prompt leaves
     /// ([`crate::drive::session`]); with none, nothing is clamped.
     pub context_window: Option<u64>,
+    /// The longest silence a streamed call sits through (#569): connect,
+    /// write and every read are each given this much, re-armed by whatever
+    /// arrives, and none of them past [`Limits::call`]. `None` leaves
+    /// [`Limits::call`] the only bound. Pi and `OpenCode` 2 both bound a
+    /// stream this way -- 300 s between chunks, and no total.
+    pub idle: Option<Duration>,
 }
 
 /// How the server was configured to serve.
@@ -736,6 +742,7 @@ mod tests {
                 max_output_tokens: 16,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

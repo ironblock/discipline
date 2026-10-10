@@ -7855,6 +7855,7 @@ pub(in crate::drive) mod tests {
                 max_output_tokens: 64,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
@@ -13018,6 +13019,7 @@ pub(in crate::drive) mod tests {
                 max_output_tokens: 512,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::from([(
