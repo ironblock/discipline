@@ -845,6 +845,7 @@ mod tests {
                 max_output_tokens: 128,
                 retries,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),

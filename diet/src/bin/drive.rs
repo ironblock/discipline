@@ -377,7 +377,15 @@ fn serve(args: &[String]) -> ExitCode {
             sha256: file.sha256.clone(),
         })
         .collect();
-    let mut shape = trunk(model, system, max_output_tokens, sampler);
+    // The regimen's, else the default (#569); no regimen, the default.
+    let stream_idle = match read_at_start.as_ref() {
+        Some(read) => read.stream_idle,
+        None => match diet::drive::regimen::stream_idle(None) {
+            Ok(idle) => idle,
+            Err(why) => return fail(EXIT_INPUT, &why),
+        },
+    };
+    let mut shape = trunk(model, system, max_output_tokens, sampler, stream_idle);
     // The regime's reasoning state, on every request, the forks' included
     // (R1): a clone of the trunk carries it.
     // A budget no template variable carries is recorded and announced as
@@ -1534,6 +1542,8 @@ struct ReadAtStart {
     levers: BTreeMap<String, String>,
     /// The output cap the session runs at, and where it came from.
     output_cap: (u32, &'static str),
+    /// How long a streamed call may go silent (#569); `None` for unbounded.
+    stream_idle: Option<std::time::Duration>,
 }
 
 /// Project the ended session, check the record reads back, and write it and
@@ -1638,14 +1648,25 @@ fn written_record(
     Ok((out, refused))
 }
 
+/// A serve call's total: none, by the vote (#569). A day, not unbounded, only
+/// because a deadline is an instant and an instant has to be finite; `idle`
+/// is what ends a call that has stopped.
+const NO_TOTAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
 /// The session's trunk: the system message and the sampler pins, and
 /// nothing else fixed yet. Every request -- each turn's, each tool step's,
 /// the interview fork's -- is this template's clone, so each carries `sampler`.
+///
+/// Each call is bounded by `idle`, the longest silence it sits through, and
+/// not by its total (#569): Pi and `OpenCode` 2 bound a stream so, and a
+/// fixed 180 s total cut a turn whose reasoning was still arriving (seam
+/// smoke run 3). [`NO_TOTAL`] stands in for the total the vote has none of.
 fn trunk(
     model: String,
     system: String,
     max_output_tokens: u32,
     sampler: SamplerCard,
+    idle: Option<std::time::Duration>,
 ) -> RequestShape {
     RequestShape {
         model,
@@ -1653,10 +1674,11 @@ fn trunk(
         sampler,
         limits: Limits {
             attempt: std::time::Duration::from_secs(60),
-            call: std::time::Duration::from_secs(180),
+            call: NO_TOTAL,
             max_output_tokens,
             retries: 0,
             context_window: None,
+            idle,
         },
         grammar: None,
         template_kwargs: BTreeMap::new(),
@@ -1907,6 +1929,8 @@ fn registered_regime(
         std::fs::read_to_string(path).map_err(|why| format!("{path} cannot be read: {why}"))?;
     let regimen =
         regimen::parse(&text).map_err(|why| format!("{path} is not a regimen: {why:?}"))?;
+    let stream_idle = diet::drive::regimen::stream_idle(Some(&regimen))
+        .map_err(|why| format!("{path}: {why}"))?;
     diet::drive::regimen::regime_registered(&regimen, diet::drive::registry::REGISTRY)
         .map(|regime| {
             let output_cap = diet::drive::regimen::output_cap(flag, Some(&regimen));
@@ -1916,6 +1940,7 @@ fn registered_regime(
                     regimen_sha256: diet::digest::sha256_hex(text.as_bytes()),
                     levers: diet::drive::regimen::serve_levers(&regimen, output_cap),
                     output_cap,
+                    stream_idle,
                 },
             )
         })
@@ -2458,6 +2483,7 @@ fn shape(regime: &Regime) -> RequestShape {
             max_output_tokens: 512,
             retries: 1,
             context_window: None,
+            idle: None,
         },
         grammar: None,
         template_kwargs: std::collections::BTreeMap::new(),

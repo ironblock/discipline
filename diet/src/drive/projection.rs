@@ -1479,6 +1479,7 @@ impl<'a> Walk<'a> {
                     max_output_tokens: 0,
                     retries: 0,
                     context_window: None,
+                    idle: None,
                 },
                 grammar: None,
                 // From `session.start` (R1), and ASSERTED by the digest check
@@ -1608,6 +1609,7 @@ impl<'a> Walk<'a> {
                         max_output_tokens: 0,
                         retries: 0,
                         context_window: None,
+                        idle: None,
                     },
                     grammar: None,
                     template_kwargs: self.template_kwargs.clone(),
@@ -2565,6 +2567,7 @@ mod tests {
                 max_output_tokens: 64,
                 retries: 0,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs,

@@ -1534,6 +1534,7 @@ mod tests {
                 // nothing.
                 retries: 1,
                 context_window: None,
+                idle: None,
             },
             grammar: None,
             template_kwargs: std::collections::BTreeMap::new(),
