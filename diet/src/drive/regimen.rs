@@ -594,7 +594,7 @@ fn phase_graph_lever(regimen: &Regimen) -> String {
 /// has them.
 #[must_use]
 pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<String, String> {
-    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS, SEAM_TAIL_TOKENS};
+    use crate::seam::policy::SEAM_TAIL_TOKENS;
     let word = |key: &str| match regimen.get(key) {
         Some(regimen::Value::String(word)) => word.clone(),
         Some(regimen::Value::Integer(n)) => n.to_string(),
@@ -618,16 +618,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         Some(regimen::Value::Integer(n)) => format!("tail:{n}"),
         Some(_) => undeclared(),
     };
-    let mut triggers = vec!["operator-declared"];
-    if regimen.get(SEAM_EVERY_TURNS).is_some() {
-        triggers.push("cadence");
-    }
-    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
-        .iter()
-        .any(|key| regimen.get(key).is_some())
-    {
-        triggers.push("budget");
-    }
+    let triggers = seam_triggers(regimen);
     let [disposition, approval, surface, limits] = command_levers(regimen, output_cap);
     let reasoning = match (regimen.get("substrate_reasoning"), regimen.get("reasoning")) {
         (Some(regimen::Value::String(state)), Some(regimen::Value::Table(table))) => {
@@ -651,7 +642,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     let pruning = crate::drive::prune::lever(regimen);
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
-        ("seam_trigger".to_owned(), triggers.join("+")),
+        ("seam_trigger".to_owned(), triggers),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         (
             "archive_recall".to_owned(),
@@ -691,6 +682,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("fork_input_view".to_owned(), fork_input_view_lever(regimen)),
         ("fork_asks".to_owned(), fork_asks_lever(regimen)),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
+        ("interview_role".to_owned(), interview_role_lever(regimen)),
         ("step_and_output_limits".to_owned(), limits),
         ("extraction_seat".to_owned(), Seat::lever(regimen)),
         ("failed_turns_on_the_trunk".to_owned(), "kept".to_owned()),
@@ -753,6 +745,13 @@ fn tangent_closure_lever(regimen: &Regimen) -> String {
     }
 }
 
+/// The interview role lever's word (#599): the role the regimen asks in.
+fn interview_role_lever(regimen: &Regimen) -> String {
+    crate::drive::session::interview_role(regimen)
+        .tag()
+        .to_owned()
+}
+
 /// The self-capture lever's word (#609): `off`, or `on:every:<n>` with the
 /// reminder's cadence of silent turns.
 fn self_capture_lever(regimen: &Regimen) -> String {
@@ -770,6 +769,31 @@ fn instruction_files_lever(regimen: &Regimen) -> String {
         "off"
     }
     .to_owned()
+}
+
+/// The seam triggers a regimen leaves armed, in [`serve_levers`]' words:
+/// the operator's always, then the cadence and budget it declares, and the
+/// automatic seam unless it turns it off (#617).
+fn seam_triggers(regimen: &Regimen) -> String {
+    use crate::seam::policy::{SEAM_AT_WORKING_SET_BYTES, SEAM_EVERY_TURNS};
+    let mut triggers = vec!["operator-declared"];
+    if regimen.get(SEAM_EVERY_TURNS).is_some() {
+        triggers.push("cadence");
+    }
+    if [SEAM_AT_WORKING_SET_BYTES, "seam_at_context_fraction"]
+        .iter()
+        .any(|key| regimen.get(key).is_some())
+    {
+        triggers.push("budget");
+    }
+    // The automatic seam (#617): on unless the regimen turns it off; it
+    // fires only where serve knows the window and keeps working memory.
+    if crate::seam::policy::Served::from_regimen(regimen, None)
+        .map_or(true, |served| !served.window_off)
+    {
+        triggers.push("window");
+    }
+    triggers.join("+")
 }
 
 /// The capture modality lever's word (#610): how a fork answers, `fields`
@@ -960,7 +984,10 @@ mod tests {
             &regimen::parse("seam_every_turns = 3\nseam_tail_tokens = 8000\n").expect("a regimen"),
             (8192, "default"),
         );
-        assert_eq!(at(&paced, "seam_trigger"), "operator-declared+cadence");
+        assert_eq!(
+            at(&paced, "seam_trigger"),
+            "operator-declared+cadence+window"
+        );
         assert_eq!(at(&paced, "compaction_depth"), "tail:8000");
     }
     use crate::formats::record::{Budget, Count, ReasoningControl};

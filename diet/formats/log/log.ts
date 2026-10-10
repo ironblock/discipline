@@ -183,6 +183,7 @@ export type SeamReason =
   | "phase"
   | "budget"
   | "cadence"
+  | "window"
   | "prune"
 ;
 
@@ -494,6 +495,7 @@ export type ForkLine = {
   question: string;
   view?: string;
   trigger?: string;
+  role?: string;
   ask?: string;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
@@ -541,6 +543,8 @@ export type SeamLine = {
   render_over_budget?: string;
   render_tokens?: number;
   render_reduced?: number;
+  prompt_tokens?: number;
+  window?: number;
   pruned?: string[];
 };
 

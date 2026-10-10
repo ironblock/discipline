@@ -996,6 +996,7 @@ impl<'a> Walk<'a> {
             tail_tokens,
             outputs,
             placement,
+            fired,
             pruned,
             ..
         } = &line.event
@@ -1084,6 +1085,9 @@ impl<'a> Walk<'a> {
             tail_tokens: tailed.then_some(tail_tokens),
             carried_turns: tailed.then_some(carried_turns),
             carried_tokens: tailed.then_some(carried_tokens),
+            // An automatic seam names the prompt that fired it (#617).
+            prompt_tokens: fired.map(|fired| fired.prompt_tokens),
+            window: fired.map(|fired| fired.window),
             pruned: (!applied.is_empty()).then_some(applied),
         });
     }
@@ -1877,6 +1881,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            fired: None,
             pruned: None,
         });
         let projection = project(
@@ -1922,6 +1927,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            fired: None,
             pruned: None,
         });
         let projection = project(
@@ -2623,6 +2629,7 @@ mod tests {
             question: "what did the operator decide".to_owned(),
             view: None,
             trigger: None,
+            role: None,
             seat: None,
             ask: None,
         };
