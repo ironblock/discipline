@@ -3404,6 +3404,40 @@ fn the_record_names_the_seat(written: &str) {
 }
 
 #[test]
+fn a_drive_server_checks_an_offboard_seats_template_for_the_interview_role() {
+    // #599 with #570: forks seated offboard ask through the seat's served
+    // template, so the role is checked there; the canned seat reports none,
+    // so a `developer` ask is refused before anything binds, naming the seat.
+    let trunk =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let seat = Stub::serving_with_props(Vec::new(), &diet::drive::canned::replay_build_info())
+        .expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nextraction_seat = \"offboard:canned-replay\"\n\
+         interview_role = \"developer\"\n",
+        "temperature = 0.6\n",
+    );
+    let (code, said) = run_briefly(
+        &trunk.url(),
+        &[
+            "--regimen",
+            &regimen.0.to_string_lossy(),
+            "--seat-endpoint",
+            &seat.url(),
+            "--seat-model",
+            "a-small-model",
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("interview_role")
+            && said.contains("the extraction seat reports no chat template")
+            && !said.contains("listening"),
+        "{said}"
+    );
+}
+
+#[test]
 fn a_drive_server_refuses_an_offboard_seat_it_cannot_reach_as_declared() {
     let regimen = seated_regimen();
     let regimen_path = regimen.0.to_string_lossy().into_owned();
