@@ -219,6 +219,13 @@ describe('HttpTransport: commands', () => {
     expect(posted).toEqual([{ kind: 'declare-seam', phase: 'build' }, { kind: 'declare-seam' }]);
   });
 
+  it('posts a move to the background as serve takes it (#614), and reads its refusal', async () => {
+    const posted: Record<string, unknown>[] = [];
+    const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"nothing-running"}', { status: 409 })) });
+    await expect(transport.dispatch({ kind: 'background' })).resolves.toEqual({ ok: false, refused: 'nothing-running' });
+    expect(posted).toEqual([{ kind: 'background' }]);
+  });
+
   it('posts an end as serve.rs takes it (#289)', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });

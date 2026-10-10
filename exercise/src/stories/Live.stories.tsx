@@ -418,3 +418,32 @@ export const ServedPhaseGraph: Story = {
     await expect((posted[0] as { phase?: string }).phase).toBe('review');
   },
 };
+
+/** diet's call that ran, cut before its outcome line: a log mid-call, the bash command still running in the foreground. */
+const callRunning = toolCallRan.trimEnd().split('\n').filter((line) => !line.includes('"kind":"tool_call"')).join('\n');
+
+/** `?drive` (#614): while a bash call runs in the foreground, the composer offers to move it to the background. */
+export const ServedMoveToBackground: Story = {
+  name: '?drive: move a running command to the background',
+  args: { drive: true, web: posting(callRunning) },
+  play: async ({ canvasElement }) => {
+    const move = await waitFor(async () => {
+      const found = [...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'move to background');
+      await expect(found).toBeDefined();
+      return found!;
+    });
+    posted.length = 0;
+    await userEvent.click(move);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'background' }]));
+  },
+};
+
+/** And with the call answered, nothing runs in the foreground: there is nothing to move. */
+export const ServedNothingToBackground: Story = {
+  name: '?drive: with no command running, nothing to move to the background',
+  args: { drive: true, web: posting(toolCallRan) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="tool"]').length).toBe(1));
+    await expect([...canvasElement.querySelectorAll('button')].some((b) => b.textContent === 'move to background')).toBe(false);
+  },
+};

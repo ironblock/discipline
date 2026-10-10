@@ -41,6 +41,8 @@ export type Command =
   | { readonly kind: 'open-tangent'; readonly id: string }
   /** Close the open tangent: each of its live entries kept, dropped or parked -- exactly those, no more. */
   | { readonly kind: 'close-tangent'; readonly dispositions: Readonly<Record<string, Disposition>> }
+  /** Move the running foreground command to the background (#614): it keeps running, and the turn goes on. */
+  | { readonly kind: 'background' }
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
   | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision };
 
@@ -113,6 +115,8 @@ export type Refusal = Open<
   | 'no-tangent'
   | 'bad-tangent'
   | 'not-the-scope'
+  /** A move to the background with no command running in the foreground (#614). */
+  | 'nothing-running'
 >;
 
 export type Ack = { readonly ok: true } | { readonly ok: false; readonly refused: Refusal };
