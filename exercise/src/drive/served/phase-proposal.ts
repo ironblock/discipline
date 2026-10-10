@@ -32,6 +32,16 @@ export const PHASE_PROPOSED: readonly LogLine[] = [
   { seq: 11, t: 50, kind: 'settlement', from: 'turn', to: 'awaiting' },
 ] as LogLine[];
 
+/**
+ * The same proposal with one live entry in working memory: the model recorded a decision before it proposed, so a
+ * seam has something to refill from (#685). The entry's patch comes after its `capture`, as serve logs it.
+ */
+export const PHASE_PROPOSED_WITH_MEMORY: readonly LogLine[] = [
+  ...PHASE_PROPOSED.slice(0, 7),
+  { seq: 7, t: 28, kind: 'patch', op: 'add', lane: 'self-capture', entry: { id: 'd1', text: 'decision: the spec is settled' } },
+  ...PHASE_PROPOSED.slice(7).map((line) => ({ ...line, seq: line.seq + 1 })),
+] as LogLine[];
+
 export const PHASE_RULED_CONTINUE: readonly LogLine[] = [
   ...PHASE_PROPOSED,
   { seq: 12, t: 55, kind: 'phase.ruled', call: 'p1', choice: 'continue', from: 'plan', to: 'build' },

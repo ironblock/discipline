@@ -96,7 +96,7 @@ export type Refusal = Open<
   | 'busy'
   /** The session has ended. */
   | 'ended'
-  /** There is nothing to seam: no turn has settled. */
+  /** There is nothing to seam: no turn has settled, or working memory holds no live entry. */
   | 'nothing-to-seam'
   /** Nothing is in flight. */
   | 'nothing-to-cancel'

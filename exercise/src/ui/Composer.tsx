@@ -31,6 +31,8 @@ export interface ComposerProps {
   readonly nearTimeout?: boolean;
   /** The model's phase proposal waiting on the operator (#124, #651): the move, its reason, and the call it is. */
   readonly proposal?: { readonly call: string; readonly from?: string; readonly to: string; readonly reason?: string };
+  /** Why a seam has nothing to refill from now, when it has none (#685): serve refuses a seam then (`nothing-to-seam`). */
+  readonly noSeam?: string;
 }
 
 const DISPOSITIONS: readonly Disposition[] = ['keep', 'drop', 'park'];
@@ -62,7 +64,7 @@ const STATE_LINE: Readonly<Record<SessionState, string>> = {
 /** How long the question "end the session?" shows before a press answers it. */
 const CONFIRM_AFTER_MS = 500;
 
-export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal }: ComposerProps) {
+export function Composer({ state, link = 'live', phase, phases, dispatch, hint, upload, tangents = false, tangent, foreground = false, nearTimeout = false, proposal, noSeam }: ComposerProps) {
   // Ending a tangent (#608): the operator rules on each of its entries, keep by default, then closes it.
   const [closing, setClosing] = useState(false);
   const [rulings, setRulings] = useState<Readonly<Record<string, Disposition>>>({});
@@ -202,11 +204,19 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
           {proposal.reason !== undefined ? <p className="ex-composer__proposal-reason">{proposal.reason}</p> : null}
           <span className="ex-composer__proposal-actions">
             {PHASE_CHOICES.map(({ choice, title }) => (
-              <button key={choice} type="button" disabled={!idle} title={title} onClick={() => run({ kind: 'ratify-phase', call: proposal.call, choice })}>
+              <button
+                key={choice}
+                type="button"
+                disabled={!idle || (choice === 'seam' && noSeam !== undefined)}
+                title={choice === 'seam' && noSeam !== undefined ? `no seam: ${noSeam}` : title}
+                onClick={() => run({ kind: 'ratify-phase', call: proposal.call, choice })}
+              >
                 {choice}
               </button>
             ))}
           </span>
+          {/* Nothing to refill from (#685): the seam is not offered, and this says why, as serve would refuse it. */}
+          {noSeam !== undefined ? <span className="ex-composer__proposal-why">no seam: {noSeam}</span> : null}
         </section>
       ) : null}
       {tangents && open && closing ? (

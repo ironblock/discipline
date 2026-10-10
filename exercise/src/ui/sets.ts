@@ -200,7 +200,7 @@ export const failOf = registry<FailReason>({
 export const refusalOf = registry<Refusal>({
   busy: { label: 'not taken: something is still running', level: 'warn' },
   ended: { label: 'not taken: the session has ended', level: 'quiet' },
-  'nothing-to-seam': { label: 'nothing to refill yet: no turn has settled', level: 'quiet' },
+  'nothing-to-seam': { label: 'nothing to refill yet: no turn has settled, or working memory holds nothing', level: 'quiet' },
   'nothing-to-cancel': { label: 'nothing is running', level: 'quiet' },
   'off-script': { label: 'the canned script expects something else next', level: 'quiet' },
   recording: { label: 'a recording: it plays, and takes no commands', level: 'quiet' },
