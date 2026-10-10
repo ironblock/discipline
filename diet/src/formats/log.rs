@@ -1075,7 +1075,25 @@ pub enum Event {
         /// The estimated tokens of the turns it kept (v7, #552), beside
         /// `tail_tokens`.
         carried_tokens: Option<u64>,
+        /// The render's budget and what it did (v7, #565), on a seam whose
+        /// regimen declares one.
+        render_budget: Option<RenderBudget>,
     },
+}
+
+/// A seam's render budget and what it did (v7, #565): `render_budget_tokens`,
+/// `render_over_budget`, `render_tokens` and `render_reduced`, together or
+/// not at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenderBudget {
+    /// The estimated tokens the render could run to.
+    pub tokens: u64,
+    /// What it did past them: `tier` or `elide`.
+    pub over: String,
+    /// The estimated tokens it ran to.
+    pub rendered: u64,
+    /// How many entries it shortened or elided.
+    pub reduced: u64,
 }
 
 /// A patch's entry (v5, #374): its id, its text, and its category when the
@@ -2467,6 +2485,15 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             carried_turns: fields.count("carried_turns")?,
             tail_tokens: fields.optional_count("tail_tokens")?,
             carried_tokens: fields.optional_count("carried_tokens")?,
+            render_budget: match fields.optional_count("render_budget_tokens")? {
+                None => None,
+                Some(tokens) => Some(RenderBudget {
+                    tokens,
+                    over: fields.string("render_over_budget")?,
+                    rendered: fields.count("render_tokens")?,
+                    reduced: fields.count("render_reduced")?,
+                }),
+            },
         },
     };
     Ok(Line {
@@ -3564,6 +3591,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v6("carried_turns", Count),
                 may_v7("tail_tokens", Count),
                 may_v7("carried_tokens", Count),
+                may_v7("render_budget_tokens", Count),
+                may_v7("render_over_budget", Text),
+                may_v7("render_tokens", Count),
+                may_v7("render_reduced", Count),
             ];
             F
         }
@@ -4260,6 +4291,7 @@ fn to_value(line: &Line) -> Value {
             carried_turns,
             tail_tokens,
             carried_tokens,
+            render_budget,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             put("reason", text(reason.tag()));
@@ -4274,6 +4306,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(tokens) = carried_tokens {
                 put("carried_tokens", count(*tokens));
+            }
+            if let Some(budget) = render_budget {
+                put("render_budget_tokens", count(budget.tokens));
+                put("render_over_budget", text(&budget.over));
+                put("render_tokens", count(budget.rendered));
+                put("render_reduced", count(budget.reduced));
             }
             Kind::Seam
         }

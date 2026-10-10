@@ -586,7 +586,19 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("tangent_closure".to_owned(), undeclared()),
         ("capture_modality".to_owned(), undeclared()),
         ("interview_routing_and_cadence".to_owned(), warrant),
-        ("render_budget".to_owned(), "none".to_owned()),
+        (
+            "render_budget".to_owned(),
+            crate::seam::policy::render_budget(regimen).map_or_else(
+                || "none".to_owned(),
+                |budget| {
+                    let over = match budget.over {
+                        crate::seam::render::OverBudget::Tier => "tier",
+                        crate::seam::render::OverBudget::Elide => "elide",
+                    };
+                    format!("{}:{over}", budget.tokens)
+                },
+            ),
+        ),
         ("fork_memory_share".to_owned(), undeclared()),
         ("archive_recall".to_owned(), "off".to_owned()),
         ("fork_input_view".to_owned(), "whole-warm-trunk".to_owned()),
@@ -713,6 +725,13 @@ mod tests {
         assert_eq!(at(&empty, "fork_warrant"), "none");
         assert_eq!(at(&empty, "isolation"), UNDECLARED);
         assert_eq!(at(&empty, "compaction_depth"), "total");
+        assert_eq!(at(&empty, "render_budget"), "none");
+        let budgeted = serve_levers(
+            &regimen::parse("render_budget_tokens = 2000\nrender_over_budget = \"elide\"\n")
+                .expect("a regimen"),
+            (8192, "default"),
+        );
+        assert_eq!(at(&budgeted, "render_budget"), "2000:elide");
         let paced = serve_levers(
             &regimen::parse("seam_every_turns = 3\nseam_tail_tokens = 8000\n").expect("a regimen"),
             (8192, "default"),

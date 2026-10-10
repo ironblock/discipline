@@ -1650,6 +1650,7 @@ mod tests {
             carried_turns: 0,
             tail_tokens: None,
             carried_tokens: None,
+            render_budget: None,
         });
         let projection = project(
             &numbered(events),
@@ -1687,6 +1688,7 @@ mod tests {
             carried_turns: 1,
             tail_tokens: Some(10_000),
             carried_tokens: Some(1),
+            render_budget: None,
         });
         let projection = project(
             &numbered(events),

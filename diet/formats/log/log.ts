@@ -476,6 +476,10 @@ export type SeamLine = {
   carried_turns: number;
   tail_tokens?: number;
   carried_tokens?: number;
+  render_budget_tokens?: number;
+  render_over_budget?: string;
+  render_tokens?: number;
+  render_reduced?: number;
 };
 
 export type DeliveredLine = {

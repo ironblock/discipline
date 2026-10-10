@@ -36,6 +36,14 @@ pub const SEAM_AT_CONTEXT_FRACTION: &str = "seam_at_context_fraction";
 /// trunk's most recent whole turns a served seam keeps after the refill.
 /// Absent or 0 is the total refill (#505).
 pub const SEAM_TAIL_TOKENS: &str = "seam_tail_tokens";
+
+/// The render budget (#565): estimated tokens the seam's render may run to.
+/// Read leniently: absent, or anything but a positive integer, is no budget.
+pub const RENDER_BUDGET_TOKENS: &str = "render_budget_tokens";
+
+/// What the render does past its budget (#565): `"tier"` (the default) or
+/// `"elide"`.
+pub const RENDER_OVER_BUDGET: &str = "render_over_budget";
 /// The ordered list of phases the work moves through.
 pub const PHASES: &str = "phases";
 /// The table of allowed transitions, one array per phase.
@@ -228,6 +236,25 @@ pub struct Served {
     /// The compaction depth: estimated tokens of recent whole turns a seam
     /// keeps after the refill ([`SEAM_TAIL_TOKENS`]); 0, the total refill.
     pub tail_tokens: u64,
+    /// The render's budget ([`RENDER_BUDGET_TOKENS`], #565), when declared.
+    pub render_budget: Option<super::render::Budget>,
+}
+
+/// The render budget `regimen` declares (#565), leniently: a positive
+/// [`RENDER_BUDGET_TOKENS`], with [`RENDER_OVER_BUDGET`] `"elide"` or else
+/// tier; anything else is no budget.
+#[must_use]
+pub fn render_budget(regimen: &Regimen) -> Option<super::render::Budget> {
+    use super::render::{Budget, OverBudget};
+    let tokens = match regimen.get(RENDER_BUDGET_TOKENS) {
+        Some(Value::Integer(count)) if *count > 0 => count.unsigned_abs(),
+        _ => return None,
+    };
+    let over = match regimen.get(RENDER_OVER_BUDGET) {
+        Some(Value::String(word)) if word == "elide" => OverBudget::Elide,
+        _ => OverBudget::Tier,
+    };
+    Some(Budget { tokens, over })
 }
 
 impl Served {
@@ -279,6 +306,7 @@ impl Served {
             every_turns,
             at_trunk_tokens,
             tail_tokens,
+            render_budget: render_budget(regimen),
         })
     }
 
@@ -389,6 +417,7 @@ mod tests {
                 every_turns: Some(4),
                 at_trunk_tokens: Some(96_000),
                 tail_tokens: 0,
+                render_budget: None,
             })
         );
         assert_eq!(
@@ -397,6 +426,7 @@ mod tests {
                 every_turns: None,
                 at_trunk_tokens: Some(8192),
                 tail_tokens: 0,
+                render_budget: None,
             })
         );
         for bad in ["0.0", "1.5", "-0.2", "\"half\""] {
@@ -430,6 +460,7 @@ mod tests {
             every_turns: Some(3),
             at_trunk_tokens: Some(1000),
             tail_tokens: 0,
+            render_budget: None,
         };
         assert_eq!(policy.due(2, Some(999)), None);
         assert_eq!(policy.due(2, None), None);
