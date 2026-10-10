@@ -422,9 +422,12 @@ struct Step {
     request: u64,
     /// The step's response: its text and reasoning.
     said: Message,
-    /// Its calls, in order, each with what it was shown, when it was shown
-    /// anything.
-    calls: Vec<(ToolCall, Option<String>)>,
+    /// Its calls, in order, each with the result message it was shown, when
+    /// it was shown anything: `read`'s images on it, read back (#557).
+    calls: Vec<(ToolCall, Option<Message>)>,
+    /// Why a result's image could not be read back, from the first that
+    /// could not: every head that carries the step names it (#557).
+    unrebuilt: Option<String>,
 }
 
 impl Step {
@@ -434,11 +437,7 @@ impl Step {
         let mut said = self.said.clone();
         said.tool_calls = self.calls.iter().map(|(call, _)| call.clone()).collect();
         let mut messages = vec![said];
-        messages.extend(self.calls.iter().filter_map(|(call, shown)| {
-            shown
-                .as_ref()
-                .map(|shown| Message::tool_result(call.id.clone(), shown.clone()))
-        }));
+        messages.extend(self.calls.iter().filter_map(|(_, shown)| shown.clone()));
         messages
     }
 }
@@ -1001,7 +1000,14 @@ impl<'a> Walk<'a> {
             .err()
             .map(|why| format!("turn {turn}'s attachment: {why}"))
             .or_else(|| self.tools.as_ref().err().cloned())
-            .or_else(|| self.trunk_unrebuilt.clone());
+            .or_else(|| self.trunk_unrebuilt.clone())
+            .or_else(|| {
+                self.steps
+                    .get(&turn)
+                    .into_iter()
+                    .flatten()
+                    .find_map(|step| step.unrebuilt.clone())
+            });
         messages.push(asked.unwrap_or_else(|_| Message::new(Role::User, String::new())));
         if let Some(note) = note {
             messages.push(Message::new(Role::User, note));
@@ -1134,6 +1140,7 @@ impl<'a> Walk<'a> {
                 request: to_request,
                 said,
                 calls: Vec::new(),
+                unrebuilt: None,
             });
             return;
         }
@@ -1162,6 +1169,10 @@ impl<'a> Walk<'a> {
         }
         let taken = self.steps.remove(&turn).unwrap_or_default();
         for step in taken.iter().take(steps) {
+            if let Some(why) = &step.unrebuilt {
+                self.trunk_unrebuilt
+                    .get_or_insert_with(|| format!("the trunk carries turn {turn}'s {why}"));
+            }
             self.trunk.extend(step.messages());
         }
     }
@@ -1275,25 +1286,71 @@ impl<'a> Walk<'a> {
             name,
             arguments,
             shown,
+            files,
             ..
         } = line
         else {
             return;
         };
+        let result = shown
+            .as_ref()
+            .map(|shown| self.tool_result(id, shown, files.as_deref().unwrap_or_default()));
         if let Some(step) = self
             .steps
             .get_mut(turn)
             .and_then(|steps| steps.iter_mut().rfind(|step| step.request == *request))
         {
+            let (result, why) = match result {
+                Some((result, why)) => (Some(result), why),
+                None => (None, None),
+            };
+            if step.unrebuilt.is_none() {
+                step.unrebuilt = why.map(|why| format!("call {id}'s image: {why}"));
+            }
             step.calls.push((
                 ToolCall {
                     id: id.clone(),
                     name: name.clone(),
                     arguments: arguments.clone(),
                 },
-                shown.clone(),
+                result,
             ));
         }
+    }
+
+    /// Call `id`'s result message as the session sent it: what it was shown,
+    /// and each image among the line's `files` -- `read`'s (#557), never a
+    /// capped output's whole -- read back from the recording and attached
+    /// through [`crate::client::attach`]; with why, when one could not be.
+    fn tool_result(
+        &self,
+        id: &str,
+        shown: &str,
+        files: &[log::RecordedFile],
+    ) -> (Message, Option<String>) {
+        let mut message = Message::tool_result(id.to_owned(), shown.to_owned());
+        for file in files
+            .iter()
+            .filter(|file| file.media_type.starts_with("image/"))
+        {
+            let Some(recording) = &self.recording else {
+                return (
+                    message,
+                    Some("no recording directory to read it back from".to_owned()),
+                );
+            };
+            let attached = std::fs::read(recording.join(&file.path))
+                .map_err(|why| format!("{}: {why}", file.path))
+                .and_then(|bytes| {
+                    crate::client::attach(message.clone(), file, &bytes)
+                        .map_err(|why| format!("{}: {why}", file.path))
+                });
+            match attached {
+                Ok(attached) => message = attached,
+                Err(why) => return (message, Some(why)),
+            }
+        }
+        (message, None)
     }
 
     fn response(

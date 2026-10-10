@@ -554,8 +554,13 @@ pub struct ToolLine {
     /// given one (#472).
     pub shown: Option<String>,
     /// The whole output, kept in the recording by digest, when what the
-    /// model was shown is capped (#554): the log's `files`.
+    /// model was shown is capped (#554), or the image `read` returned
+    /// (#557): the log's `files`.
     pub files: Vec<log::RecordedFile>,
+    /// The images `read` returned (#557), each with the reference its bytes
+    /// are checked against, for the result message: never logged, and
+    /// taken off the line before it is.
+    pub images: Vec<(log::RecordedFile, Vec<u8>)>,
 }
 
 impl ToolLine {
@@ -581,6 +586,7 @@ impl ToolLine {
             approval: None,
             shown: None,
             files: Vec::new(),
+            images: Vec::new(),
         }
     }
 }
@@ -1981,6 +1987,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
                 approval,
                 shown,
                 files,
+                images: _,
             } = line.as_ref().clone();
             log::Event::ToolCall {
                 request,
@@ -2472,8 +2479,14 @@ fn run_calls<S: Streaming>(
         line.shown.clone_from(&shown);
         unknown |= line.reason == Some(log::ToolRefusal::UnknownTool);
         stopped |= line.outcome == log::ToolOutcome::Cancelled;
+        let images = std::mem::take(&mut line.images);
         if let Some(shown) = shown {
-            results.push(Message::tool_result(call.id.clone(), shown));
+            let mut result = Message::tool_result(call.id.clone(), shown);
+            for (file, bytes) in &images {
+                result = crate::client::attach(result, file, bytes)
+                    .expect("the reference was taken from these bytes");
+            }
+            results.push(result);
         }
         shared.lock().push(Event::ToolCalled(Box::new(line)));
         shared.changed.notify_all();
@@ -2693,6 +2706,27 @@ fn standard_call(
             let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
             let shown = shown_capped(tools, &result, &mut line);
             (line, Some(shown))
+        }
+        super::standard::Done::Image { media_type, bytes } => {
+            let mut line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
+            // Kept by digest, as an attachment is, so the projection can
+            // rebuild the result; unrecorded, it is still sent.
+            let file = tools.recording.as_ref().map_or_else(
+                || super::attach::referenced(&bytes, media_type),
+                |dir| {
+                    super::attach::kept_whole(dir, &bytes, media_type).map_or_else(
+                        |_| super::attach::referenced(&bytes, media_type),
+                        |file| {
+                            line.files.push(file.clone());
+                            file
+                        },
+                    )
+                },
+            );
+            line.images.push((file, bytes));
+            // Qwen Code's form, since Pi's and `OpenCode` 2's words differ:
+            // the image alone, no text beside it.
+            (line, Some(String::new()))
         }
         super::standard::Done::Cancelled(_) => {
             let line = ToolLine::of(request, turn, call, log::ToolOutcome::Cancelled);
@@ -4691,6 +4725,7 @@ pub(in crate::drive) mod tests {
                 }),
                 shown: None,
                 files: Vec::new(),
+                images: Vec::new(),
             })),
             Event::Forked {
                 of_turn: 1,
@@ -6457,6 +6492,91 @@ pub(in crate::drive) mod tests {
         );
         every_head_rebuilds(&log);
         tidy(&[&tree]);
+    }
+
+    /// `read` of an image (#557): the result goes back as an image part
+    /// inside the tool message, with no words beside it, the image kept in
+    /// the recording by digest and named on the line's `files`; every head
+    /// rebuilds from the recording, and without one the head that carries
+    /// the image is named unrebuilt.
+    #[test]
+    fn a_read_image_rides_in_the_tool_message_and_every_head_rebuilds() {
+        let tree = scratch("standard-image");
+        let recording = scratch("standard-image-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let png = b"\x89PNG\r\n\x1a\nsome pixels".to_vec();
+        std::fs::write(tree.join("shot.png"), &png).expect("written");
+        let sha256 = crate::digest::sha256_hex(&png);
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools();
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.recording = Some(recording.clone());
+        let session = Session::open_looping(
+            Canned::new([
+                vec![Step::call(0, "call-1", "read", r#"{"path":"shot.png"}"#)],
+                deltas(&["red"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("what colour?", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        assert_eq!(settled_as(&log), Some(SettleReason::Final));
+        reads_whole(&session);
+        let written = lines(&log);
+        assert_eq!(written[0].outcome, log::ToolOutcome::Ran);
+        assert_eq!(written[0].shown.as_deref(), Some(""));
+        let file = log::RecordedFile {
+            path: format!("files/{sha256}"),
+            sha256: sha256.clone(),
+            media_type: "image/png".to_owned(),
+            bytes: png.len() as u64,
+        };
+        assert_eq!(written[0].files, std::slice::from_ref(&file));
+        assert!(written[0].images.is_empty(), "the bytes are never logged");
+        assert_eq!(
+            std::fs::read(recording.join(&file.path)).expect("kept"),
+            png
+        );
+        let sent = session.shared.transport.sent();
+        let result = sent[1].messages.last().expect("the result");
+        assert_eq!(result.role, Role::Tool);
+        assert_eq!(result.tool_call_id.as_deref(), Some("call-1"));
+        assert_eq!(result.content, "");
+        assert_eq!(
+            result.images,
+            crate::client::attach(Message::new(Role::Tool, ""), &file, &png)
+                .expect("the file's bytes")
+                .images
+        );
+        let lines: Vec<_> = log.iter().map(line_of).collect();
+        let projected =
+            crate::drive::projection::project_in(&lines, &regime(), None, Some(&recording))
+                .expect("projected");
+        let unrebuilt = |projected: &crate::drive::projection::Projection| -> Vec<String> {
+            projected
+                .unspellable
+                .iter()
+                .filter(|named| named.why.contains("could not be rebuilt"))
+                .map(|named| named.why.clone())
+                .collect()
+        };
+        assert!(
+            unrebuilt(&projected).is_empty(),
+            "{:#?}",
+            unrebuilt(&projected)
+        );
+        let projected =
+            crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+        let named = unrebuilt(&projected);
+        assert!(
+            named.iter().any(|why| why.contains("call call-1's image")),
+            "{named:#?}"
+        );
+        tidy(&[&tree, &recording]);
     }
 
     /// A turn that fails on its first request ran nothing, and keeps nothing:

@@ -378,12 +378,19 @@ pub fn kept_whole(
     bytes: &[u8],
     media_type: &str,
 ) -> Result<RecordedFile, (Check, String)> {
-    let file = RecordedFile {
-        media_type: media_type.to_owned(),
-        ..reference(bytes)
-    };
+    let file = referenced(bytes, media_type);
     kept(recording, &file, bytes)?;
     Ok(file)
+}
+
+/// The reference a line would carry for `bytes` of `media_type`, kept or
+/// not: what [`crate::client::attach`] checks an image's bytes against.
+#[must_use]
+pub fn referenced(bytes: &[u8], media_type: &str) -> RecordedFile {
+    RecordedFile {
+        media_type: media_type.to_owned(),
+        ..reference(bytes)
+    }
 }
 
 /// The reference an `ask` line carries for `bytes`: its copy's path under
