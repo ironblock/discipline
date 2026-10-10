@@ -176,3 +176,49 @@
 .ex-header__lever[data-undeclared] {
   color: var(--ink-faint);
 }
+
+/* The whole lever table (#623), opened on asking: a list over the session, each lever and its state as given. */
+.ex-header__levers {
+  position: relative;
+}
+
+.ex-header__levers > summary {
+  cursor: pointer;
+  color: var(--ink-muted);
+}
+
+.ex-header__levers > dl {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.15rem 0.9rem;
+  min-width: 22rem;
+  max-width: min(36rem, calc(100vw - 2rem));
+  margin: 0;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--glass-rim, var(--rule));
+  border-radius: var(--radius);
+  background: var(--fill-memory);
+  box-shadow: var(--relief-panel);
+}
+
+.ex-header__levers dl > div {
+  display: contents;
+}
+
+.ex-header__levers dt {
+  color: var(--ink-faint);
+}
+
+.ex-header__levers dd {
+  margin: 0;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+
+.ex-header__levers [data-undeclared] dd {
+  color: var(--ink-faint);
+}

@@ -199,6 +199,14 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(fold(logOf('an-answered-turn.jsonl')).phaseMoves).toEqual([]);
   });
 
+  it('keeps the whole lever table session.start declares, as given, and none for a log from before it (#573, #623)', () => {
+    const declared = logOf('a-v7-session-declaring-its-levers.jsonl');
+    const start = declared[0];
+    expect(fold(declared).levers.table).toEqual(start?.kind === 'session.start' ? start.levers : undefined);
+    expect(fold(declared).levers.table).not.toBeUndefined();
+    expect(fold(logOf('an-answered-turn.jsonl')).levers.table).toBeUndefined();
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });
