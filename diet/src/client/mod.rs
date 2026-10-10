@@ -80,6 +80,7 @@
 //! case turned out to be narrower than the test written for it (the narrower
 //! case is now the test).
 
+pub mod anthropic;
 pub mod cache;
 pub mod echo;
 pub mod head;

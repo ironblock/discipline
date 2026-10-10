@@ -573,6 +573,9 @@ vocabulary! {
         /// longer than its context -- read from the refusal's typed field,
         /// never its message (v1; R3.0's C3).
         ContextOverflow => "context_overflow",
+        /// The model refused to answer: a hosted API's `stop_reason`
+        /// `refusal` (v7, #555).
+        Refusal => "refusal",
     }
 }
 
@@ -1069,6 +1072,12 @@ pub enum Event {
         /// Whether the answer stopped at its output cap (v2, #30 D3/N10);
         /// absent when the writer did not say.
         capped: Option<bool>,
+        /// The signature a hosted model signed `reasoning` with (v7, #555):
+        /// sent back with it, verbatim.
+        reasoning_signature: Option<String>,
+        /// Thinking the provider redacted, each block's opaque data (v7,
+        /// #555): sent back as it came.
+        redacted: Option<Vec<String>>,
     },
     /// A call was stopped.
     Cancelled {
@@ -1492,6 +1501,13 @@ pub struct Usage {
     pub completion_tokens: u64,
     /// Prompt tokens reused from a cache, where the server reports them.
     pub cached_tokens: Option<u64>,
+    /// Prompt tokens written to a hosted API's cache (v7, #555).
+    pub cache_creation_tokens: Option<u64>,
+    /// Of those, written for five minutes, where the API breaks them down
+    /// (v7, #555): the billed lifetime, read from the response (#556).
+    pub cache_creation_5m_tokens: Option<u64>,
+    /// Of those, written for an hour (v7, #555).
+    pub cache_creation_1h_tokens: Option<u64>,
 }
 
 /// What serves a session, as the client declares it (v2, #30 D7/N10).
@@ -2815,6 +2831,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 }
             },
             capped: fields.optional_flag("capped")?,
+            reasoning_signature: fields.optional_string("reasoning_signature")?,
+            redacted: fields.optional_strings("redacted")?,
         },
         Kind::Cancelled => Event::Cancelled {
             request: fields.count("request")?,
@@ -3958,6 +3976,9 @@ pub const USAGE: &[Field] = &[
     must_v2("prompt_tokens", Holds::Count),
     must_v2("completion_tokens", Holds::Count),
     may_v2("cached_tokens", Holds::Count),
+    may_v7("cache_creation_tokens", Holds::Count),
+    may_v7("cache_creation_5m_tokens", Holds::Count),
+    may_v7("cache_creation_1h_tokens", Holds::Count),
 ];
 
 /// The keys a `session.start`'s `serving` carries: its dialect, always, and
@@ -4065,6 +4086,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
         && Command::from_tag(tag)
             .is_some_and(|command| matches!(command, Command::OpenTangent | Command::CloseTangent));
     if tangent_refusal || tangent_command {
+        return 7;
+    }
+    if tags == Tags::FailReason && FailReason::from_tag(tag) == Some(FailReason::Refusal) {
         return 7;
     }
     if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
@@ -4189,6 +4213,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v1("timings", Timings),
                 may_v2("usage", Holds::Usage),
                 may_v2("capped", Holds::Flag),
+                may_v7("reasoning_signature", Text),
+                may_v7("redacted", Holds::Strings),
             ];
             F
         }
@@ -4913,6 +4939,8 @@ fn to_value(line: &Line) -> Value {
             timings,
             usage,
             capped,
+            reasoning_signature,
+            redacted,
         } => {
             put("to_request", count(*to_request));
             put("text", text(answer));
@@ -4930,6 +4958,9 @@ fn to_value(line: &Line) -> Value {
                     ("prompt_tokens", Some(usage.prompt_tokens)),
                     ("completion_tokens", Some(usage.completion_tokens)),
                     ("cached_tokens", usage.cached_tokens),
+                    ("cache_creation_tokens", usage.cache_creation_tokens),
+                    ("cache_creation_5m_tokens", usage.cache_creation_5m_tokens),
+                    ("cache_creation_1h_tokens", usage.cache_creation_1h_tokens),
                 ]
                 .into_iter()
                 .filter_map(|(key, value)| value.map(|value| (key.to_owned(), count(value))))
@@ -4938,6 +4969,15 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(capped) = capped {
                 put("capped", Value::Boolean(*capped));
+            }
+            if let Some(signature) = reasoning_signature {
+                put("reasoning_signature", text(signature));
+            }
+            if let Some(redacted) = redacted {
+                put(
+                    "redacted",
+                    Value::Array(redacted.iter().map(|data| text(data)).collect()),
+                );
             }
             Kind::Response
         }
@@ -5984,6 +6024,15 @@ impl Fields<'_> {
                 None => None,
                 Some(_) => Some(count("cached_tokens")?),
             },
+            cache_creation_tokens: inner
+                .optional_count("cache_creation_tokens")
+                .map_err(|why| format!("`{key}`: {why}"))?,
+            cache_creation_5m_tokens: inner
+                .optional_count("cache_creation_5m_tokens")
+                .map_err(|why| format!("`{key}`: {why}"))?,
+            cache_creation_1h_tokens: inner
+                .optional_count("cache_creation_1h_tokens")
+                .map_err(|why| format!("`{key}`: {why}"))?,
         })
     }
 
@@ -6302,6 +6351,8 @@ mod tests {
                 piece: Piece::Reasoning("weighing it\n".to_owned()),
             },
             Event::Response {
+                reasoning_signature: None,
+                redacted: None,
                 to_request: 20,
                 text: "Done.".to_owned(),
                 finish_reason: Some("stop".to_owned()),
@@ -6426,6 +6477,8 @@ mod tests {
                 max_tokens: None,
             },
             Event::Response {
+                reasoning_signature: None,
+                redacted: None,
                 to_request: request,
                 text: "a tracker".to_owned(),
                 finish_reason: None,
@@ -6465,6 +6518,8 @@ mod tests {
                 max_tokens: Some(4000),
             },
             Event::Response {
+                reasoning_signature: None,
+                redacted: None,
                 to_request: fork + 1,
                 text: "{\"decisions\":[]}".to_owned(),
                 finish_reason: None,
@@ -7725,7 +7780,7 @@ mod tests {
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
-            "server timeout transport crashed context_overflow"
+            "server timeout transport crashed context_overflow refusal"
         );
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),

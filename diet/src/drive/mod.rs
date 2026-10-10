@@ -579,6 +579,9 @@ impl<T: Transport> Ratifier for Interviewer<'_, T> {
             tool_calls: Vec::new(),
             tool_call_id: None,
             images: Vec::new(),
+            reasoning_signature: None,
+            redacted: Vec::new(),
+            tool_error: false,
         }];
         // Immediately before the call, like `Heads::about_to_call`: what a
         // cache lifetime is compared against is the gap between two
@@ -877,6 +880,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
             tool_calls: Vec::new(),
             tool_call_id: None,
             images: Vec::new(),
+            reasoning_signature: None,
+            redacted: Vec::new(),
+            tool_error: false,
         }];
         asking
             .template_kwargs
@@ -947,6 +953,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tool_calls: Vec::new(),
                 tool_call_id: None,
                 images: Vec::new(),
+                reasoning_signature: None,
+                redacted: Vec::new(),
+                tool_error: false,
             },
             Message {
                 role: Role::User,
@@ -955,6 +964,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tool_calls: Vec::new(),
                 tool_call_id: None,
                 images: Vec::new(),
+                reasoning_signature: None,
+                redacted: Vec::new(),
+                tool_error: false,
             },
         ];
         // THE LINT, before the call. The main lane is the one whose head
@@ -1030,6 +1042,9 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 tool_calls: Vec::new(),
                 tool_call_id: None,
                 images: Vec::new(),
+                reasoning_signature: None,
+                redacted: Vec::new(),
+                tool_error: false,
             }];
             linted_head(&asking, index, INTERVIEW)?;
             heads.about_to_call(INTERVIEW);
