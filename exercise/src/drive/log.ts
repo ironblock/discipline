@@ -238,6 +238,9 @@ export interface Fork extends At {
   readonly question: string;
   /** AHEAD (`slots`): prefix tokens shared with the trunk, the warm tail it forked from. `diet`'s fork line does not say. */
   readonly prefix_tokens?: number;
+  /** An offboard seat's registry id, when the fork ran off the warm trunk (log v7, #615); with the model it served. */
+  readonly substrate?: string;
+  readonly model?: string;
 }
 
 /** How a fork ended. */
@@ -246,6 +249,10 @@ export interface ForkSettled extends At {
   /** The `seq` of the `fork`. */
   readonly fork: number;
   readonly outcome: ForkOutcome;
+  /** An offboard fork's prompt as it read it cold (#615): its prefill, in tokens. */
+  readonly prompt_tokens?: number;
+  /** An offboard fork's wall time, from its request to its settle (#615). */
+  readonly wall_ms?: number;
 }
 
 export interface Entry {
@@ -258,14 +265,23 @@ export interface Entry {
 /** A change to working memory, from the fork that produced it. */
 export interface Patch extends At {
   readonly kind: 'patch';
-  /** The `seq` of the `fork` that produced it. */
-  readonly fork: number;
+  /** The `seq` of the `fork` that produced it; absent for the trunk's own change, which names its `lane` (#627). */
+  readonly fork?: number;
+  /** The trunk's lane that made it, when no fork did (log v7, #627): today always `self-capture`. */
+  readonly lane?: string;
   readonly op: PatchOp;
   readonly entry: Entry;
   /** For `supersede`: the entry this one replaces. */
   readonly supersedes?: string;
   readonly authority?: Authority;
+  /** The tangent open when it was made (log v7, #608): the entry is that tangent's, to be ruled on at its close. */
+  readonly tangent?: string;
 }
+
+/** The operator opened a tangent (log v7, #608): the trunk as it stood is the point a close rolls back to. */
+export type TangentOpen = V0.TangentOpenLine;
+/** The operator closed it: its entries kept, dropped or parked, and the trunk rolled back to where it opened. */
+export type TangentClose = V0.TangentCloseLine;
 
 /**
  * The one deliberate prefill event -- the trunk refilled from working memory (log v6, #493): the head, the render
@@ -286,8 +302,14 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
 
 /** Forks' patches delivered after an ask (v7, the fork delivery lever). */
 export type Delivered = V0.DeliveredLine;
+/** Self-capture's reminder, a note after an ask (v7, #619): the harness's words, not the operator's. */
+export type Reminded = V0.RemindedLine;
+/** What a self-capture call did (v7, #619), logged beside its `tool_call` line: its outcome and the entries it wrote. */
+export type Capture = V0.CaptureLine;
 /** Archived items recalled after an ask (v7, the archive recall lever, #566). */
 export type Recalled = V0.RecalledLine;
+/** A tool result the model pruned, replaced at a later seam (v7, `prune_output`, #612). */
+export type Pruned = V0.PrunedLine;
 
 export type LogLine =
   | SessionStart
@@ -309,7 +331,12 @@ export type LogLine =
   | Patch
   | Seam
   | Delivered
-  | Recalled;
+  | Recalled
+  | Reminded
+  | Capture
+  | TangentOpen
+  | TangentClose
+  | Pruned;
 
 export type Kind = LogLine['kind'];
 

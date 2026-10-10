@@ -308,6 +308,7 @@ pub fn project_in(
                 template_kwargs,
                 fork_delivery,
                 tool_output,
+                levers,
                 ..
             },
         ..
@@ -341,7 +342,9 @@ pub fn project_in(
         fork_delivery: *fork_delivery,
         // The tool output cap, as `session.start` names it (#554).
         tool_output: *tool_output,
-        levers: None,
+        // Each lever's state, as `session.start` names it (#573): the
+        // record's start says what the log says.
+        levers: levers.clone(),
     }];
     events.extend(walk.events);
     Ok(Projection {
@@ -417,6 +420,14 @@ struct Walk<'a> {
     /// record names every move of a lane's head, and an interview head moves
     /// with the trunk it is cut from.
     side_heads: BTreeMap<Lane, String>,
+    /// Each call's latest `tool_call` line, by its id: its row and what the
+    /// trunk carried as its result (#612).
+    calls: BTreeMap<String, (u64, Option<String>)>,
+    /// The results the model pruned (#612), in the order it pruned them.
+    pruned: Vec<Pruned>,
+    /// A lane's substrate where a fork's line names an offboard seat
+    /// (#570): its requests and its fork rows name it, not the trunk's.
+    seated: BTreeMap<Lane, String>,
     /// The trunk at an open tangent's fork point (v7, #22): what its close
     /// rolls the rebuilt trunk back to, as the session's close does.
     tangent_trunk: Option<Vec<Message>>,
@@ -482,8 +493,16 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
                 Ok(super::tool_loop::bash_tool())
             } else if let Some(tool) = super::standard::definitions()
                 .into_iter()
+                .chain([super::prune::definition()])
                 .find(|tool| tool.name == *name)
             {
+                Ok(tool)
+            } else if let Some(tool) = crate::capture::tools::contract()
+                .ok()
+                .map(|contract| crate::capture::tools::definitions(&contract))
+                .and_then(|tools| tools.into_iter().find(|tool| tool.name == *name))
+            {
+                // Self-capture's tools (#609), as the pinned contract has them.
                 Ok(tool)
             } else {
                 Err(format!(
@@ -503,6 +522,26 @@ fn earlier_bash(tools: &[ToolDefinition]) -> Option<Vec<ToolDefinition>> {
     let mut earlier = tools.to_vec();
     earlier[at] = super::tool_loop::bash_tool_before_its_description();
     Some(earlier)
+}
+
+/// A result the model pruned (#612), as its `pruned` line names it.
+#[derive(Debug, Clone)]
+struct Pruned {
+    call: String,
+    shown: String,
+    text: String,
+    output: record::PrunedOutput,
+    applied: bool,
+}
+
+impl Pruned {
+    /// Whether `message` is the result it prunes, as the trunk carried it
+    /// or as a seam already replaced it: the session's own test.
+    fn is(&self, message: &Message) -> bool {
+        message.role == Role::Tool
+            && message.tool_call_id.as_deref() == Some(self.call.as_str())
+            && (message.content == self.shown || message.content == self.text)
+    }
 }
 
 impl<'a> Walk<'a> {
@@ -560,6 +599,9 @@ impl<'a> Walk<'a> {
             trunk_unrebuilt: None,
             refilled: false,
             side_heads: BTreeMap::new(),
+            calls: BTreeMap::new(),
+            pruned: Vec::new(),
+            seated: BTreeMap::new(),
         }
     }
 
@@ -570,6 +612,39 @@ impl<'a> Walk<'a> {
             why,
             text,
         });
+    }
+
+    /// A failed call, named: the record has no row for one. An overflow's
+    /// why carries its prompt as sized and the window (#616), and whether
+    /// the engine said so or its size did.
+    fn failed(
+        &mut self,
+        seq: u64,
+        reason: log::FailReason,
+        message: &str,
+        overflow: Option<log::Overflow>,
+    ) {
+        let sizes = overflow.map_or_else(String::new, |overflow| {
+            format!(
+                ", {}: a prompt of {} tokens as sized, against a window of {}",
+                if overflow.inferred {
+                    "told from its size"
+                } else {
+                    "as the engine said"
+                },
+                overflow.prompt_tokens,
+                overflow.window
+            )
+        });
+        self.name(
+            seq,
+            "request.failed",
+            format!(
+                "a failed call ({}{sizes}): the record has no row for one",
+                reason.tag()
+            ),
+            Some(message.to_owned()),
+        );
     }
 
     /// A tangent's line (v7, #22): its open keeps the rebuilt trunk as the
@@ -597,8 +672,30 @@ impl<'a> Walk<'a> {
         }
     }
 
+    /// A fact the record has no row for at all, named once per kind.
+    fn no_row(&mut self, line: &log::Line) {
+        let kind = match &line.event {
+            Line::IdleGap { .. } => log::Kind::IdleGap,
+            Line::Refused { .. } => log::Kind::Refused,
+            Line::Capture { .. } => log::Kind::Capture,
+            _ => log::Kind::Progress,
+        }
+        .tag();
+        if self.named_kinds.insert(kind) {
+            self.name(
+                line.seq,
+                kind,
+                format!("the record has no row for a `{kind}` line"),
+                None,
+            );
+        }
+    }
+
     fn line(&mut self, line: &log::Line) -> Result<(), String> {
         match &line.event {
+            // A prune (v7, #612): applied to the trunk by the seam that
+            // lists its call, as the session applies it.
+            Line::Pruned { .. } => self.pruned_line(line),
             Line::Ask {
                 turn, text, files, ..
             } => {
@@ -646,23 +743,20 @@ impl<'a> Walk<'a> {
                 request, partial, ..
             } => self.cancelled_call(line.seq, *request, partial),
             Line::RequestFailed {
-                reason, message, ..
-            } => self.name(
-                line.seq,
-                "request.failed",
-                format!(
-                    "a failed call ({}): the record has no row for one",
-                    reason.tag()
-                ),
-                Some(message.clone()),
-            ),
+                reason,
+                message,
+                overflow,
+                ..
+            } => self.failed(line.seq, *reason, message, *overflow),
             // A fork (v5, #374): its row, and its patches as one capture row.
-            Line::Fork { lane, of_turn, .. } => self.fork(line.seq, *lane, *of_turn),
-            Line::Patch { fork, .. } => self.patch(line.seq, *fork),
+            Line::Fork { .. } => self.fork(line),
+            Line::Patch {
+                fork: Some(fork), ..
+            } => self.patch(line.seq, *fork),
             // The record's fork row carries no outcome: a fork that settled
             // `value` is carried by its capture row, and any other outcome is
             // named with its word.
-            Line::ForkSettled { fork, outcome } => self.fork_settled(line.seq, *fork, *outcome),
+            Line::ForkSettled { fork, outcome, .. } => self.fork_settled(line.seq, *fork, *outcome),
             // A seam (v6, #493): its row, and the trunk refilled exactly as
             // the session refills it, so the next request's head is rebuilt
             // and checked like any other.
@@ -674,26 +768,20 @@ impl<'a> Walk<'a> {
             // on the rebuilt trunk, as it does on the session's.
             // Archived items recalled (v7, #566): a note after it too, in
             // the log's order.
-            Line::Delivered { turn, text, .. } | Line::Recalled { turn, text, .. } => {
+            // The self-capture reminder (v7, #609): a note after it too.
+            Line::Delivered { turn, text, .. }
+            | Line::Recalled { turn, text, .. }
+            | Line::Reminded { turn, text } => {
                 self.notes.entry(*turn).or_default().push(text.clone());
             }
             // Facts the record has no row for at all, named once per kind.
-            Line::IdleGap { .. } | Line::Refused { .. } | Line::Progress { .. } => {
-                let kind = match &line.event {
-                    Line::IdleGap { .. } => log::Kind::IdleGap,
-                    Line::Refused { .. } => log::Kind::Refused,
-                    _ => log::Kind::Progress,
-                }
-                .tag();
-                if self.named_kinds.insert(kind) {
-                    self.name(
-                        line.seq,
-                        kind,
-                        format!("the record has no row for a `{kind}` line"),
-                        None,
-                    );
-                }
-            }
+            Line::IdleGap { .. }
+            | Line::Refused { .. }
+            | Line::Progress { .. }
+            | Line::Capture { .. }
+            // The trunk's own self-capture patch (#609): no fork row to
+            // count it on, as its `capture` line has none.
+            | Line::Patch { fork: None, .. } => self.no_row(line),
             // A tool call (v3, #302): its row carries how it ran under the
             // log's own words, so the record says what confined it.
             Line::ToolCall { .. }
@@ -826,7 +914,27 @@ impl<'a> Walk<'a> {
     /// A fork's row, `f/<seq>`, off the turn it follows: served on the
     /// regime's substrate, like every row this projection writes. Named
     /// rather than written when that turn has no row.
-    fn fork(&mut self, seq: u64, lane: Lane, of_turn: u32) {
+    /// The substrate `lane`'s rows name: its seat's, else the trunk's.
+    fn substrate_of(&self, lane: Lane) -> String {
+        self.seated.get(&lane).unwrap_or(&self.substrate).clone()
+    }
+
+    fn fork(&mut self, forked: &log::Line) {
+        let Line::Fork {
+            lane,
+            of_turn,
+            seat,
+            ..
+        } = &forked.event
+        else {
+            return;
+        };
+        let (seq, lane, of_turn) = (forked.seq, *lane, *of_turn);
+        // The lane's requests name the seat whether or not this row can be
+        // written.
+        if let Some(seat) = seat {
+            self.seated.insert(lane, seat.substrate.clone());
+        }
         let turned = self
             .events
             .iter()
@@ -844,8 +952,35 @@ impl<'a> Walk<'a> {
         self.events.push(Event::Fork {
             id: format!("f/{seq}"),
             lane: lane.tag().to_owned(),
-            substrate: self.substrate.clone(),
+            substrate: self.substrate_of(lane),
             of_turn,
+        });
+    }
+
+    /// A `pruned` line (#612), kept until the seam that lists its call: the
+    /// pruned call's row and what the trunk carried as its result.
+    fn pruned_line(&mut self, line: &log::Line) {
+        let Line::Pruned {
+            call,
+            sha256,
+            bytes,
+            text,
+            ..
+        } = &line.event
+        else {
+            return;
+        };
+        let (row, shown) = self.calls.get(call).cloned().unwrap_or_default();
+        self.pruned.push(Pruned {
+            call: call.clone(),
+            shown: shown.unwrap_or_default(),
+            text: text.clone(),
+            output: record::PrunedOutput {
+                tool_call: format!("t/{row}"),
+                sha256: sha256.clone(),
+                bytes: *bytes,
+            },
+            applied: false,
         });
     }
 
@@ -861,6 +996,7 @@ impl<'a> Walk<'a> {
             tail_tokens,
             outputs,
             placement,
+            pruned,
             ..
         } = &line.event
         else {
@@ -873,7 +1009,26 @@ impl<'a> Walk<'a> {
             .trunk
             .get(self.head.len() + usize::from(self.refilled)..)
             .unwrap_or_default();
-        let kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+        let mut kept = crate::seam::render::tail(turns, tail_tokens).to_vec();
+        // The prunes this seam applied (#612), then each pruned result in
+        // the kept tail replaced by its line, as the session replaces it.
+        let mut applied = Vec::new();
+        for call in pruned.iter().flatten() {
+            if let Some(prune) = self
+                .pruned
+                .iter_mut()
+                .find(|prune| !prune.applied && prune.call == *call)
+            {
+                prune.applied = true;
+                applied.push(prune.output.clone());
+            }
+        }
+        for message in &mut kept {
+            if let Some(prune) = self.pruned.iter().find(|prune| prune.is(message)) {
+                message.content.clone_from(&prune.text);
+                message.images.clear();
+            }
+        }
         let carried_turns = kept
             .iter()
             .filter(|message| message.role == Role::User)
@@ -929,6 +1084,7 @@ impl<'a> Walk<'a> {
             tail_tokens: tailed.then_some(tail_tokens),
             carried_turns: tailed.then_some(carried_turns),
             carried_tokens: tailed.then_some(carried_tokens),
+            pruned: (!applied.is_empty()).then_some(applied),
         });
     }
 
@@ -1037,7 +1193,7 @@ impl<'a> Walk<'a> {
         self.events.push(Event::Request {
             id: request_id(seq),
             lane: lane.tag().to_owned(),
-            substrate: self.substrate.clone(),
+            substrate: self.substrate_of(lane),
             retry_of: None,
             text: None,
             head_sha256: Some(head_sha256.to_owned()),
@@ -1285,6 +1441,9 @@ impl<'a> Walk<'a> {
             self.onto_the_trunk(*turn, ran);
             return;
         }
+        if let Line::ToolCall { id, shown, .. } = &line.event {
+            self.calls.insert(id.clone(), (line.seq, shown.clone()));
+        }
         self.step_call(&line.event);
         self.tool_call_line(line.seq, &line.event);
     }
@@ -1519,10 +1678,12 @@ mod tests {
             fork_delivery: None,
             reasoning_effort_default: None,
             instruction_files: None,
+            levers: None,
             tool_output: None,
             phases: None,
             phase_transitions: None,
             opening_phase: None,
+            fork_asks: None,
         }
     }
 
@@ -1716,6 +1877,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            pruned: None,
         });
         let projection = project(
             &numbered(events),
@@ -1760,6 +1922,7 @@ mod tests {
             carried_output_bytes: None,
             placement: None,
             render_budget: None,
+            pruned: None,
         });
         let projection = project(
             &numbered(events),
@@ -1819,12 +1982,18 @@ mod tests {
             ),
             (
                 2,
+                // #616: TabbyAPI's abort, told an overflow from its size.
                 Line::RequestFailed {
                     request: 7,
-                    reason: FailReason::Server,
-                    message: "busy".to_owned(),
-                    status: Some(503),
+                    reason: FailReason::ContextOverflow,
+                    message: "Chat completion aborted.".to_owned(),
+                    status: Some(500),
                     partial: None,
+                    overflow: Some(log::Overflow {
+                        prompt_tokens: 161_840,
+                        window: 163_840,
+                        inferred: true,
+                    }),
                 },
             ),
         ] {
@@ -1871,6 +2040,13 @@ mod tests {
         assert!(
             kinds.contains(&"cancelled") && kinds.contains(&"request.failed"),
             "{kinds:?}"
+        );
+        assert!(
+            projection.unspellable.iter().any(|item| item.why
+                == "a failed call (context_overflow, told from its size: a prompt of 161840 \
+                    tokens as sized, against a window of 163840): the record has no row for one"),
+            "{:?}",
+            projection.unspellable
         );
         // The unanswered request by its own seq and reason: every request
         // here is also named for its unrebuildable head, so a bare "request"
@@ -2399,6 +2575,42 @@ mod tests {
         assert_eq!(named, vec![Some("ls -la (")]);
     }
 
+    /// #612: a seam that applied a prune names it on its row -- the pruned
+    /// call's row, its whole's sha256, the bytes it removed -- and the
+    /// projection reads the log's own fixture to say so.
+    #[test]
+    fn a_seam_row_names_each_prune_it_applied() {
+        let text = include_str!(
+            "../../formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl"
+        );
+        let lines = log::parse(text).expect("the fixture reads");
+        let projected =
+            project(&lines, &regime(), Some(Engine::Commit("e7051ef"))).expect("projected");
+        let rows: Vec<_> = projected
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Seam { pruned, .. } => Some(pruned.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [Some(vec![record::PrunedOutput {
+                tool_call: "t/6".to_owned(),
+                sha256: crate::digest::sha256_hex(b"line 1\nline 2\n"),
+                bytes: 14,
+            }])],
+            "{:#?}",
+            projected.unspellable
+        );
+        let tool = projected.events.iter().any(|event| {
+            matches!(event, Event::ToolCall { id, tool, .. } if id == "t/6" && tool == "bash")
+        });
+        assert!(tool, "the row it names is the pruned call's");
+        validates(&projected);
+    }
+
     /// A v5 session with two forks, projected and validated: turn 1's
     /// scoping fork settled `value` with three patches, a plain turn 2, and
     /// turn 3's read fork, declined.
@@ -2411,6 +2623,8 @@ mod tests {
             question: "what did the operator decide".to_owned(),
             view: None,
             role: None,
+            seat: None,
+            ask: None,
         };
         let call = |turn: u32, fork: u64| {
             [
@@ -2435,7 +2649,8 @@ mod tests {
             ]
         };
         let patch = |fork: u64, id: &str| Line::Patch {
-            fork,
+            fork: Some(fork),
+            lane: None,
             op: log::PatchOp::Add,
             entry: log::PatchEntry {
                 id: id.to_owned(),
@@ -2452,6 +2667,8 @@ mod tests {
         events.push(Line::ForkSettled {
             fork: 8,
             outcome: log::ForkOutcome::Value,
+            prompt_tokens: None,
+            wall_ms: None,
         });
         events.extend(["d1", "d2", "d3"].map(|id| patch(8, id)));
         events.extend(answered(2, 17, Some(warm()), None));
@@ -2461,6 +2678,8 @@ mod tests {
         events.push(Line::ForkSettled {
             fork: 29,
             outcome: log::ForkOutcome::Decline,
+            prompt_tokens: None,
+            wall_ms: None,
         });
         let lines = numbered(events);
         let document: String = lines.iter().map(|line| log::render(line) + "\n").collect();

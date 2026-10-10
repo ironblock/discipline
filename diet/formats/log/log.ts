@@ -29,8 +29,11 @@ export type Kind =
   | "seam"
   | "delivered"
   | "recalled"
+  | "pruned"
   | "tangent.open"
   | "tangent.close"
+  | "capture"
+  | "reminded"
 ;
 
 export type State =
@@ -180,6 +183,7 @@ export type SeamReason =
   | "phase"
   | "budget"
   | "cadence"
+  | "prune"
 ;
 
 export type Framing =
@@ -323,6 +327,9 @@ export type SessionStartLine = {
   unsent?: Unsent;
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
+  levers?: Record<string, string>;
+  fork_asks?: string;
+  fork_asks_digest?: string;
   reasoning_effort_default?: string;
   phases?: string[];
   phase_transitions?: PhaseMove[];
@@ -414,7 +421,7 @@ export type RequestFailedLine = {
   message: string;
   status?: number;
   partial?: string;
-};
+} & ({ prompt_tokens: number; window: number; inferred: boolean } | { prompt_tokens?: never; window?: never; inferred?: never });
 
 export type TurnSettledLine = {
   seq: number;
@@ -487,7 +494,8 @@ export type ForkLine = {
   question: string;
   view?: string;
   role?: string;
-};
+  ask?: string;
+} & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
   seq: number;
@@ -495,18 +503,19 @@ export type ForkSettledLine = {
   kind: "fork.settled";
   fork: number;
   outcome: ForkOutcome;
+  prompt_tokens?: number;
+  wall_ms?: number;
 };
 
 export type PatchLine = {
   seq: number;
   t: number;
   kind: "patch";
-  fork: number;
   op: PatchOp;
   entry: PatchEntry;
   supersedes?: string;
   tangent?: string;
-};
+} & ({ fork: number; lane?: never } | { lane: string; fork?: never });
 
 export type SeamLine = {
   seq: number;
@@ -532,6 +541,7 @@ export type SeamLine = {
   render_over_budget?: string;
   render_tokens?: number;
   render_reduced?: number;
+  pruned?: string[];
 };
 
 export type DeliveredLine = {
@@ -552,6 +562,17 @@ export type RecalledLine = {
   recall: RecallState;
   text: string;
   items: RecalledItem[];
+};
+
+export type PrunedLine = {
+  seq: number;
+  t: number;
+  kind: "pruned";
+  turn: number;
+  call: string;
+  sha256: string;
+  bytes: number;
+  text: string;
 };
 
 export type TangentOpenLine = {
@@ -576,6 +597,27 @@ export type TangentCloseLine = {
   rolled_back: number;
 };
 
+export type CaptureLine = {
+  seq: number;
+  t: number;
+  kind: "capture";
+  request: number;
+  call: string;
+  tool: string;
+  outcome: string;
+  entries: string[];
+  why?: string;
+  fork?: number;
+};
+
+export type RemindedLine = {
+  seq: number;
+  t: number;
+  kind: "reminded";
+  turn: number;
+  text: string;
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -597,6 +639,9 @@ export type LogLine =
   | SeamLine
   | DeliveredLine
   | RecalledLine
+  | PrunedLine
   | TangentOpenLine
   | TangentCloseLine
+  | CaptureLine
+  | RemindedLine
 ;

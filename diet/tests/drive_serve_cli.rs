@@ -1590,6 +1590,60 @@ fn a_drive_server_records_a_two_turn_session_that_check_record_reads() {
     let _ = std::fs::remove_file(&sidecar);
 }
 
+/// #573: the log's `session.start` carries the same `levers` as the
+/// record's start row -- one reading of the regimen, written to both, the
+/// window clamp's word included.
+#[test]
+fn a_drive_servers_log_and_record_start_carry_the_same_levers() {
+    let stub = Stub::serving_with_props(
+        vec![Act::Raw(ANSWERED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let record = file_holding("record", "");
+    let log = file_holding("log", "");
+    let record_path = record.0.to_string_lossy().into_owned();
+    let log_path = log.0.to_string_lossy().into_owned();
+    let served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            &dev_loop(),
+            "--record",
+            &record_path,
+            "--log",
+            &log_path,
+        ],
+    );
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains(r#""to":"awaiting""#),
+    );
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    served
+        .said
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the record's report");
+    let logged = first_logged_line(&log.0);
+    let written = std::fs::read_to_string(&record.0).expect("the record");
+    let start_row = log_line_object(written.lines().next().expect("a start row"));
+    assert_eq!(logged["kind"], "session.start", "{logged}");
+    assert!(
+        logged["levers"]["step_and_output_limits"]
+            .as_str()
+            .is_some_and(|word| word.ends_with(":unclamped")),
+        "{logged}"
+    );
+    assert_eq!(logged["levers"], start_row["levers"], "{logged}\n{written}");
+    let _ = std::fs::remove_file(format!("{record_path}.unspellable.json"));
+    let _ = std::fs::remove_file(format!("{record_path}.product.txt"));
+}
+
 #[test]
 fn a_drive_server_empties_an_earlier_record_and_its_sidecar_when_it_starts() {
     // Left in place until the session ends, an earlier run's record would
@@ -2718,6 +2772,39 @@ fn a_drive_server_names_the_fork_delivery_its_regimen_declares() {
 }
 
 #[test]
+fn a_drive_server_refuses_tools_capture_without_a_set_written_for_it() {
+    // #610: a fork answers through the capture tools only in an ask set
+    // written for them, with self-capture declaring them, and with forks to
+    // answer at all; each missing piece is refused before it listens.
+    for (top, says) in [
+        (
+            "capture_modality = \"tools\"\nself_capture = true\n",
+            "no `interview_warrant`",
+        ),
+        (
+            "interview_warrant = [\"scoping\"]\ncapture_modality = \"tools\"\n",
+            "self-capture off",
+        ),
+        (
+            "interview_warrant = [\"scoping\"]\ncapture_modality = \"tools\"\n\
+             self_capture = true\nfork_asks = \"v4\"\n",
+            "the ask set `v4`",
+        ),
+        (
+            "interview_warrant = [\"scoping\"]\ncapture_modality = \"both\"\n",
+            "`capture_modality` is `fields` or `tools`",
+        ),
+    ] {
+        let refused = dev_loop_sampling(top, "seed = 7\n");
+        let stub = Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info())
+            .expect("loopback");
+        let (code, said) = run_briefly(&stub.url(), &["--regimen", &refused.0.to_string_lossy()]);
+        assert_ne!(code, None, "it listened: {said}");
+        assert!(said.contains(says), "{top}: {said}");
+    }
+}
+
+#[test]
 fn a_drive_server_runs_a_regimens_phase_graph() {
     // #563: serve reads `phases` and `phase_transitions` (it refused them,
     // #520), logs the graph and the phase it opens in, and takes a phase on
@@ -3154,5 +3241,321 @@ fn the_tool_turn_record_reads(record: &std::path::Path) {
     assert_eq!(
         calls[1]["approval"], calls[0]["approval"],
         "turn two's call ran under turn one's session approval, unprompted: {written}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// the extraction seat, offboard (#570)
+// ---------------------------------------------------------------------------
+
+/// The dev loop's regimen, its forks seated offboard on the replay
+/// substrate.
+fn seated_regimen() -> HeadFile {
+    dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nextraction_seat = \"offboard:canned-replay\"\n",
+        "temperature = 0.6\n",
+    )
+}
+
+#[test]
+fn a_drive_servers_offboard_seat_takes_the_fork_and_the_record_names_it() {
+    let trunk = Stub::serving_with_props(
+        vec![Act::Raw(ANSWERED.to_vec())],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let seat = Stub::serving_with_props(
+        vec![Act::Raw(ANSWERED.to_vec())],
+        &diet::drive::canned::replay_build_info(),
+    )
+    .expect("loopback");
+    let regimen = seated_regimen();
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(
+        &trunk.url(),
+        &[
+            "--regimen",
+            &regimen_path,
+            "--record",
+            &path,
+            "--log",
+            &logged,
+            "--seat-endpoint",
+            &seat.url(),
+            "--seat-model",
+            "a-small-model",
+        ],
+    );
+    let address = served.listening.clone();
+    let reply = post(
+        &address,
+        &address,
+        r#"{"kind":"ask","text":"what are we building?","scoping":true}"#,
+    );
+    assert_eq!(status(&reply), 200, "{reply}");
+    let read = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains("fork.settled") && read.contains(r#""to":"awaiting""#),
+    );
+    assert!(read.contains("fork.settled"), "the fork settled: {read}");
+    let reply = post(&address, &address, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _report = served
+        .said
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the record's report");
+
+    // The wire: the trunk's server saw the turn, the seat's the fork, which
+    // named the seat's model and saw the last turn, then its question.
+    let [turn] = trunk.received().try_into().expect("one trunk request");
+    let [fork] = seat
+        .received()
+        .try_into()
+        .expect("one fork request, to the seat");
+    assert_eq!(log_line_object(&turn)["model"], "a-model", "{turn}");
+    assert_eq!(log_line_object(&fork)["model"], "a-small-model", "{fork}");
+    let messages = |body: &str| log_line_object(body)["messages"].as_array().cloned();
+    let (turn_messages, fork_messages) = (
+        messages(&turn).expect("messages"),
+        messages(&fork).expect("messages"),
+    );
+    assert_eq!(fork_messages.len(), turn_messages.len() + 2, "{fork}");
+    assert_eq!(fork_messages[..turn_messages.len()], turn_messages[..]);
+
+    // The log's fork line names the seat and its model.
+    let lines = std::fs::read_to_string(&log_file.0).expect("the log");
+    let fork_line = lines
+        .lines()
+        .map(log_line_object)
+        .find(|line| line["kind"] == "fork")
+        .expect("a fork line");
+    assert_eq!(
+        (
+            &fork_line["substrate"],
+            &fork_line["model"],
+            &fork_line["view"]
+        ),
+        (
+            &serde_json::json!("canned-replay"),
+            &serde_json::json!("a-small-model"),
+            &serde_json::json!("last_turn")
+        ),
+        "{fork_line}"
+    );
+
+    the_fork_settling_names_its_cost(&lines);
+    the_record_names_the_seat(&std::fs::read_to_string(&record.0).expect("the record"));
+    let _ = std::fs::remove_file(format!("{path}.unspellable.json"));
+    let _ = std::fs::remove_file(format!("{path}.product.txt"));
+}
+
+/// The fork's settling line: the prompt its server evaluated, as the fork's
+/// response reported it, and the call's wall time.
+fn the_fork_settling_names_its_cost(lines: &str) {
+    let settled_line = lines
+        .lines()
+        .map(log_line_object)
+        .find(|line| line["kind"] == "fork.settled")
+        .expect("a fork.settled line");
+    let reported = lines
+        .lines()
+        .map(log_line_object)
+        .rev()
+        .find(|line| line["kind"] == "response")
+        .expect("the fork's response")["timings"]["prompt_n"]
+        .clone();
+    assert!(reported.is_u64(), "{reported}");
+    assert_eq!(settled_line["prompt_tokens"], reported, "{settled_line}");
+    assert!(settled_line["wall_ms"].is_u64(), "{settled_line}");
+}
+
+/// The record: two substrates, the seat second; the interview lane's rows
+/// name the seat, the trunk's the trunk's; the start row's levers say so.
+fn the_record_names_the_seat(written: &str) {
+    let rows: Vec<serde_json::Value> = written.lines().map(log_line_object).collect();
+    let substrates = rows[0]["regime"]["substrates"]
+        .as_array()
+        .expect("substrates");
+    let ids: Vec<&str> = substrates.iter().filter_map(|s| s["id"].as_str()).collect();
+    assert_eq!(ids, ["canned-cache-n", "canned-replay"], "{}", rows[0]);
+    let named: Vec<(&str, &str)> = rows
+        .iter()
+        .filter_map(|row| Some((row["lane"].as_str()?, row["substrate"].as_str()?)))
+        .collect();
+    assert!(named.contains(&("trunk", "canned-cache-n")), "{named:?}");
+    assert!(named.contains(&("interview", "canned-replay")), "{named:?}");
+    for lever in [
+        r#""extraction_seat":"offboard:canned-replay""#,
+        r#""fork_input_view":"last_turn:defaulted""#,
+    ] {
+        assert!(rows[0].to_string().contains(lever), "{lever}: {}", rows[0]);
+    }
+    assert!(
+        named
+            .iter()
+            .all(|(lane, id)| (*lane == "interview") == (*id == "canned-replay")),
+        "{named:?}"
+    );
+}
+
+#[test]
+fn a_drive_server_refuses_an_offboard_seat_it_cannot_reach_as_declared() {
+    let regimen = seated_regimen();
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let trunk = || {
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback")
+    };
+
+    // Declared offboard, no seat flags.
+    let stub = trunk();
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &regimen_path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("--seat-endpoint and --seat-model") && !said.contains("listening"),
+        "{said}"
+    );
+
+    // Seat flags, and a warm regimen.
+    let warm = dev_loop_sampling("", "temperature = 0.6\n");
+    let warm_path = warm.0.to_string_lossy().into_owned();
+    let stub = trunk();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &warm_path,
+            "--seat-endpoint",
+            "http://127.0.0.1:9",
+            "--seat-model",
+            "m",
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("the regimen declares none"), "{said}");
+
+    // The trunk's own endpoint.
+    let stub = trunk();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &regimen_path,
+            "--seat-endpoint",
+            &stub.url(),
+            "--seat-model",
+            "m",
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("the trunk's own endpoint"), "{said}");
+
+    // A seat whose engine is not the registry's: the trunk's build, not the
+    // replay substrate's.
+    let stub = trunk();
+    let impostor = trunk();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &regimen_path,
+            "--seat-endpoint",
+            &impostor.url(),
+            "--seat-model",
+            "m",
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("the extraction seat: ") && !said.contains("listening"),
+        "{said}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// model-elected pruning (#612)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_drive_server_offers_prune_output_only_where_a_prune_can_be_applied() {
+    let tree = Dir::new("prune-tree");
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let pruning = "model_pruning = \"on\"\n";
+
+    // Commands and a warrant: `prune_output` after the surface's tools.
+    let regimen = commands_regimen(
+        &format!("allowed_commands = []\ninterview_warrant = [\"scoping\"]\n{pruning}"),
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let _served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--log",
+            &logged,
+        ],
+    );
+    let start_line = first_logged_line(&log_file.0);
+    assert_eq!(
+        start_line["tools"],
+        serde_json::json!(["bash", "prune_output"]),
+        "{start_line}"
+    );
+
+    // No warrant: nothing fills working memory, so no seam could apply it.
+    let regimen = commands_regimen(
+        &format!("allowed_commands = []\n{pruning}"),
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("no seam could ever replace a pruned result"),
+        "{said}"
+    );
+
+    // No commands: nothing to prune.
+    let regimen = dev_loop_sampling(
+        &format!("interview_warrant = [\"scoping\"]\n{pruning}"),
+        "temperature = 0.6\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let (code, said) = run_briefly(&stub.url(), &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("needs a session that runs commands"),
+        "{said}"
     );
 }

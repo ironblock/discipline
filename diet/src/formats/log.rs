@@ -219,11 +219,19 @@ vocabulary! {
         Delivered => "delivered",
         /// Archived items recalled at the tail of a trunk request (v7, #566).
         Recalled => "recalled",
+        /// A tool result the model pruned, replaced at a later seam (v7,
+        /// #612).
+        Pruned => "pruned",
         /// A tangent opened at the operator's word (v7, #22).
         TangentOpen => "tangent.open",
         /// A tangent closed: its entries disposed and the trunk rolled back
         /// to the fork point (v7, #22).
         TangentClose => "tangent.close",
+        /// A self-capture call the model elected, and what it wrote to
+        /// working memory (v7, #609).
+        Capture => "capture",
+        /// The self-capture reminder, as a note after an ask (v7, #609).
+        Reminded => "reminded",
     }
 }
 
@@ -361,6 +369,9 @@ vocabulary! {
         Budget => "budget",
         /// The declared cadence came round.
         Cadence => "cadence",
+        /// The model pruned a tool result, applied as its turn settled (v7,
+        /// #612).
+        Prune => "prune",
     }
 }
 
@@ -535,6 +546,21 @@ vocabulary! {
     }
 }
 
+/// A context overflow's sizes (v7, #616): `prompt_tokens`, `window` and
+/// `inferred`, all three or none.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Overflow {
+    /// The call's prompt, in tokens, as serve sized it: the latest measured
+    /// prompt plus the estimate of what was added since (#588).
+    pub prompt_tokens: u64,
+    /// The engine's context window, in tokens, as serve read it at start.
+    pub window: u64,
+    /// Whether the overflow was told from the sizes alone -- the prompt and
+    /// its output cap reached into the window's margin, and the server's
+    /// refusal named no kind -- rather than from the refusal's typed field.
+    pub inferred: bool,
+}
+
 vocabulary! {
     /// How a turn ended.
     SettleReason {
@@ -696,6 +722,27 @@ pub enum Piece {
         /// This fragment of the arguments text.
         arguments: String,
     },
+}
+
+/// The offboard seat a `fork`'s call ran on (v7, #570): the registry id of
+/// its substrate and the model its request named. Its two keys come
+/// together or not at all.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkSeat {
+    /// The seat's registry id.
+    pub substrate: String,
+    /// The model the fork's request named.
+    pub model: String,
+}
+
+/// The fork ask set a session asks in (v7, #595), by name and digest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkAsks {
+    /// The set's name: `dogma::asks`' directory.
+    pub name: String,
+    /// The set's digest, recomputable from the dogma's manifest; best
+    /// effort, so a name read without one is kept.
+    pub digest: Option<String>,
 }
 
 /// What a `session.start` claims serves it (v3, #292): the regimen's
@@ -886,6 +933,13 @@ pub enum Event {
         approvals_off: Option<bool>,
         /// The fork delivery lever's state (v7), for a session that forks.
         fork_delivery: Option<ForkDelivery>,
+        /// Each lever's state the session runs at (v7, #573), by lever, in
+        /// `docs/program.md` §2's words: the record's start row's `levers`,
+        /// from the same reading, so the two agree by construction.
+        levers: Option<BTreeMap<String, String>>,
+        /// The fork ask set a session that forks asks in (v7, #595): its name
+        /// and digest, `fork_asks` and `fork_asks_digest`.
+        fork_asks: Option<ForkAsks>,
         /// With thinking on and no `reasoning_effort` sent, the level the
         /// chat template renders by default, as the registry declares it
         /// (v7): what the model was asked for, named.
@@ -1008,6 +1062,9 @@ pub enum Event {
         status: Option<u16>,
         /// What arrived before it ended, when anything did.
         partial: Option<String>,
+        /// Its prompt against the context window, when its reason is
+        /// `context_overflow` and serve knew the window (v7, #616).
+        overflow: Option<Overflow>,
     },
     /// A turn is over.
     TurnSettled {
@@ -1133,6 +1190,11 @@ pub enum Event {
         /// The role it was asked in (v7, #599): `system` or `developer`;
         /// absent is `user`.
         role: Option<String>,
+        /// Where its call ran (v7, #570): an offboard seat's substrate and
+        /// model, together; absent is the trunk's own server, warm.
+        seat: Option<ForkSeat>,
+        /// Which ask of its set it sent (v7, #595): the router kind's tag.
+        ask: Option<String>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -1140,11 +1202,20 @@ pub enum Event {
         fork: u64,
         /// How.
         outcome: ForkOutcome,
+        /// The prompt tokens an offboard fork's server evaluated -- its
+        /// `prompt_n`, the prefill -- as it reported them (v7, #570).
+        prompt_tokens: Option<u64>,
+        /// An offboard fork's call, wall time from request to its end, in
+        /// milliseconds (v7, #570).
+        wall_ms: Option<u64>,
     },
     /// One entry a fork's answer patched into working memory (v5, #374).
     Patch {
-        /// The `seq` of the fork.
-        fork: u64,
+        /// The `seq` of the fork whose answer made it; absent for a patch the
+        /// trunk made itself (v7, #609), which names its `lane` instead.
+        fork: Option<u64>,
+        /// The lane that made it, when no fork did (v7): `self-capture`.
+        lane: Option<String>,
         /// What it does.
         op: PatchOp,
         /// The entry.
@@ -1181,6 +1252,21 @@ pub enum Event {
         /// Each item it carries, in rank order.
         items: Vec<RecalledItem>,
     },
+    /// A tool result the model pruned (v7, #612), logged when the tool
+    /// answered: a later seam carries `text` in its place.
+    Pruned {
+        /// The turn the prune was called in.
+        turn: u32,
+        /// The id of the call whose result it pruned.
+        call: String,
+        /// The sha256 of that result's whole, as saved.
+        sha256: String,
+        /// The bytes of the result the trunk carried, which the seam
+        /// removes.
+        bytes: u64,
+        /// The reference line the seam carries in its place (#596).
+        text: String,
+    },
     /// A tangent opened (v7, #22): its id, the turn it forks at, and how
     /// many messages the trunk held there, the fork point a close rolls the
     /// trunk back to.
@@ -1211,6 +1297,37 @@ pub enum Event {
         prefix_intact: bool,
         /// How many messages the rollback took off the trunk.
         rolled_back: u64,
+    },
+    /// A self-capture call (v7, #609): the model elected one of the
+    /// contract's tools, and this is what it came to in working memory.
+    Capture {
+        /// The `seq` of the `request` whose answer made the call: the
+        /// trunk's, or with `fork` the interview fork's.
+        request: u64,
+        /// The call's id.
+        call: String,
+        /// The tool.
+        tool: String,
+        /// What it came to: `recorded`, `dropped` (the groundedness gate
+        /// kept nothing), `resolved`, `judged` (a verdict that changes no
+        /// entry), `proposed` (advisory, writes nothing) or `refused` (the
+        /// contract or the object refused it).
+        outcome: String,
+        /// The entries it wrote or ruled on, by id.
+        entries: Vec<String>,
+        /// Why, when it was dropped or refused.
+        why: Option<String>,
+        /// The interview fork that made the call (#610), when a fork
+        /// answered through the capture tools; absent for the trunk's own.
+        fork: Option<u64>,
+    },
+    /// The self-capture reminder (v7, #609): an advisory note after turn
+    /// `turn`'s ask, when the model had recorded nothing for the cadence.
+    Reminded {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// The note as sent.
+        text: String,
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
@@ -1258,6 +1375,9 @@ pub enum Event {
         /// The render's budget and what it did (v7, #565), on a seam whose
         /// regimen declares one.
         render_budget: Option<RenderBudget>,
+        /// The calls whose results the model pruned that this seam replaced
+        /// with their `pruned` lines' text (v7, #612).
+        pruned: Option<Vec<String>>,
     },
 }
 
@@ -2307,10 +2427,13 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             } => forks
                 .fork(line.seq, (*lane, *of_turn, *forked_at), turns, &trunk)
                 .map_err(|why| at(index, why))?,
-            Event::ForkSettled { fork, outcome } => forks
+            Event::ForkSettled { fork, outcome, .. } => forks
                 .settle(*fork, *outcome)
                 .map_err(|why| at(index, why))?,
-            Event::Patch { fork, .. } => forks.patch(*fork).map_err(|why| at(index, why))?,
+            // The trunk's own patch (#609) answers to no fork.
+            Event::Patch {
+                fork: Some(fork), ..
+            } => forks.patch(*fork).map_err(|why| at(index, why))?,
             Event::Seam { at_turn, .. } => {
                 seam_at(*at_turn, turns, &settled, state, &forks).map_err(|why| at(index, why))?;
                 forks.seamed = Some(*at_turn);
@@ -2442,6 +2565,14 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     off => off,
                 },
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
+                levers: fields.optional_words("levers")?,
+                fork_asks: match fields.optional_string("fork_asks")? {
+                    None => None,
+                    Some(name) => Some(ForkAsks {
+                        name,
+                        digest: fields.optional_string("fork_asks_digest")?,
+                    }),
+                },
                 reasoning_effort_default: match object.get("reasoning_effort_default") {
                     None => None,
                     Some(_) => Some(fields.string("reasoning_effort_default")?),
@@ -2576,6 +2707,37 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 ),
             },
             partial: fields.optional_string("partial")?,
+            overflow: {
+                let reason = fields.tag("reason", FailReason::from_tag)?;
+                match (
+                    fields.optional_count("prompt_tokens")?,
+                    fields.optional_count("window")?,
+                    fields.optional_flag("inferred")?,
+                ) {
+                    (None, None, None) => None,
+                    (Some(prompt_tokens), Some(window), Some(inferred))
+                        if reason == FailReason::ContextOverflow =>
+                    {
+                        Some(Overflow {
+                            prompt_tokens,
+                            window,
+                            inferred,
+                        })
+                    }
+                    (Some(_), Some(_), Some(_)) => {
+                        return Err(format!(
+                            "a `request.failed` whose reason is `{}` carries a context \
+                             overflow's sizes",
+                            reason.tag()
+                        ));
+                    }
+                    _ => {
+                        return Err("a `request.failed` carries `prompt_tokens`, `window` and \
+                                    `inferred` together or none of them"
+                            .to_owned());
+                    }
+                }
+            },
         },
         Kind::TurnSettled => Event::TurnSettled {
             turn: fields.turn("turn")?,
@@ -2644,10 +2806,21 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             question: fields.string("question")?,
             view: fields.optional_string("view")?,
             role: fields.optional_string("role")?,
+            // Built only when its two keys are carried ([`all_or_none`]).
+            seat: match (
+                fields.optional_string("substrate")?,
+                fields.optional_string("model")?,
+            ) {
+                (Some(substrate), Some(model)) => Some(ForkSeat { substrate, model }),
+                _ => None,
+            },
+            ask: fields.optional_string("ask")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
             outcome: fields.tag("outcome", ForkOutcome::from_tag)?,
+            prompt_tokens: fields.optional_count("prompt_tokens")?,
+            wall_ms: fields.optional_count("wall_ms")?,
         },
         Kind::Patch => {
             let op = fields.tag("op", PatchOp::from_tag)?;
@@ -2664,14 +2837,41 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                     }
                 ));
             }
+            let fork = fields.optional_count("fork")?;
+            let lane = fields.optional_string("lane")?;
+            if fork.is_some() == lane.is_some() {
+                return Err(format!(
+                    "a patch {}: it names the fork that made it or, made on the trunk, \
+                     its `lane`, and exactly one of them",
+                    if fork.is_some() {
+                        "names both a `fork` and a `lane`"
+                    } else {
+                        "names neither a `fork` nor a `lane`"
+                    }
+                ));
+            }
             Event::Patch {
-                fork: fields.count("fork")?,
+                fork,
+                lane,
                 op,
                 entry: fields.entry("entry")?,
                 supersedes,
                 tangent: fields.optional_string("tangent")?,
             }
         }
+        Kind::Capture => Event::Capture {
+            request: fields.count("request")?,
+            call: fields.string("call")?,
+            tool: fields.string("tool")?,
+            outcome: fields.string("outcome")?,
+            entries: fields.optional_strings("entries")?.unwrap_or_default(),
+            why: fields.optional_string("why")?,
+            fork: fields.optional_count("fork")?,
+        },
+        Kind::Reminded => Event::Reminded {
+            turn: fields.turn("turn")?,
+            text: fields.string("text")?,
+        },
         Kind::TangentOpen => Event::TangentOpen {
             id: fields.string("id")?,
             at_turn: fields.turn("at_turn")?,
@@ -2687,6 +2887,13 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 .optional_flag("prefix_intact")?
                 .ok_or("a `tangent.close` carries no `prefix_intact`")?,
             rolled_back: fields.count("rolled_back")?,
+        },
+        Kind::Pruned => Event::Pruned {
+            turn: fields.turn("turn")?,
+            call: fields.string("call")?,
+            sha256: fields.digest("sha256")?,
+            bytes: fields.count("bytes")?,
+            text: fields.string("text")?,
         },
         Kind::Recalled => Event::Recalled {
             turn: fields.turn("turn")?,
@@ -2720,6 +2927,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
             placement: fields.optional_tag("placement", RenderPlacement::from_tag)?,
+            pruned: fields.optional_strings("pruned")?,
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -3307,6 +3515,9 @@ pub enum Holds {
     Serving,
     /// A list of text (v3).
     Strings,
+    /// An object of names to words (v7, #573): a `session.start`'s
+    /// `levers`, each lever's state in the program's words.
+    Words,
     /// A `delta`'s tool-call fragment: an object of the keys
     /// [`TOOL_CALL_PIECE`] declares (v3).
     ToolCallPiece,
@@ -3613,7 +3824,13 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         Kind::Seam => 6,
-        Kind::Delivered | Kind::Recalled | Kind::TangentOpen | Kind::TangentClose => 7,
+        Kind::Delivered
+        | Kind::Recalled
+        | Kind::Pruned
+        | Kind::TangentOpen
+        | Kind::TangentClose
+        | Kind::Capture
+        | Kind::Reminded => 7,
         _ => 0,
     }
 }
@@ -3666,6 +3883,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
         return 7;
     }
+    if tags == Tags::SeamReason && SeamReason::from_tag(tag) == Some(SeamReason::Prune) {
+        return 7;
+    }
     let capped =
         tags == Tags::SettleReason && SettleReason::from_tag(tag) == Some(SettleReason::Capped);
     if capped {
@@ -3715,6 +3935,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("unsent", Holds::Unsent),
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
+                may_v7("levers", Holds::Words),
+                may_v7("fork_asks", Text),
+                may_v7("fork_asks_digest", Text),
                 may_v7("reasoning_effort_default", Text),
                 may_v7("phases", Holds::Strings),
                 may_v7("phase_transitions", Holds::PhaseMoves),
@@ -3797,6 +4020,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must("message", Text),
                 may("status", Count),
                 may("partial", Text),
+                may_v7("prompt_tokens", Count),
+                may_v7("window", Count),
+                may_v7("inferred", Holds::Flag),
             ];
             F
         }
@@ -3862,6 +4088,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v5("question", Text),
                 may_v7("view", Text),
                 may_v7("role", Text),
+                may_v7("substrate", Text),
+                may_v7("model", Text),
+                may_v7("ask", Text),
             ];
             F
         }
@@ -3869,17 +4098,38 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             const F: &[Field] = &[
                 must_v5("fork", Count),
                 must_v5("outcome", Tag(Tags::ForkOutcome)),
+                may_v7("prompt_tokens", Count),
+                may_v7("wall_ms", Count),
             ];
             F
         }
         Kind::Patch => {
             const F: &[Field] = &[
-                must_v5("fork", Count),
+                // Every patch before v7 was a fork's; from v7 the trunk's
+                // own carry `lane` instead (#609), exactly one of the two.
+                may_v5("fork", Count),
+                may_v7("lane", Text),
                 must_v5("op", Tag(Tags::PatchOp)),
                 must_v5("entry", Holds::Entry),
                 may_v5("supersedes", Text),
                 may_v7("tangent", Text),
             ];
+            F
+        }
+        Kind::Capture => {
+            const F: &[Field] = &[
+                must_v7("request", Count),
+                must_v7("call", Text),
+                must_v7("tool", Text),
+                must_v7("outcome", Text),
+                must_v7("entries", Holds::Strings),
+                may_v7("why", Text),
+                may_v7("fork", Count),
+            ];
+            F
+        }
+        Kind::Reminded => {
+            const F: &[Field] = &[must_v7("turn", Count), must_v7("text", Text)];
             F
         }
         Kind::TangentOpen => {
@@ -3924,6 +4174,17 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("render_over_budget", Text),
                 may_v7("render_tokens", Count),
                 may_v7("render_reduced", Count),
+                may_v7("pruned", Holds::Strings),
+            ];
+            F
+        }
+        Kind::Pruned => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("call", Text),
+                must_v7("sha256", Holds::Digest),
+                must_v7("bytes", Count),
+                must_v7("text", Text),
             ];
             F
         }
@@ -3953,6 +4214,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
 pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
     match kind {
         Kind::Delta => &["text", "reasoning", "tool_call"],
+        // A fork's patch names its fork; the trunk's own its lane (#609).
+        Kind::Patch => &["fork", "lane"],
         _ => &[],
     }
 }
@@ -3964,6 +4227,9 @@ pub fn exactly_one(kind: Kind) -> &'static [&'static str] {
 pub fn all_or_none(kind: Kind) -> &'static [&'static str] {
     match kind {
         Kind::SessionStart => &["substrate", "registry_sha256"],
+        // A context overflow's sizes (v7, #616).
+        Kind::RequestFailed => &["prompt_tokens", "window", "inferred"],
+        Kind::Fork => &["substrate", "model"],
         _ => &[],
     }
 }
@@ -4009,6 +4275,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::RecalledItems => "RecalledItem[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
+        Holds::Words => "Record<string, string>".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
         Holds::Entry => "PatchEntry".to_owned(),
@@ -4214,6 +4481,8 @@ fn to_value(line: &Line) -> Value {
             unsent,
             approvals_off,
             fork_delivery,
+            levers,
+            fork_asks,
             reasoning_effort_default,
             tool_output,
             phases,
@@ -4237,6 +4506,12 @@ fn to_value(line: &Line) -> Value {
             if let Some(phase) = opening_phase {
                 put("opening_phase", text(phase));
             }
+            if let Some(asks) = fork_asks {
+                put("fork_asks", text(&asks.name));
+                if let Some(digest) = &asks.digest {
+                    put("fork_asks_digest", text(digest));
+                }
+            }
             if let Some(effort) = reasoning_effort_default {
                 put("reasoning_effort_default", text(effort));
             }
@@ -4252,6 +4527,17 @@ fn to_value(line: &Line) -> Value {
                                     ("sha256".to_owned(), text(&file.sha256)),
                                 ]))
                             })
+                            .collect(),
+                    ),
+                );
+            }
+            if let Some(levers) = levers {
+                put(
+                    "levers",
+                    Value::Object(
+                        levers
+                            .iter()
+                            .map(|(lever, state)| (lever.clone(), text(state)))
                             .collect(),
                     ),
                 );
@@ -4471,9 +4757,15 @@ fn to_value(line: &Line) -> Value {
             message,
             status,
             partial,
+            overflow,
         } => {
             put("request", count(*request));
             put("reason", text(reason.tag()));
+            if let Some(overflow) = overflow {
+                put("prompt_tokens", count(overflow.prompt_tokens));
+                put("window", count(overflow.window));
+                put("inferred", Value::Boolean(overflow.inferred));
+            }
             put("message", text(message));
             if let Some(status) = status {
                 put("status", count(u64::from(*status)));
@@ -4609,6 +4901,8 @@ fn to_value(line: &Line) -> Value {
             question,
             view,
             role,
+            seat,
+            ask,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -4621,21 +4915,45 @@ fn to_value(line: &Line) -> Value {
             if let Some(role) = role {
                 put("role", text(role));
             }
+            if let Some(seat) = seat {
+                put("substrate", text(&seat.substrate));
+                put("model", text(&seat.model));
+            }
+            if let Some(ask) = ask {
+                put("ask", text(ask));
+            }
             Kind::Fork
         }
-        Event::ForkSettled { fork, outcome } => {
+        Event::ForkSettled {
+            fork,
+            outcome,
+            prompt_tokens,
+            wall_ms,
+        } => {
             put("fork", count(*fork));
             put("outcome", text(outcome.tag()));
+            if let Some(tokens) = prompt_tokens {
+                put("prompt_tokens", count(*tokens));
+            }
+            if let Some(wall) = wall_ms {
+                put("wall_ms", count(*wall));
+            }
             Kind::ForkSettled
         }
         Event::Patch {
             fork,
+            lane,
             op,
             entry,
             supersedes,
             tangent,
         } => {
-            put("fork", count(*fork));
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
+            }
+            if let Some(lane) = lane {
+                put("lane", text(lane));
+            }
             put("op", text(op.tag()));
             let mut object = BTreeMap::from([
                 ("id".to_owned(), text(&entry.id)),
@@ -4652,6 +4970,36 @@ fn to_value(line: &Line) -> Value {
                 put("tangent", text(tangent));
             }
             Kind::Patch
+        }
+        Event::Capture {
+            request,
+            call,
+            tool,
+            outcome,
+            entries,
+            why,
+            fork,
+        } => {
+            put("request", count(*request));
+            put("call", text(call));
+            put("tool", text(tool));
+            put("outcome", text(outcome));
+            put(
+                "entries",
+                Value::Array(entries.iter().map(|id| text(id)).collect()),
+            );
+            if let Some(why) = why {
+                put("why", text(why));
+            }
+            if let Some(fork) = fork {
+                put("fork", count(*fork));
+            }
+            Kind::Capture
+        }
+        Event::Reminded { turn, text: note } => {
+            put("turn", count(u64::from(*turn)));
+            put("text", text(note));
+            Kind::Reminded
         }
         Event::TangentOpen {
             id,
@@ -4700,6 +5048,7 @@ fn to_value(line: &Line) -> Value {
             carried_output_bytes,
             placement,
             render_budget,
+            pruned,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
             if let Some(moved) = phase {
@@ -4738,6 +5087,12 @@ fn to_value(line: &Line) -> Value {
                 put("render_over_budget", text(&budget.over));
                 put("render_tokens", count(budget.rendered));
                 put("render_reduced", count(budget.reduced));
+            }
+            if let Some(calls) = pruned {
+                put(
+                    "pruned",
+                    Value::Array(calls.iter().map(|call| text(call)).collect()),
+                );
             }
             Kind::Seam
         }
@@ -4792,6 +5147,20 @@ fn to_value(line: &Line) -> Value {
                 ),
             );
             Kind::Recalled
+        }
+        Event::Pruned {
+            turn,
+            call,
+            sha256,
+            bytes,
+            text: line,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("call", text(call));
+            put("sha256", text(sha256));
+            put("bytes", count(*bytes));
+            put("text", text(line));
+            Kind::Pruned
         }
     };
     put("kind", text(kind.tag()));
@@ -5008,6 +5377,22 @@ impl Fields<'_> {
     }
 
     /// A list of text, when carried (v3).
+    /// An object of names to words, when carried (v7, #573).
+    fn optional_words(&self, key: &str) -> Result<Option<BTreeMap<String, String>>, String> {
+        match self.0.get(key) {
+            None => Ok(None),
+            Some(Value::Object(words)) => words
+                .iter()
+                .map(|(name, word)| match word {
+                    Value::String(word) => Ok((name.clone(), word.clone())),
+                    _ => Err(format!("`{key}`'s `{name}` is not a word")),
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()
+                .map(Some),
+            Some(_) => Err(format!("`{key}` is not an object")),
+        }
+    }
+
     fn optional_strings(&self, key: &str) -> Result<Option<Vec<String>>, String> {
         match self.0.get(key) {
             None => Ok(None),
@@ -5534,6 +5919,10 @@ mod tests {
                 fork_delivery: None,
                 reasoning_effort_default: None,
                 instruction_files: None,
+                levers: Some(BTreeMap::from([
+                    ("fork-asks".to_owned(), "v3".to_owned()),
+                    ("tangent-closure".to_owned(), "off".to_owned()),
+                ])),
                 tool_output: Some(ToolOutput {
                     state: ToolOutputState::Capped,
                     max_lines: Some(2000),
@@ -5542,6 +5931,10 @@ mod tests {
                 phases: None,
                 phase_transitions: None,
                 opening_phase: None,
+                fork_asks: Some(ForkAsks {
+                    name: "v4".to_owned(),
+                    digest: Some("0123456789abcdef".to_owned()),
+                }),
             },
         }
     }
@@ -5618,6 +6011,7 @@ mod tests {
                 message: "busy".to_owned(),
                 status: Some(503),
                 partial: Some(String::new()),
+                overflow: None,
             },
             Event::TurnSettled {
                 turn: 2,
@@ -5719,6 +6113,11 @@ mod tests {
                 message: "request (262149 tokens) exceeds the available context size".to_owned(),
                 status: Some(400),
                 partial: None,
+                overflow: Some(Overflow {
+                    prompt_tokens: 161_840,
+                    window: 163_840,
+                    inferred: true,
+                }),
             },
             Event::TurnSettled {
                 turn: 4,
@@ -5814,6 +6213,11 @@ mod tests {
                 question: "what did the operator decide".to_owned(),
                 view: Some("last:2".to_owned()),
                 role: Some("developer".to_owned()),
+                seat: Some(ForkSeat {
+                    substrate: "cpu-seat".to_owned(),
+                    model: "small".to_owned(),
+                }),
+                ask: Some("judgment".to_owned()),
             },
             Event::Request {
                 turn: 5,
@@ -5834,9 +6238,12 @@ mod tests {
             Event::ForkSettled {
                 fork,
                 outcome: ForkOutcome::Value,
+                prompt_tokens: Some(281),
+                wall_ms: Some(480),
             },
             Event::Patch {
-                fork,
+                fork: Some(fork),
+                lane: None,
                 op: PatchOp::Add,
                 entry: PatchEntry {
                     id: "d1".to_owned(),
@@ -5846,8 +6253,10 @@ mod tests {
                 supersedes: None,
                 tangent: Some("t/1".to_owned()),
             },
+            // The trunk's own (#609): named by its lane, not a fork.
             Event::Patch {
-                fork,
+                fork: None,
+                lane: Some("self-capture".to_owned()),
                 op: PatchOp::Supersede,
                 entry: PatchEntry {
                     id: "d2".to_owned(),
@@ -5870,6 +6279,28 @@ mod tests {
                 parked: Vec::new(),
                 prefix_intact: true,
                 rolled_back: 0,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-c".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "recorded".to_owned(),
+                entries: vec!["r3/call-c".to_owned()],
+                why: None,
+                fork: None,
+            },
+            Event::Capture {
+                request: 3,
+                call: "call-d".to_owned(),
+                tool: "update_record".to_owned(),
+                outcome: "dropped".to_owned(),
+                entries: Vec::new(),
+                why: Some("the groundedness gate kept nothing of it".to_owned()),
+                fork: Some(7),
+            },
+            Event::Reminded {
+                turn: 5,
+                text: "Anything you meant to record?".to_owned(),
             },
         ]);
         events
@@ -5941,6 +6372,9 @@ mod tests {
             }
             (Holds::Strings, Value::Array(items)) => {
                 items.iter().all(|item| matches!(item, Value::String(_)))
+            }
+            (Holds::Words, Value::Object(words)) => {
+                words.values().all(|word| matches!(word, Value::String(_)))
             }
             (Holds::Tag(tags), Value::String(tag)) => tags.tags().contains(&tag.as_str()),
             (Holds::Head, Value::Array(messages)) => messages.iter().all(|m| match m {
@@ -6269,6 +6703,19 @@ mod tests {
                     if kind == Kind::Patch && *absent == "supersedes" {
                         continue;
                     }
+                    // A stream's text comes with its byte count: added alone,
+                    // it is that pairing's refusal, not an exclusivity -- met
+                    // by a call that ran no command (#612's `prune_output`,
+                    // the standard tools), which writes `shown` and no stream.
+                    if kind == Kind::ToolCall && ["stdout", "stderr"].contains(absent) {
+                        continue;
+                    }
+                    // A key of an exactly-one set beside a line that already
+                    // carries another of it is that rule's refusal, whatever
+                    // key `present` is.
+                    if exactly_one(kind).contains(absent) && !exactly_one(kind).contains(present) {
+                        continue;
+                    }
                     let mut both = object.clone();
                     both.insert((*absent).to_owned(), Value::String("x".to_owned()));
                     let mut rendered = String::new();
@@ -6304,7 +6751,9 @@ mod tests {
     /// `policy` beside an `isolation` that names no profile, or none beside
     /// one that does (ruled at #299, 5976386318 point 6); and a
     /// `bash` refusal's `reason` decides its `argv`
-    /// ([`argv_if_it_parsed`]), which runs only once the reason has parsed.
+    /// ([`argv_if_it_parsed`]), which runs only once the reason has parsed;
+    /// and a `request.failed` carries a context overflow's sizes only under
+    /// that reason (v7, #616).
     fn the_reader_reads_it_as(object: &BTreeMap<String, Value>, key: &str, tags: Tags) {
         let with = |tag: &str| {
             let mut changed = object.clone();
@@ -6321,6 +6770,8 @@ mod tests {
                                 || why.contains("carries no `policy`")))
                         || (tags == Tags::ToolRefusal && why.contains("a `bash` call refused"))
                         || (tags == Tags::PatchOp && why.contains("`supersedes`"))
+                        || (tags == Tags::FailReason
+                            && why.contains("carries a context overflow's sizes"))
                         || (tags == Tags::ToolOutputState
                             && why.contains("`tool_output` is `keep` and carries a limit"))
                 },
@@ -6513,6 +6964,8 @@ mod tests {
         let Event::SessionStart {
             version,
             tool_output,
+            levers,
+            fork_asks,
             ..
         } = &mut lines[0].event
         else {
@@ -6522,6 +6975,8 @@ mod tests {
         // A v7 key on the first line would be the one named; the check is of
         // what arrived in v1, further down.
         *tool_output = None;
+        *levers = None;
+        *fork_asks = None;
         let document: String = lines.iter().map(|line| render(line) + "\n").collect();
         let refused = parse(&document).expect_err("v1 content was read as v0");
         assert!(refused.why.contains("arrived in v1"), "{refused}");
@@ -7022,7 +7477,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled tangent.open tangent.close"
+             fork.settled patch seam delivered recalled pruned tangent.open tangent.close capture reminded"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -7071,7 +7526,7 @@ mod tests {
         );
         assert_eq!(
             tags(SeamReason::ALL.iter().map(|it| it.tag()).collect()),
-            "operator phase budget cadence"
+            "operator phase budget cadence prune"
         );
     }
 

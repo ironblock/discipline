@@ -1,0 +1,4 @@
+{imperative}
+You last ran: {last_command}
+You said: "{intent}"
+That run finished. What was its outcome, and what does it settle or leave open? Answer with the fields EVIDENCE, LEARNED and STUCK, one per line; EVIDENCE quotes the run's own output, and NONE is an answer.

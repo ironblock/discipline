@@ -57,3 +57,28 @@ Beside the templates, two more pieces of the same dogma, pinned the same way:
 - the trigger vocabulary, `diet::dogma::vocabulary`: the surprise words and
   the error words, as Rust constants, pinned by the research program's own
   digest values so the port is checkable from either side.
+
+## Fork ask sets (#595)
+
+`fork-asks/<name>/` holds one named set of the asks a served fork sends:
+one file per router ask kind, the fork-local imperative, and optionally a
+`priming.txt` paragraph the system prompt carries from the session's start
+(never added later). Each file is pinned in `MANIFEST.tsv` as
+`fork-asks/<name>/<file>`, and a set's digest is `diet::dogma::digest` of its
+manifest lines, so it is recomputable from the manifest alone. A regimen picks
+a set with `fork_asks = "<name>"` (`v3` when it names none or names no set; the maintainer chose it as the default);
+the log's `session.start` names the set and its digest. **A set is never
+edited: a change adds a set**, and adding one is a dogma version bump like any
+other pin.
+
+- `v3`: the router's asks as they stood before #595, moved here unchanged.
+- `v4`: `v3` with the judgment ask showing the working record (`<id>\t<entry>`
+  lines, dropped when empty) and asking for SUPERSEDE.
+
+Each set says how its asks have a fork answer (#610): in the capitalized
+fields the interview grammar parses (`v3` and `v4`), or through the
+self-capture tools. A regimen sets `capture_modality = "fields"` (the
+default) or `"tools"`; `tools` needs `self_capture` on, an
+`interview_warrant`, and a set whose asks are written for the tools, and serve
+refuses it at start otherwise. No tools set ships until its wording is
+approved, so today `tools` is always refused.
