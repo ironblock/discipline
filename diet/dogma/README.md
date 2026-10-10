@@ -86,6 +86,11 @@ refuses it at start otherwise.
   self-capture tools (`update_record`, and for judgment `supersedes` and
   `resolve_entry`) instead of fields. Its modality is `tools`. The
   maintainer approved it as drafted.
+- `t2` (#598): `t1`'s asks, each wrapped in `<interview>` tags (the
+  imperative, filled inside an ask, is not), with `priming.txt`: what the tags
+  mean, in the system prompt from the session's start when the regimen
+  forks, never added or changed mid-session. The only set that primes; the
+  set's digest in `session.start` names the priming the session ran with.
 
 ## Self-capture contract sets (#609)
 

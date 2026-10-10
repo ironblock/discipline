@@ -2838,6 +2838,40 @@ fn a_drive_server_starts_a_tools_capture_regimen_on_the_tools_set() {
 }
 
 #[test]
+fn a_drive_server_primes_the_system_prompt_under_t2_alone() {
+    // #598: under set t2 the system prompt the session opens with -- its
+    // head, as session.start records it -- ends with t2's priming paragraph;
+    // under t1, the same regimen otherwise, it carries none.
+    let system_under = |set: &str| {
+        let stub = Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info())
+            .expect("loopback");
+        let regimen = dev_loop_sampling(
+            &format!(
+                "interview_warrant = [\"scoping\"]\ncapture_modality = \"tools\"\n\
+                 self_capture = true\nfork_asks = \"{set}\"\n"
+            ),
+            "seed = 7\n",
+        );
+        let regimen_path = regimen.0.to_string_lossy().into_owned();
+        let log_file = file_holding("log", "");
+        let logged = log_file.0.to_string_lossy().into_owned();
+        let _served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+        let start_line = first_logged_line(&log_file.0);
+        assert_eq!(start_line["fork_asks"], set, "{start_line}");
+        start_line["head"][0]["content"]
+            .as_str()
+            .expect("a system prompt")
+            .to_owned()
+    };
+    let priming = diet::dogma::asks::T2.priming().expect("t2 primes").trim();
+    let primed = system_under("t2");
+    assert!(primed.ends_with(&format!("\n\n{priming}")), "{primed}");
+    let plain = system_under("t1");
+    assert!(!plain.contains("<interview>"), "{plain}");
+    assert_eq!(primed, format!("{}\n\n{priming}", plain.trim_end()));
+}
+
+#[test]
 fn a_drive_server_runs_a_regimens_phase_graph() {
     // #563: serve reads `phases` and `phase_transitions` (it refused them,
     // #520), logs the graph and the phase it opens in, and takes a phase on
