@@ -1665,6 +1665,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            render_budget: None,
         });
         let projection = project(
             &numbered(events),
@@ -1707,6 +1708,7 @@ mod tests {
             outputs: None,
             carried_outputs: None,
             carried_output_bytes: None,
+            render_budget: None,
         });
         let projection = project(
             &numbered(events),

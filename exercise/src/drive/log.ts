@@ -278,8 +278,6 @@ export type Seam = Omit<V0.SeamLine, 'reason' | 'frame' | 'carried_entries' | 'c
     readonly reason: SeamReason;
     /** The phases it moved between (v7, #563). */
     readonly phase?: { readonly from: string; readonly to: string };
-    /** AHEAD (`pre-warm`): the render's size in tokens. */
-    readonly render_tokens?: number;
     /** AHEAD (`pre-warm`): the pre-warm -- the new prefix sent once so the next ask finds it cached. */
     readonly warm?: Timings;
     /** The surface's own older shape: the render's number, in a recording placed before v6. */
@@ -340,8 +338,9 @@ export function needsOf(line: LogLine): Need[] {
       if (AHEAD_LANES.has(line.lane)) out.push('lanes');
       break;
     case 'seam':
-      // `phase` is the format's own since v7 (#563).
-      has('pre-warm', line.render_tokens, line.warm);
+      // `phase` is the format's own since v7 (#563); `render_tokens`, the render's estimated size, since v7's render
+      // budget (#565), written beside the budget that produced it.
+      has('pre-warm', line.warm);
       break;
   }
   return out;

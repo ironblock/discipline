@@ -518,6 +518,8 @@ pub enum Event {
         /// The section after the render carrying them, when it carried any,
         /// and how many it carried.
         outputs: Option<(String, u64)>,
+        /// The render's budget and what it did (#565), when declared.
+        render_budget: Option<log::RenderBudget>,
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
@@ -2253,6 +2255,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             phase,
             tool_outputs,
             outputs,
+            render_budget,
         } => log::Event::Seam {
             phase: phase.clone(),
             at_turn: *at_turn,
@@ -2278,6 +2281,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             outputs: outputs.as_ref().map(|(text, _)| text.clone()),
             carried_outputs: outputs.as_ref().map(|(_, n)| *n),
             carried_output_bytes: outputs.as_ref().map(|(text, _)| text.len() as u64),
+            render_budget: render_budget.clone(),
         },
     };
     log::Line {
@@ -3231,7 +3235,20 @@ fn refill_trunk(
     let Some(interview) = state.interview.as_ref() else {
         unreachable!("a seam is refused or not due when the session keeps no working memory");
     };
-    let render = crate::seam::render::render(&interview.object, state.phase.as_deref());
+    // The render, under the regimen's budget when it declares one (#565).
+    let budget = interview.seams.render_budget;
+    let rendered = crate::seam::render::rendered(&interview.object, state.phase.as_deref(), budget);
+    let render_budget = budget.map(|budget| log::RenderBudget {
+        tokens: budget.tokens,
+        over: match budget.over {
+            crate::seam::render::OverBudget::Tier => "tier",
+            crate::seam::render::OverBudget::Elide => "elide",
+        }
+        .to_owned(),
+        rendered: rendered.tokens,
+        reduced: rendered.reduced,
+    });
+    let render = rendered.text;
     let carried_entries = interview.object.live().count() as u64;
     // The head a trunk request on `messages` carries: `Head::of` leaves
     // out a request's last message, its ask, so one stands in for it.
@@ -3294,6 +3311,7 @@ fn refill_trunk(
         phase,
         tool_outputs,
         outputs,
+        render_budget,
     });
 }
 
@@ -5352,6 +5370,7 @@ pub(in crate::drive) mod tests {
                 phase: None,
                 tool_outputs: log::SeamToolOutputs::Evict,
                 outputs: None,
+                render_budget: None,
             },
             Event::Delivered {
                 turn: 2,
@@ -5656,6 +5675,7 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                render_budget: None,
             },
             log::Event::Delivered {
                 turn: 2,
@@ -8687,6 +8707,7 @@ pub(in crate::drive) mod tests {
                     at_trunk_tokens: None,
                     tail_tokens,
                     outputs: state,
+                    render_budget: None,
                 },
                 ..interviewing(&[log::Warrant::Read])
             }),
@@ -8910,6 +8931,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: None,
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -8965,6 +8987,7 @@ pub(in crate::drive) mod tests {
                     at_trunk_tokens: None,
                     tail_tokens,
                     outputs: log::SeamToolOutputs::Evict,
+                    render_budget: None,
                 })),
             )
         };
@@ -9034,6 +9057,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: Some(200),
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -9064,6 +9088,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: Some(245),
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -9105,6 +9130,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: Some(100),
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -9148,6 +9174,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: None,
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session.ask("hi", None).expect("accepted");
@@ -9179,6 +9206,7 @@ pub(in crate::drive) mod tests {
                 at_trunk_tokens: None,
                 tail_tokens: 0,
                 outputs: log::SeamToolOutputs::Evict,
+                render_budget: None,
             })),
         );
         session
@@ -9210,6 +9238,55 @@ pub(in crate::drive) mod tests {
     /// that, and the log says so: the seam line carries the render, what was
     /// carried, and the head's digest either side, which the projection's
     /// rebuild of the next request's head checks.
+    /// #565: a seam under the regimen's render budget refills from the
+    /// budgeted render, and its `seam` line names the budget, the tokens the
+    /// render ran to, and how many entries it reduced.
+    #[test]
+    fn a_seam_under_a_render_budget_records_the_budget_and_what_it_reduced() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.seams.render_budget = Some(crate::seam::render::Budget {
+            tokens: 1,
+            over: crate::seam::render::OverBudget::Elide,
+        });
+        let session = Session::open_with(
+            Canned::new([deltas(&[SCOPED]), deltas(&[DECIDED])]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the fork to settle", |log| {
+            settled(log) && !fork_outcomes(log).is_empty()
+        });
+        let opened_by = settling_seq(&log, 1);
+        session
+            .declare_seam(Some(gap(opened_by, GapEnd::Seam)))
+            .expect("admitted");
+        let lines = whole_log(&session);
+        let seam = lines
+            .iter()
+            .find_map(|line| match &line.event {
+                log::Event::Seam {
+                    render,
+                    render_budget,
+                    ..
+                } => Some((render.clone(), render_budget.clone())),
+                _ => None,
+            })
+            .expect("a seam line");
+        let (render, Some(budget)) = seam.clone() else {
+            panic!("the seam names its budget: {seam:?}");
+        };
+        assert_eq!((budget.tokens, budget.over.as_str()), (1, "elide"));
+        assert_eq!(budget.reduced, 3, "the three decisions, elided: {render}");
+        assert!(render.ends_with("3 older entries elided\n"), "{render}");
+        assert_eq!(budget.rendered, (render.chars().count() as u64).div_ceil(4));
+    }
+
     #[test]
     #[allow(clippy::too_many_lines)]
     fn a_declared_seam_refills_the_trunk_from_working_memory_and_the_next_ask_runs_on_it() {
@@ -9301,6 +9378,7 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 carried_outputs: None,
                 carried_output_bytes: None,
+                render_budget: None,
             }
         );
 
