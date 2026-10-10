@@ -36,3 +36,8 @@
 .ex-seam__reason {
   color: var(--ink-muted);
 }
+
+/* An automatic seam's size (#633). */
+.ex-seam__size {
+  color: var(--warn);
+}

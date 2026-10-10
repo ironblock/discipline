@@ -239,6 +239,12 @@ function AssistantBody({
           {node.failure.message}
         </p>
       ) : null}
+      {/* An overflow's sizes (#628), and who told it: the engine, or serve from the prompt's size. */}
+      {node.failure?.overflow ? (
+        <p className="ex-overflow">
+          {`${tokens(node.failure.overflow.promptTokens)} tok against a ${tokens(node.failure.overflow.window)} window · ${node.failure.overflow.inferred ? 'serve inferred it from the prompt’s size' : 'the engine reported it'}`}
+        </p>
+      ) : null}
     </>
   );
 }

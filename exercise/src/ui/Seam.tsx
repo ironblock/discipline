@@ -10,10 +10,16 @@ import './seam.css';
  */
 export function Seam({ node }: { readonly node: Folded<SeamNode> }) {
   return (
-    <div className="ex-seam" role="separator" data-from={node.from.join(' ')} data-needs={node.needs.join(' ')} id={node.id} data-id={node.id}>
+    <div className="ex-seam" role="separator" data-reason={node.reason} data-from={node.from.join(' ')} data-needs={node.needs.join(' ')} id={node.id} data-id={node.id}>
       <span className="ex-seam__rule" aria-hidden="true" />
       <div className="ex-seam__label">
         <span className="ex-seam__kind">refill</span>
+        {/* An automatic seam (#633): fired by the window, at the size that fired it -- not declared by anyone. */}
+        {node.size ? (
+          <span className="ex-seam__size" title="an automatic seam: the prompt neared the window, so the trunk was refilled before the next request">
+            automatic · {tokens(node.size.promptTokens)} of a {tokens(node.size.window)} window
+          </span>
+        ) : null}
         {node.phase ? (
           <span>
             {node.phase.from} → <strong>{node.phase.to}</strong>

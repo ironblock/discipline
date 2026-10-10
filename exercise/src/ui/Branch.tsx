@@ -7,7 +7,7 @@ import { edgeOf, readingOf, warmOf, writingOf } from './flow.ts';
 import { Flowing } from './Flowing.tsx';
 import { useNow } from './surface.tsx';
 import { took, tokens } from './format.ts';
-import { alarmOf, failOf, opOf, outcomeOf } from './sets.ts';
+import { alarmOf, failOf, hazardOf, opOf, outcomeOf } from './sets.ts';
 import './branch.css';
 
 /**
@@ -44,6 +44,8 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
           // An offboard seat (#615): where it ran, and what reading the trunk cold cost there. A warm fork names none.
           // What triggered it (#620): the turn's end, or a call that warranted it mid-turn.
           node.trigger !== undefined && { value: <span className="ex-branch__trigger">{node.trigger}</span>, title: 'what triggered this fork' },
+          // A hazard it was sent knowing (#637).
+          node.hazard !== undefined && { value: <span className="ex-branch__hazard" data-level={hazardOf(node.hazard).level}>{hazardOf(node.hazard).label}</span>, title: `a hazard this fork was sent knowing: ${node.hazard}` },
           node.seat && {
             value: (
               <span className="ex-branch__seat">
@@ -65,7 +67,8 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
             node.outcome !== 'value' && {
               value: (
                 <span className="ex-branch__outcome" data-level={outcome.level} data-known={outcome.known ? '' : undefined}>
-                  {outcome.label}
+                  {/* A fork refused before it was sent (#637) says why, and that it never was. */}
+                  {node.refused !== undefined ? `${outcome.label} · ${node.refused} · never sent` : outcome.label}
                 </span>
               ),
               title: outcome.known ? 'how the side call ended' : 'how the side call ended: a name this surface does not know yet',

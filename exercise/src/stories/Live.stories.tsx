@@ -11,6 +11,10 @@ import recalledNote from '../../../diet/formats/log/fixtures/valid/a-v7-recall-a
 import refillMessage from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-refill-is-a-message.jsonl?raw';
 import leversDeclared from '../../../diet/formats/log/fixtures/valid/a-v7-session-declaring-its-levers.jsonl?raw';
 import selfCapturePatch from '../../../diet/formats/log/fixtures/valid/a-v7-self-capture-patch-named-by-its-lane.jsonl?raw';
+import overflowInferred from '../../../diet/formats/log/fixtures/valid/a-v7-overflow-told-from-the-prompts-size.jsonl?raw';
+import windowSeam from '../../../diet/formats/log/fixtures/valid/a-v7-window-seam-under-the-turn-it-makes-fit.jsonl?raw';
+import pruneSeam from '../../../diet/formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl?raw';
+import poolRefused from '../../../diet/formats/log/fixtures/valid/a-v7-fork-refused-for-the-pool-and-one-that-may-displace-the-trunk-cache.jsonl?raw';
 import backgroundCalls from '../../../diet/formats/log/fixtures/valid/a-v7-call-started-in-the-background.jsonl?raw';
 import triggeredForks from '../../../diet/formats/log/fixtures/valid/a-v7-gap-with-two-triggered-forks.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
@@ -569,6 +573,68 @@ export const ServedSelfCapturedEntry: Story = {
     });
     await expect(entry.querySelector('.ex-memory__lane')?.textContent).toBe('self-capture');
     await expect(entry.querySelector('.ex-memory__text')?.textContent).toContain('The parser drops blank lines');
+  },
+};
+
+/** `?drive`, log v7 (#628): an overflow says so with its sizes, and that serve told it from the prompt's size. */
+export const ServedOverflowInferred: Story = {
+  name: '?drive: an overflow names its sizes and who told it',
+  args: { drive: true, web: serving(overflowInferred) },
+  play: async ({ canvasElement }) => {
+    const overflow = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-trunk .ex-overflow');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(overflow.textContent).toBe('161.8k tok against a 163.8k window · serve inferred it from the prompt’s size');
+  },
+};
+
+/** `?drive`, log v7 (#633): an automatic seam where it fell -- between the ask and its answer -- with the size that fired it. */
+export const ServedWindowSeam: Story = {
+  name: '?drive: an automatic window seam where it falls, with the size that fired it',
+  args: { drive: true, web: serving(windowSeam) },
+  play: async ({ canvasElement }) => {
+    const seam = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-seam[data-reason="window"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(seam.querySelector('.ex-seam__size')?.textContent).toBe('automatic · 150k of a 163.8k window');
+    // Where it fell: after turn 2's ask, before its answer.
+    const order = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="user"], .ex-trunk .ex-seam, .ex-trunk [data-tone="assistant"]')].map((n) =>
+      n.classList.contains('ex-seam') ? 'seam' : (n as HTMLElement).dataset['tone'],
+    );
+    await expect(order.slice(-3)).toEqual(['user', 'seam', 'assistant']);
+  },
+};
+
+/** `?drive`, log v7 (#630): the model prunes a call's output, and the seam replaces it with its pointer. */
+export const ServedPrunedOutput: Story = {
+  name: '?drive: a pruned output, replaced by its pointer at the seam',
+  args: { drive: true, web: serving(pruneSeam) },
+  play: async ({ canvasElement }) => {
+    const mark = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-trunk .ex-pruned');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(mark.textContent).toBe('pruned by the model (14 B) · replaced by its pointer at the seam');
+  },
+};
+
+/** `?drive`, log v7 (#637): a fork refused for the pool, never sent, and the cache hazard it would have carried. */
+export const ServedForkRefusedForPool: Story = {
+  name: '?drive: a fork refused for the pool, and its cache hazard',
+  args: { drive: true, web: serving(poolRefused) },
+  play: async ({ canvasElement }) => {
+    const branch = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-lane .ex-branch');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(branch.querySelector('.ex-branch__outcome')?.textContent).toBe('refused · pool · never sent');
+    await expect(branch.querySelector('.ex-branch__hazard')?.textContent).toBe('may displace the trunk’s cache');
   },
 };
 
