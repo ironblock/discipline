@@ -6547,39 +6547,113 @@ const SUPERSEDE_FIELD: &str = "supersede: ";
 /// backticks and brackets around it, and a colon or dash after it, are read
 /// past. A field that cites nothing live, or names no entry to stand, stays
 /// the addition [`super::fold`] made of it.
+///
+/// One field may carry several pairs, `;` between them, and `→` or `->` may
+/// stand between a cited id and what replaces it (seen on a v4 fork, #562).
+/// A pair whose replacement is itself a live entry's id retires the cited
+/// entry in favour of that one, writing no new text: the entry that should
+/// stand already does. Each pair after the first records under the field's
+/// id with its position after it, and a pair that cites nothing live stays
+/// an addition of its own text.
 fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
-    patches
+    let fields = patches.len();
+    let mut read: Vec<Patch> = patches
         .into_iter()
-        .map(|patch| {
+        .flat_map(|patch| {
             let Patch::Add {
                 id,
                 content,
                 provenance,
             } = &patch
             else {
-                return patch;
+                return vec![patch];
             };
             let Some(field) = content.strip_prefix(SUPERSEDE_FIELD) else {
-                return patch;
+                return vec![patch];
             };
-            let field = field.trim_start();
-            let (cited, rest) = field.split_once(char::is_whitespace).unwrap_or((field, ""));
-            let cited = cited.trim_matches(|c: char| "`'\"[]()<>*:,—-".contains(c));
-            let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || ":—-".contains(c));
-            let voids = match crate::object::EntryId::new(cited) {
-                Ok(voids) if !rest.is_empty() && object.live().any(|entry| entry.id == voids) => {
-                    voids
-                }
-                _ => return patch,
-            };
-            Patch::Supersede {
-                id: id.clone(),
-                content: rest.to_owned(),
-                voids,
-                provenance: provenance.clone(),
+            let pairs: Vec<&str> = field
+                .split(';')
+                .map(str::trim)
+                .filter(|pair| !pair.is_empty())
+                .collect();
+            if pairs.len() < 2 {
+                return vec![
+                    superseding(field.trim(), object, id.clone(), provenance).unwrap_or(patch),
+                ];
             }
+            // Each pair on its own: one that cites nothing live stays the
+            // addition the field would have been, alone.
+            pairs
+                .iter()
+                .enumerate()
+                .filter_map(|(at, pair)| {
+                    let id = if at == 0 {
+                        id.clone()
+                    } else {
+                        crate::object::EntryId::new(&format!("{}-{at}", id.as_str())).ok()?
+                    };
+                    Some(
+                        superseding(pair, object, id.clone(), provenance).unwrap_or_else(|| {
+                            Patch::Add {
+                                id,
+                                content: format!("{SUPERSEDE_FIELD}{pair}"),
+                                provenance: provenance.clone(),
+                            }
+                        }),
+                    )
+                })
+                .collect()
         })
-        .collect()
+        .collect();
+    // A field read as several pairs is several patches: each takes its own
+    // position in the fork's emission, in the order they were written, so
+    // `(lane, fork, index)` stays a total order.
+    if read.len() > fields {
+        for (index, patch) in read.iter_mut().enumerate() {
+            provenance_of(patch).index = u32::try_from(index).unwrap_or(u32::MAX);
+        }
+    }
+    read
+}
+
+/// One `SUPERSEDE` pair (#562): the cited id, then -- after whitespace, a
+/// colon, a dash, `→` or `->` -- what replaces it: a live entry's id, which
+/// retires the cited entry in favour of it, or the text that should stand,
+/// recorded under `id`. `None` when it cites nothing live or names nothing
+/// to stand.
+fn superseding(
+    pair: &str,
+    object: &WorkingObject,
+    id: crate::object::EntryId,
+    provenance: &crate::object::Provenance,
+) -> Option<Patch> {
+    let quoted = |c: char| "`'\"[]()<>*:,—-".contains(c);
+    let (cited, rest) = match pair.split_once('→').or_else(|| pair.split_once("->")) {
+        Some((cited, rest)) => (cited.trim(), rest),
+        None => pair.split_once(char::is_whitespace).unwrap_or((pair, "")),
+    };
+    let cited = cited.trim_matches(quoted);
+    let rest = rest.trim_start_matches(|c: char| c.is_whitespace() || ":—-".contains(c));
+    let rest = rest.trim();
+    let live = |id: &crate::object::EntryId| object.live().any(|entry| entry.id == *id);
+    let voids = crate::object::EntryId::new(cited)
+        .ok()
+        .filter(|voids| !rest.is_empty() && live(voids))?;
+    let standing = crate::object::EntryId::new(rest.trim_matches(quoted))
+        .ok()
+        .filter(|standing| *standing != voids && live(standing));
+    Some(match standing {
+        Some(_) => Patch::Retire {
+            target: voids,
+            provenance: provenance.clone(),
+        },
+        None => Patch::Supersede {
+            id,
+            content: rest.to_owned(),
+            voids,
+            provenance: provenance.clone(),
+        },
+    })
 }
 
 /// One applied patch as its log line: its op, its entry -- the patch's own
@@ -7394,6 +7468,136 @@ pub(in crate::drive) mod tests {
         let overflow = overflow.expect("its sizes");
         assert!(!overflow.inferred);
         assert_eq!(overflow.window, 1_000_000);
+    }
+
+    /// An object holding the live entries `ids`, each `<id>: text`.
+    fn object_of(ids: &[&str]) -> WorkingObject {
+        let mut object = WorkingObject::open(regime());
+        let provenance = crate::object::Provenance {
+            turn: 1,
+            lane: "interview".to_owned(),
+            fork: None,
+            tangent: None,
+            index: 0,
+        };
+        object
+            .apply_turn(
+                &ids.iter()
+                    .zip(0..)
+                    .map(|(id, index)| Patch::Add {
+                        id: crate::object::EntryId::new(id).expect("an id"),
+                        content: format!("{id}: text"),
+                        provenance: crate::object::Provenance {
+                            index,
+                            ..provenance.clone()
+                        },
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .expect("applied");
+        object
+    }
+
+    /// A fork's `SUPERSEDE` field as the fold makes it, under `id`.
+    fn supersede_field(id: &str, text: &str) -> Patch {
+        Patch::Add {
+            id: crate::object::EntryId::new(id).expect("an id"),
+            content: format!("{SUPERSEDE_FIELD}{text}"),
+            provenance: crate::object::Provenance {
+                turn: 2,
+                lane: "interview".to_owned(),
+                fork: Some("f/9".to_owned()),
+                tangent: None,
+                index: 0,
+            },
+        }
+    }
+
+    /// #562: `;` separates pairs, and each is its own supersession: the
+    /// second pair is not lost into the first's text.
+    #[test]
+    fn a_supersede_field_of_two_pairs_supersedes_twice() {
+        let object = object_of(&["interview-t2-0", "interview-t2-1"]);
+        let patches = cited(
+            vec![supersede_field(
+                "interview-t3-0",
+                "interview-t2-0 a tracker for two teams; interview-t2-1 no login after all",
+            )],
+            &object,
+        );
+        let read: Vec<(String, String)> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Supersede { content, voids, .. } => {
+                    (voids.as_str().to_owned(), content.clone())
+                }
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            read,
+            [
+                (
+                    "interview-t2-0".to_owned(),
+                    "a tracker for two teams".to_owned()
+                ),
+                ("interview-t2-1".to_owned(), "no login after all".to_owned()),
+            ]
+        );
+        // Each its own position, so the two apply together.
+        let mut object = object;
+        object.apply_turn(&patches).expect("both apply");
+    }
+
+    /// #562: `→` or `->` between the cited id and what replaces it.
+    #[test]
+    fn a_supersede_pair_may_point_with_an_arrow() {
+        let object = object_of(&["interview-t2-0"]);
+        for arrow in ["→", "->"] {
+            let patches = cited(
+                vec![supersede_field(
+                    "interview-t3-0",
+                    &format!("interview-t2-0 {arrow} a tracker for two teams"),
+                )],
+                &object,
+            );
+            assert!(
+                matches!(
+                    &patches[..],
+                    [Patch::Supersede { content, voids, .. }]
+                        if content == "a tracker for two teams" && voids.as_str() == "interview-t2-0"
+                ),
+                "{arrow}: {patches:?}"
+            );
+        }
+    }
+
+    /// #562, from the seam smoke run: a pair whose replacement is itself a
+    /// live entry's id retires the cited entry in favour of it, writing no
+    /// new text -- the id never becomes an entry's text.
+    #[test]
+    fn a_supersede_pair_naming_a_live_entry_retires_the_cited_one() {
+        let object = object_of(&[
+            "interview-t2-0",
+            "interview-t2-1",
+            "r1516/call-a/decision",
+            "r1516/call-b/followup",
+        ]);
+        let patches = cited(
+            vec![supersede_field(
+                "interview-t3-0",
+                "interview-t2-0 → r1516/call-a/decision; interview-t2-1 → r1516/call-b/followup",
+            )],
+            &object,
+        );
+        let retired: Vec<&str> = patches
+            .iter()
+            .map(|patch| match patch {
+                Patch::Retire { target, .. } => target.as_str(),
+                other => panic!("{other:?}"),
+            })
+            .collect();
+        assert_eq!(retired, ["interview-t2-0", "interview-t2-1"]);
     }
 
     /// A transport that panics mid-call: the one thing a turn's thread can
