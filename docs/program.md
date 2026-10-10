@@ -49,7 +49,7 @@ Each lever has states; the current build sits at one of them; the experiments mo
 | **fork memory share** | a main slot, with forks borrowing a bounded tail | — | #406 |
 | **archive recall** | literal · embedding · off | off | embedding added nothing in the bakeoff; #566 |
 | **fork input view** | the whole warm trunk · the last turn · the last *N* turns | the whole warm trunk | a narrower view pays a prefill; #567 |
-| **fork delivery site** | the fork's ask at the tail · at position 0 | tail | the tail is 22 points better, and position 0 no better than a sham (#21); #568 |
+| **fork delivery site** | the fork's instruction at the end of its ask (tail) · appended to the system message (position 0) | tail | #21 kept the ask last in every arm and moved only an instruction: appended to the ask it scored +0.222 (p 0.0023); a priming paragraph appended to the system message scored +0.056, the same as a same-length sham, unless the ask was also wrapped in `<interview>` tags (+0.222). Position 0 breaks the fork's shared prefix and pays a full prefill; #568 |
 | **step and output limits** | `max_steps` · the output cap, as regimen settings | flags | an 8,192-token cap killed an xhigh write step on the 3.8; T1 runs 32,768; #569 |
 | **extraction seat** | the warm model · a small offboard model · an encoder | the warm model | #570, and #499's claim |
 | **failed turns on the trunk** | the commands a failed turn ran are kept · dropped | kept (#541) | a cancelled turn keeps its finished steps (#577) |
