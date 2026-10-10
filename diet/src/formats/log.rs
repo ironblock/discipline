@@ -120,7 +120,11 @@
 //! `none`, under which no gate decided a call and nothing prompted. A v7
 //! `seam` may carry `tail_tokens`, the compaction depth it ran at, and
 //! `carried_tokens`, the estimated tokens of the whole turns it kept after
-//! the refill (#552); absent, the total refill, and `carried_turns` 0.
+//! the refill (#552); absent, the total refill, and `carried_turns` 0. A
+//! v7 `seam` may carry `tool_outputs`, the seam's tool-output state (#553),
+//! and, when it carried any, `outputs` -- the section of the refill after
+//! the render, as sent -- with `carried_outputs`, the outputs it carried,
+//! and `carried_output_bytes`, the section's bytes; absent, `evict`.
 //!
 //! # A torn final line
 //!
@@ -278,6 +282,29 @@ vocabulary! {
 }
 
 vocabulary! {
+    /// What a seam's refill carries of the tool outputs it compacts away
+    /// (v7, #553): those in the turns before the kept tail.
+    SeamToolOutputs {
+        /// Nothing: today's behaviour, the default.
+        Evict => "evict",
+        /// A line per output naming its tool, arguments, size and sha256,
+        /// the whole saved by digest in the recording.
+        Reference => "reference",
+        /// The verbatim excerpts the read fork quoted from each output.
+        Salient => "salient",
+        /// Each output as the trunk had it, after the cap.
+        Keep => "keep",
+    }
+}
+
+impl Default for SeamToolOutputs {
+    /// `evict`: today's behaviour.
+    fn default() -> Self {
+        Self::Evict
+    }
+}
+
+vocabulary! {
     /// How a fork's patches reach the trunk before a seam (v7): the fork
     /// delivery lever's two mid-turn states, each a (b′) framing.
     Framing {
@@ -363,6 +390,15 @@ vocabulary! {
         /// Nothing to refill from: no turn has settled, or working memory
         /// holds no entry (v6).
         NothingToSeam => "nothing-to-seam",
+        /// A seam asked to move to a phase under no phase graph (v7, #563).
+        NoPhaseGraph => "no-phase-graph",
+        /// A seam asked to move to a phase the graph does not declare (v7).
+        NotAPhase => "not-a-phase",
+        /// A seam asked to move to the phase the session is in (v7).
+        AlreadyInPhase => "already-in-phase",
+        /// A seam asked for a move the graph does not allow from the current
+        /// phase (v7).
+        NoPhaseEdge => "no-phase-edge",
         /// A stop named a turn older than the latest.
         Stale => "stale",
     }
@@ -680,6 +716,16 @@ pub struct NoteLine {
     pub template: String,
 }
 
+/// A move between two phases of a phase graph (v7, #563): a seam's move, or
+/// one of the graph's allowed transitions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhaseMove {
+    /// The phase moved from.
+    pub from: String,
+    /// The phase moved to.
+    pub to: String,
+}
+
 /// One instruction file a session's system prompt carries (v7, #559).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstructionFile {
@@ -787,6 +833,16 @@ pub enum Event {
         /// chat template renders by default, as the registry declares it
         /// (v7): what the model was asked for, named.
         reasoning_effort_default: Option<String>,
+        /// The phase graph a served session runs under (v7, #563): its
+        /// phases, in declared order, and the moves it allows; absent when it
+        /// declares none.
+        phases: Option<Vec<String>>,
+        /// The graph's allowed moves.
+        phase_transitions: Option<Vec<PhaseMove>>,
+        /// The phase the session opens in: the graph's first. Named so
+        /// because recordings placed in older versions carry a `phase` of
+        /// their own on this line.
+        opening_phase: Option<String>,
         /// The instruction files the system prompt carries (v7, #559): each
         /// by its path relative to the worktree and its digest. Their text
         /// is in `head`.
@@ -1075,6 +1131,20 @@ pub enum Event {
         /// The estimated tokens of the turns it kept (v7, #552), beside
         /// `tail_tokens`.
         carried_tokens: Option<u64>,
+        /// The phases it moved between (v7, #563), when the operator named
+        /// a move the graph allowed; absent when the session stayed in its
+        /// phase.
+        phase: Option<PhaseMove>,
+        /// What it carried of the tool outputs it compacted away (v7,
+        /// #553). Absent is `evict`.
+        tool_outputs: Option<SeamToolOutputs>,
+        /// The section of the refill after the render carrying them, as
+        /// sent (v7, #553): present exactly when it carried any.
+        outputs: Option<String>,
+        /// How many outputs the section carried (v7, #553).
+        carried_outputs: Option<u64>,
+        /// The section's bytes (v7, #553).
+        carried_output_bytes: Option<u64>,
         /// The render's budget and what it did (v7, #565), on a seam whose
         /// regimen declares one.
         render_budget: Option<RenderBudget>,
@@ -2268,6 +2338,27 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 },
                 instruction_files: fields.instruction_files("instruction_files")?,
                 tool_output: tool_output(&fields)?,
+                phases: fields.optional_strings("phases")?,
+                phase_transitions: match object.get("phase_transitions") {
+                    None => None,
+                    Some(Value::Array(moves)) => Some(
+                        moves
+                            .iter()
+                            .enumerate()
+                            .map(|(index, entry)| match entry {
+                                Value::Object(entry) => Fields(entry)
+                                    .phase_move_of()
+                                    .map_err(|why| format!("`phase_transitions[{index}]`: {why}")),
+                                _ => Err(format!("`phase_transitions[{index}]` is not an object")),
+                            })
+                            .collect::<Result<Vec<_>, _>>()?,
+                    ),
+                    Some(_) => return Err("`phase_transitions` is not a list".to_owned()),
+                },
+                opening_phase: match object.get("opening_phase") {
+                    None => None,
+                    Some(_) => Some(fields.string("opening_phase")?),
+                },
             }
         }
         Kind::Ask => Event::Ask {
@@ -2485,6 +2576,14 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             carried_turns: fields.count("carried_turns")?,
             tail_tokens: fields.optional_count("tail_tokens")?,
             carried_tokens: fields.optional_count("carried_tokens")?,
+            phase: match object.get("phase") {
+                None => None,
+                Some(_) => Some(fields.phase_move("phase")?),
+            },
+            tool_outputs: fields.optional_tag("tool_outputs", SeamToolOutputs::from_tag)?,
+            outputs: fields.optional_string("outputs")?,
+            carried_outputs: fields.optional_count("carried_outputs")?,
+            carried_output_bytes: fields.optional_count("carried_output_bytes")?,
             render_budget: match fields.optional_count("render_budget_tokens")? {
                 None => None,
                 Some(tokens) => Some(RenderBudget {
@@ -2910,6 +3009,8 @@ pub enum Tags {
     ForkDelivery,
     /// [`ToolOutputState`] (v7).
     ToolOutputState,
+    /// [`SeamToolOutputs`] (v7).
+    SeamToolOutputs,
 }
 
 impl Tags {
@@ -2938,6 +3039,7 @@ impl Tags {
         Self::Framing,
         Self::ForkDelivery,
         Self::ToolOutputState,
+        Self::SeamToolOutputs,
     ];
 
     /// The Rust type's name, which the bindings name the union after.
@@ -2967,6 +3069,7 @@ impl Tags {
             Self::Framing => "Framing",
             Self::ForkDelivery => "ForkDelivery",
             Self::ToolOutputState => "ToolOutputState",
+            Self::SeamToolOutputs => "SeamToolOutputs",
         }
     }
 
@@ -3000,6 +3103,7 @@ impl Tags {
             Self::Framing => of(Framing::ALL, Framing::tag),
             Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
             Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
+            Self::SeamToolOutputs => of(SeamToolOutputs::ALL, SeamToolOutputs::tag),
         }
     }
 }
@@ -3036,6 +3140,10 @@ pub enum Holds {
     /// A `delivered` line's `lines` (v7): a non-empty list of objects of
     /// the keys [`DELIVERED_LINE`] declares.
     DeliveredLines,
+    /// A seam's `phase` (v7): an object of [`PHASE_MOVE`]'s keys.
+    PhaseMove,
+    /// A `session.start`'s `phase_transitions` (v7): a list of such objects.
+    PhaseMoves,
     /// A `session.start`'s `instruction_files` (v7): a non-empty list of
     /// objects of the keys [`INSTRUCTION_FILE`] declares.
     InstructionFiles,
@@ -3202,6 +3310,8 @@ pub const DELIVERED_LINE: &[Field] = &[
     must_v7("template", Holds::Text),
 ];
 
+/// The keys of a phase move (v7, #563): both, always.
+pub const PHASE_MOVE: &[Field] = &[must_v7("from", Holds::Text), must_v7("to", Holds::Text)];
 /// The keys of each of a `session.start`'s `instruction_files`. Arrived in
 /// v7.
 pub const INSTRUCTION_FILE: &[Field] = &[
@@ -3326,6 +3436,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::Serving => Some(SERVING),
         Holds::TemplateKwargs => Some(TEMPLATE_KWARGS),
         Holds::Unsent => Some(UNSENT),
+        Holds::PhaseMove | Holds::PhaseMoves => Some(PHASE_MOVE),
         Holds::InstructionFiles => Some(INSTRUCTION_FILE),
         Holds::DeliveredLines => Some(DELIVERED_LINE),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
@@ -3365,6 +3476,19 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     }
     if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::NothingToSeam) {
         return 6;
+    }
+    let phase_refusal = tags == Tags::Refusal
+        && Refusal::from_tag(tag).is_some_and(|refusal| {
+            matches!(
+                refusal,
+                Refusal::NoPhaseGraph
+                    | Refusal::NotAPhase
+                    | Refusal::AlreadyInPhase
+                    | Refusal::NoPhaseEdge
+            )
+        });
+    if phase_refusal {
+        return 7;
     }
     if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
         return 7;
@@ -3419,6 +3543,9 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("approvals_off", Holds::Flag),
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
                 may_v7("reasoning_effort_default", Text),
+                may_v7("phases", Holds::Strings),
+                may_v7("phase_transitions", Holds::PhaseMoves),
+                may_v7("opening_phase", Text),
                 may_v7("instruction_files", Holds::InstructionFiles),
                 may_v7("tool_output", Tag(Tags::ToolOutputState)),
                 may_v7("tool_output_max_lines", Holds::Count),
@@ -3591,6 +3718,11 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 must_v6("carried_turns", Count),
                 may_v7("tail_tokens", Count),
                 may_v7("carried_tokens", Count),
+                may_v7("phase", Holds::PhaseMove),
+                may_v7("tool_outputs", Tag(Tags::SeamToolOutputs)),
+                may_v7("outputs", Text),
+                may_v7("carried_outputs", Count),
+                may_v7("carried_output_bytes", Count),
                 may_v7("render_budget_tokens", Count),
                 may_v7("render_over_budget", Text),
                 may_v7("render_tokens", Count),
@@ -3665,6 +3797,8 @@ fn ts_holds(holds: Holds) -> String {
         Holds::Serving => "Serving".to_owned(),
         Holds::TemplateKwargs => "TemplateKwargs".to_owned(),
         Holds::Unsent => "Unsent".to_owned(),
+        Holds::PhaseMove => "PhaseMove".to_owned(),
+        Holds::PhaseMoves => "PhaseMove[]".to_owned(),
         Holds::InstructionFiles => "InstructionFile[]".to_owned(),
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
@@ -3765,6 +3899,7 @@ pub fn typescript() -> String {
         ("Serving", SERVING),
         ("TemplateKwargs", TEMPLATE_KWARGS),
         ("Unsent", UNSENT),
+        ("PhaseMove", PHASE_MOVE),
         ("InstructionFile", INSTRUCTION_FILE),
         ("NoteLine", DELIVERED_LINE),
         ("ToolCallPiece", TOOL_CALL_PIECE),
@@ -3873,9 +4008,27 @@ fn to_value(line: &Line) -> Value {
             fork_delivery,
             reasoning_effort_default,
             tool_output,
+            phases,
+            phase_transitions,
+            opening_phase,
             instruction_files,
         } => {
             put("version", Value::Integer(*version));
+            if let Some(phases) = phases {
+                put(
+                    "phases",
+                    Value::Array(phases.iter().map(|name| text(name)).collect()),
+                );
+            }
+            if let Some(moves) = phase_transitions {
+                put(
+                    "phase_transitions",
+                    Value::Array(moves.iter().map(phase_move_value).collect()),
+                );
+            }
+            if let Some(phase) = opening_phase {
+                put("opening_phase", text(phase));
+            }
             if let Some(effort) = reasoning_effort_default {
                 put("reasoning_effort_default", text(effort));
             }
@@ -4291,9 +4444,17 @@ fn to_value(line: &Line) -> Value {
             carried_turns,
             tail_tokens,
             carried_tokens,
+            phase,
+            tool_outputs,
+            outputs,
+            carried_outputs,
+            carried_output_bytes,
             render_budget,
         } => {
             put("at_turn", count(u64::from(*at_turn)));
+            if let Some(moved) = phase {
+                put("phase", phase_move_value(moved));
+            }
             put("reason", text(reason.tag()));
             put("prefix_hash_before", text(prefix_hash_before));
             put("prefix_hash_after", text(prefix_hash_after));
@@ -4306,6 +4467,18 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(tokens) = carried_tokens {
                 put("carried_tokens", count(*tokens));
+            }
+            if let Some(state) = tool_outputs {
+                put("tool_outputs", text(state.tag()));
+            }
+            if let Some(section) = outputs {
+                put("outputs", text(section));
+            }
+            if let Some(n) = carried_outputs {
+                put("carried_outputs", count(*n));
+            }
+            if let Some(n) = carried_output_bytes {
+                put("carried_output_bytes", count(*n));
             }
             if let Some(budget) = render_budget {
                 put("render_budget_tokens", count(budget.tokens));
@@ -4344,6 +4517,14 @@ fn to_value(line: &Line) -> Value {
     };
     put("kind", text(kind.tag()));
     Value::Object(object)
+}
+
+/// A phase move as the log writes it.
+fn phase_move_value(moved: &PhaseMove) -> Value {
+    Value::Object(BTreeMap::from([
+        ("from".to_owned(), Value::String(moved.from.clone())),
+        ("to".to_owned(), Value::String(moved.to.clone())),
+    ]))
 }
 
 /// A claim's `served` as the log writes it: each [`SERVED_FIELD`] key, and
@@ -4896,6 +5077,28 @@ impl Fields<'_> {
         Ok(kwargs)
     }
 
+    /// A seam's `phase` (v7, #563).
+    fn phase_move(&self, key: &str) -> Result<PhaseMove, String> {
+        Fields(self.object(key, PHASE_MOVE)?)
+            .phase_move_of()
+            .map_err(|why| format!("`{key}`: {why}"))
+    }
+
+    /// These fields as a phase move: `from` and `to`, nothing else.
+    fn phase_move_of(&self) -> Result<PhaseMove, String> {
+        if let Some(extra) = self
+            .0
+            .keys()
+            .find(|key| !PHASE_MOVE.iter().any(|f| f.key == key.as_str()))
+        {
+            return Err(format!("carries `{extra}`"));
+        }
+        Ok(PhaseMove {
+            from: self.string("from")?,
+            to: self.string("to")?,
+        })
+    }
+
     /// A `session.start`'s `instruction_files` (v7, #559), when carried: a
     /// non-empty list of `{path, sha256}`, each path relative -- never
     /// absolute, never a home's.
@@ -5026,6 +5229,9 @@ mod tests {
                     max_lines: Some(2000),
                     max_bytes: Some(51_200),
                 }),
+                phases: None,
+                phase_transitions: None,
+                opening_phase: None,
             },
         }
     }
@@ -5361,6 +5567,7 @@ mod tests {
                 | Holds::Serving
                 | Holds::TemplateKwargs
                 | Holds::Unsent
+                | Holds::PhaseMove
                 | Holds::ToolCallPiece
                 | Holds::Approval
                 | Holds::Entry,
@@ -5380,7 +5587,11 @@ mod tests {
             (Holds::Digest, Value::String(digest)) => is_a_digest(digest),
             (Holds::WorkingDirectory, Value::String(cwd)) => is_a_working_directory(cwd),
             (
-                Holds::Files | Holds::Served | Holds::DeliveredLines | Holds::InstructionFiles,
+                Holds::Files
+                | Holds::Served
+                | Holds::DeliveredLines
+                | Holds::PhaseMoves
+                | Holds::InstructionFiles,
                 Value::Array(entries),
             ) => {
                 let declared = object_fields(holds).expect("a list of objects");
@@ -5592,6 +5803,8 @@ mod tests {
             ("serving", SERVING),
             ("template_kwargs", TEMPLATE_KWARGS),
             ("unsent", UNSENT),
+            ("phase", PHASE_MOVE),
+            ("phase_transitions", PHASE_MOVE),
             ("instruction_files", INSTRUCTION_FILE),
             ("lines", DELIVERED_LINE),
             ("tool_call", TOOL_CALL_PIECE),
@@ -5710,7 +5923,14 @@ mod tests {
                     // A claim's two forms are the reader's other refusal
                     // ([`Fields::claimed_engine`], v7): `served` or the older
                     // keys, never both.
-                    if object.contains_key("served") && ["engine_build"].contains(absent) {
+                    // Without a claim, `engine_build` alone is part of a claim
+                    // that is not there; beside `served` it is the other form.
+                    if ["engine_build"].contains(absent) {
+                        continue;
+                    }
+                    // A key of an all-or-none set, added alone, is the
+                    // reader's `all_or_none` refusal, not an exclusivity.
+                    if all_or_none(kind).contains(absent) {
                         continue;
                     }
                     let mut both = object.clone();
@@ -6474,7 +6694,8 @@ mod tests {
         );
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
-            "in-flight ended nothing-in-flight seam-not-built nothing-to-seam stale"
+            "in-flight ended nothing-in-flight seam-not-built nothing-to-seam no-phase-graph not-a-phase \
+             already-in-phase no-phase-edge stale"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

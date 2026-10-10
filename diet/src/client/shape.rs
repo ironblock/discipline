@@ -98,6 +98,12 @@ impl Image {
     pub fn data_uri(&self) -> String {
         format!("data:{};base64,{}", self.media_type, self.base64)
     }
+
+    /// Its media type.
+    #[must_use]
+    pub fn media_type(&self) -> &str {
+        &self.media_type
+    }
 }
 
 /// Why [`attach`] refused bytes: they are not the file the log names.

@@ -55,6 +55,10 @@ export type Refusal =
   | "nothing-in-flight"
   | "seam-not-built"
   | "nothing-to-seam"
+  | "no-phase-graph"
+  | "not-a-phase"
+  | "already-in-phase"
+  | "no-phase-edge"
   | "stale"
 ;
 
@@ -185,6 +189,13 @@ export type ToolOutputState =
   | "keep"
 ;
 
+export type SeamToolOutputs =
+  | "evict"
+  | "reference"
+  | "salient"
+  | "keep"
+;
+
 export interface HeadMessage {
   role: Role;
   content: string;
@@ -219,6 +230,11 @@ export interface TemplateKwargs {
 
 export interface Unsent {
   budget_tokens: number;
+}
+
+export interface PhaseMove {
+  from: string;
+  to: string;
 }
 
 export interface InstructionFile {
@@ -284,6 +300,9 @@ export type SessionStartLine = {
   approvals_off?: boolean;
   fork_delivery?: ForkDelivery;
   reasoning_effort_default?: string;
+  phases?: string[];
+  phase_transitions?: PhaseMove[];
+  opening_phase?: string;
   instruction_files?: InstructionFile[];
   tool_output?: ToolOutputState;
   tool_output_max_lines?: number;
@@ -476,6 +495,11 @@ export type SeamLine = {
   carried_turns: number;
   tail_tokens?: number;
   carried_tokens?: number;
+  phase?: PhaseMove;
+  tool_outputs?: SeamToolOutputs;
+  outputs?: string;
+  carried_outputs?: number;
+  carried_output_bytes?: number;
   render_budget_tokens?: number;
   render_over_budget?: string;
   render_tokens?: number;

@@ -488,6 +488,25 @@ pub fn top_level_max_steps(regimen: &Regimen) -> Option<u32> {
 /// The word a lever is written with when nothing says its state: the lever
 /// exists in docs/program.md §2, and this run cannot describe where it sat.
 pub const UNDECLARED: &str = "undeclared";
+/// The phase graph a served session moves on (#563), as the start row names
+/// it beside `seam_trigger`: `none`, or its phases and allowed moves; a graph
+/// serve would refuse is undeclared.
+fn phase_graph_lever(regimen: &Regimen) -> String {
+    match crate::seam::policy::phase_graph(regimen) {
+        Ok(graph) if graph.is_empty() => "none".to_owned(),
+        Ok(graph) => format!(
+            "phases:{};transitions:{}",
+            graph.phases().join(","),
+            graph
+                .transitions()
+                .iter()
+                .map(|(from, to)| format!("{from}>{to}"))
+                .collect::<Vec<_>>()
+                .join(",")
+        ),
+        Err(_) => UNDECLARED.to_owned(),
+    }
+}
 
 /// The state of each lever (docs/program.md §2) a session `serve` runs
 /// under `regimen`, with `output_cap` its output cap and where that came
@@ -561,6 +580,7 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
     BTreeMap::from([
         ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers.join("+")),
+        ("phase_graph".to_owned(), phase_graph_lever(regimen)),
         ("fork_warrant".to_owned(), warrant.clone()),
         ("fork_delivery".to_owned(), delivery),
         ("tool_output_disposition".to_owned(), disposition),
@@ -620,12 +640,15 @@ fn command_levers(regimen: &Regimen, (cap, cap_from): (u32, &str)) -> [String; 4
     use crate::drive::tool_loop::{self, ToolSurface};
     let commands = tool_loop::declared(regimen).ok().flatten();
     let undeclared = || UNDECLARED.to_owned();
+    // The cap on arrival (#554), then what a seam carries of the outputs it
+    // compacts away (#553).
+    let seam = crate::seam::policy::seam_tool_outputs(regimen).tag();
     let disposition = match commands.as_ref().map(|declared| declared.output_cap) {
-        Some(OutputCap::Keep) => "keep".to_owned(),
+        Some(OutputCap::Keep) => format!("keep+seam:{seam}"),
         Some(OutputCap::Capped {
             max_lines,
             max_bytes,
-        }) => format!("cap-on-arrival:{max_lines}-lines:{max_bytes}-bytes"),
+        }) => format!("cap-on-arrival:{max_lines}-lines:{max_bytes}-bytes+seam:{seam}"),
         None => undeclared(),
     };
     let approval = match &commands {
@@ -690,6 +713,38 @@ mod tests {
             .expect("read")
             .expect("runs commands");
         assert_eq!(declared.max_steps, Some(40), "`[limits]` beneath it");
+    }
+
+    /// The tool-output disposition names the cap on arrival and, beside
+    /// it, what a seam carries of the outputs it compacts away (#553):
+    /// `evict` unless the regimen declares a state, an unknown word unset.
+    #[test]
+    fn the_disposition_names_the_seams_tool_output_state_beside_the_cap() {
+        let disposition = |extra: &str| {
+            let regimen =
+                regimen::parse(&format!("approval = \"none\"\n{extra}")).expect("a regimen");
+            serve_levers(&regimen, (32_768, "regimen"))
+                .get("tool_output_disposition")
+                .cloned()
+                .unwrap_or_default()
+        };
+        assert_eq!(
+            disposition(""),
+            "cap-on-arrival:2000-lines:51200-bytes+seam:evict"
+        );
+        assert_eq!(
+            disposition("seam_tool_outputs = \"reference\"\n"),
+            "cap-on-arrival:2000-lines:51200-bytes+seam:reference"
+        );
+        assert_eq!(
+            disposition("seam_tool_outputs = \"most of them\"\n"),
+            "cap-on-arrival:2000-lines:51200-bytes+seam:evict",
+            "read leniently: an unknown word is unset"
+        );
+        assert_eq!(
+            disposition("seam_tool_outputs = \"keep\"\n[tool_output]\ncap = false\n"),
+            "keep+seam:keep"
+        );
     }
 
     #[test]

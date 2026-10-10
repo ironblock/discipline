@@ -14,6 +14,8 @@ It's primarily a library, but exists primarily to apply a `regimen` - a fixed co
 
 **A seam can keep a recent tail** (#552): a regimen's `seam_tail_tokens = N` keeps the old trunk's most recent whole turns, within N estimated tokens (characters ÷ 4), after the refill, as they sat on the trunk. A tail starts only at a user message, and the turn that would cross N is not kept. 0, the default, is the total refill. The seam line and the record's seam row name the depth and what was kept.
 
+**A seam can carry the tool outputs it compacts away** (#553): a regimen's `seam_tool_outputs` says what the refill carries of the outputs in the turns before the kept tail, in a section after the rendered working memory, one entry per call in call order. `evict`, the default, carries nothing. `keep` carries each output as the trunk had it, after the cap. `reference` carries a line naming the tool, its arguments, and the output's size and sha256, with the whole saved by digest in the recording's `files/`. `salient` carries the verbatim excerpts the read fork quoted from each output. The kept tail's outputs are untouched. The seam line names the state, logs the section as sent with how many outputs and bytes it carried, and the start row names the state beside the cap.
+
 **The tool surface** (#557): a regimen's `tool_surface = "standard"` offers `read`, `write`, `edit`, `grep` and `glob` beside `bash`, shaped as the compared harnesses shape them. `bash` alone is the default. Every tool runs through the session's confinement, as `bash` does, and no approval gate decides them; each call is logged under its tool's name.
 
 **Two binaries**, built from the repository root with `cargo build -p discipline-diet`:

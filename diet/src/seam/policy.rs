@@ -36,6 +36,10 @@ pub const SEAM_AT_CONTEXT_FRACTION: &str = "seam_at_context_fraction";
 /// trunk's most recent whole turns a served seam keeps after the refill.
 /// Absent or 0 is the total refill (#505).
 pub const SEAM_TAIL_TOKENS: &str = "seam_tail_tokens";
+/// What a served seam's refill carries of the tool outputs it compacts away
+/// (#553): `evict` (the default), `reference`, `salient` or `keep`, read
+/// leniently -- any other value is unset.
+pub const SEAM_TOOL_OUTPUTS: &str = "seam_tool_outputs";
 
 /// The render budget (#565): estimated tokens the seam's render may run to.
 /// Read leniently: absent, or anything but a positive integer, is no budget.
@@ -148,6 +152,16 @@ impl fmt::Display for PolicyError {
 
 impl Error for PolicyError {}
 
+/// [`SEAM_TOOL_OUTPUTS`] read, leniently: a state's word, or `evict`.
+#[must_use]
+pub fn seam_tool_outputs(regimen: &Regimen) -> crate::formats::log::SeamToolOutputs {
+    use crate::formats::log::SeamToolOutputs;
+    match regimen.get(SEAM_TOOL_OUTPUTS) {
+        Some(Value::String(word)) => SeamToolOutputs::from_tag(word).unwrap_or_default(),
+        _ => SeamToolOutputs::default(),
+    }
+}
+
 impl Policy {
     /// Read the policy `regimen` declares.
     ///
@@ -158,41 +172,53 @@ impl Policy {
     pub fn from_regimen(regimen: &Regimen) -> Result<Self, PolicyError> {
         let every_turns = Self::from_regimen_cadence(regimen)?;
         let at_working_set_bytes = positive(regimen, SEAM_AT_WORKING_SET_BYTES)?;
+        Ok(Self {
+            every_turns,
+            at_working_set_bytes,
+            phases: phase_graph(regimen)?,
+        })
+    }
+}
 
-        let phases = names(regimen, PHASES)?.unwrap_or_default();
-        let mut graph = PhaseGraph::of(&phases)?;
+/// The phase graph `regimen` declares under [`PHASES`] and
+/// [`PHASE_TRANSITIONS`]: the one reader the scripted drive and a served
+/// session share (#563). Empty when none is declared.
+///
+/// # Errors
+///
+/// [`PolicyError`] for a key of the wrong shape, a duplicate phase, or a
+/// transition naming a phase that was never declared.
+pub fn phase_graph(regimen: &Regimen) -> Result<PhaseGraph, PolicyError> {
+    let phases = names(regimen, PHASES)?.unwrap_or_default();
+    let mut graph = PhaseGraph::of(&phases)?;
 
-        if let Some(value) = regimen.get(PHASE_TRANSITIONS) {
-            let Value::Table(table) = value else {
-                return Err(PolicyError::NotAListOfNames(PHASE_TRANSITIONS.to_owned()));
+    if let Some(value) = regimen.get(PHASE_TRANSITIONS) {
+        let Value::Table(table) = value else {
+            return Err(PolicyError::NotAListOfNames(PHASE_TRANSITIONS.to_owned()));
+        };
+        if phases.is_empty() && !table.is_empty() {
+            return Err(PolicyError::TransitionsWithoutPhases);
+        }
+        for (from, targets) in table {
+            let Value::Array(items) = targets else {
+                return Err(PolicyError::NotAListOfNames(format!(
+                    "{PHASE_TRANSITIONS}.{from}"
+                )));
             };
-            if phases.is_empty() && !table.is_empty() {
-                return Err(PolicyError::TransitionsWithoutPhases);
-            }
-            for (from, targets) in table {
-                let Value::Array(items) = targets else {
+            for item in items {
+                let Value::String(to) = item else {
                     return Err(PolicyError::NotAListOfNames(format!(
                         "{PHASE_TRANSITIONS}.{from}"
                     )));
                 };
-                for item in items {
-                    let Value::String(to) = item else {
-                        return Err(PolicyError::NotAListOfNames(format!(
-                            "{PHASE_TRANSITIONS}.{from}"
-                        )));
-                    };
-                    graph.allow(from, to)?;
-                }
+                graph.allow(from, to)?;
             }
         }
-
-        Ok(Self {
-            every_turns,
-            at_working_set_bytes,
-            phases: graph,
-        })
     }
+    Ok(graph)
+}
 
+impl Policy {
     /// The cadence `regimen` declares under [`SEAM_EVERY_TURNS`], which the
     /// scripted and the served policy read alike.
     fn from_regimen_cadence(regimen: &Regimen) -> Result<Option<u32>, PolicyError> {
@@ -236,6 +262,9 @@ pub struct Served {
     /// The compaction depth: estimated tokens of recent whole turns a seam
     /// keeps after the refill ([`SEAM_TAIL_TOKENS`]); 0, the total refill.
     pub tail_tokens: u64,
+    /// What a seam carries of the tool outputs it compacts away
+    /// ([`SEAM_TOOL_OUTPUTS`]).
+    pub outputs: crate::formats::log::SeamToolOutputs,
     /// The render's budget ([`RENDER_BUDGET_TOKENS`], #565), when declared.
     pub render_budget: Option<super::render::Budget>,
 }
@@ -270,10 +299,9 @@ impl Served {
         regimen: &Regimen,
         serving_context: Option<u64>,
     ) -> Result<Self, PolicyError> {
-        for key in [SEAM_AT_WORKING_SET_BYTES, PHASES, PHASE_TRANSITIONS] {
-            if regimen.get(key).is_some() {
-                return Err(PolicyError::NotServed(key));
-            }
+        // The phase graph is read beside this, by `phase_graph` (#563).
+        if regimen.get(SEAM_AT_WORKING_SET_BYTES).is_some() {
+            return Err(PolicyError::NotServed(SEAM_AT_WORKING_SET_BYTES));
         }
         let every_turns = Policy::from_regimen_cadence(regimen)?;
         let at_trunk_tokens = match regimen.get(SEAM_AT_CONTEXT_FRACTION) {
@@ -306,6 +334,7 @@ impl Served {
             every_turns,
             at_trunk_tokens,
             tail_tokens,
+            outputs: seam_tool_outputs(regimen),
             render_budget: render_budget(regimen),
         })
     }
@@ -417,6 +446,7 @@ mod tests {
                 every_turns: Some(4),
                 at_trunk_tokens: Some(96_000),
                 tail_tokens: 0,
+                outputs: crate::formats::log::SeamToolOutputs::Evict,
                 render_budget: None,
             })
         );
@@ -426,6 +456,7 @@ mod tests {
                 every_turns: None,
                 at_trunk_tokens: Some(8192),
                 tail_tokens: 0,
+                outputs: crate::formats::log::SeamToolOutputs::Evict,
                 render_budget: None,
             })
         );
@@ -448,10 +479,8 @@ mod tests {
             served("seam_at_working_set_bytes = 4096\n", None),
             Err(PolicyError::NotServed(SEAM_AT_WORKING_SET_BYTES))
         );
-        assert_eq!(
-            served("phases = [\"plan\", \"build\"]\n", None),
-            Err(PolicyError::NotServed(PHASES))
-        );
+        // #563: a served session reads its phase graph (`phase_graph`).
+        assert!(served("phases = [\"plan\", \"build\"]\n", None).is_ok());
     }
 
     #[test]
@@ -460,6 +489,7 @@ mod tests {
             every_turns: Some(3),
             at_trunk_tokens: Some(1000),
             tail_tokens: 0,
+            outputs: crate::formats::log::SeamToolOutputs::Evict,
             render_budget: None,
         };
         assert_eq!(policy.due(2, Some(999)), None);

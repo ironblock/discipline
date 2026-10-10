@@ -828,7 +828,7 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
-            Command::DeclareSeam => match self.session.declare_seam(gap) {
+            Command::DeclareSeam(to) => match self.session.declare_seam_to(gap, to.as_deref()) {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
@@ -854,7 +854,8 @@ enum Command {
     /// The words, and the digests of the uploads it attaches (#513).
     Ask(String, Vec<String>),
     Cancel(u32),
-    DeclareSeam,
+    /// A seam, and the phase to move to when one is named (#563).
+    DeclareSeam(Option<String>),
     End,
 }
 
@@ -873,7 +874,8 @@ impl Command {
         let takes: &[&str] = match kind {
             CommandKind::Ask => &["kind", "text", "idle_gap", "scoping", "files"],
             CommandKind::Cancel => &["kind", "turn", "idle_gap"],
-            CommandKind::DeclareSeam | CommandKind::End => &["kind", "idle_gap"],
+            CommandKind::DeclareSeam => &["kind", "idle_gap", "phase"],
+            CommandKind::End => &["kind", "idle_gap"],
         };
         if object.keys().any(|key| !takes.contains(&key.as_str())) {
             return None;
@@ -906,7 +908,11 @@ impl Command {
                 Some(Value::Integer(turn)) => u32::try_from(*turn).ok().map(Self::Cancel),
                 _ => None,
             },
-            CommandKind::DeclareSeam => Some(Self::DeclareSeam),
+            CommandKind::DeclareSeam => match object.get("phase") {
+                None => Some(Self::DeclareSeam(None)),
+                Some(Value::String(to)) => Some(Self::DeclareSeam(Some(to.clone()))),
+                Some(_) => None,
+            },
             CommandKind::End => Some(Self::End),
         }?;
         Some(Posted {
