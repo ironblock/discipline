@@ -2210,9 +2210,49 @@ impl State {
     }
 
     fn move_to(&mut self, to: Settlement) {
+        if to == Settlement::Ended {
+            self.stop_jobs();
+        }
         let from = self.settlement;
         self.settlement = to;
         self.push(Event::Settled { from, to });
+    }
+
+    /// Stop every running background job as the session ends (#614), and
+    /// log each one's end: `ended` is the log's last line (#291), so a job
+    /// the session's end kills is logged `cancelled` before it, with the
+    /// output it wrote so far. Its reaper then logs nothing more. An
+    /// admitted `end`'s gap stays immediately before its outcome.
+    fn stop_jobs(&mut self) {
+        use super::background::Status;
+        let gap = self.pending_gap.take();
+        let mut ends = Vec::new();
+        for job in self.jobs.values_mut() {
+            if job.status != Status::Running {
+                continue;
+            }
+            job.stopping = true;
+            job.status = Status::Cancelled;
+            super::background::stop_group(job.pid);
+            job.write_status();
+            let output = std::fs::read(&job.output).unwrap_or_default();
+            let files: Vec<log::RecordedFile> = self
+                .recording
+                .as_deref()
+                .and_then(|dir| super::attach::kept_whole(dir, &output, "text/plain").ok())
+                .into_iter()
+                .collect();
+            ends.push(Event::BackgroundEnded {
+                job: job.id.clone(),
+                status: log::BackgroundStatus::Cancelled,
+                exit: None,
+                files,
+            });
+        }
+        for end in ends {
+            self.push(end);
+        }
+        self.pending_gap = gap;
     }
 
     fn refuse(&mut self, command: CommandKind, because: Refusal) -> Refusal {
@@ -11199,6 +11239,72 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
         every_head_rebuilds(&log);
         tidy(&[&tree]);
+    }
+
+    /// A job still running when the session ends (#614) is stopped, and its
+    /// end is logged `cancelled` before the session's `ended`, which stays
+    /// the log's last line (#291): a reader that waits for `ended` sees no
+    /// job left running. Its reaper logs nothing after.
+    #[test]
+    fn a_job_the_sessions_end_stops_is_logged_ended_before_ended() {
+        let tree = scratch("bg-end");
+        let recording = scratch("bg-end-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let session = backgrounding(
+            &tree,
+            Some(&recording),
+            vec![
+                vec![in_the_background("call-1", "echo serving; sleep 30")],
+                deltas(&["started"]),
+            ],
+        );
+        session.ask("start it", None).expect("accepted");
+        let log = wait_until(&session, "the turn", |log| turns_settled(log) == 1);
+        let id = lines(&log)[0].background.clone().expect("a job");
+        let pid = session.shared.lock().jobs[&id].pid;
+        assert!(ended_jobs(&log).is_empty());
+        session.end(None).expect("ended");
+        let log = wait_until(&session, "the end", |log| {
+            log.last().is_some_and(|logged| {
+                matches!(
+                    logged.event,
+                    Event::Settled {
+                        to: Settlement::Ended,
+                        ..
+                    }
+                )
+            })
+        });
+        assert_eq!(
+            ended_jobs(&log),
+            [(id.clone(), log::BackgroundStatus::Cancelled, None)]
+        );
+        let at = log
+            .iter()
+            .position(|logged| matches!(logged.event, Event::BackgroundEnded { .. }))
+            .expect("the job's end");
+        assert_eq!(at, log.len() - 2, "the job's end, then `ended`");
+        let (_, status) = super::super::background::files_of(&recording.join("background"), &id);
+        assert!(
+            std::fs::read_to_string(&status)
+                .expect("a status file")
+                .contains("\"status\":\"cancelled\"")
+        );
+        // The group is gone, and its reaper logged nothing after `ended`.
+        let until = Instant::now() + Duration::from_secs(5);
+        while std::process::Command::new("/bin/kill")
+            .args(["-0", &pid.to_string()])
+            .output()
+            .is_ok_and(|out| out.status.success())
+        {
+            assert!(Instant::now() < until, "job {pid} still runs");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        assert_eq!(session.shared.lock().log.len(), log.len());
+        reads_whole(&session);
+        session.end_commands();
+        tidy(&[&tree, &recording]);
     }
 
     /// The operator moves a running call to the background (#614): it
