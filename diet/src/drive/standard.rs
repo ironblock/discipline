@@ -1,29 +1,36 @@
-//! The standard tool surface (#557): `read`, `write` and `edit` beside
-//! `bash`, as the harnesses compared offer them.
+//! The standard tool surface (#557): `read`, `write`, `edit`, `grep` and
+//! `glob` beside `bash`, as the harnesses compared offer them.
 //!
 //! By the maintainer's rule each aspect follows Pi and `OpenCode` 2 where
 //! they agree and Qwen Code where they do not (at the commits
 //! `docs/harness-baseline.md` reads):
 //!
-//! * **names** -- `read`, `write`, `edit`: Pi and `OpenCode` 2 agree.
+//! * **names** -- `read`, `write`, `edit`, `grep`: Pi and `OpenCode` 2
+//!   agree. File-name search they name differently (`find`, `glob`), so
+//!   Qwen Code's `glob`.
 //! * **parameters** -- `write`'s `path` and `content`, and `read`'s `path`,
 //!   `offset` (a 1-based line) and `limit`: they agree. `edit`'s differ, so
-//!   Qwen Code's: `file_path`, `old_string`, `new_string`, `replace_all`.
+//!   Qwen Code's: `file_path`, `old_string`, `new_string`, `replace_all`;
+//!   `grep`'s too: `pattern`, `glob`, `path`, `limit`. `glob` takes
+//!   `pattern`, `path` and `limit`, as both do.
 //! * **rules** -- neither requires a read before an edit or an absolute
 //!   path, so neither does this; a relative path resolves against the
-//!   worktree. Both cap a read at 2000 lines or 50 KiB.
+//!   worktree. Both cap a read at 2000 lines or 50 KiB. Where they differ,
+//!   Qwen Code's: a search always case-insensitive, capped at 1000 lines or
+//!   25,000 characters; file names newest first, at most 100.
 //! * **descriptions and results** -- they differ, so Qwen Code's
 //!   (`qc:packages/core/src/tools/edit.ts`, `write-file.ts`,
 //!   `read-file.ts`), its tool names swapped for these and the sentences
 //!   stating rules this surface does not enforce removed.
 //!
 //! **Containment:** every tool runs as a helper command through the
-//! session's own confinement ([`Confinement::run_with_input`]), so the
+//! session's own confinement ([`crate::isolation::Confinement::run_with_input`]), so the
 //! kernel judges each path as it judges a `bash` command's. No approval
 //! gate decides them (the approval layer is frozen); a cancel stops them as
 //! it stops `bash`.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use crate::client::shape::ToolDefinition;
@@ -41,6 +48,10 @@ pub const READ: &str = "read";
 pub const WRITE: &str = "write";
 /// The edit tool's name.
 pub const EDIT: &str = "edit";
+/// The content search tool's name.
+pub const GREP: &str = "grep";
+/// The file-name search tool's name.
+pub const GLOB: &str = "glob";
 
 /// The most lines a read shows (Pi and `OpenCode` 2).
 const READ_MAX_LINES: usize = 2000;
@@ -54,7 +65,7 @@ const SNIPPET_MAX_LINES: usize = 1000;
 /// Whether `name` is a standard tool this module runs.
 #[must_use]
 pub fn is_standard(name: &str) -> bool {
-    [READ, WRITE, EDIT].contains(&name)
+    [READ, WRITE, EDIT, GREP, GLOB].contains(&name)
 }
 
 fn text(s: &str) -> Value {
@@ -99,7 +110,13 @@ fn definition(
 /// The standard tools, in the order a request declares them after `bash`.
 #[must_use]
 pub fn definitions() -> Vec<ToolDefinition> {
-    vec![read_tool(), write_tool(), edit_tool()]
+    vec![
+        read_tool(),
+        write_tool(),
+        edit_tool(),
+        grep_tool(),
+        glob_tool(),
+    ]
 }
 
 /// `read`: Qwen Code's description, its rules this surface does not
@@ -228,6 +245,119 @@ pub fn edit_tool() -> ToolDefinition {
         ],
         &["file_path", "old_string", "new_string"],
     )
+}
+
+/// `grep`: Qwen Code's description, its tool name ours; Qwen Code's
+/// parameters (Pi and `OpenCode` 2 differ).
+#[must_use]
+pub fn grep_tool() -> ToolDefinition {
+    definition(
+        GREP,
+        "A powerful search tool built on ripgrep\n\n  Usage:\n  - ALWAYS use the grep tool for \
+         search tasks. NEVER invoke `grep` or `rg` as a Bash command. The grep tool has been \
+         optimized for correct permissions and access.\n  - Supports full regex syntax (e.g., \
+         \"log.*Error\", \"function\\s+\\w+\")\n  - Filter files with glob parameter (e.g., \
+         \"*.js\", \"**/*.tsx\")\n  - Pattern syntax: Uses ripgrep (not grep) - special regex \
+         characters need escaping (use `interface\\{\\}` to find `interface{}` in Go code)\n",
+        &[
+            (
+                "pattern",
+                property(
+                    "string",
+                    "The regular expression pattern to search for in file contents",
+                ),
+            ),
+            (
+                "glob",
+                property(
+                    "string",
+                    "Glob pattern to filter files (e.g. \"*.js\", \"*.{ts,tsx}\") - maps to rg --glob",
+                ),
+            ),
+            (
+                "path",
+                property(
+                    "string",
+                    "File or directory to search in (rg PATH). Defaults to current working \
+                     directory.",
+                ),
+            ),
+            (
+                "limit",
+                property(
+                    "integer",
+                    "Limit output to first N lines/entries. Must be a positive integer. Optional \
+                     - shows all matches if not specified.",
+                ),
+            ),
+        ],
+        &["pattern"],
+    )
+}
+
+/// `glob`: Qwen Code's name and description; `pattern`, `path` and
+/// `limit` as Pi and `OpenCode` 2 both take them, the descriptions Qwen
+/// Code's where it has them.
+#[must_use]
+pub fn glob_tool() -> ToolDefinition {
+    definition(
+        GLOB,
+        "Fast file pattern matching tool that works with any codebase size\n- Supports glob \
+         patterns like \"**/*.js\" or \"src/**/*.ts\"\n- Returns matching file paths sorted by \
+         modification time\n- Use this tool when you need to find files by name patterns",
+        &[
+            (
+                "pattern",
+                property("string", "The glob pattern to match files against"),
+            ),
+            (
+                "path",
+                property(
+                    "string",
+                    "The directory to search in. If not specified, the current working \
+                     directory will be used. IMPORTANT: Omit this field to use the default \
+                     directory. DO NOT enter \"undefined\" or \"null\" - simply omit it for the \
+                     default behavior. Must be a valid directory path if provided.",
+                ),
+            ),
+            (
+                "limit",
+                property(
+                    "integer",
+                    "Optional: the most file paths to return (at most 100).",
+                ),
+            ),
+        ],
+        &["pattern"],
+    )
+}
+
+/// The most match lines a grep shows (Qwen Code's
+/// `DEFAULT_TRUNCATE_TOOL_OUTPUT_LINES`).
+const GREP_MAX_LINES: usize = 1000;
+/// The most characters a grep shows (Qwen Code's
+/// `DEFAULT_TRUNCATE_TOOL_OUTPUT_THRESHOLD`).
+const GREP_MAX_CHARS: usize = 25_000;
+/// The most paths a glob shows (Qwen Code's `MAX_FILE_COUNT`).
+const GLOB_MAX_FILES: usize = 100;
+
+/// ripgrep, found once on the drive's own `PATH` and run by its absolute
+/// path, so a command can plant no `rg` in front of it; `None` when the
+/// machine has none.
+fn ripgrep() -> Option<&'static Path> {
+    static FOUND: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    if cfg!(test) && std::env::var_os("DIET_TEST_NO_RIPGREP").is_some() {
+        return None;
+    }
+    FOUND
+        .get_or_init(|| {
+            std::env::var_os("PATH").and_then(|path| {
+                std::env::split_paths(&path)
+                    .map(|dir| dir.join("rg"))
+                    .find(|candidate| candidate.is_file())
+            })
+        })
+        .as_deref()
 }
 
 /// How a standard tool's call ended.
@@ -361,6 +491,8 @@ pub fn run(name: &str, raw: &str, tools: &Tools, stop: &dyn Fn() -> bool) -> Don
         READ => Ok(read(&args, tools, stop)),
         WRITE => Ok(write(&args, tools, stop)),
         EDIT => Ok(edit(&args, tools, stop)),
+        GREP => Ok(grep(&args, tools, stop)),
+        GLOB => Ok(glob(&args, tools, stop)),
         _ => Err(format!("`{name}` is not a standard tool")),
     });
     match result {
@@ -527,6 +659,245 @@ fn snippet(old: &str, new: &str) -> Option<String> {
         "Showing lines {start}-{end} of {total} from the edited file:\n\n---\n\n{}",
         new_lines[start - 1..end].join("\n")
     ))
+}
+
+/// Where a search ran, in Qwen Code's words.
+fn searched_in(path: Option<&str>, word: &str) -> String {
+    path.map_or_else(
+        || "in the workspace directory".to_owned(),
+        |path| format!("{word} \"{path}\""),
+    )
+}
+
+fn optional_text<'a>(args: &'a Args, key: &str) -> Result<Option<&'a str>, String> {
+    match args.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(serde_json::Value::String(value)) => Ok(Some(value)),
+        Some(_) => Err(format!("params/{key} must be string")),
+    }
+}
+
+/// The search a `grep` call runs: ripgrep when the machine has it, always
+/// case-insensitive as Qwen Code's own (`--ignore-case`); otherwise the
+/// system `grep`, the filter as its `--include`.
+fn grep_argv(rg: Option<&Path>, pattern: &str, filter: Option<&str>, target: &str) -> Vec<String> {
+    let mut searched: Vec<String> = match rg {
+        Some(rg) => [
+            rg.to_string_lossy().as_ref(),
+            "--line-number",
+            "--with-filename",
+            "--no-heading",
+            "--color",
+            "never",
+            "--ignore-case",
+        ]
+        .iter()
+        .map(|part| (*part).to_owned())
+        .collect(),
+        None => vec!["/usr/bin/grep".to_owned(), "-rnHIiE".to_owned()],
+    };
+    match (rg, filter) {
+        (Some(_), Some(filter)) => searched.extend(["--glob".to_owned(), filter.to_owned()]),
+        (None, Some(filter)) => searched.push(format!("--include={filter}")),
+        (_, None) => {}
+    }
+    if rg.is_some() {
+        searched.push("--regexp".to_owned());
+        searched.push(pattern.to_owned());
+        searched.extend(["--".to_owned(), target.to_owned()]);
+    } else {
+        searched.extend(["--".to_owned(), pattern.to_owned(), target.to_owned()]);
+    }
+    searched
+}
+
+fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
+    let (pattern, filter, path, limit) = match (
+        required(args, "pattern"),
+        optional_text(args, "glob"),
+        optional_text(args, "path"),
+        optional_count(args, "limit"),
+    ) {
+        (Ok(pattern), Ok(filter), Ok(path), Ok(limit)) => (pattern, filter, path, limit),
+        (Err(why), ..) | (_, Err(why), ..) | (_, _, Err(why), _) | (.., Err(why)) => {
+            return Done::Shown(why);
+        }
+    };
+    let target = path.map_or_else(
+        || ".".to_owned(),
+        |path| located(tools, path).to_string_lossy().into_owned(),
+    );
+    let searched = grep_argv(ripgrep(), pattern, filter, &target);
+    let searched: Vec<&str> = searched.iter().map(String::as_str).collect();
+    let ran = confined(tools, &searched, None, stop);
+    let ran = match ran {
+        Ok(ran) => ran,
+        Err(why) => {
+            return failed(why, |why| {
+                format!("Error during grep search operation: {why}")
+            });
+        }
+    };
+    let location = searched_in(path, "in path");
+    let filtered = filter.map_or_else(String::new, |filter| format!(" (filter: \"{filter}\")"));
+    match ran.exit {
+        Some(0) => {}
+        Some(1) => {
+            return Done::Shown(format!(
+                "No matches found for pattern \"{pattern}\" {location}{filtered}."
+            ));
+        }
+        _ => {
+            return Done::Shown(format!(
+                "Error during grep search operation: {}",
+                said(&ran)
+            ));
+        }
+    }
+    // `grep -r .` names files `./a`; ripgrep names them `a`.
+    let matches: Vec<&str> = ran
+        .stdout
+        .lines()
+        .map(|line| line.strip_prefix("./").unwrap_or(line))
+        .collect();
+    let total = matches.len();
+    let term = if total == 1 { "match" } else { "matches" };
+    let mut out =
+        format!("Found {total} {term} for pattern \"{pattern}\" {location}{filtered}:\n---\n");
+    let wanted = limit.unwrap_or(GREP_MAX_LINES).min(GREP_MAX_LINES);
+    let mut included = 0;
+    for line in matches.iter().take(wanted) {
+        if out.len() + line.len() + 1 > GREP_MAX_CHARS && included > 0 {
+            break;
+        }
+        if included > 0 {
+            out.push('\n');
+        }
+        out.push_str(line);
+        included += 1;
+    }
+    if included < total {
+        let omitted = total - included;
+        let lines = if omitted == 1 { "line" } else { "lines" };
+        let _ = write!(out, "\n---\n[{omitted} {lines} truncated] ...");
+    }
+    Done::Shown(out)
+}
+
+/// Qwen Code's order (`glob.ts` `sortFileEntries`): files changed in the
+/// last day newest first, then the rest by path.
+fn newest_first(found: &mut [(PathBuf, Option<std::time::SystemTime>)]) {
+    let now = std::time::SystemTime::now();
+    let day = std::time::Duration::from_secs(24 * 60 * 60);
+    let recent = |modified: Option<std::time::SystemTime>| {
+        modified.is_some_and(|at| now.duration_since(at).is_ok_and(|age| age < day))
+    };
+    found.sort_by(|(a, at), (b, bt)| match (recent(*at), recent(*bt)) {
+        (true, true) => bt.cmp(at),
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        (false, false) => a.cmp(b),
+    });
+}
+
+fn glob(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
+    let (pattern, path, limit) = match (
+        required(args, "pattern"),
+        optional_text(args, "path"),
+        optional_count(args, "limit"),
+    ) {
+        (Ok(pattern), Ok(path), Ok(limit)) => (pattern, path, limit),
+        (Err(why), ..) | (_, Err(why), _) | (.., Err(why)) => return Done::Shown(why),
+    };
+    let root = path.map_or_else(|| tools.worktree.clone(), |path| located(tools, path));
+    let root_text = root.to_string_lossy().into_owned();
+    let ran = match ripgrep() {
+        Some(rg) => confined(
+            tools,
+            &[
+                &rg.to_string_lossy(),
+                "--files",
+                "--glob",
+                pattern,
+                "--",
+                &root_text,
+            ],
+            None,
+            stop,
+        ),
+        None => confined(
+            tools,
+            &[
+                "/usr/bin/find",
+                &root_text,
+                "-type",
+                "f",
+                "-path",
+                &format!("*{pattern}"),
+            ],
+            None,
+            stop,
+        ),
+    };
+    let ran = match ran {
+        Ok(ran) => ran,
+        Err(why) => {
+            return failed(why, |why| {
+                format!("Error during glob search operation: {why}")
+            });
+        }
+    };
+    let location = path.map_or_else(
+        || "in the workspace directory".to_owned(),
+        |_| format!("within {root_text}"),
+    );
+    if ran.exit.is_some_and(|code| code > 1) {
+        return Done::Shown(format!(
+            "Error during glob search operation: {}",
+            said(&ran)
+        ));
+    }
+    let mut found: Vec<(PathBuf, Option<std::time::SystemTime>)> = ran
+        .stdout
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            let file = Path::new(line);
+            let file = if file.is_absolute() {
+                file.to_path_buf()
+            } else {
+                tools.worktree.join(file)
+            };
+            let modified = std::fs::metadata(&file)
+                .and_then(|meta| meta.modified())
+                .ok();
+            (file, modified)
+        })
+        .collect();
+    if found.is_empty() {
+        return Done::Shown(format!(
+            "No files found matching pattern \"{pattern}\" {location}"
+        ));
+    }
+    newest_first(&mut found);
+    let total = found.len();
+    let shown = limit.unwrap_or(GLOB_MAX_FILES).min(GLOB_MAX_FILES);
+    let listed: Vec<String> = found
+        .iter()
+        .take(shown)
+        .map(|(file, _)| file.to_string_lossy().into_owned())
+        .collect();
+    let mut out = format!(
+        "Found {total} file(s) matching \"{pattern}\" {location}, sorted by modification time \
+         (newest first):\n---\n{}",
+        listed.join("\n")
+    );
+    if total > shown {
+        let omitted = total - shown;
+        let files = if omitted == 1 { "file" } else { "files" };
+        let _ = write!(out, "\n---\n[{omitted} {files} truncated] ...");
+    }
+    Done::Shown(out)
 }
 
 #[cfg(test)]
@@ -702,6 +1073,88 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tree);
     }
 
+    /// `grep`, case-insensitive as Qwen Code's always is: Qwen Code's
+    /// header and `path:line:text` lines, its glob filter, its no-match
+    /// sentence, and its truncation notice at a limit.
+    #[test]
+    fn grep_finds_matches_in_qwen_codes_shape() {
+        let tree = scratch("std-grep");
+        let tools = unconfined(&tree);
+        std::fs::create_dir_all(tree.join("src")).expect("a dir");
+        std::fs::write(tree.join("src/a.rs"), "fn main() {}\nlet Needle = 1;\n").expect("written");
+        std::fs::write(tree.join("src/b.txt"), "a needle here\n").expect("written");
+        let found = call(GREP, &serde_json::json!({"pattern": "needle"}), &tools);
+        assert!(
+            found.starts_with(
+                "Found 2 matches for pattern \"needle\" in the workspace directory:\n---\n"
+            ),
+            "{found}"
+        );
+        assert!(found.contains("src/a.rs:2:let Needle = 1;"), "{found}");
+        assert!(found.contains("src/b.txt:1:a needle here"), "{found}");
+        let filtered = call(
+            GREP,
+            &serde_json::json!({"pattern": "needle", "glob": "*.rs"}),
+            &tools,
+        );
+        assert!(filtered.starts_with("Found 1 match for pattern \"needle\" in the workspace directory (filter: \"*.rs\"):"), "{filtered}");
+        assert_eq!(
+            call(GREP, &serde_json::json!({"pattern": "haystack"}), &tools),
+            "No matches found for pattern \"haystack\" in the workspace directory."
+        );
+        let limited = call(
+            GREP,
+            &serde_json::json!({"pattern": "needle", "limit": 1}),
+            &tools,
+        );
+        assert!(
+            limited.ends_with("\n---\n[1 line truncated] ..."),
+            "{limited}"
+        );
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
+    /// `glob`: absolute paths, files changed in the last day newest first
+    /// and the rest by path, Qwen Code's header, its no-match sentence and
+    /// its truncation notice.
+    #[test]
+    fn glob_lists_files_newest_first_in_qwen_codes_shape() {
+        let tree = scratch("std-glob");
+        let tools = unconfined(&tree);
+        std::fs::write(tree.join("old.md"), "a").expect("written");
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        std::fs::write(tree.join("new.md"), "b").expect("written");
+        std::fs::write(tree.join("skip.txt"), "c").expect("written");
+        let found = call(GLOB, &serde_json::json!({"pattern": "*.md"}), &tools);
+        let (head, list) = found.split_once("\n---\n").expect("the header");
+        assert_eq!(
+            head,
+            "Found 2 file(s) matching \"*.md\" in the workspace directory, sorted by modification time (newest first):"
+        );
+        let listed: Vec<String> = list.lines().map(str::to_owned).collect();
+        assert_eq!(
+            listed,
+            [
+                tree.join("new.md").to_string_lossy().into_owned(),
+                tree.join("old.md").to_string_lossy().into_owned()
+            ]
+        );
+        assert_eq!(
+            call(GLOB, &serde_json::json!({"pattern": "*.rs"}), &tools),
+            "No files found matching pattern \"*.rs\" in the workspace directory"
+        );
+        let limited = call(
+            GLOB,
+            &serde_json::json!({"pattern": "*.md", "limit": 1}),
+            &tools,
+        );
+        assert!(
+            limited.ends_with("\n---\n[1 file truncated] ..."),
+            "{limited}"
+        );
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
     /// A stop kills a standard tool's helper as it kills `bash` (#551).
     #[test]
     fn a_stop_cancels_a_standard_tool() {
@@ -763,6 +1216,9 @@ mod tests {
         );
         assert!(refused.starts_with("Error writing to file: "), "{refused}");
         assert!(!away.exists(), "the write escaped the sandbox");
+        // A search runs under it too, and finds what the tree holds.
+        let found = call(GREP, &serde_json::json!({"pattern": "ok"}), &sandboxed);
+        assert!(found.contains("in.txt:1:ok"), "{found}");
         let _ = std::fs::remove_dir_all(&tree);
         let _ = std::fs::remove_dir_all(&outside);
     }
