@@ -583,8 +583,11 @@ pub enum Event {
     /// One entry the fork's answer patched into the session's working
     /// object, after the fork settled `value`.
     Patched {
-        /// The sequence number of its [`Event::Forked`].
-        fork: u64,
+        /// The sequence number of its [`Event::Forked`]; `None` for a patch
+        /// the trunk's own self-capture call made (#609).
+        fork: Option<u64>,
+        /// The lane that made it, when no fork did: `self-capture`.
+        lane: Option<String>,
         /// What it did.
         op: log::PatchOp,
         /// The entry.
@@ -2860,12 +2863,14 @@ pub fn line_of(logged: &Logged) -> log::Line {
         },
         Event::Patched {
             fork,
+            lane,
             op,
             entry,
             supersedes,
             tangent,
         } => log::Event::Patch {
             fork: *fork,
+            lane: lane.clone(),
             op: *op,
             entry: entry.clone(),
             supersedes: supersedes.clone(),
@@ -3641,16 +3646,26 @@ fn capture_call<S>(
     use crate::capture::tools::CaptureTool;
     let line = ToolLine::of(request, turn, call, log::ToolOutcome::Ran);
     let mut state = shared.lock();
+    // Each patch it applied, as the `patch` line a fork's would be: one
+    // place for every working-memory change.
+    let mut lines = Vec::new();
     let (outcome, entries, why) = match capture_patches(&mut state, (turn, request), call) {
         Err(why) => ("refused", Vec::new(), Some(why)),
         Ok(patches) => {
             let refused = state.interview.as_mut().map_or_else(
                 || Some("the session keeps no working memory".to_owned()),
                 |interview| {
-                    patches
+                    let refused = patches
                         .iter()
                         .find_map(|patch| interview.object.apply(patch).err())
-                        .map(|why| why.to_string())
+                        .map(|why| why.to_string());
+                    if refused.is_none() {
+                        lines = patches
+                            .iter()
+                            .map(|patch| patched(None, patch, &interview.object))
+                            .collect();
+                    }
+                    refused
                 },
             );
             capture_outcome(&call.name, refused, entries_of(&patches))
@@ -3673,6 +3688,9 @@ fn capture_call<S>(
         why,
         fork: None,
     });
+    for patch in lines {
+        state.push(patch);
+    }
     drop(state);
     shared.changed.notify_all();
     (line, Some(shown))
@@ -4374,7 +4392,7 @@ fn read_excerpts(log: &[Logged]) -> Vec<(u32, String)> {
                 entry,
                 ..
             } => {
-                let turn = reads.get(fork)?;
+                let turn = reads.get(fork.as_ref()?)?;
                 Some((*turn, entry.text.strip_prefix(&prefix)?.to_owned()))
             }
             _ => None,
@@ -4933,7 +4951,7 @@ fn applied(state: &mut State, patches: &[Patch], fork: u64) -> (log::ForkOutcome
     }
     let lines = patches
         .iter()
-        .map(|patch| patched(fork, patch, &interview.object))
+        .map(|patch| patched(Some(fork), patch, &interview.object))
         .collect();
     state.undelivered.extend(named);
     (log::ForkOutcome::Value, lines)
@@ -4988,7 +5006,7 @@ fn cited(patches: Vec<Patch>, object: &WorkingObject) -> Vec<Patch> {
 
 /// One applied patch as its log line: its op, its entry -- the patch's own
 /// content, or for a verdict on an entry that entry's -- and what it voided.
-fn patched(fork: u64, patch: &Patch, object: &WorkingObject) -> Event {
+fn patched(fork: Option<u64>, patch: &Patch, object: &WorkingObject) -> Event {
     let held = |id: &crate::object::EntryId| {
         object
             .entry(id)
@@ -5011,6 +5029,8 @@ fn patched(fork: u64, patch: &Patch, object: &WorkingObject) -> Event {
     };
     Event::Patched {
         fork,
+        // A fork's patch is named by its fork; the trunk's own by its lane.
+        lane: fork.is_none().then(|| patch.provenance().lane.clone()),
         op,
         entry: log::PatchEntry {
             id: id.as_str().to_owned(),
@@ -6574,7 +6594,8 @@ pub(in crate::drive) mod tests {
                 wall_ms: Some(480),
             },
             Event::Patched {
-                fork: 20,
+                fork: Some(20),
+                lane: None,
                 op: log::PatchOp::Add,
                 entry: log::PatchEntry {
                     id: "interview-t1-0".to_owned(),
@@ -6939,7 +6960,8 @@ pub(in crate::drive) mod tests {
                 wall_ms: Some(480),
             },
             log::Event::Patch {
-                fork: 20,
+                fork: Some(20),
+                lane: None,
                 op: log::PatchOp::Add,
                 entry: log::PatchEntry {
                     id: "interview-t1-0".to_owned(),
@@ -10291,6 +10313,29 @@ pub(in crate::drive) mod tests {
             .expect("recorded");
         assert_eq!(kept.provenances[0].lane, crate::capture::tools::LANE);
         drop(held);
+        // One place for every working-memory change: a `patch` line, named
+        // by its lane rather than a fork, carrying the entry's text.
+        let patch_lines: Vec<(Option<u64>, Option<String>, log::PatchEntry)> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Patched {
+                    fork, lane, entry, ..
+                } => Some((*fork, lane.clone(), entry.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            patch_lines,
+            [(
+                None,
+                Some(crate::capture::tools::LANE.to_owned()),
+                log::PatchEntry {
+                    id: entry.clone(),
+                    text: "The parser drops blank lines before it tokenizes.".to_owned(),
+                    category: None,
+                }
+            )]
+        );
         let shown = lines(&log)[0].shown.clone();
         assert_eq!(shown, Some(format!("recorded: {entry}")));
         reads_whole(&session);

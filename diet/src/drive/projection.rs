@@ -719,7 +719,9 @@ impl<'a> Walk<'a> {
             } => self.failed(line.seq, *reason, message, *overflow),
             // A fork (v5, #374): its row, and its patches as one capture row.
             Line::Fork { .. } => self.fork(line),
-            Line::Patch { fork, .. } => self.patch(line.seq, *fork),
+            Line::Patch {
+                fork: Some(fork), ..
+            } => self.patch(line.seq, *fork),
             // The record's fork row carries no outcome: a fork that settled
             // `value` is carried by its capture row, and any other outcome is
             // named with its word.
@@ -745,7 +747,10 @@ impl<'a> Walk<'a> {
             Line::IdleGap { .. }
             | Line::Refused { .. }
             | Line::Progress { .. }
-            | Line::Capture { .. } => self.no_row(line),
+            | Line::Capture { .. }
+            // The trunk's own self-capture patch (#609): no fork row to
+            // count it on, as its `capture` line has none.
+            | Line::Patch { fork: None, .. } => self.no_row(line),
             // A tool call (v3, #302): its row carries how it ran under the
             // log's own words, so the record says what confined it.
             Line::ToolCall { .. }
@@ -2523,7 +2528,8 @@ mod tests {
             ]
         };
         let patch = |fork: u64, id: &str| Line::Patch {
-            fork,
+            fork: Some(fork),
+            lane: None,
             op: log::PatchOp::Add,
             entry: log::PatchEntry {
                 id: id.to_owned(),
