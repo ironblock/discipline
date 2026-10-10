@@ -3527,3 +3527,25 @@ fn a_drive_server_offers_prune_output_only_where_a_prune_can_be_applied() {
         "{said}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// https, for a hosted API only (#555)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_drive_server_refuses_an_https_endpoint_but_for_an_api_entry() {
+    // A substrate we run: reached at its http address, never over TLS.
+    let regimen = dev_loop_sampling("", "temperature = 0.6\n");
+    let path = regimen.0.to_string_lossy().into_owned();
+    let (code, said) = run_briefly("https://127.0.0.1:9/v1", &["--regimen", &path]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(
+        said.contains("`canned-cache-n`'s entry is not `server_kind")
+            && !said.contains("listening"),
+        "{said}"
+    );
+    // No regimen, no entry to say so.
+    let (code, said) = run_briefly("https://127.0.0.1:9/v1", &[]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("without a regimen"), "{said}");
+}

@@ -10,7 +10,6 @@
 use std::error::Error;
 use std::fmt;
 use std::io::{self, Read as _, Write as _};
-use std::net::{TcpStream, ToSocketAddrs as _};
 use std::time::{Duration, Instant};
 
 /// Somewhere to send a request.
@@ -22,18 +21,16 @@ pub struct Endpoint {
     pub port: u16,
     /// The path, beginning with `/`.
     pub path: String,
+    /// Whether it is spoken over TLS: an `https` URL (#555).
+    pub tls: bool,
 }
 
 /// Why a URL is not an endpoint this client will use.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EndpointError {
-    /// A scheme this client does not speak.
-    ///
-    /// `https` is refused rather than downgraded. This client speaks to
-    /// servers on a machine somebody owns, and it has no TLS; quietly sending
-    /// a prompt in the clear to a URL that asked for TLS is the silent
-    /// fallback the isolation rules forbid one layer down, and it is no
-    /// better here.
+    /// A scheme this client does not speak: anything but `http` and
+    /// `https`. An `https` endpoint is spoken over TLS or not at all
+    /// ([`super::tls`]); it is never downgraded to the clear.
     Scheme(String),
     /// No host between the scheme and the path.
     NoHost,
@@ -46,8 +43,7 @@ impl fmt::Display for EndpointError {
         match self {
             Self::Scheme(scheme) => write!(
                 f,
-                "`{scheme}` is not a scheme this client speaks; it has no TLS and will not \
-                 silently send in the clear"
+                "`{scheme}` is not a scheme this client speaks: it speaks `http` and `https`"
             ),
             Self::NoHost => f.write_str("the URL names no host"),
             Self::Port(text) => write!(f, "`{text}` is not a port"),
@@ -62,16 +58,13 @@ impl Endpoint {
     ///
     /// # Errors
     ///
-    /// Returns [`EndpointError`] for a scheme other than `http`, a URL with
-    /// no host, or an unreadable port.
+    /// Returns [`EndpointError`] for a scheme other than `http` or `https`,
+    /// a URL with no host, or an unreadable port.
     pub fn parse(url: &str) -> Result<Self, EndpointError> {
-        let rest = match url.split_once("://") {
-            Some((scheme, rest)) => {
-                if scheme != "http" {
-                    return Err(EndpointError::Scheme(scheme.to_owned()));
-                }
-                rest
-            }
+        let (tls, rest) = match url.split_once("://") {
+            Some(("http", rest)) => (false, rest),
+            Some(("https", rest)) => (true, rest),
+            Some((scheme, _)) => return Err(EndpointError::Scheme(scheme.to_owned())),
             None => return Err(EndpointError::Scheme(String::new())),
         };
 
@@ -93,7 +86,7 @@ impl Endpoint {
                 }
                 (host, port)
             }
-            None => (authority, 80),
+            None => (authority, if tls { 443 } else { 80 }),
         };
         if host.is_empty() {
             return Err(EndpointError::NoHost);
@@ -103,7 +96,14 @@ impl Endpoint {
             host: host.to_owned(),
             port,
             path: path.to_owned(),
+            tls,
         })
+    }
+
+    /// Its scheme: `https` over TLS, `http` otherwise.
+    #[must_use]
+    pub fn scheme(&self) -> &'static str {
+        if self.tls { "https" } else { "http" }
     }
 }
 
@@ -203,6 +203,7 @@ pub trait Transport {
 pub struct Http {
     endpoint: Endpoint,
     reply_cap: usize,
+    trust: super::tls::Trust,
 }
 
 impl Http {
@@ -213,6 +214,7 @@ impl Http {
         Self {
             endpoint,
             reply_cap: MAX_REPLY_BYTES,
+            trust: super::tls::Trust::default(),
         }
     }
 
@@ -225,7 +227,15 @@ impl Http {
         Self {
             endpoint,
             reply_cap,
+            trust: super::tls::Trust::default(),
         }
+    }
+
+    /// The same, trusting `trust`'s roots for an `https` endpoint.
+    #[must_use]
+    pub fn with_trust(mut self, trust: super::tls::Trust) -> Self {
+        self.trust = trust;
+        self
     }
 }
 
@@ -255,22 +265,30 @@ impl Transport for Http {
             body.len(),
             body
         );
-        exchange(&self.endpoint, &request, self.reply_cap, deadline)
+        exchange(
+            (&self.endpoint, &self.trust),
+            &request,
+            self.reply_cap,
+            deadline,
+        )
     }
 
     fn describes(&self) -> String {
         format!(
-            "http://{}:{}{}",
-            self.endpoint.host, self.endpoint.port, self.endpoint.path
+            "{}://{}:{}{}",
+            self.endpoint.scheme(),
+            self.endpoint.host,
+            self.endpoint.port,
+            self.endpoint.path
         )
     }
 }
 
-/// Write `request` to `endpoint`'s host and port, and read one reply of at
-/// most `reply_cap` bytes, giving up at `deadline`. One connection, closed
-/// after.
+/// Write `request` to `endpoint`'s host and port -- over TLS under `trust`
+/// for an `https` one -- and read one reply of at most `reply_cap` bytes,
+/// giving up at `deadline`. One connection, closed after.
 pub(super) fn exchange(
-    endpoint: &Endpoint,
+    (endpoint, trust): (&Endpoint, &super::tls::Trust),
     request: &str,
     reply_cap: usize,
     deadline: Instant,
@@ -282,27 +300,7 @@ pub(super) fn exchange(
     let started = Instant::now();
     let remaining = |now: Instant| deadline.checked_duration_since(now);
 
-    let Some(budget) = remaining(started) else {
-        return Err(TransportFailure::Timeout {
-            after: started.elapsed(),
-        });
-    };
-
-    let address = (endpoint.host.as_str(), endpoint.port)
-        .to_socket_addrs()
-        .map_err(|why| TransportFailure::Connect(why.to_string()))?
-        .next()
-        .ok_or_else(|| TransportFailure::Connect("the host resolves to no address".to_owned()))?;
-
-    let mut stream = TcpStream::connect_timeout(&address, budget).map_err(|why| {
-        if is_timeout(&why) {
-            TransportFailure::Timeout {
-                after: started.elapsed(),
-            }
-        } else {
-            TransportFailure::Connect(why.to_string())
-        }
-    })?;
+    let mut stream = super::tls::connect(endpoint, trust, deadline, started)?;
 
     // Both directions carry the deadline. A socket with a read timeout and
     // no write timeout stalls forever against a server that never drains
@@ -313,8 +311,9 @@ pub(super) fn exchange(
         });
     };
     stream
+        .socket()
         .set_write_timeout(Some(budget))
-        .and_then(|()| stream.set_read_timeout(Some(budget)))
+        .and_then(|()| stream.socket().set_read_timeout(Some(budget)))
         .map_err(|why| TransportFailure::Connect(why.to_string()))?;
 
     stream
@@ -343,6 +342,7 @@ pub(super) fn exchange(
             });
         };
         stream
+            .socket()
             .set_read_timeout(Some(budget))
             .map_err(|why| TransportFailure::Read(why.to_string()))?;
 
@@ -661,13 +661,24 @@ mod tests {
         );
     }
 
+    /// #555: an `https` URL is a TLS endpoint, on 443 when it names no
+    /// port; any other scheme is still refused.
     #[test]
-    fn an_https_url_is_refused_rather_than_quietly_sent_in_the_clear() {
+    fn an_https_url_is_a_tls_endpoint_and_another_scheme_is_refused() {
         assert_eq!(
-            Endpoint::parse("https://box.example:8080/v1/chat/completions"),
-            Err(EndpointError::Scheme("https".to_owned())),
-            "this client has no TLS; downgrading silently is the fallback the \
-             isolation rules forbid one layer down"
+            Endpoint::parse("https://api.example/v1/messages"),
+            Ok(Endpoint {
+                host: "api.example".to_owned(),
+                port: 443,
+                path: "/v1/messages".to_owned(),
+                tls: true,
+            })
+        );
+        let tls = Endpoint::parse("https://box.example:8443/v1").expect("an endpoint");
+        assert_eq!((tls.port, tls.scheme()), (8443, "https"));
+        assert_eq!(
+            Endpoint::parse("ftp://box.example/v1"),
+            Err(EndpointError::Scheme("ftp".to_owned()))
         );
     }
 
@@ -679,6 +690,7 @@ mod tests {
                 host: "127.0.0.1".to_owned(),
                 port: 8080,
                 path: "/v1/chat/completions".to_owned(),
+                tls: false,
             })
         );
         assert_eq!(
@@ -687,6 +699,7 @@ mod tests {
                 host: "localhost".to_owned(),
                 port: 80,
                 path: "/".to_owned(),
+                tls: false,
             }),
             "no port means the scheme's port, and no path means the root"
         );
