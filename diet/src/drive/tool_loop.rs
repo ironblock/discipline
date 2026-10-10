@@ -48,6 +48,12 @@ pub const ALLOWED_COMMANDS: &str = "allowed_commands";
 /// the gate decides as it always has.
 pub const APPROVAL: &str = "approval";
 
+/// The regimen key for reading a tool call the model writes as text (#560):
+/// `"on"` recovers one, Qwen Code's way, when a turn makes no native call;
+/// `"off"`, the default, reads such a turn as an answer, as Pi and
+/// `OpenCode` 2 do (`docs/harness-baseline.md`).
+pub const TOOL_CALL_TEXT_FALLBACK: &str = "tool_call_text_fallback";
+
 /// The regimen's stance, a sentence carried into the receipt (#29
 /// 5981606817).
 pub const APPROVAL_POLICY: &str = "approval_policy";
@@ -141,17 +147,64 @@ pub const LIFECYCLE: &[&str] = &[
     "dependencies",
 ];
 
+/// The `bash` tool's description (#558), by the harness vote: where Pi and
+/// `OpenCode` 2 agree (a command run in the working directory), theirs;
+/// where they differ, Qwen Code's; each sentence held to what this harness
+/// does -- a fresh `bash -c` per call in the worktree, only the policy's
+/// variables, no timeout, a call that returns when its leader exits (#551),
+/// a confinement that may refuse -- and no rule it does not enforce.
+pub const BASH_DESCRIPTION: &str = "Executes a bash command (as `bash -c <command>`) in the \
+     working directory. Returns its standard output, then its standard error.\n\n\
+     - Each call runs in a fresh shell that starts in the working directory: `cd` and exported \
+     variables do not carry over to the next call, and only the environment variables the \
+     session passes are set.\n\
+     - There is no timeout. A command that does not exit on its own, such as a server or a \
+     watcher, holds the call until the turn is cancelled: start it in the background with `&` \
+     and redirect its output to a file.\n\
+     - The call returns when the command exits. A process left running in the background keeps \
+     running, but nothing it prints after the call returns is shown.\n\
+     - The command may run in a sandbox: writes outside the working directory, some reads, and \
+     network access can be refused.";
+
+/// The `bash` tool's one argument's description (#558): Pi's and
+/// `OpenCode` 2's, which agree.
+pub const BASH_COMMAND_DESCRIPTION: &str = "Shell command to execute";
+
 /// The `bash` tool as a request declares it: one string argument,
-/// `command`, the definition I0 captured a real server calling.
+/// `command`, the shape I0 captured a real server calling, with its
+/// description (#558).
 #[must_use]
 pub fn bash_tool() -> ToolDefinition {
+    let text = |s: &str| Value::String(s.to_owned());
+    let command = Value::Object(BTreeMap::from([
+        ("description".to_owned(), text(BASH_COMMAND_DESCRIPTION)),
+        ("type".to_owned(), text("string")),
+    ]));
+    ToolDefinition {
+        name: BASH.to_owned(),
+        description: Some(BASH_DESCRIPTION.to_owned()),
+        schema: Value::Object(BTreeMap::from([
+            (
+                "properties".to_owned(),
+                Value::Object(BTreeMap::from([("command".to_owned(), command)])),
+            ),
+            ("required".to_owned(), Value::Array(vec![text("command")])),
+            ("type".to_owned(), text("object")),
+        ])),
+    }
+}
+
+/// The `bash` tool as it was declared before #558, the definition I0
+/// captured: no description, and its argument's words from then. What a
+/// log written before #558 sent, so its heads still rebuild.
+#[must_use]
+pub fn bash_tool_before_its_description() -> ToolDefinition {
     let text = |s: &str| Value::String(s.to_owned());
     let command = Value::Object(BTreeMap::from([
         ("description".to_owned(), text("the command to run in bash")),
         ("type".to_owned(), text("string")),
     ]));
     ToolDefinition {
-        name: BASH.to_owned(),
         description: None,
         schema: Value::Object(BTreeMap::from([
             (
@@ -161,6 +214,7 @@ pub fn bash_tool() -> ToolDefinition {
             ("required".to_owned(), Value::Array(vec![text("command")])),
             ("type".to_owned(), text("object")),
         ])),
+        ..bash_tool()
     }
 }
 
@@ -1346,6 +1400,9 @@ pub struct Declared {
     pub approval_policy: Option<String>,
     /// `approval = "none"`: no gate decision, no prompt.
     pub approvals_off: bool,
+    /// `tool_call_text_fallback = "on"`: a call written as text is
+    /// recovered when a turn makes no native call (#560).
+    pub text_fallback: bool,
     /// `[tool_output]`: the cap on what the model is shown of a tool's
     /// output (#554), the convention's default when the table is absent.
     pub output_cap: OutputCap,
@@ -1483,6 +1540,16 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             ));
         }
     };
+    let text_fallback = match regimen.get(TOOL_CALL_TEXT_FALLBACK) {
+        None => false,
+        Some(regimen::Value::String(state)) if state == "off" => false,
+        Some(regimen::Value::String(state)) if state == "on" => true,
+        Some(_) => {
+            return Err(format!(
+                "`{TOOL_CALL_TEXT_FALLBACK}` takes \"off\" (the default) or \"on\""
+            ));
+        }
+    };
     let Some(value) = regimen.get(ALLOWED_COMMANDS) else {
         // Approvals off runs commands with no allow set to seed.
         return Ok(approvals_off.then(|| Declared {
@@ -1490,6 +1557,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
             max_steps,
             approval_policy,
             approvals_off,
+            text_fallback,
             output_cap,
             surface,
         }));
@@ -1513,6 +1581,7 @@ pub fn declared(regimen: &Regimen) -> Result<Option<Declared>, String> {
         max_steps,
         approval_policy,
         approvals_off,
+        text_fallback,
         output_cap,
         surface,
     }))
@@ -1871,6 +1940,9 @@ pub struct Tools {
     /// Approvals off (`approval = "none"`): every command runs with no gate
     /// decision and no prompt, under the same confinement.
     pub approvals_off: bool,
+    /// Whether a call the model writes as text is recovered when a turn
+    /// makes no native call (#560).
+    pub text_fallback: bool,
     /// The cap on what the model is shown of a tool's output (#554).
     pub output_cap: OutputCap,
     /// The recording's directory, where a capped output is kept whole;
@@ -2181,9 +2253,25 @@ pub(in crate::drive) mod tests {
     }
 
     #[test]
-    fn the_bash_tool_renders_as_i0_declared_it() {
+    fn the_bash_tool_renders_as_i0_declared_it_with_its_own_words() {
         let mut out = String::new();
         json::render(&bash_tool().schema, &mut out);
+        assert_eq!(
+            out,
+            "{\"properties\":{\"command\":{\"description\":\"Shell command to execute\",\
+             \"type\":\"string\"}},\"required\":[\"command\"],\"type\":\"object\"}"
+        );
+    }
+
+    /// Before #558, `bash` was I0's definition byte for byte, and no
+    /// description.
+    #[test]
+    fn the_bash_tool_before_its_description_is_i0s() {
+        let tool = bash_tool_before_its_description();
+        assert_eq!(tool.name, BASH);
+        assert_eq!(tool.description, None);
+        let mut out = String::new();
+        json::render(&tool.schema, &mut out);
         assert_eq!(
             out,
             "{\"properties\":{\"command\":{\"description\":\"the command to run in bash\",\
@@ -2976,6 +3064,7 @@ pub(in crate::drive) mod tests {
                 max_steps: Some(4),
                 approval_policy: Some("ask".to_owned()),
                 approvals_off: false,
+                text_fallback: false,
                 output_cap: OutputCap::DEFAULT,
                 surface: ToolSurface::Bash,
             }))
@@ -2988,11 +3077,18 @@ pub(in crate::drive) mod tests {
                 max_steps: None,
                 approval_policy: None,
                 approvals_off: true,
+                text_fallback: false,
                 output_cap: OutputCap::DEFAULT,
                 surface: ToolSurface::Bash,
             }))
         );
         assert!(read("approval = \"ask\"\n").is_err());
+        // #560: the text fallback, `off` unless declared `on`.
+        let on = read("approval = \"none\"\ntool_call_text_fallback = \"on\"\n")
+            .expect("declared")
+            .expect("runs commands");
+        assert!(on.text_fallback);
+        assert!(read("approval = \"none\"\ntool_call_text_fallback = \"yes\"\n").is_err());
         assert!(read("allowed_commands = \"ls\"\n").is_err());
         assert!(read("allowed_commands = [\"\"]\n").is_err());
         assert!(read("allowed_commands = []\n[limits]\nmax_steps = 0\n").is_err());

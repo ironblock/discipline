@@ -983,6 +983,10 @@ pub enum Event {
         /// was given one (v5, #472): what the next step's head is rebuilt
         /// with.
         shown: Option<String>,
+        /// The text this call was recovered from (v7, #560): the block the
+        /// model wrote in its answer, when the call was not a native one.
+        /// Absent for a streamed call.
+        recovered_from: Option<String>,
     },
     /// A side call off the trunk's warm tail (v5, #374).
     Fork {
@@ -2396,6 +2400,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 approval,
                 files: fields.optional_files("files")?,
                 shown: fields.optional_string("shown")?,
+                recovered_from: fields.optional_string("recovered_from")?,
             }
         }
         Kind::Fork => Event::Fork {
@@ -3491,6 +3496,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v4("approval", Holds::Approval),
                 may_v4("files", Holds::Files),
                 may_v5("shown", Text),
+                may_v7("recovered_from", Text),
             ];
             F
         }
@@ -4097,6 +4103,7 @@ fn to_value(line: &Line) -> Value {
             approval,
             files,
             shown,
+            recovered_from,
         } => {
             put("request", count(*request));
             put("turn", count(u64::from(*turn)));
@@ -4151,6 +4158,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(shown) = shown {
                 put("shown", text(shown));
+            }
+            if let Some(source) = recovered_from {
+                put("recovered_from", text(source));
             }
             Kind::ToolCall
         }
@@ -5104,6 +5114,7 @@ mod tests {
                 }),
                 files: None,
                 shown: None,
+                recovered_from: None,
             },
         ];
         // v5 (#374): a scoping turn answered and settled `final`, then the

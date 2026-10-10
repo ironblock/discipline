@@ -424,6 +424,7 @@ export type ToolCallLine = {
   approval?: Approval;
   files?: RecordedFile[];
   shown?: string;
+  recovered_from?: string;
 };
 
 export type ForkLine = {

@@ -488,6 +488,17 @@ fn tools_of(names: &[String]) -> Result<Vec<ToolDefinition>, String> {
         .collect()
 }
 
+/// `tools` with `bash` as it was declared before its description (#558),
+/// when `tools` declares `bash`.
+fn earlier_bash(tools: &[ToolDefinition]) -> Option<Vec<ToolDefinition>> {
+    let at = tools
+        .iter()
+        .position(|tool| tool.name == super::tool_loop::BASH)?;
+    let mut earlier = tools.to_vec();
+    earlier[at] = super::tool_loop::bash_tool_before_its_description();
+    Some(earlier)
+}
+
 impl<'a> Walk<'a> {
     fn over(lines: &'a [log::Line], substrate: String, engine: Option<Engine>) -> Self {
         let mut outcome = BTreeMap::new();
@@ -1019,25 +1030,34 @@ impl<'a> Walk<'a> {
         for step in self.steps.get(&turn).into_iter().flatten() {
             messages.extend(step.messages());
         }
-        let rebuilt = Head::of(&RequestShape {
-            model: self.model.clone(),
-            messages,
-            sampler: SamplerCard::empty(),
-            limits: Limits {
-                attempt: std::time::Duration::ZERO,
-                call: std::time::Duration::ZERO,
-                max_output_tokens: 0,
-                retries: 0,
-                context_window: None,
-            },
-            grammar: None,
-            // From `session.start` (R1), and ASSERTED by the digest check
-            // below: a kwarg the log cannot carry leaves the head unverified.
-            template_kwargs: self.template_kwargs.clone(),
-            // The session's declared tools, from `session.start` (#472).
-            tools: self.tools.clone().unwrap_or_default(),
-        });
-        let verified = (rebuilt.digest() == logged).then_some(rebuilt);
+        let tools = self.tools.clone().unwrap_or_default();
+        let head = |tools: Vec<ToolDefinition>| {
+            Head::of(&RequestShape {
+                model: self.model.clone(),
+                messages: messages.clone(),
+                sampler: SamplerCard::empty(),
+                limits: Limits {
+                    attempt: std::time::Duration::ZERO,
+                    call: std::time::Duration::ZERO,
+                    max_output_tokens: 0,
+                    retries: 0,
+                    context_window: None,
+                },
+                grammar: None,
+                // From `session.start` (R1), and ASSERTED by the digest check
+                // below: a kwarg the log cannot carry leaves the head unverified.
+                template_kwargs: self.template_kwargs.clone(),
+                // The session's declared tools, from `session.start` (#472).
+                tools,
+            })
+        };
+        // A log written before `bash` carried its description (#558) sent
+        // the definition I0 captured: its heads rebuild with that one, and
+        // the digest still decides.
+        let verified = std::iter::once(tools.clone())
+            .chain(earlier_bash(&tools))
+            .map(head)
+            .find(|rebuilt| rebuilt.digest() == logged);
         // A head whose attachment could not be read back is never verified,
         // whatever the digest of what the rebuild could reach.
         let verified = verified.filter(|_| unrebuilt.is_none());
@@ -1292,6 +1312,7 @@ impl<'a> Walk<'a> {
             arguments,
             shown,
             files,
+            recovered_from,
             ..
         } = line
         else {
@@ -1311,6 +1332,15 @@ impl<'a> Walk<'a> {
             };
             if step.unrebuilt.is_none() {
                 step.unrebuilt = why.map(|why| format!("call {id}'s image: {why}"));
+            }
+            // A call recovered from the answer's text (#560): the session put
+            // what was left of the answer on the trunk, and so does this --
+            // the same recovery, once, at the step's first call.
+            if recovered_from.is_some()
+                && step.calls.is_empty()
+                && let Some(recovery) = crate::client::xml_fallback::try_recover(&step.said.content)
+            {
+                step.said.content = recovery.remaining;
             }
             step.calls.push((
                 ToolCall {
@@ -2183,6 +2213,7 @@ mod tests {
                 approval: None,
                 files: None,
                 shown: None,
+                recovered_from: None,
             }
         };
         let mut events = vec![start()];
@@ -2268,6 +2299,7 @@ mod tests {
                 approval: None,
                 files: None,
                 shown: None,
+                recovered_from: None,
             },
         );
         events.extend(turn);
@@ -2469,6 +2501,7 @@ mod tests {
                 approval: None,
                 files: Some(vec![file.clone()]),
                 shown: None,
+                recovered_from: None,
             },
         );
         events.extend(turn);
