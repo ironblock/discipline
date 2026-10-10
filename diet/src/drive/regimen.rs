@@ -675,7 +675,10 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ),
         ("interview_routing_and_cadence".to_owned(), warrant),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
-        ("fork_memory_share".to_owned(), undeclared()),
+        (
+            "fork_memory_share".to_owned(),
+            fork_memory_share_lever(regimen),
+        ),
         ("fork_input_view".to_owned(), fork_input_view_lever(regimen)),
         ("fork_asks".to_owned(), fork_asks_lever(regimen)),
         ("fork_delivery_site".to_owned(), "tail".to_owned()),
@@ -781,6 +784,16 @@ fn seam_triggers(regimen: &Regimen) -> String {
         triggers.push("window");
     }
     triggers.join("+")
+}
+
+/// The fork memory share lever's word (#406): the tail a fork's call is
+/// clamped from, `tail:output-cap` or the regimen's `tail:<tokens>`; a fork
+/// that would not fit its window is refused unsent either way.
+fn fork_memory_share_lever(regimen: &Regimen) -> String {
+    crate::drive::session::fork_tail(regimen).map_or_else(
+        || "tail:output-cap".to_owned(),
+        |tokens| format!("tail:{tokens}"),
+    )
 }
 
 /// The capture modality lever's word (#610): how a fork answers, `fields`
