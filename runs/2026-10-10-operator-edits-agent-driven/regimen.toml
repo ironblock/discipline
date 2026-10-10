@@ -1,0 +1,54 @@
+# Operator edits run (agent-driven, #150): seam smoke run 2's regimen -- fields-modality forks on ask set v4, the seam
+# audit on -- with the arm renamed. The operator edits and flags working memory from the surface; the seam reconciles.
+arm = "operator-edits"
+dogma_version = 0
+
+substrate = "accel24-tabbyapi-exl3-qwen38-27b-3p00"
+substrate_reasoning = "on"
+substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"
+
+isolation = "sandbox"
+network = "host"
+sandbox_reads = "all"
+# The reference is writable like the worktree; the receipt's `reference_modified` covers the whole tree.
+# The seam smoke run writes only in its own worktree: no reference checkout is writable.
+sandbox_writable = []
+
+# T1 runs bash with approvals off (the maintainer, 2026-10-09; #544): every command runs with no
+# gate and no prompt, and the log says approvals were off. Seatbelt is unchanged: writes stay
+# confined to the worktree and the reference.
+approval = "none"
+
+# Names only: the values are set by whoever starts `serve`, inside the worktree.
+env_passthrough = ["npm_config_cache", "pnpm_config_store_dir"]
+
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; Seatbelt confines writes to the worktree and the reference"
+
+interview_warrant = ["scoping"]
+
+# T1 runs at xhigh, declared so the record names what was sent (the maintainer, 2026-10-09). The
+# format pairs a level with its cap; "none" is its spelling for no cap, and serve sends no budget.
+# The standard tool surface (#557): read, write, edit, grep and glob beside bash; read takes images (#582). T1 run 3.
+tool_surface = "standard"
+
+# Self-capture with its default cadence, and fork ask set v4 (both approved for the seam smoke run).
+self_capture = "on"
+fork_asks = "v4"
+
+seam_audit = "on"
+seam_warm = "on"
+archive_recall = "literal"
+interview_cadence = "per_class"
+interview_skip_self_recorded = "on"
+render_budget_tokens = 400
+
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
+# The 3.8 line's sampler card, r2's preset; all four keys declared so serve pins every one (#489).
+[sampler]
+temperature = 1.0
+top_k = 20
+top_p = 0.95
+min_p = 0.0
