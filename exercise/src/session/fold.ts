@@ -274,6 +274,8 @@ export interface MemoryEntry extends Provenance {
   readonly landedAt: number;
   /** Landed since the last ask: what the operator has not seen yet. */
   readonly fresh: boolean;
+  /** The trunk's lane that wrote it, when no fork did (a patch's `lane`, #627): `self-capture` today. */
+  readonly lane?: string;
   /** The tangent it was born in (a patch's `tangent`, #608): what that tangent's close rules on. */
   readonly tangent?: string;
 }
@@ -658,7 +660,8 @@ export function fold(lines: readonly LogLine[]): Session {
         break;
       }
       case 'patch': {
-        forks.get(e.fork)?.patches.push(e);
+        // A fork's patch is drawn on its branch too; the trunk's own (a `lane`, #627) only in working memory.
+        if (e.fork !== undefined) forks.get(e.fork)?.patches.push(e);
         const old = entries.get(e.entry.id);
         const base = {
           ...(e.entry.category !== undefined ? { category: e.entry.category } : {}),
@@ -677,7 +680,7 @@ export function fold(lines: readonly LogLine[]): Session {
           if (replaced) entries.set(e.supersedes, { ...replaced, state: 'superseded', by: id(e.seq), seq: e.seq, from: [...replaced.from, e.seq] });
         }
         if (e.op === 'add' || e.op === 'supersede' || !old) {
-          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}), ...(e.tangent !== undefined ? { tangent: e.tangent } : {}) });
+          entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}), ...(e.tangent !== undefined ? { tangent: e.tangent } : {}), ...(e.lane !== undefined ? { lane: e.lane } : {}) });
           break;
         }
         // Any other op rewrites the entry, keeps its state, and is shown by name.
