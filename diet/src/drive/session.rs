@@ -6991,7 +6991,9 @@ fn archived_at_meditation(
             format!("{}\n{}", message.content, calls.join("\n"))
         };
         Item {
-            key: format!("seam-{at_turn}/message-{}", at + 1),
+            // The model reads it: `compaction`, the word it was trained on,
+            // the maintainer's choice (#583). Older logs keep `seam-`.
+            key: format!("compaction-{at_turn}/message-{}", at + 1),
             title,
             text,
         }
@@ -10454,7 +10456,7 @@ pub(in crate::drive) mod tests {
                 recall: log::RecallState::Literal,
                 text: "<system-reminder>\n## Relevant memory\n</system-reminder>".to_owned(),
                 items: vec![log::RecalledItem {
-                    key: "seam-1/message-2".to_owned(),
+                    key: "compaction-1/message-2".to_owned(),
                     sha256: "f".repeat(64),
                     score: 2,
                 }],
@@ -10918,7 +10920,7 @@ pub(in crate::drive) mod tests {
                 recall: log::RecallState::Literal,
                 text: "<system-reminder>\n## Relevant memory\n</system-reminder>".to_owned(),
                 items: vec![log::RecalledItem {
-                    key: "seam-1/message-2".to_owned(),
+                    key: "compaction-1/message-2".to_owned(),
                     sha256: "f".repeat(64),
                     score: 2,
                 }],
@@ -17576,8 +17578,12 @@ pub(in crate::drive) mod tests {
                 panic!("one recall: {recalled:?}");
             };
             assert_eq!(*turn, 2);
-            // The scoping turn's answer, archived by the meditation, names the schema.
-            assert_eq!(items[0].key, "seam-1/message-2");
+            // The scoping turn's answer, archived by the meditation, names the
+            // schema; its key, which the model reads, says `compaction`, the
+            // maintainer's word for it (#583).
+            assert_eq!(items[0].key, "compaction-1/message-2");
+            assert!(text.contains("(compaction-1/message-2)"), "{text}");
+            assert!(!text.contains("seam-"), "{text}");
             assert_eq!(
                 items[0].sha256,
                 crate::digest::sha256_hex(SCOPED.as_bytes())

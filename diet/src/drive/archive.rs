@@ -88,8 +88,9 @@ impl Recall {
 /// One archived item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
-    /// What names it: `meditation-<turn>/message-<n>` for a dropped message,
-    /// `entry/<id>` for a working-memory entry.
+    /// What names it: `compaction-<turn>/message-<n>` for a dropped message
+    /// (`seam-` in logs before #583), `entry/<id>` for a working-memory
+    /// entry.
     pub key: String,
     /// What it is, in a few words: the note's heading.
     pub title: String,
