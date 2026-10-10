@@ -28,6 +28,7 @@ export type Kind =
   | "patch"
   | "seam"
   | "delivered"
+  | "recalled"
 ;
 
 export type State =
@@ -178,6 +179,10 @@ export type Framing =
   | "imperative"
 ;
 
+export type RecallState =
+  | "literal"
+;
+
 export type ForkDelivery =
   | "seam"
   | "advisory"
@@ -246,6 +251,12 @@ export interface NoteLine {
   entry: string;
   op: PatchOp;
   template: string;
+}
+
+export interface RecalledItem {
+  key: string;
+  sha256: string;
+  score: number;
 }
 
 export interface ToolCallPiece {
@@ -517,6 +528,16 @@ export type DeliveredLine = {
   lines: NoteLine[];
 };
 
+export type RecalledLine = {
+  seq: number;
+  t: number;
+  kind: "recalled";
+  turn: number;
+  recall: RecallState;
+  text: string;
+  items: RecalledItem[];
+};
+
 export type LogLine =
   | SessionStartLine
   | AskLine
@@ -537,4 +558,5 @@ export type LogLine =
   | PatchLine
   | SeamLine
   | DeliveredLine
+  | RecalledLine
 ;

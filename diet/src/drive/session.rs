@@ -525,6 +525,18 @@ pub enum Event {
     },
     /// Forks' patches delivered at the tail of a trunk request, after its
     /// ask (the fork delivery lever): the note stays on the trunk.
+    /// Archived items recalled after an ask (#566): one note, which stays
+    /// on the trunk.
+    Recalled {
+        /// The turn whose first request carried it.
+        turn: u32,
+        /// How it matched.
+        recall: log::RecallState,
+        /// The note as sent.
+        text: String,
+        /// Each item, in rank order.
+        items: Vec<log::RecalledItem>,
+    },
     Delivered {
         /// The turn whose first request carried it.
         turn: u32,
@@ -742,6 +754,8 @@ pub struct Interview {
     /// The regimen's phase graph (#563), read as the scripted drive reads
     /// it; empty when it declares none.
     pub phases: crate::seam::phase::PhaseGraph,
+    /// How archived items are recalled at an ask (#566): off, the default.
+    pub recall: super::archive::Recall,
     /// What a fork sees of the trunk (#567): all of it, or its last whole
     /// turns after the head.
     pub view: ForkView,
@@ -955,6 +969,8 @@ struct State {
     /// Patches waiting to be delivered at the next trunk request, under a
     /// mid-turn fork delivery: each op and the entry text its line names.
     undelivered: Vec<(log::PatchOp, String, String)>,
+    /// What seams dropped from the trunk, for a recall to find (#566).
+    archive: super::archive::Archive,
     /// The text each recovered call came from, by its id, until its line is
     /// logged (#560).
     recovered: BTreeMap<String, String>,
@@ -1076,16 +1092,38 @@ impl State {
         self.carried = gap.map(|gap| (gap, command));
     }
 
-    /// A command was admitted. The gap it carries is checked and held for its
-    /// outcome; and whatever gap was open ended here, carried or not (a gap
-    /// ends at the command that ends it -- left open, a later command could
-    /// log it after the one that really ended it, or after the session
-    /// ended; #146's first review).
-    ///
-    /// # Errors
-    ///
-    /// [`Rejected::BadGap`] when the carried gap cannot be logged: then the
-    /// command is not carried out and nothing is logged.
+    /// The note recalling what earlier seams archived that `asked` names
+    /// (#566), logged as turn `turn`'s `recalled` line, or `None`: under
+    /// `literal`, the archive's best items by the ask's anchors, in Qwen
+    /// Code's reminder shape. Under `off`, nothing.
+    fn recall(&mut self, turn: u32, asked: &str) -> Option<Message> {
+        use super::archive::Recall;
+        let recall = self.interview.as_ref()?.recall;
+        if recall != Recall::Literal || self.archive.is_empty() {
+            return None;
+        }
+        let found = self.archive.literal(asked);
+        if found.is_empty() {
+            return None;
+        }
+        let text = super::archive::note(&found);
+        let items = found
+            .iter()
+            .map(|(item, score)| log::RecalledItem {
+                key: item.key.clone(),
+                sha256: item.sha256(),
+                score: *score,
+            })
+            .collect();
+        self.push(Event::Recalled {
+            turn,
+            recall: log::RecallState::Literal,
+            text: text.clone(),
+            items,
+        });
+        Some(Message::new(Role::User, text))
+    }
+
     /// The note delivering every patch waiting since the last trunk
     /// request, logged as turn `turn`'s `delivered` line, or `None` when
     /// none waits. One line per patch, each the (b′) sentence of the
@@ -1132,6 +1170,16 @@ impl State {
         Some(Message::new(Role::User, text))
     }
 
+    /// A command was admitted. The gap it carries is checked and held for its
+    /// outcome; and whatever gap was open ended here, carried or not (a gap
+    /// ends at the command that ends it -- left open, a later command could
+    /// log it after the one that really ended it, or after the session
+    /// ended; #146's first review).
+    ///
+    /// # Errors
+    ///
+    /// [`Rejected::BadGap`] when the carried gap cannot be logged: then the
+    /// command is not carried out and nothing is logged.
     fn admit(&mut self) -> Result<(), Rejected> {
         if let Some((gap, command)) = self.carried.take() {
             let ends = match command {
@@ -1395,6 +1443,7 @@ impl<S: Streaming + 'static> Session<S> {
             pending_gap: None,
             phase: phase_at_open.clone(),
             undelivered: Vec::new(),
+            archive: super::archive::Archive::default(),
             recovered: BTreeMap::new(),
             sink: None,
             allowed: tools
@@ -1531,6 +1580,12 @@ impl<S: Streaming + 'static> Session<S> {
         // request, as one note after the ask; it joins the trunk with it.
         let mut opening = vec![message];
         if let Some(note) = state.deliver(turn) {
+            shape.messages.push(note.clone());
+            opening.push(note);
+        }
+        // Archive recall (#566): what earlier seams dropped that this ask
+        // names, as one note after it (and after any delivered note).
+        if let Some(note) = state.recall(turn, &opening[0].content) {
             shape.messages.push(note.clone());
             opening.push(note);
         }
@@ -2283,6 +2338,17 @@ pub fn line_of(logged: &Logged) -> log::Line {
         Event::ForkSettled { fork, outcome } => log::Event::ForkSettled {
             fork: *fork,
             outcome: *outcome,
+        },
+        Event::Recalled {
+            turn,
+            recall,
+            text,
+            items,
+        } => log::Event::Recalled {
+            turn: *turn,
+            recall: *recall,
+            text: text.clone(),
+            items: items.clone(),
         },
         Event::Delivered {
             turn,
@@ -3343,6 +3409,9 @@ fn refill_trunk(
     // before the kept tail, which stays as it sat.
     let tool_outputs = interview.seams.outputs;
     let compacted = &turns[..turns.len() - kept.len()];
+    // The archive (#566): what this seam drops from the trunk, and every
+    // working-memory entry no longer live, for a recall to find later.
+    let archived = archived_at_seam(compacted, &interview.object, state.turns);
     let outputs = crate::seam::outputs::section(
         tool_outputs,
         &compacted_outputs(
@@ -3359,6 +3428,9 @@ fn refill_trunk(
     refilled.extend(kept);
     let prefix_hash_after = digest(&refilled);
     state.trunk = refilled;
+    for item in archived {
+        state.archive.push(item);
+    }
     state.turns_at_seam = state.turns;
     state.trunk_tokens = None;
     let at_turn = state.turns;
@@ -3377,6 +3449,49 @@ fn refill_trunk(
         outputs,
         render_budget,
     });
+}
+
+/// What a seam at `at_turn` archives (#566): each message of `compacted`,
+/// keyed by the seam and its position, and each entry of `object` that is
+/// no longer live, keyed by its id.
+fn archived_at_seam(
+    compacted: &[Message],
+    object: &WorkingObject,
+    at_turn: u32,
+) -> Vec<super::archive::Item> {
+    use super::archive::Item;
+    let messages = compacted.iter().enumerate().map(|(at, message)| {
+        let calls: Vec<String> = message
+            .tool_calls
+            .iter()
+            .map(|call| format!("{} {}", call.name, call.arguments))
+            .collect();
+        let title = match message.role {
+            Role::User => "an ask".to_owned(),
+            Role::Tool => "a tool result".to_owned(),
+            _ if !calls.is_empty() => "a step that called tools".to_owned(),
+            _ => "an answer".to_owned(),
+        };
+        let text = if calls.is_empty() {
+            message.content.clone()
+        } else {
+            format!("{}\n{}", message.content, calls.join("\n"))
+        };
+        Item {
+            key: format!("seam-{at_turn}/message-{}", at + 1),
+            title,
+            text,
+        }
+    });
+    let entries = object
+        .entries()
+        .filter(|entry| !entry.state.is_live())
+        .map(|entry| Item {
+            key: format!("entry/{}", entry.id.as_str()),
+            title: format!("a {} entry", entry.state.name()),
+            text: entry.content.clone(),
+        });
+    messages.chain(entries).collect()
 }
 
 /// The outputs in `compacted` -- the trunk's turns a seam compacts away --
@@ -5442,6 +5557,16 @@ pub(in crate::drive) mod tests {
                 outputs: None,
                 render_budget: None,
             },
+            Event::Recalled {
+                turn: 2,
+                recall: log::RecallState::Literal,
+                text: "<system-reminder>\n## Relevant memory\n</system-reminder>".to_owned(),
+                items: vec![log::RecalledItem {
+                    key: "seam-1/message-2".to_owned(),
+                    sha256: "f".repeat(64),
+                    score: 2,
+                }],
+            },
             Event::Delivered {
                 turn: 2,
                 framing: log::Framing::Advisory,
@@ -5481,9 +5606,10 @@ pub(in crate::drive) mod tests {
                 Event::Patched { .. } => 22,
                 Event::Seamed { .. } => 23,
                 Event::Delivered { .. } => 24,
+                Event::Recalled { .. } => 25,
             });
         }
-        assert_eq!(kinds.len(), 25, "a variant has no sample");
+        assert_eq!(kinds.len(), 26, "a variant has no sample");
         events
             .into_iter()
             .enumerate()
@@ -5747,6 +5873,16 @@ pub(in crate::drive) mod tests {
                 carried_outputs: None,
                 carried_output_bytes: None,
                 render_budget: None,
+            },
+            log::Event::Recalled {
+                turn: 2,
+                recall: log::RecallState::Literal,
+                text: "<system-reminder>\n## Relevant memory\n</system-reminder>".to_owned(),
+                items: vec![log::RecalledItem {
+                    key: "seam-1/message-2".to_owned(),
+                    sha256: "f".repeat(64),
+                    score: 2,
+                }],
             },
             log::Event::Delivered {
                 turn: 2,
@@ -8011,6 +8147,7 @@ pub(in crate::drive) mod tests {
             seams: crate::seam::policy::Served::default(),
             delivery: log::ForkDelivery::Seam,
             phases: crate::seam::phase::PhaseGraph::none(),
+            recall: super::super::archive::Recall::Off,
             view: ForkView::Trunk,
         }
     }
@@ -8828,6 +8965,108 @@ pub(in crate::drive) mod tests {
             projected.unspellable
         );
         reads_whole(&session);
+    }
+
+    /// #566, `literal`: a seam archives what it drops; a later ask that
+    /// names it gets one note after it, in Qwen Code's reminder shape, logged
+    /// `recalled` with each item's key, digest and score; the note stays on
+    /// the trunk and the projection rebuilds the head. Under `off`, nothing.
+    #[test]
+    fn a_literal_recall_brings_back_what_a_seam_archived() {
+        for recall in [
+            super::super::archive::Recall::Literal,
+            super::super::archive::Recall::Off,
+        ] {
+            let session = Session::open_with(
+                Canned::new([
+                    deltas(&[SCOPED]),
+                    deltas(&[DECIDED]),
+                    deltas(&["a table per team"]),
+                ]),
+                template(),
+                None,
+                None,
+                None,
+                Some(Interview {
+                    recall,
+                    ..interviewing(&[log::Warrant::Scoping])
+                }),
+            );
+            session
+                .ask_marked("what are we building?", None, true)
+                .expect("accepted");
+            wait_until(&session, "the fork to settle", |log| {
+                settled(log) && !fork_outcomes(log).is_empty()
+            });
+            session.declare_seam(None).expect("a seam");
+            session
+                .ask("how should the `schema` look?", None)
+                .expect("accepted");
+            let log = wait_until(&session, "turn two", |log| {
+                settled(log)
+                    && log
+                        .iter()
+                        .filter(|l| matches!(l.event, Event::TurnSettled { .. }))
+                        .count()
+                        == 2
+            });
+            reads_whole(&session);
+            let lines: Vec<log::Line> = log.iter().map(line_of).collect();
+            let recalled: Vec<&log::Event> = lines
+                .iter()
+                .map(|line| &line.event)
+                .filter(|event| matches!(event, log::Event::Recalled { .. }))
+                .collect();
+            let sent = session.shared.transport.sent();
+            let asked = sent.last().expect("turn two's request");
+            if recall == super::super::archive::Recall::Off {
+                assert!(recalled.is_empty(), "{recalled:?}");
+                assert_eq!(
+                    asked.messages.last().map(|m| m.content.as_str()),
+                    Some("how should the `schema` look?")
+                );
+                continue;
+            }
+            let [
+                log::Event::Recalled {
+                    turn, text, items, ..
+                },
+            ] = recalled.as_slice()
+            else {
+                panic!("one recall: {recalled:?}");
+            };
+            assert_eq!(*turn, 2);
+            // The scoping turn's answer, archived by the seam, names the schema.
+            assert_eq!(items[0].key, "seam-1/message-2");
+            assert_eq!(
+                items[0].sha256,
+                crate::digest::sha256_hex(SCOPED.as_bytes())
+            );
+            assert_eq!(items[0].score, 1);
+            assert!(
+                text.starts_with("<system-reminder>\n## Relevant memory"),
+                "{text}"
+            );
+            assert!(text.contains(SCOPED), "{text}");
+            // The note follows the ask, on the request and on the trunk.
+            let n = asked.messages.len();
+            assert_eq!(
+                asked.messages[n - 2].content,
+                "how should the `schema` look?"
+            );
+            assert_eq!(&asked.messages[n - 1].content, text);
+            assert!(session.trunk().iter().any(|m| &m.content == text));
+            let projected =
+                crate::drive::projection::project(&lines, &regime(), None).expect("projected");
+            assert!(
+                !projected
+                    .unspellable
+                    .iter()
+                    .any(|item| item.why.contains("rebuilt")),
+                "{:?}",
+                projected.unspellable
+            );
+        }
     }
 
     /// #563: naming a phase with no graph is refused, logged.

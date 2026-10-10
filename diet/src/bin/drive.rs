@@ -788,6 +788,8 @@ fn serving_interview(
         seams,
         delivery,
         phases,
+        // #566: how archived items are recalled; off unless declared.
+        recall: diet::drive::archive::Recall::of(&read),
         view: session::fork_view(&read),
     }))
 }

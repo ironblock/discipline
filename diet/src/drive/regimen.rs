@@ -581,6 +581,10 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("compaction_depth".to_owned(), depth),
         ("seam_trigger".to_owned(), triggers.join("+")),
         ("phase_graph".to_owned(), phase_graph_lever(regimen)),
+        (
+            "archive_recall".to_owned(),
+            crate::drive::archive::Recall::lever(regimen),
+        ),
         ("fork_warrant".to_owned(), warrant.clone()),
         ("fork_delivery".to_owned(), delivery),
         ("tool_output_disposition".to_owned(), disposition),
@@ -608,7 +612,6 @@ pub fn serve_levers(regimen: &Regimen, output_cap: (u32, &str)) -> BTreeMap<Stri
         ("interview_routing_and_cadence".to_owned(), warrant),
         ("render_budget".to_owned(), render_budget_lever(regimen)),
         ("fork_memory_share".to_owned(), undeclared()),
-        ("archive_recall".to_owned(), "off".to_owned()),
         (
             "fork_input_view".to_owned(),
             crate::drive::session::fork_view(regimen).word(),

@@ -213,6 +213,8 @@ vocabulary! {
         /// Forks' patches delivered at the tail of a trunk request (v7, the
         /// fork delivery lever).
         Delivered => "delivered",
+        /// Archived items recalled at the tail of a trunk request (v7, #566).
+        Recalled => "recalled",
     }
 }
 
@@ -301,6 +303,15 @@ impl Default for SeamToolOutputs {
     /// `evict`: today's behaviour.
     fn default() -> Self {
         Self::Evict
+    }
+}
+
+vocabulary! {
+    /// How an archive recall matched (v7, #566): the `archive_recall`
+    /// lever's states that recall anything.
+    RecallState {
+        /// By the ask's anchors, matched whole.
+        Literal => "literal",
     }
 }
 
@@ -701,6 +712,19 @@ pub struct TemplateKwargs {
 pub struct Unsent {
     /// `[reasoning]`'s token budget: no chat template variable carries one.
     pub budget_tokens: u64,
+}
+
+/// One item a recall carried (v7, #566): its archive key, the digest of its
+/// text, and its score -- under `literal`, how many of the ask's anchors it
+/// holds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecalledItem {
+    /// The archive's key for it.
+    pub key: String,
+    /// The sha256 of its text.
+    pub sha256: String,
+    /// Its score.
+    pub score: u64,
 }
 
 /// One line of a delivered note (v7): the patch it delivers, by its entry
@@ -1106,6 +1130,18 @@ pub enum Event {
         /// Each line, in order: the patch it delivers and the template it
         /// was written with.
         lines: Vec<NoteLine>,
+    },
+    /// Archived items recalled (v7, #566): one note after turn `turn`'s
+    /// ask, at the tail of its first request, which stays on the trunk.
+    Recalled {
+        /// The turn whose request carried it.
+        turn: u32,
+        /// How it matched.
+        recall: RecallState,
+        /// The note as sent.
+        text: String,
+        /// Each item it carries, in rank order.
+        items: Vec<RecalledItem>,
     },
     /// The trunk refilled from working memory (v6, #493).
     Seam {
@@ -2563,6 +2599,12 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 supersedes,
             }
         }
+        Kind::Recalled => Event::Recalled {
+            turn: fields.turn("turn")?,
+            recall: fields.tag("recall", RecallState::from_tag)?,
+            text: fields.string("text")?,
+            items: fields.recalled_items("items")?,
+        },
         Kind::Delivered => Event::Delivered {
             turn: fields.turn("turn")?,
             framing: fields.tag("framing", Framing::from_tag)?,
@@ -3007,6 +3049,8 @@ pub enum Tags {
     PatchOp,
     /// [`SeamReason`] (v6).
     SeamReason,
+    /// [`RecallState`] (v7).
+    RecallState,
     /// [`Framing`] (v7).
     Framing,
     /// [`ForkDelivery`] (v7).
@@ -3041,6 +3085,7 @@ impl Tags {
         Self::PatchOp,
         Self::SeamReason,
         Self::Framing,
+        Self::RecallState,
         Self::ForkDelivery,
         Self::ToolOutputState,
         Self::SeamToolOutputs,
@@ -3071,6 +3116,7 @@ impl Tags {
             Self::PatchOp => "PatchOp",
             Self::SeamReason => "SeamReason",
             Self::Framing => "Framing",
+            Self::RecallState => "RecallState",
             Self::ForkDelivery => "ForkDelivery",
             Self::ToolOutputState => "ToolOutputState",
             Self::SeamToolOutputs => "SeamToolOutputs",
@@ -3105,6 +3151,7 @@ impl Tags {
             Self::PatchOp => of(PatchOp::ALL, PatchOp::tag),
             Self::SeamReason => of(SeamReason::ALL, SeamReason::tag),
             Self::Framing => of(Framing::ALL, Framing::tag),
+            Self::RecallState => of(RecallState::ALL, RecallState::tag),
             Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
             Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
             Self::SeamToolOutputs => of(SeamToolOutputs::ALL, SeamToolOutputs::tag),
@@ -3144,6 +3191,9 @@ pub enum Holds {
     /// A `delivered` line's `lines` (v7): a non-empty list of objects of
     /// the keys [`DELIVERED_LINE`] declares.
     DeliveredLines,
+    /// A `recalled` line's `items` (v7): a non-empty list of objects of the
+    /// keys [`RECALLED_ITEM`] declares.
+    RecalledItems,
     /// A seam's `phase` (v7): an object of [`PHASE_MOVE`]'s keys.
     PhaseMove,
     /// A `session.start`'s `phase_transitions` (v7): a list of such objects.
@@ -3307,6 +3357,13 @@ pub const TEMPLATE_KWARGS: &[Field] = &[
     may_v7("preserve_thinking", Holds::Flag),
 ];
 
+/// The keys of each of a `recalled` line's `items`. Arrived in v7.
+pub const RECALLED_ITEM: &[Field] = &[
+    must_v7("key", Holds::Text),
+    must_v7("sha256", Holds::Digest),
+    must_v7("score", Holds::Count),
+];
+
 /// The keys of each of a `delivered` line's `lines`. Arrived in v7.
 pub const DELIVERED_LINE: &[Field] = &[
     must_v7("entry", Holds::Text),
@@ -3443,6 +3500,7 @@ pub fn object_fields(holds: Holds) -> Option<&'static [Field]> {
         Holds::PhaseMove | Holds::PhaseMoves => Some(PHASE_MOVE),
         Holds::InstructionFiles => Some(INSTRUCTION_FILE),
         Holds::DeliveredLines => Some(DELIVERED_LINE),
+        Holds::RecalledItems => Some(RECALLED_ITEM),
         Holds::ToolCallPiece => Some(TOOL_CALL_PIECE),
         Holds::Approval => Some(APPROVAL),
         Holds::Files => Some(RECORDED_FILE),
@@ -3460,7 +3518,7 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
         Kind::Seam => 6,
-        Kind::Delivered => 7,
+        Kind::Delivered | Kind::Recalled => 7,
         _ => 0,
     }
 }
@@ -3735,6 +3793,15 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
+        Kind::Recalled => {
+            const F: &[Field] = &[
+                must_v7("turn", Count),
+                must_v7("recall", Tag(Tags::RecallState)),
+                must_v7("text", Text),
+                must_v7("items", Holds::RecalledItems),
+            ];
+            F
+        }
         Kind::Delivered => {
             const F: &[Field] = &[
                 must_v7("turn", Count),
@@ -3806,6 +3873,7 @@ fn ts_holds(holds: Holds) -> String {
         Holds::PhaseMoves => "PhaseMove[]".to_owned(),
         Holds::InstructionFiles => "InstructionFile[]".to_owned(),
         Holds::DeliveredLines => "NoteLine[]".to_owned(),
+        Holds::RecalledItems => "RecalledItem[]".to_owned(),
         Holds::Strings => "string[]".to_owned(),
         Holds::ToolCallPiece => "ToolCallPiece".to_owned(),
         Holds::Approval => "Approval".to_owned(),
@@ -3907,6 +3975,7 @@ pub fn typescript() -> String {
         ("PhaseMove", PHASE_MOVE),
         ("InstructionFile", INSTRUCTION_FILE),
         ("NoteLine", DELIVERED_LINE),
+        ("RecalledItem", RECALLED_ITEM),
         ("ToolCallPiece", TOOL_CALL_PIECE),
         ("Approval", APPROVAL),
         ("RecordedFile", RECORDED_FILE),
@@ -4523,6 +4592,32 @@ fn to_value(line: &Line) -> Value {
             );
             Kind::Delivered
         }
+        Event::Recalled {
+            turn,
+            recall,
+            text: note,
+            items,
+        } => {
+            put("turn", count(u64::from(*turn)));
+            put("recall", text(recall.tag()));
+            put("text", text(note));
+            put(
+                "items",
+                Value::Array(
+                    items
+                        .iter()
+                        .map(|item| {
+                            Value::Object(BTreeMap::from([
+                                ("key".to_owned(), text(&item.key)),
+                                ("sha256".to_owned(), text(&item.sha256)),
+                                ("score".to_owned(), count(item.score)),
+                            ]))
+                        })
+                        .collect(),
+                ),
+            );
+            Kind::Recalled
+        }
     };
     put("kind", text(kind.tag()));
     Value::Object(object)
@@ -4859,6 +4954,37 @@ impl Fields<'_> {
 
     /// A `delivered` line's `lines` (v7): a non-empty list, each entry the
     /// keys of [`DELIVERED_LINE`] and nothing else.
+    fn recalled_items(&self, key: &str) -> Result<Vec<RecalledItem>, String> {
+        let Value::Array(entries) = self.get(key)? else {
+            return Err(format!("`{key}` is not a list"));
+        };
+        if entries.is_empty() {
+            return Err(format!(
+                "`{key}` is empty: a recall carries at least one item"
+            ));
+        }
+        let mut items = Vec::with_capacity(entries.len());
+        for (index, entry) in entries.iter().enumerate() {
+            let at = |why: String| format!("`{key}[{index}]`: {why}");
+            let Value::Object(entry) = entry else {
+                return Err(at("is not an object".to_owned()));
+            };
+            if let Some(extra) = entry
+                .keys()
+                .find(|field| !RECALLED_ITEM.iter().any(|f| f.key == field.as_str()))
+            {
+                return Err(at(format!("carries `{extra}`")));
+            }
+            let inner = Fields(entry);
+            items.push(RecalledItem {
+                key: inner.string("key").map_err(at)?,
+                sha256: inner.digest("sha256").map_err(at)?,
+                score: inner.count("score").map_err(at)?,
+            });
+        }
+        Ok(items)
+    }
+
     fn delivered_lines(&self, key: &str) -> Result<Vec<NoteLine>, String> {
         let Value::Array(entries) = self.get(key)? else {
             return Err(format!("`{key}` is not a list"));
@@ -5600,6 +5726,7 @@ mod tests {
                 Holds::Files
                 | Holds::Served
                 | Holds::DeliveredLines
+                | Holds::RecalledItems
                 | Holds::PhaseMoves
                 | Holds::InstructionFiles,
                 Value::Array(entries),
@@ -5817,6 +5944,7 @@ mod tests {
             ("phase_transitions", PHASE_MOVE),
             ("instruction_files", INSTRUCTION_FILE),
             ("lines", DELIVERED_LINE),
+            ("items", RECALLED_ITEM),
             ("tool_call", TOOL_CALL_PIECE),
             ("approval", APPROVAL),
             ("files", RECORDED_FILE),
@@ -6696,7 +6824,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered"
+             fork.settled patch seam delivered recalled"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
