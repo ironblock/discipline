@@ -6,18 +6,18 @@
 
 The maintainer, 2026-10-09: "Working prototype _with every theorized lever present_ → controls and reproducible tests → rigor, test matrix, data collection → publish." Each is an initiative, run in that order, and holds as many milestones as it needs; nothing in a later initiative is an obstacle to an earlier one.
 
-1. **The prototype:** every theorized lever (`program.md`, The levers) present and working. v0.1.0 is its first milestone, v0.2.0 the remainder of the levers, and v0.3.0 the hosted API (approved by the maintainer, 2026-10-10).
+1. **The prototype:** every theorized lever (`program.md`, The levers) present and working. v0.1.0 is its first milestone, v0.2.0 the remainder of the levers, v0.3.0 sessions an agent can drive end to end (the maintainer, 2026-10-11), and v0.4.0 the hosted API (approved by the maintainer, 2026-10-10).
 2. **Controls and reproducible tests.**
 3. **Rigor:** the test matrix and data collection.
 4. **Publish.**
 
 ## v0.1.0 — the pieces work
 
-The prototype's first milestone. Each piece of the harness shown working **once, live, on the floor**. A passing test does not count. Using the pieces together is v0.4.0's.
+The prototype's first milestone. Each piece of the harness shown working **once, live, on the floor**. A passing test does not count. Using the pieces together is v0.5.0's.
 
 **Floor:** the 3.8 EXL3 line, config r2, on linux-pc (`accel24-tabbyapi-exl3-qwen38-27b-3p00`, #497), driven through TabbyAPI (#496). The 3.6 is retired.
 
-**Evidence:** four agent-driven runs under `runs/`, each row's approved by the maintainer (2026-10-10). Finishing T1 ([`trajectories/t1.md`](trajectories/t1.md)) moved to v0.4.0: at `xhigh` its script does not fit the floor's window without a seam ([`2026-10-10-t1-run-3-agent-driven`](../runs/2026-10-10-t1-run-3-agent-driven)).
+**Evidence:** four agent-driven runs under `runs/`, each row's approved by the maintainer (2026-10-10). Finishing T1 ([`trajectories/t1.md`](trajectories/t1.md)) moved to v0.5.0: at `xhigh` its script does not fit the floor's window without a seam ([`2026-10-10-t1-run-3-agent-driven`](../runs/2026-10-10-t1-run-3-agent-driven)).
 
 | piece | shown when | evidence |
 | --- | --- | --- |
@@ -53,7 +53,7 @@ One working state per lever, a non-default one where the default is off, none or
 | isolation | `sandbox` | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): a Seatbelt refusal at 12815 |
 | approval | none | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) |
 | reasoning state | on, `xhigh` | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) and [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) |
-| cache lifetime (hosted) | — | v0.3.0's: every paid call needs the maintainer's approval |
+| cache lifetime (hosted) | — | v0.4.0's: every paid call needs the maintainer's approval |
 | substrate rung | the floor | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) |
 | tool surface | standard | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven), [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) and [`image-smoke`](../runs/2026-10-10-image-smoke-agent-driven) |
 | instruction files | on, an AGENTS.md in the worktree | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): all 8 trunk answers followed it |
@@ -85,15 +85,27 @@ It also carries what merged after v0.2.0's tag:
 - sidechains as lanes in the Claude Code adapter (#708);
 - a capture row's count (#443).
 
-## v0.3.0 — the hosted API live
+## v0.3.0 — driveable
+
+An agent drives a served session end to end, and a drive can be run again. The maintainer, 2026-10-11, pulling it forward: his ability to run sessions is always the limiting factor. The work follows the surface seat's friction list from driving every run under `runs/`, and is split by whose concern it is: the session's on diet's side, the operator's page on exercise's.
+
+- **The session's state, readable:** `GET /state`, a `/wait` long-poll and `GET /memory` (#756).
+- **A run assembled, not transcribed:** the log names its build; one command scrubs, checks and digests a run directory and writes its README skeleton; the seqs a README cites come from a query (#757).
+- **Driven through tools:** an MCP server over serve's operator commands, so a Claude.app session drives a session without a browser (#758).
+- **The page operable by keyboard and by an agent** (#759).
+- **Scenarios:** a drive written as steps and expectations, run on the stand-in in CI and re-fired on a named endpoint by one command (#760).
+
+**Done when** levers run C's three levers, written as a scenario, pass on the stand-in in CI; and the same scenario, re-fired on the floor through the runner, lands as an assembled run under `runs/`.
+
+## v0.4.0 — the hosted API live
 
 The hosted API kind driven live (#555, #556): the first paid calls, the cache lifetime lever, and the per-fork cache-read share, on Haiku 5.5 (the nearest to the 27B floor) and Sonnet 5.5 (the maintainer, 2026-10-10). Every live call needs the maintainer's approval.
 
-## v0.4.0 — the pieces together (T2)
+## v0.5.0 — the pieces together (T2)
 
-The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. Finishing T1 moved here from v0.1.0 (the maintainer, 2026-10-10); how it runs, with a seam or without, is still the maintainer's to decide. This milestone and v0.5.0 predate the initiatives, and follow its lever milestones.
+The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. Finishing T1 moved here from v0.1.0 (the maintainer, 2026-10-10); how it runs, with a seam or without, is still the maintainer's to decide. This milestone and v0.6.0 predate the initiatives, and follow its lever milestones.
 
-## v0.5.0 — T3, NetHack
+## v0.6.0 — T3, NetHack
 
 Attempting the NetHack 5 WebAssembly port, with a record that says truthfully which arm, regime and model ran it. The comparison is the archived Claude desktop app session of the same work, read by the Claude Code adapter (#500, #501).
 
