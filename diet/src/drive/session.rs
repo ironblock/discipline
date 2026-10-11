@@ -4968,6 +4968,59 @@ fn shown_capped(tools: &Tools, whole: &str, line: &mut ToolLine) -> String {
     shown
 }
 
+/// What the model is shown of a command's output, `before` it (#734): as
+/// [`shown_capped`] when the call held its output whole; spilled, the
+/// whole kept in the recording from its files, never in memory at once,
+/// and the held head and tail capped -- under the session's cap, or with
+/// the cap off the default, since the whole was never held to show.
+fn shown_ran(
+    tools: &Tools,
+    before: &str,
+    ran: &crate::isolation::Ran,
+    line: &mut ToolLine,
+) -> String {
+    use super::attach::Part;
+    use super::output::{self, Kept, OutputCap};
+    let seen = format!("{before}{}", ran.as_the_model_sees_it());
+    if !ran.spilled() {
+        return shown_capped(tools, &seen, line);
+    }
+    let newline = |held: &[u8]| (!held.is_empty() && !held.ends_with(b"\n")).then_some(b"\n");
+    let mut parts = vec![Part::Bytes(before.as_bytes())];
+    parts.push(match &ran.stdout_spill {
+        Some(spill) => Part::File(&spill.path),
+        None => Part::Bytes(&ran.raw_stdout),
+    });
+    if let Some(nl) = newline(&ran.raw_stdout) {
+        parts.push(Part::Bytes(nl));
+    }
+    parts.push(match &ran.stderr_spill {
+        Some(spill) => Part::File(&spill.path),
+        None => Part::Bytes(ran.stderr.as_bytes()),
+    });
+    if let Some(nl) = newline(ran.stderr.as_bytes()) {
+        parts.push(Part::Bytes(nl));
+    }
+    let saved = tools.recording.as_ref().and_then(|dir| {
+        super::attach::kept_whole_from(dir, &parts, "text/plain")
+            .ok()
+            .map(|file| (dir.join(&file.path).to_string_lossy().into_owned(), file))
+    });
+    let kept = saved.as_ref().map_or(Kept::Nowhere, |(path, _)| Kept::At {
+        path,
+        read_tool: tools.read_tool.as_deref(),
+    });
+    let cap = match tools.output_cap {
+        OutputCap::Keep => OutputCap::DEFAULT,
+        capped @ OutputCap::Capped { .. } => capped,
+    };
+    let shown = output::capped(&seen, cap, kept);
+    if let Some((_, file)) = saved {
+        line.files.push(file);
+    }
+    shown
+}
+
 /// A standard tool's call (#557), to its line and what the model is shown:
 /// its result under the session's cap, or -- a stop having killed its
 /// helper -- the cancel's result; the step limit refuses it as it refuses
@@ -5648,7 +5701,7 @@ fn one_call<S: Streaming>(
                 text: ran.stderr.clone(),
                 bytes: ran.stderr_bytes,
             });
-            let shown = shown_capped(tools, &ran.as_the_model_sees_it(), &mut line);
+            let shown = shown_ran(tools, "", &ran, &mut line);
             (line, Some(shown))
         }
         Err(not_run) => never_ran(tools, line, &run, &not_run),
@@ -5828,19 +5881,26 @@ fn timed_out(
         bytes: ran.stderr_bytes,
     });
     line.timeout_ms = Some(ms);
-    let printed = ran.as_the_model_sees_it();
-    let said = if printed.is_empty() {
-        format!(
-            "Command timed out after {ms}ms before it could complete. There was no output before \
-             it timed out."
+    let shown = if ran.as_the_model_sees_it().is_empty() {
+        shown_capped(
+            tools,
+            &format!(
+                "Command timed out after {ms}ms before it could complete. There was no output \
+                 before it timed out."
+            ),
+            &mut line,
         )
     } else {
-        format!(
-            "Command timed out after {ms}ms before it could complete. Below is the output before \
-             it timed out:\n{printed}"
+        shown_ran(
+            tools,
+            &format!(
+                "Command timed out after {ms}ms before it could complete. Below is the output \
+                 before it timed out:\n"
+            ),
+            ran,
+            &mut line,
         )
     };
-    let shown = shown_capped(tools, &said, &mut line);
     (line, Some(shown))
 }
 
@@ -12839,6 +12899,49 @@ pub(in crate::drive) mod tests {
         Session::open_looping(Canned::new(replies), looping(), None, tools)
     }
 
+    /// #734: an output past what a call holds in memory -- 3 MB from `seq` --
+    /// is counted whole on its line, its whole kept in the recording from
+    /// its spill (the same digest a held output would get), and the model
+    /// shown its head and tail capped, the cap off or not.
+    #[test]
+    fn a_spilled_output_is_kept_whole_from_its_file_and_shown_capped() {
+        use crate::drive::output::OutputCap;
+        let tree = scratch("cap-spill");
+        let recording = scratch("cap-spill-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let whole: String = (1..=400_000)
+            .flat_map(|n| [n.to_string(), "\n".to_owned()])
+            .collect();
+        assert!(whole.len() > 2 * 1024 * 1024);
+        let sha256 = crate::digest::sha256_hex(whole.as_bytes());
+        for cap in [OutputCap::DEFAULT, OutputCap::Keep] {
+            let session = capping_session(&tree, &["seq 1 400000"], cap, Some(&recording));
+            session.ask("count", None).expect("accepted");
+            let log = wait_until(&session, "the turn to settle", settled);
+            let written = lines(&log);
+            let line = &written[0];
+            assert_eq!(
+                line.stdout.as_ref().map(|out| out.bytes),
+                Some(whole.len() as u64)
+            );
+            assert_eq!(line.files.len(), 1);
+            assert_eq!(line.files[0].sha256, sha256);
+            let kept = recording.join(&line.files[0].path);
+            assert_eq!(std::fs::read_to_string(&kept).expect("kept"), whole);
+            let shown = line.shown.clone().expect("shown");
+            assert!(
+                shown.starts_with("Tool output was too large and has been truncated.\n"),
+                "{}",
+                &shown[..200]
+            );
+            assert!(shown.len() < 60_000, "{}", shown.len());
+            assert!(shown.contains("\n1\n2\n") || shown.contains("1\n2\n3\n"));
+            assert!(shown.ends_with("399999\n400000\n"));
+            reads_whole(&session);
+        }
+        tidy(&[&tree, &recording]);
+    }
+
     /// #554: an output over the cap reaches the model capped -- Qwen Code's
     /// notice naming the kept file, the head, the separator, the tail -- and
     /// the whole of it is kept in the recording by digest, named on the
@@ -19593,5 +19696,57 @@ pub(in crate::drive) mod tests {
                 .any(|l| matches!(l.event, Event::Meditated { .. }))
         );
         assert_eq!(ruled, Err(Rejected::Refused(Refusal::TangentOpen)));
+    }
+
+    // ---- review probes (exec area) ----
+
+    /// PROBE, as Dispatch ruled #734 item 2: the standard tools keep no
+    /// timeout (Pi and `OpenCode` 2 agree), and the operator's cancel ends
+    /// one -- a `read` of a FIFO nobody writes -- its helper's whole group
+    /// killed, and the turn settles `cancelled`.
+    #[test]
+    fn probe_a_cancel_ends_a_standard_read_of_a_fifo() {
+        let tree = scratch("probe-std-cancel");
+        let fifo = tree.join("pipe");
+        let made = std::process::Command::new("/usr/bin/mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success());
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools_timed(false, Some(500));
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.timeout_ms = Some(500);
+        tools.approvals_off = true;
+        let session = Session::open_looping(
+            Canned::new([
+                vec![Step::call(0, "call-1", "read", r#"{"path":"pipe"}"#)],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("read the pipe", None).expect("accepted");
+        // Past the session's 500 ms timeout: a standard tool has none.
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(
+            !settled(&session.shared.lock().log),
+            "the read is still waiting"
+        );
+        let cancelled = Instant::now();
+        session.cancel(1, None).expect("cancelled");
+        let log = wait_until(&session, "the cancelled turn", settled);
+        assert!(cancelled.elapsed() < Duration::from_secs(5));
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::TurnSettled {
+                turn: 1,
+                reason: SettleReason::Cancelled
+            }
+        )));
+        tidy(&[&tree]);
     }
 }
