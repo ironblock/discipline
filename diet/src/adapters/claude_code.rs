@@ -346,6 +346,34 @@ pub fn sidechains_beside(log: &Path) -> std::io::Result<Found> {
     Ok(found)
 }
 
+/// The digest of what a replay of `log` with the sidechains `found` beside
+/// it is built from (#736): the log's own sha256 when nothing was found, as
+/// before; otherwise the sha256 of a manifest -- the log's digest, then each
+/// sidechain's, in run-then-agent order -- so the same log replayed with and
+/// without its sidechains is not one source under one digest.
+#[must_use]
+pub fn source_digest(log: &str, found: &Found) -> String {
+    let log_digest = crate::digest::sha256_hex(log.as_bytes());
+    if found.sidechains.is_empty() {
+        return log_digest;
+    }
+    let mut parts: Vec<String> = found
+        .sidechains
+        .iter()
+        .map(|side| {
+            format!(
+                "{}/{}\t{}\n",
+                side.run_id.as_deref().unwrap_or("-"),
+                side.agent_id,
+                crate::digest::sha256_hex(side.text.as_bytes())
+            )
+        })
+        .collect();
+    parts.sort();
+    let manifest = format!("log\t{log_digest}\n{}", parts.concat());
+    crate::digest::sha256_hex(manifest.as_bytes())
+}
+
 /// Each `agent-<id>.jsonl` directly in `dir`, in name order.
 fn agents_in(dir: &Path, run_id: Option<&str>) -> std::io::Result<Vec<Sidechain>> {
     let mut paths: Vec<_> = std::fs::read_dir(dir)?
