@@ -426,6 +426,7 @@ impl ClaudeCode {
         }
         let spawns = std::mem::take(&mut run.spawns);
         let mut joined = vec![false; spawns.len()];
+        let mut lanes: Vec<(usize, Vec<Event>)> = Vec::new();
         for side in &found.sidechains {
             let Some(at) = spawning_call(&spawns, side) else {
                 run.census.sidechains_add("transcripts naming no call", 1);
@@ -445,7 +446,10 @@ impl ClaudeCode {
             if let Some(agent_type) = &side.agent_type {
                 run.census.sidechains_add(&format!("type/{agent_type}"), 1);
             }
+            // Built apart, and placed after the call that spawned it (#736).
+            let main = std::mem::take(&mut run.events);
             run.side_lane(&lane, spawns[at].turn, &side.text)?;
+            lanes.push((spawns[at].call, std::mem::replace(&mut run.events, main)));
         }
         let unjoined = joined.iter().filter(|joined| !**joined).count();
         run.census.sidechains_add(
@@ -455,15 +459,35 @@ impl ClaudeCode {
         run.census
             .sidechains_add("journals not replayed", found.journals);
         Ok(Adapted {
-            events: run.events,
+            events: placed(run.events, lanes),
             census: run.census,
         })
     }
 }
 
+/// `main`'s events with each side lane in `lanes` placed right after the
+/// call that spawned it (#736): the record in the order things happened,
+/// several lanes off one call in the order they were found.
+fn placed(main: Vec<Event>, lanes: Vec<(usize, Vec<Event>)>) -> Vec<Event> {
+    let mut after: BTreeMap<usize, Vec<Event>> = BTreeMap::new();
+    for (call, events) in lanes {
+        after.entry(call).or_default().extend(events);
+    }
+    let mut out = Vec::with_capacity(main.len() + after.values().map(Vec::len).sum::<usize>());
+    for (at, event) in main.into_iter().enumerate() {
+        out.push(event);
+        if let Some(events) = after.remove(&at) {
+            out.extend(events);
+        }
+    }
+    out
+}
+
 /// A delegated run's spawning call, as the main log showed it (#708).
 #[derive(Debug, Clone)]
 struct Spawn {
+    /// Where its call sits in the main log's events: its lanes follow it.
+    call: usize,
     /// The turn that made the call.
     turn: u32,
     /// The agent its result names, for an `Agent` call.
@@ -734,6 +758,7 @@ impl Run {
         };
         let called = self.called_at.get(id).cloned();
         self.spawns.push(Spawn {
+            call: *at,
             turn: *at_turn,
             agent_id: named("agentId"),
             run_id: named("runId"),
@@ -2916,6 +2941,35 @@ mod tests {
             Some(&1),
             "the failed call only; the resume has its agent"
         );
+    }
+
+    /// #736: a side lane is written where it ran, right after the call that
+    /// spawned it, not after the whole main log -- the record is in the
+    /// order things happened.
+    #[test]
+    fn a_side_lane_follows_the_call_that_spawned_it() {
+        let (log, found) = delegated();
+        let adapted = ClaudeCode
+            .adapt_with(&log, &found, A_SUBSTRATE)
+            .expect("it adapts");
+        let at = |wanted: &dyn Fn(&Event) -> bool| {
+            adapted
+                .events
+                .iter()
+                .position(wanted)
+                .expect("the event")
+        };
+        let call = at(&|event| matches!(event, Event::ToolCall { id, .. } if id == "call-a"));
+        let fork = at(&|event| matches!(event, Event::Fork { lane, .. } if lane == "sidechain/x1"));
+        assert_eq!(
+            fork,
+            call + 1,
+            "the agent's lane opens right after its call"
+        );
+        let workflow = at(&|event| matches!(event, Event::ToolCall { id, .. } if id == "call-w"));
+        let run =
+            at(&|event| matches!(event, Event::Fork { lane, .. } if lane == "sidechain/wf_1/y1"));
+        assert_eq!(run, workflow + 1, "and the workflow agent's after its call");
     }
 
     /// #500: a repeat whose content differs from the row it repeats is
