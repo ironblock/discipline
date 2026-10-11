@@ -7,7 +7,7 @@
 The maintainer, 2026-10-09: "Working prototype _with every theorized lever present_ → controls and reproducible tests → rigor, test matrix, data collection → publish." Each is an initiative, run in that order, and holds as many milestones as it needs; nothing in a later initiative is an obstacle to an earlier one.
 
 1. **The prototype:** every theorized lever (`program.md`, The levers) present and working. v0.1.0 is its first milestone, v0.2.0 the remainder of the levers, and v0.3.0 the hosted API (approved by the maintainer, 2026-10-10).
-2. **Controls and reproducible tests.**
+2. **Controls and reproducible tests:** v0.6.0, runs re-fire, and v0.7.0, every lever has its control (drafted by Dispatch; awaits the maintainer).
 3. **Rigor:** the test matrix and data collection.
 4. **Publish.**
 
@@ -82,6 +82,30 @@ The pieces used in whatever order the work needs to reach a goal, in one session
 ## v0.5.0 — T3, NetHack
 
 Attempting the NetHack 5 WebAssembly port, with a record that says truthfully which arm, regime and model ran it. The comparison is the archived Claude desktop app session of the same work, read by the Claude Code adapter (#500, #501).
+
+## v0.6.0 — runs re-fire (draft)
+
+The second initiative's first milestone. Every run committed so far is a historical observation. Its asks were typed in answer to what a temperature-1.0 model did, so the inputs of a re-firing don't exist. A run re-fires when its inputs are a file.
+
+| piece | shown when | evidence |
+| --- | --- | --- |
+| Operator script | every operator move a log records becomes a script: asks and their files, scoping marks, meditations, flags, edits, rulings, cancels, the end. It is derived from the log by a tool and played by `serve` against a live substrate. The script fixes the inputs, not what comes back | — |
+| Today's runs as scripts | each committed run under `runs/` has its script, and one of them is re-fired on the floor | — |
+| Repeats | one script re-fired *N* times under one regimen. The receipts are a distribution, and the record names the script's digest and the repeat | — |
+| Reproducible kind | a re-fired run's README reads reproducible, not historical: its script, regimen and substrate are enough to fire it again | — |
+
+An ask a person types in answer to what the model did can't be scripted faithfully. A scripted run says which asks are fixed, and a driven run stays a driven run.
+
+## v0.7.0 — every lever has its control (draft)
+
+For each lever row of v0.2.0, the same script run with the lever at its shown state and at its control: off, the default, or a sham where one is named (`program.md` §2). It runs *N* times each, on the floor. This milestone shows that the pairs run and the receipts compare. Whether a difference is real is the third initiative's.
+
+| piece | shown when | evidence |
+| --- | --- | --- |
+| Paired runs | one command fires a script under two regimens that differ in one lever, *N* times each, and writes both records | — |
+| A control per lever | each v0.2.0 lever has a pair on the floor, or a stated reason it can't, such as the hosted cache lifetime, which is v0.3.0's | — |
+| The delta | a receipt-level comparison per pair: tokens, turns, captures, refusals, settles. A table, not a claim | — |
+| Maintainer against agent | at least one script driven by the maintainer and re-fired by an agent, as the delta the maintainer asked for ("Deltas between what I do and what agents do will be interesting data") | — |
 
 ## Later
 
