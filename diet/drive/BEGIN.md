@@ -221,7 +221,7 @@ claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp
 | --- | --- |
 | `start`, `stop` | a profile launched as `serve`; the session and that process ended |
 | `status`, `wait` | `GET /state`, `GET /wait` |
-| `ask` | the `ask` command: `text`, `scoping`, `files` |
+| `ask` | the `ask` command: `text`, `scoping`, `files`; then waits for the turn (below) unless `wait` is false |
 | `attach` | a local PNG uploaded to `POST /files`; returns its `sha256` for an ask's `files` |
 | `approve` | `POST /approve`: `call`, `scope` |
 | `cancel`, `end` | the matching commands; `cancel` takes the current turn when none is named |
@@ -230,6 +230,8 @@ claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp
 | `declare_meditation`, `refill_anyway`, `ratify_phase` | the matching commands |
 | `open_tangent`, `close_tangent` | the matching commands |
 | `events` | `GET /events`: the log lines after a seq, of the kinds named |
+
+**`ask` waits for its turn** by default. It returns when the session is next idle (the turn and its forks and audits settled), holds a meditation, waits on an approval, or has ended, or when `timeout` passes (30 minutes unless given). It sends `notifications/progress` while it waits, when the call carries a progress token. It returns why it returned (`idle`, `held`, `approval`, `ended` or `timed_out`), the last state, and a digest of what the turn did: the final answer, each tool call and its outcome, each fork and audit with its patches, meditations, refusals, and how the turn settled. Claude Code moves a call that runs past two minutes to a background task and delivers its result as a notification, so a long turn tells the driving session when it is done. `wait: false` returns at once with the ask's seq and turn.
 
 Each tool returns `serve`'s status and body as they came, a refusal's `refused` tag included. A tool that cannot reach `serve`, or is given the wrong arguments, says so as a tool error. The loop an agent runs is the one under `status` and `wait`: read the state, send a command, then wait with `after` set to the last state's `last_seq`.
 

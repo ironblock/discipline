@@ -337,7 +337,11 @@ fn first_tools() -> Vec<Value> {
         ),
         tool(
             "ask",
-            "Send the operator's next message (the `ask` command). Returns its seq and turn, or \
+            "Send the operator's next message (the `ask` command) and wait for the turn: until \
+             the session is idle, holds a meditation, waits on an approval, or has ended, or \
+             the timeout passes. Returns why it returned, the last state, and a digest of what \
+             the turn did -- the final answer, tool calls, forks and audits with their patches, \
+             meditations, refusals. With wait false, returns at once with its seq and turn, or \
              serve's refusal.",
             object(
                 json!({
@@ -347,7 +351,9 @@ fn first_tools() -> Vec<Value> {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "The sha256 of each file `attach` uploaded, in order."
-                    }
+                    },
+                    "wait": {"type": "boolean", "description": "Wait for the turn: true unless set false, when the ask returns at once with its seq and turn."},
+                    "timeout": integer("Seconds to wait for the turn; 1800 when omitted.")
                 }),
                 &["text"],
             ),
@@ -523,6 +529,18 @@ impl Args<'_> {
     }
 }
 
+/// The `ask` command `args` describe.
+fn ask_body(args: &Args<'_>) -> Result<Value, String> {
+    let mut body = json!({"kind": "ask", "text": args.string("text")?});
+    if let Some(scoping) = args.optional_bool("scoping")? {
+        body["scoping"] = Value::Bool(scoping);
+    }
+    if let Some(files) = args.optional_strings("files")? {
+        body["files"] = json!(files);
+    }
+    Ok(body)
+}
+
 /// Tool `name` called with `arguments` against `serve`: its result as JSON
 /// text, or why it could not be called.
 ///
@@ -543,16 +561,7 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
             }
             serve.get(&path)?
         }
-        "ask" => {
-            let mut body = json!({"kind": "ask", "text": args.string("text")?});
-            if let Some(scoping) = args.optional_bool("scoping")? {
-                body["scoping"] = Value::Bool(scoping);
-            }
-            if let Some(files) = args.optional_strings("files")? {
-                body["files"] = json!(files);
-            }
-            serve.command(&body)?
-        }
+        "ask" => serve.command(&ask_body(&args)?)?,
         "attach" => {
             let path = args.string("path")?;
             let bytes =
@@ -632,6 +641,174 @@ const START_PATIENCE: Duration = Duration::from_secs(120);
 
 /// How long `stop` waits for a serve it started to exit after `end`.
 const STOP_PATIENCE: Duration = Duration::from_secs(30);
+
+/// How long `ask` waits for its turn unless told (#772): 30 minutes.
+const ASK_PATIENCE: u64 = 30 * 60;
+
+/// How long each `GET /wait` an `ask` makes lasts: short enough that a
+/// pending approval -- which `/state` does not count idle -- is seen
+/// promptly, and progress goes out between them.
+const WAIT_SLICE: u64 = 5;
+
+/// Why a waiting `ask` returned (#772), from a `/state` or `/wait` body:
+/// `None` while the turn goes on.
+fn settled_as(state: &Value) -> Option<&'static str> {
+    if state.get("session").and_then(Value::as_str) == Some("ended")
+        || state.get("settlement").and_then(Value::as_str) == Some("ended")
+    {
+        return Some("ended");
+    }
+    if state.get("approval").is_some() {
+        return Some("approval");
+    }
+    if state.pointer("/meditation/state").and_then(Value::as_str) == Some("held") {
+        return Some("held");
+    }
+    (state.get("idle").and_then(Value::as_bool) == Some(true)).then_some("idle")
+}
+
+/// What a turn did, from its log lines (#772): the final answer on the
+/// trunk, each tool call and its outcome, each fork -- audits included --
+/// with its outcome and the patches it wrote, meditations, refusals, and
+/// how the turn settled.
+fn digest(lines: &[Value]) -> Value {
+    let text = |line: &Value, key: &str| line.get(key).cloned().unwrap_or(Value::Null);
+    let kind = |line: &Value| {
+        line.get("kind")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    let mut lane_of = std::collections::BTreeMap::new();
+    let mut answer = Value::Null;
+    let mut tool_calls = Vec::new();
+    let mut forks: Vec<Value> = Vec::new();
+    let mut meditations = Vec::new();
+    let mut refusals = Vec::new();
+    let mut settled = Vec::new();
+    for line in lines {
+        let seq = line.get("seq").and_then(Value::as_u64);
+        match kind(line).as_str() {
+            "request" => {
+                if let (Some(seq), Some(lane)) = (seq, line.get("lane").and_then(Value::as_str)) {
+                    lane_of.insert(seq, lane.to_owned());
+                }
+            }
+            "response" => {
+                let to = line.get("to_request").and_then(Value::as_u64);
+                if to.and_then(|to| lane_of.get(&to)).map(String::as_str) == Some("trunk") {
+                    answer = text(line, "text");
+                }
+            }
+            "tool_call" => tool_calls.push(json!({
+                "seq": seq,
+                "name": text(line, "name"),
+                "arguments": text(line, "arguments"),
+                "outcome": text(line, "outcome"),
+                "exit": text(line, "exit"),
+            })),
+            "fork" => forks.push(json!({
+                "seq": seq,
+                "lane": text(line, "lane"),
+                "why": text(line, "why"),
+                "patches": [],
+            })),
+            "fork.settled" | "patch" => {
+                let fork = line.get("fork").and_then(Value::as_u64);
+                if let Some(entry) = forks
+                    .iter_mut()
+                    .find(|entry| entry["seq"].as_u64() == fork && fork.is_some())
+                {
+                    if kind(line) == "patch" {
+                        if let Some(patches) = entry["patches"].as_array_mut() {
+                            patches.push(
+                                json!({"op": text(line, "op"), "entry": text(line, "entry")}),
+                            );
+                        }
+                    } else {
+                        entry["outcome"] = text(line, "outcome");
+                    }
+                }
+            }
+            "meditation" | "meditation.held" => {
+                let mut kept = line.clone();
+                if let Some(fields) = kept.as_object_mut() {
+                    for big in ["render", "outputs", "background"] {
+                        fields.remove(big);
+                    }
+                }
+                meditations.push(kept);
+            }
+            "refused" => refusals.push(line.clone()),
+            "turn.settled" => {
+                settled.push(json!({"turn": text(line, "turn"), "reason": text(line, "reason")}));
+            }
+            _ => {}
+        }
+    }
+    json!({
+        "answer": answer,
+        "tool_calls": tool_calls,
+        "forks": forks,
+        "meditations": meditations,
+        "refusals": refusals,
+        "settled": settled,
+    })
+}
+
+/// `ask`, waiting for its turn (#772): the ask sent, then `GET /wait` in
+/// [`WAIT_SLICE`]s -- a progress notification between them -- until the
+/// session is idle, holds a meditation, waits on an approval, or has ended,
+/// or `timeout` seconds pass. Returns the ask's answer, why it returned,
+/// the last state, and a digest of the log after the ask.
+fn ask_and_wait(
+    serve: &Serve,
+    body: &Value,
+    timeout: u64,
+    progress: &mut dyn FnMut(u64, &str),
+) -> Result<Value, String> {
+    let asked = serve.command(body)?;
+    let Some(seq) = asked
+        .body
+        .get("seq")
+        .and_then(Value::as_u64)
+        .filter(|_| asked.status == 200)
+    else {
+        return Ok(asked.json());
+    };
+    let until = Instant::now() + Duration::from_secs(timeout);
+    let mut round = 0;
+    let (returned, state) = loop {
+        let left = until.saturating_duration_since(Instant::now()).as_secs();
+        let slice = left.min(WAIT_SLICE);
+        let waited = serve.get(&format!("/wait?until=idle&after={seq}&timeout={slice}"))?;
+        if waited.status != 200 {
+            return Ok(json!({"asked": asked.body, "wait": waited.json()}));
+        }
+        if let Some(why) = settled_as(&waited.body) {
+            break (why, waited.body);
+        }
+        if left <= slice {
+            break ("timed_out", waited.body);
+        }
+        round += 1;
+        let turn = waited
+            .body
+            .pointer("/turn/state")
+            .and_then(Value::as_str)
+            .unwrap_or("running");
+        progress(round, &format!("turn {}: {turn}", asked.body["turn"]));
+    };
+    let lines = serve.events(Some(seq.saturating_sub(1)), &[], u64::MAX)?;
+    let lines = lines["events"].as_array().cloned().unwrap_or_default();
+    Ok(json!({
+        "asked": asked.body,
+        "returned": returned,
+        "timed_out": returned == "timed_out",
+        "state": state,
+        "digest": digest(&lines),
+    }))
+}
 
 /// A serve this server started (#717).
 #[derive(Debug)]
@@ -793,10 +970,28 @@ impl Driver {
 
     /// Tool `name`, `start` and `stop` here, the rest against the serve
     /// attached.
-    fn call(&mut self, name: &str, arguments: &Map<String, Value>) -> Result<Value, String> {
+    fn call(
+        &mut self,
+        name: &str,
+        arguments: &Map<String, Value>,
+        progress: &mut dyn FnMut(u64, &str),
+    ) -> Result<Value, String> {
+        let args = Args(arguments);
         match name {
-            "start" => self.start(Args(arguments).string("profile")?),
+            "start" => self.start(args.string("profile")?),
             "stop" => self.stop(),
+            // `ask` waits for its turn unless told not to (#772).
+            "ask" if args.optional_bool("wait")? != Some(false) => match &self.serve {
+                Some(serve) => ask_and_wait(
+                    serve,
+                    &ask_body(&args)?,
+                    args.optional_count("timeout")?.unwrap_or(ASK_PATIENCE),
+                    progress,
+                ),
+                None => {
+                    Err("not driving a serve: `start` a profile, or attach with --url".to_owned())
+                }
+            },
             _ => match &self.serve {
                 Some(serve) => call(serve, name, arguments),
                 None => {
@@ -840,7 +1035,7 @@ fn lifecycle_tools() -> Vec<Value> {
 /// One JSON-RPC message answered: the response to send, or `None` for a
 /// notification.
 #[must_use]
-pub fn answer(driver: &mut Driver, message: &str) -> Option<Value> {
+pub fn answer(driver: &mut Driver, message: &str, notify: &mut dyn FnMut(&Value)) -> Option<Value> {
     let Ok(request) = serde_json::from_str::<Value>(message) else {
         return Some(failure(&Value::Null, -32700, "not JSON"));
     };
@@ -876,7 +1071,18 @@ pub fn answer(driver: &mut Driver, message: &str) -> Option<Value> {
                 .get("arguments")
                 .and_then(Value::as_object)
                 .unwrap_or(&empty);
-            match driver.call(name, arguments) {
+            // Progress, when the call asked for it with a token (#772).
+            let token = params.pointer("/_meta/progressToken").cloned();
+            let mut progress = |done: u64, message: &str| {
+                if let Some(token) = &token {
+                    notify(&json!({
+                        "jsonrpc": "2.0",
+                        "method": "notifications/progress",
+                        "params": {"progressToken": token, "progress": done, "message": message}
+                    }));
+                }
+            };
+            match driver.call(name, arguments, &mut progress) {
                 Ok(result) => json!({
                     "content": [{"type": "text", "text": result.to_string()}],
                     "structuredContent": result,
@@ -913,7 +1119,11 @@ pub fn run(
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = answer(driver, &line) {
+        let mut notify = |notification: &Value| {
+            let _ = writeln!(output, "{notification}");
+            let _ = output.flush();
+        };
+        if let Some(response) = answer(driver, &line, &mut notify) {
             writeln!(output, "{response}")?;
             output.flush()?;
         }
@@ -924,6 +1134,10 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn answer_quietly(driver: &mut Driver, message: &str) -> Option<Value> {
+        answer(driver, message, &mut |_| {})
+    }
 
     fn nowhere() -> Driver {
         Driver::new(
@@ -950,27 +1164,27 @@ mod tests {
     #[test]
     fn initialize_names_the_protocol_and_the_tools() {
         let mut serve = nowhere();
-        let reply = answer(
+        let reply = answer_quietly(
             &mut serve,
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
         )
         .expect("an answer");
         assert_eq!(reply["result"]["protocolVersion"], "2025-03-26");
         assert!(reply["result"]["capabilities"]["tools"].is_object());
-        let reply = answer(
+        let reply = answer_quietly(
             &mut serve,
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#,
         )
         .expect("an answer");
         assert_eq!(reply["result"]["protocolVersion"], PROTOCOLS[0]);
         assert_eq!(
-            answer(
+            answer_quietly(
                 &mut serve,
                 r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
             ),
             None
         );
-        let listed = answer(
+        let listed = answer_quietly(
             &mut serve,
             r#"{"jsonrpc":"2.0","id":"x","method":"tools/list"}"#,
         )
@@ -1005,17 +1219,17 @@ mod tests {
             ]
         );
         assert_eq!(listed["id"], "x");
-        let missing =
-            answer(&mut serve, r#"{"jsonrpc":"2.0","id":2,"method":"nope"}"#).expect("an answer");
+        let missing = answer_quietly(&mut serve, r#"{"jsonrpc":"2.0","id":2,"method":"nope"}"#)
+            .expect("an answer");
         assert_eq!(missing["error"]["code"], -32601);
-        let garbled = answer(&mut serve, "{").expect("an answer");
+        let garbled = answer_quietly(&mut serve, "{").expect("an answer");
         assert_eq!(garbled["error"]["code"], -32700);
     }
 
     #[test]
     fn a_tool_that_cannot_reach_serve_or_is_misused_says_so() {
         let mut serve = nowhere();
-        let reply = answer(
+        let reply = answer_quietly(
             &mut serve,
             r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ask","arguments":{}}}"#,
         )
@@ -1025,7 +1239,7 @@ mod tests {
             reply["result"]["content"][0]["text"],
             "`text` is required, a string"
         );
-        let reply = answer(
+        let reply = answer_quietly(
             &mut serve,
             r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"status"}}"#,
         )
