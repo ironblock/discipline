@@ -1813,7 +1813,16 @@ impl std::error::Error for LogError {}
 /// When the text is not one object line of the record's value space, or the
 /// object is not a line of any version this reader reads.
 pub fn line(text: &str) -> Result<Line, String> {
-    line_of(text, VERSION)
+    let mut object = json::line(text).map_err(|err| err.to_string())?;
+    match super::spelling::declared(&object) {
+        // A session line declares its version, and is read in its spelling.
+        Some(declared) => super::spelling::to_current(&mut object, declared)?,
+        // Any other line, read alone, has nothing to declare its version
+        // (#737): its words are read in either spelling, the gate being
+        // [`parse`]'s, which knows the version.
+        None => super::spelling::to_current_either(&mut object),
+    }
+    from_object(&object)
 }
 
 /// [`line`], in a log declaring `declared`: its words respelled from the
@@ -6873,6 +6882,28 @@ mod tests {
             refused.why.contains("`seam`") || refused.why.contains("`after_seam`"),
             "{refused}"
         );
+    }
+
+    /// #737: a line read alone has no session line to declare its version,
+    /// so [`super::line`] reads a v7 line's words as v8's -- a `fork` whose
+    /// `why` is `seam` reads as one whose `why` is `meditation` -- rather than
+    /// refusing it; the version gate is [`super::parse`]'s, which knows the
+    /// version.
+    #[test]
+    fn a_line_read_alone_reads_v7_words_as_v8s() {
+        let v7 = r#"{"at":3,"kind":"fork","lane":"interview","of_turn":1,"question":"q","seq":7,"t":35,"why":"seam"}"#;
+        let read = super::line(v7).expect("a v7 fork reads alone");
+        assert!(matches!(
+            read.event,
+            Event::Fork {
+                why: Warrant::Meditation,
+                ..
+            }
+        ));
+        let v8 = v7.replace(r#""why":"seam""#, r#""why":"meditation""#);
+        assert_eq!(super::line(&v8), Ok(read));
+        let kind = r#"{"kind":"seam.held","at_turn":1,"reason":"operator","seq":16,"t":80,"unaddressed":["d2"]}"#;
+        assert!(super::line(kind).is_ok(), "an old kind reads alone too");
     }
 
     /// #583: a log declaring v8 spells it `meditation`, and one spelling it

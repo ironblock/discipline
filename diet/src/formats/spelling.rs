@@ -134,6 +134,28 @@ pub fn to_current(object: &mut BTreeMap<String, Value>, declared: i64) -> Result
     Ok(())
 }
 
+/// `object`, a line read alone with no version to say how it spells the
+/// boundary (#737), in the current spelling: each old word or key respelled,
+/// a current one kept, nothing refused.
+pub fn to_current_either(object: &mut BTreeMap<String, Value>) {
+    let kind = current_kind(object).map(str::to_owned);
+    for (on, old, new) in LOG_KEYS {
+        if kind.as_deref() == Some(*on)
+            && !object.contains_key(*new)
+            && let Some(value) = object.remove(*old)
+        {
+            object.insert((*new).to_owned(), value);
+        }
+    }
+    let respelled: Vec<(&str, &str)> = positions(object)
+        .filter(|(_, word, old, _)| word == old)
+        .map(|(key, _, _, new)| (key, new))
+        .collect();
+    for (key, new) in respelled {
+        object.insert(key.to_owned(), Value::String(new.to_owned()));
+    }
+}
+
 /// `object`, a line read in the current spelling, written back as a log
 /// declaring `declared` spells it.
 pub fn to_declared(object: &mut BTreeMap<String, Value>, declared: i64) {
