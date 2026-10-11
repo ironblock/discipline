@@ -4094,3 +4094,21 @@ fn review_a_drive_server_refuses_a_tools_ask_set_on_the_fields_route() {
         assert_ne!(code, None, "{set} on the fields route listened: {said}");
     }
 }
+
+#[test]
+fn a_drive_servers_log_names_the_build_it_was_made_from() {
+    // #757: session.start names the commit this binary was built from and
+    // whether its tracked files differed, so a run's build is read off its
+    // log rather than typed from memory.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = dev_loop_sampling("", "seed = 7\n");
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let _served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+    let start_line = first_logged_line(&log_file.0);
+    let (commit, dirty) = diet::build::build().expect("this test is built in a repository");
+    assert_eq!(start_line["build_commit"], commit.as_str(), "{start_line}");
+    assert_eq!(start_line["build_dirty"], dirty, "{start_line}");
+}

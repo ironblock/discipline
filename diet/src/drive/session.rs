@@ -312,6 +312,9 @@ pub enum Event {
         /// Whether a turn's notes ride in its ask's user message (#609):
         /// always, from this build on.
         notes_in_the_ask: bool,
+        /// The build serving the session (#757): its commit and whether its
+        /// tracked files differed; `None` where serve did not say.
+        build: Option<(String, bool)>,
         /// The cap tool outputs arrive under, for a session that runs tools
         /// (#554).
         tool_output: Option<super::output::OutputCap>,
@@ -1018,6 +1021,8 @@ pub type Declared = (
         Option<String>,
         Vec<log::InstructionFile>,
         Option<BTreeMap<String, String>>,
+        // The build serving it (#757): its commit and whether it was dirty.
+        Option<(String, bool)>,
     ),
 );
 
@@ -2470,7 +2475,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             None,
             None,
-            (None, None, (None, None, Vec::new(), None)),
+            (None, None, (None, None, Vec::new(), None, None)),
         )
     }
 
@@ -2484,7 +2489,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             Some(serving),
             None,
-            (None, None, (None, None, Vec::new(), None)),
+            (None, None, (None, None, Vec::new(), None, None)),
         )
     }
 
@@ -2502,7 +2507,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             Some(tools),
-            (None, None, (None, None, Vec::new(), None)),
+            (None, None, (None, None, Vec::new(), None, None)),
         )
     }
 
@@ -2525,7 +2530,7 @@ impl<S: Streaming + 'static> Session<S> {
             template,
             serving,
             tools,
-            (claim, interview, (None, None, Vec::new(), None)),
+            (claim, interview, (None, None, Vec::new(), None, None)),
         )
     }
 
@@ -2553,7 +2558,7 @@ impl<S: Streaming + 'static> Session<S> {
         template: RequestShape,
         serving: Option<Serving>,
         tools: Option<Tools>,
-        (claim, interview, (unsent, reasoning_effort_default, instruction_files, levers)): Declared,
+        (claim, interview, (unsent, reasoning_effort_default, instruction_files, levers, build)): Declared,
     ) -> Self {
         a_head(&template.messages);
         let trunk = template.messages.clone();
@@ -2587,6 +2592,7 @@ impl<S: Streaming + 'static> Session<S> {
             reasoning_effort_default,
             instruction_files,
             levers,
+            build,
             notes_in_the_ask: true,
             tool_output: tools.as_ref().map(|tools| tools.output_cap),
             bash_timeout_ms: bash_timeout_of(tools.as_ref(), &template),
@@ -3700,7 +3706,10 @@ pub fn line_of(logged: &Logged) -> log::Line {
             instruction_files,
             levers,
             notes_in_the_ask,
+            build,
         } => log::Event::SessionStart {
+            build_commit: build.as_ref().map(|(commit, _)| commit.clone()),
+            build_dirty: build.as_ref().map(|(_, dirty)| *dirty),
             bash_timeout_ms: *bash_timeout_ms,
             levers: levers.clone(),
             notes_in_the_ask: notes_in_the_ask.then_some(true),
@@ -10537,6 +10546,7 @@ pub(in crate::drive) mod tests {
                 )])),
                 fork_asks: Some(&crate::dogma::asks::V4),
                 notes_in_the_ask: true,
+                build: Some(("a".repeat(40), false)),
             },
             Event::Asked {
                 turn: 1,
@@ -10979,6 +10989,8 @@ pub(in crate::drive) mod tests {
                     digest: Some(crate::dogma::asks::V4.digest()),
                 }),
                 notes_in_the_ask: Some(true),
+                build_commit: Some("a".repeat(40)),
+                build_dirty: Some(false),
             },
             log::Event::Ask {
                 turn: 1,
