@@ -191,6 +191,13 @@ pub struct Census {
     /// past what [`crate::formats::record::Count`] holds. Both are counted
     /// so the two can be told apart by reading rather than by trusting.
     pub unrepresentable: BTreeMap<String, u64>,
+    /// Rows dropped as repeats of a row already read under the same row id
+    /// (#500), by what the repeat rewrote: `exact`, `envelope-rewritten`
+    /// (the session's bookkeeping -- `slug`, `promptId`, `cwd`,
+    /// `gitBranch`), or `parent-rewritten` (its `parentUuid`, which moves it
+    /// in the tree). Not counted in [`Census::rows`]: a repeat is not a row
+    /// of the session, it is the session written down twice.
+    pub repeated: BTreeMap<String, u64>,
 }
 
 impl Census {
@@ -267,6 +274,17 @@ impl Census {
         *self.unrepresentable.entry(what.to_owned()).or_default() += 1;
     }
 
+    /// Count one row dropped as a repeat, by what it rewrote (#500).
+    pub fn repeated_one(&mut self, what: &str) {
+        *self.repeated.entry(what.to_owned()).or_default() += 1;
+    }
+
+    /// Rows dropped as repeats (#500).
+    #[must_use]
+    pub fn repeated_rows(&self) -> u64 {
+        self.repeated.values().sum()
+    }
+
     /// Rows downgraded to [`Event::Unknown`] for content that did not fit.
     #[must_use]
     pub fn unrepresentable_rows(&self) -> u64 {
@@ -302,6 +320,10 @@ impl Census {
         out.push_str(&self.mapped_rows().to_string());
         out.push_str(",\"no_event\":");
         push_counts(&mut out, &self.no_event);
+        out.push_str(",\"repeated\":");
+        push_counts(&mut out, &self.repeated);
+        out.push_str(",\"repeated_rows\":");
+        out.push_str(&self.repeated_rows().to_string());
         out.push_str(",\"rows\":");
         out.push_str(&self.rows().to_string());
         out.push_str(",\"translated\":");
@@ -390,6 +412,17 @@ pub enum Drift {
         /// The field, by the path the mapping reads.
         field: String,
     },
+    /// A row repeats the id of one already read, and its content differs
+    /// (#500): two different rows under one id, and nothing says which is
+    /// the session's.
+    RepeatDiffers {
+        /// One-based row number of the repeat.
+        at_row: usize,
+        /// One-based row number of the row it repeats.
+        first_row: usize,
+        /// The content field that differs.
+        field: String,
+    },
     /// A value the record's value space cannot hold, in a field the mapping
     /// carries across. The record admits no `null` and no exponents.
     Unrepresentable {
@@ -430,6 +463,15 @@ impl std::fmt::Display for Drift {
                  `{field}`. \
                  The format has moved: refusing rather than reading a different field into \
                  the one this mapping wanted."
+            ),
+            Self::RepeatDiffers {
+                at_row,
+                first_row,
+                field,
+            } => write!(
+                f,
+                "row {at_row} repeats the id of row {first_row} and its `{field}` differs: two \
+                 different rows under one id"
             ),
             Self::Unrepresentable { at_row, field, why } => write!(
                 f,
@@ -539,6 +581,7 @@ mod tests {
         census.no_event_one("user/carried no text of its own");
         census.assumed_one("turn.prefill_tokens = 0");
         census.unrepresentable_one("assistant: content[].tool_use.input (an exponent)");
+        census.repeated_one("exact");
 
         // Every register renders, keys sorted, and the byte string is written
         // out rather than recomputed: a test that built the expectation the
@@ -552,6 +595,7 @@ mod tests {
              \"dropped\":{},\"dropped_content\":0,\
              \"mapped\":{\"assistant\":1},\"mapped_rows\":1,\
              \"no_event\":{\"user/carried no text of its own\":1},\
+             \"repeated\":{\"exact\":1},\"repeated_rows\":1,\
              \"rows\":2,\"translated\":{},\"silent_rows\":1,\
              \"unmapped\":{\"mode\":1},\"unmapped_rows\":1,\
              \"unrepresentable\":{\"assistant: content[].tool_use.input (an exponent)\":1},\
