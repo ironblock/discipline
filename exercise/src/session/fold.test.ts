@@ -147,11 +147,11 @@ describe('fold over what it does not know', () => {
     const add = scriptOf(2).find((e) => e.kind === 'patch');
     expect(add?.kind).toBe('patch');
     if (add?.kind !== 'patch') return;
-    const s = withEvent({ kind: 'patch', id: 'p/park', from: add.from, op: 'park', entry: { ...add.entry, text: 'parked for later' } });
+    const s = withEvent({ kind: 'patch', id: 'p/pin', from: add.from, op: 'pin', entry: { ...add.entry, text: 'pinned for later' } });
     const entry = s.memory.find((m) => m.id === add.entry.id);
     expect(entry?.state).toBe('live');
-    expect(entry?.op).toBe('park');
-    expect(entry?.text).toBe('parked for later');
+    expect(entry?.op).toBe('pin');
+    expect(entry?.text).toBe('pinned for later');
   });
 });
 

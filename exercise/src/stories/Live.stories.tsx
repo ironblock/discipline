@@ -800,7 +800,8 @@ export const ServedOperatorEdits: Story = {
       await expect(found).not.toBeNull();
       return found!;
     });
-    await expect(entry.querySelector('.ex-memory__flag')?.textContent).toBe('flag · is one team enough?');
+    // The meditation emptied the flag, as diet empties its pending flags (#733); its account below still names it.
+    await expect(entry.querySelector('.ex-memory__flag')).toBeNull();
     await expect(entry.querySelector('.ex-memory__refused')?.textContent).toBe('refused: retire by self-capture, supersede by fork 7');
     const meditation = canvasElement.querySelector<HTMLElement>('.ex-meditation');
     await expect(meditation?.querySelector('.ex-meditation__operator')?.textContent).toBe('operator: edit d2, flag d2 · unaddressed: d2');
@@ -912,6 +913,15 @@ export const ServedNoCommands: Story = {
     });
     await expect(lever.textContent).toBe('approvals no commands');
     await expect(canvasElement.querySelector('.ex-hint')?.textContent).toBe('Your turn. Ask for something, and the answer lands here.');
+  },
+};
+
+/** `?drive=<url>` or `<meta name="diet-drive">` (#733): a page talking to a drive it was pointed at says which. */
+export const ServedNamedDrive: Story = {
+  name: '?drive: a named drive is named on the page',
+  args: { drive: true, base: 'http://127.0.0.1:7802/', web: serving(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.textContent).toContain("driving: diet's session at http://127.0.0.1:7802/, over HTTP"));
   },
 };
 

@@ -83,6 +83,9 @@ export function Composer({ state, link = 'live', phase, phases, dispatch, hint, 
   const [refusal, setRefusal] = useState<string | undefined>();
   const next = phases[phases.indexOf(phase) + 1] ?? phases.find((p) => p !== phase) ?? phase;
   const [to, setTo] = useState(next);
+  // The phase moved (#733): the move offered is the new phase's next, and nothing else resets -- not the draft, the
+  // attachments or the scope mark, which a remount per phase used to lose.
+  useEffect(() => setTo(next), [next]);
   // Ending cannot be taken back: the first press asks, a second one sends (#289) -- a second the person chose after
   // seeing the question, not the other half of a double click or a held key.
   const [ending, setEnding] = useState(false);
