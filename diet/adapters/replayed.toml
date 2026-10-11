@@ -1,9 +1,10 @@
 # The regimen a replay of a foreign session runs under.
 #
-# A Claude Code session log records no model, no quantization and no sampler
-# settings. Its `version` field is the harness's version, not the model's, and
-# nothing in the file says which model answered. So the regime a replay is
-# filed under cannot be derived from the log -- the operator declares it, the
+# A Claude Code session log names the model that wrote each response (#501),
+# and the replay carries it on each response row. It records no quantization,
+# no sampler settings and no harness settings, and its `version` field is the
+# harness's version. So the regime a replay is filed under cannot be derived
+# from the log -- the operator declares it, the
 # way `diet-drive` makes them declare it, and for the same reason: a regime
 # tag a program invented makes every result under it incomparable with every
 # other, which is what the tags are for.

@@ -1982,6 +1982,7 @@ impl<'a> Walk<'a> {
             output_from,
             text: Some(text.to_owned()),
             timings: timings.and_then(timings_of),
+            model: None,
         });
     }
 }

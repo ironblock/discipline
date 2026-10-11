@@ -2325,6 +2325,7 @@ mod tests {
             output_from: None,
             text: Some(text.to_owned()),
             timings: None,
+            model: None,
         }
     }
 

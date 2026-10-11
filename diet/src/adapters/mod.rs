@@ -191,6 +191,13 @@ pub struct Census {
     /// past what [`crate::formats::record::Count`] holds. Both are counted
     /// so the two can be told apart by reading rather than by trusting.
     pub unrepresentable: BTreeMap<String, u64>,
+    /// The models the log names as having answered, by the rows that name
+    /// each (#501). One session may mix several.
+    pub models: BTreeMap<String, u64>,
+    /// Answering rows that name no model, by why (#501): `synthetic`, the
+    /// harness's placeholder for a message no model wrote, or `no model
+    /// named`, a log from before the harness recorded one.
+    pub unattributed: BTreeMap<String, u64>,
     /// Rows dropped as repeats of a row already read under the same row id
     /// (#500), by what the repeat rewrote: `exact`, `envelope-rewritten`
     /// (the session's bookkeeping -- `slug`, `promptId`, `cwd`,
@@ -274,6 +281,16 @@ impl Census {
         *self.unrepresentable.entry(what.to_owned()).or_default() += 1;
     }
 
+    /// Count one answering row naming `model` (#501).
+    pub fn model_one(&mut self, model: &str) {
+        *self.models.entry(model.to_owned()).or_default() += 1;
+    }
+
+    /// Count one answering row naming no model, and say why (#501).
+    pub fn unattributed_one(&mut self, why: &str) {
+        *self.unattributed.entry(why.to_owned()).or_default() += 1;
+    }
+
     /// Count one row dropped as a repeat, by what it rewrote (#500).
     pub fn repeated_one(&mut self, what: &str) {
         *self.repeated.entry(what.to_owned()).or_default() += 1;
@@ -318,6 +335,8 @@ impl Census {
         push_counts(&mut out, &self.mapped);
         out.push_str(",\"mapped_rows\":");
         out.push_str(&self.mapped_rows().to_string());
+        out.push_str(",\"models\":");
+        push_counts(&mut out, &self.models);
         out.push_str(",\"no_event\":");
         push_counts(&mut out, &self.no_event);
         out.push_str(",\"repeated\":");
@@ -328,6 +347,8 @@ impl Census {
         out.push_str(&self.rows().to_string());
         out.push_str(",\"translated\":");
         push_counts(&mut out, &self.translated);
+        out.push_str(",\"unattributed\":");
+        push_counts(&mut out, &self.unattributed);
         out.push_str(",\"silent_rows\":");
         out.push_str(&self.silent_rows().to_string());
         out.push_str(",\"unmapped\":");
@@ -504,8 +525,9 @@ pub trait Adapter {
     /// Read `log`, filing every request against the declared `substrate`.
     ///
     /// The substrate is NOT read out of the log -- a foreign harness records
-    /// what answered only by accident, and this one does not record it at all.
-    /// It is the id the operator declared in the regimen, passed in here so
+    /// what answered only by accident: Claude Code names a model per
+    /// response (carried on each response, #501) and nothing about how it
+    /// was served. It is the id the operator declared in the regimen, passed in here so
     /// that the rows name a substrate somebody stated rather than one this
     /// adapter guessed. Required since #68 item 3: a row that may omit it is a
     /// row whose substrate was decided somewhere else.
@@ -581,6 +603,8 @@ mod tests {
         census.no_event_one("user/carried no text of its own");
         census.assumed_one("turn.prefill_tokens = 0");
         census.unrepresentable_one("assistant: content[].tool_use.input (an exponent)");
+        census.model_one("a-model");
+        census.unattributed_one("synthetic");
         census.repeated_one("exact");
 
         // Every register renders, keys sorted, and the byte string is written
@@ -594,9 +618,11 @@ mod tests {
              \"assumed\":{\"turn.prefill_tokens = 0\":1},\"assumptions\":1,\
              \"dropped\":{},\"dropped_content\":0,\
              \"mapped\":{\"assistant\":1},\"mapped_rows\":1,\
+             \"models\":{\"a-model\":1},\
              \"no_event\":{\"user/carried no text of its own\":1},\
              \"repeated\":{\"exact\":1},\"repeated_rows\":1,\
-             \"rows\":2,\"translated\":{},\"silent_rows\":1,\
+             \"rows\":2,\"translated\":{},\"unattributed\":{\"synthetic\":1},\
+             \"silent_rows\":1,\
              \"unmapped\":{\"mode\":1},\"unmapped_rows\":1,\
              \"unrepresentable\":{\"assistant: content[].tool_use.input (an exponent)\":1},\
              \"unrepresentable_rows\":1}"
