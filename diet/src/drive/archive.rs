@@ -549,3 +549,22 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod review_tests {
+    use super::*;
+
+    /// REVIEW: an ask that names an identifier and ends its question on it
+    /// recalls the item that holds it, as the same ask without the `?` does.
+    #[test]
+    fn review_a_question_mark_after_the_name_still_recalls() {
+        let mut archive = Archive::default();
+        archive.push(Item {
+            key: "k".to_owned(),
+            title: "an answer".to_owned(),
+            text: "def parse_regimen(text): ...".to_owned(),
+        });
+        assert_eq!(archive.literal("where is parse_regimen").len(), 1);
+        assert_eq!(archive.literal("where is parse_regimen?").len(), 1);
+    }
+}
