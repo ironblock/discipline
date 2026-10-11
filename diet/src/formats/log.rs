@@ -2357,7 +2357,14 @@ impl Forks {
                      and it names the latest meditation"
                 ));
             }
-        } else if self.meditated.is_some_and(|meditated| of_turn <= meditated) {
+        } else if self
+            .last_meditation
+            .is_some_and(|meditation| meditation > at)
+        {
+            // The latest meditation came after the request the fork is cut
+            // from, so it replaced that trunk. One before it -- a window
+            // meditation under the fork's own turn, before that turn's last
+            // request (#728) -- did not.
             return Err(format!(
                 "a fork of turn {of_turn} after a meditation that followed it: the meditation replaced the \
                  trunk the fork would be cut from"

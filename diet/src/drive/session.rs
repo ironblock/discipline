@@ -4435,7 +4435,7 @@ fn call<S: Streaming>(
     // never (D13).
     let mut exchange = opening;
     shared.lock().ran.clear();
-    while let Some(next) = step(
+    while let Some((next, a_step)) = step(
         shared,
         &mut shape,
         cancel,
@@ -4443,7 +4443,9 @@ fn call<S: Streaming>(
         (turn, request, steps),
     ) {
         request = next;
-        steps += 1;
+        if a_step {
+            steps += 1;
+        }
     }
 }
 
@@ -4461,7 +4463,7 @@ fn step<S: Streaming>(
     cancel: &Cancel,
     exchange: &mut Vec<Message>,
     (turn, request, steps): (u32, u64, u32),
-) -> Option<u64> {
+) -> Option<(u64, bool)> {
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
     let mut reasoning = String::new();
@@ -4608,7 +4610,8 @@ fn step<S: Streaming>(
                 said,
                 &calls,
                 (turn, request, steps),
-            );
+            )
+            .map(|next| (next, true));
         }
         Ok(StreamEnded::Cancelled) => {
             // The steps it finished stay on the trunk, and so does what it
@@ -4656,11 +4659,12 @@ fn step<S: Streaming>(
             });
             // #617: an overflow meditates once and goes again.
             if overflow.is_some()
-                && let Some(next) = retried(&shared.template, &mut state, shape, turn)
+                && let Some(next) = retried(&shared.template, &mut state, shape, (turn, cancel))
             {
                 drop(state);
                 shared.changed.notify_all();
-                return Some(next);
+                // The same step sent again (#728): no step of its own.
+                return Some((next, false));
             }
             state.keep_ran_steps();
             state.push(Event::TurnSettled {
@@ -4680,11 +4684,12 @@ fn step<S: Streaming>(
             });
             // #617: an overflow meditates once and goes again.
             if overflow.is_some()
-                && let Some(next) = retried(&shared.template, &mut state, shape, turn)
+                && let Some(next) = retried(&shared.template, &mut state, shape, (turn, cancel))
             {
                 drop(state);
                 shared.changed.notify_all();
-                return Some(next);
+                // The same step sent again (#728): no step of its own.
+                return Some((next, false));
             }
             state.keep_ran_steps();
             state.push(Event::TurnSettled { turn, reason });
@@ -6129,6 +6134,7 @@ fn refilled(
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
+    let on_trunk = prunes_on(&state.pruned, turns);
     let kept = crate::meditation::render::tail(turns, tail_tokens).to_vec();
     let (carried_turns, newest_turn_tokens) = tail_kept(&kept, turns, tail_tokens);
     let carried_tokens = kept
@@ -6143,7 +6149,8 @@ fn refilled(
     replaced_in_tail(&mut kept, &state.pruned);
     // The archive (#566): what this meditation drops from the trunk, and every
     // working-memory entry no longer live, for a recall to find later.
-    let archived = archived_at_meditation(compacted, &interview.object, state.turns);
+    let earlier = meditations_at(&state.log, state.turns);
+    let archived = archived_at_meditation(compacted, &interview.object, (state.turns, earlier));
     let outputs = crate::meditation::outputs::section(
         tool_outputs,
         &compacted_outputs(
@@ -6171,7 +6178,7 @@ fn refilled(
     }
     state.turns_at_meditation = state.turns;
     state.trunk_tokens = None;
-    let pruned = prunes_applied(state);
+    let pruned = prunes_applied(state, &on_trunk);
     let (operator_changes, unaddressed) = operator_carried(state);
     let at_turn = state.turns;
     Event::Meditated {
@@ -7043,7 +7050,7 @@ fn retried(
     template: &RequestShape,
     state: &mut State,
     shape: &mut RequestShape,
-    turn: u32,
+    (turn, cancel): (u32, &Cancel),
 ) -> Option<u64> {
     if state.overflow_retried == Some(turn) || !window_meditation(template, state, shape, true) {
         return None;
@@ -7057,9 +7064,13 @@ fn retried(
         fork: None,
         max_tokens,
     });
-    if let Some(flight) = state.flight.as_mut() {
-        flight.request = next;
-    }
+    // In flight again (#728): the failed request cleared it, and a cancel,
+    // an end or a drop must reach the retry as it reaches any request.
+    state.flight = Some(Flight {
+        turn,
+        request: next,
+        cancel: cancel.clone(),
+    });
     Some(next)
 }
 
@@ -7074,13 +7085,37 @@ fn replaced_in_tail(kept: &mut [Message], pruned: &[Prune]) {
     }
 }
 
-/// The prunes a meditation applies -- every one since the last (#612) -- marked
-/// applied, so none is due any more; `None` when there were none.
-fn prunes_applied(state: &mut State) -> Option<Vec<String>> {
+/// The calls of `pruned` whose result is in `turns`, the trunk a meditation
+/// replaces (#728): one made in a turn a window meditation interrupts is in
+/// that turn's own messages, which ride after the refill unreplaced, and
+/// stays due.
+fn prunes_on(pruned: &[Prune], turns: &[Message]) -> Vec<String> {
+    pruned
+        .iter()
+        .filter(|prune| turns.iter().any(|message| prune.is(message)))
+        .map(|prune| prune.call.clone())
+        .collect()
+}
+
+/// How many meditations `log` holds at turn `turn` (#728): a window one
+/// under the turn, then the operator's after it, archive under keys of
+/// their own.
+fn meditations_at(log: &[Logged], turn: u32) -> usize {
+    log.iter()
+        .filter(
+            |logged| matches!(&logged.event, Event::Meditated { at_turn, .. } if *at_turn == turn),
+        )
+        .count()
+}
+
+/// The prunes a meditation applies -- every one since the last (#612) whose
+/// result was on the trunk it replaced, `on_trunk` (#728) -- marked applied,
+/// so none is due any more; `None` when there were none.
+fn prunes_applied(state: &mut State, on_trunk: &[String]) -> Option<Vec<String>> {
     let applied: Vec<String> = state
         .pruned
         .iter_mut()
-        .filter(|prune| !prune.applied)
+        .filter(|prune| !prune.applied && on_trunk.contains(&prune.call))
         .map(|prune| {
             prune.applied = true;
             prune.call.clone()
@@ -7091,13 +7126,20 @@ fn prunes_applied(state: &mut State) -> Option<Vec<String>> {
 
 /// What a meditation at `at_turn` archives (#566): each message of `compacted`,
 /// keyed by the meditation and its position, and each entry of `object` that is
-/// no longer live, keyed by its id.
+/// no longer live, keyed by its id. A meditation after `earlier` others at the
+/// same turn keys its messages `compaction-<turn>.<earlier>` (#728): the
+/// archive keeps one item per key, and the second's would otherwise collide.
 fn archived_at_meditation(
     compacted: &[Message],
     object: &WorkingObject,
-    at_turn: u32,
+    (at_turn, earlier): (u32, usize),
 ) -> Vec<super::archive::Item> {
     use super::archive::Item;
+    let meditation = if earlier == 0 {
+        at_turn.to_string()
+    } else {
+        format!("{at_turn}.{earlier}")
+    };
     let messages = compacted.iter().enumerate().map(|(at, message)| {
         let calls: Vec<String> = message
             .tool_calls
@@ -7118,7 +7160,7 @@ fn archived_at_meditation(
         Item {
             // The model reads it: `compaction`, the word it was trained on,
             // the maintainer's choice (#583). Older logs keep `seam-`.
-            key: format!("compaction-{at_turn}/message-{}", at + 1),
+            key: format!("compaction-{meditation}/message-{}", at + 1),
             title,
             text,
         }
@@ -16518,6 +16560,247 @@ pub(in crate::drive) mod tests {
         );
         let empty = windowed(acts, 100_000, crate::meditation::policy::Served::default());
         assert_eq!(run(empty), 0);
+    }
+
+    /// REVIEW: the request an overflow retries (#617) is the turn's call in
+    /// flight, and a cancel reaches it as it reaches any other.
+    #[test]
+    fn review_a_request_retried_after_an_overflow_can_be_cancelled() {
+        const TYPED: &str = r#"{"error":{"code":400,"type":"exceed_context_size_error"}}"#;
+        let gate = Gate::new();
+        let mut acts = two_turns_measuring(1_000);
+        acts.truncate(2);
+        acts.push(vec![Step::Reject(400, TYPED.to_owned())]);
+        acts.push(vec![
+            Step::Delta("Hel".to_owned()),
+            Step::Hold(gate.clone()),
+            Step::Delta("lo".to_owned()),
+        ]);
+        let session = windowed(
+            acts,
+            1_000_000,
+            crate::meditation::policy::Served::default(),
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the retried call never reached the gate"
+        );
+        assert_eq!(window_meditations(&session.events_from(0)).len(), 1);
+        let cancelled = session.cancel(2, None);
+        gate.open();
+        assert_eq!(cancelled, Ok(()), "{:#?}", session.events_from(0));
+    }
+
+    /// REVIEW: a meditation's dropped messages are archived (#566) even
+    /// when an earlier meditation at the same turn -- the window's, under
+    /// the turn (#617) -- already archived messages under the same keys.
+    #[test]
+    fn review_a_second_meditation_at_the_same_turn_still_archives_what_it_drops() {
+        let session = windowed(
+            two_turns_measuring(90_000),
+            100_000,
+            crate::meditation::policy::Served::default(),
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session
+            .ask("where is turn_two_marker defined?", None)
+            .expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+                && settled(log)
+        });
+        assert_eq!(window_meditations(&log).len(), 1, "{log:#?}");
+        session.declare_meditation(None).expect("declared");
+        assert!(
+            !session
+                .trunk()
+                .iter()
+                .any(|m| m.content.contains("turn_two_marker")),
+            "the operator's meditation dropped turn two"
+        );
+        let state = session.shared.lock();
+        let found: Vec<String> = state
+            .archive
+            .literal("turn_two_marker")
+            .iter()
+            .map(|found| found.item.key.clone())
+            .collect();
+        assert!(
+            !found.is_empty(),
+            "turn two's ask left the trunk and is not in the archive"
+        );
+    }
+
+    /// REVIEW: a turn whose step was meditated under it (#617) settles
+    /// `final`, its gap forks off the refilled trunk, and the log reads back.
+    #[test]
+    fn review_a_gap_fork_after_a_window_meditation_under_its_turn_reads_back() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.cadence = Cadence::TurnBoundary;
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut shape = template();
+        shape.limits.context_window = Some(100_000);
+        declare_self_capture(&mut shape, Some(&interview));
+        let mut acts = two_turns_measuring(90_000);
+        acts.insert(2, deltas(&["NONE"]));
+        acts.push(deltas(&["NONE"]));
+        let session =
+            Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview));
+        let forks_settled = |log: &[Logged]| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::ForkSettled { .. }))
+                .count()
+        };
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one and its fork", |log| {
+            settled(log) && forks_settled(log) == 1
+        });
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two and its fork", |log| {
+            settled(log) && forks_settled(log) == 2
+        });
+        assert_eq!(window_meditations(&log).len(), 1, "{log:#?}");
+        reads_whole(&session);
+    }
+
+    /// REVIEW: the request an overflow retries (#617) is the same step sent
+    /// again, not a step of its own against `max_steps`.
+    #[test]
+    fn review_an_overflow_retry_does_not_spend_a_step() {
+        const TYPED: &str = r#"{"error":{"code":400,"type":"exceed_context_size_error"}}"#;
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let tree = scratch("review-retry-step");
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut shape = looping();
+        shape.limits.context_window = Some(1_000_000);
+        declare_self_capture(&mut shape, Some(&interview));
+        let acts = vec![
+            vec![Step::Delta(SAID.to_owned()), record("call-1", "fact", SAID)],
+            deltas(&["done"]),
+            vec![bash("b-1", "touch m1")],
+            vec![Step::Reject(400, TYPED.to_owned())],
+            vec![bash("b-2", "touch m2")],
+            deltas(&["finished"]),
+        ];
+        let session = Session::open_with(
+            Canned::new(acts),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                Some(3),
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("touch two files", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        assert_eq!(window_meditations(&log).len(), 1, "{log:#?}");
+        let m2 = tree.join("m2").exists();
+        let reason = settled_as(&log);
+        tidy(&[&tree]);
+        assert!(m2, "the retried step's call was refused: {reason:?}");
+        assert_eq!(reason, Some(SettleReason::Final));
+    }
+
+    /// REVIEW: under `prune_meditation = "turn_end"` (#612), a prune made in a
+    /// turn whose next step a window meditation ran under (#617) is still
+    /// replaced when the turn ends.
+    #[test]
+    fn review_a_turn_end_prune_survives_a_window_meditation_under_its_turn() {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let tree = scratch("review-prune-window");
+        let notes: String = (0..80)
+            .map(|n| format!("note line {n}\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        std::fs::write(tree.join("notes.md"), &notes).expect("the notes");
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.prune = Some(super::super::prune::PruneMeditation::TurnEnd);
+        let mut shape = looping();
+        shape.tools.push(super::super::prune::definition());
+        shape.limits.context_window = Some(100_000);
+        declare_self_capture(&mut shape, Some(&interview));
+        let acts = vec![
+            vec![Step::Delta(SAID.to_owned()), record("call-r", "fact", SAID)],
+            deltas(&["done"]),
+            vec![bash("call-1", "cat notes.md")],
+            vec![
+                prune_step("call-2", "cat notes.md"),
+                Step::Timings(Timings {
+                    prompt_n: Some(90_000),
+                    cache_n: Some(0),
+                    ..Timings::default()
+                }),
+            ],
+            deltas(&["after"]),
+        ];
+        let session = Session::open_with(
+            Canned::new(acts),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("read the notes", None).expect("accepted");
+        // Turn two settled -- and, the prune now due at its end, the
+        // meditation that applies it logged after the settle.
+        let log = wait_until(&session, "turn two", |log| {
+            (settled(log)
+                || log
+                    .last()
+                    .is_some_and(|logged| matches!(logged.event, Event::Meditated { .. })))
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        tidy(&[&tree]);
+        assert_eq!(prunes_in(&log).len(), 1, "{log:#?}");
+        let meditations = meditations_in(&log);
+        assert!(
+            !session.trunk().iter().any(|m| m.content == notes),
+            "the pruned result is still on the trunk whole after its turn ended; \
+             meditations {meditations:?}, their prunes {:?}",
+            meditation_prunes(&log)
+        );
     }
 
     /// Each fork screened out (#611): its trigger, ask, the capture call
