@@ -570,6 +570,10 @@ pub enum Event {
         template: crate::dogma::Template,
         /// The ask, filled.
         question: String,
+        /// The seam whose refilled trunk it is cut from, by `seq`: a seam
+        /// declared again with no turn since the last, as the operator does
+        /// to reconcile changes made after that refill.
+        after_seam: Option<u64>,
     },
     /// How the fork ended: once per fork, after its call's last event.
     ForkSettled {
@@ -3945,6 +3949,7 @@ pub fn line_of(logged: &Logged) -> log::Line {
             ask,
             displaces,
         } => log::Event::Fork {
+            after_seam: None,
             lane: log::Lane::Interview,
             of_turn: *of_turn,
             at: *at,
@@ -3965,7 +3970,9 @@ pub fn line_of(logged: &Logged) -> log::Line {
             at,
             template,
             question,
+            after_seam,
         } => log::Event::Fork {
+            after_seam: *after_seam,
             lane: log::Lane::Audit,
             of_turn: *of_turn,
             at: *at,
@@ -6544,11 +6551,20 @@ fn audit_fired(
     shape
         .messages
         .push(Message::new(Role::User, ask.text.clone()));
+    // A seam since that request (#698's run): the audit is cut from its
+    // refill, the trunk the session holds now, and says so.
+    let after_seam = state
+        .log
+        .iter()
+        .rev()
+        .take_while(|logged| logged.seq > at)
+        .find_map(|logged| matches!(logged.event, Event::Seamed { .. }).then_some(logged.seq));
     let fork = state.push(Event::Audited {
         of_turn: turn,
         at,
         template: ask.template,
         question: ask.text.clone(),
+        after_seam,
     });
     let max_tokens = state.sized(&mut shape, template.limits.max_output_tokens);
     let request = state.push(Event::Requested {
@@ -10506,6 +10522,7 @@ pub(in crate::drive) mod tests {
                 text: "Anything you meant to record?".to_owned(),
             },
             Event::Audited {
+                after_seam: None,
                 of_turn: 1,
                 at: 3,
                 template: crate::dogma::Template::AuditQHuman,
@@ -10820,6 +10837,7 @@ pub(in crate::drive) mod tests {
                 timeout_ms: None,
             },
             log::Event::Fork {
+                after_seam: None,
                 lane: log::Lane::Interview,
                 of_turn: 1,
                 at: 3,
@@ -10968,6 +10986,7 @@ pub(in crate::drive) mod tests {
                 text: "Anything you meant to record?".to_owned(),
             },
             log::Event::Fork {
+                after_seam: None,
                 lane: log::Lane::Audit,
                 of_turn: 1,
                 at: 3,
@@ -14492,6 +14511,50 @@ pub(in crate::drive) mod tests {
             })
             .collect();
         assert_eq!(rows, [(Some(2), Some(2)), (Some(2), None), (None, None)]);
+    }
+
+    /// Track 5's gate-and-tail run: the operator flags an entry after a
+    /// seam's refill and declares the seam again with no turn between, to
+    /// reconcile it. The second seam's audit is cut from the first's refill
+    /// -- the trunk the session holds -- and its fork line says so,
+    /// `after_seam` naming that seam; the log reads back (the run's log was
+    /// refused: "a fork of turn 1 after a seam that followed it") and so does
+    /// the record.
+    #[test]
+    fn a_seam_right_after_a_seam_audits_the_refill_and_says_so() {
+        let session = three_decisions_then(
+            |seams| seams.audit = true,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+            ],
+        );
+        session.declare_seam(None).expect("admitted");
+        wait_until(&session, "seam one", seams_logged(1));
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_seam(None).expect("admitted");
+        let log = wait_until(&session, "seam two", seams_logged(2));
+        let first_seam = log
+            .iter()
+            .find(|logged| matches!(logged.event, Event::Seamed { .. }))
+            .expect("seam one")
+            .seq;
+        let audits: Vec<Option<u64>> = log
+            .iter()
+            .filter_map(|logged| match &logged.event {
+                Event::Audited { after_seam, .. } => Some(*after_seam),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(audits, [None, Some(first_seam)]);
+        assert_eq!(
+            every_carried(&log)[1].1,
+            Some(Vec::new()),
+            "the flag addressed"
+        );
+        reads_whole(&session);
+        record_read_back(&session);
     }
 
     /// #654's seam smoke run 2: a session with the audit on and two seams --

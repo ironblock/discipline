@@ -1315,6 +1315,12 @@ pub enum Event {
         /// `may-displace-trunk-cache` when it is sent to the trunk's own
         /// server with a prompt that is not the trunk's prefix.
         hazard: Option<String>,
+        /// The `seq` of the seam whose refilled trunk it is cut from (v7): a
+        /// seam's audit at a seam declared with no turn since the last one,
+        /// which reconciles the operator's changes made after that refill.
+        /// It names the latest seam; absent, the fork is cut from its turn's
+        /// warm trunk.
+        after_seam: Option<u64>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -2260,6 +2266,9 @@ struct Forks {
     /// The turn the latest seam followed (v6, #493): a fork of it, or of any
     /// turn before it, forks a warm tail the seam replaced.
     seamed: Option<u32>,
+    /// The latest seam's `seq`: what an audit cut from its refill names
+    /// (v7, `after_seam`).
+    last_seam: Option<u64>,
 }
 
 impl Forks {
@@ -2272,6 +2281,7 @@ impl Forks {
         &mut self,
         seq: u64,
         (lane, of_turn, at, triggered): (Lane, u32, u64, bool),
+        after_seam: Option<u64>,
         turns: u32,
         trunk: &BTreeMap<u32, u64>,
     ) -> Result<(), String> {
@@ -2297,7 +2307,17 @@ impl Forks {
                 "a fork at seq {at}, which is not turn {of_turn}'s answered trunk `request`"
             ));
         }
-        if self.seamed.is_some_and(|seamed| of_turn <= seamed) {
+        // A seam's audit cut from the latest seam's refill (v7): a seam
+        // declared again with no turn between, to reconcile the operator's
+        // changes since that refill. It names that seam.
+        if let Some(seam) = after_seam {
+            if lane != Lane::Audit || self.last_seam != Some(seam) {
+                return Err(format!(
+                    "a fork `after_seam` {seam}: only a seam's audit is cut from a refill, \
+                     and it names the latest seam"
+                ));
+            }
+        } else if self.seamed.is_some_and(|seamed| of_turn <= seamed) {
             return Err(format!(
                 "a fork of turn {of_turn} after a seam that followed it: the seam replaced the \
                  trunk the fork would be cut from"
@@ -2727,11 +2747,13 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 of_turn,
                 at: forked_at,
                 trigger,
+                after_seam,
                 ..
             } => forks
                 .fork(
                     line.seq,
                     (*lane, *of_turn, *forked_at, trigger.is_some()),
+                    *after_seam,
                     turns,
                     &trunk,
                 )
@@ -2749,6 +2771,7 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 seam_at(*at_turn, *reason, turns, &settled, state, &forks)
                     .map_err(|why| at(index, why))?;
                 forks.seamed = Some(*at_turn);
+                forks.last_seam = Some(line.seq);
             }
             Event::Capture { call, .. } => {
                 captured.insert(call.clone());
@@ -3163,6 +3186,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             },
             ask: fields.optional_string("ask")?,
             hazard: fields.optional_string("hazard")?,
+            after_seam: fields.optional_count("after_seam")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -4637,6 +4661,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("model", Text),
                 may_v7("ask", Text),
                 may_v7("hazard", Text),
+                may_v7("after_seam", Count),
             ];
             F
         }
@@ -5559,6 +5584,7 @@ fn to_value(line: &Line) -> Value {
             seat,
             ask,
             hazard,
+            after_seam,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -5583,6 +5609,9 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(hazard) = hazard {
                 put("hazard", text(hazard));
+            }
+            if let Some(seam) = after_seam {
+                put("after_seam", count(*seam));
             }
             Kind::Fork
         }
@@ -7075,6 +7104,7 @@ mod tests {
                 to: State::Awaiting,
             },
             Event::Fork {
+                after_seam: None,
                 lane: Lane::Interview,
                 of_turn: 5,
                 at: request,

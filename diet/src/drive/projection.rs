@@ -3190,6 +3190,7 @@ mod tests {
     /// turn 3's read fork, declined.
     fn two_forks() -> Projection {
         let fork = |at: u64, of_turn: u32, why: log::Warrant| Line::Fork {
+            after_seam: None,
             lane: Lane::Interview,
             of_turn,
             at,
