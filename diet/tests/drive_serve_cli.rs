@@ -392,6 +392,22 @@ fn run_briefly(endpoint: &str, extra: &[&str]) -> (Option<i32>, String) {
     (code, said)
 }
 
+/// Whether this host's sandbox runner is on `PATH`, where serve looks for it.
+fn sandbox_runner_on_path() -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path).any(|dir| dir.join(sandbox_runner()).is_file())
+    })
+}
+
+/// This host's sandbox runner, as serve names it.
+fn sandbox_runner() -> &'static str {
+    if cfg!(target_os = "macos") {
+        diet::isolation::seatbelt::RUNNER
+    } else {
+        diet::isolation::bwrap::RUNNER
+    }
+}
+
 /// A file holding `text`, removed when dropped. Named by this process and a
 /// count, never a clock: tests run in parallel, and two that read the clock
 /// in the same tick would share a file, and one would remove the other's.
@@ -1045,19 +1061,29 @@ fn begins_floor_regimen_starts_against_the_floors_tabbyapi() {
     let tree = Dir::new("begin-worktree");
     let auth = file_holding("auth", "driver:s3cret\n");
     let auth_path = auth.0.to_string_lossy().into_owned();
-    let served = start(
-        &stub.url(),
-        &[
-            "--regimen",
-            &path,
-            "--log",
-            &logged,
-            "--worktree",
-            &tree.path(),
-            "--auth-file",
-            &auth_path,
-        ],
-    );
+    let args = [
+        "--regimen",
+        &path,
+        "--log",
+        &logged,
+        "--worktree",
+        &tree.path(),
+        "--auth-file",
+        &auth_path,
+    ];
+    // The floor confines the model's commands under the OS's sandbox, so a
+    // host without its runner refuses to start -- CI's Linux image has no
+    // `bwrap`. That refusal is asserted there; the start everywhere else.
+    if !sandbox_runner_on_path() && std::env::var_os("DIET_REQUIRE_SANDBOX").is_none() {
+        let (code, said) = run_briefly(&stub.url(), &args);
+        assert!(code.is_some_and(|code| code != 0), "{code:?}: {said}");
+        assert!(
+            said.contains(&format!("`{}` is not on this host", sandbox_runner())),
+            "{said}"
+        );
+        return;
+    }
+    let served = start(&stub.url(), &args);
     assert_eq!(
         served.substrate.as_deref(),
         Some("accel24-tabbyapi-exl3-qwen38-27b-3p00")
