@@ -36,12 +36,19 @@ use std::error::Error;
 use std::fmt;
 
 use pest::Parser as _;
-use pest::iterators::Pair;
 use pest_derive::Parser;
 
 use json::{Decimal, Value, ValueError};
 
 use crate::formats::log;
+use crate::formats::spelling;
+
+/// The version this module writes, as a record's `start` names it (#583):
+/// the first that names one, spelling the boundary `meditation`.
+pub const VERSION: i64 = 2;
+
+/// Every version this module reads: 1, a start naming none, and 2.
+pub const READS: &[i64] = &[1, 2];
 
 #[derive(Parser)]
 #[grammar = "../formats/record/grammar.pest"]
@@ -554,7 +561,7 @@ vocabulary! {
         /// A capture wrote to the working object.
         Capture => "capture",
         /// The working object was rendered into a prompt.
-        Seam => "seam",
+        Meditation => "meditation",
         /// A tool was called.
         ToolCall => "tool_call",
         /// The frozen head a lane sends changed between two of its requests.
@@ -1143,7 +1150,7 @@ vocabulary! {
     }
 }
 
-/// A tool result the model pruned and a seam replaced (#612): the call's
+/// A tool result the model pruned and a meditation replaced (#612): the call's
 /// row, its whole's sha256, and the bytes the trunk no longer carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrunedOutput {
@@ -1169,7 +1176,7 @@ pub enum Event {
         /// is the one the run used when the two digests agree. Optional: a
         /// record adapted from another harness had no regimen file.
         regimen_sha256: Option<String>,
-        /// The fork delivery lever's state the session ran under (`seam`,
+        /// The fork delivery lever's state the session ran under (`meditation`,
         /// `advisory`, `imperative`), as its log's `session.start` names it.
         /// Optional: a session that never forks names none.
         fork_delivery: Option<log::ForkDelivery>,
@@ -1182,6 +1189,9 @@ pub enum Event {
         /// lever, in that table's words; `undeclared` where nothing said.
         /// Best effort: absent, partial or `undeclared`, it is never refused.
         levers: Option<BTreeMap<String, String>>,
+        /// The record's version (#583): [`VERSION`] for one this crate
+        /// writes; absent, version 1, which spells the boundary `seam`.
+        version: Option<i64>,
     },
     /// A turn happened.
     Turn {
@@ -1275,7 +1285,7 @@ pub enum Event {
     },
     /// A harness discarded its own history and put a summary in its place.
     ///
-    /// A SEAM-LIKE EVENT AND NOT A SEAM. A seam is this architecture's own
+    /// A MEDITATION-LIKE EVENT AND NOT A MEDITATION. A meditation is this architecture's own
     /// deliberate re-render, with the dumps either side; this is somebody
     /// else's harness throwing the prefix away -- a synthetic summary message
     /// injected mid-history and the session-start marker moved, which is a
@@ -1356,8 +1366,8 @@ pub enum Event {
         entries: u32,
     },
     /// The working object was rendered into a prompt.
-    Seam {
-        /// This seam's identifier.
+    Meditation {
+        /// This meditation's identifier.
         id: String,
         /// The turn it was rendered for.
         at_turn: u32,
@@ -1372,14 +1382,14 @@ pub enum Event {
         /// Their estimated tokens, beside `tail_tokens`.
         carried_tokens: Option<u64>,
         /// The prompt, in tokens as serve sized it, that fired an automatic
-        /// seam (#617); absent on any other seam.
+        /// meditation (#617); absent on any other meditation.
         prompt_tokens: Option<u64>,
         /// The context window it would not have fit, beside `prompt_tokens`.
         window: Option<u64>,
-        /// The tool results the model pruned that this seam replaced with
+        /// The tool results the model pruned that this meditation replaced with
         /// their reference lines (#612), in the order they were pruned.
         pruned: Option<Vec<PrunedOutput>>,
-        /// The operator's edits and flags this seam carried (#150): each
+        /// The operator's edits and flags this meditation carried (#150): each
         /// entry and `edit` or `flag`.
         operator_changes: Option<Vec<log::OperatorChange>>,
         /// Of those, the entries no answer addressed, carried on (#150).
@@ -1576,7 +1586,7 @@ impl Event {
             Self::Response { .. } => Kind::Response,
             Self::Fork { .. } => Kind::Fork,
             Self::Capture { .. } => Kind::Capture,
-            Self::Seam { .. } => Kind::Seam,
+            Self::Meditation { .. } => Kind::Meditation,
             Self::ToolCall { .. } => Kind::ToolCall,
             Self::Rejected { .. } => Kind::Rejected,
             Self::Claim { .. } => Kind::Claim,
@@ -1596,7 +1606,7 @@ impl Event {
             | Self::Response { id, .. }
             | Self::Fork { id, .. }
             | Self::Capture { id, .. }
-            | Self::Seam { id, .. }
+            | Self::Meditation { id, .. }
             | Self::ToolCall { id, .. }
             | Self::Rejected { id, .. }
             | Self::Claim { id, .. }
@@ -1623,6 +1633,15 @@ pub struct Record {
 }
 
 impl Record {
+    /// The record's version (#583): its start's, or 1 when it names none.
+    #[must_use]
+    pub fn version(&self) -> i64 {
+        match self.events.first() {
+            Some(Event::Start { version, .. }) => version.unwrap_or(1),
+            _ => unreachable!("validate() refuses a record whose first event is not a start"),
+        }
+    }
+
     /// The regime every event in this record ran under.
     ///
     /// Read from the required `start` event rather than stored beside it, so
@@ -1801,6 +1820,9 @@ pub enum SchemaError {
         /// What it held.
         found: String,
     },
+    /// A row spells the boundary in the other version's word (#583):
+    /// `meditation` in a version 1 record, `seam` in a version 2 one.
+    Respelled(String),
     /// A row's keys do not fit together: a `tool_call`'s against its
     /// outcome, by the log's own rule (#302).
     Inconsistent {
@@ -2166,6 +2188,7 @@ impl fmt::Display for SchemaError {
             Self::Inconsistent { of, why } => {
                 write!(f, "a `{of}` row's keys do not fit: {why}")
             }
+            Self::Respelled(why) => write!(f, "{why}"),
         }
     }
 }
@@ -2404,6 +2427,10 @@ pub fn parse(input: &str) -> Result<Record, ParseError> {
         .ok_or(ParseError::Schema(SchemaError::NoKind))?;
 
     let mut events = Vec::new();
+    // The version the first row declares (#583): each row is read in its
+    // spelling. A record whose first row is no start is refused by
+    // `validate`.
+    let mut declared = None;
     for line in document.into_inner() {
         if line.as_rule() != Rule::event_line {
             continue; // a blank line
@@ -2414,7 +2441,10 @@ pub fn parse(input: &str) -> Result<Record, ParseError> {
             .ok_or(ParseError::Value(ValueError::Shape(
                 "a line with no object",
             )))?;
-        events.push(event(&object)?);
+        let mut members = json::object(&object)?;
+        let version = *declared.get_or_insert_with(|| spelling::record_declared(&members));
+        spelling::record_to_current(&mut members, version).map_err(SchemaError::Respelled)?;
+        events.push(event(members)?);
     }
 
     validate(&events)?;
@@ -2467,9 +2497,23 @@ fn nesting_depth(input: &str) -> usize {
     deepest
 }
 
-/// One row.
-fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
-    let mut members = json::object(object)?;
+/// A start's `version` (#583): one this reader reads, or none.
+fn take_version(
+    members: &mut BTreeMap<String, Value>,
+    of: &'static str,
+) -> Result<Option<i64>, ParseError> {
+    match take_optional_integer(members, of, "version")? {
+        Some(version) if !READS.contains(&version) => Err(SchemaError::Inconsistent {
+            of,
+            why: format!("version {version}, where this reader reads {READS:?}"),
+        }
+        .into()),
+        version => Ok(version),
+    }
+}
+
+/// One row, in the current spelling.
+fn event(mut members: BTreeMap<String, Value>) -> Result<Event, ParseError> {
     let tag = match members.remove("record") {
         Some(Value::String(tag)) => tag,
         Some(_) => {
@@ -2498,6 +2542,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             )?,
             tool_output: take_tool_output(&mut members, of)?,
             levers: levers(&mut members),
+            version: take_version(&mut members, of)?,
         },
         Kind::Turn => Event::Turn {
             index: take_u32(&mut members, of, "index")?,
@@ -2532,7 +2577,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             from_fork: take_string(&mut members, of, "from_fork")?,
             entries: take_u32(&mut members, of, "entries")?,
         },
-        Kind::Seam => Event::Seam {
+        Kind::Meditation => Event::Meditation {
             id: take_string(&mut members, of, "id")?,
             at_turn: take_u32(&mut members, of, "at_turn")?,
             rendered_bytes: take_u64(&mut members, of, "rendered_bytes")?,
@@ -4109,7 +4154,7 @@ fn take_tool_output(
     }))
 }
 
-/// A seam row's `operator_changes` (#150): absent, or a non-empty list of
+/// A meditation row's `operator_changes` (#150): absent, or a non-empty list of
 /// objects holding exactly `entry` and `kind` (`edit` or `flag`).
 fn take_optional_operator_changes(
     members: &mut BTreeMap<String, Value>,
@@ -4206,7 +4251,7 @@ fn take_optional_share(
     }
 }
 
-/// A seam row's `pruned` (#612): absent, or a non-empty list of objects
+/// A meditation row's `pruned` (#612): absent, or a non-empty list of objects
 /// holding exactly `tool_call`, `sha256` and `bytes`.
 fn take_optional_pruned(
     members: &mut BTreeMap<String, Value>,
@@ -4581,7 +4626,7 @@ impl<'a> Seen<'a> {
             Event::Capture { id, from_fork, .. } => {
                 link(&self.ids, id, "from_fork", from_fork, Kind::Fork)?;
             }
-            Event::Seam { at_turn, .. } | Event::ToolCall { at_turn, .. } => {
+            Event::Meditation { at_turn, .. } | Event::ToolCall { at_turn, .. } => {
                 self.require_turn(*at_turn)?;
             }
             Event::Rejected {
@@ -5031,10 +5076,18 @@ fn link(
 pub fn render(record: &Record) -> String {
     let mut out = String::new();
     for event in &record.events {
-        json::render(&Value::Object(event_value(event)), &mut out);
+        json::render(&Value::Object(row_value(event, record.version())), &mut out);
         out.push('\n');
     }
     out
+}
+
+/// A row as a record of `version` writes it (#583): its spelling the
+/// version's.
+fn row_value(event: &Event, version: i64) -> BTreeMap<String, Value> {
+    let mut row = event_value(event);
+    spelling::record_to_declared(&mut row, version);
+    row
 }
 
 /// The whole record as the value space: its regime, and its events.
@@ -5052,7 +5105,7 @@ pub fn to_value(record: &Record) -> Value {
                 record
                     .events
                     .iter()
-                    .map(|event| Value::Object(event_value(event)))
+                    .map(|event| Value::Object(row_value(event, record.version())))
                     .collect(),
             ),
         ),
@@ -5125,8 +5178,10 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             fork_delivery,
             tool_output,
             levers,
+            version,
         } => {
             members.put("regime", regime_value(regime));
+            members.put_optional("version", version.map(Value::Integer));
             if let Some(cap) = tool_output {
                 members.put("tool_output", Value::String(cap.state.tag().to_owned()));
                 members.put_optional(
@@ -5256,7 +5311,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_text("from_fork", from_fork);
             members.put_u32("entries", *entries);
         }
-        Event::Seam {
+        Event::Meditation {
             at_turn,
             rendered_bytes,
             tail_tokens,
@@ -5863,7 +5918,10 @@ pub fn project(source: &str) -> Result<Value, String> {
                         parsed
                             .kinds()
                             .iter()
-                            .map(|kind| Value::String(kind.tag().to_owned()))
+                            .map(|kind| {
+                                let tag = spelling::record_kind_as(kind.tag(), parsed.version());
+                                Value::String(tag.to_owned())
+                            })
                             .collect(),
                     ),
                 ),
@@ -5885,6 +5943,53 @@ mod tests {
         PrefixReason, Reasoning, Regime, SchemaError, StructureError, Verdict, Weights,
         WeightsKind, delta, delta_value, objects, parse, reason_of, regime_value, render,
     };
+
+    /// The committed full-session record: unversioned, so version 1, with a
+    /// `seam` row.
+    fn v1_record() -> String {
+        std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("formats/record/fixtures/valid/full-session.jsonl"),
+        )
+        .expect("the fixture")
+    }
+
+    /// #583: a record whose start names no version is version 1 and spells
+    /// the boundary `seam`; one spelling it `meditation` is refused, and one
+    /// declaring version 2 spells it `meditation` and refuses `seam`.
+    #[test]
+    fn a_records_version_decides_how_it_spells_the_boundary() {
+        let v1 = v1_record();
+        assert!(v1.contains(r#""record":"seam""#));
+        let read = parse(&v1).expect("version 1 reads as written");
+        assert_eq!(read.version(), 1);
+        let written = render(&read);
+        assert!(
+            written.contains(r#""record":"seam""#),
+            "and writes back in its words"
+        );
+        assert!(!written.contains(r#""version""#));
+        let in_v2_words = v1.replace(r#""record":"seam""#, r#""record":"meditation""#);
+        let refused = parse(&in_v2_words).expect_err("v2's word in a v1 record");
+        assert!(refused.to_string().contains("`meditation`"), "{refused}");
+        let v2_old = v1.replacen(
+            r#""record":"start","#,
+            r#""record":"start","version":2,"#,
+            1,
+        );
+        assert_ne!(v2_old, v1);
+        let refused = parse(&v2_old).expect_err("v1's word in a v2 record");
+        assert!(refused.to_string().contains("`seam`"), "{refused}");
+        let v2 = v2_old.replace(r#""record":"seam""#, r#""record":"meditation""#);
+        let read = parse(&v2).expect("version 2 in its own words");
+        assert!(render(&read).contains(r#""record":"meditation""#));
+        let v3 = v1.replacen(
+            r#""record":"start","#,
+            r#""record":"start","version":3,"#,
+            1,
+        );
+        assert!(parse(&v3).is_err(), "a version this reader does not read");
+    }
 
     /// A `start` line whose regime is complete, as every record needs one.
     const START: &str = r#"{"source":{"kind":"live"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532","sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on"}]}}"#;

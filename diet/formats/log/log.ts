@@ -4,8 +4,8 @@
 // i64, and a JavaScript number is exact only to 2^53. A `timings`
 // millisecond may carry a fraction, written as the server wrote it.
 
-export const VERSION = 7;
-export const READS = [0, 1, 2, 3, 4, 5, 6, 7] as const;
+export const VERSION = 8;
+export const READS = [0, 1, 2, 3, 4, 5, 6, 7, 8] as const;
 export const PRESENCE_WINDOW_MS = 2000;
 
 export type Kind =
@@ -26,11 +26,11 @@ export type Kind =
   | "fork"
   | "fork.settled"
   | "patch"
-  | "seam"
+  | "meditation"
   | "delivered"
   | "recalled"
   | "flag"
-  | "seam.held"
+  | "meditation.held"
   | "patch.refused"
   | "pruned"
   | "phase.ruled"
@@ -60,7 +60,7 @@ export type Lane =
 export type Command =
   | "ask"
   | "cancel"
-  | "declare-seam"
+  | "declare-meditation"
   | "end"
   | "open-tangent"
   | "close-tangent"
@@ -75,8 +75,8 @@ export type Refusal =
   | "in-flight"
   | "ended"
   | "nothing-in-flight"
-  | "seam-not-built"
-  | "nothing-to-seam"
+  | "meditation-not-built"
+  | "nothing-to-meditate"
   | "no-phase-graph"
   | "not-a-phase"
   | "already-in-phase"
@@ -91,7 +91,7 @@ export type Refusal =
   | "unknown-entry"
   | "not-live"
   | "empty"
-  | "seam-held"
+  | "meditation-held"
   | "nothing-held"
 ;
 
@@ -115,7 +115,7 @@ export type SettleReason =
 
 export type GapEnd =
   | "ask"
-  | "seam"
+  | "meditation"
   | "cancel"
   | "end"
 ;
@@ -181,7 +181,7 @@ export type ApprovalScope =
 export type Warrant =
   | "read"
   | "scoping"
-  | "seam"
+  | "meditation"
 ;
 
 export type ForkOutcome =
@@ -202,7 +202,7 @@ export type PatchOp =
   | "park"
 ;
 
-export type SeamReason =
+export type MeditationReason =
   | "operator"
   | "phase"
   | "budget"
@@ -221,7 +221,7 @@ export type RecallState =
 ;
 
 export type ForkDelivery =
-  | "seam"
+  | "meditation"
   | "advisory"
   | "imperative"
 ;
@@ -231,7 +231,7 @@ export type ToolOutputState =
   | "keep"
 ;
 
-export type SeamToolOutputs =
+export type MeditationToolOutputs =
   | "evict"
   | "reference"
   | "salient"
@@ -352,7 +352,7 @@ export type SessionStartLine = {
   seq: number;
   t: number;
   kind: "session.start";
-  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+  version: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
   opened: number;
   model: string;
   head: HeadMessage[];
@@ -544,7 +544,7 @@ export type ForkLine = {
   role?: string;
   ask?: string;
   hazard?: string;
-  after_seam?: number;
+  after_meditation?: number;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
@@ -569,12 +569,12 @@ export type PatchLine = {
   tangent?: string;
 } & ({ fork: number; lane?: never } | { lane: string; fork?: never });
 
-export type SeamLine = {
+export type MeditationLine = {
   seq: number;
   t: number;
-  kind: "seam";
+  kind: "meditation";
   at_turn: number;
-  reason: SeamReason;
+  reason: MeditationReason;
   prefix_hash_before: string;
   prefix_hash_after: string;
   frame: string;
@@ -584,7 +584,7 @@ export type SeamLine = {
   tail_tokens?: number;
   carried_tokens?: number;
   phase?: PhaseMove;
-  tool_outputs?: SeamToolOutputs;
+  tool_outputs?: MeditationToolOutputs;
   outputs?: string;
   carried_outputs?: number;
   carried_output_bytes?: number;
@@ -634,12 +634,12 @@ export type FlagLine = {
   note: string;
 };
 
-export type SeamHeldLine = {
+export type MeditationHeldLine = {
   seq: number;
   t: number;
-  kind: "seam.held";
+  kind: "meditation.held";
   at_turn: number;
-  reason: SeamReason;
+  reason: MeditationReason;
   unaddressed: string[];
 };
 
@@ -776,11 +776,11 @@ export type LogLine =
   | ForkLine
   | ForkSettledLine
   | PatchLine
-  | SeamLine
+  | MeditationLine
   | DeliveredLine
   | RecalledLine
   | FlagLine
-  | SeamHeldLine
+  | MeditationHeldLine
   | PatchRefusedLine
   | PrunedLine
   | PhaseRuledLine

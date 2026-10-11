@@ -10,7 +10,7 @@
 //! two of these can run at once and neither collides with anything a machine
 //! already has listening.
 //!
-//! It is in the library rather than in a test file because the seam
+//! It is in the library rather than in a test file because the meditation
 //! controller and the integration lane need the same thing: a server whose
 //! answers are a script, so that a drive over the machinery is deterministic
 //! and needs no model.

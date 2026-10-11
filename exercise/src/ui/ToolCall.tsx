@@ -152,10 +152,10 @@ export function ToolBlock({ node, caller, first = false }: { readonly node: Fold
       {/* What a self-capture call did to working memory (#619): its outcome, and the entries it wrote or why not. */}
       {/* A phase proposal the operator ruled on (#651): how. */}
       {node.ruled ? <p className="ex-ruled">{`ruled · ${node.ruled.choice} → ${node.ruled.to}`}</p> : null}
-      {/* Output the model pruned (#630): kept whole until the turn's seam replaces it by its pointer. */}
+      {/* Output the model pruned (#630): kept whole until the turn's meditation replaces it by its pointer. */}
       {node.pruned ? (
         <p className="ex-pruned" data-replaced={node.pruned.replaced ? '' : undefined}>
-          {`pruned by the model (${size(node.pruned.bytes)}) · ${node.pruned.replaced ? 'replaced by its pointer at the seam' : 'replaced when this turn ends'}`}
+          {`pruned by the model (${size(node.pruned.bytes)}) · ${node.pruned.replaced ? 'replaced by its pointer at the meditation' : 'replaced when this turn ends'}`}
         </p>
       ) : null}
       {/* A call run in the background (#614): its job, and how the job ended once it has. */}

@@ -2,13 +2,13 @@
 //!
 //! The grammar at `diet/formats/audit/grammar.pest` is normative. This
 //! module implements it and is the **one authorized implementation**: a
-//! seam's audit (#504) reads its answer through here.
+//! meditation's audit (#504) reads its answer through here.
 //!
 //! An audit is the whole answer to the dogma's pinned audit ask, which
 //! numbers the working notes 1..n and asks for one line per note: `KEEP`,
 //! `UPDATE: <note>`, `REMOVE — <reason>` or `REMOVE — dup of #<k>`. There is
 //! no `ADD`: the pinned asks offer none. The model judges; the grammar
-//! formats; the seam folds. See the grammar for the four rules.
+//! formats; the meditation folds. See the grammar for the four rules.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;

@@ -1,7 +1,7 @@
 // The `audit` format, v0. This file is NORMATIVE: the Rust parser in
 // diet/src/formats/audit.rs implements it and is not itself the definition.
 //
-// An audit is the whole answer to a seam's audit ask (#504): the dogma's
+// An audit is the whole answer to a meditation's audit ask (#504): the dogma's
 // pinned AUDIT_Q, AUDIT_Q_CADENCE and AUDIT_Q_HUMAN, which number the
 // working notes 1..n and ask for EXACTLY one line per note:
 //

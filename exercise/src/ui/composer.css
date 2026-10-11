@@ -83,7 +83,7 @@
   color: var(--ink-faint);
 }
 
-.ex-composer__seam {
+.ex-composer__meditation {
   display: inline-flex;
   align-items: center;
   gap: 0.4rem;
@@ -107,9 +107,9 @@
   cursor: default;
 }
 
-.ex-composer__seam button:not(:disabled) {
-  border-color: var(--seam);
-  color: var(--seam);
+.ex-composer__meditation button:not(:disabled) {
+  border-color: var(--meditation);
+  color: var(--meditation);
 }
 
 .ex-composer__send:not(:disabled) {
@@ -253,13 +253,13 @@
   justify-content: flex-end;
 }
 
-/* Why the proposal's seam is not offered (#685): nothing to refill from. */
+/* Why the proposal's meditation is not offered (#685): nothing to refill from. */
 .ex-composer__proposal-why {
   justify-self: end;
   color: var(--ink-muted);
 }
 
-/* A seam held for the operator (#150's gate): what is unaddressed, refill anyway, and the alternatives. */
+/* A meditation held for the operator (#150's gate): what is unaddressed, refill anyway, and the alternatives. */
 .ex-composer__held {
   display: grid;
   gap: 0.3rem;

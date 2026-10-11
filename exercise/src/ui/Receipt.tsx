@@ -25,7 +25,7 @@ export function Receipt({ receipt: r }: { readonly receipt: Numbers }) {
       measure: 'idle-before-refill',
       value: r.idleBeforeRefill.length === 0 ? '–' : r.idleBeforeRefill.map((ms) => `${Math.round(ms / 1000)} s`).join(' · '),
       label: 'trunk idle before refill',
-      title: 'for each refill, from the trunk last finishing something to the seam',
+      title: 'for each refill, from the trunk last finishing something to the meditation',
     },
     {
       measure: 'side-call-time-in-gap',

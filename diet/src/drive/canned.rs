@@ -18,7 +18,7 @@
 //! The acts are in **call order**, and the order is a property of
 //! [`script`]: turn one's ask and its fork, turn two's ask and its fork and
 //! the ratification the declared boundary triggers, turn three's ask. A
-//! script that fires a seam somewhere else needs its own acts, and
+//! script that fires a meditation somewhere else needs its own acts, and
 //! [`the_acts_are_exactly_what_the_script_asks_for`] is what stops the two
 //! drifting apart.
 //!
@@ -75,7 +75,7 @@ pub const PROMPT_TOKENS: u64 = 600;
 
 /// The scripted three-turn drive.
 ///
-/// Turn two declares the boundary, so the seam lands where the script chose
+/// Turn two declares the boundary, so the meditation lands where the script chose
 /// rather than where a cadence happened to put it.
 #[must_use]
 pub fn script(regime: Regime) -> Script {
@@ -409,7 +409,7 @@ fn escaped(text: &str) -> String {
         .replace('\n', "\\n")
 }
 
-/// How many calls [`script`] makes: one per turn, one per fork, one per seam.
+/// How many calls [`script`] makes: one per turn, one per fork, one per meditation.
 ///
 /// Derived rather than written down, so a script that grows a turn cannot
 /// leave the count behind.

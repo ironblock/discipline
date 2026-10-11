@@ -11,7 +11,7 @@
  *
  *   notice   settling → the first sign the person is present
  *   read     → their first keystroke or other input in the composer (a
- *              paste, a drop, #289), or first click on a declare-seam control
+ *              paste, a drop, #289), or first click on a declare-meditation control
  *   compose  → the accepted send or declare
  *   blocked  from the first send held or refused because work was in
  *            flight → the accepted send (the time after it is not composing);
@@ -84,7 +84,7 @@ export class GapMeter {
     this.present(t);
   }
 
-  /** A keystroke or other input in the composer (a paste, a drop, #289), or a click on a declare-seam control: reading is over. */
+  /** A keystroke or other input in the composer (a paste, a drop, #289), or a click on a declare-meditation control: reading is over. */
   composing(now: number): void {
     this.present(now);
     if (this.#phase === 'read') this.#enter('compose', now);

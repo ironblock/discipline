@@ -362,7 +362,7 @@
   text-shadow: 0 0 var(--led-radius) var(--led);
 }
 
-/* Eras before the latest seam were evicted from the prefix: kept in the archive,
+/* Eras before the latest meditation were evicted from the prefix: kept in the archive,
    drawn as such -- and so are the side calls that hung off them. */
 .ex-era:not(:last-of-type) .ex-block {
   box-shadow: var(--relief-evicted);
@@ -440,8 +440,8 @@
   margin: 0.5rem 0 0 1.25rem;
 }
 
-/* A seam crosses every column: the refill changes the prefix every slot forks from. */
-.ex-session--curtain .ex-seam {
+/* A meditation crosses every column: the refill changes the prefix every slot forks from. */
+.ex-session--curtain .ex-meditation {
   margin-right: calc(-1 * var(--lanes) * (var(--lane-width) + var(--gutter)));
 }
 

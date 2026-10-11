@@ -1,6 +1,6 @@
 //! The request shape, as data.
 //!
-//! Every fork, seam and canonical turn is a request to an inference server,
+//! Every fork, meditation and canonical turn is a request to an inference server,
 //! and in prior work the shape of that request was assembled at each call
 //! site. The consequences were paid one at a time: a sampler setting the
 //! client believed it had sent, a field stripped by a retry that nobody
@@ -717,7 +717,7 @@ mod tests {
         );
     }
 
-    /// The seam's claim, now asked of the bytes that actually go out.
+    /// The meditation's claim, now asked of the bytes that actually go out.
     ///
     /// This test used to call `RequestShape::prefix()`, a second rendering of
     /// the head that nothing sent. #79 removed it and pointed the same

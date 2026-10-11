@@ -828,10 +828,12 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
-            Command::DeclareSeam(to) => match self.session.declare_seam_to(gap, to.as_deref()) {
-                Ok(()) => (200, BTreeMap::new()),
-                Err(rejection) => rejected(rejection),
-            },
+            Command::DeclareMeditation(to) => {
+                match self.session.declare_meditation_to(gap, to.as_deref()) {
+                    Ok(()) => (200, BTreeMap::new()),
+                    Err(rejection) => rejected(rejection),
+                }
+            }
             Command::End => match self.session.end(gap) {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
@@ -860,7 +862,7 @@ impl<S: Streaming + 'static> Serving<S> {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
             },
-            // The operator's refill over a held seam (#150's gate).
+            // The operator's refill over a held meditation (#150's gate).
             Command::RefillAnyway => match self.session.refill_anyway() {
                 Ok(()) => (200, BTreeMap::new()),
                 Err(rejection) => rejected(rejection),
@@ -891,8 +893,8 @@ enum Command {
     /// The words, and the digests of the uploads it attaches (#513).
     Ask(String, Vec<String>),
     Cancel(u32),
-    /// A seam, and the phase to move to when one is named (#563).
-    DeclareSeam(Option<String>),
+    /// A meditation, and the phase to move to when one is named (#563).
+    DeclareMeditation(Option<String>),
     End,
     /// Open a tangent under this id (#22).
     OpenTangent(String),
@@ -906,8 +908,18 @@ enum Command {
     EditEntry(String, String),
     /// Flag the entry with this id with this note (#150).
     FlagEntry(String, String),
-    /// Refill the held seam anyway (#150's gate).
+    /// Refill the held meditation anyway (#150's gate).
     RefillAnyway,
+}
+
+/// A command's word as a client written before #583's rename may send it,
+/// in the current spelling: `declare-seam`, and a ruling's `seam`.
+fn current(word: &str) -> &str {
+    match word {
+        "declare-seam" => "declare-meditation",
+        "seam" => "meditation",
+        other => other,
+    }
 }
 
 impl Command {
@@ -917,6 +929,7 @@ impl Command {
         let Some(Value::String(kind)) = object.get("kind") else {
             return None;
         };
+        let kind = current(kind);
         let kind = CommandKind::ALL
             .iter()
             .copied()
@@ -925,13 +938,13 @@ impl Command {
         let takes: &[&str] = match kind {
             CommandKind::Ask => &["kind", "text", "idle_gap", "scoping", "files"],
             CommandKind::Cancel => &["kind", "turn", "idle_gap"],
-            CommandKind::DeclareSeam => &["kind", "idle_gap", "phase"],
+            CommandKind::DeclareMeditation => &["kind", "idle_gap", "phase"],
             CommandKind::End => &["kind", "idle_gap"],
             // No idle gap (#22): a tangent's open and close end none.
             CommandKind::OpenTangent => &["kind", "id"],
             CommandKind::CloseTangent => &["kind", "dispositions"],
             // #614: moving the running call ends no idle gap either; nor
-            // does #150's refill-anyway, the held seam being the one.
+            // does #150's refill-anyway, the held meditation being the one.
             CommandKind::Background | CommandKind::RefillAnyway => &["kind"],
             // #124: the proposal's call and the operator's choice; a ruling
             // ends no idle gap.
@@ -972,9 +985,9 @@ impl Command {
                 Some(Value::Integer(turn)) => u32::try_from(*turn).ok().map(Self::Cancel),
                 _ => None,
             },
-            CommandKind::DeclareSeam => match object.get("phase") {
-                None => Some(Self::DeclareSeam(None)),
-                Some(Value::String(to)) => Some(Self::DeclareSeam(Some(to.clone()))),
+            CommandKind::DeclareMeditation => match object.get("phase") {
+                None => Some(Self::DeclareMeditation(None)),
+                Some(Value::String(to)) => Some(Self::DeclareMeditation(Some(to.clone()))),
                 Some(_) => None,
             },
             CommandKind::End => Some(Self::End),
@@ -1000,6 +1013,7 @@ impl Command {
             CommandKind::Background => Some(Self::Background),
             CommandKind::RatifyPhase => match (object.get("call"), object.get("choice")) {
                 (Some(Value::String(call)), Some(Value::String(choice))) => {
+                    let choice = current(choice);
                     crate::drive::session::PhaseChoice::ALL
                         .iter()
                         .copied()
@@ -1450,8 +1464,27 @@ mod tests {
         }
     }
 
+    /// #583: a client written before the rename still works: the old
+    /// `declare-seam` and a ruling's `seam` read as their meditation names.
+    #[test]
+    fn the_old_seam_spellings_are_read_as_their_meditation_names() {
+        use crate::drive::session::PhaseChoice;
+        let read = |body: &str| {
+            let object = crate::formats::record::json::line(body).expect("an object");
+            Command::from_object(&object).map(|posted| posted.command)
+        };
+        assert!(matches!(
+            read(r#"{"kind":"declare-seam"}"#),
+            Some(Command::DeclareMeditation(None))
+        ));
+        assert!(matches!(
+            read(r#"{"kind":"ratify-phase","call":"call-p","choice":"seam"}"#),
+            Some(Command::RatifyPhase(call, PhaseChoice::Meditation)) if call == "call-p"
+        ));
+    }
+
     /// #124: `ratify-phase` takes the proposal's call and a choice --
-    /// `seam`, `continue` or `stay`; anything else, or an idle gap, is no
+    /// `meditation`, `continue` or `stay`; anything else, or an idle gap, is no
     /// command.
     #[test]
     fn the_phase_ruling_reads_its_call_and_choice_and_nothing_else() {
@@ -1461,7 +1494,7 @@ mod tests {
             Command::from_object(&object).map(|posted| posted.command)
         };
         for (word, choice) in [
-            ("seam", PhaseChoice::Seam),
+            ("meditation", PhaseChoice::Meditation),
             ("continue", PhaseChoice::Continue),
             ("stay", PhaseChoice::Stay),
         ] {
@@ -1472,8 +1505,8 @@ mod tests {
         }
         for refused in [
             r#"{"kind":"ratify-phase","call":"call-p","choice":"maybe"}"#,
-            r#"{"kind":"ratify-phase","choice":"seam"}"#,
-            r#"{"kind":"ratify-phase","call":"call-p","choice":"seam","idle_gap":{}}"#,
+            r#"{"kind":"ratify-phase","choice":"meditation"}"#,
+            r#"{"kind":"ratify-phase","call":"call-p","choice":"meditation","idle_gap":{}}"#,
         ] {
             assert!(read(refused).is_none(), "{refused}");
         }
@@ -1967,7 +2000,7 @@ mod tests {
         // every refusal a session in these states gives.
         session.ask("one", None).expect("accepted");
         wait_until(&session, "the first turn to settle", settled);
-        let _ = session.declare_seam(None);
+        let _ = session.declare_meditation(None);
         session.ask("two", None).expect("accepted");
         assert!(gate.wait_for_a_waiter(Duration::from_secs(10)));
         let _ = session.ask("while the second is in flight", None);
@@ -2058,7 +2091,7 @@ mod tests {
         let sealed = written.text();
         assert!(session.ask("too late", None).is_err());
         assert!(session.cancel(1, None).is_err());
-        assert!(session.declare_seam(None).is_err());
+        assert!(session.declare_meditation(None).is_err());
         assert!(session.end(None).is_err());
         assert_eq!(written.text(), sealed);
     }
@@ -2100,9 +2133,9 @@ mod tests {
         let again = post(&server, r#"{"kind":"ask","text":"b"}"#, "");
         assert_eq!(status(&again), 409, "{again}");
         assert_eq!(body(&again), r#"{"refused":"in-flight"}"#);
-        let seam = post(&server, r#"{"kind":"declare-seam"}"#, "");
-        assert_eq!(status(&seam), 409, "{seam}");
-        assert_eq!(body(&seam), r#"{"refused":"in-flight"}"#);
+        let meditation = post(&server, r#"{"kind":"declare-meditation"}"#, "");
+        assert_eq!(status(&meditation), 409, "{meditation}");
+        assert_eq!(body(&meditation), r#"{"refused":"in-flight"}"#);
 
         gate.open();
         wait_until(&session, "the turn to settle", settled);

@@ -17,7 +17,7 @@ import { Preferred, Settings } from '../ui/Prefs.tsx';
 import { Memory } from '../ui/Memory.tsx';
 import { Prose, ProseProbe } from '../ui/Prose.tsx';
 import { AssistantMessage, SystemMessage, UserMessage } from '../ui/Message.tsx';
-import { Seam } from '../ui/Seam.tsx';
+import { Meditation } from '../ui/Meditation.tsx';
 import { Segments } from '../ui/Segments.tsx';
 import { SessionHeader } from '../ui/SessionHeader.tsx';
 import { ms, rate, tokens, took } from '../ui/format.ts';
@@ -816,14 +816,14 @@ export const MemoryAfterRefill: Story = {
   },
 };
 
-// ---------------------------------------------------------------- Seam
+// ---------------------------------------------------------------- Meditation
 
-export const SeamRefill: Story = {
-  name: 'Seam · the refill',
-  render: () => <Seam node={sessionAt(MOMENTS.refilled).eras[1]!.seam!} />,
+export const MeditationRefill: Story = {
+  name: 'Meditation · the refill',
+  render: () => <Meditation node={sessionAt(MOMENTS.refilled).eras[1]!.meditation!} />,
   play: async ({ canvasElement }) => {
-    const label = canvasElement.querySelector('.ex-seam__label')?.textContent ?? '';
-    await expect(canvasElement.querySelector('.ex-seam__kind')?.textContent).toBe('refill');
+    const label = canvasElement.querySelector('.ex-meditation__label')?.textContent ?? '';
+    await expect(canvasElement.querySelector('.ex-meditation__kind')?.textContent).toBe('refill');
     for (const said of ['spec → build', `${tokens(18_009)} → ${tokens(1_512)} tok`, 'a41c09e2 → 7e02b5d1', `warm ${ms(1_050)}`]) await expect(label).toContain(said);
   },
 };
@@ -883,18 +883,18 @@ export const UnknownTool: Story = {
   },
 };
 
-export const UnknownSeam: Story = {
-  name: 'Unknown · a seam reason, with no phase recorded',
+export const UnknownMeditation: Story = {
+  name: 'Unknown · a meditation reason, with no phase recorded',
   render: () => {
     const session = variantAt(MOMENTS.refilled, (e) => {
-      if (e['kind'] !== 'seam') return e;
+      if (e['kind'] !== 'meditation') return e;
       const rest: Record<string, unknown> = { ...e, reason: 'drift' };
       delete rest['phase'];
       return rest;
     });
-    const seam = session.eras[1]?.seam;
-    if (!seam) throw new Error('no seam');
-    return <Seam node={seam} />;
+    const meditation = session.eras[1]?.meditation;
+    if (!meditation) throw new Error('no meditation');
+    return <Meditation node={meditation} />;
   },
   play: async ({ canvasElement }) => {
     await expect(canvasElement.textContent).toContain('drift');
@@ -957,7 +957,7 @@ const composer = (state: ComposerProps['state'], phase = 'spec') => (
 const composerSays = (root: HTMLElement) => ({
   state: root.querySelector('.ex-composer__state')?.textContent,
   typing: !(root.querySelector('textarea') as HTMLTextAreaElement).disabled,
-  refill: !(root.querySelector('.ex-composer__seam button') as HTMLButtonElement).disabled,
+  refill: !(root.querySelector('.ex-composer__meditation button') as HTMLButtonElement).disabled,
   cancel: root.querySelector('.ex-composer__cancel') !== null,
 });
 
@@ -1053,13 +1053,13 @@ export const ComposerNarrow: Story = {
   play: async ({ canvasElement }) => {
     const box = (sel: string) => (canvasElement.querySelector(sel) as HTMLElement).getBoundingClientRect();
     const state = box('.ex-composer__state');
-    const seam = box('.ex-composer__seam');
+    const meditation = box('.ex-composer__meditation');
     const action = box('.ex-composer__cancel');
     const bar = box('.ex-composer__bar');
-    await expect(seam.top).toBeGreaterThanOrEqual(state.bottom);
-    await expect(Math.abs(action.top - seam.top)).toBeLessThan(4);
+    await expect(meditation.top).toBeGreaterThanOrEqual(state.bottom);
+    await expect(Math.abs(action.top - meditation.top)).toBeLessThan(4);
     await expect(Math.abs(action.right - bar.right)).toBeLessThan(2);
-    await expect(Math.abs(box('.ex-composer__phase').top - seam.top)).toBeLessThan(6);
+    await expect(Math.abs(box('.ex-composer__phase').top - meditation.top)).toBeLessThan(6);
   },
 };
 

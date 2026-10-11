@@ -111,13 +111,13 @@ set.
 
 ## Tools-route audit sets (#610)
 
-`audit-tools/<name>/` holds the words a seam's audit asks in when the
+`audit-tools/<name>/` holds the words a meditation's audit asks in when the
 session's forks answer through the record tools (`capture_modality =
 "tools"`): one file per pinned audit template, named as the template is. Each
 is the template's opening sentence, the notes as `<id>\t<note>` lines, and one
 instruction naming `update_record` and `resolve_entry`; the audit's calls are
 run as a tools fork's are, their patches on the `audit` lane. Pinned in
-`MANIFEST.tsv` as `audit-tools/<name>/<file>`; the `seam_audit` lever's word
+`MANIFEST.tsv` as `audit-tools/<name>/<file>`; the `meditation_audit` lever's word
 names the set and its digest (`on:<set>:<digest>`). A set is never edited.
 
 - `t1`: the maintainer's wording, approved as drafted.

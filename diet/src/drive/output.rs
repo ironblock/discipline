@@ -1,5 +1,5 @@
 //! A tool output capped as it arrives on the trunk, with a pointer to the
-//! whole of it (#554): the one disposition that helps before a seam -- the
+//! whole of it (#554): the one disposition that helps before a meditation -- the
 //! README's 300 KB file read in turn two, paid for on every request after.
 //!
 //! By the maintainer's rule, the convention is the other harnesses', by

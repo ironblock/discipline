@@ -1,58 +1,58 @@
-.ex-seam {
+.ex-meditation {
   display: flex;
   align-items: center;
   gap: 1rem;
   margin: 1.5rem 0 0.5rem;
-  color: var(--seam);
+  color: var(--meditation);
   font: var(--size-chrome) / 1.4 var(--font-chrome);
   position: relative;
 }
 
-.ex-seam__rule {
+.ex-meditation__rule {
   flex: 1 1 2rem;
-  height: var(--seam-thickness, 0);
-  border-top: var(--seam-line, 1px solid);
-  border-color: color-mix(in oklab, var(--seam) 60%, transparent);
+  height: var(--meditation-thickness, 0);
+  border-top: var(--meditation-line, 1px solid);
+  border-color: color-mix(in oklab, var(--meditation) 60%, transparent);
   border-radius: 999px;
-  box-shadow: var(--seam-groove, 0 0 0 transparent), 0 0 var(--glow-radius) color-mix(in oklab, var(--seam) var(--glow-seam), transparent);
+  box-shadow: var(--meditation-groove, 0 0 0 transparent), 0 0 var(--glow-radius) color-mix(in oklab, var(--meditation) var(--glow-meditation), transparent);
 }
 
-.ex-seam__label {
+.ex-meditation__label {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 0.35rem 1rem;
 }
 
-.ex-seam__label strong {
+.ex-meditation__label strong {
   font-weight: 600;
 }
 
-.ex-seam__kind {
+.ex-meditation__kind {
   text-transform: uppercase;
   letter-spacing: 0.1em;
 }
 
-.ex-seam__reason {
+.ex-meditation__reason {
   color: var(--ink-muted);
 }
 
-/* An automatic seam's size (#633). */
-.ex-seam__size {
+/* An automatic meditation's size (#633). */
+.ex-meditation__size {
   color: var(--warn);
 }
 
 /* The operator's changes the refill carried, and the flags it left open (#150). */
-.ex-seam__operator {
+.ex-meditation__operator {
   color: var(--warn);
 }
 
-/* The background commands still running at this seam (#614): a row under the rule, one line per job. */
-.ex-seam:has(.ex-seam__background) {
+/* The background commands still running at this meditation (#614): a row under the rule, one line per job. */
+.ex-meditation:has(.ex-meditation__background) {
   flex-wrap: wrap;
 }
 
-.ex-seam__background {
+.ex-meditation__background {
   flex: 1 0 100%;
   display: grid;
   gap: 0.25rem;
@@ -62,7 +62,7 @@
   justify-items: center;
 }
 
-.ex-seam__job {
+.ex-meditation__job {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
@@ -70,23 +70,23 @@
   max-width: 100%;
 }
 
-.ex-seam__job-command,
-.ex-seam__job-output {
+.ex-meditation__job-command,
+.ex-meditation__job-output {
   font: var(--size-tool) / 1.4 var(--font-tool);
   overflow-wrap: anywhere;
 }
 
-.ex-seam__job-since,
-.ex-seam__job-output {
+.ex-meditation__job-since,
+.ex-meditation__job-output {
   color: var(--ink-muted);
 }
 
 /* Refilled over the operator's unaddressed changes (#150's gate). */
-.ex-seam__anyway {
+.ex-meditation__anyway {
   color: var(--warn);
 }
 
 /* A compaction tail that kept no turn (#693). */
-.ex-seam__zero {
+.ex-meditation__zero {
   color: var(--warn);
 }

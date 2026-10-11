@@ -16,7 +16,7 @@ export interface Receipt {
   readonly patches: number;
   readonly liveEntries: number;
   readonly mimicry: number;
-  /** For each refill, ms from the trunk's last node finishing to the seam. */
+  /** For each refill, ms from the trunk's last node finishing to the meditation. */
   readonly idleBeforeRefill: readonly number[];
   /** Side-call time, ms: each side call from its request to its settling. */
   readonly sideCallMs: number;
@@ -50,9 +50,9 @@ export function receiptOf(lines: readonly LogLine[]): Omit<Receipt, 'liveEntries
     ...of('response').filter((e) => trunkRequests.has(e.to_request)).map((e) => e.t),
     ...of('tool_call').map((e) => e.t),
   ];
-  const idleBeforeRefill = of('seam').map((seam) => {
-    const last = Math.max(...trunkDone.filter((t) => t <= seam.t));
-    return Number.isFinite(last) ? seam.t - last : 0;
+  const idleBeforeRefill = of('meditation').map((meditation) => {
+    const last = Math.max(...trunkDone.filter((t) => t <= meditation.t));
+    return Number.isFinite(last) ? meditation.t - last : 0;
   });
 
   // Each side call from its request to its settling (or now, still running).
@@ -63,7 +63,7 @@ export function receiptOf(lines: readonly LogLine[]): Omit<Receipt, 'liveEntries
   });
 
   // Each person's gap: the turn handed back, to their next ask or refill -- or, measured, its attended part.
-  const acts = [...asks, ...of('seam')].map((e) => e.t).sort((a, b) => a - b);
+  const acts = [...asks, ...of('meditation')].map((e) => e.t).sort((a, b) => a - b);
   const measured = new Map(of('idle.gap').map((g) => [g.opened_by, g] as const));
   const settles = of('turn.settled');
   const gaps: Span[] = settles.map((s) => {

@@ -77,20 +77,20 @@ describe('fold over the specimen', () => {
     expect(byId.get('f3')?.state).toBe('retired');
   });
 
-  it('is ratifying while the seam-time fork runs', () => {
+  it('is ratifying while the meditation-time fork runs', () => {
     const s = at(4, 1000);
     expect(s.state).toBe('ratify');
     expect(s.occupancy[1]).toEqual({ id: s.id('r/1'), lane: 'ratify' });
   });
 
-  it('opens a second era at the seam, whose system prompt is the render', () => {
+  it('opens a second era at the meditation, whose system prompt is the render', () => {
     const s = at(4);
     expect(s.eras).toHaveLength(2);
     expect(s.phase).toBe('build');
     const era = s.eras[1]!;
     expect(era.system.render).toBe('v1');
-    expect(era.seam?.phase).toEqual({ from: 'spec', to: 'build' });
-    expect(era.seam?.prefixAfter).toBeLessThan(era.seam?.prefixBefore ?? 0);
+    expect(era.meditation?.phase).toEqual({ from: 'spec', to: 'build' });
+    expect(era.meditation?.prefixAfter).toBeLessThan(era.meditation?.prefixBefore ?? 0);
   });
 
   it('prices the build turn ask against the refilled prefix, not the transcript', () => {

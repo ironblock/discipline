@@ -1129,7 +1129,7 @@ mod tests {
         for site in Site::ALL {
             assert_eq!(Site::from_name(site.name()), Some(*site));
         }
-        assert_eq!(Site::from_name("seam"), None);
+        assert_eq!(Site::from_name("meditation"), None);
     }
 
     #[test]

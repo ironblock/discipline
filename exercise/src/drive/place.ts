@@ -262,11 +262,11 @@ export class Placer {
             ...(e.authority !== undefined ? { authority: e.authority } : {}),
           },
         ];
-      case 'seam':
+      case 'meditation':
         this.#name(e.id);
         return [
           {
-            kind: 'seam',
+            kind: 'meditation',
             t: e.t,
             at_turn: e.at_turn,
             reason: e.reason,

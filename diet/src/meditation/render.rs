@@ -8,11 +8,11 @@
 //! engine's checkpoint boundaries. (One model, one engine, one card;
 //! re-measure per substrate.) So the prefix stays byte-identical during a
 //! phase, state accumulates outside the context, and this function runs only
-//! at a seam.
+//! at a meditation.
 //!
 //! It is a **pure function** of the object and the phase. Nothing here reads
 //! a clock, a counter, or anything that moves: two renders of the same object
-//! in the same phase are the same bytes, and the byte-identity claim the seam
+//! in the same phase are the same bytes, and the byte-identity claim the meditation
 //! controller makes is only checkable because that is true.
 
 use std::fmt::Write as _;
@@ -246,7 +246,7 @@ fn head(object: &WorkingObject, phase: Option<&str>) -> String {
     // repository exists to measure -- so a frame naming one of them would be
     // naming whichever happened to be first.
     //
-    // This CHANGES THE RENDERED BYTES of every seam, and there was no option
+    // This CHANGES THE RENDERED BYTES of every meditation, and there was no option
     // that did not: the field this line used to read, `substrate.name`, no
     // longer exists. Prose identity was what the digest replaced. The frame's
     // shape is unchanged -- one line, one label, one value -- which is what
@@ -289,17 +289,17 @@ pub fn entries(object: &WorkingObject) -> String {
     lines
 }
 
-/// The trunk a served session continues from after a seam (#493): its
+/// The trunk a served session continues from after a meditation (#493): its
 /// `head`, untouched, then [`refill_message`] carrying `render`, and nothing
 /// of the old trunk.
 ///
 /// A TOTAL compaction, by the maintainer's intent on #493: the refill is not
 /// a summary of the old turns with the later ones kept, and it does not try
-/// to make the model believe it is continuing the session. Each seam hands it
+/// to make the model believe it is continuing the session. Each meditation hands it
 /// a better starting point, built from working memory alone.
 ///
 /// The system message is never changed (#597, the maintainer: "System
-/// prompt mutation is forbidden"): after a seam it is byte-identical to the
+/// prompt mutation is forbidden"): after a meditation it is byte-identical to the
 /// session's first. The session and the record's projection both rebuild
 /// the trunk through this one function, so the projection's head check
 /// holds the session to it.
@@ -310,7 +310,7 @@ pub fn refill(head: &[Message], render: &str) -> Vec<Message> {
     trunk
 }
 
-/// [`refill`], with `after` -- a seam's list of the background commands
+/// [`refill`], with `after` -- a meditation's list of the background commands
 /// still running (#614) -- following the summary in the same message, as
 /// Qwen Code puts its list after the summary
 /// (`chatCompressionService.ts:1139`).
@@ -323,7 +323,7 @@ pub fn refill_with(head: &[Message], render: &str, after: Option<&str>) -> Vec<M
     trunk
 }
 
-/// The message a seam's refill rides in (#597), shaped as Pi and `OpenCode`
+/// The message a meditation's refill rides in (#597), shaped as Pi and `OpenCode`
 /// 2 carry a compaction summary: a user message, the text inside
 /// `<summary>` tags, opened and closed on lines of their own (Pi
 /// `core/messages.ts:11-17`, `OpenCode` 2 `session/runner/to-llm-message.ts:
@@ -335,7 +335,7 @@ pub fn refill_message(render: &str) -> Message {
     Message::new(Role::User, format!("<summary>\n{render}\n</summary>"))
 }
 
-/// The trunk after a seam logged before #597: `render` appended to the
+/// The trunk after a meditation logged before #597: `render` appended to the
 /// head's system message after a blank line, or a system message of its
 /// own when the head has none. What those logs' heads were sent, so they
 /// still rebuild.
@@ -374,7 +374,7 @@ pub fn estimated_tokens(message: &Message) -> u64 {
     u64::try_from(chars.div_ceil(4)).unwrap_or(u64::MAX)
 }
 
-/// The recent tail of `turns` -- the trunk after its head -- a seam keeps
+/// The recent tail of `turns` -- the trunk after its head -- a meditation keeps
 /// after the refill (#552): whole turns, from the newest back, while their
 /// estimated tokens stay within `budget`. A turn starts at its user message:
 /// the tail never starts at an assistant reply or a tool result, so no call

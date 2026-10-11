@@ -18,8 +18,8 @@
 
 import type { Timings, Unplaced } from './script.ts';
 
-/** What starts a beat: the session opening, a person's ask, a declared seam. */
-export type Trigger = 'open' | 'send' | 'seam';
+/** What starts a beat: the session opening, a person's ask, a declared meditation. */
+export type Trigger = 'open' | 'send' | 'meditation';
 
 /** One stretch of a session, started by one action. `t` is relative to the beat's start. */
 export interface Beat {
@@ -339,7 +339,7 @@ export const SPECIMEN: readonly Beat[] = [
     ],
   },
   {
-    trigger: 'seam',
+    trigger: 'meditation',
     events: [
       {
         kind: 'fork',
@@ -367,7 +367,7 @@ export const SPECIMEN: readonly Beat[] = [
       { kind: 'patch', t: 3920, id: 'p/9', from: 'r/1', op: 'retire', entry: { id: 'f3', category: 'Facts', text: 'the rest of report.rs is column-width and colour handling; not needed for --json' } },
       { kind: 'patch', t: 3920, id: 'p/10', from: 'r/1', op: 'add', entry: { id: 'n1', category: 'Next', text: 'implement --json in Args and Report::print, then a test per shape' } },
       {
-        kind: 'seam',
+        kind: 'meditation',
         t: 5100,
         id: 's/1',
         at_turn: 2,

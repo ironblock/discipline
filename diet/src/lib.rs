@@ -14,5 +14,5 @@ pub mod dogma;
 pub mod drive;
 pub mod formats;
 pub mod isolation;
+pub mod meditation;
 pub mod object;
-pub mod seam;

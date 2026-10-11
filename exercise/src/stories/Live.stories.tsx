@@ -12,20 +12,21 @@ import refillMessage from '../../../diet/formats/log/fixtures/valid/a-v7-seam-wh
 import leversDeclared from '../../../diet/formats/log/fixtures/valid/a-v7-session-declaring-its-levers.jsonl?raw';
 import selfCapturePatch from '../../../diet/formats/log/fixtures/valid/a-v7-self-capture-patch-named-by-its-lane.jsonl?raw';
 import overflowInferred from '../../../diet/formats/log/fixtures/valid/a-v7-overflow-told-from-the-prompts-size.jsonl?raw';
-import windowSeam from '../../../diet/formats/log/fixtures/valid/a-v7-window-seam-under-the-turn-it-makes-fit.jsonl?raw';
-import pruneSeam from '../../../diet/formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl?raw';
+import windowMeditation from '../../../diet/formats/log/fixtures/valid/a-v7-window-seam-under-the-turn-it-makes-fit.jsonl?raw';
+import pruneMeditation from '../../../diet/formats/log/fixtures/valid/a-v7-prune-applied-at-the-turns-seam.jsonl?raw';
 import poolRefused from '../../../diet/formats/log/fixtures/valid/a-v7-fork-refused-for-the-pool-and-one-that-may-displace-the-trunk-cache.jsonl?raw';
 import backgroundCalls from '../../../diet/formats/log/fixtures/valid/a-v7-call-started-in-the-background.jsonl?raw';
 import triggeredForks from '../../../diet/formats/log/fixtures/valid/a-v7-gap-with-two-triggered-forks.jsonl?raw';
-import auditedSeam from '../../../diet/formats/log/fixtures/valid/a-v7-seam-audited-on-its-lane-and-warmed.jsonl?raw';
+import auditedMeditation from '../../../diet/formats/log/fixtures/valid/a-v7-seam-audited-on-its-lane-and-warmed.jsonl?raw';
 import operatorEdits from '../../../diet/formats/log/fixtures/valid/a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl?raw';
-import seamBackground from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-listed-a-running-background-command.jsonl?raw';
-import seamHeld from '../../../diet/formats/log/fixtures/valid/a-v7-seam-held-for-the-operator-then-refilled-anyway.jsonl?raw';
+import meditationBackground from '../../../diet/formats/log/fixtures/valid/a-v7-seam-that-listed-a-running-background-command.jsonl?raw';
+import meditationHeld from '../../../diet/formats/log/fixtures/valid/a-v7-seam-held-for-the-operator-then-refilled-anyway.jsonl?raw';
 import tailKeptNone from '../../../diet/formats/log/fixtures/valid/a-v7-seam-whose-tail-kept-no-turn.jsonl?raw';
 import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-turn.jsonl?raw';
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
+import { respelled } from '../drive/spelling.ts';
 import { outcomeOf } from '../ui/sets.ts';
 import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
@@ -332,7 +333,7 @@ export const AttachAScreenshot: Story = {
 
 /**
  * `?drive`: a log that declares no phase graph -- so the composer offers no move, says so, and its refill sends a
- * declare-seam naming no phase.
+ * declare-meditation naming no phase.
  */
 export const ServedRefillNamesNoPhase: Story = {
   name: '?drive: refill offers no phase, since the drive declares none',
@@ -343,8 +344,8 @@ export const ServedRefillNamesNoPhase: Story = {
     await expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase not declared');
     posted.length = 0;
     await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'refill')!);
-    // The bare declare-seam (with the idle gap it ends): no phase named.
-    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-seam']));
+    // The bare declare-meditation (with the idle gap it ends): no phase named.
+    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-meditation']));
     await expect(posted.some((p) => 'to' in (p as object))).toBe(false);
   },
 };
@@ -433,7 +434,7 @@ export const ServedPhaseGraph: Story = {
     await expect([...(select?.options ?? [])].map((o) => o.value)).toEqual(['review']);
     posted.length = 0;
     await userEvent.click([...canvasElement.querySelectorAll('button')].find((b) => b.textContent === 'refill')!);
-    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-seam']));
+    await waitFor(async () => expect(posted.map((p) => (p as { kind: string }).kind)).toEqual(['declare-meditation']));
     await expect((posted[0] as { phase?: string }).phase).toBe('review');
   },
 };
@@ -508,9 +509,9 @@ export const ServedSelfCapture: Story = {
   },
 };
 
-/** `?drive`, log v7 (#604): the seam's refill sent as a user message -- the harness's summary, not the operator's ask. */
+/** `?drive`, log v7 (#604): the meditation's refill sent as a user message -- the harness's summary, not the operator's ask. */
 export const ServedRefillSummary: Story = {
-  name: '?drive: the seam’s refill message is labelled as the harness’s summary',
+  name: '?drive: the meditation’s refill message is labelled as the harness’s summary',
   args: { drive: true, web: serving(refillMessage) },
   play: async ({ canvasElement }) => {
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-trunk [data-tone="system"]').length).toBeGreaterThan(1));
@@ -597,36 +598,36 @@ export const ServedOverflowInferred: Story = {
   },
 };
 
-/** `?drive`, log v7 (#633): an automatic seam where it fell -- between the ask and its answer -- with the size that fired it. */
-export const ServedWindowSeam: Story = {
-  name: '?drive: an automatic window seam where it falls, with the size that fired it',
-  args: { drive: true, web: serving(windowSeam) },
+/** `?drive`, log v7 (#633): an automatic meditation where it fell -- between the ask and its answer -- with the size that fired it. */
+export const ServedWindowMeditation: Story = {
+  name: '?drive: an automatic window meditation where it falls, with the size that fired it',
+  args: { drive: true, web: serving(windowMeditation) },
   play: async ({ canvasElement }) => {
-    const seam = await waitFor(async () => {
-      const found = canvasElement.querySelector<HTMLElement>('.ex-seam[data-reason="window"]');
+    const meditation = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-meditation[data-reason="window"]');
       await expect(found).not.toBeNull();
       return found!;
     });
-    await expect(seam.querySelector('.ex-seam__size')?.textContent).toBe('automatic · 150k of a 163.8k window');
+    await expect(meditation.querySelector('.ex-meditation__size')?.textContent).toBe('automatic · 150k of a 163.8k window');
     // Where it fell: after turn 2's ask, before its answer.
-    const order = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="user"], .ex-trunk .ex-seam, .ex-trunk [data-tone="assistant"]')].map((n) =>
-      n.classList.contains('ex-seam') ? 'seam' : (n as HTMLElement).dataset['tone'],
+    const order = [...canvasElement.querySelectorAll('.ex-trunk [data-tone="user"], .ex-trunk .ex-meditation, .ex-trunk [data-tone="assistant"]')].map((n) =>
+      n.classList.contains('ex-meditation') ? 'meditation' : (n as HTMLElement).dataset['tone'],
     );
-    await expect(order.slice(-3)).toEqual(['user', 'seam', 'assistant']);
+    await expect(order.slice(-3)).toEqual(['user', 'meditation', 'assistant']);
   },
 };
 
-/** `?drive`, log v7 (#630): the model prunes a call's output, and the seam replaces it with its pointer. */
+/** `?drive`, log v7 (#630): the model prunes a call's output, and the meditation replaces it with its pointer. */
 export const ServedPrunedOutput: Story = {
-  name: '?drive: a pruned output, replaced by its pointer at the seam',
-  args: { drive: true, web: serving(pruneSeam) },
+  name: '?drive: a pruned output, replaced by its pointer at the meditation',
+  args: { drive: true, web: serving(pruneMeditation) },
   play: async ({ canvasElement }) => {
     const mark = await waitFor(async () => {
       const found = canvasElement.querySelector<HTMLElement>('.ex-trunk .ex-pruned');
       await expect(found).not.toBeNull();
       return found!;
     });
-    await expect(mark.textContent).toBe('pruned by the model (14 B) · replaced by its pointer at the seam');
+    await expect(mark.textContent).toBe('pruned by the model (14 B) · replaced by its pointer at the meditation');
   },
 };
 
@@ -697,10 +698,10 @@ const auditBranch = (root: HTMLElement) =>
     return found!;
   });
 
-/** `?drive`, log v7 (#646): a seam's audit runs in its own lane, coloured as itself, and says what it did to working memory. */
-export const ServedSeamAudit: Story = {
-  name: '?drive: a seam’s audit in its own lane, with what it kept, updated and removed',
-  args: { drive: true, web: serving(auditedSeam) },
+/** `?drive`, log v7 (#646): a meditation's audit runs in its own lane, coloured as itself, and says what it did to working memory. */
+export const ServedMeditationAudit: Story = {
+  name: '?drive: a meditation’s audit in its own lane, with what it kept, updated and removed',
+  args: { drive: true, web: serving(auditedMeditation) },
   play: async ({ canvasElement }) => {
     const branch = await auditBranch(canvasElement);
     await expect(branch.querySelector('.ex-branch__audit')?.textContent).toBe('kept 0 · updated 1 · removed 0');
@@ -711,12 +712,12 @@ export const ServedSeamAudit: Story = {
 };
 
 /** The same audit answered in words the grammar cannot read: drawn as unparseable, with nothing changed. */
-export const ServedSeamAuditUnparseable: Story = {
-  name: '?drive: a seam’s audit the grammar could not read',
+export const ServedMeditationAuditUnparseable: Story = {
+  name: '?drive: a meditation’s audit the grammar could not read',
   args: {
     drive: true,
     web: serving(
-      auditedSeam
+      auditedMeditation
         .trimEnd()
         .split('\n')
         .filter((l) => !(l.includes('"kind":"patch"') && l.includes('"fork":8')))
@@ -746,20 +747,20 @@ export const ServedPhaseProposal: Story = {
     });
     await expect(dock.querySelector('.ex-composer__proposal-move')?.textContent).toBe('plan → build');
     await expect(dock.querySelector('.ex-composer__proposal-reason')?.textContent).toBe('the spec is settled');
-    await expect([...dock.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['seam', 'continue', 'stay']);
-    // Working memory holds nothing, so there is nothing to seam: serve would refuse it (#685).
-    const seam = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'seam')!;
-    await expect(seam.disabled).toBe(true);
-    await expect(dock.querySelector('.ex-composer__proposal-why')?.textContent).toBe('no seam: working memory holds nothing yet');
+    await expect([...dock.querySelectorAll('button')].map((b) => b.textContent)).toEqual(['meditation', 'continue', 'stay']);
+    // Working memory holds nothing, so there is nothing to meditation: serve would refuse it (#685).
+    const meditation = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'meditation')!;
+    await expect(meditation.disabled).toBe(true);
+    await expect(dock.querySelector('.ex-composer__proposal-why')?.textContent).toBe('no meditation: working memory holds nothing yet');
     posted.length = 0;
     await userEvent.click([...dock.querySelectorAll('button')].find((b) => b.textContent === 'continue')!);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'continue' }]));
   },
 };
 
-/** `?drive` (#685): the same proposal with a live entry in working memory -- the seam is offered, and posts the ruling. */
+/** `?drive` (#685): the same proposal with a live entry in working memory -- the meditation is offered, and posts the ruling. */
 export const ServedPhaseProposalWithMemory: Story = {
-  name: '?drive: a phase proposal offers the seam when working memory has something to refill from',
+  name: '?drive: a phase proposal offers the meditation when working memory has something to refill from',
   args: { drive: true, web: posting(PHASE_PROPOSED_WITH_MEMORY.map((l) => JSON.stringify(l)).join('\n')) },
   play: async ({ canvasElement }) => {
     const dock = await waitFor(async () => {
@@ -767,12 +768,12 @@ export const ServedPhaseProposalWithMemory: Story = {
       await expect(found).not.toBeNull();
       return found!;
     });
-    const seam = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'seam')!;
-    await expect(seam.disabled).toBe(false);
+    const meditation = [...dock.querySelectorAll('button')].find((b) => b.textContent === 'meditation')!;
+    await expect(meditation.disabled).toBe(false);
     await expect(dock.querySelector('.ex-composer__proposal-why')).toBeNull();
     posted.length = 0;
-    await userEvent.click(seam);
-    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'seam' }]));
+    await userEvent.click(meditation);
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'meditation' }]));
   },
 };
 
@@ -787,9 +788,9 @@ export const ServedPhaseRuled: Story = {
   },
 };
 
-/** `?drive`, log v7 (#150): the operator's edited entry, their flag on it, the model's writes refused over it, and the seam's account. */
+/** `?drive`, log v7 (#150): the operator's edited entry, their flag on it, the model's writes refused over it, and the meditation's account. */
 export const ServedOperatorEdits: Story = {
-  name: '?drive: the operator’s edit and flag in working memory, and what the seam left unaddressed',
+  name: '?drive: the operator’s edit and flag in working memory, and what the meditation left unaddressed',
   args: { drive: true, web: serving(operatorEdits) },
   play: async ({ canvasElement }) => {
     const entry = await waitFor(async () => {
@@ -799,35 +800,35 @@ export const ServedOperatorEdits: Story = {
     });
     await expect(entry.querySelector('.ex-memory__flag')?.textContent).toBe('flag · is one team enough?');
     await expect(entry.querySelector('.ex-memory__refused')?.textContent).toBe('refused: retire by self-capture, supersede by fork 7');
-    const seam = canvasElement.querySelector<HTMLElement>('.ex-seam');
-    await expect(seam?.querySelector('.ex-seam__operator')?.textContent).toBe('operator: edit d2, flag d2 · unaddressed: d2');
+    const meditation = canvasElement.querySelector<HTMLElement>('.ex-meditation');
+    await expect(meditation?.querySelector('.ex-meditation__operator')?.textContent).toBe('operator: edit d2, flag d2 · unaddressed: d2');
   },
 };
 
-/** `?drive`, log v7 (#614, #667): a seam lists each background command still running, as the refill sent it. */
-export const ServedSeamBackground: Story = {
-  name: '?drive: a seam lists the background commands still running',
-  args: { drive: true, web: serving(seamBackground) },
+/** `?drive`, log v7 (#614, #667): a meditation lists each background command still running, as the refill sent it. */
+export const ServedMeditationBackground: Story = {
+  name: '?drive: a meditation lists the background commands still running',
+  args: { drive: true, web: serving(meditationBackground) },
   play: async ({ canvasElement }) => {
     const job = await waitFor(async () => {
-      const found = canvasElement.querySelector<HTMLElement>('.ex-seam .ex-seam__job');
+      const found = canvasElement.querySelector<HTMLElement>('.ex-meditation .ex-meditation__job');
       await expect(found).not.toBeNull();
       return found!;
     });
     await expect(job.dataset.job).toBe('bg_0123abcd');
-    await expect(job.querySelector('.ex-seam__job-command')?.textContent).toBe('python3 -m http.server 8765');
-    await expect(job.querySelector('.ex-seam__job-since')?.textContent).toBe('no output since it started');
-    await expect(job.querySelector('.ex-seam__job-output')?.textContent).toBe('background/shell-bg_0123abcd.output');
+    await expect(job.querySelector('.ex-meditation__job-command')?.textContent).toBe('python3 -m http.server 8765');
+    await expect(job.querySelector('.ex-meditation__job-since')?.textContent).toBe('no output since it started');
+    await expect(job.querySelector('.ex-meditation__job-output')?.textContent).toBe('background/shell-bg_0123abcd.output');
   },
 };
 
 /** `?drive`, log v7 (#693): a compaction tail that kept no turn warns the operator, in the maintainer's words. */
 export const ServedTailKeptNoTurn: Story = {
-  name: '?drive: a seam whose tail kept no turn warns the operator',
+  name: '?drive: a meditation whose tail kept no turn warns the operator',
   args: { drive: true, web: serving(tailKeptNone) },
   play: async ({ canvasElement }) => {
     const warning = await waitFor(async () => {
-      const found = canvasElement.querySelector<HTMLElement>('.ex-seam .ex-seam__zero');
+      const found = canvasElement.querySelector<HTMLElement>('.ex-meditation .ex-meditation__zero');
       await expect(found).not.toBeNull();
       return found!;
     });
@@ -835,12 +836,16 @@ export const ServedTailKeptNoTurn: Story = {
   },
 };
 
-/** The held-seam fixture up to its hold: the seam waits on the operator, nothing refilled yet. */
-const UNTIL_HELD = seamHeld.split('\n').slice(0, seamHeld.split('\n').findIndex((line) => line.includes('"kind":"seam.held"')) + 1).join('\n');
+/** The held-meditation fixture up to its hold: the meditation waits on the operator, nothing refilled yet. */
+// The fixture is a v7 log: its line is found as the surface reads it, in either spelling (#583).
+const UNTIL_HELD = meditationHeld
+  .split('\n')
+  .slice(0, meditationHeld.split('\n').findIndex((line) => respelled(JSON.parse(line) as { kind: string }).kind === 'meditation.held') + 1)
+  .join('\n');
 
-/** `?drive`, log v7 (#150's gate, #698): a seam held for the operator names what is unaddressed and offers refill anyway. */
-export const ServedSeamHeld: Story = {
-  name: '?drive: a seam held for the operator, with refill anyway and the alternatives',
+/** `?drive`, log v7 (#150's gate, #698): a meditation held for the operator names what is unaddressed and offers refill anyway. */
+export const ServedMeditationHeld: Story = {
+  name: '?drive: a meditation held for the operator, with refill anyway and the alternatives',
   args: { drive: true, web: posting(UNTIL_HELD) },
   play: async ({ canvasElement }) => {
     const held = await waitFor(async () => {
@@ -856,17 +861,17 @@ export const ServedSeamHeld: Story = {
   },
 };
 
-/** The whole fixture: the operator refilled anyway -- no hold waits, and the seam says how it was refilled. */
-export const ServedSeamRefilledAnyway: Story = {
-  name: '?drive: a seam refilled anyway over unaddressed changes',
-  args: { drive: true, web: serving(seamHeld) },
+/** The whole fixture: the operator refilled anyway -- no hold waits, and the meditation says how it was refilled. */
+export const ServedMeditationRefilledAnyway: Story = {
+  name: '?drive: a meditation refilled anyway over unaddressed changes',
+  args: { drive: true, web: serving(meditationHeld) },
   play: async ({ canvasElement }) => {
-    const seam = await waitFor(async () => {
-      const found = canvasElement.querySelector<HTMLElement>('.ex-seam .ex-seam__anyway');
+    const meditation = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-meditation .ex-meditation__anyway');
       await expect(found).not.toBeNull();
       return found!;
     });
-    await expect(seam.textContent).toBe('refilled anyway');
+    await expect(meditation.textContent).toBe('refilled anyway');
     await expect(canvasElement.querySelector('.ex-composer__held')).toBeNull();
   },
 };

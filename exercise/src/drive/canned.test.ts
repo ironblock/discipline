@@ -17,7 +17,7 @@ async function settled() {
   return { transport, lines, open: open.seq };
 }
 
-const gap = (opened_by: number, ended_by: 'ask' | 'seam' | 'cancel' | 'end' = 'ask') => ({ opened_by, notice: 0, read: 1000, compose: 500, away: 0, blocked: 0, ended_by });
+const gap = (opened_by: number, ended_by: 'ask' | 'meditation' | 'cancel' | 'end' = 'ask') => ({ opened_by, notice: 0, read: 1000, compose: 500, away: 0, blocked: 0, ended_by });
 
 describe('the canned transport, as the drive (#146, ruling (b) on #117)', () => {
   it('logs an admitted command’s gap just before the first line the command pushes', async () => {
@@ -38,7 +38,7 @@ describe('the canned transport, as the drive (#146, ruling (b) on #117)', () => 
     expect(lines[before]?.kind).toBe('ask');
     expect(lines.slice(before).some((l) => l.kind === 'idle.gap')).toBe(false);
     const other = await settled();
-    await expect(other.transport.dispatch({ kind: 'ask', text: 'next' }, { idle_gap: gap(other.open, 'seam') })).resolves.toEqual({ ok: true });
+    await expect(other.transport.dispatch({ kind: 'ask', text: 'next' }, { idle_gap: gap(other.open, 'meditation') })).resolves.toEqual({ ok: true });
     other.transport.close();
     expect(other.lines.some((l) => l.kind === 'idle.gap')).toBe(false);
   });
@@ -51,16 +51,16 @@ describe('the canned transport, as the drive (#146, ruling (b) on #117)', () => 
     expect(cancelled).toMatchObject({ reason: 'cancelled' });
     const before = lines.length;
     // The script's next beat is the refill.
-    await expect(transport.dispatch({ kind: 'seam', to: 'build' }, { idle_gap: gap(cancelled?.seq ?? -1, 'seam') })).resolves.toEqual({ ok: true });
+    await expect(transport.dispatch({ kind: 'meditation', to: 'build' }, { idle_gap: gap(cancelled?.seq ?? -1, 'meditation') })).resolves.toEqual({ ok: true });
     transport.close();
-    expect(lines[before]).toMatchObject({ kind: 'idle.gap', opened_by: cancelled?.seq, ended_by: 'seam' });
+    expect(lines[before]).toMatchObject({ kind: 'idle.gap', opened_by: cancelled?.seq, ended_by: 'meditation' });
   });
 
   it('drops the gap of a refused command', async () => {
     const { transport, lines, open } = await settled();
     const before = lines.length;
-    // The script expects an ask next, not a refill: the seam is refused, and its gap with it.
-    const ack = await transport.dispatch({ kind: 'seam', to: 'build' }, { idle_gap: gap(open, 'seam') });
+    // The script expects an ask next, not a refill: the meditation is refused, and its gap with it.
+    const ack = await transport.dispatch({ kind: 'meditation', to: 'build' }, { idle_gap: gap(open, 'meditation') });
     transport.close();
     expect(ack.ok).toBe(false);
     expect(lines.slice(before).some((l) => l.kind === 'idle.gap')).toBe(false);

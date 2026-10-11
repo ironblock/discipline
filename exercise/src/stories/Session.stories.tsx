@@ -148,7 +148,7 @@ export const Refilled: Story = {
   name: '8 · refilled into build',
   args: { cursor: MOMENTS.refilled },
   play: async ({ canvasElement }) => {
-    await expect(q(canvasElement, '.ex-seam')).not.toBeNull();
+    await expect(q(canvasElement, '.ex-meditation')).not.toBeNull();
     await expect(q(canvasElement, '[data-era="1"] .ex-block--system')).not.toBeNull();
   },
 };
@@ -184,7 +184,7 @@ export const Done: Story = {
   play: async ({ canvasElement }) => {
     // The session at rest after both phases: one refill between them, every side call settled, memory kept.
     await expect(q(canvasElement, '.ex-session')?.getAttribute('data-state')).toBe('awaiting');
-    await expect(canvasElement.querySelectorAll('.ex-era__seam .ex-seam')).toHaveLength(1);
+    await expect(canvasElement.querySelectorAll('.ex-era__meditation .ex-meditation')).toHaveLength(1);
     await expect(canvasElement.querySelectorAll('.ex-branch[data-outcome="running"], .ex-branch[data-outcome="pending"]')).toHaveLength(0);
     await expect(canvasElement.querySelectorAll('.ex-branch').length).toBeGreaterThan(0);
     await expect(canvasElement.querySelectorAll('.ex-memory__entry')).toHaveLength(11);

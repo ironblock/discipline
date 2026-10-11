@@ -27,6 +27,7 @@ pub mod operating_points;
 pub mod record;
 pub mod regimen;
 pub mod shell;
+pub mod spelling;
 pub mod verdict;
 
 /// A format with a grammar and a conformance-fixture directory.

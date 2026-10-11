@@ -116,7 +116,7 @@ export const Minimap: Story = {
     const stage = canvasElement.querySelector('.ex-stage');
     await waitFor(() => expect(map.querySelectorAll('.ex-mm__lane')).toHaveLength(94));
     await expect(map.querySelectorAll('.ex-mm__trunk')).toHaveLength(stage?.querySelectorAll('.ex-trunk .ex-block, .ex-trunk .ex-turnend').length ?? -1);
-    await expect(map.querySelectorAll('.ex-mm__seam')).toHaveLength(2);
+    await expect(map.querySelectorAll('.ex-mm__meditation')).toHaveLength(2);
     const alarms = stage?.querySelectorAll('[data-alarm]').length ?? 0;
     await expect(alarms).toBeGreaterThan(0);
     await expect(map.querySelectorAll('[data-alarm]')).toHaveLength(alarms);
@@ -201,7 +201,7 @@ export const FollowsTheBottom: Story = {
     const where = (step: string) => `${step}: scrollY ${Math.round(window.scrollY)} + view ${window.innerHeight} of ${page.scrollHeight}`;
     const later = canvasElement.querySelector('[data-advance]') as HTMLElement;
     await waitFor(async () => expect(canvasElement.querySelectorAll('.ex-branchcell .ex-cable, .ex-wiring [data-net]').length).toBeGreaterThan(0));
-    // Layout settles over a few passes (placements, seam pads); read heights only once it has.
+    // Layout settles over a few passes (placements, meditation pads); read heights only once it has.
     const settled = async () => {
       let last = -1;
       await waitFor(
@@ -409,17 +409,17 @@ export const VoxelStress: Story = {
 };
 
 /**
- * The chrome around the trunk, legible in every look: the seam, working
+ * The chrome around the trunk, legible in every look: the meditation, working
  * memory, the receipt and the header read at WCAG AA for small text (4.5:1)
  * -- text set in the faint ink, a label or an id, at 3:1, as a footer's
  * units are; an entry struck out as superseded or retired is faint on
- * purpose, and not held to it. The minimap's seams stand off its track, and
+ * purpose, and not held to it. The minimap's meditations stand off its track, and
  * its alarm ticks off the page-coloured halo they are drawn in, at 3:1, as a
  * mark that carries meaning must (WCAG 1.4.11).
  */
 const LEGIBLE = [
-  '.ex-seam__kind',
-  '.ex-seam__reason',
+  '.ex-meditation__kind',
+  '.ex-meditation__reason',
   '.ex-header__item',
   '.ex-lanehead',
   ".ex-memory__entry:not([data-state='superseded'], [data-state='retired']) :is(.ex-memory__text, .ex-memory__id)",
@@ -439,7 +439,7 @@ function haloContrast(el: Element): number {
 /** Measured at rest: with motion still, an entry that just landed is not mid-flash. */
 const ChromeLegible: Story = {
   play: async ({ canvasElement }) => {
-    await waitFor(() => expect(canvasElement.querySelectorAll('.ex-mm__seam').length).toBeGreaterThan(0));
+    await waitFor(() => expect(canvasElement.querySelectorAll('.ex-mm__meditation').length).toBeGreaterThan(0));
     // The faint ink, as this look resolves it: text in it is held to 3:1.
     const probe = canvasElement.querySelector('.ex-root, .ex-session')!.appendChild(document.createElement('span'));
     probe.style.color = 'var(--ink-faint)';
@@ -451,7 +451,7 @@ const ChromeLegible: Story = {
       ...LEGIBLE.flatMap((selector) =>
         [...canvasElement.querySelectorAll(selector)].map((el) => ({ what: `${selector.slice(-24)}`, floor: getComputedStyle(el).color === faint ? 3 : 4.5, ratio: contrast(el) })),
       ),
-      ...[...canvasElement.querySelectorAll('.ex-mm__seam')].map((el) => ({ what: 'minimap seam', floor: 3, ratio: fillContrast(el) })),
+      ...[...canvasElement.querySelectorAll('.ex-mm__meditation')].map((el) => ({ what: 'minimap meditation', floor: 3, ratio: fillContrast(el) })),
       ...[...canvasElement.querySelectorAll('.ex-minimap > [data-alarm]')].map((el) => ({ what: `minimap ${el.getAttribute('data-alarm')} tick`, floor: 3, ratio: haloContrast(el) })),
     ]
       .filter(({ ratio, floor }) => ratio < floor)

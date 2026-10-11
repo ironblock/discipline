@@ -211,12 +211,12 @@ describe('HttpTransport: commands', () => {
     expect(posted).toEqual([{ kind: 'cancel', turn: 2 }]);
   });
 
-  it('declares a seam with the phase picked, and without one when none was (log v7, #563)', async () => {
+  it('declares a meditation with the phase picked, and without one when none was (log v7, #563)', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{}', { status: 200 })) });
-    await transport.dispatch({ kind: 'seam', to: 'build' });
-    await transport.dispatch({ kind: 'seam' });
-    expect(posted).toEqual([{ kind: 'declare-seam', phase: 'build' }, { kind: 'declare-seam' }]);
+    await transport.dispatch({ kind: 'meditation', to: 'build' });
+    await transport.dispatch({ kind: 'meditation' });
+    expect(posted).toEqual([{ kind: 'declare-meditation', phase: 'build' }, { kind: 'declare-meditation' }]);
   });
 
   it('posts a move to the background as serve takes it (#614), and reads its refusal', async () => {
@@ -226,7 +226,7 @@ describe('HttpTransport: commands', () => {
     expect(posted).toEqual([{ kind: 'background' }]);
   });
 
-  it('posts a held seam’s refill-anyway as serve takes it (#150’s gate), and reads its refusal', async () => {
+  it('posts a held meditation’s refill-anyway as serve takes it (#150’s gate), and reads its refusal', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"nothing-held"}', { status: 409 })) });
     await expect(transport.dispatch({ kind: 'refill-anyway' })).resolves.toEqual({ ok: false, refused: 'nothing-held' });
@@ -236,8 +236,8 @@ describe('HttpTransport: commands', () => {
   it('posts the operator’s ruling on a phase proposal as serve takes it (#651), and reads its refusal', async () => {
     const posted: Record<string, unknown>[] = [];
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"no-proposal"}', { status: 409 })) });
-    await expect(transport.dispatch({ kind: 'ratify-phase', call: 'p1', choice: 'seam' })).resolves.toEqual({ ok: false, refused: 'no-proposal' });
-    expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'seam' }]);
+    await expect(transport.dispatch({ kind: 'ratify-phase', call: 'p1', choice: 'meditation' })).resolves.toEqual({ ok: false, refused: 'no-proposal' });
+    expect(posted).toEqual([{ kind: 'ratify-phase', call: 'p1', choice: 'meditation' }]);
   });
 
   it('posts the operator’s edit and flag as serve takes them (#150), and reads a refusal', async () => {
