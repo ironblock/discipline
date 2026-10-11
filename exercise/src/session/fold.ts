@@ -438,8 +438,12 @@ export interface Session {
 
 /** The lever states a session declares on its first line (#573): only what the log says, never a default of the surface's. */
 export interface Levers {
-  /** `off` (log v7's `approvals_off`, #544), or `gate`: from v7 an absent field is the gate deciding. Undeclared before v7. */
-  readonly approvals?: 'off' | 'gate';
+  /**
+   * `off` (log v7's `approvals_off`, #544), or `gate`: from v7 an absent field is the gate deciding. `no commands` when
+   * the lever table says the approval lever is undeclared -- serve's word for a regimen that runs no commands. Undeclared
+   * before v7.
+   */
+  readonly approvals?: 'off' | 'gate' | 'no commands';
   /** How a fork's result reaches the trunk (`fork_delivery`): `meditation`, `advisory`, `imperative`, or a newer drive's word. */
   readonly forkDelivery?: string;
   /** The reasoning state on the wire (`template_kwargs`): thinking on or off, and the effort, as sent. */
@@ -458,7 +462,13 @@ export function leversOf(start: LineOf<'session.start'>): Levers {
     kwargs?.reasoning_effort === undefined ? undefined : `effort ${kwargs.reasoning_effort}`,
   ].filter((part): part is string => part !== undefined);
   return {
-    ...(start.approvals_off === true ? { approvals: 'off' as const } : start.version >= 7 ? { approvals: 'gate' as const } : {}),
+    ...(start.approvals_off === true
+      ? { approvals: 'off' as const }
+      : start.levers?.['approval'] === 'undeclared'
+        ? { approvals: 'no commands' as const }
+        : start.version >= 7
+          ? { approvals: 'gate' as const }
+          : {}),
     ...(start.fork_delivery !== undefined ? { forkDelivery: start.fork_delivery } : {}),
     ...(reasoning.length > 0 ? { reasoning: reasoning.join(' · ') } : {}),
     ...(start.levers !== undefined ? { table: start.levers } : {}),
