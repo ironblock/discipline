@@ -332,8 +332,8 @@ fn serve(args: &[String]) -> ExitCode {
         Ok(ui) => ui,
         Err(why) => return fail(EXIT_INPUT, &why),
     };
-    let endpoint = match Endpoint::parse(&endpoint) {
-        Ok(endpoint) => chat_endpoint(endpoint),
+    let (endpoint, written) = match Endpoint::parse(&endpoint) {
+        Ok(endpoint) => (chat_endpoint(endpoint.clone()), endpoint),
         Err(why) => return fail(EXIT_INPUT, &format!("{endpoint} is not an endpoint: {why}")),
     };
     let system = match std::fs::read_to_string(&head) {
@@ -527,6 +527,14 @@ fn serve(args: &[String]) -> ExitCode {
     let listen = match listen_on(listen, credential.is_some()) {
         Ok(listen) => listen,
         Err(refused) => return refused,
+    };
+    // A base URL on a hosted Messages API reaches its messages path (#731).
+    let endpoint = match hosted
+        .as_ref()
+        .and_then(|identity| identity.dialect.as_deref())
+    {
+        Some(dialect) => completed(written, Some(dialect)),
+        None => endpoint,
     };
     let trunk_endpoint = endpoint.clone();
     let mut transport = HttpStream::new(endpoint);
@@ -998,8 +1006,11 @@ fn offboard_seat(
              say where and as what"
         ));
     };
+    let seat_speaks = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .ok()
+        .and_then(|identity| identity.dialect);
     let endpoint = match Endpoint::parse(&endpoint) {
-        Ok(endpoint) => chat_endpoint(endpoint),
+        Ok(endpoint) => completed(endpoint, seat_speaks.as_deref()),
         Err(why) => return Err(format!("{endpoint} is not an endpoint: {why}")),
     };
     tls_only_for_an_api(&endpoint, Some(id))?;
@@ -1574,7 +1585,19 @@ fn started_writers(
                     .map_err(|why| emptied.named(format!("{product} cannot be removed: {why}")))?;
                 emptied.push(format!("the previous product at {product}"));
             }
-            Ok::<_, String>((held || stale || stale_product, (regime, (path, file))))
+            // An earlier session's refused projection (#658), as its sidecar
+            // and product are (#731): never beside this session's record.
+            let refused = format!("{path}.refused.jsonl");
+            let stale_refused = std::path::Path::new(&refused).exists();
+            if stale_refused {
+                std::fs::remove_file(&refused)
+                    .map_err(|why| emptied.named(format!("{refused} cannot be removed: {why}")))?;
+                emptied.push(format!("the previous refused projection at {refused}"));
+            }
+            Ok::<_, String>((
+                held || stale || stale_product || stale_refused,
+                (regime, (path, file)),
+            ))
         })
         .transpose()?;
     let log_held = log
@@ -1775,6 +1798,23 @@ fn chat_endpoint(mut endpoint: Endpoint) -> Endpoint {
 
 /// The path [`chat_endpoint`] completes a base URL to.
 const CHAT_COMPLETIONS: &str = "/v1/chat/completions";
+
+/// The path a hosted Messages API's base URL is completed to (#731).
+const MESSAGES: &str = "/v1/messages";
+
+/// `endpoint` completed for the server's `dialect` (#731): a base URL (no
+/// path, or `/v1`) on an `anthropic-messages` entry to [`MESSAGES`], any
+/// other to [`CHAT_COMPLETIONS`] as [`chat_endpoint`] does; a written path
+/// as it is.
+fn completed(mut endpoint: Endpoint, dialect: Option<&str>) -> Endpoint {
+    if dialect == Some("anthropic-messages")
+        && matches!(endpoint.path.as_str(), "/" | "/v1" | "/v1/")
+    {
+        MESSAGES.clone_into(&mut endpoint.path);
+        return endpoint;
+    }
+    chat_endpoint(endpoint)
+}
 
 /// The address `serve` may listen on: `listen`, refused when it is a
 /// wildcard, or off loopback with no credential (fail-closed, I7). A usage
