@@ -354,6 +354,23 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(kept.eras.find((era) => era.meditation)?.meditation?.zeroTurns).toBeUndefined();
   });
 
+  it('folds a meditation’s reconcile as one interstitial: working memory before, the operator’s changes, the answer, after (#150 DoD 4)', () => {
+    const session = fold(logOf('a-v8-meditation-right-after-a-meditation-audits-its-refill.jsonl'));
+    expect([...session.unknown.keys()]).toEqual([]);
+    const second = session.eras.filter((era) => era.meditation).map((era) => era.meditation!)[1];
+    const three = [
+      { id: 'interview-t1-0', text: 'decision: a tracker' },
+      { id: 'interview-t1-1', text: 'decision: for one team' },
+      { id: 'interview-t1-2', text: 'decision: no login' },
+    ];
+    expect(second?.reconcile).toEqual({
+      before: three,
+      changes: [{ entry: 'interview-t1-0', kind: 'flag', detail: 'still so?' }],
+      answer: '1. KEEP\n2. KEEP\n3. KEEP',
+      after: three,
+    });
+  });
+
   it('takes the state from the log: an ended session is ended', () => {
     expect(fold(logOf('an-ended-session.jsonl')).state).toBe('ended');
   });
