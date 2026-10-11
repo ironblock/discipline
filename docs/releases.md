@@ -103,7 +103,7 @@ The hosted API kind driven live (#555, #556): the first paid calls, the cache li
 
 ## v0.5.0 — the pieces together (T2)
 
-The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. Finishing T1 moved here from v0.1.0 (the maintainer, 2026-10-10); how it runs, with a seam or without, is still the maintainer's to decide. This milestone and v0.6.0 predate the initiatives, and follow its lever milestones.
+The pieces used in whatever order the work needs to reach a goal, in one session that ends in a declared compaction. T2 is that session; its trajectory is not yet written. Finishing T1 moved here from v0.1.0 (the maintainer, 2026-10-10); it runs with meditation allowed, automatic or declared (the maintainer, 2026-10-11; [`trajectories/t1.md`](trajectories/t1.md)). This milestone and v0.6.0 predate the initiatives, and follow its lever milestones.
 
 ## v0.6.0 — T3, NetHack
 
