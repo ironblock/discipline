@@ -48,20 +48,29 @@ const LOG: &[(Option<&str>, &str, &str, &str)] = &[
     (Some("phase.ruled"), "choice", "seam", "meditation"),
 ];
 
+/// A renamed key (#705's, after the inventory): the line's kind, the key's
+/// name before v8 and from it.
+const LOG_KEYS: &[(&str, &str, &str)] = &[("fork", "after_seam", "after_meditation")];
+
+/// The kind a line names, as v8 spells it.
+fn current_kind(object: &BTreeMap<String, Value>) -> Option<&str> {
+    let kind = match object.get("kind") {
+        Some(Value::String(kind)) => kind.as_str(),
+        _ => return None,
+    };
+    Some(
+        LOG.iter()
+            .find(|(on, key, old, _)| on.is_none() && *key == "kind" && *old == kind)
+            .map_or(kind, |(_, _, _, new)| new),
+    )
+}
+
 /// The words at `object`'s respelled positions, as (key, word, old, new):
 /// the kind as it would read either way.
 fn positions(
     object: &BTreeMap<String, Value>,
 ) -> impl Iterator<Item = (&'static str, &str, &'static str, &'static str)> + '_ {
-    let kind = match object.get("kind") {
-        Some(Value::String(kind)) => Some(kind.as_str()),
-        _ => None,
-    };
-    let kind = kind.map(|kind| {
-        LOG.iter()
-            .find(|(on, key, old, _)| on.is_none() && *key == "kind" && *old == kind)
-            .map_or(kind, |(_, _, _, new)| new)
-    });
+    let kind = current_kind(object);
     LOG.iter().filter_map(move |(on, key, old, new)| {
         if on.is_some() && *on != kind {
             return None;
@@ -82,6 +91,27 @@ fn positions(
 /// A word in the other version's spelling: v8's in a log declaring v7 or
 /// earlier, v7's in one declaring v8 or later.
 pub fn to_current(object: &mut BTreeMap<String, Value>, declared: i64) -> Result<(), String> {
+    let kind = current_kind(object).map(str::to_owned);
+    for (on, old, new) in LOG_KEYS {
+        if kind.as_deref() != Some(*on) {
+            continue;
+        }
+        if declared < RESPELLED_IN {
+            if object.contains_key(*new) {
+                return Err(format!(
+                    "`{on}` carries `{new}`, v{RESPELLED_IN}'s name: a v{declared} log names it `{old}`"
+                ));
+            }
+            if let Some(value) = object.remove(*old) {
+                object.insert((*new).to_owned(), value);
+            }
+        } else if object.contains_key(*old) {
+            return Err(format!(
+                "`{on}` carries `{old}`, the name before v{RESPELLED_IN}: a v{declared} log names it \
+                 `{new}`"
+            ));
+        }
+    }
     let mut respelled = Vec::new();
     for (key, word, old, new) in positions(object) {
         if declared < RESPELLED_IN {
@@ -109,6 +139,14 @@ pub fn to_current(object: &mut BTreeMap<String, Value>, declared: i64) -> Result
 pub fn to_declared(object: &mut BTreeMap<String, Value>, declared: i64) {
     if declared >= RESPELLED_IN {
         return;
+    }
+    let kind = current_kind(object).map(str::to_owned);
+    for (on, old, new) in LOG_KEYS {
+        if kind.as_deref() == Some(*on)
+            && let Some(value) = object.remove(*new)
+        {
+            object.insert((*old).to_owned(), value);
+        }
     }
     let back: Vec<(&str, &str)> = positions(object)
         .filter(|(_, word, _, new)| word == new)

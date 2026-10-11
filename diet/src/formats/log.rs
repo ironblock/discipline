@@ -6850,6 +6850,31 @@ mod tests {
         }
     }
 
+    /// #583: a fork's `after_seam` (#705) is a v7 key; v8 names it
+    /// `after_meditation`, and each version refuses the other's name.
+    #[test]
+    fn a_forks_after_seam_key_is_v7s_and_after_meditation_v8s() {
+        let v7 = v7_fixture("a-v7-seam-right-after-a-seam-audits-its-refill.jsonl");
+        assert!(v7.contains(r#""after_seam":"#));
+        let read = super::parse(&v7).expect("the v7 fixture reads as written");
+        assert!(read.iter().any(|line| matches!(
+            line.event,
+            Event::Fork {
+                after_meditation: Some(_),
+                ..
+            }
+        )));
+        let renamed = v7.replace(r#""after_seam":"#, r#""after_meditation":"#);
+        let refused = super::parse(&renamed).expect_err("v8's key in a v7 log");
+        assert!(refused.why.contains("`after_meditation`"), "{refused}");
+        let v8_old = v7.replacen(r#""version":7"#, r#""version":8"#, 1);
+        let refused = super::parse(&v8_old).expect_err("v7's words in a v8 log");
+        assert!(
+            refused.why.contains("`seam`") || refused.why.contains("`after_seam`"),
+            "{refused}"
+        );
+    }
+
     /// #583: a log declaring v8 spells it `meditation`, and one spelling it
     /// `seam` is refused, naming both.
     #[test]
@@ -7761,6 +7786,10 @@ mod tests {
                     }
                     let mut both = object.clone();
                     both.insert((*absent).to_owned(), Value::String("x".to_owned()));
+                    // Probed in this version's spelling (#583).
+                    if both.contains_key("version") {
+                        both.insert("version".to_owned(), Value::Integer(VERSION));
+                    }
                     let mut rendered = String::new();
                     json::render(&Value::Object(both), &mut rendered);
                     let refused = self::line(&rendered).is_err();

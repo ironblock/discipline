@@ -1,0 +1,320 @@
+{
+  "events": [
+    {
+      "fork_asks": "v3",
+      "fork_asks_digest": "49c0f8c081a24a9a",
+      "fork_delivery": "meditation",
+      "head": [
+        {
+          "content": "you are the trunk",
+          "role": "system"
+        }
+      ],
+      "kind": "session.start",
+      "model": "a-model",
+      "notes_in_the_ask": true,
+      "opened": 1791676860593,
+      "seq": 0,
+      "t": 0,
+      "version": 8
+    },
+    {
+      "kind": "ask",
+      "scoping": true,
+      "seq": 1,
+      "t": 0,
+      "text": "what are we building?",
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 2,
+      "t": 0,
+      "to": "turn"
+    },
+    {
+      "head_sha256": "1bfd211e2e023cbe1c522fd4542444e82f4a70103069011c42f3aec4fc994806",
+      "kind": "request",
+      "lane": "trunk",
+      "max_tokens": 64,
+      "seq": 3,
+      "t": 0,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 3,
+      "seq": 4,
+      "t": 0,
+      "text": "A tracker for one team, no login. Next, I will sketch the schema."
+    },
+    {
+      "finish_reason": "stop",
+      "kind": "response",
+      "seq": 5,
+      "t": 0,
+      "text": "A tracker for one team, no login. Next, I will sketch the schema.",
+      "to_request": 3
+    },
+    {
+      "kind": "turn.settled",
+      "reason": "final",
+      "seq": 6,
+      "t": 0,
+      "turn": 1
+    },
+    {
+      "from": "turn",
+      "kind": "settlement",
+      "seq": 7,
+      "t": 0,
+      "to": "capture"
+    },
+    {
+      "ask": "judgment",
+      "at": 3,
+      "kind": "fork",
+      "lane": "interview",
+      "of_turn": 1,
+      "question": "Answer from this turn alone.\nYou said: \"Next, I will sketch the schema.\"\nThe turn has ended. What did you decide, and what do you intend next? Answer with the fields DECISION and PLAN, one per line, and write NONE for a field with nothing to record.\n",
+      "seq": 8,
+      "t": 0,
+      "trigger": "turn_end",
+      "why": "scoping"
+    },
+    {
+      "fork": 8,
+      "head_sha256": "0342d762e2062badde70517494bef7f379dd6a3b2c84606285fc6418e23bc032",
+      "kind": "request",
+      "lane": "interview",
+      "max_tokens": 64,
+      "seq": 9,
+      "t": 0,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 9,
+      "seq": 10,
+      "t": 0,
+      "text": "DECISION: a tracker\nDECISION: for one team\nDECISION: no login\nPLAN: NONE\n"
+    },
+    {
+      "finish_reason": "stop",
+      "kind": "response",
+      "seq": 11,
+      "t": 0,
+      "text": "DECISION: a tracker\nDECISION: for one team\nDECISION: no login\nPLAN: NONE\n",
+      "to_request": 9
+    },
+    {
+      "fork": 8,
+      "kind": "fork.settled",
+      "outcome": "value",
+      "seq": 12,
+      "t": 2
+    },
+    {
+      "entry": {
+        "id": "interview-t1-0",
+        "text": "decision: a tracker"
+      },
+      "fork": 8,
+      "kind": "patch",
+      "op": "add",
+      "seq": 13,
+      "t": 2
+    },
+    {
+      "entry": {
+        "id": "interview-t1-1",
+        "text": "decision: for one team"
+      },
+      "fork": 8,
+      "kind": "patch",
+      "op": "add",
+      "seq": 14,
+      "t": 2
+    },
+    {
+      "entry": {
+        "id": "interview-t1-2",
+        "text": "decision: no login"
+      },
+      "fork": 8,
+      "kind": "patch",
+      "op": "add",
+      "seq": 15,
+      "t": 2
+    },
+    {
+      "from": "capture",
+      "kind": "settlement",
+      "seq": 16,
+      "t": 2,
+      "to": "awaiting"
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 17,
+      "t": 2,
+      "to": "capture"
+    },
+    {
+      "ask": "audit_q_human",
+      "at": 3,
+      "kind": "fork",
+      "lane": "audit",
+      "of_turn": 1,
+      "question": "We're at a phase boundary — the operator declared one, so I want to audit our working notes (working notes). For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nJudge against everything that has actually happened in this session. Output 3 lines and nothing else.\n\n1. decision: a tracker\n2. decision: for one team\n3. decision: no login",
+      "seq": 18,
+      "t": 2,
+      "why": "meditation"
+    },
+    {
+      "fork": 18,
+      "head_sha256": "0342d762e2062badde70517494bef7f379dd6a3b2c84606285fc6418e23bc032",
+      "kind": "request",
+      "lane": "audit",
+      "max_tokens": 64,
+      "seq": 19,
+      "t": 2,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 19,
+      "seq": 20,
+      "t": 2,
+      "text": "1. KEEP\n2. KEEP\n3. KEEP\n"
+    },
+    {
+      "finish_reason": "stop",
+      "kind": "response",
+      "seq": 21,
+      "t": 2,
+      "text": "1. KEEP\n2. KEEP\n3. KEEP\n",
+      "to_request": 19
+    },
+    {
+      "fork": 18,
+      "kind": "fork.settled",
+      "outcome": "decline",
+      "seq": 22,
+      "t": 3
+    },
+    {
+      "from": "capture",
+      "kind": "settlement",
+      "seq": 23,
+      "t": 3,
+      "to": "awaiting"
+    },
+    {
+      "at_turn": 1,
+      "carried_entries": 3,
+      "carried_turns": 0,
+      "frame": "placeholder",
+      "kind": "meditation",
+      "placement": "message",
+      "prefix_hash_after": "c60e3c783fc74a8feca4ee232110871ab25d962b941f30a71db4c3f969704e21",
+      "prefix_hash_before": "0342d762e2062badde70517494bef7f379dd6a3b2c84606285fc6418e23bc032",
+      "reason": "operator",
+      "render": "# regime\narm: dev-loop\nsubstrate: canned-cache-n\ndogma_version: 0\nphase: -\nframe_version: placeholder\n\n# working set\ninterview-t1-0\tdecision: a tracker\ninterview-t1-1\tdecision: for one team\ninterview-t1-2\tdecision: no login\n",
+      "seq": 24,
+      "t": 3,
+      "tool_outputs": "evict"
+    },
+    {
+      "entry": "interview-t1-0",
+      "kind": "flag",
+      "note": "still so?",
+      "seq": 25,
+      "t": 3,
+      "turn": 1
+    },
+    {
+      "from": "awaiting",
+      "kind": "settlement",
+      "seq": 26,
+      "t": 3,
+      "to": "capture"
+    },
+    {
+      "after_meditation": 24,
+      "ask": "audit_q_human_reconcile",
+      "at": 3,
+      "kind": "fork",
+      "lane": "audit",
+      "of_turn": 1,
+      "question": "We're at a phase boundary — the operator declared one, so I want to audit our working notes (working notes). The operator changed some of them since the last boundary: a note marked [edited by the operator] is their correction, and a note marked [flagged: …] carries their concern. For each note below, reply with EXACTLY one line, each starting with its number:\n<n>. KEEP\nor <n>. UPDATE: <the corrected one-line note>\nor <n>. REMOVE — <one-clause reason>\nor <n>. REMOVE — dup of #<k>  (when it duplicates another note here)\nAddress every marked note: KEEP an edited note — it stands as the operator wrote it — and UPDATE or REMOVE any note of yours it makes wrong; KEEP a flagged note if the concern does not hold, or UPDATE or REMOVE it if it does. Judge against everything that has actually happened in this session. Output 3 lines and nothing else.\n\n1. decision: a tracker [flagged: still so?]\n2. decision: for one team\n3. decision: no login",
+      "seq": 27,
+      "t": 3,
+      "why": "meditation"
+    },
+    {
+      "fork": 27,
+      "head_sha256": "c60e3c783fc74a8feca4ee232110871ab25d962b941f30a71db4c3f969704e21",
+      "kind": "request",
+      "lane": "audit",
+      "max_tokens": 64,
+      "seq": 28,
+      "t": 3,
+      "turn": 1
+    },
+    {
+      "kind": "delta",
+      "request": 28,
+      "seq": 29,
+      "t": 3,
+      "text": "1. KEEP\n2. KEEP\n3. KEEP\n"
+    },
+    {
+      "finish_reason": "stop",
+      "kind": "response",
+      "seq": 30,
+      "t": 3,
+      "text": "1. KEEP\n2. KEEP\n3. KEEP\n",
+      "to_request": 28
+    },
+    {
+      "fork": 27,
+      "kind": "fork.settled",
+      "outcome": "decline",
+      "seq": 31,
+      "t": 3
+    },
+    {
+      "from": "capture",
+      "kind": "settlement",
+      "seq": 32,
+      "t": 3,
+      "to": "awaiting"
+    },
+    {
+      "at_turn": 1,
+      "carried_entries": 3,
+      "carried_turns": 0,
+      "frame": "placeholder",
+      "kind": "meditation",
+      "operator_changes": [
+        {
+          "entry": "interview-t1-0",
+          "kind": "flag"
+        }
+      ],
+      "placement": "message",
+      "prefix_hash_after": "ac7a96609ad66f83abeb437b012e3659e6c1ee0b2e7de4cd158aa1aee69bba6c",
+      "prefix_hash_before": "c60e3c783fc74a8feca4ee232110871ab25d962b941f30a71db4c3f969704e21",
+      "reason": "operator",
+      "render": "# regime\narm: dev-loop\nsubstrate: canned-cache-n\ndogma_version: 0\nphase: -\nframe_version: placeholder\n\n# working set\ninterview-t1-0\tdecision: a tracker [flagged: still so?]\ninterview-t1-1\tdecision: for one team\ninterview-t1-2\tdecision: no login\n",
+      "seq": 33,
+      "t": 3,
+      "tool_outputs": "evict",
+      "unaddressed": []
+    }
+  ],
+  "torn": 0
+}

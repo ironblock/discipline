@@ -20,6 +20,9 @@ const POSITIONS: readonly (readonly [on: string | undefined, key: string, old: s
   ['phase.ruled', 'choice', 'seam', 'meditation'],
 ];
 
+/** A renamed key: the line's kind as v8 spells it, the key's name before v8 and from it. */
+const KEYS: readonly (readonly [on: string, old: string, now: string])[] = [['fork', 'after_seam', 'after_meditation']];
+
 /** `line` in the current spelling: itself when it holds no old word. */
 export function respelled<T extends { readonly kind: string }>(line: T): T {
   const fields = line as unknown as Readonly<Record<string, unknown>>;
@@ -29,6 +32,13 @@ export function respelled<T extends { readonly kind: string }>(line: T): T {
     if ((on === undefined || on === kind) && fields[key] === old) {
       out ??= { ...fields };
       out[key] = now;
+    }
+  }
+  for (const [on, old, now] of KEYS) {
+    if (on === kind && old in fields) {
+      out ??= { ...fields };
+      out[now] = out[old];
+      delete out[old];
     }
   }
   return (out ?? line) as T;
