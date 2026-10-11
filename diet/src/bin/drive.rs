@@ -1169,6 +1169,16 @@ fn serving_interview(
                 session::CAPTURE_MODALITY
             ));
         }
+    } else if asks.modality == diet::dogma::asks::Modality::Tools {
+        // The dual (#730): a set whose asks have a fork call the record
+        // tools, on the fields route, where every such call is discarded.
+        return Err(format!(
+            "{path} declares the ask set `{}`, whose asks have a fork answer through the \
+             record tools, without `{}` = \"tools\": on the fields route every fork's \
+             call would be discarded",
+            asks.name,
+            session::CAPTURE_MODALITY
+        ));
     }
     Ok(
         (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
