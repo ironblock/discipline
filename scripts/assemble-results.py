@@ -31,8 +31,10 @@ and refuses (exit 1) when:
 - the record or the log is empty (a session that never ended).
 
 SCRUB. A log carries the operator's absolute paths (a call's `cwd`, a
-receipt's reference checkouts). Each occurrence of the home directory (--home,
-default $HOME) is rewritten to `~`, the spelling regimens already use. Only the
+receipt's reference checkouts). They are rewritten by scripts/scrub.py, with
+the hygiene check's own patterns (#757): a home path to `~`, the spelling
+regimens already use, a scratch path to `/tmp/scratch/`, and the account name
+(--home's last part, default $HOME's) to `user`. Only the
 log, record, sidecar and receipt are rewritten. digests.json keeps each
 rewritten file's original sha256 beside the copy's, so the copy can be told
 from what serve wrote. The regimen is never rewritten: its digest is the
@@ -55,10 +57,12 @@ import hashlib
 import json
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import scrub as scrubbing  # noqa: E402
 import tempfile
 import tomllib
 
@@ -95,11 +99,10 @@ def named_files(log: bytes) -> dict[str, dict]:
 
 
 def scrub(data: bytes, home: str) -> bytes:
-    """`home` rewritten to `~` wherever the name it ends in ends: the
-    boundary hygiene's personal-home-path reads, so whatever follows -- a
-    quote, a backtick, a paren, a colon -- the path is scrubbed."""
-    pattern = re.compile(re.escape(home.rstrip("/").encode()) + rb"(?![A-Za-z0-9._-])")
-    return pattern.sub(b"~", data)
+    """`data` scrubbed by `scripts/scrub.py`, with the hygiene check's own
+    patterns (#757): a home path to `~`, a scratch path to `/tmp/scratch/`,
+    the account name (`home`'s last part) to `user`."""
+    return scrubbing.scrub(data.decode("utf-8"), pathlib.Path(home).name)[0].encode("utf-8")
 
 
 def diet() -> str:

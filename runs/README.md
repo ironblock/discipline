@@ -16,6 +16,8 @@ Each run is one directory, `runs/YYYY-MM-DD-<name>/`, where the name says what w
 
 A run whose record was never written has no `record.jsonl`, and its README says why.
 
+**Assembling one:** `python3 scripts/assemble-run.py --log L --record R --regimen G --out runs/YYYY-MM-DD-<name>` builds the directory from serve's outputs (#757). It scrubs with the hygiene check's own patterns (`scripts/scrub.py`), runs `diet check-log` and `diet check-record`, counts through `diet`, pins every file by sha256, and writes a README skeleton whose narrative is `[unwritten: …]`. It refuses what it cannot scrub, such as a LAN address. Every seq the README cites comes from `diet log find <log> key=value key~text`.
+
 **Before a run lands:**
 - `diet check-log` and `diet check-record` accept its log and record, and its README says they were run. A log or record that serve wrote and diet refuses lands as the run's finding: its README quotes the refusal and names the issue that fixes it.
 - The tree-wide hygiene check (`./verify.sh --only hygiene`) covers `runs/`. A log is scrubbed until it passes, and the README names each replacement. Digests the log and record carry inside them were taken over the unscrubbed bytes.

@@ -2172,6 +2172,8 @@ mod tests {
             opening_phase: None,
             fork_asks: None,
             notes_in_the_ask: None,
+            build_dirty: None,
+            build_commit: None,
         }
     }
 

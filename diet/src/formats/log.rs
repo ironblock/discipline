@@ -1036,6 +1036,13 @@ pub enum Event {
         /// absent, an earlier log's notes followed the ask as messages of
         /// their own.
         notes_in_the_ask: Option<bool>,
+        /// The commit the serving binary was built from (v8, #757): 40 hex
+        /// digits, from the build script, so a run's build is read off its
+        /// log rather than typed from memory. With `build_dirty`, or neither.
+        build_commit: Option<String>,
+        /// Whether that build's tracked files differed from the commit (v8,
+        /// #757).
+        build_dirty: Option<bool>,
         /// The fork ask set a session that forks asks in (v7, #595): its name
         /// and digest, `fork_asks` and `fork_asks_digest`.
         fork_asks: Option<ForkAsks>,
@@ -2990,6 +2997,8 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 fork_delivery: fields.optional_tag("fork_delivery", ForkDelivery::from_tag)?,
                 levers: fields.optional_words("levers")?,
                 notes_in_the_ask: fields.optional_flag("notes_in_the_ask")?,
+                build_commit: build_of(&fields)?.0,
+                build_dirty: build_of(&fields)?.1,
                 fork_asks: match fields.optional_string("fork_asks")? {
                     None => None,
                     Some(name) => Some(ForkAsks {
@@ -4311,6 +4320,15 @@ const fn must_v5(key: &'static str, holds: Holds) -> Field {
 }
 
 /// A key that arrived in v6 and is required wherever its object is written.
+const fn may_v8(key: &'static str, holds: Holds) -> Field {
+    Field {
+        key,
+        holds,
+        required: false,
+        since: 8,
+    }
+}
+
 const fn may_v7(key: &'static str, holds: Holds) -> Field {
     Field {
         key,
@@ -4371,6 +4389,32 @@ pub const SERVING: &[Field] = &[
 ];
 
 /// Whether `text` is a sha256 as this format writes one.
+/// A start's build (#757): `build_commit`, 40 lowercase hex digits, and
+/// `build_dirty`, both or neither.
+fn build_of(fields: &Fields<'_>) -> Result<(Option<String>, Option<bool>), String> {
+    let commit = fields.optional_string("build_commit")?;
+    let dirty = fields.optional_flag("build_dirty")?;
+    if let Some(commit) = &commit
+        && !is_a_commit(commit)
+    {
+        return Err(format!(
+            "`build_commit` is `{commit}`, and a commit is 40 lowercase hex digits"
+        ));
+    }
+    if commit.is_some() != dirty.is_some() {
+        return Err("`build_commit` and `build_dirty` name one build: both or neither".to_owned());
+    }
+    Ok((commit, dirty))
+}
+
+/// A git commit's full id: 40 lowercase hex digits (#757).
+fn is_a_commit(text: &str) -> bool {
+    text.len() == 40
+        && text
+            .bytes()
+            .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
 fn is_a_digest(text: &str) -> bool {
     text.len() == 64
         && text
@@ -4567,6 +4611,8 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("fork_delivery", Tag(Tags::ForkDelivery)),
                 may_v7("levers", Holds::Words),
                 may_v7("notes_in_the_ask", Holds::Flag),
+                may_v8("build_commit", Holds::Text),
+                may_v8("build_dirty", Holds::Flag),
                 may_v7("fork_asks", Text),
                 may_v7("fork_asks_digest", Text),
                 may_v7("reasoning_effort_default", Text),
@@ -5200,6 +5246,8 @@ fn to_value(line: &Line) -> Value {
             fork_delivery,
             levers,
             notes_in_the_ask,
+            build_commit,
+            build_dirty,
             fork_asks,
             reasoning_effort_default,
             tool_output,
@@ -5252,6 +5300,12 @@ fn to_value(line: &Line) -> Value {
             }
             if let Some(in_the_ask) = notes_in_the_ask {
                 put("notes_in_the_ask", Value::Boolean(*in_the_ask));
+            }
+            if let Some(commit) = build_commit {
+                put("build_commit", text(commit));
+            }
+            if let Some(dirty) = build_dirty {
+                put("build_dirty", Value::Boolean(*dirty));
             }
             if let Some(levers) = levers {
                 put(
@@ -7008,6 +7062,47 @@ mod tests {
         assert!(!text.contains(r#""kind":"meditation""#), "{text}");
     }
 
+    /// #757: a v8 `session.start` names the build serve ran -- the commit
+    /// it was built from and whether that tree was dirty -- the two together
+    /// or neither; a log before v8 names none.
+    #[test]
+    fn a_v8_start_names_its_build_and_an_earlier_one_does_not() {
+        let start = r#"{"head":[{"content":"you are the trunk","role":"system"}],"kind":"session.start","model":"a-model","opened":1790000000000,"seq":0,"t":0,"version":8}"#;
+        let commit = "0123456789abcdef0123456789abcdef01234567";
+        let built = start.replace(
+            r#""version":8}"#,
+            &format!(r#""version":8,"build_commit":"{commit}","build_dirty":false}}"#),
+        );
+        let read = super::line(&built).expect("a start naming its build");
+        let Event::SessionStart {
+            build_commit,
+            build_dirty,
+            ..
+        } = &read.event
+        else {
+            panic!("a start");
+        };
+        assert_eq!(build_commit.as_deref(), Some(commit));
+        assert_eq!(*build_dirty, Some(false));
+        assert_eq!(super::line(&super::render(&read)), Ok(read.clone()));
+        let half = start.replace(
+            r#""version":8}"#,
+            &format!(r#""version":8,"build_commit":"{commit}"}}"#),
+        );
+        assert!(
+            super::line(&half).is_err(),
+            "a commit without its dirty flag"
+        );
+        let not_a_commit = built.replace(commit, "develop");
+        assert!(
+            super::line(&not_a_commit).is_err(),
+            "a commit is 40 hex digits"
+        );
+        let v7 = built.replace(r#""version":8"#, r#""version":7"#);
+        let refused = super::parse(&format!("{v7}\n")).expect_err("a v7 log naming a build");
+        assert!(refused.why.contains("v8"), "{refused}");
+    }
+
     /// #583: this module writes v8.
     #[test]
     fn this_module_writes_v8_and_reads_every_version_before_it() {
@@ -7055,6 +7150,8 @@ mod tests {
                     digest: Some("0123456789abcdef".to_owned()),
                 }),
                 notes_in_the_ask: Some(true),
+                build_commit: Some("a".repeat(40)),
+                build_dirty: Some(false),
             },
         }
     }
@@ -7889,6 +7986,12 @@ mod tests {
                     if exactly_one(kind).contains(absent) && !exactly_one(kind).contains(present) {
                         continue;
                     }
+                    // A build's commit is 40 hex digits with its dirty flag
+                    // beside it (#757): that rule's refusal, not an
+                    // exclusivity.
+                    if kind == Kind::SessionStart && *absent == "build_commit" {
+                        continue;
+                    }
                     let mut both = object.clone();
                     both.insert((*absent).to_owned(), Value::String("x".to_owned()));
                     // Probed in this version's spelling (#583).
@@ -8153,6 +8256,8 @@ mod tests {
             levers,
             fork_asks,
             notes_in_the_ask,
+            build_commit,
+            build_dirty,
             ..
         } = &mut lines[0].event
         else {
@@ -8165,6 +8270,8 @@ mod tests {
         *levers = None;
         *fork_asks = None;
         *notes_in_the_ask = None;
+        *build_commit = None;
+        *build_dirty = None;
         // Written as a v0 log spells it (#583).
         let document: String = lines
             .iter()

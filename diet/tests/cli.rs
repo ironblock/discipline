@@ -614,3 +614,38 @@ fn write_bakeoff_run(dir: &Path) -> PathBuf {
     std::fs::write(&path, record).expect("a written record");
     path
 }
+
+#[test]
+fn log_find_prints_each_line_that_passes_every_filter() {
+    // #757: the seqs a run's README cites come from a query.
+    let log = formats_dir().join("../../runs/2026-10-11-levers-run-c-agent-driven/session.log");
+    let out = std::process::Command::new(DIET)
+        .args([
+            "log",
+            "find",
+            &log.to_string_lossy(),
+            "kind=fork",
+            "trigger~call:",
+        ])
+        .output()
+        .expect("diet runs");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let seqs: Vec<i64> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line).expect("a JSON line")["seq"]
+                .as_i64()
+                .expect("a seq")
+        })
+        .collect();
+    assert_eq!(seqs, [1346, 1994, 2343, 2946, 3230, 4269, 4705]);
+    let usage = std::process::Command::new(DIET)
+        .args(["log", "find"])
+        .output()
+        .expect("diet runs");
+    assert_eq!(usage.status.code(), Some(2));
+}

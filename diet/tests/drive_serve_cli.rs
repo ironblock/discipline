@@ -1318,15 +1318,26 @@ fn start_through_sh(prelude: &str, endpoint: &str, extra: &[&str]) -> (Child, St
 
 #[test]
 fn a_drive_server_whose_log_cannot_be_written_stops_even_with_its_stdout_closed() {
-    // A file-size limit of one block, its signal ignored, so the log's
+    // A file-size limit of 1024 bytes, its signal ignored, so the log's
     // write fails as a full disk's would; and stdout closed after the
     // announcement, which once turned the failure into a panic that left
     // the server running with its log stopped (#230's review, finding 1).
+    // 1024 bytes sits between what is written before the ask is answered --
+    // the start line, which names its build since #757, the ask, the
+    // settlement and the request: 567 bytes -- and the whole session's
+    // 1360, so the write fails after the reply, as the test needs. `ulimit
+    // -f` counts in 1024-byte blocks in macOS's `sh` and 512-byte blocks in
+    // Linux's, so the same bytes are one block or two. (One block on Linux
+    // failed the write before the reply once #757's start line grew.)
+    let blocks = if cfg!(target_os = "macos") { 1 } else { 2 };
     let stub = Stub::serving(vec![Act::Raw(CAPTURED.to_vec())]).expect("loopback");
     let log_file = file_holding("log", "");
     let path = log_file.0.to_string_lossy().into_owned();
-    let (mut child, address, _head) =
-        start_through_sh("ulimit -f 1; trap '' XFSZ", &stub.url(), &["--log", &path]);
+    let (mut child, address, _head) = start_through_sh(
+        &format!("ulimit -f {blocks}; trap '' XFSZ"),
+        &stub.url(),
+        &["--log", &path],
+    );
     let reply = post(&address, &address, r#"{"kind":"ask","text":"hi"}"#);
     assert_eq!(status(&reply), 200, "{reply}");
     let give_up = Instant::now() + Duration::from_secs(10);
@@ -4093,6 +4104,24 @@ fn review_a_drive_server_refuses_a_tools_ask_set_on_the_fields_route() {
         eprintln!("{set}: exit {code:?}");
         assert_ne!(code, None, "{set} on the fields route listened: {said}");
     }
+}
+
+#[test]
+fn a_drive_servers_log_names_the_build_it_was_made_from() {
+    // #757: session.start names the commit this binary was built from and
+    // whether its tracked files differed, so a run's build is read off its
+    // log rather than typed from memory.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let regimen = dev_loop_sampling("", "seed = 7\n");
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let _served = start(&stub.url(), &["--regimen", &regimen_path, "--log", &logged]);
+    let start_line = first_logged_line(&log_file.0);
+    let (commit, dirty) = diet::build::build().expect("this test is built in a repository");
+    assert_eq!(start_line["build_commit"], commit.as_str(), "{start_line}");
+    assert_eq!(start_line["build_dirty"], dirty, "{start_line}");
 }
 
 /// A streamed reply saying `text`.

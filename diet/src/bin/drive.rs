@@ -732,6 +732,8 @@ fn serve(args: &[String]) -> ExitCode {
                 instruction_files,
                 // #573: the start row's levers, from the same reading.
                 read_at_start.as_ref().map(|read| read.levers.clone()),
+                // #757: the build serving it, as the build script read it.
+                diet::build::build(),
             ),
         ),
     );
