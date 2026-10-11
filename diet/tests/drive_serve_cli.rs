@@ -4167,6 +4167,15 @@ impl Mcp {
     }
 
     fn request(&mut self, method: &str, params: serde_json::Value) -> serde_json::Value {
+        self.request_noting(method, params).0
+    }
+
+    /// [`Self::request`], and the notifications sent before its answer.
+    fn request_noting(
+        &mut self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> (serde_json::Value, Vec<serde_json::Value>) {
         use std::io::{BufRead as _, Write as _};
         self.next += 1;
         let mut message = serde_json::Map::new();
@@ -4176,11 +4185,18 @@ impl Mcp {
         message.insert("params".to_owned(), params);
         let message = serde_json::Value::Object(message);
         writeln!(self.input, "{message}").expect("sent");
-        let mut line = String::new();
-        self.output.read_line(&mut line).expect("an answer");
-        let reply: serde_json::Value = serde_json::from_str(&line).expect("JSON");
-        assert_eq!(reply["id"], self.next, "{reply}");
-        reply["result"].clone()
+        let mut noted = Vec::new();
+        loop {
+            let mut line = String::new();
+            self.output.read_line(&mut line).expect("an answer");
+            let reply: serde_json::Value = serde_json::from_str(&line).expect("JSON");
+            if reply.get("id").is_none() {
+                noted.push(reply);
+                continue;
+            }
+            assert_eq!(reply["id"], self.next, "{reply}");
+            return (reply["result"].clone(), noted);
+        }
     }
 
     /// Tool `name`'s result: serve's status and body.
@@ -4240,7 +4256,7 @@ fn an_mcp_client_drives_a_served_session_to_a_held_meditation_and_refills_anyway
 
     let asked = mcp.call(
         "ask",
-        serde_json::json!({"text": "what are we building?", "scoping": true}),
+        serde_json::json!({"text": "what are we building?", "scoping": true, "wait": false}),
     );
     assert_eq!(asked["status"], 200, "{asked}");
     assert_eq!(asked["body"]["turn"], 1, "{asked}");
@@ -4461,4 +4477,223 @@ fn a_drive_mcp_start_reaches_an_idle_session_and_stop_leaves_no_process() {
         serde_json::json!({"name": "stop", "arguments": {}}),
     );
     assert_eq!(again["isError"], true, "{again}");
+}
+
+/// [`saying`]'s stream, as text.
+fn said_stream(text: &str) -> String {
+    let Act::Answer(body) = saying(text) else {
+        unreachable!("saying answers")
+    };
+    body
+}
+
+/// An `ask` through the MCP server that waits for its turn (#772), with a
+/// progress token: its result and the notifications before it.
+fn waiting_ask(
+    mcp: &mut Mcp,
+    arguments: serde_json::Value,
+) -> (serde_json::Value, Vec<serde_json::Value>) {
+    let mut params = serde_json::Map::new();
+    params.insert("name".to_owned(), "ask".into());
+    params.insert("arguments".to_owned(), arguments);
+    params.insert(
+        "_meta".to_owned(),
+        serde_json::json!({"progressToken": "p1"}),
+    );
+    let (result, noted) = mcp.request_noting("tools/call", serde_json::Value::Object(params));
+    assert_eq!(result["isError"], false, "{result}");
+    (result["structuredContent"].clone(), noted)
+}
+
+#[test]
+fn a_drive_mcp_ask_waits_past_the_turns_settle_for_its_fork_and_returns_its_digest() {
+    // #772: the turn settles at once and its scoping fork answers six
+    // seconds later; the ask returns only once the fork has settled -- idle
+    // -- with progress between its waits, and a digest of the answer, the
+    // fork and its three patches, and the settle.
+    let stub = Stub::serving_with_props(
+        vec![
+            saying("A tracker for one team, no login. Next, I will sketch the schema."),
+            Act::Stall(
+                Duration::from_secs(6),
+                said_stream(
+                    "DECISION: a tracker\nDECISION: for one team\nDECISION: no login\nPLAN: NONE\n",
+                ),
+            ),
+        ],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let regimen = dev_loop_sampling("interview_warrant = [\"scoping\"]\n", "seed = 7\n");
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &regimen_path]);
+    let mut mcp = Mcp::attached(&served.listening);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+    let (asked, noted) = waiting_ask(
+        &mut mcp,
+        serde_json::json!({"text": "what are we building?", "scoping": true}),
+    );
+    assert_eq!(asked["returned"], "idle", "{asked}");
+    assert_eq!(asked["timed_out"], false, "{asked}");
+    assert_eq!(asked["state"]["idle"], true, "{asked}");
+    let digest = &asked["digest"];
+    assert_eq!(
+        digest["answer"], "A tracker for one team, no login. Next, I will sketch the schema.",
+        "{digest}"
+    );
+    assert_eq!(digest["settled"][0]["reason"], "final", "{digest}");
+    assert_eq!(
+        digest["forks"].as_array().map(Vec::len),
+        Some(1),
+        "{digest}"
+    );
+    assert_eq!(digest["forks"][0]["outcome"], "value", "{digest}");
+    assert_eq!(
+        digest["forks"][0]["patches"].as_array().map(Vec::len),
+        Some(3),
+        "{digest}"
+    );
+    assert!(!noted.is_empty(), "no progress while it waited");
+    assert!(
+        noted
+            .iter()
+            .all(|note| note["method"] == "notifications/progress"
+                && note["params"]["progressToken"] == "p1"),
+        "{noted:?}"
+    );
+    // `wait: false` is today's ask: its seq and turn, at once.
+    let at_once = mcp.call(
+        "ask",
+        serde_json::json!({"text": "and next?", "wait": false}),
+    );
+    assert_eq!(at_once["body"]["turn"], 2, "{at_once}");
+}
+
+#[test]
+fn a_drive_mcp_ask_returns_early_on_a_pending_approval() {
+    // #772: a call that needs the operator's decision -- not idle in
+    // /state -- returns the ask with the approval, not at its timeout.
+    let tree = Dir::new("ask-approval-tree");
+    let state = Dir::new("ask-approval-state");
+    let auth = file_holding("auth", "author:s3cret\n");
+    let stub = Stub::serving_with_props(vec![a_call("ls")], &diet::drive::canned::build_info())
+        .expect("loopback");
+    let regimen = commands_regimen(
+        "allowed_commands = []\nenv_passthrough = [\"XDG_STATE_HOME\"]\n\
+         approval_policy = \"approve what stays in the worktree\"\n",
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let served = start_with(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+        ],
+        &[("XDG_STATE_HOME", &state.path())],
+    );
+    let url = format!("http://{}", served.listening);
+    let mut mcp = Mcp::spawned(&["--url", &url, "--auth-file", &auth_path], &[]);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+    let started = Instant::now();
+    let (asked, _) = waiting_ask(&mut mcp, serde_json::json!({"text": "go", "timeout": 120}));
+    assert_eq!(asked["returned"], "approval", "{asked}");
+    assert!(asked["state"]["approval"]["command"].is_string(), "{asked}");
+    assert!(
+        started.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        started.elapsed()
+    );
+    let call = asked["state"]["approval"]["id"].clone();
+    let declined = mcp.call(
+        "approve",
+        serde_json::json!({"call": call, "scope": "decline"}),
+    );
+    assert_eq!(declined["status"], 204, "{declined}");
+}
+
+#[test]
+fn a_drive_mcp_ask_returns_early_on_a_held_meditation() {
+    // #772: a turn whose cadence meditation is held for the operator --
+    // the flag its audit ignored, under the refuse gate -- returns the ask
+    // as held.
+    let stub = Stub::serving_with_props(
+        vec![
+            saying("A tracker for one team, no login. Next, I will sketch the schema."),
+            saying("DECISION: a tracker\nDECISION: for one team\nDECISION: no login\nPLAN: NONE\n"),
+            saying("I will sketch the schema now."),
+            saying("1. KEEP\n2. KEEP\n"),
+            saying("nothing to say"),
+        ],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let regimen = dev_loop_sampling(
+        "interview_warrant = [\"scoping\"]\nmeditation_audit = \"on\"\n\
+         reconcile_gate = \"refuse\"\nmeditation_every_turns = 2\n",
+        "seed = 7\n",
+    );
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &regimen_path]);
+    let mut mcp = Mcp::attached(&served.listening);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+    let (first, _) = waiting_ask(
+        &mut mcp,
+        serde_json::json!({"text": "what are we building?", "scoping": true}),
+    );
+    assert_eq!(first["returned"], "idle", "{first}");
+    let memory = mcp.call("memory", serde_json::json!({}));
+    let flagged = memory["body"]["entries"][0]["id"].clone();
+    let flag = mcp.call(
+        "flag",
+        serde_json::json!({"id": flagged, "note": "still so?"}),
+    );
+    assert_eq!(flag["status"], 200, "{flag}");
+    let (second, _) = waiting_ask(&mut mcp, serde_json::json!({"text": "go on"}));
+    assert_eq!(second["returned"], "held", "{second}");
+    assert_eq!(second["state"]["meditation"]["state"], "held", "{second}");
+    assert!(
+        second["digest"]["meditations"]
+            .as_array()
+            .is_some_and(|lines| lines.iter().any(|line| line["kind"] == "meditation.held")),
+        "{second}"
+    );
+}
+
+#[test]
+fn a_drive_mcp_ask_that_outwaits_its_timeout_returns_the_state_timed_out() {
+    // #772: a fork still running at the ask's timeout returns the state,
+    // `timed_out`.
+    let stub = Stub::serving_with_props(
+        vec![
+            saying("A tracker for one team, no login. Next, I will sketch the schema."),
+            Act::Stall(Duration::from_secs(8), said_stream("PLAN: NONE\n")),
+        ],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let regimen = dev_loop_sampling("interview_warrant = [\"scoping\"]\n", "seed = 7\n");
+    let regimen_path = regimen.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &regimen_path]);
+    let mut mcp = Mcp::attached(&served.listening);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+    let started = Instant::now();
+    let (asked, _) = waiting_ask(
+        &mut mcp,
+        serde_json::json!({"text": "what are we building?", "scoping": true, "timeout": 2}),
+    );
+    assert_eq!(asked["returned"], "timed_out", "{asked}");
+    assert_eq!(asked["timed_out"], true, "{asked}");
+    assert_eq!(asked["state"]["idle"], false, "{asked}");
+    assert!(
+        started.elapsed() < Duration::from_secs(6),
+        "{:?}",
+        started.elapsed()
+    );
 }
