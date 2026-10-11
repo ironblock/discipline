@@ -1,0 +1,2 @@
+{"sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:00:00Z","type":"user","uuid":"z9-u1","parentUuid":null,"message":{"role":"user","content":"an orphan"},"isSidechain":true,"agentId":"z9"}
+{"sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:00:00Z","type":"assistant","uuid":"z9-a2","parentUuid":"z9-u1","isSidechain":true,"agentId":"z9","message":{"model":"model-two","role":"assistant","content":[{"type":"text","text":"Nobody spawned me."}],"usage":{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":3000,"output_tokens":20}}}

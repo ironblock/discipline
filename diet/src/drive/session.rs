@@ -170,6 +170,9 @@ vocabulary! {
         MeditationHeld => "meditation-held",
         /// A refill-anyway with no meditation held (#150's gate).
         NothingHeld => "nothing-held",
+        /// An edit whose text restates the entry it corrects, or another
+        /// live entry (v8, #729): working memory has it already.
+        Restates => "restates",
     }
 }
 
@@ -1628,23 +1631,38 @@ fn self_recorded(log: &[Logged], turn: u32) -> Vec<(usize, String, String)> {
         .collect()
 }
 
-/// The fields an ask asks for, read off its words: the `fields X, Y and Z`
-/// (or `field X`) every router ask names its answer with, lower-cased to
-/// the contract's spelling. None when it names none.
+/// The fields an ask asks for, read off its own instruction (#730): the
+/// fields route's `with the fields X, Y and Z` (or `with the field X`),
+/// upper case, or the tools route's `under the field x, y or z`, lower case
+/// -- the last such, after the intent it quotes -- lower-cased to the
+/// contract's spelling. None when it names none.
 fn asked_fields(question: &str) -> Vec<String> {
-    let Some(at) = question
-        .find("fields ")
-        .map(|at| at + 7)
-        .or_else(|| question.find("field ").map(|at| at + 6))
-    else {
+    let marked = [
+        ("with the fields ", true),
+        ("with the field ", true),
+        ("under the field ", false),
+    ]
+    .iter()
+    .filter_map(|(marker, upper)| question.rfind(marker).map(|at| (at + marker.len(), *upper)))
+    .max_by_key(|(at, _)| *at);
+    let Some((at, upper)) = marked else {
         return Vec::new();
     };
     let named = &question[at..];
     let end = named.find([';', '.', '\n']).unwrap_or(named.len());
     named[..end]
         .split([',', ' '])
-        .filter(|word| !word.is_empty() && *word != "and")
-        .take_while(|word| word.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+        .filter(|word| !word.is_empty() && *word != "and" && *word != "or")
+        .take_while(|word| {
+            word.chars().all(|c| {
+                c == '_'
+                    || if upper {
+                        c.is_ascii_uppercase()
+                    } else {
+                        c.is_ascii_lowercase()
+                    }
+            })
+        })
         .map(str::to_ascii_lowercase)
         .collect()
 }
@@ -1690,6 +1708,7 @@ fn routed(log: &[Logged], turn: u32) -> Vec<Routed> {
                 exit: None,
                 output: None,
                 exec: None,
+                lane: None,
             });
             let class = decided.first()?.class;
             let bytes = match (&line.stdout, &line.stderr) {
@@ -1882,8 +1901,8 @@ struct State {
     /// The operator's edits and flags since a meditation last addressed them
     /// (#150), in order.
     operator_pending: Vec<Pending>,
-    /// The pending changes this meditation's audit addressed (#150): its answer
-    /// parsed, so each marked note had its line. Cleared as the meditation ends.
+    /// The pending changes this meditation's audit addressed (#150): the ones
+    /// its answer acted on ([`acted_on`], #748). Cleared as the meditation ends.
     operator_addressed: Vec<String>,
     /// Whether the trunk carries a meditation's refill message after the head
     /// (#597): the turns start after it.
@@ -2253,6 +2272,13 @@ impl State {
         Ok(())
     }
 
+    /// A command that carries no idle gap and ends none, admitted (#729):
+    /// the operator's edit, flag, phase ruling or refill-anyway is a step
+    /// within the gap, so the gap stays open for the ask that ends it.
+    fn admit_within_the_gap(&mut self) {
+        self.carried = None;
+    }
+
     /// Now, on the log's clock: milliseconds since the session opened.
     fn now(&self) -> u64 {
         u64::try_from(self.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX)
@@ -2540,6 +2566,7 @@ impl<S: Streaming + 'static> Session<S> {
             .map_or(0, |since| {
                 u64::try_from(since.as_millis()).unwrap_or(u64::MAX)
             });
+        let tools = tools.map(|tools| readable_outputs(tools, opened));
         let mut state = State::opening(trunk, phase_at_open.clone(), interview, tools.as_ref());
         state.push(Event::Started {
             opened,
@@ -2954,6 +2981,13 @@ impl<S: Streaming + 'static> Session<S> {
             (Settlement::Turn | Settlement::Capture, _) => Some(Refusal::InFlight),
             (Settlement::Awaiting, None) => Some(Refusal::NoProposal),
             (Settlement::Awaiting, Some(_)) if choice == PhaseChoice::Stay => None,
+            // A meditation's refill under an open tangent is one its close
+            // would undo (#729), as a declared one is refused.
+            (Settlement::Awaiting, Some(_))
+                if choice == PhaseChoice::Meditation && state.tangent.is_some() =>
+            {
+                Some(Refusal::TangentOpen)
+            }
             (Settlement::Awaiting, Some(to)) => graph_refusal(&state, to).or_else(|| {
                 (choice == PhaseChoice::Meditation
                     && (state.turns == 0
@@ -2970,7 +3004,7 @@ impl<S: Streaming + 'static> Session<S> {
             self.shared.changed.notify_all();
             return Err(Rejected::Refused(refused));
         }
-        state.admit()?;
+        state.admit_within_the_gap();
         let Some(PendingProposal { call, from, to }) = state.proposal.take() else {
             unreachable!("a pending proposal was checked above");
         };
@@ -3155,14 +3189,15 @@ impl<S: Streaming + 'static> Session<S> {
     /// [`Refusal::NotLive`] for one no longer live.
     pub fn edit_entry(&self, id: &str, content: &str) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
-        let because = operator_refusal(&state, id, content);
+        let because =
+            operator_refusal(&state, id, content).or_else(|| restates(&state, id, content));
         if let Some(because) = because {
             let refused = state.refuse(CommandKind::EditEntry, because);
             drop(state);
             self.shared.changed.notify_all();
             return Err(Rejected::Refused(refused));
         }
-        state.admit()?;
+        state.admit_within_the_gap();
         let seq = state.log.len();
         let turn = state.turns;
         let tangent = state
@@ -3220,7 +3255,20 @@ impl<S: Streaming + 'static> Session<S> {
             self.shared.changed.notify_all();
             return Err(Rejected::Refused(refused));
         }
-        state.admit()?;
+        state.admit_within_the_gap();
+        // By the object's own id (#729): a flag on an alias marks the entry
+        // the audit lists.
+        let id = state
+            .interview
+            .as_ref()
+            .and_then(|interview| {
+                crate::object::EntryId::new(id)
+                    .ok()
+                    .and_then(|named| interview.object.entry(&named))
+                    .map(|entry| entry.id.as_str().to_owned())
+            })
+            .unwrap_or_else(|| id.to_owned());
+        let id = id.as_str();
         let turn = state.turns;
         state.push(Event::Flagged {
             turn,
@@ -3252,6 +3300,8 @@ impl<S: Streaming + 'static> Session<S> {
             Settlement::Ended => Some(Refusal::Ended),
             Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
             Settlement::Awaiting if state.held.is_none() => Some(Refusal::NothingHeld),
+            // As a declared meditation is (#729): its close would undo it.
+            Settlement::Awaiting if state.tangent.is_some() => Some(Refusal::TangentOpen),
             Settlement::Awaiting => None,
         };
         if let Some(because) = because {
@@ -3260,10 +3310,15 @@ impl<S: Streaming + 'static> Session<S> {
             self.shared.changed.notify_all();
             return Err(Rejected::Refused(refused));
         }
-        state.admit()?;
+        state.admit_within_the_gap();
         let Some(PendingMeditation { reason, to, .. }) = state.held.take() else {
             unreachable!("a held meditation was checked above");
         };
+        // The phase it was to move to, ruled again from where the session
+        // is now (#729): a `continue` while it held may have moved it, and a
+        // move the graph no longer allows from here is not made -- the
+        // refill is in place.
+        let to = to.filter(|to| graph_refusal(&state, to).is_none());
         state.meditation_pending = Some(PendingMeditation {
             reason,
             to,
@@ -4353,6 +4408,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::Empty => log::Refusal::Empty,
         Refusal::MeditationHeld => log::Refusal::MeditationHeld,
         Refusal::NothingHeld => log::Refusal::NothingHeld,
+        Refusal::Restates => log::Refusal::Restates,
     }
 }
 
@@ -4395,7 +4451,7 @@ fn call<S: Streaming>(
     // never (D13).
     let mut exchange = opening;
     shared.lock().ran.clear();
-    while let Some(next) = step(
+    while let Some((next, a_step)) = step(
         shared,
         &mut shape,
         cancel,
@@ -4403,7 +4459,9 @@ fn call<S: Streaming>(
         (turn, request, steps),
     ) {
         request = next;
-        steps += 1;
+        if a_step {
+            steps += 1;
+        }
     }
 }
 
@@ -4421,7 +4479,7 @@ fn step<S: Streaming>(
     cancel: &Cancel,
     exchange: &mut Vec<Message>,
     (turn, request, steps): (u32, u64, u32),
-) -> Option<u64> {
+) -> Option<(u64, bool)> {
     let deadline = Instant::now() + shared.template.limits.call;
     let mut partial = String::new();
     let mut reasoning = String::new();
@@ -4568,7 +4626,8 @@ fn step<S: Streaming>(
                 said,
                 &calls,
                 (turn, request, steps),
-            );
+            )
+            .map(|next| (next, true));
         }
         Ok(StreamEnded::Cancelled) => {
             // The steps it finished stay on the trunk, and so does what it
@@ -4616,11 +4675,12 @@ fn step<S: Streaming>(
             });
             // #617: an overflow meditates once and goes again.
             if overflow.is_some()
-                && let Some(next) = retried(&shared.template, &mut state, shape, turn)
+                && let Some(next) = retried(&shared.template, &mut state, shape, (turn, cancel))
             {
                 drop(state);
                 shared.changed.notify_all();
-                return Some(next);
+                // The same step sent again (#728): no step of its own.
+                return Some((next, false));
             }
             state.keep_ran_steps();
             state.push(Event::TurnSettled {
@@ -4640,11 +4700,12 @@ fn step<S: Streaming>(
             });
             // #617: an overflow meditates once and goes again.
             if overflow.is_some()
-                && let Some(next) = retried(&shared.template, &mut state, shape, turn)
+                && let Some(next) = retried(&shared.template, &mut state, shape, (turn, cancel))
             {
                 drop(state);
                 shared.changed.notify_all();
-                return Some(next);
+                // The same step sent again (#728): no step of its own.
+                return Some((next, false));
             }
             state.keep_ran_steps();
             state.push(Event::TurnSettled { turn, reason });
@@ -4923,6 +4984,59 @@ fn shown_capped(tools: &Tools, whole: &str, line: &mut ToolLine) -> String {
     if shown != whole
         && let Some((_, file)) = saved
     {
+        line.files.push(file);
+    }
+    shown
+}
+
+/// What the model is shown of a command's output, `before` it (#734): as
+/// [`shown_capped`] when the call held its output whole; spilled, the
+/// whole kept in the recording from its files, never in memory at once,
+/// and the held head and tail capped -- under the session's cap, or with
+/// the cap off the default, since the whole was never held to show.
+fn shown_ran(
+    tools: &Tools,
+    before: &str,
+    ran: &crate::isolation::Ran,
+    line: &mut ToolLine,
+) -> String {
+    use super::attach::Part;
+    use super::output::{self, Kept, OutputCap};
+    let seen = format!("{before}{}", ran.as_the_model_sees_it());
+    if !ran.spilled() {
+        return shown_capped(tools, &seen, line);
+    }
+    let newline = |held: &[u8]| (!held.is_empty() && !held.ends_with(b"\n")).then_some(b"\n");
+    let mut parts = vec![Part::Bytes(before.as_bytes())];
+    parts.push(match &ran.stdout_spill {
+        Some(spill) => Part::File(&spill.path),
+        None => Part::Bytes(&ran.raw_stdout),
+    });
+    if let Some(nl) = newline(&ran.raw_stdout) {
+        parts.push(Part::Bytes(nl));
+    }
+    parts.push(match &ran.stderr_spill {
+        Some(spill) => Part::File(&spill.path),
+        None => Part::Bytes(ran.stderr.as_bytes()),
+    });
+    if let Some(nl) = newline(ran.stderr.as_bytes()) {
+        parts.push(Part::Bytes(nl));
+    }
+    let saved = tools.recording.as_ref().and_then(|dir| {
+        super::attach::kept_whole_from(dir, &parts, "text/plain")
+            .ok()
+            .map(|file| (dir.join(&file.path).to_string_lossy().into_owned(), file))
+    });
+    let kept = saved.as_ref().map_or(Kept::Nowhere, |(path, _)| Kept::At {
+        path,
+        read_tool: tools.read_tool.as_deref(),
+    });
+    let cap = match tools.output_cap {
+        OutputCap::Keep => OutputCap::DEFAULT,
+        capped @ OutputCap::Capped { .. } => capped,
+    };
+    let shown = output::capped(&seen, cap, kept);
+    if let Some((_, file)) = saved {
         line.files.push(file);
     }
     shown
@@ -5608,7 +5722,7 @@ fn one_call<S: Streaming>(
                 text: ran.stderr.clone(),
                 bytes: ran.stderr_bytes,
             });
-            let shown = shown_capped(tools, &ran.as_the_model_sees_it(), &mut line);
+            let shown = shown_ran(tools, "", &ran, &mut line);
             (line, Some(shown))
         }
         Err(not_run) => never_ran(tools, line, &run, &not_run),
@@ -5619,26 +5733,57 @@ fn one_call<S: Streaming>(
 /// `background/`, or, with no recording, a directory of the session's own
 /// under the system's temporary one.
 fn background_dir<S>(shared: &Shared<S>, state: &State) -> std::path::PathBuf {
-    let dir = shared
+    let opened = match state.log.first() {
+        Some(Logged {
+            event: Event::Started { opened, .. },
+            ..
+        }) => *opened,
+        _ => 0,
+    };
+    // The recording's `background`, when it is one serve made (#735): a
+    // symlink planted there would steer the job's files; the session's own
+    // temporary directory otherwise.
+    shared
         .tools
         .as_ref()
         .and_then(|tools| tools.recording.as_ref())
-        .map_or_else(
-            || {
-                let opened = match state.log.first() {
-                    Some(Logged {
-                        event: Event::Started { opened, .. },
-                        ..
-                    }) => *opened,
-                    _ => 0,
-                };
-                std::env::temp_dir()
-                    .join(format!("diet-background-{opened}-{}", std::process::id()))
-            },
-            |recording| recording.join("background"),
-        );
-    let _ = std::fs::create_dir_all(&dir);
-    dir
+        .and_then(|recording| super::attach::own_dir(recording, "background").ok())
+        .unwrap_or_else(|| {
+            let dir = temporary_background(opened);
+            let _ = std::fs::create_dir_all(&dir);
+            dir
+        })
+}
+
+/// The session's own directory for background jobs' files when it keeps no
+/// recording (#614), under the system's temporary directory.
+fn temporary_background(opened: u64) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("diet-background-{opened}-{}", std::process::id()))
+}
+
+/// `tools` with the directories serve points the model to readable under
+/// its sandbox (#735): the recording's, where a capped output is kept whole
+/// and background jobs write; or, with background commands on and no
+/// recording, the session's temporary one, where they write. A sandbox
+/// listing what it reads otherwise refuses the very `sed` and `cat` the
+/// model is told to run.
+fn readable_outputs(mut tools: Tools, opened: u64) -> Tools {
+    if matches!(tools.confinement, crate::isolation::Confinement::Unconfined) {
+        return tools;
+    }
+    let temporary = (tools.background && tools.recording.is_none()).then(|| {
+        let dir = temporary_background(opened);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    });
+    let dirs = tools.recording.iter().cloned().chain(temporary);
+    for dir in dirs {
+        let dir = dir.to_string_lossy().into_owned();
+        if !tools.policy.readable.contains(&dir) {
+            tools.policy.readable.push(dir);
+        }
+    }
+    tools
 }
 
 /// A started job, kept and handed to the reaper (#614).
@@ -5668,7 +5813,11 @@ fn background_call<S>(
     let dir = background_dir(shared, &shared.lock());
     let id = super::background::new_id();
     let (output, status_file) = super::background::files_of(&dir, &id);
-    let spawned = std::fs::File::create(&output)
+    // Made new (#735): a name planted there is refused, not followed.
+    let spawned = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&output)
         .map_err(|why| crate::isolation::NotRun::Runner {
             said: format!(
                 "the output file {} could not be made: {why}",
@@ -5788,19 +5937,26 @@ fn timed_out(
         bytes: ran.stderr_bytes,
     });
     line.timeout_ms = Some(ms);
-    let printed = ran.as_the_model_sees_it();
-    let said = if printed.is_empty() {
-        format!(
-            "Command timed out after {ms}ms before it could complete. There was no output before \
-             it timed out."
+    let shown = if ran.as_the_model_sees_it().is_empty() {
+        shown_capped(
+            tools,
+            &format!(
+                "Command timed out after {ms}ms before it could complete. There was no output \
+                 before it timed out."
+            ),
+            &mut line,
         )
     } else {
-        format!(
-            "Command timed out after {ms}ms before it could complete. Below is the output before \
-             it timed out:\n{printed}"
+        shown_ran(
+            tools,
+            &format!(
+                "Command timed out after {ms}ms before it could complete. Below is the output \
+                 before it timed out:\n"
+            ),
+            ran,
+            &mut line,
         )
     };
-    let shown = shown_capped(tools, &said, &mut line);
     (line, Some(shown))
 }
 
@@ -6029,6 +6185,7 @@ fn refilled(
         .trunk
         .get(template.messages.len() + usize::from(state.refilled)..)
         .unwrap_or_default();
+    let on_trunk = prunes_on(&state.pruned, turns);
     let kept = crate::meditation::render::tail(turns, tail_tokens).to_vec();
     let (carried_turns, newest_turn_tokens) = tail_kept(&kept, turns, tail_tokens);
     let carried_tokens = kept
@@ -6043,7 +6200,8 @@ fn refilled(
     replaced_in_tail(&mut kept, &state.pruned);
     // The archive (#566): what this meditation drops from the trunk, and every
     // working-memory entry no longer live, for a recall to find later.
-    let archived = archived_at_meditation(compacted, &interview.object, state.turns);
+    let earlier = meditations_at(&state.log, state.turns);
+    let archived = archived_at_meditation(compacted, &interview.object, (state.turns, earlier));
     let outputs = crate::meditation::outputs::section(
         tool_outputs,
         &compacted_outputs(
@@ -6071,7 +6229,7 @@ fn refilled(
     }
     state.turns_at_meditation = state.turns;
     state.trunk_tokens = None;
-    let pruned = prunes_applied(state);
+    let pruned = prunes_applied(state, &on_trunk);
     let (operator_changes, unaddressed) = operator_carried(state);
     let at_turn = state.turns;
     Event::Meditated {
@@ -6127,6 +6285,32 @@ impl Event {
             trailer: None,
         }
     }
+}
+
+/// [`Refusal::Restates`] when the operator's edit of `id` to `content`
+/// is one working memory refuses as no correction (#729): `content` is the
+/// entry's own text, or another live entry's. Tried on a copy, so nothing is
+/// applied.
+fn restates(state: &State, id: &str, content: &str) -> Option<Refusal> {
+    let interview = state.interview.as_ref()?;
+    let voids = crate::object::EntryId::new(id).ok()?;
+    let new = crate::object::EntryId::new(&format!("operator-{}", state.log.len())).ok()?;
+    let mut trial = interview.object.clone();
+    trial
+        .apply(&Patch::Supersede {
+            id: new,
+            content: content.to_owned(),
+            voids,
+            provenance: crate::object::Provenance {
+                turn: state.turns,
+                lane: crate::object::OPERATOR.to_owned(),
+                fork: None,
+                tangent: None,
+                index: 0,
+            },
+        })
+        .is_err()
+        .then_some(Refusal::Restates)
 }
 
 /// Why an operator edit or flag of `id` with `text` is refused, if it is.
@@ -6226,7 +6410,7 @@ fn operator_marks(pending: &[Pending]) -> crate::meditation::render::Marks {
 /// The operator's changes a meditation carries (#150) -- each still live, or
 /// addressed by this meditation's audit -- and the ones no answer addressed,
 /// which stay pending for the next meditation. A change is addressed when the
-/// meditation's audit, which marked its note, parsed: every note had its line.
+/// meditation's audit acted on it ([`acted_on`], #748).
 fn operator_carried(state: &mut State) -> (Option<Vec<log::OperatorChange>>, Option<Vec<String>>) {
     let live = |id: &str| {
         state.interview.as_ref().is_some_and(|interview| {
@@ -6503,8 +6687,8 @@ fn audit_fired(
         .collect();
     // #610: a session whose forks answer through the record tools audits
     // through them too, in the tools-route set. That set's words carry no
-    // markers yet, so it marks nothing and addresses nothing (#150); the
-    // lines route marks the operator's pending changes and, with any, asks
+    // markers yet, so it marks nothing (#150), though its patches address
+    // (#748); the lines route marks the operator's pending changes and, with any, asks
     // the reconciling ask.
     let tools = interview.capture == crate::dogma::asks::Modality::Tools;
     let marks = if tools {
@@ -6517,27 +6701,33 @@ fn audit_fired(
     } else {
         crate::meditation::audit_ask_marked(reason, &items, &marks)?
     };
+    // The notes with a pending change, on either route (#748): the tools
+    // route's words carry no markers, but its patches can still act on them.
     let marked = ask
         .items
         .iter()
-        .filter(|id| marks.contains_key(*id))
+        .filter(|id| {
+            state
+                .operator_pending
+                .iter()
+                .any(|change| change.entry == id.as_str())
+        })
         .map(|id| id.as_str().to_owned())
         .collect();
-    let turn = state.turns;
-    let finished = state
+    // The latest turn that settled `final` (#729): one that failed since
+    // has no answered request to cut from, and under `refuse` a meditation
+    // that could ask nothing would hold having asked nothing.
+    let turn = state
         .log
         .iter()
         .rev()
         .find_map(|logged| match &logged.event {
             Event::TurnSettled {
                 turn: settled,
-                reason,
-            } if *settled == turn => Some(*reason),
+                reason: SettleReason::Final,
+            } => Some(*settled),
             _ => None,
-        });
-    if finished != Some(SettleReason::Final) {
-        return None;
-    }
+        })?;
     let at = state
         .log
         .iter()
@@ -6737,21 +6927,21 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
                 // patches the audit's (lane `audit`).
                 let (outcome, patched) =
                     captured_in(&mut state, &calls, (turn, request), (fork, Lane::Audit));
+                if outcome != log::ForkOutcome::Unparseable {
+                    acted_on(&mut state, &marked, &patched);
+                }
                 lines = patched;
                 outcome
             } else if called {
                 log::ForkOutcome::Unparseable
             } else {
                 let (outcome, patched) = audit_folded(&mut state, &text, &items, fork);
-                lines = patched;
-                // Parsed: every marked note had its line (#150).
+                // Parsed: every marked note had its line (#150), and the
+                // answer's patches say which it acted on (#748).
                 if outcome != log::ForkOutcome::Unparseable {
-                    for entry in marked {
-                        if !state.operator_addressed.contains(&entry) {
-                            state.operator_addressed.push(entry);
-                        }
-                    }
+                    acted_on(&mut state, &marked, &patched);
                 }
+                lines = patched;
                 outcome
             }
         }
@@ -6792,6 +6982,55 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
     }
     drop(state);
     shared.changed.notify_all();
+}
+
+/// The marked entries an audit acted on (#748, log v8), added to the ones
+/// this meditation addressed: a flag is addressed when one of the audit's
+/// patches `lines` superseded, retired, resolved or parked its entry -- on the
+/// lines route an `UPDATE` or a `REMOVE`, never a `KEEP` -- and an edit
+/// unless a patch over it was refused -- on the lines route its `KEEP`.
+/// An entry is addressed when each of its changes is.
+fn acted_on(state: &mut State, marked: &[String], lines: &[Event]) {
+    let settled = |entry: &str| settles(lines, entry);
+    let refused = |entry: &str| {
+        lines
+            .iter()
+            .any(|line| matches!(line, Event::PatchRefused { entry: over, .. } if over == entry))
+    };
+    for entry in marked {
+        let addressed = state
+            .operator_pending
+            .iter()
+            .filter(|change| change.entry == *entry)
+            .all(|change| {
+                if change.kind == "flag" {
+                    settled(entry)
+                } else {
+                    !refused(entry)
+                }
+            });
+        if addressed && !state.operator_addressed.contains(entry) {
+            state.operator_addressed.push(entry.clone());
+        }
+    }
+}
+
+/// Whether one of `lines` took `entry` out of live memory (#748): a patch
+/// that superseded, retired, resolved or parked it.
+fn settles(lines: &[Event], entry: &str) -> bool {
+    lines.iter().any(|line| match line {
+        Event::Patched {
+            op: log::PatchOp::Supersede,
+            supersedes: Some(voids),
+            ..
+        } => voids == entry,
+        Event::Patched {
+            op: log::PatchOp::Retire | log::PatchOp::Resolve | log::PatchOp::Park,
+            entry: patched,
+            ..
+        } => patched.id == entry,
+        _ => false,
+    })
 }
 
 /// An audit's answer `text`, folded (#504): its lines, which must number
@@ -6918,7 +7157,7 @@ fn retried(
     template: &RequestShape,
     state: &mut State,
     shape: &mut RequestShape,
-    turn: u32,
+    (turn, cancel): (u32, &Cancel),
 ) -> Option<u64> {
     if state.overflow_retried == Some(turn) || !window_meditation(template, state, shape, true) {
         return None;
@@ -6932,9 +7171,13 @@ fn retried(
         fork: None,
         max_tokens,
     });
-    if let Some(flight) = state.flight.as_mut() {
-        flight.request = next;
-    }
+    // In flight again (#728): the failed request cleared it, and a cancel,
+    // an end or a drop must reach the retry as it reaches any request.
+    state.flight = Some(Flight {
+        turn,
+        request: next,
+        cancel: cancel.clone(),
+    });
     Some(next)
 }
 
@@ -6949,13 +7192,37 @@ fn replaced_in_tail(kept: &mut [Message], pruned: &[Prune]) {
     }
 }
 
-/// The prunes a meditation applies -- every one since the last (#612) -- marked
-/// applied, so none is due any more; `None` when there were none.
-fn prunes_applied(state: &mut State) -> Option<Vec<String>> {
+/// The calls of `pruned` whose result is in `turns`, the trunk a meditation
+/// replaces (#728): one made in a turn a window meditation interrupts is in
+/// that turn's own messages, which ride after the refill unreplaced, and
+/// stays due.
+fn prunes_on(pruned: &[Prune], turns: &[Message]) -> Vec<String> {
+    pruned
+        .iter()
+        .filter(|prune| turns.iter().any(|message| prune.is(message)))
+        .map(|prune| prune.call.clone())
+        .collect()
+}
+
+/// How many meditations `log` holds at turn `turn` (#728): a window one
+/// under the turn, then the operator's after it, archive under keys of
+/// their own.
+fn meditations_at(log: &[Logged], turn: u32) -> usize {
+    log.iter()
+        .filter(
+            |logged| matches!(&logged.event, Event::Meditated { at_turn, .. } if *at_turn == turn),
+        )
+        .count()
+}
+
+/// The prunes a meditation applies -- every one since the last (#612) whose
+/// result was on the trunk it replaced, `on_trunk` (#728) -- marked applied,
+/// so none is due any more; `None` when there were none.
+fn prunes_applied(state: &mut State, on_trunk: &[String]) -> Option<Vec<String>> {
     let applied: Vec<String> = state
         .pruned
         .iter_mut()
-        .filter(|prune| !prune.applied)
+        .filter(|prune| !prune.applied && on_trunk.contains(&prune.call))
         .map(|prune| {
             prune.applied = true;
             prune.call.clone()
@@ -6966,13 +7233,20 @@ fn prunes_applied(state: &mut State) -> Option<Vec<String>> {
 
 /// What a meditation at `at_turn` archives (#566): each message of `compacted`,
 /// keyed by the meditation and its position, and each entry of `object` that is
-/// no longer live, keyed by its id.
+/// no longer live, keyed by its id. A meditation after `earlier` others at the
+/// same turn keys its messages `compaction-<turn>.<earlier>` (#728): the
+/// archive keeps one item per key, and the second's would otherwise collide.
 fn archived_at_meditation(
     compacted: &[Message],
     object: &WorkingObject,
-    at_turn: u32,
+    (at_turn, earlier): (u32, usize),
 ) -> Vec<super::archive::Item> {
     use super::archive::Item;
+    let meditation = if earlier == 0 {
+        at_turn.to_string()
+    } else {
+        format!("{at_turn}.{earlier}")
+    };
     let messages = compacted.iter().enumerate().map(|(at, message)| {
         let calls: Vec<String> = message
             .tool_calls
@@ -6993,7 +7267,7 @@ fn archived_at_meditation(
         Item {
             // The model reads it: `compaction`, the word it was trained on,
             // the maintainer's choice (#583). Older logs keep `seam-`.
-            key: format!("compaction-{at_turn}/message-{}", at + 1),
+            key: format!("compaction-{meditation}/message-{}", at + 1),
             title,
             text,
         }
@@ -7247,7 +7521,7 @@ struct AuditFired {
     cancel: Cancel,
     /// The notes the ask numbered, in its order.
     items: Vec<crate::object::EntryId>,
-    /// The notes among them the operator's markers marked (#150).
+    /// The notes among them with an operator's pending change (#150, #748).
     marked: Vec<String>,
     /// Whether it is answered through the record tools (#610), not in lines.
     tools: bool,
@@ -8027,6 +8301,37 @@ fn trailed(text: &str) -> (std::borrow::Cow<'_, str>, Option<String>) {
     (std::borrow::Cow::Owned(body), Some(trailer))
 }
 
+/// `patches` with each addition whose id `object` already holds -- an
+/// earlier fork in the same gap folded under the same `interview-t<turn>-
+/// <index>` (#730) -- renamed `interview-t<turn>-f<fork>-<index>`, so the
+/// second fork's facts fold beside the first's instead of being refused as an
+/// id reused. A gap's first fork keeps the ids it always had.
+fn unclashed(patches: Vec<Patch>, object: &WorkingObject, (turn, fork): (u32, u64)) -> Vec<Patch> {
+    patches
+        .into_iter()
+        .map(|patch| match patch {
+            Patch::Add {
+                id,
+                content,
+                provenance,
+            } if object.entry(&id).is_some() => {
+                let renamed = crate::object::EntryId::new(&format!(
+                    "{}-t{turn}-f{fork}-{}",
+                    super::INTERVIEW,
+                    provenance.index
+                ))
+                .unwrap_or(id);
+                Patch::Add {
+                    id: renamed,
+                    content,
+                    provenance,
+                }
+            }
+            other => other,
+        })
+        .collect()
+}
+
 /// The fork's answer, read by the interview grammar and folded as the
 /// scripted gym folds a fork's answer ([`super::fold`]), its patches applied
 /// to the working object: `value` and one [`Event::Patched`] per patch;
@@ -8044,6 +8349,7 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
     let Some(interview) = state.interview.as_ref() else {
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
+    let patches = unclashed(patches, &interview.object, (turn, fork));
     let patches = cited(patches, &interview.object);
     // Made under an open tangent (#22): stamped with it from birth, so its
     // close finds them by provenance and never by recency.
@@ -8238,7 +8544,13 @@ fn superseding(
     provenance: &crate::object::Provenance,
 ) -> Option<Patch> {
     let quoted = |c: char| "`'\"[]()<>*:,—-".contains(c);
-    let (cited, rest) = match pair.split_once('→').or_else(|| pair.split_once("->")) {
+    // An arrow points from the cited id only when it follows the id itself:
+    // one inside the text that stands is that text's (#730).
+    let arrowed = pair
+        .split_once('→')
+        .or_else(|| pair.split_once("->"))
+        .filter(|(cited, _)| !cited.trim().contains(char::is_whitespace));
+    let (cited, rest) = match arrowed {
         Some((cited, rest)) => (cited.trim(), rest),
         None => pair.split_once(char::is_whitespace).unwrap_or((pair, "")),
     };
@@ -11501,7 +11813,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates"
         );
         assert_eq!(
             tags(
@@ -12774,6 +13086,49 @@ pub(in crate::drive) mod tests {
         Session::open_looping(Canned::new(replies), looping(), None, tools)
     }
 
+    /// #734: an output past what a call holds in memory -- 3 MB from `seq` --
+    /// is counted whole on its line, its whole kept in the recording from
+    /// its spill (the same digest a held output would get), and the model
+    /// shown its head and tail capped, the cap off or not.
+    #[test]
+    fn a_spilled_output_is_kept_whole_from_its_file_and_shown_capped() {
+        use crate::drive::output::OutputCap;
+        let tree = scratch("cap-spill");
+        let recording = scratch("cap-spill-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let whole: String = (1..=400_000)
+            .flat_map(|n| [n.to_string(), "\n".to_owned()])
+            .collect();
+        assert!(whole.len() > 2 * 1024 * 1024);
+        let sha256 = crate::digest::sha256_hex(whole.as_bytes());
+        for cap in [OutputCap::DEFAULT, OutputCap::Keep] {
+            let session = capping_session(&tree, &["seq 1 400000"], cap, Some(&recording));
+            session.ask("count", None).expect("accepted");
+            let log = wait_until(&session, "the turn to settle", settled);
+            let written = lines(&log);
+            let line = &written[0];
+            assert_eq!(
+                line.stdout.as_ref().map(|out| out.bytes),
+                Some(whole.len() as u64)
+            );
+            assert_eq!(line.files.len(), 1);
+            assert_eq!(line.files[0].sha256, sha256);
+            let kept = recording.join(&line.files[0].path);
+            assert_eq!(std::fs::read_to_string(&kept).expect("kept"), whole);
+            let shown = line.shown.clone().expect("shown");
+            assert!(
+                shown.starts_with("Tool output was too large and has been truncated.\n"),
+                "{}",
+                &shown[..200]
+            );
+            assert!(shown.len() < 60_000, "{}", shown.len());
+            assert!(shown.contains("\n1\n2\n") || shown.contains("1\n2\n3\n"));
+            assert!(shown.ends_with("399999\n400000\n"));
+            reads_whole(&session);
+        }
+        tidy(&[&tree, &recording]);
+    }
+
     /// #554: an output over the cap reaches the model capped -- Qwen Code's
     /// notice naming the kept file, the head, the separator, the tail -- and
     /// the whole of it is kept in the recording by digest, named on the
@@ -13940,8 +14295,9 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
-    /// Under `refuse`, a re-ask that addresses the change refills: the
-    /// gate holds only what stays unaddressed.
+    /// Under `refuse`, a re-ask that addresses the change -- an `UPDATE` of
+    /// the flagged note (#748) -- refills: the gate holds only what stays
+    /// unaddressed.
     #[test]
     fn under_the_refuse_gate_a_re_ask_that_addresses_the_change_refills() {
         let session = three_decisions_then(
@@ -13949,7 +14305,10 @@ pub(in crate::drive) mod tests {
                 meditations.audit = true;
                 meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
             },
-            vec![deltas(&["1. KEEP\n2. KEEP\n"]), deltas(&["1. KEEP\n"])],
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n"]),
+                deltas(&["1. UPDATE: still so\n"]),
+            ],
         );
         let flagged = live_entries(&session)[0].0.clone();
         session.flag_entry(&flagged, "still so?").expect("a flag");
@@ -14320,14 +14679,321 @@ pub(in crate::drive) mod tests {
             .expect("the meditation")
     }
 
+    /// #748: a session reconciling under `gate` whose audits answer
+    /// `answers` in turn -- in lines, or through the record tools when
+    /// `tools` -- after `change` makes the operator's changes on the three
+    /// live entries; the log once the meditation refilled or held.
+    fn reconciled(
+        gate: crate::meditation::policy::ReconcileGate,
+        answers: Vec<Vec<Step>>,
+        tools: bool,
+        change: impl FnOnce(&Session<Canned>, &[String]),
+    ) -> (Session<Canned>, Vec<Logged>) {
+        let session = three_decisions_then(
+            |meditations| {
+                meditations.audit = true;
+                meditations.reconcile_gate = gate;
+            },
+            answers,
+        );
+        let ids: Vec<String> = live_entries(&session)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        change(&session, &ids);
+        if tools {
+            let mut state = session.shared.lock();
+            let interview = state.interview.as_mut().expect("memory");
+            interview.capture = crate::dogma::asks::Modality::Tools;
+            interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        }
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the refill or the hold", |log| {
+            meditated(log)
+                || log
+                    .iter()
+                    .any(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+                    && session_settled_awaiting(log)
+        });
+        (session, log)
+    }
+
+    /// The operator's entry an edit wrote: the live one with `content`.
+    fn operators(session: &Session<Canned>, content: &str) -> String {
+        live_entries(session)
+            .into_iter()
+            .find(|(_, held)| held == content)
+            .expect("the operator's entry")
+            .0
+    }
+
+    /// The entries the meditation held on, or `None` when it did not hold.
+    fn held_on(log: &[Logged]) -> Option<Vec<String>> {
+        log.iter().find_map(|logged| match &logged.event {
+            Event::MeditationHeld { unaddressed, .. } => Some(unaddressed.clone()),
+            _ => None,
+        })
+    }
+
+    /// One `resolve_entry` call on `entry`, as the audit's whole answer.
+    fn resolving(entry: &str) -> Vec<Step> {
+        vec![
+            Step::Delta("Settling it.".to_owned()),
+            Step::call(
+                0,
+                "call-r",
+                "resolve_entry",
+                &serde_json::json!({ "entry": entry, "verdict": "done" }).to_string(),
+            ),
+        ]
+    }
+
+    /// #748, Dispatch's ruling: a park takes the entry out of live memory
+    /// as a retire does, so it settles a flag; an add names no entry and
+    /// does not.
+    #[test]
+    fn v8_a_park_settles_a_flag_as_a_retire_does() {
+        let line = |op, id: &str| Event::Patched {
+            fork: Some(1),
+            lane: None,
+            op,
+            entry: log::PatchEntry {
+                id: id.to_owned(),
+                text: "a note".to_owned(),
+                category: None,
+            },
+            supersedes: None,
+            tangent: None,
+        };
+        for op in [
+            log::PatchOp::Park,
+            log::PatchOp::Retire,
+            log::PatchOp::Resolve,
+        ] {
+            assert!(settles(&[line(op, "e-1")], "e-1"), "{op:?}");
+            assert!(!settles(&[line(op, "e-2")], "e-1"), "{op:?}");
+        }
+        assert!(!settles(&[line(log::PatchOp::Add, "e-1")], "e-1"));
+    }
+
+    const CARRY: crate::meditation::policy::ReconcileGate =
+        crate::meditation::policy::ReconcileGate::Carry;
+    const REFUSE: crate::meditation::policy::ReconcileGate =
+        crate::meditation::policy::ReconcileGate::Refuse;
+
+    /// #748, the fields route, under `carry`: a flag the audit keeps is not
+    /// addressed; one it updates or removes is.
+    #[test]
+    fn v8_under_carry_a_kept_flag_is_unaddressed_and_an_updated_or_removed_one_addressed() {
+        let (session, log) = reconciled(
+            CARRY,
+            vec![deltas(&["1. KEEP\n2. REMOVE — gone\n3. UPDATE: now so\n"])],
+            false,
+            |session, ids| {
+                for id in ids {
+                    session.flag_entry(id, "still so?").expect("a flag");
+                }
+            },
+        );
+        let ids: Vec<String> = every_carried(&log)[0]
+            .0
+            .clone()
+            .expect("carried")
+            .into_iter()
+            .map(|change| change.entry)
+            .collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(every_carried(&log)[0].1, Some(vec![ids[0].clone()]));
+        reads_whole(&session);
+        record_read_back(&session);
+    }
+
+    /// #748, the fields route, under `refuse`: a flag kept, then given an `UPDATE`
+    /// on the re-ask, is addressed, and the meditation refills.
+    #[test]
+    fn v8_under_refuse_a_kept_flag_is_re_asked_and_an_update_addresses_it() {
+        let (session, log) = reconciled(
+            REFUSE,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. UPDATE: now so\n"]),
+            ],
+            false,
+            |session, ids| session.flag_entry(&ids[0], "still so?").expect("a flag"),
+        );
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert_eq!(held_on(&log), None);
+        assert_eq!(every_carried(&log)[0].1, Some(Vec::new()));
+        record_read_back(&session);
+    }
+
+    /// #748's named case: under `refuse`, a flag the audit keeps and the
+    /// re-ask keeps again holds, naming that entry.
+    #[test]
+    fn v8_under_refuse_a_flag_kept_twice_holds() {
+        let (session, log) = reconciled(
+            REFUSE,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. KEEP\n"]),
+            ],
+            false,
+            |session, ids| session.flag_entry(&ids[0], "still so?").expect("a flag"),
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert_eq!(held_on(&log), Some(vec![flagged]));
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Meditated { .. }))
+        );
+        reads_whole(&session);
+    }
+
+    /// #748, the fields route: an edit the audit keeps is addressed, under
+    /// either gate.
+    #[test]
+    fn v8_a_kept_edit_is_addressed_under_either_gate() {
+        for gate in [CARRY, REFUSE] {
+            let (session, log) = reconciled(
+                gate,
+                vec![deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"])],
+                false,
+                |session, ids| {
+                    session
+                        .edit_entry(&ids[1], "decision: the operator's version")
+                        .expect("an edit");
+                },
+            );
+            let operator = operators(&session, "decision: the operator's version");
+            assert_eq!(held_on(&log), None, "{gate:?}");
+            assert_eq!(
+                every_carried(&log),
+                [(
+                    Some(vec![log::OperatorChange {
+                        entry: operator,
+                        kind: "edit".to_owned(),
+                    }]),
+                    Some(Vec::new())
+                )],
+                "{gate:?}"
+            );
+            record_read_back(&session);
+        }
+    }
+
+    /// #748, the fields route: an UPDATE over the operator's edit is
+    /// refused by the guard and leaves it unaddressed -- carried under
+    /// `carry`, re-asked under `refuse`, where a KEEP addresses it.
+    #[test]
+    fn v8_a_refused_update_over_an_edit_leaves_it_unaddressed_under_either_gate() {
+        let edit = |session: &Session<Canned>, ids: &[String]| {
+            session
+                .edit_entry(&ids[1], "decision: the operator's version")
+                .expect("an edit");
+        };
+        let (session, log) = reconciled(
+            CARRY,
+            vec![deltas(&[
+                "1. KEEP\n2. KEEP\n3. UPDATE: the model's rewrite\n",
+            ])],
+            false,
+            edit,
+        );
+        let operator = operators(&session, "decision: the operator's version");
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PatchRefused { entry, .. } if *entry == operator
+        )));
+        assert_eq!(every_carried(&log)[0].1, Some(vec![operator]));
+        let (session, log) = reconciled(
+            REFUSE,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. UPDATE: the model's rewrite\n"]),
+                deltas(&["1. KEEP\n"]),
+            ],
+            false,
+            edit,
+        );
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert_eq!(held_on(&log), None);
+        assert_eq!(every_carried(&log)[0].1, Some(Vec::new()));
+        record_read_back(&session);
+    }
+
+    /// #748, the tools route: a flag the audit resolves is addressed; one
+    /// it leaves alone is not -- carried under `carry`, held under
+    /// `refuse` once the re-ask leaves it alone too.
+    #[test]
+    fn v8_tools_route_a_flag_is_addressed_when_a_patch_settles_it() {
+        let flagged = "interview-t1-0";
+        let flag = |session: &Session<Canned>, _: &[String]| {
+            session.flag_entry(flagged, "still so?").expect("a flag");
+        };
+        for gate in [CARRY, REFUSE] {
+            let (session, log) = reconciled(gate, vec![resolving(flagged)], true, flag);
+            assert_eq!(held_on(&log), None, "{gate:?}");
+            assert_eq!(every_carried(&log)[0].1, Some(Vec::new()), "{gate:?}");
+            reads_whole(&session);
+        }
+        let (_, log) = reconciled(CARRY, vec![deltas(&["Nothing to change."])], true, flag);
+        assert_eq!(every_carried(&log)[0].1, Some(vec![flagged.to_owned()]));
+        let (_, log) = reconciled(
+            REFUSE,
+            vec![deltas(&["Nothing to change."]), deltas(&["Still nothing."])],
+            true,
+            flag,
+        );
+        assert_eq!(held_on(&log), Some(vec![flagged.to_owned()]));
+    }
+
+    /// #748, the tools route: an edit is addressed unless a write over it
+    /// was refused -- carried under `carry`, re-asked under `refuse`.
+    #[test]
+    fn v8_tools_route_an_edit_is_addressed_unless_a_write_over_it_is_refused() {
+        let edit = |session: &Session<Canned>, ids: &[String]| {
+            session
+                .edit_entry(&ids[1], "decision: the operator's version")
+                .expect("an edit");
+        };
+        for gate in [CARRY, REFUSE] {
+            let (session, log) =
+                reconciled(gate, vec![deltas(&["Nothing to change."])], true, edit);
+            assert_eq!(held_on(&log), None, "{gate:?}");
+            assert_eq!(every_carried(&log)[0].1, Some(Vec::new()), "{gate:?}");
+            reads_whole(&session);
+        }
+        // The operator's entry's id is the edit's; resolving it is refused.
+        let operator = {
+            let (session, _) = reconciled(CARRY, vec![deltas(&["x"])], true, edit);
+            operators(&session, "decision: the operator's version")
+        };
+        let (_, log) = reconciled(CARRY, vec![resolving(&operator)], true, edit);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PatchRefused { entry, .. } if *entry == operator
+        )));
+        assert_eq!(every_carried(&log)[0].1, Some(vec![operator.clone()]));
+        let (_, log) = reconciled(
+            REFUSE,
+            vec![resolving(&operator), deltas(&["Nothing to change."])],
+            true,
+            edit,
+        );
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert_eq!(held_on(&log), None);
+        assert_eq!(every_carried(&log)[0].1, Some(Vec::new()));
+    }
+
     /// #150: the operator edits one decision -- a new entry, on the
     /// operator's lane, superseding it -- and flags another; edits and flags
     /// of an entry gone or unknown, or with nothing to say, are refused. The
     /// audit's answer that would rewrite the operator's entry is refused per
     /// patch and the rest of the fold goes on. The audit is the reconciling
-    /// ask, each change marked on its note; its answer parsed, so the meditation
-    /// records both changes as carried and addressed, and the refill marks
-    /// them too.
+    /// ask, each change marked on its note. Its answer keeps the flagged note
+    /// and its UPDATE of the edit is refused, so it acted on neither (#748):
+    /// the meditation records both changes as carried and unaddressed, and the
+    /// refill marks them too.
     #[test]
     fn the_operators_edits_and_flags_are_theirs_and_a_meditation_carries_them() {
         let session = three_decisions_then(
@@ -14420,7 +15086,7 @@ pub(in crate::drive) mod tests {
                         kind: "flag".to_owned()
                     },
                 ]),
-                Some(Vec::new())
+                Some(vec![operator.clone(), flagged.clone()])
             )
         );
         the_refill_marks_them(&session, &operator);
@@ -14431,8 +15097,9 @@ pub(in crate::drive) mod tests {
 
     /// #150: an audit whose answer does not parse addresses nothing -- both
     /// changes carried and left open, still marked -- and the next meditation's
-    /// reconciling audit, parsed, addresses them; the meditation after that carries
-    /// none and asks the trigger's own ask again.
+    /// reconciling audit, which keeps the edit and updates the flagged note,
+    /// addresses them (#748); the meditation after that carries none and asks
+    /// the trigger's own ask again.
     #[test]
     fn an_unparsed_audit_leaves_the_changes_open_for_the_next_meditation() {
         let session = three_decisions_then(
@@ -14440,7 +15107,7 @@ pub(in crate::drive) mod tests {
             vec![
                 deltas(&["not an audit"]),
                 deltas(&["the next answer"]),
-                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. UPDATE: still so\n2. KEEP\n3. KEEP\n"]),
                 deltas(&["the answer after"]),
                 deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
             ],
@@ -14534,7 +15201,7 @@ pub(in crate::drive) mod tests {
             |meditations| meditations.audit = true,
             vec![
                 deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
-                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. UPDATE: still so\n2. KEEP\n3. KEEP\n"]),
             ],
         );
         session.declare_meditation(None).expect("admitted");
@@ -16350,6 +17017,247 @@ pub(in crate::drive) mod tests {
         );
         let empty = windowed(acts, 100_000, crate::meditation::policy::Served::default());
         assert_eq!(run(empty), 0);
+    }
+
+    /// REVIEW: the request an overflow retries (#617) is the turn's call in
+    /// flight, and a cancel reaches it as it reaches any other.
+    #[test]
+    fn review_a_request_retried_after_an_overflow_can_be_cancelled() {
+        const TYPED: &str = r#"{"error":{"code":400,"type":"exceed_context_size_error"}}"#;
+        let gate = Gate::new();
+        let mut acts = two_turns_measuring(1_000);
+        acts.truncate(2);
+        acts.push(vec![Step::Reject(400, TYPED.to_owned())]);
+        acts.push(vec![
+            Step::Delta("Hel".to_owned()),
+            Step::Hold(gate.clone()),
+            Step::Delta("lo".to_owned()),
+        ]);
+        let session = windowed(
+            acts,
+            1_000_000,
+            crate::meditation::policy::Served::default(),
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("second", None).expect("accepted");
+        assert!(
+            gate.wait_for_a_waiter(Duration::from_secs(10)),
+            "the retried call never reached the gate"
+        );
+        assert_eq!(window_meditations(&session.events_from(0)).len(), 1);
+        let cancelled = session.cancel(2, None);
+        gate.open();
+        assert_eq!(cancelled, Ok(()), "{:#?}", session.events_from(0));
+    }
+
+    /// REVIEW: a meditation's dropped messages are archived (#566) even
+    /// when an earlier meditation at the same turn -- the window's, under
+    /// the turn (#617) -- already archived messages under the same keys.
+    #[test]
+    fn review_a_second_meditation_at_the_same_turn_still_archives_what_it_drops() {
+        let session = windowed(
+            two_turns_measuring(90_000),
+            100_000,
+            crate::meditation::policy::Served::default(),
+        );
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session
+            .ask("where is turn_two_marker defined?", None)
+            .expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                .count()
+                == 2
+                && settled(log)
+        });
+        assert_eq!(window_meditations(&log).len(), 1, "{log:#?}");
+        session.declare_meditation(None).expect("declared");
+        assert!(
+            !session
+                .trunk()
+                .iter()
+                .any(|m| m.content.contains("turn_two_marker")),
+            "the operator's meditation dropped turn two"
+        );
+        let state = session.shared.lock();
+        let found: Vec<String> = state
+            .archive
+            .literal("turn_two_marker")
+            .iter()
+            .map(|found| found.item.key.clone())
+            .collect();
+        assert!(
+            !found.is_empty(),
+            "turn two's ask left the trunk and is not in the archive"
+        );
+    }
+
+    /// REVIEW: a turn whose step was meditated under it (#617) settles
+    /// `final`, its gap forks off the refilled trunk, and the log reads back.
+    #[test]
+    fn review_a_gap_fork_after_a_window_meditation_under_its_turn_reads_back() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.cadence = Cadence::TurnBoundary;
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut shape = template();
+        shape.limits.context_window = Some(100_000);
+        declare_self_capture(&mut shape, Some(&interview));
+        let mut acts = two_turns_measuring(90_000);
+        acts.insert(2, deltas(&["NONE"]));
+        acts.push(deltas(&["NONE"]));
+        let session =
+            Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview));
+        let forks_settled = |log: &[Logged]| {
+            log.iter()
+                .filter(|logged| matches!(logged.event, Event::ForkSettled { .. }))
+                .count()
+        };
+        session
+            .ask("how are blank lines treated?", None)
+            .expect("accepted");
+        wait_until(&session, "turn one and its fork", |log| {
+            settled(log) && forks_settled(log) == 1
+        });
+        session.ask("second", None).expect("accepted");
+        let log = wait_until(&session, "turn two and its fork", |log| {
+            settled(log) && forks_settled(log) == 2
+        });
+        assert_eq!(window_meditations(&log).len(), 1, "{log:#?}");
+        reads_whole(&session);
+    }
+
+    /// REVIEW: the request an overflow retries (#617) is the same step sent
+    /// again, not a step of its own against `max_steps`.
+    #[test]
+    fn review_an_overflow_retry_does_not_spend_a_step() {
+        const TYPED: &str = r#"{"error":{"code":400,"type":"exceed_context_size_error"}}"#;
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let tree = scratch("review-retry-step");
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        let mut shape = looping();
+        shape.limits.context_window = Some(1_000_000);
+        declare_self_capture(&mut shape, Some(&interview));
+        let acts = vec![
+            vec![Step::Delta(SAID.to_owned()), record("call-1", "fact", SAID)],
+            deltas(&["done"]),
+            vec![bash("b-1", "touch m1")],
+            vec![Step::Reject(400, TYPED.to_owned())],
+            vec![bash("b-2", "touch m2")],
+            deltas(&["finished"]),
+        ];
+        let session = Session::open_with(
+            Canned::new(acts),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["touch"],
+                Some(3),
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("touch two files", None).expect("accepted");
+        let log = wait_until(&session, "turn two", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        assert_eq!(window_meditations(&log).len(), 1, "{log:#?}");
+        let m2 = tree.join("m2").exists();
+        let reason = settled_as(&log);
+        tidy(&[&tree]);
+        assert!(m2, "the retried step's call was refused: {reason:?}");
+        assert_eq!(reason, Some(SettleReason::Final));
+    }
+
+    /// REVIEW: under `prune_meditation = "turn_end"` (#612), a prune made in a
+    /// turn whose next step a window meditation ran under (#617) is still
+    /// replaced when the turn ends.
+    #[test]
+    fn review_a_turn_end_prune_survives_a_window_meditation_under_its_turn() {
+        const SAID: &str = "The parser drops blank lines before it tokenizes.";
+        let tree = scratch("review-prune-window");
+        let notes: String = (0..80)
+            .map(|n| format!("note line {n}\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        std::fs::write(tree.join("notes.md"), &notes).expect("the notes");
+        let mut interview = interviewing(&[]);
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.prune = Some(super::super::prune::PruneMeditation::TurnEnd);
+        let mut shape = looping();
+        shape.tools.push(super::super::prune::definition());
+        shape.limits.context_window = Some(100_000);
+        declare_self_capture(&mut shape, Some(&interview));
+        let acts = vec![
+            vec![Step::Delta(SAID.to_owned()), record("call-r", "fact", SAID)],
+            deltas(&["done"]),
+            vec![bash("call-1", "cat notes.md")],
+            vec![
+                prune_step("call-2", "cat notes.md"),
+                Step::Timings(Timings {
+                    prompt_n: Some(90_000),
+                    cache_n: Some(0),
+                    ..Timings::default()
+                }),
+            ],
+            deltas(&["after"]),
+        ];
+        let session = Session::open_with(
+            Canned::new(acts),
+            shape,
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(interview),
+        );
+        session.ask("first", None).expect("accepted");
+        wait_until(&session, "turn one", settled);
+        session.ask("read the notes", None).expect("accepted");
+        // Turn two settled -- and, the prune now due at its end, the
+        // meditation that applies it logged after the settle.
+        let log = wait_until(&session, "turn two", |log| {
+            (settled(log)
+                || log
+                    .last()
+                    .is_some_and(|logged| matches!(logged.event, Event::Meditated { .. })))
+                && log
+                    .iter()
+                    .filter(|logged| matches!(logged.event, Event::TurnSettled { .. }))
+                    .count()
+                    == 2
+        });
+        tidy(&[&tree]);
+        assert_eq!(prunes_in(&log).len(), 1, "{log:#?}");
+        let meditations = meditations_in(&log);
+        assert!(
+            !session.trunk().iter().any(|m| m.content == notes),
+            "the pruned result is still on the trunk whole after its turn ended; \
+             meditations {meditations:?}, their prunes {:?}",
+            meditation_prunes(&log)
+        );
     }
 
     /// Each fork screened out (#611): its trigger, ask, the capture call
@@ -19144,5 +20052,689 @@ pub(in crate::drive) mod tests {
         );
         assert!(read("interview_warrant = \"scoping\"\n").is_err());
         assert!(read("interview_warrant = [\"always\"]\n").is_err());
+    }
+
+    // -----------------------------------------------------------------
+    // adversarial review (memory area)
+    // -----------------------------------------------------------------
+
+    /// #655: a model's write over an operator-edited entry is refused. A
+    /// fork that restates the operator's words dedups onto their entry and
+    /// appends its own provenance last, so `by_operator` reads false and the
+    /// audit's UPDATE of it is then applied.
+    #[test]
+    fn review_a_restatement_of_the_operators_entry_frees_it_for_the_model() {
+        const OPERATORS: &str = "decision: for the one team that files bugs";
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.meditations.audit = true;
+        let session = Session::open_with(
+            Canned::new(vec![
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["Agreed. Next, I will write the schema."]),
+                deltas(&["DECISION: for the one team that files bugs\nPLAN: NONE\n"]),
+                deltas(&["1. KEEP\n2. KEEP\n3. UPDATE: a model rewrite of the operator's note\n"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the first fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 1
+        });
+        let edited = live_entries(&session)[1].0.clone();
+        session.edit_entry(&edited, OPERATORS).expect("an edit");
+        let operator = live_entries(&session)
+            .into_iter()
+            .find(|(_, content)| content == OPERATORS)
+            .expect("the operator's entry")
+            .0;
+        session
+            .ask_marked("so, one team?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the second fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        eprintln!("fork outcomes: {:?}", fork_outcomes(&log));
+        let still_theirs = session
+            .shared
+            .lock()
+            .interview
+            .as_ref()
+            .expect("memory")
+            .object
+            .by_operator(&crate::object::EntryId::new(&operator).expect("an id"));
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let refused = log
+            .iter()
+            .any(|logged| matches!(&logged.event, Event::PatchRefused { entry, .. } if *entry == operator));
+        let held: Vec<String> = live_entries(&session)
+            .into_iter()
+            .map(|(_, content)| content)
+            .collect();
+        eprintln!(
+            "by_operator after the restatement: {still_theirs}; audit refused: {refused}; live: {held:?}"
+        );
+        assert!(
+            held.contains(&OPERATORS.to_owned()),
+            "the audit's UPDATE voided the operator's entry {operator}: live {held:?}"
+        );
+        assert!(still_theirs, "the operator's entry stopped being theirs");
+    }
+
+    /// #608: a meditation while a tangent is open is refused `tangent-open`,
+    /// since the close restores the fork point the refill would replace.
+    /// The operator's refill anyway (#698) is not.
+    #[test]
+    fn review_a_refill_anyway_under_an_open_tangent_is_undone_by_its_close() {
+        let session = three_decisions_then(
+            |meditations| {
+                meditations.audit = true;
+                meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
+            },
+            vec![deltas(&["1. KEEP\n2. KEEP\n"]), deltas(&["nothing to say"])],
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the hold", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+        });
+        let before = session.trunk();
+        session
+            .open_tangent("aside")
+            .expect("a tangent over a held meditation");
+        assert_eq!(
+            session.declare_meditation(None),
+            Err(Rejected::Refused(Refusal::TangentOpen))
+        );
+        let anyway = session.refill_anyway();
+        eprintln!("refill_anyway under an open tangent: {anyway:?}");
+        if anyway.is_ok() {
+            let log = wait_until(&session, "the refill", meditated);
+            let refilled = session.trunk();
+            session
+                .close_tangent(&BTreeMap::new())
+                .expect("an empty tangent closes");
+            let after = session.trunk();
+            eprintln!(
+                "trunk before {} msgs, refilled {} msgs, after close {} msgs; meditated logged: {}; close rolled_back: {:?}",
+                before.len(),
+                refilled.len(),
+                after.len(),
+                log.iter()
+                    .any(|l| matches!(l.event, Event::Meditated { .. })),
+                session.events_from(0).iter().find_map(|l| match &l.event {
+                    Event::TangentClosed { rolled_back, .. } => Some(*rolled_back),
+                    _ => None,
+                })
+            );
+            assert_eq!(after, refilled, "the close undid the logged refill");
+        }
+        assert_eq!(anyway, Err(Rejected::Refused(Refusal::TangentOpen)));
+    }
+
+    /// #698: under `refuse` the meditation re-asks once, then holds. After
+    /// a turn that did not settle `final`, no audit fires at all, so it
+    /// holds having asked nothing -- and holds again on every re-declare,
+    /// since no ask can be admitted to make a final turn.
+    #[test]
+    fn review_under_refuse_a_meditation_after_a_failed_turn_holds_having_asked_nothing() {
+        let session = three_decisions_then(
+            |meditations| {
+                meditations.audit = true;
+                meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
+            },
+            vec![vec![Step::Fail(TransportFailure::Connect(
+                "reset".to_owned(),
+            ))]],
+        );
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "the failed turn", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .any(|logged| matches!(logged.event, Event::TurnSettled { turn: 2, .. }))
+        });
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        let holds = |n: usize| {
+            move |log: &[Logged]| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+                    .count()
+                    == n
+                    && session_settled_awaiting(log)
+            }
+        };
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the hold", holds(1));
+        session.declare_meditation(None).expect("admitted again");
+        let log = wait_until(&session, "the second hold", holds(2));
+        assert_eq!(
+            session.ask("go on", None),
+            Err(Rejected::Refused(Refusal::MeditationHeld))
+        );
+        let audits = audited_templates(&log);
+        eprintln!("audits asked across two holds: {audits:?}");
+        assert!(
+            !audits.is_empty(),
+            "held twice without asking the model anything"
+        );
+    }
+
+    fn session_settled_awaiting(log: &[Logged]) -> bool {
+        log.iter().rev().find_map(|logged| match &logged.event {
+            Event::Settled { to, .. } => Some(*to == Settlement::Awaiting),
+            _ => None,
+        }) == Some(true)
+    }
+
+    /// #655/#671: a flag on an entry by the id the surface was shown for it
+    /// -- a dedup's patch line names its alias -- is accepted, but its
+    /// marker is keyed by the alias, never matches the audit's canonical
+    /// item, and so is never marked or addressed.
+    #[test]
+    fn review_a_flag_on_an_alias_is_marked_and_addressed() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.meditations.audit = true;
+        let session = Session::open_with(
+            Canned::new(vec![
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["Agreed. Next, I will write the schema."]),
+                deltas(&["DECISION: a tracker\nPLAN: NONE\n"]),
+                deltas(&["1. UPDATE: still so\n2. KEEP\n3. KEEP\n"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the first fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 1
+        });
+        session
+            .ask_marked("a tracker?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the second fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        let shown: Vec<String> = patches(&log).into_iter().map(|entry| entry.id).collect();
+        eprintln!("patch lines name {shown:?}");
+        assert!(shown.contains(&"interview-t2-0".to_owned()));
+        session
+            .flag_entry("interview-t2-0", "still so?")
+            .expect("a flag by the id the patch line named");
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let question = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited { question, .. } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("an audit");
+        eprintln!("carried {:?}", carried(&log));
+        assert!(question.contains("[flagged: still so?]"), "{question}");
+        assert_eq!(
+            carried(&log).1,
+            Some(Vec::new()),
+            "the audit's UPDATE addressed it"
+        );
+    }
+
+    /// #698 x #651: a held phase meditation keeps the move the graph ruled
+    /// on when it was declared; a `continue` ruling while it holds moves the
+    /// phase, and refill anyway then makes the held move from the new phase
+    /// with no ruling -- here build to review, an edge the graph lacks.
+    #[test]
+    fn review_refill_anyway_after_a_continue_moves_along_no_edge() {
+        const SAID: &str = "The schema has two tables.";
+        let mut graph = crate::meditation::phase::PhaseGraph::of(&[
+            "plan".to_owned(),
+            "build".to_owned(),
+            "review".to_owned(),
+        ])
+        .expect("three phases");
+        graph.allow("plan", "build").expect("an edge");
+        graph.allow("plan", "review").expect("an edge");
+        let mut interview = Interview {
+            phases: graph,
+            ..interviewing(&[])
+        };
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.meditations.audit = true;
+        interview.meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        let acts = vec![
+            vec![
+                Step::Delta(SAID.to_owned()),
+                Step::call(
+                    0,
+                    "call-f",
+                    "update_record",
+                    &serde_json::json!({ "field": "fact", "content": SAID }).to_string(),
+                ),
+                Step::call(
+                    1,
+                    "call-p",
+                    "propose_phase_transition",
+                    &serde_json::json!({ "to": "build", "reason": "the plan is settled" })
+                        .to_string(),
+                ),
+            ],
+            deltas(&["done"]),
+            deltas(&["nothing to say"]),
+            deltas(&["nothing to say"]),
+        ];
+        let session =
+            Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview));
+        session.ask("plan it", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let fact = live_entries(&session)[0].0.clone();
+        session.flag_entry(&fact, "two?").expect("a flag");
+        session
+            .declare_meditation_to(None, Some("review"))
+            .expect("plan to review is an edge");
+        wait_until(&session, "the hold", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+                && session_settled_awaiting(log)
+        });
+        session
+            .ratify_phase("call-p", PhaseChoice::Continue)
+            .expect("continue, while the meditation holds");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        assert_eq!(
+            session.declare_meditation_to(None, Some("review")),
+            Err(Rejected::Refused(Refusal::NoPhaseEdge)),
+            "the graph has no build to review"
+        );
+        session.refill_anyway().expect("refilled anyway");
+        let log = wait_until(&session, "the refill", meditated);
+        let moved = log.iter().find_map(|logged| match &logged.event {
+            Event::Meditated { phase, .. } => phase.clone(),
+            _ => None,
+        });
+        eprintln!(
+            "refill anyway moved {moved:?}; phase now {:?}",
+            session.shared.lock().phase
+        );
+        assert_ne!(
+            session.shared.lock().phase.as_deref(),
+            Some("review"),
+            "moved build -> review, an edge the graph refuses: {moved:?}"
+        );
+    }
+
+    /// #655: an operator edit is applied or refused (409, logged). An edit
+    /// whose content is the entry's own, or another entry's, is refused by
+    /// the object, and `edit_entry` reaches `unreachable!`.
+    #[test]
+    fn review_an_edit_that_restates_an_entry_is_refused_not_a_panic() {
+        let session = three_decisions_then(|_| {}, Vec::new());
+        let entries = live_entries(&session);
+        let (id, own) = entries[0].clone();
+        let other = entries[1].1.clone();
+        for content in [own, other] {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                session.edit_entry(&id, &content)
+            }));
+            eprintln!(
+                "edit {id} to {content:?}: {:?}",
+                outcome.as_ref().map_err(|_| "panicked")
+            );
+            assert!(outcome.is_ok(), "edit_entry panicked on {content:?}");
+        }
+    }
+
+    /// #655 "neither command ends an idle gap"; #698 the same of
+    /// refill-anyway. A flag admitted in the gap after a turn: the ask that
+    /// then carries that gap should be admitted with it.
+    #[test]
+    fn review_a_flag_ends_no_idle_gap() {
+        let control = three_decisions_then(|_| {}, vec![deltas(&["two"])]);
+        let first = settling_seq(&control.events_from(0), 1);
+        assert!(
+            control.ask("go on", Some(gap(first, GapEnd::Ask))).is_ok(),
+            "control: with no flag the gap is carried"
+        );
+        let session = three_decisions_then(|_| {}, vec![deltas(&["two"])]);
+        let log = session.events_from(0);
+        let first = settling_seq(&log, 1);
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        let asked = session.ask("go on", Some(gap(first, GapEnd::Ask)));
+        eprintln!("ask carrying the gap after a flag: {asked:?}");
+        assert!(asked.is_ok(), "{asked:?}");
+    }
+
+    /// #608 x #651: a `meditation` ruling on a proposal while a tangent is
+    /// open refills the trunk the close then restores.
+    #[test]
+    fn review_a_meditation_ruling_under_an_open_tangent_is_refused() {
+        let (session, _) = proposing("build", Vec::new());
+        session.open_tangent("aside").expect("a tangent");
+        let ruled = session.ratify_phase("call-p", PhaseChoice::Meditation);
+        let log = session.events_from(0);
+        eprintln!(
+            "ratify meditation under a tangent: {ruled:?}; meditated: {}",
+            log.iter()
+                .any(|l| matches!(l.event, Event::Meditated { .. }))
+        );
+        assert_eq!(ruled, Err(Rejected::Refused(Refusal::TangentOpen)));
+    }
+
+    // ---- review probes (exec area) ----
+
+    /// PROBE, as Dispatch ruled #734 item 2: the standard tools keep no
+    /// timeout (Pi and `OpenCode` 2 agree), and the operator's cancel ends
+    /// one -- a `read` of a FIFO nobody writes -- its helper's whole group
+    /// killed, and the turn settles `cancelled`.
+    #[test]
+    fn probe_a_cancel_ends_a_standard_read_of_a_fifo() {
+        let tree = scratch("probe-std-cancel");
+        let fifo = tree.join("pipe");
+        let made = std::process::Command::new("/usr/bin/mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("mkfifo");
+        assert!(made.success());
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Standard.tools_timed(false, Some(500));
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        tools.surface = tool_loop::ToolSurface::Standard;
+        tools.read_tool = tool_loop::ToolSurface::Standard.read_tool();
+        tools.timeout_ms = Some(500);
+        tools.approvals_off = true;
+        let session = Session::open_looping(
+            Canned::new([
+                vec![Step::call(0, "call-1", "read", r#"{"path":"pipe"}"#)],
+                deltas(&["done"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("read the pipe", None).expect("accepted");
+        // Past the session's 500 ms timeout: a standard tool has none.
+        std::thread::sleep(Duration::from_millis(1500));
+        assert!(
+            !settled(&session.shared.lock().log),
+            "the read is still waiting"
+        );
+        let cancelled = Instant::now();
+        session.cancel(1, None).expect("cancelled");
+        let log = wait_until(&session, "the cancelled turn", settled);
+        assert!(cancelled.elapsed() < Duration::from_secs(5));
+        assert!(log.iter().any(|logged| matches!(
+            logged.event,
+            Event::TurnSettled {
+                turn: 1,
+                reason: SettleReason::Cancelled
+            }
+        )));
+        tidy(&[&tree]);
+    }
+
+    /// PROBE: #578's claim, "a later call reads a slice of it through bash",
+    /// under the default sandbox policy (Seatbelt, `sandbox_reads` listed)
+    /// with the recording outside the worktree.
+    #[test]
+    fn probe_capped_output_is_readable_under_the_default_sandbox() {
+        use crate::drive::output::OutputCap;
+        if crate::isolation::Platform::here() != crate::isolation::Platform::MacOs {
+            return;
+        }
+        let tree = scratch("probe-cap-sb");
+        let recording = scratch("probe-cap-sb-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let whole: String = (1..=5000)
+            .flat_map(|n| [n.to_string(), "\n".to_owned()])
+            .collect();
+        let sha256 = crate::digest::sha256_hex(whole.as_bytes());
+        let kept = recording.join("files").join(&sha256);
+        let slice = format!("sed -n '2500,2502p' \"{}\"", kept.display());
+        let mut replies: Vec<Vec<Step>> = ["seq 1 5000", slice.as_str()]
+            .iter()
+            .enumerate()
+            .map(|(n, command)| vec![bash(&format!("call-{n}"), command)])
+            .collect();
+        replies.push(deltas(&["done"]));
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        let policy = crate::isolation::Policy::merged_usr();
+        tools.confinement = crate::isolation::open_on(&policy, crate::isolation::Platform::MacOs)
+            .expect("Seatbelt");
+        tools.policy = policy;
+        tools.output_cap = OutputCap::DEFAULT;
+        tools.recording = Some(recording.clone());
+        tools.approvals_off = true;
+        let session = Session::open_looping(Canned::new(replies), looping(), None, tools);
+        session.ask("count", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        eprintln!(
+            "PROBE call-0 shown head: {:?}",
+            written[0].shown.as_deref().map(|s| &s[..s.len().min(300)])
+        );
+        eprintln!("PROBE call-1 shown: {:?}", written[1].shown);
+        assert!(kept.exists(), "the drive kept the whole");
+        assert_eq!(written[1].shown.as_deref(), Some("2500\n2501\n2502\n"));
+        tidy(&[&tree, &recording]);
+    }
+
+    /// PROBE: #632's start text tells the model to read the output and
+    /// status files; under the default sandbox, can it?
+    #[test]
+    fn probe_background_files_are_readable_under_the_default_sandbox() {
+        if crate::isolation::Platform::here() != crate::isolation::Platform::MacOs {
+            return;
+        }
+        let tree = scratch("probe-bg-sb");
+        let recording = scratch("probe-bg-sb-recording");
+        let recording = std::fs::canonicalize(&recording).expect("the recording");
+        let look = format!(
+            "ls \"{0}/background\"; for f in \"{0}\"/background/shell-*; do cat \"$f\"; done",
+            recording.display()
+        );
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        let policy = crate::isolation::Policy::merged_usr();
+        tools.confinement = crate::isolation::open_on(&policy, crate::isolation::Platform::MacOs)
+            .expect("Seatbelt");
+        tools.policy = policy;
+        tools.background = true;
+        tools.approvals_off = true;
+        tools.recording = Some(recording.clone());
+        let mut shape = looping();
+        shape.tools = tool_loop::ToolSurface::Bash.tools_with(true);
+        let session = Session::open_looping(
+            Canned::new(vec![
+                vec![in_the_background("call-1", "echo ready")],
+                deltas(&["started"]),
+                vec![bash("call-2", &look)],
+                deltas(&["looked"]),
+            ]),
+            shape,
+            None,
+            tools,
+        );
+        session.ask("start it", None).expect("accepted");
+        let _ = wait_until(&session, "the job's end", |log| ended_jobs(log).len() == 1);
+        session.ask("look", None).expect("accepted");
+        let log = wait_until(&session, "the second turn", |log| turns_settled(log) == 2);
+        let written = lines(&log);
+        eprintln!("PROBE start text: {:?}", written[0].shown);
+        eprintln!("PROBE look: {:?}", written[1].shown);
+        session.end_commands();
+        let shown = written[1].shown.clone().unwrap_or_default();
+        tidy(&[&tree, &recording]);
+        assert!(shown.contains("ready"), "{shown}");
+    }
+
+    /// PROBE: a recording inside the worktree (where a listed-reads sandbox
+    /// can read capped outputs): can a sandboxed command steer the drive's
+    /// own unconfined write of a capped output outside the policy?
+    #[test]
+    fn probe_kept_output_cannot_be_steered_outside_the_sandbox() {
+        use crate::drive::output::OutputCap;
+        if crate::isolation::Platform::here() != crate::isolation::Platform::MacOs {
+            return;
+        }
+        let tree = scratch("probe-steer-tree");
+        let tree = std::fs::canonicalize(&tree).expect("the tree");
+        let outside = scratch("probe-steer-outside");
+        let outside = std::fs::canonicalize(&outside).expect("outside");
+        let recording = tree.join("rec");
+        std::fs::create_dir_all(&recording).expect("rec");
+        let plant = format!("ln -s \"{}\" rec/files && echo planted", outside.display());
+        let payload = "seq 1 5000";
+        let mut replies: Vec<Vec<Step>> = [
+            plant.as_str(),
+            payload,
+            "echo 'direct' > \"$(dirname rec)/../probe-steer-direct\" ; ls rec/files/",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(n, command)| vec![bash(&format!("call-{n}"), command)])
+        .collect();
+        replies.push(deltas(&["done"]));
+        let mut tools = tools(Confinement::Unconfined, &tree, &[], None, Decider::Decline);
+        let policy = crate::isolation::Policy::merged_usr();
+        tools.confinement = crate::isolation::open_on(&policy, crate::isolation::Platform::MacOs)
+            .expect("Seatbelt");
+        tools.policy = policy;
+        tools.output_cap = OutputCap::DEFAULT;
+        tools.recording = Some(recording.clone());
+        tools.approvals_off = true;
+        let session = Session::open_looping(Canned::new(replies), looping(), None, tools);
+        session.ask("go", None).expect("accepted");
+        let log = wait_until(&session, "the turn to settle", settled);
+        let written = lines(&log);
+        for line in &written {
+            eprintln!(
+                "PROBE {:?}: {:?}",
+                line.argv,
+                line.shown.as_deref().map(|s| &s[..s.len().min(200)])
+            );
+        }
+        let landed: Vec<_> = std::fs::read_dir(&outside)
+            .expect("outside")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .collect();
+        eprintln!("PROBE files in the directory outside the sandbox: {landed:?}");
+        tidy(&[&tree, &outside]);
+        assert!(
+            landed.is_empty(),
+            "the drive wrote outside the sandbox: {landed:?}"
+        );
+    }
+
+    /// Two forks in one turn's gap (#564 cadences) that record different
+    /// facts: the fold names both `interview-t<turn>-0`, so the second is
+    /// refused by the object as an id reused and settles `unparseable`.
+    #[test]
+    fn review_two_forks_in_one_turn_that_record_different_facts_both_fold() {
+        let tree = scratch("review-two-forks");
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        std::fs::write(tree.join("lib.rs"), "pub fn f() {}\n").expect("a source");
+        let replies = vec![
+            vec![bash("call-1", "cat notes.md")],
+            vec![bash("call-2", "cat lib.rs")],
+            deltas(&["Done. Next, I will write the schema."]),
+            deltas(&["LEARNED: the notes hold one note\n"]),
+            deltas(&["LEARNED: the library exports f\n"]),
+        ];
+        let session = Session::open_with(
+            Canned::new(replies),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat", "echo"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(Interview {
+                cadence: Cadence::PerClass,
+                threshold_bytes: None,
+                ..interviewing(&[log::Warrant::Scoping, log::Warrant::Read])
+            }),
+        );
+        let log = through_the_gap(&session, 2);
+        let written: Vec<(String, String)> = patches(&log)
+            .into_iter()
+            .map(|entry| (entry.id, entry.text))
+            .collect();
+        eprintln!(
+            "fork outcomes {:?}; patches {written:?}",
+            fork_outcomes(&log)
+        );
+        tidy(&[&tree]);
+        assert_eq!(
+            fork_outcomes(&log),
+            [log::ForkOutcome::Value, log::ForkOutcome::Value],
+            "patches {written:?}"
+        );
+    }
+
+    /// #648: `→` or `->` stands between the cited id and its replacement.
+    /// An arrow inside the replacement's own text is taken as that
+    /// separator, so the cited "id" becomes the id plus prose and the pair
+    /// cites nothing: the supersede is lost and the field stays an add.
+    #[test]
+    fn review_a_supersede_whose_new_entry_holds_an_arrow_still_supersedes() {
+        for arrow in ["->", "→"] {
+            let object = object_of(&["interview-t1-0"]);
+            let text = format!("interview-t1-0 the pipeline is build {arrow} test {arrow} ship");
+            let patches = cited(vec![supersede_field("interview-t2-0", &text)], &object);
+            assert!(
+                matches!(
+                    patches.as_slice(),
+                    [Patch::Supersede { voids, .. }] if voids.as_str() == "interview-t1-0"
+                ),
+                "{arrow}: {patches:#?}"
+            );
+        }
+    }
+
+    /// #611: the fields an ask asks for are read off its answer
+    /// instruction. The first `field ` in the question is taken, and the
+    /// stated intent (and v4's record) come before the instruction.
+    #[test]
+    fn review_an_asks_fields_are_its_instructions_not_its_intents() {
+        let ask = router::Ask {
+            kind: AskKind::Judgment,
+            intent: router::stated_intent("Done. Next, I will add the fields for the email."),
+        }
+        .render_in(&crate::dogma::asks::V3, &Facts::default(), None);
+        assert_eq!(asked_fields(&ask), ["decision", "plan"], "{ask}");
+    }
+
+    /// #611 under the tools route (t1, #666): its asks name their fields in
+    /// lower case, so no fork is ever read as covered.
+    #[test]
+    fn review_a_tools_route_asks_fields_are_read() {
+        let ask = router::Ask {
+            kind: AskKind::Judgment,
+            intent: None,
+        }
+        .render_in(&crate::dogma::asks::T1, &Facts::default(), None);
+        assert_eq!(asked_fields(&ask), ["decision", "plan"], "{ask}");
     }
 }

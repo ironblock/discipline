@@ -1033,10 +1033,14 @@ impl Router {
                 at_turn,
                 tool,
                 args,
+                lane: None,
                 ..
             } => vec![self.route_call(id, *at_turn, tool, args.as_ref())],
             Event::Summary { .. } => self.end_turn().into_iter().collect(),
-            Event::Start { .. }
+            // A delegated run's call (#736) is its own lane's, not the
+            // trunk's turn: neither counted nor forked here.
+            Event::ToolCall { lane: Some(_), .. }
+            | Event::Start { .. }
             | Event::Response { .. }
             | Event::Fork { .. }
             | Event::Capture { .. }
@@ -1162,6 +1166,29 @@ mod tests {
     use crate::formats::record::json::Value;
     use crate::formats::record::{self, Event};
 
+    /// #736: a delegated run's tool call -- one naming its side lane -- is
+    /// not the trunk's: the router neither counts nor forks it.
+    #[test]
+    fn a_side_lanes_tool_call_is_not_routed() {
+        let record = crate::formats::record::parse(include_str!(
+            "../../../formats/record/fixtures/valid/a-delegated-run-as-a-side-lane.jsonl"
+        ))
+        .expect("the fixture");
+        let mut router = Router::new().expect("a router");
+        let decided: Vec<Decision> = record
+            .events
+            .iter()
+            .flat_map(|event| router.observe(event))
+            .collect();
+        assert_eq!(router.census().tool_calls, 1, "the trunk's Agent call only");
+        assert!(
+            decided
+                .iter()
+                .all(|decision| decision.trigger != Trigger::Call("call-2".to_owned())),
+            "{decided:?}"
+        );
+    }
+
     fn turn(index: u32) -> Event {
         Event::Turn {
             index,
@@ -1180,6 +1207,7 @@ mod tests {
             exit: Some(0),
             output: None,
             exec: None,
+            lane: None,
         }
     }
 
@@ -1533,6 +1561,7 @@ mod tests {
             exit: None,
             output: None,
             exec: None,
+            lane: None,
         });
         assert_eq!(decisions[0].class, Class::Unknown);
         assert_eq!(router.census().unclassified, 2);

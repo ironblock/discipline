@@ -35,6 +35,7 @@ import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { TANGENT_OPEN } from '../drive/served/tangent.ts';
 import { SELF_CAPTURE } from '../drive/served/self-capture.ts';
 import { PHASE_PROPOSED, PHASE_PROPOSED_WITH_MEMORY, PHASE_RULED_CONTINUE } from '../drive/served/phase-proposal.ts';
+import { NO_COMMANDS } from '../drive/served/no-commands.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
@@ -119,7 +120,7 @@ function posting(log: string): Web {
   return {
     ...serving(log),
     fetch: async (url, init) => {
-      if (String(url).endsWith('/commands') && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
+      if (/(^|\/)commands$/.test(String(url)) && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
       return new Response('{}', { status: 200 });
     },
   };
@@ -799,6 +800,7 @@ export const ServedOperatorEdits: Story = {
       await expect(found).not.toBeNull();
       return found!;
     });
+    // The meditation left the flag unaddressed, so it stays pending to the next one (#749).
     await expect(entry.querySelector('.ex-memory__flag')?.textContent).toBe('flag · is one team enough?');
     await expect(entry.querySelector('.ex-memory__refused')?.textContent).toBe('refused: retire by self-capture, supersede by fork 7');
     const meditation = canvasElement.querySelector<HTMLElement>('.ex-meditation');
@@ -893,6 +895,33 @@ export const ServedMeditationReconcile: Story = {
     await expect(items('changes')).toEqual(['flag interview-t1-0 · still so?']);
     await expect(row.querySelector('[data-part="answer"] pre')?.textContent).toBe('1. KEEP\n2. KEEP\n3. KEEP');
     await expect(items('after')).toEqual(three);
+  },
+};
+
+/**
+ * `?drive` (BEGIN's dry run): a session that runs no commands and asks no interviews says so -- no "approvals gate"
+ * over commands that never run, and no promise of side calls that will not come.
+ */
+export const ServedNoCommands: Story = {
+  name: '?drive: a session with no commands and no interviews promises neither',
+  args: { drive: true, web: serving(NO_COMMANDS.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const lever = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-header__lever[data-lever="approvals"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(lever.textContent).toBe('approvals no commands');
+    await expect(canvasElement.querySelector('.ex-hint')?.textContent).toBe('Your turn. Ask for something, and the answer lands here.');
+  },
+};
+
+/** `?drive=<url>` or `<meta name="diet-drive">` (#733): a page talking to a drive it was pointed at says which. */
+export const ServedNamedDrive: Story = {
+  name: '?drive: a named drive is named on the page',
+  args: { drive: true, base: 'http://127.0.0.1:7802/', web: serving(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.textContent).toContain("driving: diet's session at http://127.0.0.1:7802/, over HTTP"));
   },
 };
 

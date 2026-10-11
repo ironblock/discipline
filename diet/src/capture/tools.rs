@@ -1395,6 +1395,7 @@ mod tests {
             exit: Some(0),
             output: None,
             exec: None,
+            lane: None,
         }
     }
 
@@ -1900,6 +1901,7 @@ mod tests {
             exit: Some(0),
             output: None,
             exec: None,
+            lane: None,
         };
         assert!(matches!(
             apply(&ledger, 0, saw()),
@@ -2338,6 +2340,7 @@ mod tests {
             exit: Some(0),
             output: Some(output.to_owned()),
             exec: None,
+            lane: None,
         }
     }
 
@@ -2371,6 +2374,7 @@ mod tests {
             exit,
             output: Some(output.to_owned()),
             exec: None,
+            lane: None,
         }
     }
 

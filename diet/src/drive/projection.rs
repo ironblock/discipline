@@ -1005,8 +1005,10 @@ impl<'a> Walk<'a> {
             // A fork (v5, #374): its row, and its patches as one capture row.
             Line::Fork { .. } => self.fork(line),
             Line::Patch {
-                fork: Some(fork), ..
-            } => self.patch(line.seq, *fork),
+                fork: Some(fork),
+                op,
+                ..
+            } => self.patch(line.seq, *fork, *op),
             // The record's fork row carries no outcome: a fork that settled
             // `value` is carried by its capture row, and any other outcome is
             // named with its word.
@@ -1177,6 +1179,7 @@ impl<'a> Walk<'a> {
             exit,
             output,
             exec: Some(exec),
+            lane: None,
         });
     }
 
@@ -1384,9 +1387,11 @@ impl<'a> Walk<'a> {
         });
     }
 
-    /// A patch, counted on its fork's capture row, `c/<fork>`: one entry per
-    /// patch line, the row written at the fork's first patch.
-    fn patch(&mut self, seq: u64, fork: u64) {
+    /// A patch, counted on its fork's capture row, `c/<fork>`: the row
+    /// written at the fork's first patch, its `entries` the entries the
+    /// patches WROTE (#443) -- an `add` or a `supersede`; a `retire`,
+    /// `resolve` or `park` changes an entry and writes none.
+    fn patch(&mut self, seq: u64, fork: u64, op: log::PatchOp) {
         if !self.forks.contains(&fork) {
             self.name(
                 seq,
@@ -1396,9 +1401,10 @@ impl<'a> Walk<'a> {
             );
             return;
         }
+        let wrote = u32::from(matches!(op, log::PatchOp::Add | log::PatchOp::Supersede));
         if let Some(&at) = self.captures.get(&fork) {
             if let Some(Event::Capture { entries, .. }) = self.events.get_mut(at) {
-                *entries += 1;
+                *entries += wrote;
             }
             return;
         }
@@ -1406,7 +1412,7 @@ impl<'a> Walk<'a> {
         self.events.push(Event::Capture {
             id: format!("c/{fork}"),
             from_fork: format!("f/{fork}"),
-            entries: 1,
+            entries: wrote,
         });
     }
 
@@ -2031,6 +2037,41 @@ mod tests {
             tools_of(&names, None, &C1).expect("declared")[0],
             sent[0],
             "c1's and c2's update_record differ"
+        );
+    }
+
+    /// The capture row a committed run's log projects to for fork `fork`.
+    fn capture_of(log: &str, fork: &str) -> Option<u32> {
+        let lines = log::parse(log).expect("the run's log reads");
+        project(&lines, &regime(), None)
+            .expect("the run's log projects")
+            .events
+            .iter()
+            .find_map(|event| match event {
+                Event::Capture { id, entries, .. } if id == fork => Some(*entries),
+                _ => None,
+            })
+    }
+
+    /// #443: a capture row counts the entries its fork's patches WROTE -- an
+    /// `add` or a `supersede` -- and not a `retire`, `resolve` or `park`,
+    /// which change an entry and write none. Two committed runs carried the
+    /// old count: a fork whose only patch is a retire, and one with a
+    /// supersede and two retires.
+    #[test]
+    fn a_capture_counts_the_entries_its_patches_wrote_and_no_retire() {
+        let smoke =
+            include_str!("../../../runs/2026-10-10-seam-smoke-run-3-agent-driven/session.log");
+        assert_eq!(
+            capture_of(smoke, "c/9164"),
+            Some(0),
+            "one retire writes no entry"
+        );
+        let levers = include_str!("../../../runs/2026-10-10-levers-run-a-agent-driven/session.log");
+        assert_eq!(
+            capture_of(levers, "c/3646"),
+            Some(1),
+            "a supersede writes one, its two retires none"
         );
     }
 

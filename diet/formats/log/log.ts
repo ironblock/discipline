@@ -93,6 +93,7 @@ export type Refusal =
   | "empty"
   | "meditation-held"
   | "nothing-held"
+  | "restates"
 ;
 
 export type FailReason =

@@ -70,17 +70,17 @@ The fork rows are `f/8355` (interview), `f/9164` and `f/14823` (audit), each wit
 
 | ask | items (score) | windowed? |
 | --- | --- | --- |
-| turn 8 | seam-6 messages 48, 45, 29 (2) | no; all under 1,200 characters |
-| turn 9 | seam-6 messages 48, 45, 35 (1) | message 35 cut at its end |
-| turn 11 | seam-8 messages 50, 46, 45 (2) | message 46 cut at its end; message 45 at both ends |
-| turn 12 | seam-8 messages 50, 46, 45 (1) | messages 46 and 45 at both ends |
+| turn 7 | seam-6 messages 48, 45, 29 (2) | no; all under 1,200 characters |
+| turn 8 | seam-6 messages 48, 45, 35 (1) | message 35 cut at its end |
+| turn 9 | seam-8 messages 50, 46, 45 (2) | message 46 cut at its end; message 45 at both ends |
+| turn 10 | seam-8 messages 50, 46, 45 (1) | messages 46 and 45 at both ends |
 
 - **The window works.** Seam-8 message 45 is a 9,749-character `read` of `linkcheck.py`.
-  - At turn 12 its note started `[…]` at character 4,097 and ended `[…]`.
+  - At turn 10 its note started `[…]` at character 4,097 and ended `[…]`.
   - It held `heading_slug` (the call site in `collect_headings`): a match far past 1,200 characters, kept.
 - **First gap: the window centres on the first anchor in the text, not the most specific one.**
-  - At turn 11 the ask also named `linkcheck.py`. The window centred on that name's first occurrence (character 928, the docstring's usage line), and `heading_slug` (5,814) fell outside.
-  - At turn 12 the first `heading_slug` is a call site, which comes before the definition.
+  - At turn 9 the ask also named `linkcheck.py`. The window centred on that name's first occurrence (character 928, the docstring's usage line), and `heading_slug` (5,814) fell outside.
+  - At turn 10 the first `heading_slug` is a call site, which comes before the definition.
   - So the definition was not shown either time.
 - **Second gap: ties go to the newest archive.** Turn 3's original write holds `def heading_slug`, in seam 1's archive. It was never offered: every item tied on score, and all three slots went to the most recent archive.
 - The model said both times, honestly, that it had never been shown the original.
@@ -108,7 +108,7 @@ The render budget did not bite.
 4. **The recall window centres on the earliest anchor in the item,** as above.
 5. **Recall ties go to the newest archive,** as above.
 
-The model also wrote scratch fixtures to `/tmp` first, then moved them inside the worktree and deleted them. This is noted, not a break.
+The model also tried to write scratch fixtures to `/tmp` first, and Seatbelt refused it (seq 12815, "Operation not permitted"). It then wrote them inside the worktree (13147) and deleted them (13517). This is noted, not a break.
 
 **Counts:** 10 asks, 58 requests, 72 tool calls, 3 forks (1 interview, 2 audits), 1 fork skipped, 9 patches, 10 captures (4 recorded, 5 dropped, 1 judged), 1 reminder, 4 recalls, 2 seams, 1 `background.ended`. Settles: timeout, then 9 × `final`. All 57 responses carry `usage`.
 

@@ -533,8 +533,11 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                     <SystemMessage node={era.system} />
                     {era.index === 0 && era.nodes.length === 0 && session.state === 'awaiting' ? (
                       <p className="ex-hint">
-                        Your turn. Ask for something, and the answer lands here. Behind the curtain, side calls run in the
-                        slots to the right while you read, and what they learn lands in working memory.
+                        Your turn. Ask for something, and the answer lands here.
+                        {/* Only a session that interviews has side calls to promise (BEGIN's dry run: the floor's has none). */}
+                        {session.levers.table?.['fork_warrant'] === 'none'
+                          ? null
+                          : ' Behind the curtain, side calls run in the slots to the right while you read, and what they learn lands in working memory.'}
                       </p>
                     ) : null}
                     {era.nodes.map((node) => {
@@ -619,7 +622,6 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
             <div ref={composerStrip} className="ex-session__composer" data-waiting={approving.waiting ? '' : undefined}>
               {approving.waiting && approving.decide ? <ApprovalPrompt key={`${approving.waiting.request}/${approving.waiting.id}`} prompt={approving.waiting} decide={approving.decide} /> : null}
               <Composer
-                key={session.phase}
                 state={session.state}
                 link={link}
                 phase={session.phase}

@@ -1,6 +1,6 @@
 {
   "name": "exercise",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "The reference coding harness's surface: a chat-shaped trunk, interviews branching into the slots that serve them, and working memory -- driven through one narrow drive interface.",
   "license": "Apache-2.0",
@@ -14,6 +14,7 @@
     "storybook": "storybook dev -p 6006",
     "build": "storybook build",
     "build:replay": "vite build --mode replay",
+    "build:drive": "vite build --mode app --emptyOutDir",
     "gate": "node scripts/build-gate.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint .",

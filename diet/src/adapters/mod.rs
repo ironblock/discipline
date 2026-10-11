@@ -198,11 +198,19 @@ pub struct Census {
     /// harness's placeholder for a message no model wrote, or `no model
     /// named`, a log from before the harness recorded one.
     pub unattributed: BTreeMap<String, u64>,
+    /// The harness's delegated runs, joined from their own transcripts as
+    /// side lanes (#708): joined by kind (`joined/agent`, `joined/workflow
+    /// agent`) and by their metadata's type (`type/<agentType>`), their
+    /// `rows` and `turns`, and what did not join -- `spawning calls with no
+    /// transcript`, `transcripts naming no call`, `journals not replayed`.
+    pub sidechains: BTreeMap<String, u64>,
     /// Rows dropped as repeats of a row already read under the same row id
     /// (#500), by what the repeat rewrote: `exact`, `envelope-rewritten`
     /// (the session's bookkeeping -- `slug`, `promptId`, `cwd`,
-    /// `gitBranch`), or `parent-rewritten` (its `parentUuid`, which moves it
-    /// in the tree). Not counted in [`Census::rows`]: a repeat is not a row
+    /// `gitBranch`), `side-copy-rewritten` (the harness's copy of what the
+    /// model saw -- `toolUseResult`, `message.usage`,
+    /// `attachment.displayPath`, #736), or `parent-rewritten` (its
+    /// `parentUuid`, which moves it in the tree, counted first). Not counted in [`Census::rows`]: a repeat is not a row
     /// of the session, it is the session written down twice.
     pub repeated: BTreeMap<String, u64>,
 }
@@ -286,6 +294,13 @@ impl Census {
         *self.models.entry(model.to_owned()).or_default() += 1;
     }
 
+    /// Add `count` to the sidechain register's `what` (#708).
+    pub fn sidechains_add(&mut self, what: &str, count: u64) {
+        if count > 0 {
+            *self.sidechains.entry(what.to_owned()).or_default() += count;
+        }
+    }
+
     /// Count one answering row naming no model, and say why (#501).
     pub fn unattributed_one(&mut self, why: &str) {
         *self.unattributed.entry(why.to_owned()).or_default() += 1;
@@ -349,6 +364,8 @@ impl Census {
         push_counts(&mut out, &self.translated);
         out.push_str(",\"unattributed\":");
         push_counts(&mut out, &self.unattributed);
+        out.push_str(",\"sidechains\":");
+        push_counts(&mut out, &self.sidechains);
         out.push_str(",\"silent_rows\":");
         out.push_str(&self.silent_rows().to_string());
         out.push_str(",\"unmapped\":");
@@ -605,6 +622,7 @@ mod tests {
         census.unrepresentable_one("assistant: content[].tool_use.input (an exponent)");
         census.model_one("a-model");
         census.unattributed_one("synthetic");
+        census.sidechains_add("joined/agent", 1);
         census.repeated_one("exact");
 
         // Every register renders, keys sorted, and the byte string is written
@@ -622,7 +640,7 @@ mod tests {
              \"no_event\":{\"user/carried no text of its own\":1},\
              \"repeated\":{\"exact\":1},\"repeated_rows\":1,\
              \"rows\":2,\"translated\":{},\"unattributed\":{\"synthetic\":1},\
-             \"silent_rows\":1,\
+             \"sidechains\":{\"joined/agent\":1},\"silent_rows\":1,\
              \"unmapped\":{\"mode\":1},\"unmapped_rows\":1,\
              \"unrepresentable\":{\"assistant: content[].tool_use.input (an exponent)\":1},\
              \"unrepresentable_rows\":1}"

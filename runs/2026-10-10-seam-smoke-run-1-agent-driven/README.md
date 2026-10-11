@@ -56,7 +56,7 @@
    - The grammar read one supersede of `interview-t2-0`, whose new text was the rest of the line. The second pair was lost, and the reference became entry text.
 3. **One `unattributed` prefix change with an empty diff,** at the second fork's request (`q/2142`, interview lane). Recorded as data.
 
-**Counts:** 5 asks, 35 trunk requests, 32 tool calls, 2 forks, 9 patches (4 of them self-capture), 4 captures, 1 reminder, 1 seam. All five turns settled `final`.
+**Counts:** 5 asks, 35 requests (33 trunk, 2 interview), 32 tool calls, 2 forks, 9 patches (4 of them self-capture), 4 captures, 1 reminder, 1 seam. All five turns settled `final`.
 
 ## Scrubbed
 

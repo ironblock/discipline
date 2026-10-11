@@ -1,21 +1,60 @@
-# The floor regimen: the first driven session (#177) against the maintainer's
-# admitted floor, as #287 ruled. `diet/drive/BEGIN.md` is how to run it.
+# The floor regimen: a driven session against the maintainer's floor with the
+# product on -- the model's commands, interview forks and self-capture -- so a
+# first drive shows a tool call, a fork and a meditation (the maintainer's
+# ruling on #721). Every other lever is at its default.
+# `diet/drive/BEGIN.md` is how to run it.
 #
-# The endpoint is NOT here: it goes on `serve`'s command line. The output cap
-# is not here either -- nothing reads one from a regimen; it is `serve`'s
-# `--max-output-tokens`, 8192 by default (#290, measured: 5969377550).
+# The floor is the 3.8 line's config r2 (#497): Qwen3.8 27B as EXL3 on
+# TabbyAPI, registry entry `accel24-tabbyapi-exl3-qwen38-27b-3p00`. The
+# substrate, reasoning, sampler, confinement and approval lines are T1's 3.8
+# regimen's (drafts/t1-session-one-qwen38.regimen.toml), its pre-seeded
+# command set T1's (drafts/t1-session-one.regimen.toml).
+#
+# The endpoint, the head, the worktree, the auth file and the output cap are
+# `serve`'s command line, not this file.
 arm = "first-driven-session"
 dogma_version = 0
 
-substrate = "accel24-beellama-qwen27b-q4kxl"
+substrate = "accel24-tabbyapi-exl3-qwen38-27b-3p00"
 # What the server does with reasoning, as served: "on", "off" or "suppressed".
 substrate_reasoning = "on"
-# The registry's hardware_fingerprint for equipment `linux-pc`, which must agree.
+# The registry's hardware_fingerprint for the entry's equipment, which must agree.
 substrate_hardware = "e6489f9c1815a0c4540a0c6663acaa3c62b1b66e03806479475c2645347fe7af"
 
+# The model's commands run in `--worktree`, under the OS's sandbox (Seatbelt on
+# macOS): reads anywhere, writes in the worktree alone, the network as the
+# host has it. T1's pre-seeded set; with approvals off, as T1 runs, no command
+# waits on a prompt and the log says approvals were off.
+allowed_commands = ["ls", "cat", "rg", "node", "npx", "chrome-devtools"]
+isolation = "sandbox"
+network = "host"
+sandbox_reads = "all"
+approval = "none"
+approval_policy = "approvals are off: every command runs without a gate decision or a prompt; the sandbox confines writes to the worktree"
+
+# Interview forks: the gated warrant, one fork per gap, on a read or a
+# scoping-marked ask. They answer through the record tools, in ask set t2,
+# whose priming ships with it.
+interview_warrant = ["read", "scoping"]
+fork_asks = "t2"
+capture_modality = "tools"
+
+# The model records what it learns as it goes, at the default cadence.
+self_capture = "on"
+
+# The level T1 runs at (the maintainer, 2026-10-09), declared so the record
+# names what was sent. "none" is the format's spelling for no cap: serve
+# sends no budget.
+[reasoning]
+effort = "xhigh"
+budget_tokens = "none"
+
 # Sent on every request, trunk and fork (#486), and recorded as the
-# substrate's `sampler_card`: one value, so the wire carries what the record
-# claims. A setting not written here is the server's launch default.
+# substrate's `sampler_card`: the registry's card for the line (config r2's
+# preset qwen38_thinking), every key declared so none falls to the engine's
+# defaults (#489).
 [sampler]
-temperature = 0.6
+temperature = 1.0
+top_k = 20
 top_p = 0.95
+min_p = 0.0

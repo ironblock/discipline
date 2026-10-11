@@ -317,6 +317,9 @@ export interface BackgroundListed {
 }
 
 /** The text diet escaped for the list's elements (`background.rs` `escaped`). */
+/** diet's content key (`object.rs` `normalise`): whitespace runs collapsed, the ends trimmed. */
+const normalised = (text: string): string => text.split(/\s+/).filter((word) => word !== '').join(' ');
+
 const unescaped = (text: string): string =>
   text.replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&amp;', '&');
 
@@ -342,7 +345,8 @@ export interface Era {
 }
 
 /** `parked`: set aside as its tangent's at the tangent's close (#608), out of the render and kept in the archive. */
-export type EntryState = 'live' | 'superseded' | 'retired' | 'parked';
+/** diet's entry states (`diet/src/object.rs` `EntryState`), `voided` spelled `superseded`. Only `live` is live. */
+export type EntryState = 'live' | 'superseded' | 'resolved' | 'retired' | 'parked';
 
 export interface MemoryEntry extends Provenance {
   readonly id: string;
@@ -438,8 +442,12 @@ export interface Session {
 
 /** The lever states a session declares on its first line (#573): only what the log says, never a default of the surface's. */
 export interface Levers {
-  /** `off` (log v7's `approvals_off`, #544), or `gate`: from v7 an absent field is the gate deciding. Undeclared before v7. */
-  readonly approvals?: 'off' | 'gate';
+  /**
+   * `off` (log v7's `approvals_off`, #544), or `gate`: from v7 an absent field is the gate deciding. `no commands` when
+   * the lever table says the approval lever is undeclared -- serve's word for a regimen that runs no commands. Undeclared
+   * before v7.
+   */
+  readonly approvals?: 'off' | 'gate' | 'no commands';
   /** How a fork's result reaches the trunk (`fork_delivery`): `meditation`, `advisory`, `imperative`, or a newer drive's word. */
   readonly forkDelivery?: string;
   /** The reasoning state on the wire (`template_kwargs`): thinking on or off, and the effort, as sent. */
@@ -458,7 +466,13 @@ export function leversOf(start: LineOf<'session.start'>): Levers {
     kwargs?.reasoning_effort === undefined ? undefined : `effort ${kwargs.reasoning_effort}`,
   ].filter((part): part is string => part !== undefined);
   return {
-    ...(start.approvals_off === true ? { approvals: 'off' as const } : start.version >= 7 ? { approvals: 'gate' as const } : {}),
+    ...(start.approvals_off === true
+      ? { approvals: 'off' as const }
+      : start.levers?.['approval'] === 'undeclared'
+        ? { approvals: 'no commands' as const }
+        : start.version >= 7
+          ? { approvals: 'gate' as const }
+          : {}),
     ...(start.fork_delivery !== undefined ? { forkDelivery: start.fork_delivery } : {}),
     ...(reasoning.length > 0 ? { reasoning: reasoning.join(' · ') } : {}),
     ...(start.levers !== undefined ? { table: start.levers } : {}),
@@ -612,6 +626,8 @@ export function fold(written: readonly LogLine[]): Session {
   const callAt = new Map<string, number>();
   const forks = new Map<number, { fork: LineOf<'fork'>; request?: number; settled?: LineOf<'fork.settled'>; patches: LineOf<'patch'>[]; audited?: string[] }>();
   const entries = new Map<string, Mutable<Omit<MemoryEntry, 'fresh' | 'landedAt'>> & { seq: number }>();
+  // An id diet aliased to the live entry already holding its content (a restated add), to that entry's id.
+  const aliases = new Map<string, string>();
   // The tangent open now (#608), the turns asked inside each, and the turns a close rolled the trunk back over.
   let openTangent: string | undefined;
   let tangentsOpened = 0;
@@ -655,7 +671,8 @@ export function fold(written: readonly LogLine[]): Session {
   let held: { atTurn: number; reason: string; unaddressed: readonly string[] } | undefined;
   // The last meditation's seq: an audit forked after it belongs to the next one.
   let lastMeditation = -1;
-  const rulings = new Map<string, LineOf<'phase.ruled'>>();
+  // A ruling, keyed by the call it ruled: the latest call before it with its id, since a model may reuse an id (#733).
+  const rulings = new Map<number, LineOf<'phase.ruled'>>();
   let openTurn: number | undefined;
   let lastAskSeq = -1;
   // The state as the log says it, when it says it (`diet` logs every move; a script logs only the end).
@@ -728,7 +745,8 @@ export function fold(written: readonly LogLine[]): Session {
         } else {
           calls.set(e.seq, { request: e.request, t: e.t, first: e, ...(piece.id !== undefined ? { id: piece.id } : {}), ...(piece.name !== undefined ? { name: piece.name } : {}), args: piece.arguments });
           callAt.set(key, e.seq);
-          era().slots.push({ kind: 'tool', call: e.seq });
+          // Only the trunk's calls are the trunk's rows: a fork's own calls (its `update_record`) belong to its branch.
+          if (generations.get(e.request)?.request.lane === 'trunk') era().slots.push({ kind: 'tool', call: e.seq });
         }
         break;
       }
@@ -781,7 +799,19 @@ export function fold(written: readonly LogLine[]): Session {
       case 'patch': {
         // A fork's patch is drawn on its branch too; the trunk's own (a `lane`, #627) only in working memory.
         if (e.fork !== undefined) forks.get(e.fork)?.patches.push(e);
-        const old = entries.get(e.entry.id);
+        // An id diet aliased to the entry holding its content names that entry (`WorkingObject::add`'s `Deduped`).
+        const held = (entry: string) => aliases.get(entry) ?? entry;
+        // A restated add -- its content, whitespace collapsed, already a live entry's -- is diet's alias, not an entry.
+        if (e.op === 'add' && !entries.has(e.entry.id)) {
+          const key = normalised(e.entry.text);
+          const holder = [...entries.values()].find((x) => x.state === 'live' && normalised(x.text) === key);
+          if (holder) {
+            aliases.set(e.entry.id, holder.id);
+            break;
+          }
+        }
+        const target = held(e.entry.id);
+        const old = entries.get(target);
         const base = {
           ...(e.entry.category !== undefined ? { category: e.entry.category } : {}),
           ...(e.authority !== undefined ? { authority: e.authority } : {}),
@@ -790,20 +820,23 @@ export function fold(written: readonly LogLine[]): Session {
           seq: e.seq,
           ...provenance(e),
         };
-        if (e.op === 'retire') {
-          if (old) entries.set(e.entry.id, { ...old, state: 'retired', by: id(e.seq), seq: e.seq, from: [...old.from, e.seq] });
+        // A state change (diet's `Resolve`, `Retire`, `Park`): the entry leaves working memory's live set, its text kept.
+        const leaves: Partial<Record<string, EntryState>> = { retire: 'retired', resolve: 'resolved', park: 'parked' };
+        const left = leaves[e.op];
+        if (left !== undefined) {
+          if (old) entries.set(target, { ...old, state: left, by: id(e.seq), seq: e.seq, op: e.op, from: [...old.from, e.seq] });
           break;
         }
         if (e.op === 'supersede' && e.supersedes) {
-          const replaced = entries.get(e.supersedes);
-          if (replaced) entries.set(e.supersedes, { ...replaced, state: 'superseded', by: id(e.seq), seq: e.seq, from: [...replaced.from, e.seq] });
+          const replaced = entries.get(held(e.supersedes));
+          if (replaced) entries.set(replaced.id, { ...replaced, state: 'superseded', by: id(e.seq), seq: e.seq, from: [...replaced.from, e.seq] });
         }
         if (e.op === 'add' || e.op === 'supersede' || !old) {
           entries.set(e.entry.id, { id: e.entry.id, state: 'live', ...base, ...(e.op !== 'add' && e.op !== 'supersede' ? { op: e.op } : {}), ...(e.tangent !== undefined ? { tangent: e.tangent } : {}), ...(e.lane !== undefined ? { lane: e.lane } : {}) });
           break;
         }
         // Any other op rewrites the entry, keeps its state, and is shown by name.
-        entries.set(e.entry.id, { ...old, ...base, op: e.op, from: [...old.from, e.seq] });
+        entries.set(target, { ...old, ...base, op: e.op, from: [...old.from, e.seq] });
         break;
       }
       // The operator's flag (#150): a note on the entry, its state unchanged.
@@ -857,12 +890,14 @@ export function fold(written: readonly LogLine[]): Session {
           proposal = { call: e.call, ...(e.from !== undefined ? { from: e.from } : {}), to: e.to, ...(typeof args['reason'] === 'string' ? { reason: args['reason'] } : {}) };
         }
         break;
-      case 'phase.ruled':
-        rulings.set(e.call, e);
+      case 'phase.ruled': {
+        const ruled = [...calls.entries()].filter(([at, c]) => c.id === e.call && at < e.seq).at(-1)?.[0];
+        if (ruled !== undefined) rulings.set(ruled, e);
         if (proposal?.call === e.call) proposal = undefined;
         // "continue" moves the phase with no meditation; "meditation" is followed by the meditation line, which moves it.
         if (e.choice === 'continue') phase = e.to;
         break;
+      }
       case 'meditation': {
         held = undefined;
         for (const call of e.pruned ?? []) replacedByMeditation.add(call);
@@ -902,6 +937,15 @@ export function fold(written: readonly LogLine[]): Session {
             }
           : undefined;
         lastMeditation = e.seq;
+        // A meditation clears the flags its reconcile addressed. One it left unaddressed (the line's `unaddressed`) stays
+        // pending to the next meditation, which marks it again (diet's `operator_carried`, #749).
+        const pending = new Set(e.unaddressed ?? []);
+        for (const [key, entry] of entries) {
+          if (entry.flag === undefined || pending.has(key)) continue;
+          const addressed = { ...entry };
+          delete addressed.flag;
+          entries.set(key, addressed);
+        }
         eras.push({ meditation: e, ...(reconcile ? { reconcile } : {}), system: rendered, slots: [] });
         break;
       }
@@ -1053,10 +1097,11 @@ export function fold(written: readonly LogLine[]): Session {
                   ...(line.exit !== undefined ? { exit: line.exit } : {}),
                   ...(line.stdout !== undefined ? { output: line.stdout } : {}),
                   ...(line.stderr ? { stderr: line.stderr } : {}),
-                  ...(rulings.has(line.id) ? { ruled: { choice: rulings.get(line.id)!.choice, to: rulings.get(line.id)!.to } } : {}),
+                  ...(rulings.has(slot.call) ? { ruled: { choice: rulings.get(slot.call)!.choice, to: rulings.get(slot.call)!.to } } : {}),
                   ...(line.reason !== undefined ? { refusal: line.reason } : {}),
                   ...(() => {
-                    const cut = [...prunes.values()].flat().find((p) => p.call === line.id);
+                    // A prune names its call by id within its turn: an id may recur in another turn (#733).
+                    const cut = (prunes.get(line.turn) ?? []).find((p) => p.call === line.id);
                     return cut ? { pruned: { bytes: cut.bytes, replaced: replacedByMeditation.has(line.id) } } : {};
                   })(),
                   ...(line.background !== undefined

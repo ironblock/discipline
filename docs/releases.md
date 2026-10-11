@@ -44,7 +44,7 @@ One working state per lever, a non-default one where the default is off, none or
 | compaction depth | a tail, `seam_tail_tokens` 2000 | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): seam 4039 carried 1 turn. At seam 2804 it carried none, the newest turn being larger than *N*; the zero-turns warning drawn at two meditations of [`gate-and-tail`](../runs/2026-10-10-gate-and-tail-agent-driven) |
 | seam trigger | budget | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): seam 2804, `reason: budget` |
 | fork warrant | one per gap, gated on scoping | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven): forks 860 and 2141 |
-| fork asks | v4 | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven): a SUPERSEDE patch at 3188; [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) |
+| fork asks | v4 | [`levers-run-c`](../runs/2026-10-11-levers-run-c-agent-driven): fork 4988 answered SUPERSEDE, and patch 5550 superseded `interview-t1-f3970-0` with the new decision. Earlier, [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven)'s one SUPERSEDE was misread (3188, #648) |
 | self-capture | on, a reminder after 3 silent turns | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) and [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): captures and the reminder |
 | capture modality | tools, with ask set t1 | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): fork 608 answered through `update_record` |
 | model-elected pruning | — | moved to Later — lever candidates (#710; the maintainer, 2026-10-10) |
@@ -58,7 +58,7 @@ One working state per lever, a non-default one where the default is off, none or
 | tool surface | standard | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven), [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) and [`image-smoke`](../runs/2026-10-10-image-smoke-agent-driven) |
 | instruction files | on, an AGENTS.md in the worktree | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): all 8 trunk answers followed it |
 | tangent closure | closed, its entry parked | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): 4 messages rolled back, the prefix intact (1399) |
-| interview routing and cadence | per class, skipping self-recorded turns | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): a scoping fork at 8355, `fork.skipped` at 14819 |
+| interview routing and cadence | per class, skipping self-recorded turns | [`levers-run-c`](../runs/2026-10-11-levers-run-c-agent-driven): seven forks triggered by the model's edits (`call:edit:…`, 1346 to 4705) beside the turn-end scoping forks; the skip in [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven), `fork.skipped` at 14819 |
 | render budget | tier | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): `render_reduced` 1 and 2. The render stayed over its budget after reducing (v0.2.0's own fix) |
 | fork memory share | displacement logged | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): forks 2439 and 4952, `may-displace-trunk-cache`. No clamp or refusal was provoked |
 | archive recall | literal | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): `recalled` at 10396 and three more |
@@ -66,10 +66,24 @@ One working state per lever, a non-default one where the default is off, none or
 | interview role | user | the start rows of [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) and [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven). System and developer do not render in the floor's chat template |
 | step and output limits | `max_steps` 6 | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): turn 3 stopped at `max_steps` (814) |
 | failed turns on the trunk | kept | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): turn 4 cancelled after 3 steps, and the next request only appended |
-| reconcile gate | `refuse` | [`gate-and-tail`](../runs/2026-10-10-gate-and-tail-agent-driven): set, never held. Across three meditations the model addressed every operator change, including one a contrived flag asked it to leave out. The held state is covered by #698's tests and #699's stories |
+| reconcile gate | `refuse` | [`levers-run-c`](../runs/2026-10-11-levers-run-c-agent-driven): a flag on a still-true decision (5552) kept by the audit (5555) and its re-ask (9776), held (`meditation.held` 10034, an ask refused `meditation-held` at 10035), then refilled anyway (10038). Holding needs #748's rule: an audit that keeps a flagged note leaves it unaddressed |
 | subagent | — | later |
 
 Every row's evidence is approved (the maintainer, 2026-10-10: "approve all, proceed"). The reconcile gate's row and the zero-turns warning are approved too, as written (the maintainer, 2026-10-10). The extraction seat is struck (#570). The milestone closes with its open issues and the v0.2.0 tag.
+
+**Corrected 2026-10-11.** An adversarial review of the evidence found three rows that did not show what they said: fork asks, interview routing and cadence, and the reconcile gate. Each was reworded to what its log shows (the maintainer approved the rewording, 2026-10-11), and all three were then shown by [`levers-run-c`](../runs/2026-10-11-levers-run-c-agent-driven), driven after the tag on #744's and #748's fixes (the maintainer approved the evidence, 2026-10-11). Pruning, cache lifetime and subagent remain not shown, as deferred.
+
+**v0.2.1** (2026-10-11): the fixes from an adversarial review of the work merged since 2026-10-08:
+- the review's ten issues, #728 to #737;
+- #748, the maintainer's ruling that an operator's change is addressed only when the model acted on it;
+- #749, the surface's follow-up to #748;
+- the evidence above, corrected and re-shown (#747, #750, #755).
+
+It also carries what merged after v0.2.0's tag:
+- BEGIN on today's floor, with the product on (#720, #722, #723);
+- serve serving the page on its own origin (#716);
+- sidechains as lanes in the Claude Code adapter (#708);
+- a capture row's count (#443).
 
 ## v0.3.0 — the hosted API live
 

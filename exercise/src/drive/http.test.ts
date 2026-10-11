@@ -57,7 +57,7 @@ function stand(answers: { readonly events?: number; readonly commands?: (body: R
     },
     fetch: async (url, init) => {
       fetched.push({ url, ...(init ? { init } : {}) });
-      if (url.includes('/events')) return new Response(null, { status: answers.events ?? 200 });
+      if (url.startsWith('events')) return new Response(null, { status: answers.events ?? 200 });
       const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
       return answers.commands ? answers.commands(body) : new Response('{}', { status: 200 });
     },
@@ -77,7 +77,7 @@ const settle = async () => new Promise((resolve) => setTimeout(resolve, 0));
 describe('HttpTransport: the log, served', () => {
   it('reads the log from 0, in order, and is live once the stream opens', () => {
     const { sources, lines, links, last } = stand();
-    expect(sources.map((s) => s.url)).toEqual(['/events?from=0']);
+    expect(sources.map((s) => s.url)).toEqual(['events?from=0']);
     expect(links).toEqual(['reconnecting']);
     last().open();
     last().send(start);
@@ -127,7 +127,7 @@ describe('HttpTransport: a closed stream (finding 17)', () => {
     last().fail(2);
     await settle();
     expect(fetched).toHaveLength(1);
-    expect(fetched[0]?.url).toBe('/events?from=1');
+    expect(fetched[0]?.url).toBe('events?from=1');
     expect(fetched[0]?.init?.headers).toEqual({ 'Last-Event-ID': `${OPENED}-0` });
     expect(links.at(-1)).toMatch(/^lost: .*--allow-origin.*\(403\)$/);
     // Not retried blind.
@@ -155,7 +155,7 @@ describe('HttpTransport: a closed stream (finding 17)', () => {
     last().send(ask(1));
     last().fail(2);
     await settle();
-    expect(sources.map((s) => s.url)).toEqual(['/events?from=0', '/events?from=0']);
+    expect(sources.map((s) => s.url)).toEqual(['events?from=0', 'events?from=0']);
     last().send({ ...start, opened: OPENED + 5 }, OPENED + 5);
     expect(lines.map((l) => l.seq)).toEqual([0, 1, 0]);
   });
@@ -182,7 +182,7 @@ describe('HttpTransport: a closed stream (finding 17)', () => {
     last().send(start);
     last().send(ask(1));
     last().send(ask(2), OPENED + 5);
-    expect(sources.map((s) => s.url)).toEqual(['/events?from=0', '/events?from=0']);
+    expect(sources.map((s) => s.url)).toEqual(['events?from=0', 'events?from=0']);
     expect(lines.map((l) => l.seq)).toEqual([0, 1]);
   });
 });
@@ -224,6 +224,28 @@ describe('HttpTransport: commands', () => {
     const { transport } = stand({ commands: (body) => (posted.push(body), new Response('{"refused":"nothing-running"}', { status: 409 })) });
     await expect(transport.dispatch({ kind: 'background' })).resolves.toEqual({ ok: false, refused: 'nothing-running' });
     expect(posted).toEqual([{ kind: 'background' }]);
+  });
+
+  it('names its routes relative to the page by default, and under a named drive’s base -- a subpath or another origin (#716)', async () => {
+    const urls = async (base: string) => {
+      const seen: string[] = [];
+      const web: Web = {
+        EventSource: class extends FakeSource {
+          constructor(url: string) {
+            super(url);
+            seen.push(url);
+          }
+        },
+        fetch: async (url) => (seen.push(url), new Response('{}', { status: 200 })),
+      };
+      const transport = new HttpTransport(base, web);
+      transport.subscribe(() => {});
+      await transport.dispatch({ kind: 'background' });
+      return seen;
+    };
+    await expect(urls('')).resolves.toEqual(['events?from=0', 'commands']);
+    await expect(urls('https://box.example/app/')).resolves.toEqual(['https://box.example/app/events?from=0', 'https://box.example/app/commands']);
+    await expect(urls('http://127.0.0.1:7801/')).resolves.toEqual(['http://127.0.0.1:7801/events?from=0', 'http://127.0.0.1:7801/commands']);
   });
 
   it('posts a held meditation’s refill-anyway as serve takes it (#150’s gate), and reads its refusal', async () => {
@@ -269,7 +291,7 @@ describe('HttpTransport: closed and reopened', () => {
     const again: LogLine[] = [];
     transport.subscribe((line) => again.push(line));
     expect(again.map((l) => l.seq)).toEqual([0, 1]);
-    expect(sources.map((s) => s.url)).toEqual(['/events?from=0', '/events?from=2']);
+    expect(sources.map((s) => s.url)).toEqual(['events?from=0', 'events?from=2']);
   });
 });
 
@@ -319,7 +341,7 @@ describe('HttpTransport: a tool call’s file, by digest (#372)', () => {
   it('asks serve for GET /files/<sha256> and answers its bytes, unchecked', async () => {
     const { transport, asked } = serving(200, new Uint8Array([1, 2, 3]));
     await expect(transport.file(sha)).resolves.toEqual({ kind: 'bytes', bytes: new Uint8Array([1, 2, 3]) });
-    expect(asked).toEqual([`/files/${sha}`]);
+    expect(asked).toEqual([`files/${sha}`]);
   });
 
   it('answers not found on 404, and why on anything else', async () => {
@@ -369,7 +391,7 @@ describe('HttpTransport: a call waiting on the operator (#389, ruled 5982826097)
     const seen = watched(transport);
     last().emit('waiting', waiting);
     await expect(transport.dispatch({ kind: 'approve', call: 'call_1', scope: 'session' })).resolves.toEqual({ ok: true });
-    expect(posted).toEqual([{ url: '/approve', body: { call: 'call_1', scope: 'session' } }]);
+    expect(posted).toEqual([{ url: 'approve', body: { call: 'call_1', scope: 'session' } }]);
     expect(seen).toEqual([undefined, 'call_1', undefined]);
   });
 
@@ -422,7 +444,7 @@ describe('HttpTransport: the operator’s attachment (#372)', () => {
     const { transport, sent } = answering(200, JSON.stringify({ sha256: sha, bytes: bytes.length }));
     await expect(transport.upload(bytes)).resolves.toEqual({ ok: true, sha256: sha, bytes: bytes.length });
     expect(sent).toHaveLength(1);
-    expect(sent[0]!.url).toBe('/files');
+    expect(sent[0]!.url).toBe('files');
     expect(sent[0]!.init?.method).toBe('POST');
     expect(new Headers(sent[0]!.init?.headers).get('Content-Type')).toBe('image/png');
     expect(sent[0]!.init?.body).toBe(bytes);

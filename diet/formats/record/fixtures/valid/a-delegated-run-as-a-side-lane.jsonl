@@ -1,0 +1,9 @@
+{"source":{"adapter":"claude-code","kind":"adapted","source_available":"pinned_only","source_digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"},"record":"start","regime":{"arm":"baseline","dogma_version":0,"substrates":[{"id":"local","engine":{"name":"a-runtime","version_or_digest":"1.0"},"weights":{"kind":"digest","sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},"sampler_card":{"seed":7,"temperature":0.7},"reasoning":"on","hardware_fingerprint":"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532"}]},"version":2}
+{"record":"turn","index":1,"prefill_tokens":1024}
+{"record":"request","id":"u/1","lane":"main","substrate":"local","text":"build the parser"}
+{"record":"response","id":"a/1","to_request":"u/1","output_tokens":40,"model":"model-one"}
+{"record":"tool_call","id":"call-1","at_turn":1,"tool":"Agent"}
+{"record":"fork","id":"sidechain/agent-1","lane":"sidechain/agent-1","substrate":"local","of_turn":1}
+{"record":"request","id":"sidechain/agent-1/q1","lane":"sidechain/agent-1","substrate":"local","text":"read the grammar"}
+{"record":"response","id":"sidechain/agent-1/a/1","to_request":"sidechain/agent-1/q1","output_tokens":12,"model":"model-two"}
+{"record":"tool_call","id":"call-2","at_turn":1,"tool":"read_file","lane":"sidechain/agent-1"}

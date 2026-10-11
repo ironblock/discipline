@@ -1,50 +1,91 @@
 # How to begin a drive
 
-One start path, from a clean checkout to a recorded session (#287, the ticket that asked for one). It is two steps: start `serve`, then start the surface. Nothing runs anywhere as a service. Whoever drives runs both on their own machine, against a model server they name.
+One start path, from a clean checkout to a recorded session (#287, the ticket that asked for one). It is two steps: start `serve`, then start the surface. Nothing runs anywhere as a service.
 
 **With no model server, start at [No model at hand](#no-model-at-hand)**: the same two steps against a stand-in, then the session driven from the page or from `curl`.
 
+## Three roles
+
+A drive has three parts. They may be one machine or three:
+
+- **The model server:** an endpoint, anywhere `serve` can reach. It answers `…/v1/chat/completions`.
+- **The harness host:** `serve` and the surface, both on the machine that holds the code the model works on. The model's commands and edits run there, under that operating system's sandbox (`--worktree`, **The model's commands**, below), so the harness host is wherever that code is.
+- **The browser:** anywhere. On the harness host, open the surface directly. Anywhere else, reach it through an ssh tunnel to the harness host, not by opening `serve` or the surface to the network:
+
+  ```
+  ssh -L 5173:localhost:5173 <harness host>
+  ```
+
+  Then open `http://localhost:5173/?drive` on the browser's machine. `serve` listens on loopback by default. Off loopback it refuses to start without `--auth-file`, and it refuses a wildcard address. The tunnel needs neither.
+
+Every command below runs on the harness host, from the repository root, unless it says otherwise.
+
 ## What you need
 
-Read from the tree, so they hold for whoever runs this:
+On the harness host, read from the tree, so they hold for whoever runs this:
 
 - **Rust** at the version `rust-toolchain.toml` pins (`channel`). With [rustup](https://rustup.rs) installed, the first `cargo build` fetches it.
 - **Node** at the version `exercise/package.json`'s `engines` asks for, with `npx`. It runs the stand-in model and the surface, and fetches the pinned `pnpm` itself.
-- **A browser**, for the surface. Without one, `curl` drives the session instead (**No model at hand**, below).
-- **A model server**, `llama-server` or anything answering `…/v1/chat/completions` the same way. Without one, use the stand-in (**No model at hand**), which needs no GPU. Setup fetches the Rust toolchain, crates, npm packages and, for `verify` only, Playwright's Chromium. A drive reaches only loopback and the endpoint you name; the stand-in drive, loopback alone.
+- **The wasm32 target and the pinned `wasm-bindgen` CLI**, for the surface's shell gate (step 2's `gate`): `rustup target add wasm32-unknown-unknown`, and `cargo install wasm-bindgen-cli --version <the pin> --locked`, the pin being `wasm-bindgen`'s exact version in `diet/wasm/Cargo.toml`. Without the gate built, the page does not load.
+- **A browser** for the surface, on any machine (**Three roles**). Without one, `curl` drives the session instead (**No model at hand**, below).
+- **A model server**, the floor or anything answering `…/v1/chat/completions` the same way. Without one, use the stand-in (**No model at hand**), which needs no GPU. Setup fetches the Rust toolchain, crates, npm packages and, for `verify` only, Playwright's Chromium. A drive reaches only loopback and the endpoint you name; the stand-in drive, loopback alone.
 
 Only the surface's own tests (`npx --yes pnpm@11.20.0 -C exercise verify`) also need Playwright's Chromium; `exercise/README.md` says how to install it.
 
 ## What you bring
 
-- **The endpoint:** the model server's `…/v1/chat/completions` URL. It goes on the command line, never in a file.
+- **The endpoint:** the model server's URL. A base URL (no path, or `/v1`) is completed to `/v1/chat/completions`. It goes on the command line, never in a file.
+- **The key**, when the model server asks for one: a file holding it, named with `--key-file`. It is sent as a bearer credential, never taken as an argument, and never written to the log or the record.
+- **The worktree:** an empty directory, named absolutely with `--worktree`, where the model's commands run and write. It is the code the model works on, so it lives on the harness host (**Three roles**), outside this checkout.
+- **The auth file:** a file holding `user:password`, named with `--auth-file`. A regimen that runs commands makes `serve` ask every request for it, and the surface presents it for the page. Keep it outside the checkout, where no commit can take it and the model's sandbox never reads it (it joins the session's secrets).
 - **The head:** the trunk's system message, a file you name with `--head`. [`heads/floor.md`](heads/floor.md) is a worked example: the head the 2026-10-03 rehearsal ran with. Edit it, or bring your own. The log carries the head the session ran with, and each request's `head_sha256`, so a recording cites whatever ran.
-- **The regimen:** [`floor.toml`](floor.toml) binds the session to the maintainer's registered floor, substrate `accel24-beellama-qwen27b-q4kxl`.
-  - `serve` refuses to start unless the server's `GET /props` reports that substrate's registered engine, and the record names what it ran on.
+- **The regimen:** [`floor.toml`](floor.toml) binds the session to the maintainer's floor, the 3.8 line's config r2 (#497): substrate `accel24-tabbyapi-exl3-qwen38-27b-3p00`, Qwen3.8 27B as EXL3 on TabbyAPI. Its reasoning is `xhigh` and its sampler the registry's card for the line. It turns the product on, so a first drive shows a tool call, a fork and a meditation (#721):
+    - **the model's commands:** `bash`, run in your worktree under macOS's sandbox (Seatbelt), with approvals off as T1 runs them. The regimen lets commands read anywhere (`sandbox_reads = "all"`), which is built for Seatbelt alone, so on a Linux harness host serve refuses it;
+    - **interview forks:** one per gap, on a read or a scoping-marked ask, answering through the record tools in ask set `t2`;
+    - **self-capture:** the model records what it learns as it goes.
+
+    Every other lever is at its default.
+  - **What `serve` confirms at start** is what the substrate's registry entry declares, and what the server reports of it (#509):
+    - TabbyAPI reports no build, so the floor's engine is declared by its entry, not asked.
+    - `serve` reads `GET /v1/model` and refuses to start if the server reports a model, context, cache, batch, chunk, vision setting or chat-template digest other than the entry declares.
+    - A llama-server substrate is asked `GET /props` instead, and must report its entry's `build_info`.
+    - The start line names what was confirmed and what stands declared.
   - Every request, the trunk's and the interview fork's, carries the regimen's `[sampler]` settings, the values the record's `sampler_card` names, in the digits written. A `[sampler]` key outside `temperature`, `top_p`, `top_k`, `min_p`, `repeat_penalty` and `seed` refuses the start. Without `--regimen`, no sampler setting is sent and the server's defaults apply.
   - **The drive needs it:** `--record` refuses to start without `--regimen`, because a record's `start` names the regime it ran under. Only a rehearsal, with `--log` alone, can leave it out; then `serve` runs against any server and claims no substrate.
-  - **On your own server,** `floor.toml` refuses to start unless your server's `GET /props` reports the floor's registered `build_info` literal; the machine itself is not checked at start. Leave `--regimen` out for a rehearsal, or register your own machine and model and name them in a regimen of your own: [`substrates/README.md`](../../substrates/README.md), section **Registering your own box**. The registry is compiled into `diet-drive`, so registering means rebuilding.
+  - **On your own server,** `floor.toml` refuses to start unless your server reports what the floor's entry declares. Leave `--regimen` out for a rehearsal, or register your own machine and model and name them in a regimen of your own: [`substrates/README.md`](../../substrates/README.md), section **Registering your own box**. The registry is compiled into `diet-drive`, so registering means rebuilding.
 
 ## 1. Start `serve`
+
+Name the endpoint for this shell, the model server's URL (**What you bring**). Make the worktree, empty, and the auth file, both outside the checkout; here, under your home directory:
+
+```
+export DIET_ENDPOINT=<the model server's URL>
+mkdir -p ~/drives/first && test -z "$(ls -A ~/drives/first)"
+mkdir -p ~/.config/discipline && (umask 077 && printf 'driver:%s\n' "$(openssl rand -hex 16)" > ~/.config/discipline/drive.auth)
+```
 
 From the repository root:
 
 ```
 cargo build -p discipline-diet --bin diet-drive
-target/debug/diet-drive serve --endpoint "$DIET_ENDPOINT" --model <served model name> \
+target/debug/diet-drive serve --endpoint "$DIET_ENDPOINT" --key-file <a file holding the key> \
+    --model Qwen3.8-27B-exl3-3.00bpw-img1024 \
     --head diet/drive/heads/floor.md --regimen diet/drive/floor.toml \
+    --worktree ~/drives/first --auth-file ~/.config/discipline/drive.auth \
     --port 7801 --allow-origin http://localhost:5173 \
     --log session.log --record session.record.jsonl
 ```
 
-**`--log` and `--record` are part of the drive, not options to it.** The drive exists to produce a recording, and a session run without them is a rehearsal. The two outputs:
+**`--log` and `--record` are part of the drive, not options to it.** The drive exists to produce a recording, and a session run without them is a rehearsal. The paths above write at the repository root, untracked, and an attached image is copied beside the log under `files/`; name paths outside the checkout to keep them out of it. The two outputs:
 
 - **`--log`** is the session's log, written as each line is appended. It holds byte for byte what `GET /events` streams.
 - **`--record`** is the session's record, written once when the session ends. It is projected from the log, with `session.record.jsonl.unspellable.json` beside it naming what the record cannot spell. Both digests are reported on stdout. The record is read back before it is written. A row the reader proves missing (a `prefix.changed` it owes) is added as `unattributed`, and the repair is named in the sidecar's `repairs`. Any other refusal leaves the record empty and keeps the projected rows at `session.record.jsonl.refused.jsonl`, with the refusal in the sidecar and on the end line, and serve exits as for a record it could not write (#645).
 
 If a file already holds something, naming it empties it. The first stdout line says so (`log_truncated`, `record_truncated`), and a failure after the emptying names what it emptied. A start refused for its usage, its regimen or the engine check empties nothing: those refusals come first.
 
-**The output cap** is `--max-output-tokens`, **8192 by default**. That leaves room for a reasoning model's thinking: on the floor, three turns that hit a 512 cap, re-sent at a cap of 4096, finished at 3,561, 408 and 1,873 completion tokens, one sample each ([#290, measured](https://github.com/ironblock/discipline/issues/290#issuecomment-5969377550): the ticket where the cap was measured). Pass the flag for another value. A turn that hits the cap is logged `capped` and settles `failed`, and it is not answered.
+`--model` is the served model's name, the floor's being the entry's `served_model`. Leave `--key-file` out for a server that asks for no key.
+
+**The output cap** is `--max-output-tokens`, else the regimen's `max_output_tokens`, else **64000** (the harness vote, #569). That leaves room for a reasoning model's thinking at `xhigh`. Pass the flag for another value. A turn that hits the cap is logged `capped` and settles `failed`, and it is not answered.
 
 **A refused start** prints one JSON line on stdout instead, `{"error": <why>, "ok": false}`, and exits `1` for an input it cannot use (the endpoint, the head, a key or auth file, the regimen, the engine check), `2` for a usage it refuses (`--record` without `--regimen`, a `[sampler]` key it cannot send, a listen address it will not take) or an address it cannot listen on, or a server that could not start, or `3` when a file it was told to write cannot be opened. Flags it cannot parse print the usage on stderr and exit `2`.
 
@@ -70,18 +111,37 @@ From the repository root, once per checkout, install the surface's dependencies,
 
 ```
 npx --yes pnpm@11.20.0 -C exercise install
-DIET_DRIVE=http://127.0.0.1:7801 npx --yes pnpm@11.20.0 -C exercise dev
+npx --yes pnpm@11.20.0 -C exercise gate
+DIET_DRIVE=http://127.0.0.1:7801 DIET_DRIVE_AUTH_FILE=~/.config/discipline/drive.auth npx --yes pnpm@11.20.0 -C exercise dev
 ```
 
-Open `http://localhost:5173/?drive`. The surface's dev server proxies `/events`, `/commands`, `/approve` and `/files` to `serve` (`exercise/vite.config.ts`).
+`gate` builds `diet`'s shell gate to wasm (`exercise/src/gate/wasm/`), which every page imports; it needs the wasm32 target and the pinned `wasm-bindgen` CLI (**What you need**). Run it once per checkout, and again after `diet/wasm` changes. Without it the page shows Vite's error that `./wasm/diet_wasm.js` cannot be resolved.
 
-**A regimen that runs the model's commands** makes `serve` require `--auth-file FILE` (`user:password`). The page cannot answer that credential itself, so name the same file to the surface and its proxy presents it:
+Open `http://localhost:5173/?drive` in the browser. From another machine, open it through the tunnel (**Three roles**). The surface's dev server proxies `/events`, `/commands`, `/approve` and `/files` to `serve` (`exercise/vite.config.ts`), so the browser reaches `serve` only through the surface, and both stay on loopback.
+
+**The auth file goes to the surface too.** `floor.toml` runs the model's commands, so `serve` requires `--auth-file` (`user:password`) on every request. The page cannot answer that credential itself, so `DIET_DRIVE_AUTH_FILE` names the same file to the surface, and its proxy presents it. Without it the page says the drive asks for credentials (401).
+
+**A first drive** shows the product end to end:
+
+- **A tool call:** ask the model to list the files in its directory. Its `bash` call runs in the worktree under the sandbox, and the answer comes back.
+- **An interview fork:** mark an ask as scoping in the page, or have the model read a file. When the turn settles, one fork asks it what it decided, and the patch it records lands in working memory.
+- **A meditation:** declare one from the page, or post `{"kind":"declare-meditation"}` to `/commands`. Working memory replaces the conversation, and the next ask runs on the refill.
+
+## One process: `serve` serves the page
+
+Step 2's dev server is for working on the surface. To drive with `serve` alone, and no Node at run time, build the surface's bundle once and let `serve` serve it on its own origin (#716):
 
 ```
-DIET_DRIVE=http://127.0.0.1:7801 DIET_DRIVE_AUTH_FILE=<the file given to --auth-file> npx --yes pnpm@11.20.0 -C exercise dev
+npx --yes pnpm@11.20.0 -C exercise install
+npx --yes pnpm@11.20.0 -C exercise gate
+npx --yes pnpm@11.20.0 -C exercise build:drive
 ```
 
-Without it the page says the drive asks for credentials (401).
+Then start `serve` as in step 1, naming the bundle with `--ui exercise/dist/app`. Its first line names the page as `page`, `http://127.0.0.1:7801/?drive`. A release archive or a native app ships that directory as `ui/` beside the binary, where `serve` finds it with no flag. Open it in the browser, or through the tunnel from another machine (**Three roles**). Forward `serve`'s port in place of 5173: `ssh -L 7801:localhost:7801 <harness host>`.
+
+The page and the session share one origin, so there is no proxy and no `--allow-origin`. Under `--auth-file`, the page asks for the credential as every route does. The browser prompts once, with the auth file's user and password, and sends them with the page's own calls.
+
+Rebuild the bundle after the surface changes. Building it needs Node; serving it does not.
 
 ## Ending
 
