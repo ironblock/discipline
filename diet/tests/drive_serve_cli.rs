@@ -1029,6 +1029,27 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
     assert_eq!(start_line["serving"]["dialect"], "tabbyapi", "{start_line}");
 }
 
+/// #718: BEGIN's start, as shipped -- `diet/drive/floor.toml` against a
+/// server answering as the floor does (config r2's captured `/v1/model`, and
+/// a warm reply) -- starts with no refusal, naming today's floor.
+#[test]
+fn begins_floor_regimen_starts_against_the_floors_tabbyapi() {
+    let floor = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("drive/floor.toml");
+    let path = floor.to_string_lossy().into_owned();
+    let stub = Stub::serving(vec![tabby_model_card(163_840), warm()]).expect("loopback");
+    let log_file = file_holding("log", "");
+    let logged = log_file.0.to_string_lossy().into_owned();
+    let served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
+    assert_eq!(
+        served.substrate.as_deref(),
+        Some("accel24-tabbyapi-exl3-qwen38-27b-3p00")
+    );
+    assert_eq!(
+        served.engine_identity.as_deref(),
+        Some("declared (the engine not asked)")
+    );
+}
+
 #[test]
 fn a_drive_server_refuses_a_contradicted_setting_and_takes_a_silent_draft_as_declared() {
     let id = "accel24-tabbyapi-exl3-qwen38-27b-3p00";

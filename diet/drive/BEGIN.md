@@ -1,29 +1,50 @@
 # How to begin a drive
 
-One start path, from a clean checkout to a recorded session (#287, the ticket that asked for one). It is two steps: start `serve`, then start the surface. Nothing runs anywhere as a service. Whoever drives runs both on their own machine, against a model server they name.
+One start path, from a clean checkout to a recorded session (#287, the ticket that asked for one). It is two steps: start `serve`, then start the surface. Nothing runs anywhere as a service.
 
 **With no model server, start at [No model at hand](#no-model-at-hand)**: the same two steps against a stand-in, then the session driven from the page or from `curl`.
 
+## Three roles
+
+A drive has three parts. They may be one machine or three:
+
+- **The model server:** an endpoint, anywhere `serve` can reach. It answers `…/v1/chat/completions`.
+- **The harness host:** `serve` and the surface, both on the machine that holds the code the model works on. The model's commands and edits run there, under that operating system's sandbox (`--worktree`, **The model's commands**, below), so the harness host is wherever that code is.
+- **The browser:** anywhere. On the harness host, open the surface directly. Anywhere else, reach it through an ssh tunnel to the harness host, not by opening `serve` or the surface to the network:
+
+  ```
+  ssh -L 5173:localhost:5173 <harness host>
+  ```
+
+  Then open `http://localhost:5173/?drive` on the browser's machine. `serve` listens on loopback by default. Off loopback it refuses to start without `--auth-file`, and it refuses a wildcard address. The tunnel needs neither.
+
+Every command below runs on the harness host, from the repository root, unless it says otherwise.
+
 ## What you need
 
-Read from the tree, so they hold for whoever runs this:
+On the harness host, read from the tree, so they hold for whoever runs this:
 
 - **Rust** at the version `rust-toolchain.toml` pins (`channel`). With [rustup](https://rustup.rs) installed, the first `cargo build` fetches it.
 - **Node** at the version `exercise/package.json`'s `engines` asks for, with `npx`. It runs the stand-in model and the surface, and fetches the pinned `pnpm` itself.
-- **A browser**, for the surface. Without one, `curl` drives the session instead (**No model at hand**, below).
-- **A model server**, `llama-server` or anything answering `…/v1/chat/completions` the same way. Without one, use the stand-in (**No model at hand**), which needs no GPU. Setup fetches the Rust toolchain, crates, npm packages and, for `verify` only, Playwright's Chromium. A drive reaches only loopback and the endpoint you name; the stand-in drive, loopback alone.
+- **A browser** for the surface, on any machine (**Three roles**). Without one, `curl` drives the session instead (**No model at hand**, below).
+- **A model server**, the floor or anything answering `…/v1/chat/completions` the same way. Without one, use the stand-in (**No model at hand**), which needs no GPU. Setup fetches the Rust toolchain, crates, npm packages and, for `verify` only, Playwright's Chromium. A drive reaches only loopback and the endpoint you name; the stand-in drive, loopback alone.
 
 Only the surface's own tests (`npx --yes pnpm@11.20.0 -C exercise verify`) also need Playwright's Chromium; `exercise/README.md` says how to install it.
 
 ## What you bring
 
-- **The endpoint:** the model server's `…/v1/chat/completions` URL. It goes on the command line, never in a file.
+- **The endpoint:** the model server's URL. A base URL (no path, or `/v1`) is completed to `/v1/chat/completions`. It goes on the command line, never in a file.
+- **The key**, when the model server asks for one: a file holding it, named with `--key-file`. It is sent as a bearer credential, never taken as an argument, and never written to the log or the record.
 - **The head:** the trunk's system message, a file you name with `--head`. [`heads/floor.md`](heads/floor.md) is a worked example: the head the 2026-10-03 rehearsal ran with. Edit it, or bring your own. The log carries the head the session ran with, and each request's `head_sha256`, so a recording cites whatever ran.
-- **The regimen:** [`floor.toml`](floor.toml) binds the session to the maintainer's registered floor, substrate `accel24-beellama-qwen27b-q4kxl`.
-  - `serve` refuses to start unless the server's `GET /props` reports that substrate's registered engine, and the record names what it ran on.
+- **The regimen:** [`floor.toml`](floor.toml) binds the session to the maintainer's floor, the 3.8 line's config r2 (#497): substrate `accel24-tabbyapi-exl3-qwen38-27b-3p00`, Qwen3.8 27B as EXL3 on TabbyAPI. Its reasoning is `xhigh` and its sampler the registry's card for the line. Every other lever is at its default.
+  - **What `serve` confirms at start** is what the substrate's registry entry declares, and what the server reports of it (#509):
+    - TabbyAPI reports no build, so the floor's engine is declared by its entry, not asked.
+    - `serve` reads `GET /v1/model` and refuses to start if the server reports a model, context, cache, batch, chunk, vision setting or chat-template digest other than the entry declares.
+    - A llama-server substrate is asked `GET /props` instead, and must report its entry's `build_info`.
+    - The start line names what was confirmed and what stands declared.
   - Every request, the trunk's and the interview fork's, carries the regimen's `[sampler]` settings, the values the record's `sampler_card` names, in the digits written. A `[sampler]` key outside `temperature`, `top_p`, `top_k`, `min_p`, `repeat_penalty` and `seed` refuses the start. Without `--regimen`, no sampler setting is sent and the server's defaults apply.
   - **The drive needs it:** `--record` refuses to start without `--regimen`, because a record's `start` names the regime it ran under. Only a rehearsal, with `--log` alone, can leave it out; then `serve` runs against any server and claims no substrate.
-  - **On your own server,** `floor.toml` refuses to start unless your server's `GET /props` reports the floor's registered `build_info` literal; the machine itself is not checked at start. Leave `--regimen` out for a rehearsal, or register your own machine and model and name them in a regimen of your own: [`substrates/README.md`](../../substrates/README.md), section **Registering your own box**. The registry is compiled into `diet-drive`, so registering means rebuilding.
+  - **On your own server,** `floor.toml` refuses to start unless your server reports what the floor's entry declares. Leave `--regimen` out for a rehearsal, or register your own machine and model and name them in a regimen of your own: [`substrates/README.md`](../../substrates/README.md), section **Registering your own box**. The registry is compiled into `diet-drive`, so registering means rebuilding.
 
 ## 1. Start `serve`
 
@@ -31,7 +52,8 @@ From the repository root:
 
 ```
 cargo build -p discipline-diet --bin diet-drive
-target/debug/diet-drive serve --endpoint "$DIET_ENDPOINT" --model <served model name> \
+target/debug/diet-drive serve --endpoint "$DIET_ENDPOINT" --key-file <a file holding the key> \
+    --model Qwen3.8-27B-exl3-3.00bpw-img1024 \
     --head diet/drive/heads/floor.md --regimen diet/drive/floor.toml \
     --port 7801 --allow-origin http://localhost:5173 \
     --log session.log --record session.record.jsonl
@@ -44,7 +66,9 @@ target/debug/diet-drive serve --endpoint "$DIET_ENDPOINT" --model <served model 
 
 If a file already holds something, naming it empties it. The first stdout line says so (`log_truncated`, `record_truncated`), and a failure after the emptying names what it emptied. A start refused for its usage, its regimen or the engine check empties nothing: those refusals come first.
 
-**The output cap** is `--max-output-tokens`, **8192 by default**. That leaves room for a reasoning model's thinking: on the floor, three turns that hit a 512 cap, re-sent at a cap of 4096, finished at 3,561, 408 and 1,873 completion tokens, one sample each ([#290, measured](https://github.com/ironblock/discipline/issues/290#issuecomment-5969377550): the ticket where the cap was measured). Pass the flag for another value. A turn that hits the cap is logged `capped` and settles `failed`, and it is not answered.
+`--model` is the served model's name, the floor's being the entry's `served_model`. Leave `--key-file` out for a server that asks for no key.
+
+**The output cap** is `--max-output-tokens`, else the regimen's `max_output_tokens`, else **64000** (the harness vote, #569). That leaves room for a reasoning model's thinking at `xhigh`. Pass the flag for another value. A turn that hits the cap is logged `capped` and settles `failed`, and it is not answered.
 
 **A refused start** prints one JSON line on stdout instead, `{"error": <why>, "ok": false}`, and exits `1` for an input it cannot use (the endpoint, the head, a key or auth file, the regimen, the engine check), `2` for a usage it refuses (`--record` without `--regimen`, a `[sampler]` key it cannot send, a listen address it will not take) or an address it cannot listen on, or a server that could not start, or `3` when a file it was told to write cannot be opened. Flags it cannot parse print the usage on stderr and exit `2`.
 
@@ -73,7 +97,7 @@ npx --yes pnpm@11.20.0 -C exercise install
 DIET_DRIVE=http://127.0.0.1:7801 npx --yes pnpm@11.20.0 -C exercise dev
 ```
 
-Open `http://localhost:5173/?drive`. The surface's dev server proxies `/events`, `/commands`, `/approve` and `/files` to `serve` (`exercise/vite.config.ts`).
+Open `http://localhost:5173/?drive` in the browser. From another machine, open it through the tunnel (**Three roles**). The surface's dev server proxies `/events`, `/commands`, `/approve` and `/files` to `serve` (`exercise/vite.config.ts`), so the browser reaches `serve` only through the surface, and both stay on loopback.
 
 **A regimen that runs the model's commands** makes `serve` require `--auth-file FILE` (`user:password`). The page cannot answer that credential itself, so name the same file to the surface and its proxy presents it:
 
