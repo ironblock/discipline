@@ -43,6 +43,10 @@ fn staged(name: &str, edit: impl Fn(String) -> String) -> PathBuf {
 }
 
 fn assemble(stage: &Path, out: &Path, home: &str) -> Output {
+    assemble_with(stage, out, home, &[])
+}
+
+fn assemble_with(stage: &Path, out: &Path, home: &str, more: &[&str]) -> Output {
     Command::new("python3")
         .current_dir(root())
         .arg("scripts/assemble-run.py")
@@ -51,6 +55,7 @@ fn assemble(stage: &Path, out: &Path, home: &str) -> Output {
         .args(["--regimen", &stage.join("regimen.toml").to_string_lossy()])
         .args(["--out", &out.to_string_lossy()])
         .args(["--home", home])
+        .args(more)
         .output()
         .expect("python3 runs the assembler")
 }
@@ -103,7 +108,13 @@ fn assembling_levers_run_c_reproduces_its_counts_and_digests() {
     let stage = staged("c", |log| log);
     let runs = scratch("c-runs");
     let out = runs.join("2026-10-11-levers-run-c");
-    let assembled = assemble(&stage, &out, &home_of("nobody-in-particular"));
+    let driven = "scripted: scenario levers-run-c";
+    let assembled = assemble_with(
+        &stage,
+        &out,
+        &home_of("nobody-in-particular"),
+        &["--driven-by", driven],
+    );
     assert!(assembled.status.success(), "{}", said(&assembled));
     let counts = &said(&assembled)["counts"];
     // As its README counted them: 2 asks, 24 requests, 13 tool calls, 11
@@ -132,7 +143,10 @@ fn assembling_levers_run_c_reproduces_its_counts_and_digests() {
         file_rows(&committed),
         "the digests table"
     );
-    assert!(skeleton.contains("[unwritten: who drove it"), "{skeleton}");
+    assert!(
+        skeleton.contains(&format!("**Who drove it:** {driven}\n")),
+        "--driven-by fills the first line: {skeleton}"
+    );
     let _ = std::fs::remove_dir_all(&stage);
     let _ = std::fs::remove_dir_all(&runs);
 }
@@ -154,6 +168,11 @@ fn a_planted_home_path_is_scrubbed_and_a_planted_lan_address_refused() {
         1,
         "{}",
         said(&assembled)
+    );
+    let skeleton = std::fs::read_to_string(out.join("README.md")).expect("a skeleton");
+    assert!(
+        skeleton.contains("**Who drove it:** [unwritten: who drove it"),
+        "without --driven-by the line is left for whoever drove it: {skeleton}"
     );
     let log = std::fs::read_to_string(out.join("session.log")).expect("the log");
     assert!(log.contains("~/work/notes.md") && !log.contains("someone-planted"));

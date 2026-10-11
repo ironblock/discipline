@@ -2,7 +2,7 @@
 """Assemble a driven session's run directory from what `serve` wrote (#757).
 
     python3 scripts/assemble-run.py --log FILE --record FILE --regimen FILE \\
-        --out runs/YYYY-MM-DD-<name> [--home DIR]
+        --out runs/YYYY-MM-DD-<name> [--home DIR] [--driven-by TEXT]
 
 `serve --log L --record R` leaves the log, the record and, beside the record,
 its sidecar (R.unspellable.json), the working memory at the end
@@ -16,7 +16,8 @@ copies them into OUT under the names `runs/README.md` lists:
     unspellable.json  the record's sidecar, scrubbed
     regimen.toml      the regimen, byte for byte
     README.md         a skeleton: what the files say, filled; every narrative
-                      claim `[unwritten: ...]` for whoever drove it to write
+                      claim `[unwritten: ...]` for whoever drove it to write,
+                      and its first line --driven-by's TEXT when given
 
 SCRUB, with the hygiene check's own patterns (scripts/scrub.py): a home path
 to `~`, a scratch path to `/tmp/scratch/`, the account name (--home's last
@@ -140,7 +141,9 @@ def plural(count: int, one: str, many: str) -> str:
     return f"{count} {one if count == 1 else many}"
 
 
-def readme(name: str, start: dict, counts: dict, checks: dict, scrubbed: dict, digests: dict) -> str:
+def readme(
+    name: str, start: dict, counts: dict, checks: dict, scrubbed: dict, digests: dict, driven_by: str | None
+) -> str:
     kinds, lanes, turns = counts["kinds"], counts["lanes"], counts["turns"]
     build = (
         f"`{start['build_commit']}`"
@@ -165,7 +168,8 @@ def readme(name: str, start: dict, counts: dict, checks: dict, scrubbed: dict, d
     out = [
         f"# {name}",
         "",
-        "**Who drove it:** [unwritten: who drove it, and whether the maintainer approved it]",
+        "**Who drove it:** "
+        + (driven_by or "[unwritten: who drove it, and whether the maintainer approved it]"),
         "",
         "**Purpose:** [unwritten: what this run is evidence for]",
         "",
@@ -282,7 +286,9 @@ def assemble(args: argparse.Namespace) -> dict:
             raise Refused(f"diet check-log refuses the log: {checks['check-log'][1]['why']}")
         counts = counts_of(events)
         digests = {name: sha256(data) for name, data in written.items()}
-        (holding / "README.md").write_text(readme(out.name, events[0], counts, checks, scrubbed, digests))
+        (holding / "README.md").write_text(
+            readme(out.name, events[0], counts, checks, scrubbed, digests, args.driven_by)
+        )
         hygiene = subprocess.run(
             ["bash", str(ROOT / "scripts" / "hygiene.sh"), "--tree", str(holding)],
             capture_output=True, text=True, cwd=ROOT,
@@ -308,6 +314,9 @@ def main() -> int:
     parser.add_argument("--regimen", required=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--home", default=os.path.expanduser("~"))
+    # Who drove it (#760): a scenario runner names itself; a person or agent
+    # writes it after. Without it the line stays `[unwritten]`.
+    parser.add_argument("--driven-by")
     args = parser.parse_args()
     try:
         print(json.dumps(assemble(args), sort_keys=True))

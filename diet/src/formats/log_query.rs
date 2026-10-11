@@ -87,9 +87,25 @@ pub fn find(source: &str, filters: &[Filter]) -> Result<Vec<Value>, String> {
         .collect())
 }
 
+/// [`find`], with each filter as it is spelled -- `key=value` or `key~text`:
+/// the one matcher `diet log find` and a scenario's expectations both call
+/// (#757, #760).
+///
+/// # Errors
+///
+/// A term that is no filter, or a `source` that is not a log this reader
+/// reads.
+pub fn find_terms<T: AsRef<str>>(source: &str, terms: &[T]) -> Result<Vec<Value>, String> {
+    let filters = terms
+        .iter()
+        .map(|term| Filter::parse(term.as_ref()))
+        .collect::<Result<Vec<_>, _>>()?;
+    find(source, &filters)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Filter, find};
+    use super::{Filter, find, find_terms};
     use crate::formats::record::json::Value;
 
     fn seqs(lines: &[Value]) -> Vec<i64> {
@@ -133,6 +149,24 @@ mod tests {
             one("supersedes=interview-t1-f3970-0"),
             [5550],
             "a key reached by name, wherever the line keeps it"
+        );
+    }
+
+    #[test]
+    fn terms_as_spelled_find_what_their_filters_do() {
+        let terms = ["kind=fork", "trigger~call:"];
+        let filters: Vec<Filter> = terms
+            .iter()
+            .map(|term| Filter::parse(term).expect("a filter"))
+            .collect();
+        assert_eq!(
+            find_terms(RUN_C, &terms),
+            find(RUN_C, &filters),
+            "one matcher, two spellings of its input"
+        );
+        assert!(
+            find_terms(RUN_C, &["kind"]).is_err(),
+            "a term that is no filter"
         );
     }
 

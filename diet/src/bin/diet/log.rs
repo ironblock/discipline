@@ -6,7 +6,7 @@
 
 use std::process::ExitCode;
 
-use diet::formats::log_query::{Filter, find};
+use diet::formats::log_query::{Filter, find_terms};
 use diet::formats::record::json;
 
 const USAGE: &str = "usage: diet log find <log> [key=value | key~text]...\n\n\
@@ -25,17 +25,11 @@ pub fn run(args: &[String]) -> ExitCode {
         eprint!("{USAGE}");
         return ExitCode::from(2);
     }
-    let filters = match filters
-        .iter()
-        .map(|spelled| Filter::parse(spelled))
-        .collect::<Result<Vec<_>, _>>()
-    {
-        Ok(filters) => filters,
-        Err(why) => {
-            eprintln!("{why}");
-            return ExitCode::from(2);
-        }
-    };
+    // Parsed first, so a malformed term is a usage error, not a refusal.
+    if let Some(why) = filters.iter().find_map(|term| Filter::parse(term).err()) {
+        eprintln!("{why}");
+        return ExitCode::from(2);
+    }
     let source = match std::fs::read_to_string(path) {
         Ok(source) => source,
         Err(why) => {
@@ -43,7 +37,7 @@ pub fn run(args: &[String]) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match find(&source, &filters) {
+    match find_terms(&source, filters) {
         Ok(lines) => {
             let mut out = String::new();
             for line in &lines {
