@@ -44,7 +44,7 @@ One working state per lever, a non-default one where the default is off, none or
 | compaction depth | a tail, `seam_tail_tokens` 2000 | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): seam 4039 carried 1 turn. At seam 2804 it carried none, the newest turn being larger than *N*; the zero-turns warning drawn at two meditations of [`gate-and-tail`](../runs/2026-10-10-gate-and-tail-agent-driven) |
 | seam trigger | budget | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): seam 2804, `reason: budget` |
 | fork warrant | one per gap, gated on scoping | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven): forks 860 and 2141 |
-| fork asks | v4 | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven): a SUPERSEDE patch at 3188; [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) |
+| fork asks | v4 | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven): v4 was sent, fork 2141's question listing the record by id. Its one SUPERSEDE answer (3184) was misread at 3188, the run's break 2 (#648); [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) has no SUPERSEDE from a v4 fork. **A SUPERSEDE through v4 working is not shown** |
 | self-capture | on, a reminder after 3 silent turns | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) and [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): captures and the reminder |
 | capture modality | tools, with ask set t1 | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): fork 608 answered through `update_record` |
 | model-elected pruning | — | moved to Later — lever candidates (#710; the maintainer, 2026-10-10) |
@@ -58,7 +58,7 @@ One working state per lever, a non-default one where the default is off, none or
 | tool surface | standard | [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven), [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven) and [`image-smoke`](../runs/2026-10-10-image-smoke-agent-driven) |
 | instruction files | on, an AGENTS.md in the worktree | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): all 8 trunk answers followed it |
 | tangent closure | closed, its entry parked | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): 4 messages rolled back, the prefix intact (1399) |
-| interview routing and cadence | per class, skipping self-recorded turns | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): a scoping fork at 8355, `fork.skipped` at 14819 |
+| interview routing and cadence | skipping self-recorded turns | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): `fork.skipped` at 14819. **Per class is not shown:** every run's warrant was `scoping` alone, and per class forks on calls only under `read`, so it fired as `gap` does (8355, `trigger: turn_end`) |
 | render budget | tier | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): `render_reduced` 1 and 2. The render stayed over its budget after reducing (v0.2.0's own fix) |
 | fork memory share | displacement logged | [`levers-run-a`](../runs/2026-10-10-levers-run-a-agent-driven): forks 2439 and 4952, `may-displace-trunk-cache`. No clamp or refusal was provoked |
 | archive recall | literal | [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven): `recalled` at 10396 and three more |
@@ -66,10 +66,12 @@ One working state per lever, a non-default one where the default is off, none or
 | interview role | user | the start rows of [`seam-smoke-run-1`](../runs/2026-10-10-seam-smoke-run-1-agent-driven) and [`seam-smoke-run-3`](../runs/2026-10-10-seam-smoke-run-3-agent-driven). System and developer do not render in the floor's chat template |
 | step and output limits | `max_steps` 6 | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): turn 3 stopped at `max_steps` (814) |
 | failed turns on the trunk | kept | [`levers-run-b`](../runs/2026-10-10-levers-run-b-agent-driven): turn 4 cancelled after 3 steps, and the next request only appended |
-| reconcile gate | `refuse` | [`gate-and-tail`](../runs/2026-10-10-gate-and-tail-agent-driven): set, never held. Across three meditations the model addressed every operator change, including one a contrived flag asked it to leave out. The held state is covered by #698's tests and #699's stories |
+| reconcile gate | `refuse` | [`gate-and-tail`](../runs/2026-10-10-gate-and-tail-agent-driven): set, never held. **Holding is not shown on the floor:** on the fields route an audit that parses counts every marked note addressed, so the contrived flag could not make it hold. The held state is shown only by #698's tests and #699's stories |
 | subagent | — | later |
 
 Every row's evidence is approved (the maintainer, 2026-10-10: "approve all, proceed"). The reconcile gate's row and the zero-turns warning are approved too, as written (the maintainer, 2026-10-10). The extraction seat is struck (#570). The milestone closes with its open issues and the v0.2.0 tag.
+
+**Corrected 2026-10-11.** An adversarial review of the evidence found three rows that did not show what they said: fork asks, interview routing and cadence, and the reconcile gate. Each is reworded to what its log shows (the maintainer approved the rewording, 2026-10-11). With pruning, cache lifetime and subagent, six of the 27 levers are not shown working at v0.2.0.
 
 ## v0.3.0 — the hosted API live
 
