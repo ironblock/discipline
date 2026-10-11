@@ -1901,8 +1901,8 @@ struct State {
     /// The operator's edits and flags since a meditation last addressed them
     /// (#150), in order.
     operator_pending: Vec<Pending>,
-    /// The pending changes this meditation's audit addressed (#150): its answer
-    /// parsed, so each marked note had its line. Cleared as the meditation ends.
+    /// The pending changes this meditation's audit addressed (#150): the ones
+    /// its answer acted on ([`acted_on`], #748). Cleared as the meditation ends.
     operator_addressed: Vec<String>,
     /// Whether the trunk carries a meditation's refill message after the head
     /// (#597): the turns start after it.
@@ -6410,7 +6410,7 @@ fn operator_marks(pending: &[Pending]) -> crate::meditation::render::Marks {
 /// The operator's changes a meditation carries (#150) -- each still live, or
 /// addressed by this meditation's audit -- and the ones no answer addressed,
 /// which stay pending for the next meditation. A change is addressed when the
-/// meditation's audit, which marked its note, parsed: every note had its line.
+/// meditation's audit acted on it ([`acted_on`], #748).
 fn operator_carried(state: &mut State) -> (Option<Vec<log::OperatorChange>>, Option<Vec<String>>) {
     let live = |id: &str| {
         state.interview.as_ref().is_some_and(|interview| {
@@ -6687,8 +6687,8 @@ fn audit_fired(
         .collect();
     // #610: a session whose forks answer through the record tools audits
     // through them too, in the tools-route set. That set's words carry no
-    // markers yet, so it marks nothing and addresses nothing (#150); the
-    // lines route marks the operator's pending changes and, with any, asks
+    // markers yet, so it marks nothing (#150), though its patches address
+    // (#748); the lines route marks the operator's pending changes and, with any, asks
     // the reconciling ask.
     let tools = interview.capture == crate::dogma::asks::Modality::Tools;
     let marks = if tools {
@@ -6701,10 +6701,17 @@ fn audit_fired(
     } else {
         crate::meditation::audit_ask_marked(reason, &items, &marks)?
     };
+    // The notes with a pending change, on either route (#748): the tools
+    // route's words carry no markers, but its patches can still act on them.
     let marked = ask
         .items
         .iter()
-        .filter(|id| marks.contains_key(*id))
+        .filter(|id| {
+            state
+                .operator_pending
+                .iter()
+                .any(|change| change.entry == id.as_str())
+        })
         .map(|id| id.as_str().to_owned())
         .collect();
     // The latest turn that settled `final` (#729): one that failed since
@@ -6920,21 +6927,21 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
                 // patches the audit's (lane `audit`).
                 let (outcome, patched) =
                     captured_in(&mut state, &calls, (turn, request), (fork, Lane::Audit));
+                if outcome != log::ForkOutcome::Unparseable {
+                    acted_on(&mut state, &marked, &patched);
+                }
                 lines = patched;
                 outcome
             } else if called {
                 log::ForkOutcome::Unparseable
             } else {
                 let (outcome, patched) = audit_folded(&mut state, &text, &items, fork);
-                lines = patched;
-                // Parsed: every marked note had its line (#150).
+                // Parsed: every marked note had its line (#150), and the
+                // answer's patches say which it acted on (#748).
                 if outcome != log::ForkOutcome::Unparseable {
-                    for entry in marked {
-                        if !state.operator_addressed.contains(&entry) {
-                            state.operator_addressed.push(entry);
-                        }
-                    }
+                    acted_on(&mut state, &marked, &patched);
                 }
+                lines = patched;
                 outcome
             }
         }
@@ -6975,6 +6982,55 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
     }
     drop(state);
     shared.changed.notify_all();
+}
+
+/// The marked entries an audit acted on (#748, log v8), added to the ones
+/// this meditation addressed: a flag is addressed when one of the audit's
+/// patches `lines` superseded, retired, resolved or parked its entry -- on the
+/// lines route an `UPDATE` or a `REMOVE`, never a `KEEP` -- and an edit
+/// unless a patch over it was refused -- on the lines route its `KEEP`.
+/// An entry is addressed when each of its changes is.
+fn acted_on(state: &mut State, marked: &[String], lines: &[Event]) {
+    let settled = |entry: &str| settles(lines, entry);
+    let refused = |entry: &str| {
+        lines
+            .iter()
+            .any(|line| matches!(line, Event::PatchRefused { entry: over, .. } if over == entry))
+    };
+    for entry in marked {
+        let addressed = state
+            .operator_pending
+            .iter()
+            .filter(|change| change.entry == *entry)
+            .all(|change| {
+                if change.kind == "flag" {
+                    settled(entry)
+                } else {
+                    !refused(entry)
+                }
+            });
+        if addressed && !state.operator_addressed.contains(entry) {
+            state.operator_addressed.push(entry.clone());
+        }
+    }
+}
+
+/// Whether one of `lines` took `entry` out of live memory (#748): a patch
+/// that superseded, retired, resolved or parked it.
+fn settles(lines: &[Event], entry: &str) -> bool {
+    lines.iter().any(|line| match line {
+        Event::Patched {
+            op: log::PatchOp::Supersede,
+            supersedes: Some(voids),
+            ..
+        } => voids == entry,
+        Event::Patched {
+            op: log::PatchOp::Retire | log::PatchOp::Resolve | log::PatchOp::Park,
+            entry: patched,
+            ..
+        } => patched.id == entry,
+        _ => false,
+    })
 }
 
 /// An audit's answer `text`, folded (#504): its lines, which must number
@@ -7465,7 +7521,7 @@ struct AuditFired {
     cancel: Cancel,
     /// The notes the ask numbered, in its order.
     items: Vec<crate::object::EntryId>,
-    /// The notes among them the operator's markers marked (#150).
+    /// The notes among them with an operator's pending change (#150, #748).
     marked: Vec<String>,
     /// Whether it is answered through the record tools (#610), not in lines.
     tools: bool,
@@ -14239,8 +14295,9 @@ pub(in crate::drive) mod tests {
         reads_whole(&session);
     }
 
-    /// Under `refuse`, a re-ask that addresses the change refills: the
-    /// gate holds only what stays unaddressed.
+    /// Under `refuse`, a re-ask that addresses the change -- an `UPDATE` of
+    /// the flagged note (#748) -- refills: the gate holds only what stays
+    /// unaddressed.
     #[test]
     fn under_the_refuse_gate_a_re_ask_that_addresses_the_change_refills() {
         let session = three_decisions_then(
@@ -14248,7 +14305,10 @@ pub(in crate::drive) mod tests {
                 meditations.audit = true;
                 meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
             },
-            vec![deltas(&["1. KEEP\n2. KEEP\n"]), deltas(&["1. KEEP\n"])],
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n"]),
+                deltas(&["1. UPDATE: still so\n"]),
+            ],
         );
         let flagged = live_entries(&session)[0].0.clone();
         session.flag_entry(&flagged, "still so?").expect("a flag");
@@ -14619,14 +14679,321 @@ pub(in crate::drive) mod tests {
             .expect("the meditation")
     }
 
+    /// #748: a session reconciling under `gate` whose audits answer
+    /// `answers` in turn -- in lines, or through the record tools when
+    /// `tools` -- after `change` makes the operator's changes on the three
+    /// live entries; the log once the meditation refilled or held.
+    fn reconciled(
+        gate: crate::meditation::policy::ReconcileGate,
+        answers: Vec<Vec<Step>>,
+        tools: bool,
+        change: impl FnOnce(&Session<Canned>, &[String]),
+    ) -> (Session<Canned>, Vec<Logged>) {
+        let session = three_decisions_then(
+            |meditations| {
+                meditations.audit = true;
+                meditations.reconcile_gate = gate;
+            },
+            answers,
+        );
+        let ids: Vec<String> = live_entries(&session)
+            .into_iter()
+            .map(|(id, _)| id)
+            .collect();
+        change(&session, &ids);
+        if tools {
+            let mut state = session.shared.lock();
+            let interview = state.interview.as_mut().expect("memory");
+            interview.capture = crate::dogma::asks::Modality::Tools;
+            interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        }
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the refill or the hold", |log| {
+            meditated(log)
+                || log
+                    .iter()
+                    .any(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+                    && session_settled_awaiting(log)
+        });
+        (session, log)
+    }
+
+    /// The operator's entry an edit wrote: the live one with `content`.
+    fn operators(session: &Session<Canned>, content: &str) -> String {
+        live_entries(session)
+            .into_iter()
+            .find(|(_, held)| held == content)
+            .expect("the operator's entry")
+            .0
+    }
+
+    /// The entries the meditation held on, or `None` when it did not hold.
+    fn held_on(log: &[Logged]) -> Option<Vec<String>> {
+        log.iter().find_map(|logged| match &logged.event {
+            Event::MeditationHeld { unaddressed, .. } => Some(unaddressed.clone()),
+            _ => None,
+        })
+    }
+
+    /// One `resolve_entry` call on `entry`, as the audit's whole answer.
+    fn resolving(entry: &str) -> Vec<Step> {
+        vec![
+            Step::Delta("Settling it.".to_owned()),
+            Step::call(
+                0,
+                "call-r",
+                "resolve_entry",
+                &serde_json::json!({ "entry": entry, "verdict": "done" }).to_string(),
+            ),
+        ]
+    }
+
+    /// #748, Dispatch's ruling: a park takes the entry out of live memory
+    /// as a retire does, so it settles a flag; an add names no entry and
+    /// does not.
+    #[test]
+    fn v8_a_park_settles_a_flag_as_a_retire_does() {
+        let line = |op, id: &str| Event::Patched {
+            fork: Some(1),
+            lane: None,
+            op,
+            entry: log::PatchEntry {
+                id: id.to_owned(),
+                text: "a note".to_owned(),
+                category: None,
+            },
+            supersedes: None,
+            tangent: None,
+        };
+        for op in [
+            log::PatchOp::Park,
+            log::PatchOp::Retire,
+            log::PatchOp::Resolve,
+        ] {
+            assert!(settles(&[line(op, "e-1")], "e-1"), "{op:?}");
+            assert!(!settles(&[line(op, "e-2")], "e-1"), "{op:?}");
+        }
+        assert!(!settles(&[line(log::PatchOp::Add, "e-1")], "e-1"));
+    }
+
+    const CARRY: crate::meditation::policy::ReconcileGate =
+        crate::meditation::policy::ReconcileGate::Carry;
+    const REFUSE: crate::meditation::policy::ReconcileGate =
+        crate::meditation::policy::ReconcileGate::Refuse;
+
+    /// #748, the fields route, under `carry`: a flag the audit keeps is not
+    /// addressed; one it updates or removes is.
+    #[test]
+    fn v8_under_carry_a_kept_flag_is_unaddressed_and_an_updated_or_removed_one_addressed() {
+        let (session, log) = reconciled(
+            CARRY,
+            vec![deltas(&["1. KEEP\n2. REMOVE — gone\n3. UPDATE: now so\n"])],
+            false,
+            |session, ids| {
+                for id in ids {
+                    session.flag_entry(id, "still so?").expect("a flag");
+                }
+            },
+        );
+        let ids: Vec<String> = every_carried(&log)[0]
+            .0
+            .clone()
+            .expect("carried")
+            .into_iter()
+            .map(|change| change.entry)
+            .collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(every_carried(&log)[0].1, Some(vec![ids[0].clone()]));
+        reads_whole(&session);
+        record_read_back(&session);
+    }
+
+    /// #748, the fields route, under `refuse`: a flag kept, then given an `UPDATE`
+    /// on the re-ask, is addressed, and the meditation refills.
+    #[test]
+    fn v8_under_refuse_a_kept_flag_is_re_asked_and_an_update_addresses_it() {
+        let (session, log) = reconciled(
+            REFUSE,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. UPDATE: now so\n"]),
+            ],
+            false,
+            |session, ids| session.flag_entry(&ids[0], "still so?").expect("a flag"),
+        );
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert_eq!(held_on(&log), None);
+        assert_eq!(every_carried(&log)[0].1, Some(Vec::new()));
+        record_read_back(&session);
+    }
+
+    /// #748's named case: under `refuse`, a flag the audit keeps and the
+    /// re-ask keeps again holds, naming that entry.
+    #[test]
+    fn v8_under_refuse_a_flag_kept_twice_holds() {
+        let (session, log) = reconciled(
+            REFUSE,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. KEEP\n"]),
+            ],
+            false,
+            |session, ids| session.flag_entry(&ids[0], "still so?").expect("a flag"),
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert_eq!(held_on(&log), Some(vec![flagged]));
+        assert!(
+            !log.iter()
+                .any(|logged| matches!(logged.event, Event::Meditated { .. }))
+        );
+        reads_whole(&session);
+    }
+
+    /// #748, the fields route: an edit the audit keeps is addressed, under
+    /// either gate.
+    #[test]
+    fn v8_a_kept_edit_is_addressed_under_either_gate() {
+        for gate in [CARRY, REFUSE] {
+            let (session, log) = reconciled(
+                gate,
+                vec![deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"])],
+                false,
+                |session, ids| {
+                    session
+                        .edit_entry(&ids[1], "decision: the operator's version")
+                        .expect("an edit");
+                },
+            );
+            let operator = operators(&session, "decision: the operator's version");
+            assert_eq!(held_on(&log), None, "{gate:?}");
+            assert_eq!(
+                every_carried(&log),
+                [(
+                    Some(vec![log::OperatorChange {
+                        entry: operator,
+                        kind: "edit".to_owned(),
+                    }]),
+                    Some(Vec::new())
+                )],
+                "{gate:?}"
+            );
+            record_read_back(&session);
+        }
+    }
+
+    /// #748, the fields route: an UPDATE over the operator's edit is
+    /// refused by the guard and leaves it unaddressed -- carried under
+    /// `carry`, re-asked under `refuse`, where a KEEP addresses it.
+    #[test]
+    fn v8_a_refused_update_over_an_edit_leaves_it_unaddressed_under_either_gate() {
+        let edit = |session: &Session<Canned>, ids: &[String]| {
+            session
+                .edit_entry(&ids[1], "decision: the operator's version")
+                .expect("an edit");
+        };
+        let (session, log) = reconciled(
+            CARRY,
+            vec![deltas(&[
+                "1. KEEP\n2. KEEP\n3. UPDATE: the model's rewrite\n",
+            ])],
+            false,
+            edit,
+        );
+        let operator = operators(&session, "decision: the operator's version");
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PatchRefused { entry, .. } if *entry == operator
+        )));
+        assert_eq!(every_carried(&log)[0].1, Some(vec![operator]));
+        let (session, log) = reconciled(
+            REFUSE,
+            vec![
+                deltas(&["1. KEEP\n2. KEEP\n3. UPDATE: the model's rewrite\n"]),
+                deltas(&["1. KEEP\n"]),
+            ],
+            false,
+            edit,
+        );
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert_eq!(held_on(&log), None);
+        assert_eq!(every_carried(&log)[0].1, Some(Vec::new()));
+        record_read_back(&session);
+    }
+
+    /// #748, the tools route: a flag the audit resolves is addressed; one
+    /// it leaves alone is not -- carried under `carry`, held under
+    /// `refuse` once the re-ask leaves it alone too.
+    #[test]
+    fn v8_tools_route_a_flag_is_addressed_when_a_patch_settles_it() {
+        let flagged = "interview-t1-0";
+        let flag = |session: &Session<Canned>, _: &[String]| {
+            session.flag_entry(flagged, "still so?").expect("a flag");
+        };
+        for gate in [CARRY, REFUSE] {
+            let (session, log) = reconciled(gate, vec![resolving(flagged)], true, flag);
+            assert_eq!(held_on(&log), None, "{gate:?}");
+            assert_eq!(every_carried(&log)[0].1, Some(Vec::new()), "{gate:?}");
+            reads_whole(&session);
+        }
+        let (_, log) = reconciled(CARRY, vec![deltas(&["Nothing to change."])], true, flag);
+        assert_eq!(every_carried(&log)[0].1, Some(vec![flagged.to_owned()]));
+        let (_, log) = reconciled(
+            REFUSE,
+            vec![deltas(&["Nothing to change."]), deltas(&["Still nothing."])],
+            true,
+            flag,
+        );
+        assert_eq!(held_on(&log), Some(vec![flagged.to_owned()]));
+    }
+
+    /// #748, the tools route: an edit is addressed unless a write over it
+    /// was refused -- carried under `carry`, re-asked under `refuse`.
+    #[test]
+    fn v8_tools_route_an_edit_is_addressed_unless_a_write_over_it_is_refused() {
+        let edit = |session: &Session<Canned>, ids: &[String]| {
+            session
+                .edit_entry(&ids[1], "decision: the operator's version")
+                .expect("an edit");
+        };
+        for gate in [CARRY, REFUSE] {
+            let (session, log) =
+                reconciled(gate, vec![deltas(&["Nothing to change."])], true, edit);
+            assert_eq!(held_on(&log), None, "{gate:?}");
+            assert_eq!(every_carried(&log)[0].1, Some(Vec::new()), "{gate:?}");
+            reads_whole(&session);
+        }
+        // The operator's entry's id is the edit's; resolving it is refused.
+        let operator = {
+            let (session, _) = reconciled(CARRY, vec![deltas(&["x"])], true, edit);
+            operators(&session, "decision: the operator's version")
+        };
+        let (_, log) = reconciled(CARRY, vec![resolving(&operator)], true, edit);
+        assert!(log.iter().any(|logged| matches!(
+            &logged.event,
+            Event::PatchRefused { entry, .. } if *entry == operator
+        )));
+        assert_eq!(every_carried(&log)[0].1, Some(vec![operator.clone()]));
+        let (_, log) = reconciled(
+            REFUSE,
+            vec![resolving(&operator), deltas(&["Nothing to change."])],
+            true,
+            edit,
+        );
+        assert_eq!(audited_templates(&log).len(), 2);
+        assert_eq!(held_on(&log), None);
+        assert_eq!(every_carried(&log)[0].1, Some(Vec::new()));
+    }
+
     /// #150: the operator edits one decision -- a new entry, on the
     /// operator's lane, superseding it -- and flags another; edits and flags
     /// of an entry gone or unknown, or with nothing to say, are refused. The
     /// audit's answer that would rewrite the operator's entry is refused per
     /// patch and the rest of the fold goes on. The audit is the reconciling
-    /// ask, each change marked on its note; its answer parsed, so the meditation
-    /// records both changes as carried and addressed, and the refill marks
-    /// them too.
+    /// ask, each change marked on its note. Its answer keeps the flagged note
+    /// and its UPDATE of the edit is refused, so it acted on neither (#748):
+    /// the meditation records both changes as carried and unaddressed, and the
+    /// refill marks them too.
     #[test]
     fn the_operators_edits_and_flags_are_theirs_and_a_meditation_carries_them() {
         let session = three_decisions_then(
@@ -14719,7 +15086,7 @@ pub(in crate::drive) mod tests {
                         kind: "flag".to_owned()
                     },
                 ]),
-                Some(Vec::new())
+                Some(vec![operator.clone(), flagged.clone()])
             )
         );
         the_refill_marks_them(&session, &operator);
@@ -14730,8 +15097,9 @@ pub(in crate::drive) mod tests {
 
     /// #150: an audit whose answer does not parse addresses nothing -- both
     /// changes carried and left open, still marked -- and the next meditation's
-    /// reconciling audit, parsed, addresses them; the meditation after that carries
-    /// none and asks the trigger's own ask again.
+    /// reconciling audit, which keeps the edit and updates the flagged note,
+    /// addresses them (#748); the meditation after that carries none and asks
+    /// the trigger's own ask again.
     #[test]
     fn an_unparsed_audit_leaves_the_changes_open_for_the_next_meditation() {
         let session = three_decisions_then(
@@ -14739,7 +15107,7 @@ pub(in crate::drive) mod tests {
             vec![
                 deltas(&["not an audit"]),
                 deltas(&["the next answer"]),
-                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. UPDATE: still so\n2. KEEP\n3. KEEP\n"]),
                 deltas(&["the answer after"]),
                 deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
             ],
@@ -14833,7 +15201,7 @@ pub(in crate::drive) mod tests {
             |meditations| meditations.audit = true,
             vec![
                 deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
-                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. UPDATE: still so\n2. KEEP\n3. KEEP\n"]),
             ],
         );
         session.declare_meditation(None).expect("admitted");
@@ -19883,7 +20251,7 @@ pub(in crate::drive) mod tests {
                 deltas(&[DECIDED]),
                 deltas(&["Agreed. Next, I will write the schema."]),
                 deltas(&["DECISION: a tracker\nPLAN: NONE\n"]),
-                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+                deltas(&["1. UPDATE: still so\n2. KEEP\n3. KEEP\n"]),
             ]),
             template(),
             None,
@@ -19923,7 +20291,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             carried(&log).1,
             Some(Vec::new()),
-            "the parsed audit addressed it"
+            "the audit's UPDATE addressed it"
         );
     }
 
