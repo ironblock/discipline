@@ -622,7 +622,6 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
             <div ref={composerStrip} className="ex-session__composer" data-waiting={approving.waiting ? '' : undefined}>
               {approving.waiting && approving.decide ? <ApprovalPrompt key={`${approving.waiting.request}/${approving.waiting.id}`} prompt={approving.waiting} decide={approving.decide} /> : null}
               <Composer
-                key={session.phase}
                 state={session.state}
                 link={link}
                 phase={session.phase}

@@ -93,7 +93,8 @@ export function App({
         tangents: drive === true,
         ...(uploader ? { upload: (bytes: Uint8Array) => uploader.call(transport, bytes) } : {}),
         hint: drive
-          ? `driving: diet's session, over HTTP`
+          ? // A drive the page was pointed at -- `?drive=<url>`, or a meta -- is named, so the operator sees where it talks (#733).
+            `driving: diet's session${base !== '' ? ` at ${base}` : ''}, over HTTP`
           : recording
           ? `replaying: ${SESSIONS[recording].title}`
           : session.state === 'awaiting'

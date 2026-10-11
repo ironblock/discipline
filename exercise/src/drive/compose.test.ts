@@ -79,6 +79,7 @@ describe('the kitchen sink: the happy path the surface expects', () => {
 
   it('refills soon after the trunk goes idle, and runs most side-call time while the trunk works or the person reads', () => {
     expect(r.idleBeforeRefill.every((ms) => ms < 30_000)).toBe(true);
-    expect(r.liveEntries).toBeGreaterThanOrEqual(8);
+    // Resolved entries are not live, as in diet (#733): three of the kitchen sink's are resolved.
+    expect(r.liveEntries).toBeGreaterThanOrEqual(7);
   });
 });

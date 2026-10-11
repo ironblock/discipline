@@ -6,6 +6,8 @@ import type { Cursor } from '../drive/canned.ts';
 import { useState } from 'react';
 
 import { SessionView } from '../ui/SessionView.tsx';
+import { fold } from '../session/fold.ts';
+import { PHASE_PROPOSED, PHASE_RULED_CONTINUE } from '../drive/served/phase-proposal.ts';
 import type { Surface } from '../ui/surface.tsx';
 import { cableOf } from './cables.ts';
 import { pointAt } from './pointing.ts';
@@ -597,5 +599,34 @@ export const NarrowTablet: Story = {
       const y = Number(/^M\s*[\d.]+[ ,]([\d.]+)/.exec(d)?.[1]);
       await expect(y >= head.top - stage.top && y <= head.bottom - stage.top).toBe(true);
     });
+  },
+};
+
+/** The phase moves while the person is writing (#733): the composer keeps its draft -- it is not remounted per phase. */
+function PhaseMovesMidDraft() {
+  const [ruled, setRuled] = useState(false);
+  return (
+    <>
+      <button type="button" data-testid="rule" onClick={() => setRuled(true)}>
+        rule continue
+      </button>
+      <SessionView
+        session={fold(ruled ? PHASE_RULED_CONTINUE : PHASE_PROPOSED)}
+        surface={{ curtain: true, gaps: false }}
+        composer={{ phases: ['plan', 'build'], dispatch: () => Promise.resolve({ ok: true }) }}
+      />
+    </>
+  );
+}
+
+export const DraftSurvivesAPhaseMove: Story = {
+  name: 'composer · a draft survives the phase moving',
+  render: () => <PhaseMovesMidDraft />,
+  play: async ({ canvasElement }) => {
+    const input = within(canvasElement).getByRole('textbox', { name: 'your ask' });
+    await userEvent.type(input, 'half a thought');
+    await userEvent.click(within(canvasElement).getByTestId('rule'));
+    await waitFor(async () => expect(canvasElement.querySelector('.ex-composer__phase')?.textContent).toBe('phase build'));
+    await expect((within(canvasElement).getByRole('textbox', { name: 'your ask' }) as HTMLTextAreaElement).value).toBe('half a thought');
   },
 };
