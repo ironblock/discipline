@@ -58,6 +58,8 @@ struct Served {
     log: Option<(String, bool)>,
     /// Where `--record` writes, and whether naming it emptied anything.
     record: Option<(String, bool)>,
+    /// Where the served page drives the session, under `--ui` (#716).
+    page: Option<String>,
     /// Every later line it writes on stdout.
     said: std::sync::mpsc::Receiver<String>,
     _head: HeadFile,
@@ -133,6 +135,7 @@ fn start_with(endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
         engine_build: announced["engine_build"].as_str().map(str::to_owned),
         engine_identity: announced["engine_identity"].as_str().map(str::to_owned),
         budget_tokens_unsent: announced["budget_tokens_unsent"].as_u64(),
+        page: announced["page"].as_str().map(str::to_owned),
         log: announced["log"]
             .as_str()
             .zip(announced["log_truncated"].as_bool())
@@ -943,6 +946,39 @@ fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
         said.contains("reports exactly") && said.contains("b0-unknown-dirty"),
         "{said}"
     );
+}
+
+/// #716: `--ui DIR` serves the surface's built bundle on serve's own
+/// origin, and the first line names the page; a directory holding no
+/// `index.html` is refused before anything binds.
+#[test]
+fn a_drive_server_serves_the_surfaces_bundle_with_ui() {
+    let bundle = Dir::new("ui-bundle");
+    std::fs::write(bundle.0.join("index.html"), "<html>the page</html>").expect("a page");
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let served = start(&stub.url(), &["--ui", &bundle.path()]);
+    assert_eq!(
+        served.page.as_deref(),
+        Some(format!("http://{}/?drive", served.listening).as_str())
+    );
+    let mut page = std::net::TcpStream::connect(&served.listening).expect("connects");
+    page.write_all(
+        format!(
+            "GET / HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            served.listening
+        )
+        .as_bytes(),
+    )
+    .expect("asked");
+    let mut reply = String::new();
+    page.read_to_string(&mut reply).expect("answered");
+    assert!(reply.starts_with("HTTP/1.1 200 "), "{reply}");
+    assert!(reply.ends_with("<html>the page</html>"), "{reply}");
+
+    let empty = Dir::new("ui-empty");
+    let (code, said) = run_briefly(&stub.url(), &["--ui", &empty.path()]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("holds no index.html"), "{said}");
 }
 
 /// What `TabbyAPI`'s `GET /v1/model` answered for the 3.8 line's config r2,

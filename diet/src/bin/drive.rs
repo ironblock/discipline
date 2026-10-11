@@ -95,6 +95,10 @@ fn serve_usage() -> String {
     out.push_str("commands. <FILE> is the trunk's system message. The first line on\n");
     out.push_str("stdout is JSON naming the address it listens on and when it opened.\n");
     out.push_str("--allow-origin admits a page's origin (a development proxy's).\n");
+    out.push_str("--ui DIR serves the surface's built bundle on serve's own origin, the page\n");
+    out.push_str("at /?drive driving the session with no proxy; unnamed, a ui directory\n");
+    out.push_str("beside this binary is served when there is one. The first line names it\n");
+    out.push_str("as `page`.\n");
     out.push_str("--key-file names a file holding the endpoint's key, sent as a bearer\n");
     out.push_str("credential; it is never taken as an argument.\n");
     out.push_str("--auth-file names a file holding user:password; every request must then\n");
@@ -165,6 +169,8 @@ struct ServeArgs {
     worktree: Option<String>,
     /// `--seat-endpoint`, `--seat-model` and `--seat-key-file` (#570).
     seat: SeatArgs,
+    /// `--ui`, the surface's built bundle to serve (#716).
+    ui: Option<String>,
 }
 
 /// Where an offboard extraction seat is reached, as `serve`'s flags say.
@@ -204,6 +210,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut max_output_tokens = None;
     let mut worktree = None;
     let mut seat = SeatArgs::default();
+    let mut ui = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -242,6 +249,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
             true
         } else if flag == "--listen" {
             value.parse().map(|given| listen = given).is_ok()
+        } else if flag == "--ui" {
+            ui = Some(value.clone());
+            true
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -282,6 +292,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         max_output_tokens,
         worktree,
         seat,
+        ui,
     })
 }
 
@@ -309,10 +320,17 @@ fn serve(args: &[String]) -> ExitCode {
         max_output_tokens,
         worktree,
         seat,
+        ui,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
         return ExitCode::from(EXIT_USAGE);
+    };
+    // The surface's bundle (#716): `--ui`, else a `ui` directory beside the
+    // binary, as a release archive or a native shell ships it; else none.
+    let ui = match page_bundle(ui.as_deref()) {
+        Ok(ui) => ui,
+        Err(why) => return fail(EXIT_INPUT, &why),
     };
     let endpoint = match Endpoint::parse(&endpoint) {
         Ok(endpoint) => chat_endpoint(endpoint),
@@ -683,10 +701,12 @@ fn serve(args: &[String]) -> ExitCode {
     // Where the projection reads an attached file back from (#372): the
     // directory its copy was kept in.
     let recording = attaching.recording.clone();
+    let page = ui.is_some();
     let config = Config {
         attaching,
         allowed_origins,
         credential,
+        ui,
         ..Config::default()
     };
     let running = match started(
@@ -706,7 +726,7 @@ fn serve(args: &[String]) -> ExitCode {
     println!(
         "{}",
         announcement(
-            &running.server.addr().to_string(),
+            (&running.server.addr().to_string(), page),
             opened,
             substrate.map(|id| (id, registry_sha256.as_str())),
             engine
@@ -1876,7 +1896,7 @@ fn confirmations(
 }
 
 fn announcement(
-    listening: &str,
+    (listening, page): (&str, bool),
     opened: u64,
     substrate: Option<(&str, &str)>,
     engine: Option<(&diet::drive::engine::Passed, Warmed)>,
@@ -1891,6 +1911,13 @@ fn announcement(
             Value::Integer(i64::try_from(opened).unwrap_or(i64::MAX)),
         ),
     ]);
+    // Where the served page drives the session (#716).
+    if page {
+        fields.insert(
+            "page".to_owned(),
+            Value::String(format!("http://{listening}/?drive")),
+        );
+    }
     if let Some((substrate, registry_sha256)) = substrate {
         fields.insert("substrate".to_owned(), Value::String(substrate.to_owned()));
         // Which registry answered (#204): its text's digest, for a reader
@@ -1969,6 +1996,34 @@ fn registered_regime(
             )
         })
         .map_err(|why| format!("{path}: {why}"))
+}
+
+/// The surface's built bundle to serve (#716): `named`, which must hold an
+/// `index.html`; else, unnamed, a `ui` directory beside this binary that
+/// holds one; else none.
+///
+/// # Errors
+///
+/// A named directory with no `index.html`.
+fn page_bundle(named: Option<&str>) -> Result<Option<std::path::PathBuf>, String> {
+    let holds_a_page = |dir: &std::path::Path| dir.join("index.html").is_file();
+    match named {
+        Some(dir) => {
+            let dir = std::path::PathBuf::from(dir);
+            if holds_a_page(&dir) {
+                Ok(Some(dir))
+            } else {
+                Err(format!(
+                    "--ui {} holds no index.html: name the surface's built bundle",
+                    dir.display()
+                ))
+            }
+        }
+        None => Ok(std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join("ui")))
+            .filter(|dir| holds_a_page(dir))),
+    }
 }
 
 /// The endpoint's key, from a FILE: an argument is readable by anyone who
