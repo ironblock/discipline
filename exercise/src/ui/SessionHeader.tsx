@@ -32,7 +32,9 @@ const LEVERS: readonly { readonly lever: Exclude<keyof Levers, 'table'>; readonl
         ? 'approvals off: every command ran with no gate decision and no prompt; the sandbox still confined it'
         : s === 'gate'
           ? 'the gate decided each command: pre-seeded, approved by the operator, or refused'
-          : 'this log does not declare the approval lever',
+          : s === 'no commands'
+            ? 'this session runs no commands: its regimen declares none, so there is nothing to approve'
+            : 'this log does not declare the approval lever',
   },
   { lever: 'forkDelivery', label: 'fork delivery', title: (s) => (s === undefined ? 'this log does not declare how a fork’s result reaches the trunk' : 'how a fork’s result reaches the trunk') },
   { lever: 'reasoning', label: 'reasoning', title: (s) => (s === undefined ? 'this log does not declare the reasoning state it sent' : 'the reasoning state sent on every request') },

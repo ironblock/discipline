@@ -26,6 +26,7 @@ On the harness host, read from the tree, so they hold for whoever runs this:
 
 - **Rust** at the version `rust-toolchain.toml` pins (`channel`). With [rustup](https://rustup.rs) installed, the first `cargo build` fetches it.
 - **Node** at the version `exercise/package.json`'s `engines` asks for, with `npx`. It runs the stand-in model and the surface, and fetches the pinned `pnpm` itself.
+- **The wasm32 target and the pinned `wasm-bindgen` CLI**, for the surface's shell gate (step 2's `gate`): `rustup target add wasm32-unknown-unknown`, and `cargo install wasm-bindgen-cli --version <the pin> --locked`, the pin being `wasm-bindgen`'s exact version in `diet/wasm/Cargo.toml`. Without the gate built, the page does not load.
 - **A browser** for the surface, on any machine (**Three roles**). Without one, `curl` drives the session instead (**No model at hand**, below).
 - **A model server**, the floor or anything answering `…/v1/chat/completions` the same way. Without one, use the stand-in (**No model at hand**), which needs no GPU. Setup fetches the Rust toolchain, crates, npm packages and, for `verify` only, Playwright's Chromium. A drive reaches only loopback and the endpoint you name; the stand-in drive, loopback alone.
 
@@ -48,6 +49,12 @@ Only the surface's own tests (`npx --yes pnpm@11.20.0 -C exercise verify`) also 
 
 ## 1. Start `serve`
 
+Name the endpoint for this shell, the model server's URL (**What you bring**):
+
+```
+export DIET_ENDPOINT=<the model server's URL>
+```
+
 From the repository root:
 
 ```
@@ -59,7 +66,7 @@ target/debug/diet-drive serve --endpoint "$DIET_ENDPOINT" --key-file <a file hol
     --log session.log --record session.record.jsonl
 ```
 
-**`--log` and `--record` are part of the drive, not options to it.** The drive exists to produce a recording, and a session run without them is a rehearsal. The two outputs:
+**`--log` and `--record` are part of the drive, not options to it.** The drive exists to produce a recording, and a session run without them is a rehearsal. The paths above write at the repository root, untracked, and an attached image is copied beside the log under `files/`; name paths outside the checkout to keep them out of it. The two outputs:
 
 - **`--log`** is the session's log, written as each line is appended. It holds byte for byte what `GET /events` streams.
 - **`--record`** is the session's record, written once when the session ends. It is projected from the log, with `session.record.jsonl.unspellable.json` beside it naming what the record cannot spell. Both digests are reported on stdout. The record is read back before it is written. A row the reader proves missing (a `prefix.changed` it owes) is added as `unattributed`, and the repair is named in the sidecar's `repairs`. Any other refusal leaves the record empty and keeps the projected rows at `session.record.jsonl.refused.jsonl`, with the refusal in the sidecar and on the end line, and serve exits as for a record it could not write (#645).
@@ -94,8 +101,11 @@ From the repository root, once per checkout, install the surface's dependencies,
 
 ```
 npx --yes pnpm@11.20.0 -C exercise install
+npx --yes pnpm@11.20.0 -C exercise gate
 DIET_DRIVE=http://127.0.0.1:7801 npx --yes pnpm@11.20.0 -C exercise dev
 ```
+
+`gate` builds `diet`'s shell gate to wasm (`exercise/src/gate/wasm/`), which every page imports; it needs the wasm32 target and the pinned `wasm-bindgen` CLI (**What you need**). Run it once per checkout, and again after `diet/wasm` changes. Without it the page shows Vite's error that `./wasm/diet_wasm.js` cannot be resolved.
 
 Open `http://localhost:5173/?drive` in the browser. From another machine, open it through the tunnel (**Three roles**). The surface's dev server proxies `/events`, `/commands`, `/approve` and `/files` to `serve` (`exercise/vite.config.ts`), so the browser reaches `serve` only through the surface, and both stay on loopback.
 

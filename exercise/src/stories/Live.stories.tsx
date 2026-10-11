@@ -35,6 +35,7 @@ import rehearsal from '../drive/served/rehearsal-turns-1-4.log?raw';
 import { TANGENT_OPEN } from '../drive/served/tangent.ts';
 import { SELF_CAPTURE } from '../drive/served/self-capture.ts';
 import { PHASE_PROPOSED, PHASE_PROPOSED_WITH_MEMORY, PHASE_RULED_CONTINUE } from '../drive/served/phase-proposal.ts';
+import { NO_COMMANDS } from '../drive/served/no-commands.ts';
 import { STOPPED_IN_PREFILL, STOPPED_IN_PREFILL_AFTER } from '../drive/served/stopped-in-prefill.ts';
 
 /**
@@ -893,6 +894,24 @@ export const ServedMeditationReconcile: Story = {
     await expect(items('changes')).toEqual(['flag interview-t1-0 · still so?']);
     await expect(row.querySelector('[data-part="answer"] pre')?.textContent).toBe('1. KEEP\n2. KEEP\n3. KEEP');
     await expect(items('after')).toEqual(three);
+  },
+};
+
+/**
+ * `?drive` (BEGIN's dry run): a session that runs no commands and asks no interviews says so -- no "approvals gate"
+ * over commands that never run, and no promise of side calls that will not come.
+ */
+export const ServedNoCommands: Story = {
+  name: '?drive: a session with no commands and no interviews promises neither',
+  args: { drive: true, web: serving(NO_COMMANDS.map((l) => JSON.stringify(l)).join('\n')) },
+  play: async ({ canvasElement }) => {
+    const lever = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-header__lever[data-lever="approvals"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    await expect(lever.textContent).toBe('approvals no commands');
+    await expect(canvasElement.querySelector('.ex-hint')?.textContent).toBe('Your turn. Ask for something, and the answer lands here.');
   },
 };
 
