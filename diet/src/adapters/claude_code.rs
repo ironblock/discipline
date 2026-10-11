@@ -710,8 +710,14 @@ impl Run {
         // A sidechain's own rows are the lane's turns when the walk reads
         // that sidechain as a side lane (#708); its `isMeta` text is still
         // the harness's.
-        let excluded =
-            excluded_from_parent(row).filter(|why| self.side.is_none() || *why != "isSidechain");
+        let excluded = if self.side.is_some() {
+            // A sidechain row is the lane's own; asked first, so a row that
+            // is both is still the harness's text (#736).
+            (row.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true))
+                .then_some("isMeta")
+        } else {
+            excluded_from_parent(row)
+        };
         if let Some(why) = excluded {
             self.census.no_event_one(&format!("{}/{why}", mapped.tag()));
             return Ok(());
@@ -2754,6 +2760,31 @@ mod tests {
             ]),
             "the truncated repeat also moved its parent, which counts first"
         );
+    }
+
+    /// #736: a sidechain's `isMeta` row -- text the harness composed -- is
+    /// not an ask of the lane, as it is not a turn of the trunk.
+    #[test]
+    fn a_sidechains_meta_row_is_not_an_ask() {
+        let (log, mut found) = delegated();
+        let side = found
+            .sidechains
+            .iter_mut()
+            .find(|side| side.agent_id == "x1")
+            .expect("the agent's sidechain");
+        let meta = r#"{"type":"user","message":{"role":"user","content":"<caveat>the harness wrote this</caveat>"},"uuid":"x1-meta","parentUuid":"x1-u1","isSidechain":true,"isMeta":true,"agentId":"x1","sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:00:00Z"}"#;
+        let (first, rest) = side.text.split_once('\n').expect("a first row");
+        side.text = format!("{first}\n{meta}\n{rest}");
+        let adapted = ClaudeCode
+            .adapt_with(&log, &found, A_SUBSTRATE)
+            .expect("it adapts");
+        let asks = adapted
+            .events
+            .iter()
+            .filter(|event| matches!(event, Event::Request { lane, .. } if lane == "sidechain/x1"))
+            .count();
+        assert_eq!(asks, 1, "the meta row is no second ask");
+        assert_eq!(adapted.census.sidechains.get("turns"), Some(&2));
     }
 
     /// #500: a repeat whose content differs from the row it repeats is
