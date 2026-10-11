@@ -101,6 +101,7 @@ pub mod canned;
 pub mod engine;
 pub mod hosted;
 pub mod instructions;
+pub mod mcp;
 pub mod output;
 pub mod projection;
 pub mod prune;
