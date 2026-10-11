@@ -2248,6 +2248,26 @@ fn comparison_message(error: &StructureError, f: &mut fmt::Formatter<'_>) -> fmt
     }
 }
 
+/// The two refusals about a lane's identity: its substrate, and whether it
+/// was opened before a call named it (#708).
+fn lane_message(error: &StructureError, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match error {
+        StructureError::LaneChangedSubstrate { lane, was, now } => write!(
+            f,
+            "the `{lane}` lane is served by `{was}` and then by `{now}`, \
+             and a lane is a role on a substrate: a lane that changes \
+             substrate is two lanes, and a row that inherits its lane's \
+             substrate would have two answers"
+        ),
+        StructureError::UnopenedLane { call, lane } => write!(
+            f,
+            "tool call `{call}` names the `{lane}` lane, and no fork or request opened it \
+             before"
+        ),
+        _ => unreachable!("lane_message is called with a lane refusal only"),
+    }
+}
+
 impl fmt::Display for StructureError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -2312,18 +2332,7 @@ impl fmt::Display for StructureError {
             Self::SubstratesIndistinguishable { first, again } => {
                 indistinguishable_complaint(f, first, again)
             }
-            Self::LaneChangedSubstrate { lane, was, now } => write!(
-                f,
-                "the `{lane}` lane is served by `{was}` and then by `{now}`, \
-                 and a lane is a role on a substrate: a lane that changes \
-                 substrate is two lanes, and a row that inherits its lane's \
-                 substrate would have two answers"
-            ),
-            Self::UnopenedLane { call, lane } => write!(
-                f,
-                "tool call `{call}` names the `{lane}` lane, and no fork or request opened it \
-                 before"
-            ),
+            Self::LaneChangedSubstrate { .. } | Self::UnopenedLane { .. } => lane_message(self, f),
             Self::UndeclaredSubstrate { row, id, declared } => write!(
                 f,
                 "a `{row}` row is served by `{id}`, which this run does not \
@@ -2532,6 +2541,23 @@ fn take_version(
         }
         .into()),
         version => Ok(version),
+    }
+}
+
+/// A tool call naming its lane names one some fork or request opened
+/// before it (#708).
+fn opened_before(event: &Event, lanes: &BTreeMap<&str, &str>) -> Result<(), ParseError> {
+    match event {
+        Event::ToolCall {
+            id,
+            lane: Some(lane),
+            ..
+        } if !lanes.contains_key(lane.as_str()) => Err(StructureError::UnopenedLane {
+            call: id.clone(),
+            lane: lane.clone(),
+        }
+        .into()),
+        _ => Ok(()),
     }
 }
 
@@ -5024,19 +5050,7 @@ fn validate(events: &[Event]) -> Result<(), ParseError> {
                 .into());
             }
         }
-        if let Event::ToolCall {
-            id,
-            lane: Some(lane),
-            ..
-        } = event
-            && !lanes.contains_key(lane.as_str())
-        {
-            return Err(StructureError::UnopenedLane {
-                call: id.clone(),
-                lane: lane.clone(),
-            }
-            .into());
-        }
+        opened_before(event, &lanes)?;
         seen.admit(event)?;
         seen.claim_id(event)?;
         summary_seen |= matches!(event, Event::Summary { .. });

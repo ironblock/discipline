@@ -603,3 +603,32 @@ fn adapters_a_reader_that_stops_reading_is_not_a_failed_replay() {
         "a reader that stopped reading ends the run at 0, not at a panic's 101"
     );
 }
+
+#[test]
+fn adapters_a_replay_joins_the_sidechains_found_beside_its_log() {
+    // #708: the delegated runs beside the log join as side lanes, the record
+    // they build reads back (the replay refuses one that does not), and the
+    // census says what joined and what did not.
+    let (code, out, err) = run(&[
+        "--adapter",
+        "claude-code",
+        "--regimen",
+        &regimen().to_string_lossy(),
+        "--source-available",
+        "committed",
+        &fixture("a-session-that-delegated").to_string_lossy(),
+    ]);
+    assert_eq!(code, 0, "{err}");
+    let (census, _) = heading(&out);
+    assert!(
+        census.contains("\"joined/agent\":1")
+            && census.contains("\"joined/workflow agent\":1")
+            && census.contains("\"transcripts naming no call\":1")
+            && census.contains("\"spawning calls with no transcript\":1"),
+        "the census names what joined and what did not: {census}"
+    );
+    assert!(
+        census.contains("\"models\":{\"model-one\":4,\"model-three\":1,\"model-two\":2}"),
+        "and counts the models across the main log and its sidechains: {census}"
+    );
+}

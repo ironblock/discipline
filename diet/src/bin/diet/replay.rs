@@ -226,7 +226,17 @@ pub fn run(args: &[String]) -> ExitCode {
     // this is the id every adapted row is filed against. Reading it off the
     // regime rather than naming it here keeps one statement of what served.
     let substrate = regime.substrates[0].id.clone();
-    let read = match adapter.adapt(&log, &substrate) {
+    // The delegated runs the harness wrote beside the log, by its own
+    // convention (#708): joined as side lanes; none there is none found.
+    let found =
+        match diet::adapters::claude_code::sidechains_beside(std::path::Path::new(&parsed.log)) {
+            Ok(found) => found,
+            Err(why) => {
+                eprintln!("{}: its sidechains: {why}", parsed.log);
+                return ExitCode::from(EXIT_COULD_NOT_RUN);
+            }
+        };
+    let read = match adapter.adapt_with(&log, &found, &substrate) {
         Ok(read) => read,
         Err(drift) => {
             eprintln!("{drift}");
