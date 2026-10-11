@@ -4114,8 +4114,15 @@ struct Mcp {
 
 impl Mcp {
     fn attached(listening: &str) -> Self {
+        Self::spawned(&["--url", &format!("http://{listening}")], &[])
+    }
+
+    /// `diet-drive mcp` with `args`, under `env` besides its own.
+    fn spawned(args: &[&str], env: &[(&str, &std::path::Path)]) -> Self {
         let mut child = Command::new(DRIVE)
-            .args(["mcp", "--url", &format!("http://{listening}")])
+            .arg("mcp")
+            .args(args)
+            .envs(env.iter().map(|(name, value)| (*name, *value)))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()
@@ -4198,7 +4205,7 @@ fn an_mcp_client_drives_a_served_session_to_a_held_meditation_and_refills_anyway
     let listed = mcp.request("tools/list", serde_json::json!({}));
     assert_eq!(
         listed["tools"].as_array().map(Vec::len),
-        Some(16),
+        Some(18),
         "{listed}"
     );
 
@@ -4271,4 +4278,158 @@ fn an_mcp_client_drives_a_served_session_to_a_held_meditation_and_refills_anyway
 
     let ended = mcp.call("end", serde_json::json!({}));
     assert_eq!(ended["status"], 200, "{ended}");
+}
+
+/// A per-user config (#717) holding profile `canned`: `serve` against
+/// `endpoint` on the canned dev loop, its head a file of its own. The
+/// directory to name as `XDG_CONFIG_HOME`, and the head -- held only to be
+/// removed with it -- both removed on drop.
+struct ConfigHome(PathBuf, #[allow(dead_code)] HeadFile);
+
+impl Drop for ConfigHome {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn config_home(endpoint: &str) -> ConfigHome {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let home = std::env::temp_dir().join(format!(
+        "diet-config-{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir_all(home.join("discipline")).expect("the config's directory");
+    let head = file_holding("head", "you are the trunk\n");
+    std::fs::write(
+        home.join("discipline").join("drive.toml"),
+        format!(
+            "[endpoints.canned]\nurl = \"{endpoint}\"\n\n[profiles.canned]\nendpoint = \"canned\"\n\
+             model = \"a-model\"\nhead = \"{}\"\nregimen = \"{}\"\n",
+            head.0.display(),
+            dev_loop()
+        ),
+    )
+    .expect("the config");
+    ConfigHome(home, head)
+}
+
+#[test]
+fn a_drive_server_starts_from_a_profile_with_no_other_flags() {
+    // #717: `serve --profile canned` -- the endpoint, the model, the head
+    // and the regimen all from the per-user config -- starts on the
+    // regimen's substrate; a profile the config does not name is refused.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let config = config_home(&stub.url());
+    let mut child = Command::new(DRIVE)
+        .args(["serve", "--profile", "canned"])
+        .env("XDG_CONFIG_HOME", &config.0)
+        .stdout(Stdio::piped())
+        .spawn()
+        .expect("diet-drive runs");
+    let mut first = String::new();
+    BufReader::new(child.stdout.take().expect("its output"))
+        .read_line(&mut first)
+        .expect("its first line");
+    let announced = log_line_object(&first);
+    let listening = announced["listening"]
+        .as_str()
+        .expect("listening")
+        .to_owned();
+    assert!(announced["substrate"].is_string(), "{announced}");
+    let reply = post(&listening, &listening, r#"{"kind":"end"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    assert!(child.wait().expect("it exits").success());
+
+    let refused = Command::new(DRIVE)
+        .args(["serve", "--profile", "nope"])
+        .env("XDG_CONFIG_HOME", &config.0)
+        .output()
+        .expect("diet-drive runs");
+    assert_eq!(refused.status.code(), Some(1));
+    let said = String::from_utf8_lossy(&refused.stdout);
+    assert!(said.contains("it names no profile `nope`"), "{said}");
+}
+
+#[test]
+fn a_drive_check_names_its_four_results() {
+    // #717's first-run check, from a profile: the endpoint answers, it
+    // lists the model, the canned regimen's engine check passes, and the
+    // sandbox -- whatever this host has -- is named either way.
+    let stub = Stub::serving_with_props(
+        vec![Act::Answer(
+            r#"{"data":[{"id":"a-model"},{"id":"other"}]}"#.to_owned(),
+        )],
+        &diet::drive::canned::build_info(),
+    )
+    .expect("loopback");
+    let config = config_home(&stub.url());
+    let checked = Command::new(DRIVE)
+        .args(["check", "--profile", "canned"])
+        .env("XDG_CONFIG_HOME", &config.0)
+        .output()
+        .expect("diet-drive runs");
+    let said = String::from_utf8_lossy(&checked.stdout).into_owned();
+    let lines: Vec<(&str, &str)> = said
+        .lines()
+        .map(|line| {
+            let mut words = line.split_whitespace();
+            (
+                words.next().unwrap_or_default(),
+                words.next().unwrap_or_default(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        lines.iter().map(|(what, _)| *what).collect::<Vec<_>>(),
+        ["endpoint", "model", "engine", "sandbox"],
+        "{said}"
+    );
+    assert_eq!(lines[0].1, "ok", "{said}");
+    assert_eq!(lines[1].1, "ok", "{said}");
+    assert!(said.contains("`a-model` is listed"), "{said}");
+    assert_eq!(lines[2].1, "ok", "{said}");
+    assert!(matches!(lines[3].1, "ok" | "failed"), "{said}");
+    assert_eq!(checked.status.success(), lines[3].1 == "ok", "{said}");
+}
+
+#[test]
+fn a_drive_mcp_start_reaches_an_idle_session_and_stop_leaves_no_process() {
+    // #717 through #758's server: `start` with a profile launches serve and
+    // attaches to it, a session from nothing in one call; `wait` finds it
+    // idle; `stop` ends it and its process, and nothing is left running.
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let config = config_home(&stub.url());
+    let mut mcp = Mcp::spawned(&[], &[("XDG_CONFIG_HOME", &config.0)]);
+    let _ = mcp.request("initialize", serde_json::json!({}));
+    let unattached = mcp.request(
+        "tools/call",
+        serde_json::json!({"name": "status", "arguments": {}}),
+    );
+    assert_eq!(unattached["isError"], true, "{unattached}");
+
+    let started = mcp.call("start", serde_json::json!({"profile": "canned"}));
+    assert_eq!(started["started"], true, "{started}");
+    let pid = started["pid"].as_u64().expect("its pid");
+    assert!(started["said"]["listening"].is_string(), "{started}");
+    let idle = mcp.call("wait", serde_json::json!({"until": "idle", "timeout": 30}));
+    assert_eq!(idle["body"]["idle"], true, "{idle}");
+
+    let stopped = mcp.call("stop", serde_json::json!({}));
+    assert_eq!(stopped["status"], 200, "{stopped}");
+    assert_eq!(stopped["exited"], 0, "{stopped}");
+    let alive = Command::new("/bin/kill")
+        .args(["-0", &pid.to_string()])
+        .output()
+        .expect("kill runs")
+        .status
+        .success();
+    assert!(!alive, "serve {pid} outlived stop");
+    let again = mcp.request(
+        "tools/call",
+        serde_json::json!({"name": "stop", "arguments": {}}),
+    );
+    assert_eq!(again["isError"], true, "{again}");
 }

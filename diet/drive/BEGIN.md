@@ -154,6 +154,46 @@ Send `end`: `{"kind":"end"}` posted to `serve`'s `/commands`. `serve` then:
 
 You do not need to interrupt it. Once it has exited, a later command finds nothing listening. In the moment before (while the record is written and the streams drain) one is answered `409` and writes nothing to the log.
 
+## A profile, and the first-run check
+
+The endpoint, the model, the head and the regimen can live in a per-user config instead of on every start's command line. The file is `$XDG_CONFIG_HOME/discipline/drive.toml`, or `~/.config/discipline/drive.toml` when `XDG_CONFIG_HOME` is unset. It is your own file, outside any checkout; nothing about it goes in the tree. It is written in the regimen's TOML subset, with two tables of tables:
+
+```toml
+[endpoints.floor]
+url = "http://HOST:PORT/v1/chat/completions"
+key_file = "~/.config/discipline/floor.key"
+
+[profiles.floor]
+endpoint = "floor"
+model = "the-model"
+head = "~/heads/floor.txt"
+regimen = "~/regimens/floor.toml"
+auth_file = "~/.config/discipline/drive.auth"
+port = 7801
+```
+
+- **Keys:** a profile's keys are `serve`'s flags without their dashes, with `_` for `-`.
+- **`endpoint`:** names an `[endpoints]` table, which supplies its `url`, and its `key_file` unless the profile names one. It can instead be a URL itself.
+- **Credentials:** a key or credential is named by its file's path. No key holds one written in, so a profile cannot inline a secret.
+- **Paths:** a leading `~` means the home directory.
+
+Start from it:
+
+```
+diet-drive serve --profile floor
+```
+
+A flag given on the command line beats the profile's, and `--config FILE` names another config file.
+
+**The first-run check.** `diet-drive check --profile floor` (or with `serve`'s flags) starts nothing and binds nothing. It reports four results on one screen, each `ok`, `failed` or `skipped`, with why:
+
+1. **endpoint:** whether the endpoint answers `GET /v1/models`.
+2. **model:** whether it lists the model.
+3. **engine:** whether the regimen's engine check passes, as `serve` runs it before it binds.
+4. **sandbox:** whether the sandbox opens on this host: Seatbelt on macOS, `bwrap` on Linux.
+
+It exits `0` when nothing failed, `1` otherwise.
+
 ## An agent drives it over MCP
 
 `diet-drive mcp` is an MCP server on standard input and output. Its tools drive one running `serve`, so a Claude app or Claude Code session drives the session in place of the page. Start `serve` as in step 1, then give the MCP server its `listening` and, when `serve` has one, the same auth file:
@@ -170,8 +210,16 @@ claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp --url http
 
 In the Claude app, add the same command under `mcpServers` in its MCP configuration, as `command` and `args`.
 
+**From nothing, in one call.** Started with no `--url`, the server's `start` tool takes a profile's name. It launches `diet-drive serve --profile NAME`, attaches to the address `serve` prints, and uses the profile's auth file. `stop` ends the session and the `serve` it started; nothing is left running, and closing the MCP server stops it too. So the Claude Code line can be:
+
+```
+claude mcp add diet-drive -- /abs/path/to/target/debug/diet-drive mcp
+```
+
+
 | tool | what it calls |
 | --- | --- |
+| `start`, `stop` | a profile launched as `serve`; the session and that process ended |
 | `status`, `wait` | `GET /state`, `GET /wait` |
 | `ask` | the `ask` command: `text`, `scoping`, `files` |
 | `attach` | a local PNG uploaded to `POST /files`; returns its `sha256` for an ask's `files` |

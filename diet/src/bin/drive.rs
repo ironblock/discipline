@@ -80,6 +80,9 @@ const REPLAY: &str = "replay";
 /// The subcommand that serves MCP over a running `serve` (#758).
 const MCP: &str = "mcp";
 
+/// The first-run check (#717).
+const CHECK: &str = "check";
+
 /// The port `diet-drive replay` listens on unless told another.
 const REPLAY_PORT: u16 = 7902;
 
@@ -90,8 +93,12 @@ fn serve_usage() -> String {
          \x20                       [--log FILE] [--record FILE]\n\
          \x20                       [--allow-origin URL]... [--max-output-tokens N]\n\
          \x20                       [--worktree DIR]\n\
-         \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\n",
+         \x20                       [--seat-endpoint URL --seat-model NAME [--seat-key-file FILE]]\n\
+         \x20      diet-drive serve --profile NAME [--config FILE] [any flag above]\n\n",
     );
+    out.push_str("--profile takes the flags from a profile in the per-user config\n");
+    out.push_str("($XDG_CONFIG_HOME/discipline/drive.toml, or --config); a flag given\n");
+    out.push_str("here beats the profile's (#717).\n\n");
     out.push_str("Serves one interactive session over HTTP + SSE on 127.0.0.1, or on\n");
     out.push_str("--listen's address:\n");
     out.push_str("GET /events streams the session's log, POST /commands takes its\n");
@@ -2185,10 +2192,13 @@ fn key_file_in_declared_path(regimen: Option<&str>, key_file: &str) -> Option<St
 /// Re-execute this program under only the regimen's environment
 /// (`PATH`, `HOME`, `LANG`, `TERM`, `TMPDIR` and its `env_passthrough`),
 /// marked so it does not do it twice. Returns only if the exec failed.
-fn scrubbed() -> ExitCode {
+fn scrubbed(args: &[String]) -> ExitCode {
     use std::os::unix::process::CommandExt as _;
-    let args: Vec<std::ffi::OsString> = std::env::args_os().skip(1).collect();
-    let regimen = if args.first().is_some_and(|first| first == SERVE) {
+    let args: Vec<std::ffi::OsString> = args.iter().map(std::ffi::OsString::from).collect();
+    let regimen = if args
+        .first()
+        .is_some_and(|first| first == SERVE || first == CHECK)
+    {
         args.iter()
             .position(|arg| arg == "--regimen")
             .and_then(|at| args.get(at + 1))
@@ -2227,7 +2237,11 @@ fn usage() -> String {
     // The interactive server, which the first form's usage once hid (#290).
     out.push_str("       diet-drive serve --endpoint URL --model NAME --head FILE ...\n");
     out.push_str("       (one interactive session over HTTP; `diet-drive serve --help`)\n");
-    out.push_str("       diet-drive mcp --url http://HOST:PORT [--auth-file FILE]\n");
+    out.push_str("       diet-drive serve --profile NAME [--config FILE] [serve's flags]\n");
+    out.push_str("       (a profile from the per-user config; `diet-drive serve --help`)\n");
+    out.push_str("       diet-drive check --profile NAME [--config FILE]\n");
+    out.push_str("       (the first-run check; `diet-drive check --help`)\n");
+    out.push_str("       diet-drive mcp [--url http://HOST:PORT] [--auth-file FILE]\n");
     out.push_str("       (MCP over stdio, driving a running serve; `diet-drive mcp --help`)\n");
     out.push_str("       diet-drive replay [--answers] [--port N]\n");
     out.push_str("       (substrate `canned-replay-tools` on loopback: captured llama.cpp\n");
@@ -2312,11 +2326,14 @@ fn replay(args: &[String]) -> ExitCode {
 
 fn mcp_usage() -> String {
     String::from(
-        "usage: diet-drive mcp --url http://HOST:PORT [--auth-file FILE]\n\
+        "usage: diet-drive mcp [--url http://HOST:PORT] [--auth-file FILE] [--config FILE]\n\
          An MCP server on standard input and output (JSON-RPC 2.0, one message a\n\
-         line) whose tools drive the running `diet-drive serve` at --url -- its\n\
-         `listening` -- with the credential in --auth-file (`user:password`), the\n\
-         same file serve was given. Each tool returns serve's status and body.\n",
+         line) whose tools drive one `diet-drive serve`: the one at --url -- its\n\
+         `listening` -- with the credential in --auth-file (`user:password`), or\n\
+         one its `start` tool launches from a profile in the per-user config\n\
+         (--config, else $XDG_CONFIG_HOME/discipline/drive.toml). Each tool\n\
+         returns serve's status and body; `stop` ends the session and the serve\n\
+         it started.\n",
     )
 }
 
@@ -2324,41 +2341,58 @@ fn mcp_usage() -> String {
 fn mcp(args: &[String]) -> ExitCode {
     let mut url = None;
     let mut auth_file = None;
+    let mut config = None;
     let mut rest = args.iter();
     while let Some(flag) = rest.next() {
         let value = rest.next();
         match (flag.as_str(), value) {
             ("--url", Some(value)) => url = Some(value.clone()),
             ("--auth-file", Some(value)) => auth_file = Some(value.clone()),
+            ("--config", Some(value)) => config = Some(std::path::PathBuf::from(value)),
             _ => {
                 eprint!("{}", mcp_usage());
                 return ExitCode::from(EXIT_USAGE);
             }
         }
     }
-    let Some(url) = url else {
-        eprint!("{}", mcp_usage());
-        return ExitCode::from(EXIT_USAGE);
-    };
-    let credential = match auth_file.map(std::fs::read_to_string).transpose() {
-        Ok(credential) => credential.map(|text| {
-            text.strip_suffix('\n').map_or(text.clone(), |line| {
-                line.strip_suffix('\r').unwrap_or(line).to_owned()
-            })
-        }),
+    let credential = match auth_file
+        .as_deref()
+        .map(diet::drive::mcp::credential_in)
+        .transpose()
+    {
+        Ok(credential) => credential,
         Err(why) => {
-            eprintln!("diet-drive mcp: the auth file could not be read: {why}");
+            eprintln!("diet-drive mcp: {why}");
             return ExitCode::from(EXIT_INPUT);
         }
     };
-    let serve = match diet::drive::mcp::Serve::new(&url, credential.as_deref()) {
+    let serve = match url
+        .as_deref()
+        .map(|url| diet::drive::mcp::Serve::new(url, credential.as_deref()))
+        .transpose()
+    {
         Ok(serve) => serve,
         Err(why) => {
             eprintln!("diet-drive mcp: {why}");
             return ExitCode::from(EXIT_USAGE);
         }
     };
-    match diet::drive::mcp::run(&serve, std::io::stdin().lock(), std::io::stdout().lock()) {
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(why) => {
+            eprintln!("diet-drive mcp: cannot find this program to start serve: {why}");
+            return ExitCode::from(EXIT_HALT);
+        }
+    };
+    let config =
+        config.or_else(|| diet::drive::profile::default_path(|name| std::env::var_os(name)));
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let mut driver = diet::drive::mcp::Driver::new(serve, exe, config, home);
+    match diet::drive::mcp::run(
+        &mut driver,
+        std::io::stdin().lock(),
+        std::io::stdout().lock(),
+    ) {
         Ok(()) => ExitCode::SUCCESS,
         Err(why) => {
             eprintln!("diet-drive mcp: {why}");
@@ -2367,32 +2401,216 @@ fn mcp(args: &[String]) -> ExitCode {
     }
 }
 
+fn check_usage() -> String {
+    String::from(
+        "usage: diet-drive check --profile NAME [--config FILE]\n\
+         \x20      diet-drive check --endpoint URL --model NAME --head FILE [serve's flags]\n\
+         The first-run check (#717), on one screen: whether the endpoint answers,\n\
+         whether it lists the model, whether the regimen's engine check passes,\n\
+         and whether the sandbox is available on this host. Exit 0 when none\n\
+         failed, 1 otherwise. It starts nothing and binds nothing.\n",
+    )
+}
+
+/// `diet-drive check` (#717): the first-run check, its four results one a
+/// line -- `ok`, `failed` or `skipped`, and why.
+fn check(args: &[String]) -> ExitCode {
+    let Some(ServeArgs {
+        endpoint,
+        model,
+        key_file,
+        regimen_file,
+        max_output_tokens,
+        ..
+    }) = serve_args(args)
+    else {
+        eprint!("{}", check_usage());
+        return ExitCode::from(EXIT_USAGE);
+    };
+    let mut failed = false;
+    let mut said = |what: &str, result: Result<String, String>| {
+        let (word, why) = match result {
+            Ok(why) if why.starts_with("skipped") => ("skipped", why),
+            Ok(why) => ("ok", why),
+            Err(why) => {
+                failed = true;
+                ("failed", why)
+            }
+        };
+        println!("{what:<9}{word:<9}{why}");
+    };
+    let transport = match Endpoint::parse(&endpoint) {
+        Ok(parsed) => {
+            let transport = HttpStream::new(chat_endpoint(parsed));
+            match key_file.as_deref().map(bearer_from).transpose() {
+                Ok(Some(bearer)) => Ok(transport.with_bearer(bearer)),
+                Ok(None) => Ok(transport),
+                Err(why) => Err(why),
+            }
+        }
+        Err(why) => Err(format!("{endpoint} is not an endpoint: {why}")),
+    };
+    // The endpoint, and the models it lists, by `GET /v1/models`.
+    let listed = transport
+        .as_ref()
+        .map_err(Clone::clone)
+        .and_then(|transport| {
+            transport
+                .get(
+                    "/v1/models",
+                    std::time::Instant::now() + std::time::Duration::from_secs(10),
+                )
+                .map_err(|why| format!("{endpoint} did not answer GET /v1/models: {why:?}"))
+        });
+    said(
+        "endpoint",
+        listed
+            .as_ref()
+            .map(|reply| format!("{endpoint} answered GET /v1/models {}", reply.status))
+            .map_err(Clone::clone),
+    );
+    said("model", model_listed(&listed, &model));
+    // The regimen's engine check, as serve runs it before it binds.
+    said(
+        "engine",
+        match regimen_file.as_deref() {
+            None => Ok("skipped: no regimen names a substrate to check".to_owned()),
+            Some(path) => registered_regime(path, max_output_tokens).and_then(|(regime, _)| {
+                let id = regime.substrates[0].id.clone();
+                let transport = transport.as_ref().map_err(Clone::clone)?;
+                diet::drive::engine::check_served(transport, &id)
+                    .map(|passed| format!("`{id}`: {}", passed.identity.tag()))
+            }),
+        },
+    );
+    said("sandbox", sandbox_available(regimen_file.as_deref()));
+    if failed {
+        ExitCode::from(EXIT_INPUT)
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+/// Whether `listed` -- the endpoint's `GET /v1/models` -- lists `model`
+/// (#717).
+fn model_listed(
+    listed: &Result<diet::client::transport::HttpReply, String>,
+    model: &str,
+) -> Result<String, String> {
+    match listed {
+        Err(_) => Err("nothing to list it: the endpoint did not answer".to_owned()),
+        Ok(reply) if reply.status != 200 => Err(format!(
+            "GET /v1/models answered {}, listing nothing",
+            reply.status
+        )),
+        Ok(reply) => {
+            let ids: Vec<String> = serde_json::from_str::<serde_json::Value>(&reply.body)
+                .ok()
+                .and_then(|body| body.get("data").and_then(|data| data.as_array()).cloned())
+                .unwrap_or_default()
+                .iter()
+                .filter_map(|entry| entry.get("id").and_then(|id| id.as_str()))
+                .map(str::to_owned)
+                .collect();
+            if ids.iter().any(|id| id == model) {
+                Ok(format!("`{model}` is listed"))
+            } else {
+                Err(format!(
+                    "`{model}` is not among the {} it lists: {}",
+                    ids.len(),
+                    ids.join(", ")
+                ))
+            }
+        }
+    }
+}
+
+/// Whether the sandbox opens on this host (#717): the regimen's policy
+/// when it confines, else the default one, opened as serve opens it --
+/// Seatbelt's profile run once.
+fn sandbox_available(regimen_file: Option<&str>) -> Result<String, String> {
+    let policy = regimen_file
+        .and_then(isolation_policy_of)
+        .filter(|policy| policy.isolation == isolation::Isolation::Sandbox)
+        .unwrap_or_else(IsolationPolicy::merged_usr);
+    isolation::open(&policy)
+        .map(|_| {
+            let mechanism = match isolation::Platform::here() {
+                isolation::Platform::MacOs => "Seatbelt",
+                isolation::Platform::Linux => "bubblewrap",
+                isolation::Platform::Other => "none",
+            };
+            format!("available on this host: {mechanism}")
+        })
+        .map_err(|why| why.to_string())
+}
+
+/// `args` with a profile as the flags it stands for (#717), for `serve`
+/// and `check`, before the re-exec: the config is found under this
+/// environment, and the re-exec reads the regimen the profile names.
+fn with_profile_flags(args: &mut Vec<String>) -> Result<(), ExitCode> {
+    if !matches!(args.first().map(String::as_str), Some(SERVE | CHECK)) || asks_for_help(&args[1..])
+    {
+        return Ok(());
+    }
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let config = diet::drive::profile::default_path(|name| std::env::var_os(name));
+    match diet::drive::profile::with_profile(&args[1..], config, home.as_deref()) {
+        Ok(rest) => {
+            args.splice(1.., rest).for_each(drop);
+            Ok(())
+        }
+        Err(why) => Err(fail(EXIT_INPUT, &format!("--profile: {why}"))),
+    }
+}
+
+/// `serve`, `replay` or `check`, run, when `args` names one.
+fn subcommand(args: &[String]) -> Option<ExitCode> {
+    if args.first().map(String::as_str) == Some(SERVE) {
+        if asks_for_help(&args[1..]) {
+            print!("{}", serve_usage());
+            return Some(ExitCode::SUCCESS);
+        }
+        return Some(serve(&args[1..]));
+    }
+    if args.first().map(String::as_str) == Some(REPLAY) {
+        return Some(replay(&args[1..]));
+    }
+    if args.first().map(String::as_str) == Some(CHECK) {
+        if asks_for_help(&args[1..]) {
+            print!("{}", check_usage());
+            return Some(ExitCode::SUCCESS);
+        }
+        return Some(check(&args[1..]));
+    }
+    None
+}
+
 fn main() -> ExitCode {
     // FIRST, before any thread: a sandboxed command can read this process's
     // environment and argv (`KERN_PROCARGS2`), so the drive re-executes
     // itself holding only what a command is given anyway (#299, ruling
     // 5983673467, H(1)). The endpoint's key is never in either; serve reads
     // it from `--key-file` after this.
-    if std::env::var_os(isolation::SCRUBBED).is_none() {
-        return scrubbed();
-    }
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some(SERVE) {
-        if asks_for_help(&args[1..]) {
-            print!("{}", serve_usage());
-            return ExitCode::SUCCESS;
-        }
-        return serve(&args[1..]);
-    }
-    if args.first().map(String::as_str) == Some(REPLAY) {
-        return replay(&args[1..]);
-    }
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    // The MCP server runs no command, so it is not re-executed: it keeps
+    // the environment a profile is found in, and the serve it starts
+    // re-executes itself (#717).
     if args.first().map(String::as_str) == Some(MCP) {
         if asks_for_help(&args[1..]) {
             print!("{}", mcp_usage());
             return ExitCode::SUCCESS;
         }
         return mcp(&args[1..]);
+    }
+    if let Err(refused) = with_profile_flags(&mut args) {
+        return refused;
+    }
+    if std::env::var_os(isolation::SCRUBBED).is_none() {
+        return scrubbed(&args);
+    }
+    if let Some(done) = subcommand(&args) {
+        return done;
     }
     if args
         .first()
