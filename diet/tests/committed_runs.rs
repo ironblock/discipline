@@ -7,6 +7,21 @@ use std::path::{Path, PathBuf};
 
 use diet::formats::{log, record, regimen};
 
+/// Committed logs the reader refuses today, each with the refusal it
+/// gives, word for word: a run recorded before a rule it breaks was
+/// written. Pinned so a different refusal, or this one going away, fails
+/// here rather than passing quietly.
+///
+/// The gate-and-tail run was recorded before #705: its audit fork after an
+/// operator meditation that followed a meditation names no `after_seam`,
+/// and #705's rule refuses the fork. The reader on develop refuses it the
+/// same way; it is not the rename's.
+const KNOWN_REFUSALS: &[(&str, &str)] = &[(
+    "2026-10-10-gate-and-tail-agent-driven/session.log",
+    "line 2094: a fork of turn 3 after a meditation that followed it: the meditation replaced \
+     the trunk the fork would be cut from",
+)];
+
 /// Every directory under `runs/`.
 fn runs() -> Vec<PathBuf> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runs");
@@ -35,8 +50,15 @@ fn every_committed_runs_log_record_and_regimen_still_read() {
         if log_file.is_file() {
             read += 1;
             let text = std::fs::read_to_string(&log_file).expect("the log");
-            if let Err(why) = log::parse(&text) {
-                failures.push(format!("{name}/session.log: {why}"));
+            let file = format!("{name}/session.log");
+            let known = KNOWN_REFUSALS.iter().find(|(path, _)| *path == file);
+            match (log::parse(&text), known) {
+                (Ok(_), None) => {}
+                (Err(why), Some((_, expected))) if why.to_string() == *expected => {}
+                (Err(why), _) => failures.push(format!("{file}: {why}")),
+                (Ok(_), Some(_)) => {
+                    failures.push(format!("{file}: reads now; take it out of KNOWN_REFUSALS"));
+                }
             }
         }
         let record_file = dir.join("record.jsonl");
