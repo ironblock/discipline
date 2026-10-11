@@ -518,11 +518,36 @@ pub struct Ran {
     /// `TERM`, then `KILL`.
     pub timed_out: bool,
     /// What it printed, as bytes: what a file tool reads an image from
-    /// (#557), which [`Ran::stdout`]'s lossy text cannot carry.
+    /// (#557), which [`Ran::stdout`]'s lossy text cannot carry. Spilled,
+    /// its head and tail alone (#734).
     pub raw_stdout: Vec<u8>,
+    /// Standard output's whole, once it passed what a call holds in memory
+    /// (#734); `None` when [`Ran::raw_stdout`] is all of it.
+    pub stdout_spill: Option<std::sync::Arc<Spill>>,
+    /// The same, of standard error.
+    pub stderr_spill: Option<std::sync::Arc<Spill>>,
 }
 
 impl Ran {
+    /// Whether either stream passed what a call holds in memory (#734).
+    #[must_use]
+    pub fn spilled(&self) -> bool {
+        self.stdout_spill.is_some() || self.stderr_spill.is_some()
+    }
+
+    /// Standard output whole: what was held, or -- spilled -- read back
+    /// from its file (#734).
+    ///
+    /// # Errors
+    ///
+    /// When the spill cannot be read.
+    pub fn whole_stdout(&self) -> std::io::Result<Vec<u8>> {
+        match &self.stdout_spill {
+            Some(spill) => std::fs::read(&spill.path),
+            None => Ok(self.raw_stdout.clone()),
+        }
+    }
+
     /// Every line of standard error that reads like a refusal.
     #[must_use]
     pub fn denials(&self) -> Vec<Denial> {
@@ -859,6 +884,8 @@ impl Confinement {
                 cancelled: false,
                 timed_out: false,
                 raw_stdout: Vec::new(),
+                stdout_spill: None,
+                stderr_spill: None,
             },
             child,
         ))
@@ -902,6 +929,8 @@ impl Confinement {
                 cancelled: true,
                 timed_out: false,
                 raw_stdout: Vec::new(),
+                stdout_spill: None,
+                stderr_spill: None,
             }));
         }
         let Some((program, rest)) = confined.split_first() else {
@@ -955,7 +984,7 @@ impl Confinement {
             runner.forget_ended_groups();
         }
 
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr.bytes).into_owned();
         // `bwrap` only. Seatbelt's profile was validated at open, so its exit
         // here is the command's own, 65 included.
         if let Self::Sandbox(Backend::Bubblewrap(runner)) = self
@@ -973,13 +1002,15 @@ impl Confinement {
             network: policy.network,
             policy: digest,
             exit: output.status.and_then(|status| status.code()),
-            stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+            stdout: String::from_utf8_lossy(&output.stdout.bytes).into_owned(),
             stderr,
-            stdout_bytes: u64::try_from(output.stdout.len()).unwrap_or(u64::MAX),
-            stderr_bytes: u64::try_from(output.stderr.len()).unwrap_or(u64::MAX),
+            stdout_bytes: output.stdout.total,
+            stderr_bytes: output.stderr.total,
             cancelled: output.cancelled,
             timed_out: output.timed_out,
-            raw_stdout: output.stdout,
+            raw_stdout: output.stdout.bytes,
+            stdout_spill: output.stdout.spill,
+            stderr_spill: output.stderr.spill,
         };
         Ok(if output.status.is_none() {
             Finished::Promoted(ran, child)
@@ -1042,16 +1073,146 @@ struct Collected {
     status: Option<std::process::ExitStatus>,
     /// Whether its timeout ended it (#613).
     timed_out: bool,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
+    stdout: Stream,
+    stderr: Stream,
     cancelled: bool,
 }
 
-/// One of a call's output streams, read on a thread of its own into a
-/// buffer while the call is collected, and drained and discarded after, so
-/// a background writer never blocks on a full pipe nobody reads.
+/// How much of one output stream a call holds in memory whole (#734):
+/// past it, the whole stream goes to a file and memory keeps its head and
+/// tail -- Pi's and `OpenCode` 2's spill (`pi:core/tools/output-accumulator.ts`,
+/// `oc:tool/shell.ts` 439-503). Both bound memory and neither bounds the
+/// file, so neither does this.
+const HELD: usize = 2 * 1024 * 1024;
+
+/// Of a spilled stream, the head kept in memory: what the model's capped
+/// view takes its first fifth from.
+const HEAD_HELD: usize = 1024 * 1024;
+
+/// Of a spilled stream, the tail kept in memory -- between this and twice
+/// it, trimmed as Pi trims its rolling tail.
+const TAIL_HELD: usize = 1024 * 1024;
+
+/// A stream's whole, on disk, once it passed [`HELD`] (#734). The file is
+/// removed when the last holder drops it.
+#[derive(Debug)]
+pub struct Spill {
+    /// The file.
+    pub path: std::path::PathBuf,
+}
+
+impl PartialEq for Spill {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+
+impl Eq for Spill {}
+
+impl Drop for Spill {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+/// A new spill file of this process's own, under the system's temporary
+/// directory.
+fn spill_file() -> std::io::Result<(std::path::PathBuf, std::fs::File)> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    loop {
+        let path = std::env::temp_dir().join(format!(
+            "diet-output-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => return Ok((path, file)),
+            Err(why) if why.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(why) => return Err(why),
+        }
+    }
+}
+
+/// What a stream held as it was read (#734): whole up to [`HELD`]; past
+/// it, its head and a rolling tail, the whole in its spill file.
+#[derive(Default)]
+struct Held {
+    head: Vec<u8>,
+    tail: Vec<u8>,
+    total: u64,
+    /// Past [`HELD`]: the rest goes to the tail.
+    over: bool,
+    spill: Option<(std::path::PathBuf, std::fs::File)>,
+}
+
+impl Held {
+    fn push(&mut self, chunk: &[u8]) {
+        use std::io::Write as _;
+        self.total = self
+            .total
+            .saturating_add(u64::try_from(chunk.len()).unwrap_or(u64::MAX));
+        if !self.over && self.head.len() + chunk.len() <= HELD {
+            self.head.extend_from_slice(chunk);
+            return;
+        }
+        if !self.over {
+            self.over = true;
+            // A spill that cannot be made keeps the head and tail alone.
+            if let Ok((path, mut file)) = spill_file() {
+                let _ = file.write_all(&self.head);
+                self.spill = Some((path, file));
+            }
+            self.tail = self.head.split_off(HEAD_HELD.min(self.head.len()));
+        }
+        if let Some((_, file)) = self.spill.as_mut() {
+            let _ = file.write_all(chunk);
+        }
+        self.tail.extend_from_slice(chunk);
+        if self.tail.len() > 2 * TAIL_HELD {
+            let cut = self.tail.len() - TAIL_HELD;
+            self.tail.drain(..cut);
+        }
+    }
+
+    /// What it held -- its head and tail joined -- and its spill.
+    fn stream(&mut self) -> Stream {
+        use std::io::Write as _;
+        let mut bytes = std::mem::take(&mut self.head);
+        bytes.extend_from_slice(&std::mem::take(&mut self.tail));
+        let spill = self.spill.take().map(|(path, mut file)| {
+            let _ = file.flush();
+            std::sync::Arc::new(Spill { path })
+        });
+        Stream {
+            bytes,
+            total: std::mem::take(&mut self.total),
+            spill,
+        }
+    }
+}
+
+/// One stream of a call's output, as collected (#734).
+#[derive(Default)]
+struct Stream {
+    /// Whole, or -- spilled -- its head and tail.
+    bytes: Vec<u8>,
+    /// How many bytes it printed.
+    total: u64,
+    /// Its whole, when it passed [`HELD`].
+    spill: Option<std::sync::Arc<Spill>>,
+}
+
+/// One of a call's output streams, read on a thread of its own while the
+/// call is collected -- held within [`HELD`], spilled past it (#734) -- and
+/// drained and discarded after, so a background writer never blocks on a
+/// full pipe nobody reads.
 struct Drained {
-    kept: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    held: std::sync::Arc<std::sync::Mutex<Held>>,
     keeping: std::sync::Arc<std::sync::atomic::AtomicBool>,
     ended: std::sync::mpsc::Receiver<()>,
     /// Where the stream goes once the call is promoted (#614).
@@ -1061,13 +1222,13 @@ struct Drained {
 impl Drained {
     fn of(mut stream: impl std::io::Read + Send + 'static) -> Self {
         use std::sync::atomic::Ordering;
-        let kept = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let held: std::sync::Arc<std::sync::Mutex<Held>> = std::sync::Arc::default();
         let keeping = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         let (end, ended) = std::sync::mpsc::channel();
         let sink: std::sync::Arc<std::sync::Mutex<Option<std::fs::File>>> =
             std::sync::Arc::default();
         let (into, still, out) = (
-            std::sync::Arc::clone(&kept),
+            std::sync::Arc::clone(&held),
             std::sync::Arc::clone(&keeping),
             std::sync::Arc::clone(&sink),
         );
@@ -1089,7 +1250,7 @@ impl Drained {
                         } else if still.load(Ordering::SeqCst) {
                             into.lock()
                                 .unwrap_or_else(std::sync::PoisonError::into_inner)
-                                .extend_from_slice(&chunk[..read]);
+                                .push(&chunk[..read]);
                         }
                     }
                 }
@@ -1097,7 +1258,7 @@ impl Drained {
             let _ = end.send(());
         });
         Self {
-            kept,
+            held,
             keeping,
             ended,
             sink,
@@ -1105,38 +1266,45 @@ impl Drained {
     }
 
     /// The stream from here on into `file` (#614): what was read so far is
-    /// written there first, and handed back.
-    fn redirect(&self, mut file: std::fs::File) -> Vec<u8> {
+    /// written there first -- the whole of it, from its spill when it had
+    /// one -- and what was held handed back.
+    fn redirect(&self, mut file: std::fs::File) -> Stream {
         use std::io::Write as _;
         let mut sink = self
             .sink
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let so_far = std::mem::take(
-            &mut *self
-                .kept
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        );
-        let _ = file.write_all(&so_far);
+        let so_far = self
+            .held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stream();
+        match &so_far.spill {
+            Some(spill) => {
+                if let Ok(mut whole) = std::fs::File::open(&spill.path) {
+                    let _ = std::io::copy(&mut whole, &mut file);
+                }
+            }
+            None => {
+                let _ = file.write_all(&so_far.bytes);
+            }
+        }
         *sink = Some(file);
         so_far
     }
 
     /// What was read: all of it once the stream ended, or by `until`,
     /// whichever comes first. Nothing read after is kept.
-    fn taken(self, until: Instant) -> Vec<u8> {
+    fn taken(self, until: Instant) -> Stream {
         let _ = self
             .ended
             .recv_timeout(until.saturating_duration_since(Instant::now()));
         self.keeping
             .store(false, std::sync::atomic::Ordering::SeqCst);
-        std::mem::take(
-            &mut *self
-                .kept
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner),
-        )
+        self.held
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .stream()
     }
 }
 
@@ -1189,8 +1357,11 @@ fn collected(
                     std::thread::sleep(POLL);
                     ended = child.try_wait()?;
                 }
+                // The whole group, whether or not its leader went on
+                // `TERM`: a member that ignores it would outlive the call
+                // (#734). Pi and `OpenCode` 2 both end it.
+                let _ = seatbelt::kill().args(["-KILL", "--", &target]).output();
                 if ended.is_none() {
-                    let _ = seatbelt::kill().args(["-KILL", "--", &target]).output();
                     let _ = child.kill();
                 }
                 timed_out = true;
@@ -4345,6 +4516,8 @@ mod tests {
             cancelled: false,
             timed_out: false,
             raw_stdout: Vec::new(),
+            stdout_spill: None,
+            stderr_spill: None,
         }
     }
 
@@ -4573,5 +4746,110 @@ mod tests {
             Platform::ALL.iter().map(|p| p.tag()).collect::<Vec<_>>(),
             ["linux", "macos", "other"]
         );
+    }
+
+    /// PROBE: #638 "its group ended". A call whose leader dies on TERM but
+    /// whose child ignores TERM, at its timeout.
+    #[test]
+    fn probe_a_timeout_ends_the_whole_group() {
+        let ground = Ground::make("probe-timeout-group");
+        let warn = || {};
+        let finished = Confinement::Unconfined
+            .run_promotable(
+                &Policy::unconfined(),
+                &ground.tree,
+                &argv(&[
+                    "/bin/bash",
+                    "-c",
+                    "echo $$; (trap '' TERM; exec /bin/sleep 30) & wait",
+                ]),
+                &|| false,
+                (
+                    &|| None,
+                    Some(super::Limit {
+                        after: std::time::Duration::from_millis(500),
+                        warn: &warn,
+                    }),
+                ),
+            )
+            .expect("it ran");
+        let super::Finished::Ran(ran) = finished else {
+            panic!("promoted")
+        };
+        let group = ran.stdout.lines().next().expect("the pid").to_owned();
+        eprintln!("PROBE timed_out={} exit={:?}", ran.timed_out, ran.exit);
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let alive = group_alive(&group);
+        eprintln!("PROBE group {group} alive 1 s after the timeout returned: {alive}");
+        kill_group(&group);
+        assert!(ran.timed_out);
+        assert!(!alive, "a member of the timed-out call's group survived");
+    }
+
+    /// PROBE: how much a call collects before anything bounds it.
+    #[test]
+    fn probe_output_is_collected_without_bound() {
+        let ground = Ground::make("probe-unbounded");
+        let ran = Confinement::Unconfined
+            .run(
+                &Policy::unconfined(),
+                &ground.tree,
+                &argv(&["/bin/sh", "-c", "/usr/bin/head -c 268435456 /dev/zero"]),
+            )
+            .expect("it ran");
+        eprintln!(
+            "PROBE stdout_bytes={} raw_stdout.len={} stdout.len={}",
+            ran.stdout_bytes,
+            ran.raw_stdout.len(),
+            ran.stdout.len()
+        );
+        // Counted whole, held within the bound, the whole in its spill
+        // (#734).
+        assert_eq!(ran.stdout_bytes, 268_435_456);
+        assert!(ran.raw_stdout.len() <= super::HEAD_HELD + 2 * super::TAIL_HELD);
+        assert!(ran.stdout.len() <= 3 * (super::HEAD_HELD + 2 * super::TAIL_HELD));
+        let spill = ran.stdout_spill.clone().expect("spilled");
+        assert_eq!(
+            std::fs::metadata(&spill.path).expect("the spill").len(),
+            268_435_456
+        );
+        let path = spill.path.clone();
+        drop((ran, spill));
+        assert!(!path.exists(), "the spill goes with its last holder");
+    }
+
+    /// PROBE: what a 2 s `yes` leaves in memory at its timeout.
+    #[test]
+    fn probe_yes_until_timeout() {
+        let ground = Ground::make("probe-yes");
+        let warn = || {};
+        let started = std::time::Instant::now();
+        let finished = Confinement::Unconfined
+            .run_promotable(
+                &Policy::unconfined(),
+                &ground.tree,
+                &argv(&["/bin/sh", "-c", "/usr/bin/yes"]),
+                &|| false,
+                (
+                    &|| None,
+                    Some(super::Limit {
+                        after: std::time::Duration::from_secs(2),
+                        warn: &warn,
+                    }),
+                ),
+            )
+            .expect("it ran");
+        let super::Finished::Ran(ran) = finished else {
+            panic!("promoted")
+        };
+        eprintln!(
+            "PROBE yes for {:?}: timed_out={} stdout_bytes={} ({} MiB)",
+            started.elapsed(),
+            ran.timed_out,
+            ran.stdout_bytes,
+            ran.stdout_bytes / (1024 * 1024)
+        );
+        assert!(ran.timed_out);
+        assert!(ran.raw_stdout.len() <= super::HEAD_HELD + 2 * super::TAIL_HELD);
     }
 }

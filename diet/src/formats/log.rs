@@ -950,7 +950,9 @@ pub struct ServedField {
 /// its decoding, lossy where the output is not UTF-8, so the two may
 /// differ and the reader does not compare them; it refuses only a count
 /// that is `0` beside a text that is not empty, or not `0` beside one that
-/// is (ruled at 5975957135).
+/// is (ruled at 5975957135). A stream past what a call holds in memory
+/// (#734) is its head and tail alone, joined, and the whole is kept in the
+/// recording by digest, named on the line's `files`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Output {
     /// What it printed.

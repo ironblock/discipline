@@ -65,8 +65,15 @@ use sha2::{Digest as _, Sha256};
 /// the kind of mismatch that gets debugged for an hour.
 #[must_use]
 pub fn sha256_hex(bytes: &[u8]) -> String {
+    hex(sha256(bytes))
+}
+
+/// A SHA-256 digest taken elsewhere -- over a stream, say (#734) -- in
+/// [`sha256_hex`]'s spelling.
+#[must_use]
+pub fn hex(digest: [u8; 32]) -> String {
     let mut out = String::with_capacity(64);
-    for byte in sha256(bytes) {
+    for byte in digest {
         // Written rather than formatted through a width specifier, because a
         // missing zero pad is the classic way a hex encoder produces a digest
         // that is right for most inputs. This half is ours, so it is tested

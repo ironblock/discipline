@@ -466,13 +466,19 @@ fn read_bytes(
     if ran.exit != Some(0) {
         return Err(Some(said(&ran)));
     }
-    Ok(ran.raw_stdout)
+    // Whole: from its spill when it passed what a call holds (#734).
+    ran.whole_stdout().map_err(|why| Some(why.to_string()))
 }
 
-/// A file's text through a confined `cat`.
-fn read_text(tools: &Tools, at: &Path, stop: &dyn Fn() -> bool) -> Result<String, Option<String>> {
-    let bytes = read_bytes(tools, at, stop)?;
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+/// A helper's standard output whole, as text (#734): from its spill when
+/// it passed what a call holds.
+fn whole_text(ran: &crate::isolation::Ran) -> Result<String, String> {
+    if ran.stdout_spill.is_none() {
+        return Ok(ran.stdout.clone());
+    }
+    ran.whole_stdout()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+        .map_err(|why| why.to_string())
 }
 
 /// The image formats Pi and `OpenCode` 2 both read (JPEG, PNG, GIF, WebP),
@@ -496,7 +502,7 @@ fn image_type(bytes: &[u8]) -> Option<&'static str> {
 fn write_text(
     tools: &Tools,
     at: &Path,
-    content: &str,
+    content: &[u8],
     stop: &dyn Fn() -> bool,
 ) -> Result<bool, Option<String>> {
     let ran = confined(
@@ -509,7 +515,7 @@ fn write_text(
             "sh",
             &at.to_string_lossy(),
         ],
-        Some(content.as_bytes()),
+        Some(content),
         stop,
     )?;
     if ran.exit != Some(0) {
@@ -552,6 +558,9 @@ fn read(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         (Ok(path), Ok(offset), Ok(limit)) => (path, offset, limit),
         (Err(why), _, _) | (_, Err(why), _) | (_, _, Err(why)) => return Done::Shown(why),
     };
+    if let Some(refused) = refused_tilde(path) {
+        return Done::Shown(refused);
+    }
     let bytes = match read_bytes(tools, &located(tools, path), stop) {
         Ok(bytes) => bytes,
         Err(why) => return failed(why, |why| format!("Error reading file {path}: {why}")),
@@ -602,7 +611,11 @@ fn write(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         (Ok(path), Ok(content)) => (path, content),
         (Err(why), _) | (_, Err(why)) => return Done::Shown(why),
     };
-    match write_text(tools, &located(tools, path), content, stop) {
+    let at = match refused_tilde(path) {
+        Some(refused) => return Done::Shown(refused),
+        None => located(tools, path),
+    };
+    match write_text(tools, &at, content.as_bytes(), stop) {
         Ok(true) => Done::Shown(format!("Successfully overwrote file: {path}.")),
         Ok(false) => Done::Shown(format!(
             "Successfully created and wrote to new file: {path}."
@@ -632,12 +645,17 @@ fn edit(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
             "old_string must not be empty. Use write to create or overwrite a file.".to_owned(),
         );
     }
+    if let Some(refused) = refused_tilde(path) {
+        return Done::Shown(refused);
+    }
     let at = located(tools, path);
-    let current = match read_text(tools, &at, stop) {
+    // The file's bytes, edited as bytes (#734): nothing outside a match
+    // changes, though the file is not UTF-8 everywhere.
+    let current = match read_bytes(tools, &at, stop) {
         Ok(current) => current,
         Err(why) => return failed(why, |why| format!("Error executing edit: {why}")),
     };
-    let occurrences = current.matches(old).count();
+    let occurrences = found_at(&current, old.as_bytes()).len();
     if occurrences == 0 {
         return Done::Shown(format!(
             "Failed to edit, 0 occurrences found for old_string in {path}. No edits made. The \
@@ -657,21 +675,90 @@ fn edit(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
             "No changes to apply. The old_string and new_string are identical in file: {path}"
         ));
     }
-    let updated = if replace_all {
-        current.replace(old, new)
-    } else {
-        current.replacen(old, new, 1)
-    };
+    let updated = replaced(
+        &current,
+        old.as_bytes(),
+        new.as_bytes(),
+        if replace_all { usize::MAX } else { 1 },
+    );
     if let Err(why) = write_text(tools, &at, &updated, stop) {
         return failed(why, |why| format!("Error executing edit: {why}"));
     }
     let mut message = format!("The file: {path} has been updated.");
-    if let Some(snippet) = snippet(&current, &updated) {
+    if let Some(snippet) = snippet(
+        &String::from_utf8_lossy(&current),
+        &String::from_utf8_lossy(&updated),
+    ) {
         message.push(' ');
         message.push_str(&snippet);
     }
     Done::Shown(message)
 }
+
+/// Where `needle` starts in `bytes`, each match after the last one ends:
+/// `str::matches`' non-overlapping order, over bytes (#734).
+fn found_at(bytes: &[u8], needle: &[u8]) -> Vec<usize> {
+    let mut at = Vec::new();
+    let mut from = 0;
+    while let Some(found) = bytes.get(from..).and_then(|rest| {
+        rest.windows(needle.len())
+            .position(|window| window == needle)
+    }) {
+        at.push(from + found);
+        from += found + needle.len();
+    }
+    at
+}
+
+/// `bytes` with its first `most` matches of `old` replaced by `new`, and
+/// every other byte as it was (#734).
+fn replaced(bytes: &[u8], old: &[u8], new: &[u8], most: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut from = 0;
+    for at in found_at(bytes, old).into_iter().take(most) {
+        out.extend_from_slice(&bytes[from..at]);
+        out.extend_from_slice(new);
+        from = at + old.len();
+    }
+    out.extend_from_slice(&bytes[from..]);
+    out
+}
+
+/// A path beginning `~`, refused by `read`, `write` and `edit` (#734):
+/// Qwen Code, breaking Pi's and `OpenCode` 2's tie, expands `~` only in
+/// its searches and refuses a path that is not absolute in these
+/// (`read-file.ts:651`), so the refusal is its words, naming the absolute
+/// path meant. `None` for any other path.
+fn refused_tilde(path: &str) -> Option<String> {
+    let expanded = tilde_expanded(path)?;
+    Some(format!(
+        "File path must be absolute, but was relative: {path}. You must provide an absolute \
+         path: {}.",
+        expanded.display()
+    ))
+}
+
+/// `path` with a leading `~` or `~/` as the home directory, Qwen Code's
+/// `expandTilde` (`utils/paths.ts:96-115`); `None` when it has none, or
+/// no home is known.
+fn tilde_expanded(path: &str) -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from)?;
+    if path == "~" {
+        return Some(home);
+    }
+    path.strip_prefix("~/").map(|rest| home.join(rest))
+}
+
+/// A search's `path` as the helper opens it: `~` expanded (#734), Qwen
+/// Code's searches' `resolvePath`, then as [`located`].
+fn searched_path(tools: &Tools, path: &str) -> PathBuf {
+    tilde_expanded(path).unwrap_or_else(|| located(tools, path))
+}
+
+/// Qwen Code's notice on a search ripgrep could not finish (exit 2), after
+/// the matches it did return (`tools/ripGrep.ts:36-37, 414-415`).
+const INCOMPLETE_NOTICE: &str =
+    "Search did not complete: the results above may not include all matches.";
 
 /// Qwen Code's snippet of an edited file (`editHelper.ts`
 /// `extractEditSnippet`): the changed lines and four around them, or
@@ -733,11 +820,20 @@ fn grep_argv(rg: Option<&Path>, pattern: &str, filter: Option<&str>, target: &st
             "--color",
             "never",
             "--ignore-case",
+            // Hidden files searched (#734): Pi and `OpenCode` 2 agree, and
+            // `.git` left out, as `OpenCode` 2 leaves it.
+            "--hidden",
+            "--glob",
+            "!**/.git/**",
         ]
         .iter()
         .map(|part| (*part).to_owned())
         .collect(),
-        None => vec!["/usr/bin/grep".to_owned(), "-rnHIiE".to_owned()],
+        None => vec![
+            "/usr/bin/grep".to_owned(),
+            "-rnHIiE".to_owned(),
+            "--exclude-dir=.git".to_owned(),
+        ],
     };
     match (rg, filter) {
         (Some(_), Some(filter)) => searched.extend(["--glob".to_owned(), filter.to_owned()]),
@@ -768,7 +864,7 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     };
     let target = path.map_or_else(
         || ".".to_owned(),
-        |path| located(tools, path).to_string_lossy().into_owned(),
+        |path| searched_path(tools, path).to_string_lossy().into_owned(),
     );
     let searched = grep_argv(ripgrep(), pattern, filter, &target);
     let searched: Vec<&str> = searched.iter().map(String::as_str).collect();
@@ -783,8 +879,25 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
     };
     let location = searched_in(path, "in path");
     let filtered = filter.map_or_else(String::new, |filter| format!(" (filter: \"{filter}\")"));
+    let stdout = match whole_text(&ran) {
+        Ok(stdout) => stdout,
+        Err(why) => return Done::Shown(format!("Error during grep search operation: {why}")),
+    };
+    // Exit 2 with matches is a search that could not finish -- an entry it
+    // could not read (#734): Pi and `OpenCode` 2 differ, so Qwen Code's,
+    // the matches kept and its notice after them; with none, its message
+    // (`tools/ripGrep.ts:246-255, 579-581`).
+    let incomplete = ran.exit == Some(2);
     match ran.exit {
         Some(0) => {}
+        Some(2) if !stdout.trim().is_empty() => {}
+        Some(2) => {
+            return Done::Shown(format!(
+                "Search did not complete for pattern \"{pattern}\" {location}{filtered}. No \
+                 valid matches were returned; do not treat this as no matches. Error: {}",
+                said(&ran)
+            ));
+        }
         Some(1) => {
             return Done::Shown(format!(
                 "No matches found for pattern \"{pattern}\" {location}{filtered}."
@@ -798,8 +911,7 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         }
     }
     // `grep -r .` names files `./a`; ripgrep names them `a`.
-    let matches: Vec<&str> = ran
-        .stdout
+    let matches: Vec<&str> = stdout
         .lines()
         .map(|line| line.strip_prefix("./").unwrap_or(line))
         .collect();
@@ -823,6 +935,9 @@ fn grep(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         let omitted = total - included;
         let lines = if omitted == 1 { "line" } else { "lines" };
         let _ = write!(out, "\n---\n[{omitted} {lines} truncated] ...");
+    }
+    if incomplete {
+        let _ = write!(out, "\n---\n[{INCOMPLETE_NOTICE}]");
     }
     Done::Shown(out)
 }
@@ -852,18 +967,36 @@ fn glob(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         (Ok(pattern), Ok(path), Ok(limit)) => (pattern, path, limit),
         (Err(why), ..) | (_, Err(why), _) | (.., Err(why)) => return Done::Shown(why),
     };
-    let root = path.map_or_else(|| tools.worktree.clone(), |path| located(tools, path));
+    let root = path.map_or_else(|| tools.worktree.clone(), |path| searched_path(tools, path));
     let root_text = root.to_string_lossy().into_owned();
+    // ripgrep matches a glob with a `/` against the path from its working
+    // directory, the worktree (#734): a root under it is searched by that
+    // path, the pattern under it; one outside it as it was.
+    let (searched, anchored) = match root.strip_prefix(&tools.worktree) {
+        Ok(under) if under.as_os_str().is_empty() => (".".to_owned(), pattern.to_owned()),
+        Ok(under) if pattern.contains('/') => {
+            let under = under.to_string_lossy().into_owned();
+            (under.clone(), format!("{under}/{pattern}"))
+        }
+        Ok(under) => (under.to_string_lossy().into_owned(), pattern.to_owned()),
+        Err(_) => (root_text.clone(), pattern.to_owned()),
+    };
     let ran = match ripgrep() {
         Some(rg) => confined(
             tools,
             &[
                 &rg.to_string_lossy(),
                 "--files",
+                // Hidden files listed (#734): Pi and `OpenCode` 2 differ, so
+                // Qwen Code's `dot: true`; `.git` left out, as `OpenCode` 2
+                // leaves it.
+                "--hidden",
                 "--glob",
-                pattern,
+                "!**/.git/**",
+                "--glob",
+                &anchored,
                 "--",
-                &root_text,
+                &searched,
             ],
             None,
             stop,
@@ -875,6 +1008,9 @@ fn glob(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
                 &root_text,
                 "-type",
                 "f",
+                "-not",
+                "-path",
+                "*/.git/*",
                 "-path",
                 &format!("*{pattern}"),
             ],
@@ -894,18 +1030,23 @@ fn glob(args: &Args, tools: &Tools, stop: &dyn Fn() -> bool) -> Done {
         || "in the workspace directory".to_owned(),
         |_| format!("within {root_text}"),
     );
-    if ran.exit.is_some_and(|code| code > 1) {
+    let stdout = match whole_text(&ran) {
+        Ok(stdout) => stdout,
+        Err(why) => return Done::Shown(format!("Error during glob search operation: {why}")),
+    };
+    // Exit 2 with files listed keeps them (#734), as `grep` keeps its
+    // matches.
+    if ran.exit.is_some_and(|code| code > 2) || (ran.exit == Some(2) && stdout.trim().is_empty()) {
         return Done::Shown(format!(
             "Error during glob search operation: {}",
             said(&ran)
         ));
     }
-    let mut found: Vec<(PathBuf, Option<std::time::SystemTime>)> = ran
-        .stdout
+    let mut found: Vec<(PathBuf, Option<std::time::SystemTime>)> = stdout
         .lines()
         .filter(|line| !line.is_empty())
         .map(|line| {
-            let file = Path::new(line);
+            let file = Path::new(line.strip_prefix("./").unwrap_or(line));
             let file = if file.is_absolute() {
                 file.to_path_buf()
             } else {
@@ -1306,5 +1447,142 @@ mod tests {
         assert!(found.contains("in.txt:1:ok"), "{found}");
         let _ = std::fs::remove_dir_all(&tree);
         let _ = std::fs::remove_dir_all(&outside);
+    }
+
+    /// PROBE: an edit of one line of a file that is not UTF-8 everywhere
+    /// changes only that line.
+    #[test]
+    fn probe_edit_leaves_bytes_outside_the_match_alone() {
+        let tree = scratch("probe-edit-latin1");
+        let tools = unconfined(&tree);
+        // "café" in Latin-1, then a line to edit.
+        std::fs::write(tree.join("legacy.c"), b"/* caf\xe9 */\nint keep = 1;\n").expect("written");
+        let done = call(
+            EDIT,
+            &serde_json::json!({"file_path": "legacy.c", "old_string": "keep = 1", "new_string": "keep = 2"}),
+            &tools,
+        );
+        eprintln!("PROBE edit said: {done}");
+        let after = std::fs::read(tree.join("legacy.c")).expect("read");
+        eprintln!("PROBE bytes after: {after:?}");
+        assert_eq!(after, b"/* caf\xe9 */\nint keep = 2;\n".to_vec());
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
+    /// PROBE: `glob` finds a workflow file under `.github/`, and a file the
+    /// tree's `.gitignore` names.
+    #[test]
+    fn probe_glob_finds_dot_dirs_and_ignored_files() {
+        let tree = scratch("probe-glob-hidden");
+        let tools = unconfined(&tree);
+        std::fs::create_dir_all(tree.join(".github/workflows")).expect("a dir");
+        std::fs::write(tree.join(".github/workflows/ci.yml"), "on: push\n").expect("written");
+        std::fs::write(tree.join(".eslintrc.json"), "{}\n").expect("written");
+        std::fs::write(tree.join(".gitignore"), "dist/\n").expect("written");
+        std::fs::create_dir_all(tree.join("dist")).expect("a dir");
+        std::fs::write(tree.join("dist/out.js"), "x\n").expect("written");
+        std::fs::create_dir_all(tree.join(".git")).expect("a git dir");
+        eprintln!("PROBE ripgrep: {:?}", ripgrep());
+        for pattern in ["**/*.yml", ".github/**/*.yml", ".eslintrc*", "**/*.js"] {
+            let found = call(GLOB, &serde_json::json!({"pattern": pattern}), &tools);
+            eprintln!("PROBE glob {pattern:?}: {found}");
+        }
+        let found = call(GREP, &serde_json::json!({"pattern": "push"}), &tools);
+        eprintln!("PROBE grep push: {found}");
+        let found = call(
+            GREP,
+            &serde_json::json!({"pattern": "push", "path": ".github"}),
+            &tools,
+        );
+        eprintln!("PROBE grep push in .github: {found}");
+        // Hidden files found, ripgrep or not (#734); `.git` never searched.
+        std::fs::write(tree.join(".git/config"), "push\n").expect("written");
+        let globbed = call(
+            GLOB,
+            &serde_json::json!({"pattern": ".github/**/*.yml"}),
+            &tools,
+        );
+        assert!(globbed.contains(".github/workflows/ci.yml"), "{globbed}");
+        let globbed = call(GLOB, &serde_json::json!({"pattern": ".eslintrc*"}), &tools);
+        assert!(globbed.contains(".eslintrc.json"), "{globbed}");
+        let grepped = call(GREP, &serde_json::json!({"pattern": "push"}), &tools);
+        assert!(
+            grepped.contains(".github/workflows/ci.yml:1:on: push"),
+            "{grepped}"
+        );
+        assert!(!grepped.contains(".git/config"), "{grepped}");
+        let _ = std::fs::remove_dir_all(&tree);
+    }
+
+    /// PROBE: one unreadable file beside a match.
+    #[test]
+    fn probe_grep_keeps_matches_beside_an_unreadable_file() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let tree = scratch("probe-grep-unreadable");
+        let tools = unconfined(&tree);
+        std::fs::write(tree.join("a.txt"), "needle\n").expect("written");
+        std::fs::create_dir_all(tree.join("locked")).expect("a dir");
+        std::fs::write(tree.join("locked/b.txt"), "needle\n").expect("written");
+        std::fs::set_permissions(tree.join("locked"), std::fs::Permissions::from_mode(0o000))
+            .expect("chmod");
+        let found = call(GREP, &serde_json::json!({"pattern": "needle"}), &tools);
+        eprintln!("PROBE grep beside unreadable: {found}");
+        let globbed = call(GLOB, &serde_json::json!({"pattern": "*.txt"}), &tools);
+        eprintln!("PROBE glob beside unreadable: {globbed}");
+        std::fs::set_permissions(tree.join("locked"), std::fs::Permissions::from_mode(0o755))
+            .expect("chmod");
+        let _ = std::fs::remove_dir_all(&tree);
+        assert!(found.contains("a.txt:1:needle"), "{found}");
+        assert!(globbed.contains("a.txt"), "{globbed}");
+    }
+
+    /// PROBE: a `~` path.
+    #[test]
+    fn probe_tilde_path() {
+        let tree = scratch("probe-tilde");
+        let tools = unconfined(&tree);
+        let said = call(
+            WRITE,
+            &serde_json::json!({"path": "~/probe-tilde-note.txt", "content": "x\n"}),
+            &tools,
+        );
+        eprintln!("PROBE write ~: {said}");
+        eprintln!(
+            "PROBE literal ~ dir in the tree: {}",
+            tree.join("~/probe-tilde-note.txt").exists()
+        );
+        let read = call(
+            READ,
+            &serde_json::json!({"path": "~/probe-tilde-note.txt"}),
+            &tools,
+        );
+        eprintln!("PROBE read ~: {read:?}");
+        // Refused, naming the absolute path, and no literal `~` written
+        // (#734): Qwen Code's tie-break.
+        let home = std::env::var("HOME").expect("a home");
+        let refusal = format!(
+            "File path must be absolute, but was relative: ~/probe-tilde-note.txt. You must \
+             provide an absolute path: {home}/probe-tilde-note.txt."
+        );
+        assert_eq!(said, refusal);
+        assert_eq!(read, refusal);
+        let edited = call(
+            EDIT,
+            &serde_json::json!({"file_path": "~/probe-tilde-note.txt", "old_string": "x", "new_string": "y"}),
+            &tools,
+        );
+        assert_eq!(edited, refusal);
+        assert!(!tree.join("~").exists());
+        assert!(
+            !std::path::Path::new(&home)
+                .join("probe-tilde-note.txt")
+                .exists()
+        );
+        // A search's `~` is the home directory.
+        assert_eq!(
+            searched_path(&tools, "~/x"),
+            std::path::Path::new(&home).join("x")
+        );
+        let _ = std::fs::remove_dir_all(&tree);
     }
 }
