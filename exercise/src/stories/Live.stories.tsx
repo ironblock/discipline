@@ -26,6 +26,7 @@ import answeredTurn from '../../../diet/formats/log/fixtures/valid/an-answered-t
 import toolCallRan from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-that-ran.jsonl?raw';
 import forks from '../../../diet/formats/log/fixtures/valid/a-v5-scoping-fork-that-patched-and-a-read-fork-that-declined.jsonl?raw';
 import { App } from '../App.tsx';
+import { respelled } from '../drive/spelling.ts';
 import { outcomeOf } from '../ui/sets.ts';
 import { png } from '../drive/png.ts';
 import type { EventSourceLike, Web } from '../drive/http.ts';
@@ -836,7 +837,11 @@ export const ServedTailKeptNoTurn: Story = {
 };
 
 /** The held-meditation fixture up to its hold: the meditation waits on the operator, nothing refilled yet. */
-const UNTIL_HELD = meditationHeld.split('\n').slice(0, meditationHeld.split('\n').findIndex((line) => line.includes('"kind":"meditation.held"')) + 1).join('\n');
+// The fixture is a v7 log: its line is found as the surface reads it, in either spelling (#583).
+const UNTIL_HELD = meditationHeld
+  .split('\n')
+  .slice(0, meditationHeld.split('\n').findIndex((line) => respelled(JSON.parse(line) as { kind: string }).kind === 'meditation.held') + 1)
+  .join('\n');
 
 /** `?drive`, log v7 (#150's gate, #698): a meditation held for the operator names what is unaddressed and offers refill anyway. */
 export const ServedMeditationHeld: Story = {
