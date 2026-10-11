@@ -306,7 +306,8 @@ fn none() -> Value {
 /// The tools, as `tools/list` names them.
 #[must_use]
 pub fn tools() -> Value {
-    let mut all = first_tools();
+    let mut all = lifecycle_tools();
+    all.extend(first_tools());
     all.extend(later_tools());
     Value::Array(all)
 }
@@ -625,10 +626,221 @@ pub fn call(serve: &Serve, name: &str, arguments: &Map<String, Value>) -> Result
     Ok(answer.json())
 }
 
+/// How long `start` waits for serve's first line: its engine check and
+/// warmup come before it.
+const START_PATIENCE: Duration = Duration::from_secs(120);
+
+/// How long `stop` waits for a serve it started to exit after `end`.
+const STOP_PATIENCE: Duration = Duration::from_secs(30);
+
+/// A serve this server started (#717).
+#[derive(Debug)]
+struct Started {
+    child: std::process::Child,
+}
+
+/// What the server drives: the serve it is attached to, if any, and the
+/// one it started, if it started it (#717).
+#[derive(Debug)]
+pub struct Driver {
+    serve: Option<Serve>,
+    started: Option<Started>,
+    /// This program, which `start` runs as `serve`.
+    exe: std::path::PathBuf,
+    /// The per-user config `start` reads its profile from.
+    config: Option<std::path::PathBuf>,
+    /// Where a profile's `~` points.
+    home: Option<std::path::PathBuf>,
+}
+
+/// A credential file's `user:password`, one trailing newline taken off.
+///
+/// # Errors
+///
+/// When it cannot be read.
+pub fn credential_in(path: &str) -> Result<String, String> {
+    let text = std::fs::read_to_string(path)
+        .map_err(|why| format!("the auth file {path} could not be read: {why}"))?;
+    Ok(text.strip_suffix('\n').map_or(text.clone(), |line| {
+        line.strip_suffix('\r').unwrap_or(line).to_owned()
+    }))
+}
+
+impl Driver {
+    /// A driver attached to `serve` when one is given, starting serves as
+    /// `exe` from profiles in `config`, their `~` at `home`.
+    #[must_use]
+    pub fn new(
+        serve: Option<Serve>,
+        exe: std::path::PathBuf,
+        config: Option<std::path::PathBuf>,
+        home: Option<std::path::PathBuf>,
+    ) -> Self {
+        Self {
+            serve,
+            started: None,
+            exe,
+            config,
+            home,
+        }
+    }
+
+    /// `start` (#717): `serve --profile NAME` launched, its first line read,
+    /// and the server attached to the address it prints, with the profile's
+    /// auth file. A refused start is answered with what serve said.
+    fn start(&mut self, profile: &str) -> Result<Value, String> {
+        use std::io::BufRead as _;
+        if let Some(serve) = &self.serve {
+            return Err(format!(
+                "already driving the serve at {}: `stop` it first",
+                serve.address
+            ));
+        }
+        let mut flags = vec!["--profile".to_owned(), profile.to_owned()];
+        if let Some(config) = &self.config {
+            flags.extend(["--config".to_owned(), config.to_string_lossy().into_owned()]);
+        }
+        let resolved =
+            super::profile::with_profile(&flags, self.config.clone(), self.home.as_deref())?;
+        let credential = resolved
+            .chunks(2)
+            .find(|pair| pair[0] == "--auth-file")
+            .map(|pair| credential_in(&pair[1]))
+            .transpose()?;
+        let mut child = std::process::Command::new(&self.exe)
+            .arg("serve")
+            .args(&flags)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|why| format!("serve could not be started: {why}"))?;
+        let stdout = child.stdout.take().ok_or("serve's output was not piped")?;
+        let (said, first) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut lines = std::io::BufReader::new(stdout).lines();
+            let _ = said.send(lines.next());
+            // The rest -- the record's report at the end -- read and let go,
+            // so serve never blocks on a full pipe.
+            lines.for_each(drop);
+        });
+        let line = match first.recv_timeout(START_PATIENCE) {
+            Ok(Some(Ok(line))) => line,
+            outcome => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(match outcome {
+                    Err(_) => format!("serve said nothing in {}s", START_PATIENCE.as_secs()),
+                    Ok(_) => "serve exited without a word".to_owned(),
+                });
+            }
+        };
+        let announced: Value =
+            serde_json::from_str(&line).unwrap_or_else(|_| Value::String(line.clone()));
+        let Some(listening) = announced.get("listening").and_then(Value::as_str) else {
+            // A refused start: serve said why, and exits.
+            let exited = child.wait().ok().and_then(|status| status.code());
+            return Ok(json!({"started": false, "said": announced, "exited": exited}));
+        };
+        let pid = child.id();
+        match Serve::new(listening, credential.as_deref()) {
+            Ok(serve) => self.serve = Some(serve),
+            Err(why) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(why);
+            }
+        }
+        self.started = Some(Started { child });
+        Ok(json!({"started": true, "pid": pid, "said": announced}))
+    }
+
+    /// `stop` (#717): the session ended, and a serve this server started
+    /// waited for -- killed if it has not exited in [`STOP_PATIENCE`] -- so
+    /// nothing is left behind; the server is then attached to nothing.
+    fn stop(&mut self) -> Result<Value, String> {
+        let Some(serve) = self.serve.take() else {
+            return Err("not driving a serve: `start` a profile, or attach with --url".to_owned());
+        };
+        let ended = serve.command(&json!({"kind": "end"}));
+        let mut stopped = json!({});
+        if let Ok(ended) = &ended {
+            stopped = ended.json();
+        }
+        if let Some(Started { mut child }) = self.started.take() {
+            let until = Instant::now() + STOP_PATIENCE;
+            let exited = loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => {
+                        break status.code().map_or(json!("by signal"), |code| json!(code));
+                    }
+                    Ok(None) if Instant::now() < until => {
+                        std::thread::sleep(Duration::from_millis(50));
+                    }
+                    _ => {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        break json!("killed");
+                    }
+                }
+            };
+            stopped["exited"] = exited;
+        }
+        if let Err(why) = ended {
+            stopped["end"] = json!(why);
+        }
+        Ok(stopped)
+    }
+
+    /// Tool `name`, `start` and `stop` here, the rest against the serve
+    /// attached.
+    fn call(&mut self, name: &str, arguments: &Map<String, Value>) -> Result<Value, String> {
+        match name {
+            "start" => self.start(Args(arguments).string("profile")?),
+            "stop" => self.stop(),
+            _ => match &self.serve {
+                Some(serve) => call(serve, name, arguments),
+                None => {
+                    Err("not driving a serve: `start` a profile, or attach with --url".to_owned())
+                }
+            },
+        }
+    }
+}
+
+impl Drop for Driver {
+    /// A serve this server started does not outlive it.
+    fn drop(&mut self) {
+        if self.started.is_some() {
+            let _ = self.stop();
+        }
+    }
+}
+
+/// `start` and `stop` (#717): a session from nothing, and back.
+fn lifecycle_tools() -> Vec<Value> {
+    vec![
+        tool(
+            "start",
+            "Start a session from a profile in the per-user config: `diet-drive serve --profile \
+             NAME` launched, and this server attached to the address it prints. Returns what \
+             serve announced, or why it refused to start.",
+            object(
+                json!({"profile": string("The profile's name.")}),
+                &["profile"],
+            ),
+        ),
+        tool(
+            "stop",
+            "End the session, and the serve process `start` launched: nothing is left running.",
+            none(),
+        ),
+    ]
+}
+
 /// One JSON-RPC message answered: the response to send, or `None` for a
 /// notification.
 #[must_use]
-pub fn answer(serve: &Serve, message: &str) -> Option<Value> {
+pub fn answer(driver: &mut Driver, message: &str) -> Option<Value> {
     let Ok(request) = serde_json::from_str::<Value>(message) else {
         return Some(failure(&Value::Null, -32700, "not JSON"));
     };
@@ -646,7 +858,8 @@ pub fn answer(serve: &Serve, message: &str) -> Option<Value> {
                 "protocolVersion": protocol,
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "diet-drive", "version": env!("CARGO_PKG_VERSION")},
-                "instructions": "Drives one running `diet-drive serve` session. Read `status`, \
+                "instructions": "Drives one `diet-drive serve` session: `start` one from a \
+                     profile, or attach with --url. Read `status`, \
                      act with a command tool, then `wait` with `after` set to the last \
                      state's last_seq. Each tool returns serve's status and body as they came."
             })
@@ -663,7 +876,7 @@ pub fn answer(serve: &Serve, message: &str) -> Option<Value> {
                 .get("arguments")
                 .and_then(Value::as_object)
                 .unwrap_or(&empty);
-            match call(serve, name, arguments) {
+            match driver.call(name, arguments) {
                 Ok(result) => json!({
                     "content": [{"type": "text", "text": result.to_string()}],
                     "structuredContent": result,
@@ -690,13 +903,17 @@ fn failure(id: &Value, code: i64, message: &str) -> Value {
 /// # Errors
 ///
 /// When `input` cannot be read or `output` written.
-pub fn run(serve: &Serve, input: impl BufRead, mut output: impl Write) -> std::io::Result<()> {
+pub fn run(
+    driver: &mut Driver,
+    input: impl BufRead,
+    mut output: impl Write,
+) -> std::io::Result<()> {
     for line in input.lines() {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
-        if let Some(response) = answer(serve, &line) {
+        if let Some(response) = answer(driver, &line) {
             writeln!(output, "{response}")?;
             output.flush()?;
         }
@@ -708,8 +925,13 @@ pub fn run(serve: &Serve, input: impl BufRead, mut output: impl Write) -> std::i
 mod tests {
     use super::*;
 
-    fn nowhere() -> Serve {
-        Serve::new("http://127.0.0.1:9", None).expect("an address")
+    fn nowhere() -> Driver {
+        Driver::new(
+            Some(Serve::new("http://127.0.0.1:9", None).expect("an address")),
+            std::path::PathBuf::from("/nowhere/diet-drive"),
+            None,
+            None,
+        )
     }
 
     #[test]
@@ -727,29 +949,29 @@ mod tests {
 
     #[test]
     fn initialize_names_the_protocol_and_the_tools() {
-        let serve = nowhere();
+        let mut serve = nowhere();
         let reply = answer(
-            &serve,
+            &mut serve,
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26"}}"#,
         )
         .expect("an answer");
         assert_eq!(reply["result"]["protocolVersion"], "2025-03-26");
         assert!(reply["result"]["capabilities"]["tools"].is_object());
         let reply = answer(
-            &serve,
+            &mut serve,
             r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"1999-01-01"}}"#,
         )
         .expect("an answer");
         assert_eq!(reply["result"]["protocolVersion"], PROTOCOLS[0]);
         assert_eq!(
             answer(
-                &serve,
+                &mut serve,
                 r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#
             ),
             None
         );
         let listed = answer(
-            &serve,
+            &mut serve,
             r#"{"jsonrpc":"2.0","id":"x","method":"tools/list"}"#,
         )
         .expect("an answer");
@@ -762,6 +984,8 @@ mod tests {
         assert_eq!(
             names,
             [
+                "start",
+                "stop",
                 "status",
                 "wait",
                 "ask",
@@ -782,17 +1006,17 @@ mod tests {
         );
         assert_eq!(listed["id"], "x");
         let missing =
-            answer(&serve, r#"{"jsonrpc":"2.0","id":2,"method":"nope"}"#).expect("an answer");
+            answer(&mut serve, r#"{"jsonrpc":"2.0","id":2,"method":"nope"}"#).expect("an answer");
         assert_eq!(missing["error"]["code"], -32601);
-        let garbled = answer(&serve, "{").expect("an answer");
+        let garbled = answer(&mut serve, "{").expect("an answer");
         assert_eq!(garbled["error"]["code"], -32700);
     }
 
     #[test]
     fn a_tool_that_cannot_reach_serve_or_is_misused_says_so() {
-        let serve = nowhere();
+        let mut serve = nowhere();
         let reply = answer(
-            &serve,
+            &mut serve,
             r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"ask","arguments":{}}}"#,
         )
         .expect("an answer");
@@ -802,7 +1026,7 @@ mod tests {
             "`text` is required, a string"
         );
         let reply = answer(
-            &serve,
+            &mut serve,
             r#"{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"status"}}"#,
         )
         .expect("an answer");

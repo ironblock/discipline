@@ -103,6 +103,7 @@ pub mod hosted;
 pub mod instructions;
 pub mod mcp;
 pub mod output;
+pub mod profile;
 pub mod projection;
 pub mod prune;
 pub mod regimen;
