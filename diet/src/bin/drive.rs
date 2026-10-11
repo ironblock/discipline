@@ -498,6 +498,27 @@ fn serve(args: &[String]) -> ExitCode {
             .recording
             .as_ref()
             .map(|dir| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone()));
+        // Serve writes the recording unconfined (#735): never where the
+        // model's own commands can write, or a symlink they plant there
+        // steers serve's write outside the sandbox.
+        if let Some(writable) = tools
+            .recording
+            .as_deref()
+            .and_then(|recording| writable_holding(tools, recording))
+        {
+            return fail(
+                EXIT_INPUT,
+                &format!(
+                    "the recording's directory {} lies in {writable}, where the model's commands \
+                     write: name --log (or --record) outside it",
+                    tools
+                        .recording
+                        .as_deref()
+                        .unwrap_or(std::path::Path::new(""))
+                        .display()
+                ),
+            );
+        }
     }
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
@@ -2006,6 +2027,25 @@ fn registered_regime(
             )
         })
         .map_err(|why| format!("{path}: {why}"))
+}
+
+/// The path the model's commands may write that holds `recording` (#735):
+/// the worktree, or a `sandbox_writable` directory, each as it resolves.
+fn writable_holding(
+    tools: &diet::drive::tool_loop::Tools,
+    recording: &std::path::Path,
+) -> Option<String> {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let resolved = |path: &str| {
+        let path = match (path.strip_prefix("~/"), home.as_ref()) {
+            (Some(rest), Some(home)) => home.join(rest),
+            _ => std::path::PathBuf::from(path),
+        };
+        std::fs::canonicalize(&path).unwrap_or(path)
+    };
+    std::iter::once(tools.worktree.to_string_lossy().into_owned())
+        .chain(tools.policy.writable.iter().cloned())
+        .find(|path| recording.starts_with(resolved(path)))
 }
 
 /// The surface's built bundle to serve (#716): `named`, which must hold an
