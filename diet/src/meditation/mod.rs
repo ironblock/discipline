@@ -861,6 +861,25 @@ mod tests {
         assert_eq!(short.text, floor.text);
     }
 
+    /// REVIEW: a render whose whole estimate is exactly its budget is
+    /// inside it, so it is the unbudgeted render byte for byte (#565).
+    #[test]
+    fn review_a_render_exactly_at_its_budget_is_not_reduced() {
+        let contents: Vec<(String, String)> = (0..8)
+            .map(|i| (format!("e{i}"), format!("fact: {}", "y".repeat(100 + i))))
+            .collect();
+        let refs: Vec<(&str, &str)> = contents
+            .iter()
+            .map(|(id, content)| (id.as_str(), content.as_str()))
+            .collect();
+        let object = holding(&refs);
+        let plain = render::render(&object, None);
+        let exact = (plain.chars().count() as u64).div_ceil(4);
+        let at = render::rendered(&object, None, Some(budget(exact, render::OverBudget::Tier)));
+        assert_eq!(at.reduced, 0, "{}", at.text);
+        assert_eq!(at.text, plain);
+    }
+
     /// #565: recency is an entry's latest patch, not its creation: an old
     /// entry a later fork says again is newer than one recorded since.
     #[test]
