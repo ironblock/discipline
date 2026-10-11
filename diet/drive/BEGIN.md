@@ -207,6 +207,29 @@ An ask is answered `200` with the turn it opened, `{"seq":1,"turn":1}`. `end` is
 
 After `end`, the stream closes, `serve` exits `0`, and `session.log` holds the same lines the stream carried. Before `end`, a command `serve` refuses is answered `409` with `{"refused": <why>}`, and the log gains a `refused` line naming it. An ask sent while a turn is in flight is one: `{"refused":"in-flight"}`.
 
+**An agent driving it reads the state, not the log.** Three routes beside `/events`, under the same `Host`, `Origin` and auth rules, log nothing:
+
+- **`GET /state`** answers what the session is doing now, as one JSON object:
+  - `session`: `running` or `ended`, and `settlement`;
+  - `turn`: `number`, and `state` — `running`, `awaiting-approval`, or `settled` with its `reason`;
+  - `in_flight`: the `forks` and `audits` running, by their lines' `seq`, the forks `queued` behind them, and whether a pre-warm is `warming`;
+  - `meditation`: `state` — `none`, `capturing`, or `held` with its `unaddressed`;
+  - `approval`: the prompt waiting on you, in `event: waiting`'s shape;
+  - `refusal`: the last refused command, its `seq`, `command` and `because`;
+  - `last_seq`, and `idle`: no turn running, nothing in flight or queued, and no prompt waiting.
+
+  `turn`, `approval` and `refusal` are absent when there is none.
+- **`GET /wait?until=idle|<kind>&after=<seq>&timeout=<s>`** is the same object, once the session is idle, or once a line of that `kind` (`meditation.held`, `turn.settled`, any line's) is logged after `after` — the whole log when `after` is absent — with that line as `event`. At `timeout` (30 s when absent, at most 300 s) it answers the state as it is with `"timed_out": true`, so loop on it rather than holding one request open. Any other query is `400`.
+
+- **`GET /memory`** is working memory as `serve` holds it: `entries`, the live ones, each in the object's own dump shape (`id`, `content`, `state`, `provenances` with each one's `lane`, `turn` and `fork`, and `supersedes`, `voided_by` or `aliases` when it has them), and `last_seq`. An entry with an edit or flag of yours no meditation has addressed yet carries `operator`: each change's `kind`, `edit` or `flag`, and a flag's `note`. With `?all`, resolved, parked, retired and voided entries come too. Read memory here rather than folding the log again.
+
+```
+curl -s -X POST -H 'Content-Type: application/json' -d '{"kind":"ask","text":"hello"}' http://127.0.0.1:7801/commands
+curl -s 'http://127.0.0.1:7801/wait?until=idle&timeout=120'
+```
+
+`idle` waits for the gap's forks and a meditation's audit, not only for `turn.settled`. A held meditation is idle: it waits on you, and `meditation.state` says so.
+
 ## Rehearsing a regimen with no model
 
 To rehearse a session that runs commands, with approvals and a record, use the rehearsal regimen [`replay.toml`](replay.toml) against `diet-drive replay`. It plays two captures of one real llama.cpp session, byte for byte. Every ask is answered with a `bash` call of `ls | wc -l`, and once the call's output comes back, with that session's answer, which settles `final`.
