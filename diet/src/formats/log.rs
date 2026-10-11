@@ -525,6 +525,8 @@ vocabulary! {
         MeditationHeld => "meditation-held",
         /// A refill-anyway with no meditation held (v7, #150's gate).
         NothingHeld => "nothing-held",
+        /// An edit that restates an entry working memory holds (v8, #729).
+        Restates => "restates",
     }
 }
 
@@ -2319,7 +2321,11 @@ impl Forks {
         // they settled: it is one more call in the gap, never a second
         // interview.
         let triggered = triggered || lane == Lane::Audit;
-        if of_turn != turns || !self.finals.contains(&of_turn) {
+        // A meditation's audit after turns that failed (#729) is of the
+        // latest turn that settled `final`, every later one settled otherwise.
+        let latest_final =
+            lane == Lane::Audit && of_turn < turns && self.finals.last() == Some(&of_turn);
+        if (of_turn != turns && !latest_final) || !self.finals.contains(&of_turn) {
             return Err(format!(
                 "a fork of turn {of_turn} outside its gap: a fork follows the latest turn \
                  (here {turns}) once it settled `final`, before the next `ask`"
@@ -4398,6 +4404,9 @@ pub fn introduced(kind: Kind) -> i64 {
 /// its key is scoped by the key's `since`.
 #[must_use]
 pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
+    if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::Restates) {
+        return 8;
+    }
     let refused_in_v4 = tags == Tags::ToolRefusal
         && ToolRefusal::from_tag(tag)
             .is_some_and(|reason| [ToolRefusal::Denylist, ToolRefusal::Declined].contains(&reason));
@@ -8080,6 +8089,31 @@ mod tests {
         }
     }
 
+    /// #729: `restates`, the refusal v8 adds, is refused in a log that
+    /// declares v7, and read in one that declares v8.
+    #[test]
+    fn a_v7_log_carrying_restates_is_refused_and_a_v8_log_reads_it() {
+        let log = |version: u32| {
+            format!(
+                concat!(
+                    r#"{{"head":[{{"content":"you are the trunk","role":"system"}}],"kind":"session.start","model":"a-model","opened":1,"seq":0,"t":0,"version":{version}}}"#,
+                    "\n",
+                    r#"{{"because":"restates","command":"edit-entry","during":"awaiting","kind":"refused","seq":1,"t":5}}"#,
+                    "\n"
+                ),
+                version = version
+            )
+        };
+        let refused = parse(&log(7)).expect_err("`restates` was read as v7");
+        assert!(
+            refused
+                .why
+                .contains("which arrived in v8, and this log declares v7"),
+            "{refused}"
+        );
+        parse(&log(8)).expect("`restates` reads in v8");
+    }
+
     /// WHAT ARRIVED IN v4 IS REFUSED IN A LOG THAT DECLARES v3 (#388, ruled
     /// at 5981588394 (a), 5982826236 and 5983588924): an `approval`, a `cwd`,
     /// `files`, and each of
@@ -8581,7 +8615,7 @@ mod tests {
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
             "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),

@@ -170,6 +170,9 @@ vocabulary! {
         MeditationHeld => "meditation-held",
         /// A refill-anyway with no meditation held (#150's gate).
         NothingHeld => "nothing-held",
+        /// An edit whose text restates the entry it corrects, or another
+        /// live entry (v8, #729): working memory has it already.
+        Restates => "restates",
     }
 }
 
@@ -2254,6 +2257,13 @@ impl State {
         Ok(())
     }
 
+    /// A command that carries no idle gap and ends none, admitted (#729):
+    /// the operator's edit, flag, phase ruling or refill-anyway is a step
+    /// within the gap, so the gap stays open for the ask that ends it.
+    fn admit_within_the_gap(&mut self) {
+        self.carried = None;
+    }
+
     /// Now, on the log's clock: milliseconds since the session opened.
     fn now(&self) -> u64 {
         u64::try_from(self.opened_at.elapsed().as_millis()).unwrap_or(u64::MAX)
@@ -2955,6 +2965,13 @@ impl<S: Streaming + 'static> Session<S> {
             (Settlement::Turn | Settlement::Capture, _) => Some(Refusal::InFlight),
             (Settlement::Awaiting, None) => Some(Refusal::NoProposal),
             (Settlement::Awaiting, Some(_)) if choice == PhaseChoice::Stay => None,
+            // A meditation's refill under an open tangent is one its close
+            // would undo (#729), as a declared one is refused.
+            (Settlement::Awaiting, Some(_))
+                if choice == PhaseChoice::Meditation && state.tangent.is_some() =>
+            {
+                Some(Refusal::TangentOpen)
+            }
             (Settlement::Awaiting, Some(to)) => graph_refusal(&state, to).or_else(|| {
                 (choice == PhaseChoice::Meditation
                     && (state.turns == 0
@@ -2971,7 +2988,7 @@ impl<S: Streaming + 'static> Session<S> {
             self.shared.changed.notify_all();
             return Err(Rejected::Refused(refused));
         }
-        state.admit()?;
+        state.admit_within_the_gap();
         let Some(PendingProposal { call, from, to }) = state.proposal.take() else {
             unreachable!("a pending proposal was checked above");
         };
@@ -3156,14 +3173,15 @@ impl<S: Streaming + 'static> Session<S> {
     /// [`Refusal::NotLive`] for one no longer live.
     pub fn edit_entry(&self, id: &str, content: &str) -> Result<(), Rejected> {
         let mut state = self.shared.lock();
-        let because = operator_refusal(&state, id, content);
+        let because =
+            operator_refusal(&state, id, content).or_else(|| restates(&state, id, content));
         if let Some(because) = because {
             let refused = state.refuse(CommandKind::EditEntry, because);
             drop(state);
             self.shared.changed.notify_all();
             return Err(Rejected::Refused(refused));
         }
-        state.admit()?;
+        state.admit_within_the_gap();
         let seq = state.log.len();
         let turn = state.turns;
         let tangent = state
@@ -3221,7 +3239,20 @@ impl<S: Streaming + 'static> Session<S> {
             self.shared.changed.notify_all();
             return Err(Rejected::Refused(refused));
         }
-        state.admit()?;
+        state.admit_within_the_gap();
+        // By the object's own id (#729): a flag on an alias marks the entry
+        // the audit lists.
+        let id = state
+            .interview
+            .as_ref()
+            .and_then(|interview| {
+                crate::object::EntryId::new(id)
+                    .ok()
+                    .and_then(|named| interview.object.entry(&named))
+                    .map(|entry| entry.id.as_str().to_owned())
+            })
+            .unwrap_or_else(|| id.to_owned());
+        let id = id.as_str();
         let turn = state.turns;
         state.push(Event::Flagged {
             turn,
@@ -3253,6 +3284,8 @@ impl<S: Streaming + 'static> Session<S> {
             Settlement::Ended => Some(Refusal::Ended),
             Settlement::Turn | Settlement::Capture => Some(Refusal::InFlight),
             Settlement::Awaiting if state.held.is_none() => Some(Refusal::NothingHeld),
+            // As a declared meditation is (#729): its close would undo it.
+            Settlement::Awaiting if state.tangent.is_some() => Some(Refusal::TangentOpen),
             Settlement::Awaiting => None,
         };
         if let Some(because) = because {
@@ -3261,10 +3294,15 @@ impl<S: Streaming + 'static> Session<S> {
             self.shared.changed.notify_all();
             return Err(Rejected::Refused(refused));
         }
-        state.admit()?;
+        state.admit_within_the_gap();
         let Some(PendingMeditation { reason, to, .. }) = state.held.take() else {
             unreachable!("a held meditation was checked above");
         };
+        // The phase it was to move to, ruled again from where the session
+        // is now (#729): a `continue` while it held may have moved it, and a
+        // move the graph no longer allows from here is not made -- the
+        // refill is in place.
+        let to = to.filter(|to| graph_refusal(&state, to).is_none());
         state.meditation_pending = Some(PendingMeditation {
             reason,
             to,
@@ -4354,6 +4392,7 @@ fn refusal_of(refusal: Refusal) -> log::Refusal {
         Refusal::Empty => log::Refusal::Empty,
         Refusal::MeditationHeld => log::Refusal::MeditationHeld,
         Refusal::NothingHeld => log::Refusal::NothingHeld,
+        Refusal::Restates => log::Refusal::Restates,
     }
 }
 
@@ -6130,6 +6169,32 @@ impl Event {
     }
 }
 
+/// [`Refusal::Restates`] when the operator's edit of `id` to `content`
+/// is one working memory refuses as no correction (#729): `content` is the
+/// entry's own text, or another live entry's. Tried on a copy, so nothing is
+/// applied.
+fn restates(state: &State, id: &str, content: &str) -> Option<Refusal> {
+    let interview = state.interview.as_ref()?;
+    let voids = crate::object::EntryId::new(id).ok()?;
+    let new = crate::object::EntryId::new(&format!("operator-{}", state.log.len())).ok()?;
+    let mut trial = interview.object.clone();
+    trial
+        .apply(&Patch::Supersede {
+            id: new,
+            content: content.to_owned(),
+            voids,
+            provenance: crate::object::Provenance {
+                turn: state.turns,
+                lane: crate::object::OPERATOR.to_owned(),
+                fork: None,
+                tangent: None,
+                index: 0,
+            },
+        })
+        .is_err()
+        .then_some(Refusal::Restates)
+}
+
 /// Why an operator edit or flag of `id` with `text` is refused, if it is.
 fn operator_refusal(state: &State, id: &str, text: &str) -> Option<Refusal> {
     if state.settlement == Settlement::Ended {
@@ -6524,21 +6589,20 @@ fn audit_fired(
         .filter(|id| marks.contains_key(*id))
         .map(|id| id.as_str().to_owned())
         .collect();
-    let turn = state.turns;
-    let finished = state
+    // The latest turn that settled `final` (#729): one that failed since
+    // has no answered request to cut from, and under `refuse` a meditation
+    // that could ask nothing would hold having asked nothing.
+    let turn = state
         .log
         .iter()
         .rev()
         .find_map(|logged| match &logged.event {
             Event::TurnSettled {
                 turn: settled,
-                reason,
-            } if *settled == turn => Some(*reason),
+                reason: SettleReason::Final,
+            } => Some(*settled),
             _ => None,
-        });
-    if finished != Some(SettleReason::Final) {
-        return None;
-    }
+        })?;
     let at = state
         .log
         .iter()
@@ -11502,7 +11566,7 @@ pub(in crate::drive) mod tests {
         assert_eq!(
             tags(&Refusal::ALL.iter().map(|it| it.tag()).collect::<Vec<_>>()),
             "in-flight ended nothing-in-flight nothing-to-meditate no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held"
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held restates"
         );
         assert_eq!(
             tags(
@@ -19145,5 +19209,389 @@ pub(in crate::drive) mod tests {
         );
         assert!(read("interview_warrant = \"scoping\"\n").is_err());
         assert!(read("interview_warrant = [\"always\"]\n").is_err());
+    }
+
+    // -----------------------------------------------------------------
+    // adversarial review (memory area)
+    // -----------------------------------------------------------------
+
+    /// #655: a model's write over an operator-edited entry is refused. A
+    /// fork that restates the operator's words dedups onto their entry and
+    /// appends its own provenance last, so `by_operator` reads false and the
+    /// audit's UPDATE of it is then applied.
+    #[test]
+    fn review_a_restatement_of_the_operators_entry_frees_it_for_the_model() {
+        const OPERATORS: &str = "decision: for the one team that files bugs";
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.meditations.audit = true;
+        let session = Session::open_with(
+            Canned::new(vec![
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["Agreed. Next, I will write the schema."]),
+                deltas(&["DECISION: for the one team that files bugs\nPLAN: NONE\n"]),
+                deltas(&["1. KEEP\n2. KEEP\n3. UPDATE: a model rewrite of the operator's note\n"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the first fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 1
+        });
+        let edited = live_entries(&session)[1].0.clone();
+        session.edit_entry(&edited, OPERATORS).expect("an edit");
+        let operator = live_entries(&session)
+            .into_iter()
+            .find(|(_, content)| content == OPERATORS)
+            .expect("the operator's entry")
+            .0;
+        session
+            .ask_marked("so, one team?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the second fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        eprintln!("fork outcomes: {:?}", fork_outcomes(&log));
+        let still_theirs = session
+            .shared
+            .lock()
+            .interview
+            .as_ref()
+            .expect("memory")
+            .object
+            .by_operator(&crate::object::EntryId::new(&operator).expect("an id"));
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let refused = log
+            .iter()
+            .any(|logged| matches!(&logged.event, Event::PatchRefused { entry, .. } if *entry == operator));
+        let held: Vec<String> = live_entries(&session)
+            .into_iter()
+            .map(|(_, content)| content)
+            .collect();
+        eprintln!(
+            "by_operator after the restatement: {still_theirs}; audit refused: {refused}; live: {held:?}"
+        );
+        assert!(
+            held.contains(&OPERATORS.to_owned()),
+            "the audit's UPDATE voided the operator's entry {operator}: live {held:?}"
+        );
+        assert!(still_theirs, "the operator's entry stopped being theirs");
+    }
+
+    /// #608: a meditation while a tangent is open is refused `tangent-open`,
+    /// since the close restores the fork point the refill would replace.
+    /// The operator's refill anyway (#698) is not.
+    #[test]
+    fn review_a_refill_anyway_under_an_open_tangent_is_undone_by_its_close() {
+        let session = three_decisions_then(
+            |meditations| {
+                meditations.audit = true;
+                meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
+            },
+            vec![deltas(&["1. KEEP\n2. KEEP\n"]), deltas(&["nothing to say"])],
+        );
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the hold", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+        });
+        let before = session.trunk();
+        session
+            .open_tangent("aside")
+            .expect("a tangent over a held meditation");
+        assert_eq!(
+            session.declare_meditation(None),
+            Err(Rejected::Refused(Refusal::TangentOpen))
+        );
+        let anyway = session.refill_anyway();
+        eprintln!("refill_anyway under an open tangent: {anyway:?}");
+        if anyway.is_ok() {
+            let log = wait_until(&session, "the refill", meditated);
+            let refilled = session.trunk();
+            session
+                .close_tangent(&BTreeMap::new())
+                .expect("an empty tangent closes");
+            let after = session.trunk();
+            eprintln!(
+                "trunk before {} msgs, refilled {} msgs, after close {} msgs; meditated logged: {}; close rolled_back: {:?}",
+                before.len(),
+                refilled.len(),
+                after.len(),
+                log.iter()
+                    .any(|l| matches!(l.event, Event::Meditated { .. })),
+                session.events_from(0).iter().find_map(|l| match &l.event {
+                    Event::TangentClosed { rolled_back, .. } => Some(*rolled_back),
+                    _ => None,
+                })
+            );
+            assert_eq!(after, refilled, "the close undid the logged refill");
+        }
+        assert_eq!(anyway, Err(Rejected::Refused(Refusal::TangentOpen)));
+    }
+
+    /// #698: under `refuse` the meditation re-asks once, then holds. After
+    /// a turn that did not settle `final`, no audit fires at all, so it
+    /// holds having asked nothing -- and holds again on every re-declare,
+    /// since no ask can be admitted to make a final turn.
+    #[test]
+    fn review_under_refuse_a_meditation_after_a_failed_turn_holds_having_asked_nothing() {
+        let session = three_decisions_then(
+            |meditations| {
+                meditations.audit = true;
+                meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
+            },
+            vec![vec![Step::Fail(TransportFailure::Connect(
+                "reset".to_owned(),
+            ))]],
+        );
+        session.ask("go on", None).expect("accepted");
+        wait_until(&session, "the failed turn", |log| {
+            settled(log)
+                && log
+                    .iter()
+                    .any(|logged| matches!(logged.event, Event::TurnSettled { turn: 2, .. }))
+        });
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        let holds = |n: usize| {
+            move |log: &[Logged]| {
+                log.iter()
+                    .filter(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+                    .count()
+                    == n
+                    && session_settled_awaiting(log)
+            }
+        };
+        session.declare_meditation(None).expect("admitted");
+        wait_until(&session, "the hold", holds(1));
+        session.declare_meditation(None).expect("admitted again");
+        let log = wait_until(&session, "the second hold", holds(2));
+        assert_eq!(
+            session.ask("go on", None),
+            Err(Rejected::Refused(Refusal::MeditationHeld))
+        );
+        let audits = audited_templates(&log);
+        eprintln!("audits asked across two holds: {audits:?}");
+        assert!(
+            !audits.is_empty(),
+            "held twice without asking the model anything"
+        );
+    }
+
+    fn session_settled_awaiting(log: &[Logged]) -> bool {
+        log.iter().rev().find_map(|logged| match &logged.event {
+            Event::Settled { to, .. } => Some(*to == Settlement::Awaiting),
+            _ => None,
+        }) == Some(true)
+    }
+
+    /// #655/#671: a flag on an entry by the id the surface was shown for it
+    /// -- a dedup's patch line names its alias -- is accepted, but its
+    /// marker is keyed by the alias, never matches the audit's canonical
+    /// item, and so is never marked or addressed.
+    #[test]
+    fn review_a_flag_on_an_alias_is_marked_and_addressed() {
+        let mut interview = interviewing(&[log::Warrant::Scoping]);
+        interview.meditations.audit = true;
+        let session = Session::open_with(
+            Canned::new(vec![
+                deltas(&[SCOPED]),
+                deltas(&[DECIDED]),
+                deltas(&["Agreed. Next, I will write the schema."]),
+                deltas(&["DECISION: a tracker\nPLAN: NONE\n"]),
+                deltas(&["1. KEEP\n2. KEEP\n3. KEEP\n"]),
+            ]),
+            template(),
+            None,
+            None,
+            None,
+            Some(interview),
+        );
+        session
+            .ask_marked("what are we building?", None, true)
+            .expect("accepted");
+        wait_until(&session, "the first fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 1
+        });
+        session
+            .ask_marked("a tracker?", None, true)
+            .expect("accepted");
+        let log = wait_until(&session, "the second fork", |log| {
+            settled(log) && fork_outcomes(log).len() == 2
+        });
+        let shown: Vec<String> = patches(&log).into_iter().map(|entry| entry.id).collect();
+        eprintln!("patch lines name {shown:?}");
+        assert!(shown.contains(&"interview-t2-0".to_owned()));
+        session
+            .flag_entry("interview-t2-0", "still so?")
+            .expect("a flag by the id the patch line named");
+        session.declare_meditation(None).expect("admitted");
+        let log = wait_until(&session, "the meditation", meditated);
+        let question = log
+            .iter()
+            .find_map(|logged| match &logged.event {
+                Event::Audited { question, .. } => Some(question.clone()),
+                _ => None,
+            })
+            .expect("an audit");
+        eprintln!("carried {:?}", carried(&log));
+        assert!(question.contains("[flagged: still so?]"), "{question}");
+        assert_eq!(
+            carried(&log).1,
+            Some(Vec::new()),
+            "the parsed audit addressed it"
+        );
+    }
+
+    /// #698 x #651: a held phase meditation keeps the move the graph ruled
+    /// on when it was declared; a `continue` ruling while it holds moves the
+    /// phase, and refill anyway then makes the held move from the new phase
+    /// with no ruling -- here build to review, an edge the graph lacks.
+    #[test]
+    fn review_refill_anyway_after_a_continue_moves_along_no_edge() {
+        const SAID: &str = "The schema has two tables.";
+        let mut graph = crate::meditation::phase::PhaseGraph::of(&[
+            "plan".to_owned(),
+            "build".to_owned(),
+            "review".to_owned(),
+        ])
+        .expect("three phases");
+        graph.allow("plan", "build").expect("an edge");
+        graph.allow("plan", "review").expect("an edge");
+        let mut interview = Interview {
+            phases: graph,
+            ..interviewing(&[])
+        };
+        interview.self_capture = Some(crate::capture::tools::Cadence::DEFAULT);
+        interview.meditations.audit = true;
+        interview.meditations.reconcile_gate = crate::meditation::policy::ReconcileGate::Refuse;
+        let mut shape = template();
+        declare_self_capture(&mut shape, Some(&interview));
+        let acts = vec![
+            vec![
+                Step::Delta(SAID.to_owned()),
+                Step::call(
+                    0,
+                    "call-f",
+                    "update_record",
+                    &serde_json::json!({ "field": "fact", "content": SAID }).to_string(),
+                ),
+                Step::call(
+                    1,
+                    "call-p",
+                    "propose_phase_transition",
+                    &serde_json::json!({ "to": "build", "reason": "the plan is settled" })
+                        .to_string(),
+                ),
+            ],
+            deltas(&["done"]),
+            deltas(&["nothing to say"]),
+            deltas(&["nothing to say"]),
+        ];
+        let session =
+            Session::open_with(Canned::new(acts), shape, None, None, None, Some(interview));
+        session.ask("plan it", None).expect("accepted");
+        wait_until(&session, "the turn", settled);
+        let fact = live_entries(&session)[0].0.clone();
+        session.flag_entry(&fact, "two?").expect("a flag");
+        session
+            .declare_meditation_to(None, Some("review"))
+            .expect("plan to review is an edge");
+        wait_until(&session, "the hold", |log| {
+            log.iter()
+                .any(|logged| matches!(logged.event, Event::MeditationHeld { .. }))
+                && session_settled_awaiting(log)
+        });
+        session
+            .ratify_phase("call-p", PhaseChoice::Continue)
+            .expect("continue, while the meditation holds");
+        assert_eq!(session.shared.lock().phase.as_deref(), Some("build"));
+        assert_eq!(
+            session.declare_meditation_to(None, Some("review")),
+            Err(Rejected::Refused(Refusal::NoPhaseEdge)),
+            "the graph has no build to review"
+        );
+        session.refill_anyway().expect("refilled anyway");
+        let log = wait_until(&session, "the refill", meditated);
+        let moved = log.iter().find_map(|logged| match &logged.event {
+            Event::Meditated { phase, .. } => phase.clone(),
+            _ => None,
+        });
+        eprintln!(
+            "refill anyway moved {moved:?}; phase now {:?}",
+            session.shared.lock().phase
+        );
+        assert_ne!(
+            session.shared.lock().phase.as_deref(),
+            Some("review"),
+            "moved build -> review, an edge the graph refuses: {moved:?}"
+        );
+    }
+
+    /// #655: an operator edit is applied or refused (409, logged). An edit
+    /// whose content is the entry's own, or another entry's, is refused by
+    /// the object, and `edit_entry` reaches `unreachable!`.
+    #[test]
+    fn review_an_edit_that_restates_an_entry_is_refused_not_a_panic() {
+        let session = three_decisions_then(|_| {}, Vec::new());
+        let entries = live_entries(&session);
+        let (id, own) = entries[0].clone();
+        let other = entries[1].1.clone();
+        for content in [own, other] {
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                session.edit_entry(&id, &content)
+            }));
+            eprintln!(
+                "edit {id} to {content:?}: {:?}",
+                outcome.as_ref().map_err(|_| "panicked")
+            );
+            assert!(outcome.is_ok(), "edit_entry panicked on {content:?}");
+        }
+    }
+
+    /// #655 "neither command ends an idle gap"; #698 the same of
+    /// refill-anyway. A flag admitted in the gap after a turn: the ask that
+    /// then carries that gap should be admitted with it.
+    #[test]
+    fn review_a_flag_ends_no_idle_gap() {
+        let control = three_decisions_then(|_| {}, vec![deltas(&["two"])]);
+        let first = settling_seq(&control.events_from(0), 1);
+        assert!(
+            control.ask("go on", Some(gap(first, GapEnd::Ask))).is_ok(),
+            "control: with no flag the gap is carried"
+        );
+        let session = three_decisions_then(|_| {}, vec![deltas(&["two"])]);
+        let log = session.events_from(0);
+        let first = settling_seq(&log, 1);
+        let flagged = live_entries(&session)[0].0.clone();
+        session.flag_entry(&flagged, "still so?").expect("a flag");
+        let asked = session.ask("go on", Some(gap(first, GapEnd::Ask)));
+        eprintln!("ask carrying the gap after a flag: {asked:?}");
+        assert!(asked.is_ok(), "{asked:?}");
+    }
+
+    /// #608 x #651: a `meditation` ruling on a proposal while a tangent is
+    /// open refills the trunk the close then restores.
+    #[test]
+    fn review_a_meditation_ruling_under_an_open_tangent_is_refused() {
+        let (session, _) = proposing("build", Vec::new());
+        session.open_tangent("aside").expect("a tangent");
+        let ruled = session.ratify_phase("call-p", PhaseChoice::Meditation);
+        let log = session.events_from(0);
+        eprintln!(
+            "ratify meditation under a tangent: {ruled:?}; meditated: {}",
+            log.iter()
+                .any(|l| matches!(l.event, Event::Meditated { .. }))
+        );
+        assert_eq!(ruled, Err(Rejected::Refused(Refusal::TangentOpen)));
     }
 }
