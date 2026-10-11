@@ -249,6 +249,18 @@ export const MemoryDrawer: Story = {
   },
 };
 
+/** The drawer with motion off (#759): the preference, or the system's reduced motion, and it opens without sliding. */
+export const MemoryDrawerStill: Story = {
+  ...MemoryDrawer,
+  name: 'memory · a drawer, still when motion is off',
+  globals: { motion: 'off' },
+  play: async ({ canvasElement }) => {
+    await within(canvasElement).findByRole('button', { name: /working memory/ });
+    const drawer = q(canvasElement, '.ex-session__memory') as HTMLElement;
+    await expect(getComputedStyle(drawer).transitionDuration.split(',').every((d) => parseFloat(d) === 0)).toBe(true);
+  },
+};
+
 /** Everything drawn from a field `diet` does not write yet, outlined with what it is (`NEEDS`). */
 export const Gaps: Story = {
   name: 'what diet can’t emit yet',
