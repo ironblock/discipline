@@ -1180,6 +1180,7 @@ mod tests {
             exit: Some(0),
             output: None,
             exec: None,
+            lane: None,
         }
     }
 
@@ -1533,6 +1534,7 @@ mod tests {
             exit: None,
             output: None,
             exec: None,
+            lane: None,
         });
         assert_eq!(decisions[0].class, Class::Unknown);
         assert_eq!(router.census().unclassified, 2);

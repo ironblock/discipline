@@ -1177,6 +1177,7 @@ impl<'a> Walk<'a> {
             exit,
             output,
             exec: Some(exec),
+            lane: None,
         });
     }
 

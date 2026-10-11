@@ -1034,6 +1034,7 @@ pub fn run<T: Transport>(script: &Script, gym: &Gym<'_, T>) -> Result<Drive, Hal
                 exit: ran.exit.map(i64::from),
                 output: Some(ran.as_the_model_sees_it()),
                 exec: None,
+                lane: None,
             });
         }
 

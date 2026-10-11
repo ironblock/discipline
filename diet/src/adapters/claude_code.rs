@@ -129,6 +129,7 @@
 //! harness DOES declare synthetic is no longer misattributed.
 
 use std::collections::BTreeMap;
+use std::path::Path;
 
 use super::{Adapted, Adapter, Census, Drift};
 use crate::formats::record::{CompactionSource, Count, CountSource, Event, json::Value};
@@ -286,6 +287,178 @@ impl Adapter for ClaudeCode {
     }
 }
 
+/// One delegated run's transcript, found beside its session's log (#708).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sidechain {
+    /// The agent that ran it: the id its spawning call's result names, and
+    /// the name of its file, `agent-<agentId>.jsonl`.
+    pub agent_id: String,
+    /// The workflow run it belongs to, for a workflow's agent: the directory
+    /// it sits in, `subagents/workflows/<runId>/`. `None` for an agent the
+    /// session spawned directly.
+    pub run_id: Option<String>,
+    /// The `agentType` its metadata file names, when it has one.
+    pub agent_type: Option<String>,
+    /// The transcript.
+    pub text: String,
+}
+
+/// What [`sidechains_beside`] found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Found {
+    /// Each transcript, agents first, then each run's, in name order.
+    pub sidechains: Vec<Sidechain>,
+    /// Workflow journals: a run's own event log, not a model's turns, so
+    /// counted and never replayed.
+    pub journals: u64,
+}
+
+/// The sidechain transcripts the harness wrote beside `log` (#708), by its
+/// convention: a directory named for the log, `subagents/agent-*.jsonl` for
+/// the agents the session spawned, `subagents/workflows/<runId>/agent-*.jsonl`
+/// for a workflow's, each with a `.meta.json` beside it naming its type, and a
+/// `journal.jsonl` per run. Nothing there is nothing found.
+///
+/// # Errors
+///
+/// When a directory that is there cannot be read.
+pub fn sidechains_beside(log: &Path) -> std::io::Result<Found> {
+    let mut found = Found::default();
+    let subagents = log.with_extension("").join("subagents");
+    if !subagents.is_dir() {
+        return Ok(found);
+    }
+    found.sidechains.extend(agents_in(&subagents, None)?);
+    let workflows = subagents.join("workflows");
+    if workflows.is_dir() {
+        let mut runs: Vec<_> = std::fs::read_dir(&workflows)?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir())
+            .collect();
+        runs.sort();
+        for run in runs {
+            let run_id = run.file_name().and_then(|name| name.to_str());
+            found.journals += u64::from(run.join("journal.jsonl").is_file());
+            found.sidechains.extend(agents_in(&run, run_id)?);
+        }
+    }
+    Ok(found)
+}
+
+/// Each `agent-<id>.jsonl` directly in `dir`, in name order.
+fn agents_in(dir: &Path, run_id: Option<&str>) -> std::io::Result<Vec<Sidechain>> {
+    let mut paths: Vec<_> = std::fs::read_dir(dir)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "jsonl"))
+        .collect();
+    paths.sort();
+    let mut found = Vec::new();
+    for path in paths {
+        let Some(agent_id) = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(|stem| stem.strip_prefix("agent-"))
+        else {
+            continue;
+        };
+        let agent_type = std::fs::read_to_string(path.with_extension("meta.json"))
+            .ok()
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+            .and_then(|meta| meta.get("agentType")?.as_str().map(str::to_owned));
+        found.push(Sidechain {
+            agent_id: agent_id.to_owned(),
+            run_id: run_id.map(str::to_owned),
+            agent_type,
+            text: std::fs::read_to_string(&path)?,
+        });
+    }
+    Ok(found)
+}
+
+impl ClaudeCode {
+    /// [`Adapter::adapt`], with the sidechains `found` beside the log
+    /// joined as side lanes (#708): each off the call that spawned it -- an
+    /// `Agent` call by the `agentId` its result names, a `Workflow` call by
+    /// its `runId` -- at that call's turn, its lane `sidechain/<agentId>`
+    /// (`sidechain/<runId>/<agentId>` for a workflow's agent, whose id need
+    /// not be unique across runs). Each is read as the main log is, repeats
+    /// dropped and models counted; what did not join is counted, never
+    /// dropped silently.
+    ///
+    /// # Errors
+    ///
+    /// As [`Adapter::adapt`], for the log or any sidechain.
+    pub fn adapt_with(&self, log: &str, found: &Found, substrate: &str) -> Result<Adapted, Drift> {
+        let mut run = Run::new(self.name(), substrate);
+        let rows = unrepeated(parse(log)?, &mut run.census)?;
+        for (at, (at_row, raw, row)) in rows.iter().enumerate() {
+            run.row(*at_row, raw, row, rows.get(at + 1..).unwrap_or(&[]))?;
+        }
+        let spawns = std::mem::take(&mut run.spawns);
+        let mut joined = vec![false; spawns.len()];
+        for side in &found.sidechains {
+            let spawned = spawns.iter().position(|spawn| match &side.run_id {
+                Some(run_id) => spawn.run_id.as_ref() == Some(run_id),
+                None => spawn.agent_id.as_ref() == Some(&side.agent_id),
+            });
+            let Some(at) = spawned else {
+                run.census.sidechains_add("transcripts naming no call", 1);
+                continue;
+            };
+            joined[at] = true;
+            let lane = match &side.run_id {
+                Some(run_id) => format!("sidechain/{run_id}/{}", side.agent_id),
+                None => format!("sidechain/{}", side.agent_id),
+            };
+            let kind = if side.run_id.is_some() {
+                "joined/workflow agent"
+            } else {
+                "joined/agent"
+            };
+            run.census.sidechains_add(kind, 1);
+            if let Some(agent_type) = &side.agent_type {
+                run.census.sidechains_add(&format!("type/{agent_type}"), 1);
+            }
+            run.side_lane(&lane, spawns[at].turn, &side.text)?;
+        }
+        let unjoined = joined.iter().filter(|joined| !**joined).count();
+        run.census.sidechains_add(
+            "spawning calls with no transcript",
+            u64::try_from(unjoined).unwrap_or(u64::MAX),
+        );
+        run.census
+            .sidechains_add("journals not replayed", found.journals);
+        Ok(Adapted {
+            events: run.events,
+            census: run.census,
+        })
+    }
+}
+
+/// A delegated run's spawning call, as the main log showed it (#708).
+#[derive(Debug, Clone)]
+struct Spawn {
+    /// The turn that made the call.
+    turn: u32,
+    /// The agent its result names, for an `Agent` call.
+    agent_id: Option<String>,
+    /// The workflow run its result names, for a `Workflow` call.
+    run_id: Option<String>,
+}
+
+/// The side lane a walk is reading (#708): its name, and how many asks it
+/// has been given so far.
+#[derive(Debug, Clone)]
+struct Side {
+    lane: String,
+    asks: u32,
+}
+
+/// The tools whose calls spawn a delegated run with its own transcript.
+const SPAWNING: &[&str] = &["Agent", "Workflow"];
+
 /// Every non-blank line, as its own text, JSON, and the FILE line it came
 /// from.
 ///
@@ -392,6 +565,10 @@ struct Run {
     /// for it. A pair rather than a session-wide counter so a compaction's id
     /// reads as *the nth compaction of turn k*.
     compacted: (u32, u32),
+    /// The delegated runs the main log's calls spawned (#708).
+    spawns: Vec<Spawn>,
+    /// The side lane this walk reads, when it reads a sidechain (#708).
+    side: Option<Side>,
 }
 
 impl Run {
@@ -406,7 +583,67 @@ impl Run {
             turn: 0,
             awaiting: BTreeMap::new(),
             compacted: (0, 0),
+            spawns: Vec::new(),
+            side: None,
         }
+    }
+
+    /// The sidechain `text` read as the side lane `lane`, off turn `turn`
+    /// (#708): a fork opening the lane, then its rows walked as the main
+    /// log's are, on the lane.
+    fn side_lane(&mut self, lane: &str, turn: u32, text: &str) -> Result<(), Drift> {
+        let (main_turn, awaiting) = (self.turn, std::mem::take(&mut self.awaiting));
+        self.turn = turn;
+        self.side = Some(Side {
+            lane: lane.to_owned(),
+            asks: 0,
+        });
+        self.events.push(Event::Fork {
+            id: lane.to_owned(),
+            lane: lane.to_owned(),
+            substrate: self.substrate.clone(),
+            of_turn: turn,
+            cache_read_share: None,
+        });
+        let rows = unrepeated(parse(text)?, &mut self.census)?;
+        self.census
+            .sidechains_add("rows", u64::try_from(rows.len()).unwrap_or(u64::MAX));
+        for (at, (at_row, raw, row)) in rows.iter().enumerate() {
+            self.row(*at_row, raw, row, rows.get(at + 1..).unwrap_or(&[]))?;
+        }
+        let asks = self.side.take().map_or(0, |side| side.asks);
+        self.census.sidechains_add("turns", u64::from(asks));
+        self.turn = main_turn;
+        self.awaiting = awaiting;
+        Ok(())
+    }
+
+    /// A call that spawns a delegated run, answered (#708): its turn and
+    /// the agent or run its result names, kept for the sidechains to join.
+    fn spawned(&mut self, block: &serde_json::Value, row: &serde_json::Value) {
+        let Some(at) = block
+            .get("tool_use_id")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|id| self.awaiting.get(id))
+        else {
+            return;
+        };
+        let Some(Event::ToolCall { tool, at_turn, .. }) = self.events.get(*at) else {
+            return;
+        };
+        if !SPAWNING.contains(&tool.as_str()) {
+            return;
+        }
+        let named = |key: &str| {
+            row.pointer(&format!("/toolUseResult/{key}"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        self.spawns.push(Spawn {
+            turn: *at_turn,
+            agent_id: named("agentId"),
+            run_id: named("runId"),
+        });
     }
 
     /// One row. `rest` is what follows it, for the prefill lookahead.
@@ -438,7 +675,12 @@ impl Run {
         // row either flag names is mapped -- the kind is one this adapter
         // knows -- and silent, because it is a subagent's own exchange or
         // text the harness composed, never the top-level session's turn.
-        if let Some(why) = excluded_from_parent(row) {
+        // A sidechain's own rows are the lane's turns when the walk reads
+        // that sidechain as a side lane (#708); its `isMeta` text is still
+        // the harness's.
+        let excluded =
+            excluded_from_parent(row).filter(|why| self.side.is_none() || *why != "isSidechain");
+        if let Some(why) = excluded {
             self.census.no_event_one(&format!("{}/{why}", mapped.tag()));
             return Ok(());
         }
@@ -535,7 +777,12 @@ impl Run {
                             };
                             said.push_str(text);
                         }
-                        Some(Block::ToolResult) => self.tool_result(block),
+                        Some(Block::ToolResult) => {
+                            if self.side.is_none() {
+                                self.spawned(block, row);
+                            }
+                            self.tool_result(block);
+                        }
                         // A call inside a `user` row. The mapping reads calls
                         // from `assistant` rows only, so this is content with
                         // no home rather than a call -- counted under its own
@@ -578,6 +825,21 @@ impl Run {
             // which produced no event, and `mapped` alone would report it as
             // carried.
             self.census.no_event_one("user/carried no text of its own");
+            return Ok(());
+        }
+
+        // A sidechain's ask (#708): a request on its lane, no turn of the
+        // session's own.
+        if let Some(side) = self.side.as_mut() {
+            side.asks += 1;
+            self.events.push(Event::Request {
+                id: format!("{}/q{}", side.lane, side.asks),
+                lane: side.lane.clone(),
+                substrate: self.substrate.clone(),
+                retry_of: None,
+                text: Some(said),
+                head_sha256: None,
+            });
             return Ok(());
         }
 
@@ -642,7 +904,10 @@ impl Run {
         if self.compacted.0 != self.turn {
             self.compacted = (self.turn, 0);
         }
-        let id = format!("compact/{}/{}", self.turn, self.compacted.1);
+        let id = match &self.side {
+            Some(side) => format!("{}/compact/{}", side.lane, self.compacted.1),
+            None => format!("compact/{}/{}", self.turn, self.compacted.1),
+        };
         self.compacted.1 += 1;
         // CHARACTERS, through the record's own bound, like every other count
         // this adapter crosses. What compaction cost is the difference
@@ -744,6 +1009,21 @@ impl Run {
                 .no_event_one("assistant/spoke before any turn was opened");
             return Ok(());
         }
+        if self.side.as_ref().is_some_and(|side| side.asks == 0) {
+            self.census
+                .no_event_one("assistant/spoke before its sidechain was asked anything");
+            return Ok(());
+        }
+        let (id, to_request) = match &self.side {
+            Some(side) => (
+                format!("{}/a/{}", side.lane, self.events.len()),
+                format!("{}/q{}", side.lane, side.asks),
+            ),
+            None => (
+                format!("a/{}", self.events.len()),
+                format!("u/{}", self.turn),
+            ),
+        };
         let model = self.model_of(row);
         self.events.push(Event::Response {
             model,
@@ -751,8 +1031,8 @@ impl Run {
             cache_creation: None,
             cache_creation_5m: None,
             cache_creation_1h: None,
-            id: format!("a/{}", self.events.len()),
-            to_request: format!("u/{}", self.turn),
+            id,
+            to_request,
             output_tokens: Some(count_of(at_row, "message.usage.output_tokens", tokens)?),
             output_from: Some(CountSource::Usage),
             text: (!spoke.trim().is_empty()).then_some(spoke),
@@ -875,6 +1155,8 @@ impl Run {
             exit: None,
             output: None,
             exec: None,
+            // A delegated run's call names its lane (#708); the trunk's names none.
+            lane: self.side.as_ref().map(|side| side.lane.clone()),
         });
         Ok(())
     }
@@ -1176,7 +1458,9 @@ mod tests {
     /// the one it was GIVEN, never one read out of the log.
     const A_SUBSTRATE: &str = "claude-code";
 
-    use super::{Block, ClaudeCode, MAPS, PREFILL_ASSUMED, Row, native_tool};
+    use super::{
+        Block, ClaudeCode, Found, MAPS, PREFILL_ASSUMED, Row, native_tool, sidechains_beside,
+    };
     use crate::adapters::{Adapter, Drift};
     use crate::formats::record::{CompactionSource, Event};
 
@@ -2427,6 +2711,117 @@ mod tests {
         assert!(refused.to_string().contains("row 4"), "{refused}");
     }
 
+    /// The delegated-session fixture: its main log, and the sidechains
+    /// found beside it by convention.
+    fn delegated() -> (String, Found) {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("adapters/fixtures/claude-code");
+        let log = dir.join("a-session-that-delegated.jsonl");
+        let found = sidechains_beside(&log).expect("the sidechains");
+        (std::fs::read_to_string(&log).expect("the log"), found)
+    }
+
+    /// #708: the sidechains beside a log are found by convention -- each
+    /// agent's transcript under `subagents/`, each workflow run's under
+    /// `subagents/workflows/<runId>/` -- each with its metadata's type, and
+    /// each run's journal counted, never read as turns.
+    #[test]
+    fn a_logs_sidechains_are_found_beside_it_by_convention() {
+        let (_, found) = delegated();
+        let mut named: Vec<(String, Option<String>, Option<String>)> = found
+            .sidechains
+            .iter()
+            .map(|side| {
+                (
+                    side.agent_id.clone(),
+                    side.run_id.clone(),
+                    side.agent_type.clone(),
+                )
+            })
+            .collect();
+        named.sort();
+        let some = |text: &str| Some(text.to_owned());
+        assert_eq!(
+            named,
+            [
+                ("x1".to_owned(), None, some("general-purpose")),
+                ("y1".to_owned(), some("wf_1"), some("workflow-agent")),
+                ("z9".to_owned(), None, None),
+            ]
+        );
+        assert_eq!(found.journals, 1);
+        let nothing = sidechains_beside(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("adapters/fixtures/claude-code/session.jsonl"),
+        )
+        .expect("no sidechains is no error");
+        assert!(nothing.sidechains.is_empty());
+        assert_eq!(nothing.journals, 0);
+    }
+
+    /// #708: each sidechain joins the record as a side lane off the call
+    /// that spawned it -- a fork at the call's turn, its asks on its lane,
+    /// its responses with the model each names, its tool calls naming the
+    /// lane -- and the census counts what joined, what did not, and the
+    /// models across the main log and its sidechains.
+    #[test]
+    fn each_sidechain_joins_as_a_side_lane_off_the_call_that_spawned_it() {
+        let (log, found) = delegated();
+        let adapted = ClaudeCode
+            .adapt_with(&log, &found, A_SUBSTRATE)
+            .expect("it adapts");
+        let forks: Vec<(String, u32)> = adapted
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Fork { lane, of_turn, .. } => Some((lane.clone(), *of_turn)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            forks,
+            [
+                ("sidechain/x1".to_owned(), 1),
+                ("sidechain/wf_1/y1".to_owned(), 1)
+            ]
+        );
+        assert!(adapted.events.iter().any(|event| matches!(
+            event,
+            Event::ToolCall { id, lane: Some(lane), .. } if id == "call-x" && lane == "sidechain/x1"
+        )));
+        assert!(adapted.events.iter().any(|event| matches!(
+            event,
+            Event::ToolCall { id, lane: None, .. } if id == "call-a"
+        )));
+        assert!(adapted.events.iter().any(|event| matches!(
+            event,
+            Event::Response { model: Some(model), to_request, .. }
+                if model == "model-three" && to_request.starts_with("sidechain/wf_1/y1/")
+        )));
+        assert_eq!(
+            adapted.census.models,
+            std::collections::BTreeMap::from([
+                ("model-one".to_owned(), 4),
+                ("model-three".to_owned(), 1),
+                ("model-two".to_owned(), 2),
+            ])
+        );
+        assert_eq!(
+            adapted.census.sidechains,
+            std::collections::BTreeMap::from([
+                ("joined/agent".to_owned(), 1),
+                ("joined/workflow agent".to_owned(), 1),
+                ("journals not replayed".to_owned(), 1),
+                ("rows".to_owned(), 6),
+                ("spawning calls with no transcript".to_owned(), 1),
+                ("transcripts naming no call".to_owned(), 1),
+                ("turns".to_owned(), 2),
+                ("type/general-purpose".to_owned(), 1),
+                ("type/workflow-agent".to_owned(), 1),
+            ])
+        );
+    }
+
     /// The corpus is committed, and it is what the tests above are about.
     ///
     /// Table-driven against the DIRECTORY rather than against a list of
@@ -2446,6 +2841,7 @@ mod tests {
             ("a-path-that-resolves-to-nothing", Some((3, 0, 0, 0))),
             ("a-renamed-field", None),
             ("turns-from-three-models", Some((8, 0, 0, 0))),
+            ("a-session-that-delegated", Some((8, 0, 0, 0))),
             ("rows-that-repeat", Some((5, 1, 0, 3))),
             ("a-repeat-whose-content-differs", None),
         ];

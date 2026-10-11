@@ -1,0 +1,25 @@
+{
+  "canonical": "{\"record\":\"start\",\"regime\":{\"arm\":\"baseline\",\"dogma_version\":0,\"substrates\":[{\"engine\":{\"name\":\"a-runtime\",\"version_or_digest\":\"1.0\"},\"hardware_fingerprint\":\"edaec1af6bd2226d6464c29bbbf6d0d139179ddd03bff236351a3ae3e2dad532\",\"id\":\"local\",\"reasoning\":\"on\",\"sampler_card\":{\"seed\":7,\"temperature\":0.7},\"weights\":{\"kind\":\"digest\",\"sha256\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}}]},\"source\":{\"adapter\":\"claude-code\",\"kind\":\"adapted\",\"source_available\":\"pinned_only\",\"source_digest\":\"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"},\"version\":2}\n{\"index\":1,\"prefill_tokens\":1024,\"record\":\"turn\"}\n{\"id\":\"u/1\",\"lane\":\"main\",\"record\":\"request\",\"substrate\":\"local\",\"text\":\"build the parser\"}\n{\"id\":\"a/1\",\"model\":\"model-one\",\"output_tokens\":40,\"record\":\"response\",\"to_request\":\"u/1\"}\n{\"at_turn\":1,\"id\":\"call-1\",\"record\":\"tool_call\",\"tool\":\"Agent\"}\n{\"id\":\"sidechain/agent-1\",\"lane\":\"sidechain/agent-1\",\"of_turn\":1,\"record\":\"fork\",\"substrate\":\"local\"}\n{\"id\":\"sidechain/agent-1/q1\",\"lane\":\"sidechain/agent-1\",\"record\":\"request\",\"substrate\":\"local\",\"text\":\"read the grammar\"}\n{\"id\":\"sidechain/agent-1/a/1\",\"model\":\"model-two\",\"output_tokens\":12,\"record\":\"response\",\"to_request\":\"sidechain/agent-1/q1\"}\n{\"at_turn\":1,\"id\":\"call-2\",\"lane\":\"sidechain/agent-1\",\"record\":\"tool_call\",\"tool\":\"read_file\"}\n",
+  "kinds": [
+    "start",
+    "turn",
+    "request",
+    "response",
+    "fork",
+    "tool_call"
+  ],
+  "regime": {
+    "arm": "baseline",
+    "dogma_version": 0,
+    "hosted_substrates": [],
+    "substrates": [
+      "local"
+    ]
+  },
+  "source": {
+    "adapter": "claude-code",
+    "kind": "adapted",
+    "source_available": "pinned_only",
+    "source_digest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+  }
+}

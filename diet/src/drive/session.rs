@@ -1690,6 +1690,7 @@ fn routed(log: &[Logged], turn: u32) -> Vec<Routed> {
                 exit: None,
                 output: None,
                 exec: None,
+                lane: None,
             });
             let class = decided.first()?.class;
             let bytes = match (&line.stdout, &line.stderr) {

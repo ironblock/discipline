@@ -1,0 +1,2 @@
+{"sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:00:00Z","type":"user","uuid":"y1-u1","parentUuid":null,"message":{"role":"user","content":"lex the input"},"isSidechain":true,"agentId":"y1"}
+{"sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:00:00Z","type":"assistant","uuid":"y1-a2","parentUuid":"y1-u1","isSidechain":true,"agentId":"y1","message":{"model":"model-three","role":"assistant","content":[{"type":"text","text":"Lexed."}],"usage":{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":3000,"output_tokens":20}}}
