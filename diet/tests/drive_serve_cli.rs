@@ -3994,3 +3994,21 @@ fn a_drive_server_on_a_hosted_api_entry_asks_the_cache_for_the_lifetimes_declare
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains("cache_ttl"), "{said}");
 }
+
+#[test]
+fn review_a_drive_server_refuses_a_tools_ask_set_on_the_fields_route() {
+    // #625 refuses `tools` with a fields set. The dual: a set written for
+    // the record tools (t1, t2 primes the system prompt for them) on the
+    // fields route, where a fork's tool call is discarded `unparseable`.
+    for set in ["t1", "t2"] {
+        let top = format!(
+            "interview_warrant = [\"scoping\"]\nself_capture = true\nfork_asks = \"{set}\"\n"
+        );
+        let regimen = dev_loop_sampling(&top, "seed = 7\n");
+        let stub = Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info())
+            .expect("loopback");
+        let (code, said) = run_briefly(&stub.url(), &["--regimen", &regimen.0.to_string_lossy()]);
+        eprintln!("{set}: exit {code:?}");
+        assert_ne!(code, None, "{set} on the fields route listened: {said}");
+    }
+}

@@ -1631,23 +1631,38 @@ fn self_recorded(log: &[Logged], turn: u32) -> Vec<(usize, String, String)> {
         .collect()
 }
 
-/// The fields an ask asks for, read off its words: the `fields X, Y and Z`
-/// (or `field X`) every router ask names its answer with, lower-cased to
-/// the contract's spelling. None when it names none.
+/// The fields an ask asks for, read off its own instruction (#730): the
+/// fields route's `with the fields X, Y and Z` (or `with the field X`),
+/// upper case, or the tools route's `under the field x, y or z`, lower case
+/// -- the last such, after the intent it quotes -- lower-cased to the
+/// contract's spelling. None when it names none.
 fn asked_fields(question: &str) -> Vec<String> {
-    let Some(at) = question
-        .find("fields ")
-        .map(|at| at + 7)
-        .or_else(|| question.find("field ").map(|at| at + 6))
-    else {
+    let marked = [
+        ("with the fields ", true),
+        ("with the field ", true),
+        ("under the field ", false),
+    ]
+    .iter()
+    .filter_map(|(marker, upper)| question.rfind(marker).map(|at| (at + marker.len(), *upper)))
+    .max_by_key(|(at, _)| *at);
+    let Some((at, upper)) = marked else {
         return Vec::new();
     };
     let named = &question[at..];
     let end = named.find([';', '.', '\n']).unwrap_or(named.len());
     named[..end]
         .split([',', ' '])
-        .filter(|word| !word.is_empty() && *word != "and")
-        .take_while(|word| word.chars().all(|c| c.is_ascii_uppercase() || c == '_'))
+        .filter(|word| !word.is_empty() && *word != "and" && *word != "or")
+        .take_while(|word| {
+            word.chars().all(|c| {
+                c == '_'
+                    || if upper {
+                        c.is_ascii_uppercase()
+                    } else {
+                        c.is_ascii_lowercase()
+                    }
+            })
+        })
         .map(str::to_ascii_lowercase)
         .collect()
 }
@@ -8194,6 +8209,37 @@ fn trailed(text: &str) -> (std::borrow::Cow<'_, str>, Option<String>) {
     (std::borrow::Cow::Owned(body), Some(trailer))
 }
 
+/// `patches` with each addition whose id `object` already holds -- an
+/// earlier fork in the same gap folded under the same `interview-t<turn>-
+/// <index>` (#730) -- renamed `interview-t<turn>-f<fork>-<index>`, so the
+/// second fork's facts fold beside the first's instead of being refused as an
+/// id reused. A gap's first fork keeps the ids it always had.
+fn unclashed(patches: Vec<Patch>, object: &WorkingObject, (turn, fork): (u32, u64)) -> Vec<Patch> {
+    patches
+        .into_iter()
+        .map(|patch| match patch {
+            Patch::Add {
+                id,
+                content,
+                provenance,
+            } if object.entry(&id).is_some() => {
+                let renamed = crate::object::EntryId::new(&format!(
+                    "{}-t{turn}-f{fork}-{}",
+                    super::INTERVIEW,
+                    provenance.index
+                ))
+                .unwrap_or(id);
+                Patch::Add {
+                    id: renamed,
+                    content,
+                    provenance,
+                }
+            }
+            other => other,
+        })
+        .collect()
+}
+
 /// The fork's answer, read by the interview grammar and folded as the
 /// scripted gym folds a fork's answer ([`super::fold`]), its patches applied
 /// to the working object: `value` and one [`Event::Patched`] per patch;
@@ -8211,6 +8257,7 @@ fn folded(state: &mut State, text: &str, turn: u32, fork: u64) -> (log::ForkOutc
     let Some(interview) = state.interview.as_ref() else {
         return (log::ForkOutcome::Unparseable, Vec::new());
     };
+    let patches = unclashed(patches, &interview.object, (turn, fork));
     let patches = cited(patches, &interview.object);
     // Made under an open tangent (#22): stamped with it from birth, so its
     // close finds them by provenance and never by recency.
@@ -8405,7 +8452,13 @@ fn superseding(
     provenance: &crate::object::Provenance,
 ) -> Option<Patch> {
     let quoted = |c: char| "`'\"[]()<>*:,—-".contains(c);
-    let (cited, rest) = match pair.split_once('→').or_else(|| pair.split_once("->")) {
+    // An arrow points from the cited id only when it follows the id itself:
+    // one inside the text that stands is that text's (#730).
+    let arrowed = pair
+        .split_once('→')
+        .or_else(|| pair.split_once("->"))
+        .filter(|(cited, _)| !cited.trim().contains(char::is_whitespace));
+    let (cited, rest) = match arrowed {
         Some((cited, rest)) => (cited.trim(), rest),
         None => pair.split_once(char::is_whitespace).unwrap_or((pair, "")),
     };
@@ -20031,5 +20084,100 @@ pub(in crate::drive) mod tests {
             }
         )));
         tidy(&[&tree]);
+    }
+
+    /// Two forks in one turn's gap (#564 cadences) that record different
+    /// facts: the fold names both `interview-t<turn>-0`, so the second is
+    /// refused by the object as an id reused and settles `unparseable`.
+    #[test]
+    fn review_two_forks_in_one_turn_that_record_different_facts_both_fold() {
+        let tree = scratch("review-two-forks");
+        std::fs::write(tree.join("notes.md"), "a note\n").expect("a note");
+        std::fs::write(tree.join("lib.rs"), "pub fn f() {}\n").expect("a source");
+        let replies = vec![
+            vec![bash("call-1", "cat notes.md")],
+            vec![bash("call-2", "cat lib.rs")],
+            deltas(&["Done. Next, I will write the schema."]),
+            deltas(&["LEARNED: the notes hold one note\n"]),
+            deltas(&["LEARNED: the library exports f\n"]),
+        ];
+        let session = Session::open_with(
+            Canned::new(replies),
+            looping(),
+            None,
+            Some(tools(
+                Confinement::Unconfined,
+                &tree,
+                &["cat", "echo"],
+                None,
+                Decider::Decline,
+            )),
+            None,
+            Some(Interview {
+                cadence: Cadence::PerClass,
+                threshold_bytes: None,
+                ..interviewing(&[log::Warrant::Scoping, log::Warrant::Read])
+            }),
+        );
+        let log = through_the_gap(&session, 2);
+        let written: Vec<(String, String)> = patches(&log)
+            .into_iter()
+            .map(|entry| (entry.id, entry.text))
+            .collect();
+        eprintln!(
+            "fork outcomes {:?}; patches {written:?}",
+            fork_outcomes(&log)
+        );
+        tidy(&[&tree]);
+        assert_eq!(
+            fork_outcomes(&log),
+            [log::ForkOutcome::Value, log::ForkOutcome::Value],
+            "patches {written:?}"
+        );
+    }
+
+    /// #648: `→` or `->` stands between the cited id and its replacement.
+    /// An arrow inside the replacement's own text is taken as that
+    /// separator, so the cited "id" becomes the id plus prose and the pair
+    /// cites nothing: the supersede is lost and the field stays an add.
+    #[test]
+    fn review_a_supersede_whose_new_entry_holds_an_arrow_still_supersedes() {
+        for arrow in ["->", "→"] {
+            let object = object_of(&["interview-t1-0"]);
+            let text = format!("interview-t1-0 the pipeline is build {arrow} test {arrow} ship");
+            let patches = cited(vec![supersede_field("interview-t2-0", &text)], &object);
+            assert!(
+                matches!(
+                    patches.as_slice(),
+                    [Patch::Supersede { voids, .. }] if voids.as_str() == "interview-t1-0"
+                ),
+                "{arrow}: {patches:#?}"
+            );
+        }
+    }
+
+    /// #611: the fields an ask asks for are read off its answer
+    /// instruction. The first `field ` in the question is taken, and the
+    /// stated intent (and v4's record) come before the instruction.
+    #[test]
+    fn review_an_asks_fields_are_its_instructions_not_its_intents() {
+        let ask = router::Ask {
+            kind: AskKind::Judgment,
+            intent: router::stated_intent("Done. Next, I will add the fields for the email."),
+        }
+        .render_in(&crate::dogma::asks::V3, &Facts::default(), None);
+        assert_eq!(asked_fields(&ask), ["decision", "plan"], "{ask}");
+    }
+
+    /// #611 under the tools route (t1, #666): its asks name their fields in
+    /// lower case, so no fork is ever read as covered.
+    #[test]
+    fn review_a_tools_route_asks_fields_are_read() {
+        let ask = router::Ask {
+            kind: AskKind::Judgment,
+            intent: None,
+        }
+        .render_in(&crate::dogma::asks::T1, &Facts::default(), None);
+        assert_eq!(asked_fields(&ask), ["decision", "plan"], "{ask}");
     }
 }
