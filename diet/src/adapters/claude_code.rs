@@ -346,6 +346,34 @@ pub fn sidechains_beside(log: &Path) -> std::io::Result<Found> {
     Ok(found)
 }
 
+/// The digest of what a replay of `log` with the sidechains `found` beside
+/// it is built from (#736): the log's own sha256 when nothing was found, as
+/// before; otherwise the sha256 of a manifest -- the log's digest, then each
+/// sidechain's, in run-then-agent order -- so the same log replayed with and
+/// without its sidechains is not one source under one digest.
+#[must_use]
+pub fn source_digest(log: &str, found: &Found) -> String {
+    let log_digest = crate::digest::sha256_hex(log.as_bytes());
+    if found.sidechains.is_empty() {
+        return log_digest;
+    }
+    let mut parts: Vec<String> = found
+        .sidechains
+        .iter()
+        .map(|side| {
+            format!(
+                "{}/{}\t{}\n",
+                side.run_id.as_deref().unwrap_or("-"),
+                side.agent_id,
+                crate::digest::sha256_hex(side.text.as_bytes())
+            )
+        })
+        .collect();
+    parts.sort();
+    let manifest = format!("log\t{log_digest}\n{}", parts.concat());
+    crate::digest::sha256_hex(manifest.as_bytes())
+}
+
 /// Each `agent-<id>.jsonl` directly in `dir`, in name order.
 fn agents_in(dir: &Path, run_id: Option<&str>) -> std::io::Result<Vec<Sidechain>> {
     let mut paths: Vec<_> = std::fs::read_dir(dir)?
@@ -398,12 +426,9 @@ impl ClaudeCode {
         }
         let spawns = std::mem::take(&mut run.spawns);
         let mut joined = vec![false; spawns.len()];
+        let mut lanes: Vec<(usize, Vec<Event>)> = Vec::new();
         for side in &found.sidechains {
-            let spawned = spawns.iter().position(|spawn| match &side.run_id {
-                Some(run_id) => spawn.run_id.as_ref() == Some(run_id),
-                None => spawn.agent_id.as_ref() == Some(&side.agent_id),
-            });
-            let Some(at) = spawned else {
+            let Some(at) = spawning_call(&spawns, side) else {
                 run.census.sidechains_add("transcripts naming no call", 1);
                 continue;
             };
@@ -421,7 +446,10 @@ impl ClaudeCode {
             if let Some(agent_type) = &side.agent_type {
                 run.census.sidechains_add(&format!("type/{agent_type}"), 1);
             }
+            // Built apart, and placed after the call that spawned it (#736).
+            let main = std::mem::take(&mut run.events);
             run.side_lane(&lane, spawns[at].turn, &side.text)?;
+            lanes.push((spawns[at].call, std::mem::replace(&mut run.events, main)));
         }
         let unjoined = joined.iter().filter(|joined| !**joined).count();
         run.census.sidechains_add(
@@ -431,21 +459,72 @@ impl ClaudeCode {
         run.census
             .sidechains_add("journals not replayed", found.journals);
         Ok(Adapted {
-            events: run.events,
+            events: placed(run.events, lanes),
             census: run.census,
         })
     }
 }
 
+/// `main`'s events with each side lane in `lanes` placed right after the
+/// call that spawned it (#736): the record in the order things happened,
+/// several lanes off one call in the order they were found.
+fn placed(main: Vec<Event>, lanes: Vec<(usize, Vec<Event>)>) -> Vec<Event> {
+    let mut after: BTreeMap<usize, Vec<Event>> = BTreeMap::new();
+    for (call, events) in lanes {
+        after.entry(call).or_default().extend(events);
+    }
+    let mut out = Vec::with_capacity(main.len() + after.values().map(Vec::len).sum::<usize>());
+    for (at, event) in main.into_iter().enumerate() {
+        out.push(event);
+        if let Some(events) = after.remove(&at) {
+            out.extend(events);
+        }
+    }
+    out
+}
+
 /// A delegated run's spawning call, as the main log showed it (#708).
 #[derive(Debug, Clone)]
 struct Spawn {
+    /// Where its call sits in the main log's events: its lanes follow it.
+    call: usize,
     /// The turn that made the call.
     turn: u32,
     /// The agent its result names, for an `Agent` call.
     agent_id: Option<String>,
     /// The workflow run its result names, for a `Workflow` call.
     run_id: Option<String>,
+    /// When the call was made, as its row's timestamp (#736).
+    called: Option<String>,
+}
+
+/// The call `side` joins (#736): of the calls naming its run (or agent),
+/// the latest made at or before the sidechain's first row -- a resumed run
+/// reuses its `runId`, and the resume's agents start after the resume --
+/// else the first.
+fn spawning_call(spawns: &[Spawn], side: &Sidechain) -> Option<usize> {
+    let names = |spawn: &Spawn| match &side.run_id {
+        Some(run_id) => spawn.run_id.as_ref() == Some(run_id),
+        None => spawn.agent_id.as_ref() == Some(&side.agent_id),
+    };
+    let started = side.text.lines().find_map(|line| {
+        serde_json::from_str::<serde_json::Value>(line)
+            .ok()?
+            .get("timestamp")?
+            .as_str()
+            .map(str::to_owned)
+    });
+    let candidates: Vec<usize> = (0..spawns.len()).filter(|at| names(&spawns[*at])).collect();
+    started
+        .and_then(|started| {
+            candidates.iter().copied().rev().find(|at| {
+                spawns[*at]
+                    .called
+                    .as_ref()
+                    .is_some_and(|called| *called <= started)
+            })
+        })
+        .or_else(|| candidates.first().copied())
 }
 
 /// The side lane a walk is reading (#708): its name, and how many asks it
@@ -494,10 +573,42 @@ fn parse(log: &str) -> Result<Vec<(usize, &str, serde_json::Value)>, Drift> {
     Ok(rows)
 }
 
-/// The fields that are a row's content: what a repeat must match to be one
-/// (#500). Everything else -- `slug`, `promptId`, `cwd`, `gitBranch`,
-/// `parentUuid` -- is the envelope the app rewrites when a session resumes.
-const CONTENT: &[&str] = &["type", "message", "toolUseResult", "attachment"];
+/// What a repeat must match to be one (#500, #736): the row's `type`, its
+/// `message` but for `usage`, and its `attachment` but for `displayPath`.
+/// The rest is what the app rewrites when a session resumes: the envelope
+/// (`slug`, `promptId`, `cwd`, `gitBranch`, `parentUuid`) and the harness's
+/// side copy -- `toolUseResult`, whose output a repeat may carry truncated,
+/// `message.usage`, recounted, `attachment.displayPath`. What the model saw
+/// is in `message.content`, and that is what must match.
+fn content_of_row(row: &serde_json::Value) -> [Option<serde_json::Value>; 3] {
+    let without = |key: &str, drop: &str| {
+        row.get(key).map(|value| {
+            let mut value = value.clone();
+            if let Some(object) = value.as_object_mut() {
+                object.remove(drop);
+            }
+            value
+        })
+    };
+    [
+        row.get("type").cloned(),
+        without("message", "usage"),
+        without("attachment", "displayPath"),
+    ]
+}
+
+/// The names of [`content_of_row`]'s parts, for a refusal.
+const CONTENT: [&str; 3] = ["type", "message", "attachment"];
+
+/// The harness's side copy: what may differ in a repeat without it being a
+/// different row (#736).
+fn side_copy_of(row: &serde_json::Value) -> [Option<&serde_json::Value>; 3] {
+    [
+        row.get("toolUseResult"),
+        row.pointer("/message/usage"),
+        row.pointer("/attachment/displayPath"),
+    ]
+}
 
 /// `rows` with every repeat of a row id already read dropped (#500): the
 /// first occurrence kept, each drop counted by what it rewrote, and every
@@ -524,20 +635,20 @@ fn unrepeated<'a>(
             continue;
         };
         let (first_row, _, original) = &kept[at];
-        if let Some(field) = CONTENT
-            .iter()
-            .find(|field| row.get(**field) != original.get(**field))
-        {
+        let (repeat, first) = (content_of_row(&row), content_of_row(original));
+        if let Some(at) = (0..CONTENT.len()).find(|at| repeat[*at] != first[*at]) {
             return Err(Drift::RepeatDiffers {
                 at_row,
                 first_row: *first_row,
-                field: (*field).to_owned(),
+                field: CONTENT[at].to_owned(),
             });
         }
         census.repeated_one(if row == *original {
             "exact"
         } else if row.get("parentUuid") != original.get("parentUuid") {
             "parent-rewritten"
+        } else if side_copy_of(&row) != side_copy_of(original) {
+            "side-copy-rewritten"
         } else {
             "envelope-rewritten"
         });
@@ -567,6 +678,8 @@ struct Run {
     compacted: (u32, u32),
     /// The delegated runs the main log's calls spawned (#708).
     spawns: Vec<Spawn>,
+    /// Each call's id -> the timestamp of the row that made it (#736).
+    called_at: BTreeMap<String, String>,
     /// The side lane this walk reads, when it reads a sidechain (#708).
     side: Option<Side>,
 }
@@ -584,6 +697,7 @@ impl Run {
             awaiting: BTreeMap::new(),
             compacted: (0, 0),
             spawns: Vec::new(),
+            called_at: BTreeMap::new(),
             side: None,
         }
     }
@@ -628,7 +742,10 @@ impl Run {
         else {
             return;
         };
-        let Some(Event::ToolCall { tool, at_turn, .. }) = self.events.get(*at) else {
+        let Some(Event::ToolCall {
+            id, tool, at_turn, ..
+        }) = self.events.get(*at)
+        else {
             return;
         };
         if !SPAWNING.contains(&tool.as_str()) {
@@ -639,10 +756,13 @@ impl Run {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
         };
+        let called = self.called_at.get(id).cloned();
         self.spawns.push(Spawn {
+            call: *at,
             turn: *at_turn,
             agent_id: named("agentId"),
             run_id: named("runId"),
+            called,
         });
     }
 
@@ -678,8 +798,14 @@ impl Run {
         // A sidechain's own rows are the lane's turns when the walk reads
         // that sidechain as a side lane (#708); its `isMeta` text is still
         // the harness's.
-        let excluded =
-            excluded_from_parent(row).filter(|why| self.side.is_none() || *why != "isSidechain");
+        let excluded = if self.side.is_some() {
+            // A sidechain row is the lane's own; asked first, so a row that
+            // is both is still the harness's text (#736).
+            (row.get("isMeta").and_then(serde_json::Value::as_bool) == Some(true))
+                .then_some("isMeta")
+        } else {
+            excluded_from_parent(row)
+        };
         if let Some(why) = excluded {
             self.census.no_event_one(&format!("{}/{why}", mapped.tag()));
             return Ok(());
@@ -959,7 +1085,17 @@ impl Run {
                     };
                     spoke.push_str(text);
                 }
-                Some(Block::ToolUse) => self.tool_use(at_row, block)?,
+                Some(Block::ToolUse) => {
+                    // When it was called, for a delegated run's agents to
+                    // join the call that started them (#736).
+                    if let (Some(id), Some(at)) = (
+                        block.get("id").and_then(serde_json::Value::as_str),
+                        row.get("timestamp").and_then(serde_json::Value::as_str),
+                    ) {
+                        self.called_at.insert(id.to_owned(), at.to_owned());
+                    }
+                    self.tool_use(at_row, block)?;
+                }
                 // An answer in the row that asks. The mapping joins answers
                 // from `user` rows, so this is content with no home.
                 Some(known @ Block::ToolResult) => {
@@ -1459,7 +1595,8 @@ mod tests {
     const A_SUBSTRATE: &str = "claude-code";
 
     use super::{
-        Block, ClaudeCode, Found, MAPS, PREFILL_ASSUMED, Row, native_tool, sidechains_beside,
+        Block, ClaudeCode, Found, MAPS, PREFILL_ASSUMED, Row, Sidechain, native_tool,
+        sidechains_beside,
     };
     use crate::adapters::{Adapter, Drift};
     use crate::formats::record::{CompactionSource, Event};
@@ -2690,6 +2827,145 @@ mod tests {
         );
         assert!(adapted.census.models.is_empty());
         assert!(adapted.census.unattributed.contains_key("no model named"));
+    }
+
+    /// #736: a repeat whose `message.content` matches but whose harness's
+    /// side copy differs -- `toolUseResult.stdout` a truncated prefix, the
+    /// `usage` recounted -- is the same row written twice, dropped and
+    /// counted as `side-copy-rewritten`, never refused.
+    #[test]
+    fn a_repeat_differing_only_in_the_harness_side_copy_is_a_repeat() {
+        let log = include_str!("../../adapters/fixtures/claude-code/rows-that-repeat.jsonl");
+        let lines: Vec<&str> = log.lines().collect();
+        let truncated = lines[6].replace(
+            r#""toolUseResult":{"stdout":"fn parse() {}"}"#,
+            r#""toolUseResult":{"stdout":"fn pa"}"#,
+        );
+        assert_ne!(truncated, lines[6]);
+        let recounted = lines[5].replace(r#""output_tokens":42"#, r#""output_tokens":43"#);
+        assert_ne!(recounted, lines[5]);
+        let mut edited: Vec<String> = lines.iter().map(|line| (*line).to_owned()).collect();
+        edited[6] = truncated;
+        edited[5] = recounted;
+        let adapted = ClaudeCode
+            .adapt(&edited.join("\n"), A_SUBSTRATE)
+            .expect("a repeat whose side copy differs is a repeat");
+        assert_eq!(
+            adapted.census.repeated,
+            std::collections::BTreeMap::from([
+                ("exact".to_owned(), 1),
+                ("parent-rewritten".to_owned(), 1),
+                ("side-copy-rewritten".to_owned(), 1),
+            ]),
+            "the truncated repeat also moved its parent, which counts first"
+        );
+    }
+
+    /// #736: a sidechain's `isMeta` row -- text the harness composed -- is
+    /// not an ask of the lane, as it is not a turn of the trunk.
+    #[test]
+    fn a_sidechains_meta_row_is_not_an_ask() {
+        let (log, mut found) = delegated();
+        let side = found
+            .sidechains
+            .iter_mut()
+            .find(|side| side.agent_id == "x1")
+            .expect("the agent's sidechain");
+        let meta = r#"{"type":"user","message":{"role":"user","content":"<caveat>the harness wrote this</caveat>"},"uuid":"x1-meta","parentUuid":"x1-u1","isSidechain":true,"isMeta":true,"agentId":"x1","sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:00:00Z"}"#;
+        let (first, rest) = side.text.split_once('\n').expect("a first row");
+        side.text = format!("{first}\n{meta}\n{rest}");
+        let adapted = ClaudeCode
+            .adapt_with(&log, &found, A_SUBSTRATE)
+            .expect("it adapts");
+        let asks = adapted
+            .events
+            .iter()
+            .filter(|event| matches!(event, Event::Request { lane, .. } if lane == "sidechain/x1"))
+            .count();
+        assert_eq!(asks, 1, "the meta row is no second ask");
+        assert_eq!(adapted.census.sidechains.get("turns"), Some(&2));
+    }
+
+    /// #736: a resumed workflow run reuses its `runId`: each of its agents
+    /// joins the latest call naming that run made at or before the agent's
+    /// first row -- the resume's agents fork at the resume's turn -- and the
+    /// resume is a call with a transcript.
+    #[test]
+    fn a_resumed_workflow_runs_agents_join_the_call_that_resumed_it() {
+        let (log, mut found) = delegated();
+        let resume = [
+            r#"{"type":"user","message":{"role":"user","content":"resume the lexing"},"uuid":"u5","parentUuid":"a4","sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:10:00Z"}"#,
+            r#"{"type":"assistant","message":{"model":"model-one","role":"assistant","content":[{"type":"tool_use","id":"call-r","name":"Workflow","input":{"resumeFromRunId":"wf_1"}}],"usage":{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":3000,"output_tokens":20}},"uuid":"a5","parentUuid":"u5","sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:10:01Z"}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-r","content":"resumed"}]},"toolUseResult":{"runId":"wf_1","status":"completed"},"uuid":"u6","parentUuid":"a5","sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:12:00Z"}"#,
+        ];
+        let log = format!("{log}{}\n", resume.join("\n"));
+        let later = found
+            .sidechains
+            .iter()
+            .find(|side| side.agent_id == "y1")
+            .expect("the run's first agent")
+            .text
+            .replace("y1", "y2")
+            .replace("2026-01-01T00:00:00Z", "2026-01-01T00:11:00Z");
+        found.sidechains.push(Sidechain {
+            agent_id: "y2".to_owned(),
+            run_id: Some("wf_1".to_owned()),
+            agent_type: None,
+            text: later,
+        });
+        let adapted = ClaudeCode
+            .adapt_with(&log, &found, A_SUBSTRATE)
+            .expect("it adapts");
+        let forks: Vec<(String, u32)> = adapted
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Fork { lane, of_turn, .. } if lane.starts_with("sidechain/wf_1/") => {
+                    Some((lane.clone(), *of_turn))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            forks,
+            [
+                ("sidechain/wf_1/y1".to_owned(), 1),
+                ("sidechain/wf_1/y2".to_owned(), 2)
+            ]
+        );
+        assert_eq!(
+            adapted
+                .census
+                .sidechains
+                .get("spawning calls with no transcript"),
+            Some(&1),
+            "the failed call only; the resume has its agent"
+        );
+    }
+
+    /// #736: a side lane is written where it ran, right after the call that
+    /// spawned it, not after the whole main log -- the record is in the
+    /// order things happened.
+    #[test]
+    fn a_side_lane_follows_the_call_that_spawned_it() {
+        let (log, found) = delegated();
+        let adapted = ClaudeCode
+            .adapt_with(&log, &found, A_SUBSTRATE)
+            .expect("it adapts");
+        let at = |wanted: &dyn Fn(&Event) -> bool| {
+            adapted.events.iter().position(wanted).expect("the event")
+        };
+        let call = at(&|event| matches!(event, Event::ToolCall { id, .. } if id == "call-a"));
+        let fork = at(&|event| matches!(event, Event::Fork { lane, .. } if lane == "sidechain/x1"));
+        assert_eq!(
+            fork,
+            call + 1,
+            "the agent's lane opens right after its call"
+        );
+        let workflow = at(&|event| matches!(event, Event::ToolCall { id, .. } if id == "call-w"));
+        let run =
+            at(&|event| matches!(event, Event::Fork { lane, .. } if lane == "sidechain/wf_1/y1"));
+        assert_eq!(run, workflow + 1, "and the workflow agent's after its call");
     }
 
     /// #500: a repeat whose content differs from the row it repeats is

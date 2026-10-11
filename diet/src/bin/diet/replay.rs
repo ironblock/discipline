@@ -216,12 +216,6 @@ pub fn run(args: &[String]) -> ExitCode {
         }
     };
 
-    // The sha256 of the log this verb actually read, over its own bytes --
-    // before adapting, so it names the file that was opened rather than
-    // anything derived from it. `Start.source.source_digest` for the record
-    // built below.
-    let source_digest = diet::digest::sha256_hex(log.as_bytes());
-
     // The regimen declares exactly one substrate and the log names none, so
     // this is the id every adapted row is filed against. Reading it off the
     // regime rather than naming it here keeps one statement of what served.
@@ -236,6 +230,12 @@ pub fn run(args: &[String]) -> ExitCode {
                 return ExitCode::from(EXIT_COULD_NOT_RUN);
             }
         };
+    // The sha256 of what this verb actually read, over its own bytes --
+    // before adapting, so it names the files that were opened rather than
+    // anything derived from them: the log, and the sidechains beside it
+    // when there are any (#736). `Start.source.source_digest` for the record
+    // built below.
+    let source_digest = diet::adapters::claude_code::source_digest(&log, &found);
     let read = match adapter.adapt_with(&log, &found, &substrate) {
         Ok(read) => read,
         Err(drift) => {

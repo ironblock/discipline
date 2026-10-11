@@ -207,8 +207,10 @@ pub struct Census {
     /// Rows dropped as repeats of a row already read under the same row id
     /// (#500), by what the repeat rewrote: `exact`, `envelope-rewritten`
     /// (the session's bookkeeping -- `slug`, `promptId`, `cwd`,
-    /// `gitBranch`), or `parent-rewritten` (its `parentUuid`, which moves it
-    /// in the tree). Not counted in [`Census::rows`]: a repeat is not a row
+    /// `gitBranch`), `side-copy-rewritten` (the harness's copy of what the
+    /// model saw -- `toolUseResult`, `message.usage`,
+    /// `attachment.displayPath`, #736), or `parent-rewritten` (its
+    /// `parentUuid`, which moves it in the tree, counted first). Not counted in [`Census::rows`]: a repeat is not a row
     /// of the session, it is the session written down twice.
     pub repeated: BTreeMap<String, u64>,
 }
