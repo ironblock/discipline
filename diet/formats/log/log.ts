@@ -544,6 +544,7 @@ export type ForkLine = {
   role?: string;
   ask?: string;
   hazard?: string;
+  after_seam?: number;
 } & ({ substrate: string; model: string } | { substrate?: never; model?: never });
 
 export type ForkSettledLine = {
