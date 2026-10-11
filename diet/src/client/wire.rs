@@ -46,7 +46,7 @@ pub struct Reply {
     /// How many prompt tokens the server read.
     pub prompt_tokens: Option<u64>,
     /// How many of them it reused from its cache -- the direct measurement of
-    /// prefix stability, which is what the seam controller's claims are
+    /// prefix stability, which is what the meditation controller's claims are
     /// checked against.
     pub cached_tokens: Option<u64>,
     /// The sampler settings the server reports it used, by the names it used.
@@ -219,7 +219,7 @@ pub fn streaming_body(shape: &RequestShape) -> String {
 ///   third live-incident class is a level that rewrites the head, and a hash
 ///   that excluded them would hash two different rendered heads alike and
 ///   push a real mutation into the residual;
-/// * **every message but the last**, which is the prefix the seam controller
+/// * **every message but the last**, which is the prefix the meditation controller
 ///   claims stays byte-identical.
 ///
 /// **What is out:** the sampler pins, the output cap, the grammar, and the
@@ -879,7 +879,7 @@ mod tests {
         );
     }
 
-    /// #609, from seam smoke run 3: the harness's notes go out in the ask's
+    /// #609, from meditation smoke run 3: the harness's notes go out in the ask's
     /// own user message, each a text part BEFORE the operator's words, which
     /// come last -- Qwen Code's order; a message with no notes goes out as
     /// the plain string it always did.

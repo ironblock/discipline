@@ -554,7 +554,7 @@ vocabulary! {
         /// A capture wrote to the working object.
         Capture => "capture",
         /// The working object was rendered into a prompt.
-        Seam => "seam",
+        Meditation => "meditation",
         /// A tool was called.
         ToolCall => "tool_call",
         /// The frozen head a lane sends changed between two of its requests.
@@ -1143,7 +1143,7 @@ vocabulary! {
     }
 }
 
-/// A tool result the model pruned and a seam replaced (#612): the call's
+/// A tool result the model pruned and a meditation replaced (#612): the call's
 /// row, its whole's sha256, and the bytes the trunk no longer carries.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrunedOutput {
@@ -1169,7 +1169,7 @@ pub enum Event {
         /// is the one the run used when the two digests agree. Optional: a
         /// record adapted from another harness had no regimen file.
         regimen_sha256: Option<String>,
-        /// The fork delivery lever's state the session ran under (`seam`,
+        /// The fork delivery lever's state the session ran under (`meditation`,
         /// `advisory`, `imperative`), as its log's `session.start` names it.
         /// Optional: a session that never forks names none.
         fork_delivery: Option<log::ForkDelivery>,
@@ -1275,7 +1275,7 @@ pub enum Event {
     },
     /// A harness discarded its own history and put a summary in its place.
     ///
-    /// A SEAM-LIKE EVENT AND NOT A SEAM. A seam is this architecture's own
+    /// A MEDITATION-LIKE EVENT AND NOT A MEDITATION. A meditation is this architecture's own
     /// deliberate re-render, with the dumps either side; this is somebody
     /// else's harness throwing the prefix away -- a synthetic summary message
     /// injected mid-history and the session-start marker moved, which is a
@@ -1356,8 +1356,8 @@ pub enum Event {
         entries: u32,
     },
     /// The working object was rendered into a prompt.
-    Seam {
-        /// This seam's identifier.
+    Meditation {
+        /// This meditation's identifier.
         id: String,
         /// The turn it was rendered for.
         at_turn: u32,
@@ -1372,14 +1372,14 @@ pub enum Event {
         /// Their estimated tokens, beside `tail_tokens`.
         carried_tokens: Option<u64>,
         /// The prompt, in tokens as serve sized it, that fired an automatic
-        /// seam (#617); absent on any other seam.
+        /// meditation (#617); absent on any other meditation.
         prompt_tokens: Option<u64>,
         /// The context window it would not have fit, beside `prompt_tokens`.
         window: Option<u64>,
-        /// The tool results the model pruned that this seam replaced with
+        /// The tool results the model pruned that this meditation replaced with
         /// their reference lines (#612), in the order they were pruned.
         pruned: Option<Vec<PrunedOutput>>,
-        /// The operator's edits and flags this seam carried (#150): each
+        /// The operator's edits and flags this meditation carried (#150): each
         /// entry and `edit` or `flag`.
         operator_changes: Option<Vec<log::OperatorChange>>,
         /// Of those, the entries no answer addressed, carried on (#150).
@@ -1576,7 +1576,7 @@ impl Event {
             Self::Response { .. } => Kind::Response,
             Self::Fork { .. } => Kind::Fork,
             Self::Capture { .. } => Kind::Capture,
-            Self::Seam { .. } => Kind::Seam,
+            Self::Meditation { .. } => Kind::Meditation,
             Self::ToolCall { .. } => Kind::ToolCall,
             Self::Rejected { .. } => Kind::Rejected,
             Self::Claim { .. } => Kind::Claim,
@@ -1596,7 +1596,7 @@ impl Event {
             | Self::Response { id, .. }
             | Self::Fork { id, .. }
             | Self::Capture { id, .. }
-            | Self::Seam { id, .. }
+            | Self::Meditation { id, .. }
             | Self::ToolCall { id, .. }
             | Self::Rejected { id, .. }
             | Self::Claim { id, .. }
@@ -2532,7 +2532,7 @@ fn event(object: &Pair<'_, Rule>) -> Result<Event, ParseError> {
             from_fork: take_string(&mut members, of, "from_fork")?,
             entries: take_u32(&mut members, of, "entries")?,
         },
-        Kind::Seam => Event::Seam {
+        Kind::Meditation => Event::Meditation {
             id: take_string(&mut members, of, "id")?,
             at_turn: take_u32(&mut members, of, "at_turn")?,
             rendered_bytes: take_u64(&mut members, of, "rendered_bytes")?,
@@ -4109,7 +4109,7 @@ fn take_tool_output(
     }))
 }
 
-/// A seam row's `operator_changes` (#150): absent, or a non-empty list of
+/// A meditation row's `operator_changes` (#150): absent, or a non-empty list of
 /// objects holding exactly `entry` and `kind` (`edit` or `flag`).
 fn take_optional_operator_changes(
     members: &mut BTreeMap<String, Value>,
@@ -4206,7 +4206,7 @@ fn take_optional_share(
     }
 }
 
-/// A seam row's `pruned` (#612): absent, or a non-empty list of objects
+/// A meditation row's `pruned` (#612): absent, or a non-empty list of objects
 /// holding exactly `tool_call`, `sha256` and `bytes`.
 fn take_optional_pruned(
     members: &mut BTreeMap<String, Value>,
@@ -4581,7 +4581,7 @@ impl<'a> Seen<'a> {
             Event::Capture { id, from_fork, .. } => {
                 link(&self.ids, id, "from_fork", from_fork, Kind::Fork)?;
             }
-            Event::Seam { at_turn, .. } | Event::ToolCall { at_turn, .. } => {
+            Event::Meditation { at_turn, .. } | Event::ToolCall { at_turn, .. } => {
                 self.require_turn(*at_turn)?;
             }
             Event::Rejected {
@@ -5256,7 +5256,7 @@ fn event_value(event: &Event) -> BTreeMap<String, Value> {
             members.put_text("from_fork", from_fork);
             members.put_u32("entries", *entries);
         }
-        Event::Seam {
+        Event::Meditation {
             at_turn,
             rendered_bytes,
             tail_tokens,

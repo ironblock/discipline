@@ -1,5 +1,5 @@
 //! Model-elected pruning (#612): a tool the model calls to have an earlier
-//! tool result it no longer needs replaced, at a seam, by a pointer to its
+//! tool result it no longer needs replaced, at a meditation, by a pointer to its
 //! whole.
 //!
 //! **No harness convention.** Pi, `OpenCode` 2 and Qwen Code give the model
@@ -9,11 +9,11 @@
 //! words wait on the maintainer's approval before anyone turns it on.
 //!
 //! **The prefix rule holds** (#553): the trunk is never rewritten between
-//! seams. The tool answers at once; the replacement is made at the next
-//! seam (`prune_seam = "next"`, the default), or at a seam derived as soon
-//! as the turn settles (`"turn_end"`), refused or deferred as any seam is.
-//! At that seam a pruned output is carried as #596's `reference` line,
-//! verbatim, whatever `seam_tool_outputs` says -- in the section when its
+//! meditations. The tool answers at once; the replacement is made at the next
+//! meditation (`prune_meditation = "next"`, the default), or at a meditation derived as soon
+//! as the turn settles (`"turn_end"`), refused or deferred as any meditation is.
+//! At that meditation a pruned output is carried as #596's `reference` line,
+//! verbatim, whatever `meditation_tool_outputs` says -- in the section when its
 //! turn is compacted away, in place of the result when it sits in the kept
 //! tail.
 //!
@@ -36,7 +36,7 @@ pub const MODEL_PRUNING: &str = "model_pruning";
 
 /// The regimen key for when a prune is applied: `next` (the default) or
 /// `turn_end`.
-pub const PRUNE_SEAM: &str = "prune_seam";
+pub const PRUNE_MEDITATION: &str = "prune_meditation";
 
 /// The tool's description. Draft model-facing text: nobody turns the lever
 /// on until the maintainer approves it.
@@ -52,15 +52,15 @@ pub const CALL_DESCRIPTION: &str = "The command or file path of the earlier call
 
 /// When a prune is applied.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum PruneSeam {
-    /// At the next seam, whenever it fires.
+pub enum PruneMeditation {
+    /// At the next meditation, whenever it fires.
     #[default]
     Next,
-    /// At a seam derived as soon as the turn settles.
+    /// At a meditation derived as soon as the turn settles.
     TurnEnd,
 }
 
-impl PruneSeam {
+impl PruneMeditation {
     /// The regimen's word for it.
     #[must_use]
     pub fn word(self) -> &'static str {
@@ -84,21 +84,24 @@ impl PruneSeam {
 /// `None` unless `model_pruning = "on"`. Read leniently: any other value of
 /// either key is its default.
 #[must_use]
-pub fn of(regimen: &Regimen) -> Option<PruneSeam> {
+pub fn of(regimen: &Regimen) -> Option<PruneMeditation> {
     let word = |key: &str| match regimen.get(key) {
         Some(regimen::Value::String(word)) => Some(word.as_str()),
         _ => None,
     };
-    (word(MODEL_PRUNING) == Some("on")).then(|| match word(PRUNE_SEAM) {
-        Some("turn_end") => PruneSeam::TurnEnd,
-        _ => PruneSeam::Next,
+    (word(MODEL_PRUNING) == Some("on")).then(|| match word(PRUNE_MEDITATION) {
+        Some("turn_end") => PruneMeditation::TurnEnd,
+        _ => PruneMeditation::Next,
     })
 }
 
 /// The start row's word for the lever: `off`, or `on:next` / `on:turn_end`.
 #[must_use]
 pub fn lever(regimen: &Regimen) -> String {
-    of(regimen).map_or_else(|| "off".to_owned(), |seam| format!("on:{}", seam.word()))
+    of(regimen).map_or_else(
+        || "off".to_owned(),
+        |meditation| format!("on:{}", meditation.word()),
+    )
 }
 
 /// The tool, as a request declares it.
@@ -151,7 +154,7 @@ pub fn unmatched(call: &str) -> String {
     format!("{PRUNE_OUTPUT}: no earlier call matches `{call}`")
 }
 
-/// The refusal for a prune whose target a seam already compacted away.
+/// The refusal for a prune whose target a meditation already compacted away.
 pub const ALREADY_COMPACTED: &str = "prune_output: that result was already compacted away";
 
 /// The refusal for a prune whose target is already pruned.
@@ -171,15 +174,15 @@ mod tests {
         assert_eq!(read("model_pruning = \"yes\"\n"), (None, "off".to_owned()));
         assert_eq!(
             read("model_pruning = \"on\"\n"),
-            (Some(PruneSeam::Next), "on:next".to_owned())
+            (Some(PruneMeditation::Next), "on:next".to_owned())
         );
         assert_eq!(
-            read("model_pruning = \"on\"\nprune_seam = \"turn_end\"\n"),
-            (Some(PruneSeam::TurnEnd), "on:turn_end".to_owned())
+            read("model_pruning = \"on\"\nprune_meditation = \"turn_end\"\n"),
+            (Some(PruneMeditation::TurnEnd), "on:turn_end".to_owned())
         );
         assert_eq!(
-            read("model_pruning = \"on\"\nprune_seam = \"soon\"\n"),
-            (Some(PruneSeam::Next), "on:next".to_owned())
+            read("model_pruning = \"on\"\nprune_meditation = \"soon\"\n"),
+            (Some(PruneMeditation::Next), "on:next".to_owned())
         );
     }
 

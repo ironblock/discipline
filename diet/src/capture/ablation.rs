@@ -530,7 +530,7 @@ fn declines(field: &Field) -> bool {
 /// Echo of the ask is a fourth way to say nothing and is not read here -- it
 /// needs the ask, which these graders are not given, and it is the mimicry
 /// detector's endpoint rather than this ablation's. The corpus carries an
-/// echoed ask graded as engagement so that the seam is written down where a
+/// echoed ask graded as engagement so that the meditation is written down where a
 /// later reader will trip over it.
 #[must_use]
 pub fn grade(answer: &Answer) -> Grade {

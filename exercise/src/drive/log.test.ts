@@ -77,27 +77,27 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     );
   });
 
-  it("opens a second era at a served seam (v6, #493): its system prompt is the head's and the render, and it says what it carried", () => {
+  it("opens a second era at a served meditation (v6, #493): its system prompt is the head's and the render, and it says what it carried", () => {
     const file = 'a-v6-seam-the-operator-declared.jsonl';
-    const line = logOf(file).find((l) => l.kind === 'seam');
+    const line = logOf(file).find((l) => l.kind === 'meditation');
     const session = fold(logOf(file));
     expect(session.eras).toHaveLength(2);
     const era = session.eras[1]!;
     const head = logOf(file).find((l) => l.kind === 'session.start');
     const system = head?.kind === 'session.start' ? head.head.find((m) => m.role === 'system')?.content : undefined;
     // The head's system message, a blank line, then the render: what `refill` sends.
-    expect(era.system.text).toBe(line?.kind === 'seam' ? `${system}\n\n${line.render}` : undefined);
+    expect(era.system.text).toBe(line?.kind === 'meditation' ? `${system}\n\n${line.render}` : undefined);
     expect(era.system.render).toBe('placeholder');
-    expect(era.seam?.carried).toEqual({ entries: 1, turns: 0 });
+    expect(era.meditation?.carried).toEqual({ entries: 1, turns: 0 });
     expect(era.nodes.map((n) => n.kind)).toEqual(['user', 'assistant']);
   });
 
-  it('a seam since #597 leaves the system prompt alone: the era opens on the user message carrying the render', () => {
+  it('a meditation since #597 leaves the system prompt alone: the era opens on the user message carrying the render', () => {
     const file = 'a-v7-seam-whose-refill-is-a-message.jsonl';
-    const line = logOf(file).find((l) => l.kind === 'seam');
+    const line = logOf(file).find((l) => l.kind === 'meditation');
     const era = fold(logOf(file)).eras[1]!;
     expect(era.system.placement).toBe('message');
-    expect(era.system.text).toBe(line?.kind === 'seam' ? `<summary>\n${line.render}\n</summary>` : undefined);
+    expect(era.system.text).toBe(line?.kind === 'meditation' ? `<summary>\n${line.render}\n</summary>` : undefined);
   });
 
   it('folds a stopped call as cancelled, keeping what arrived', () => {
@@ -210,7 +210,7 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     ]);
   });
 
-  it('reads the phase graph off the first line, opens in its opening phase, and moves with each seam that moved (#563)', () => {
+  it('reads the phase graph off the first line, opens in its opening phase, and moves with each meditation that moved (#563)', () => {
     const log = logOf('a-v7-seam-that-moved-a-phase.jsonl');
     const opened = fold(log.slice(0, 1));
     expect(opened.phase).toBe('plan');
@@ -262,7 +262,7 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(session.memory.map((e) => [e.id, e.text, e.state, e.lane])).toEqual([['r3/call-1/fact', 'The parser drops blank lines before it tokenizes.', 'live', 'self-capture']]);
   });
 
-  it('folds an overflow with its sizes and who told it, a window seam with its size, a pruned call’s replacement, and a fork refused for the pool (#628, #633, #630, #637)', () => {
+  it('folds an overflow with its sizes and who told it, a window meditation with its size, a pruned call’s replacement, and a fork refused for the pool (#628, #633, #630, #637)', () => {
     const answerOf = (file: string) => fold(logOf(file)).eras.flatMap((e) => e.nodes).find((n) => n.kind === 'assistant');
     const inferred = answerOf('a-v7-overflow-told-from-the-prompts-size.jsonl');
     expect(inferred?.kind === 'assistant' && inferred.failure?.overflow).toEqual({ promptTokens: 161840, window: 163840, inferred: true });
@@ -270,7 +270,7 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(reported?.kind === 'assistant' && reported.failure?.reason).toBe('context_overflow');
     expect(reported?.kind === 'assistant' && reported.failure?.overflow).toBeUndefined();
     const windowed = fold(logOf('a-v7-window-seam-under-the-turn-it-makes-fit.jsonl'));
-    expect(windowed.eras[1]?.seam).toMatchObject({ reason: 'window', size: { promptTokens: 150000, window: 163840 } });
+    expect(windowed.eras[1]?.meditation).toMatchObject({ reason: 'window', size: { promptTokens: 150000, window: 163840 } });
     const pruned = fold(logOf('a-v7-prune-applied-at-the-turns-seam.jsonl')).eras[0]?.nodes.find((n) => n.kind === 'tool' && n.tool === 'bash');
     expect(pruned?.kind === 'tool' && pruned.pruned).toEqual({ bytes: 14, replaced: true });
     const [refused] = [...fold(logOf('a-v7-fork-refused-for-the-pool-and-one-that-may-displace-the-trunk-cache.jsonl')).branches.values()].flat();
@@ -291,7 +291,7 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(triggers).toEqual(['call:document-read:c1', 'turn_end']);
   });
 
-  it('folds a seam’s audit on its own lane: the entries it kept, updated and removed (#646)', () => {
+  it('folds a meditation’s audit on its own lane: the entries it kept, updated and removed (#646)', () => {
     const [audit] = [...fold(logOf('a-v7-seam-audited-on-its-lane-and-warmed.jsonl')).branches.values()].flat().filter((b) => b.lane === 'audit');
     expect(audit?.outcome).toBe('value');
     expect(audit?.audit).toEqual({ kept: [], updated: ['d1'], removed: [] });
@@ -309,7 +309,7 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     expect(call?.kind === 'tool' && call.ruled).toEqual({ choice: 'continue', to: 'build' });
   });
 
-  it('folds the operator’s edit and flag, the model writes refused over that entry, and the seam’s account of them (#150, #655)', () => {
+  it('folds the operator’s edit and flag, the model writes refused over that entry, and the meditation’s account of them (#150, #655)', () => {
     const session = fold(logOf('a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl'));
     expect([...session.unknown.keys()]).toEqual([]);
     const d2 = session.memory.find((e) => e.id === 'd2');
@@ -321,35 +321,35 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
         { op: 'supersede', by: 'fork 7' },
       ],
     ]);
-    expect(session.eras[1]?.seam).toMatchObject({ operatorChanges: [{ entry: 'd2', kind: 'edit' }, { entry: 'd2', kind: 'flag' }], unaddressed: ['d2'] });
+    expect(session.eras[1]?.meditation).toMatchObject({ operatorChanges: [{ entry: 'd2', kind: 'edit' }, { entry: 'd2', kind: 'flag' }], unaddressed: ['d2'] });
   });
 
-  it('folds a seam’s list of the background commands still running, each job’s id, command, since-state and output file (#614, #667)', () => {
+  it('folds a meditation’s list of the background commands still running, each job’s id, command, since-state and output file (#614, #667)', () => {
     const session = fold(logOf('a-v7-seam-that-listed-a-running-background-command.jsonl'));
     expect([...session.unknown.keys()]).toEqual([]);
-    const seam = session.eras.find((era) => era.seam)?.seam;
-    expect(seam?.background).toEqual([
+    const meditation = session.eras.find((era) => era.meditation)?.meditation;
+    expect(meditation?.background).toEqual([
       { id: 'bg_0123abcd', command: 'python3 -m http.server 8765', since: 'no output since it started', output: 'background/shell-bg_0123abcd.output' },
     ]);
   });
 
-  it('folds a seam held for the operator, and the refill that overrode it (#150’s gate, #698)', () => {
+  it('folds a meditation held for the operator, and the refill that overrode it (#150’s gate, #698)', () => {
     const log = logOf('a-v7-seam-held-for-the-operator-then-refilled-anyway.jsonl');
-    const atHold = log.findIndex((line) => line.kind === 'seam.held') + 1;
+    const atHold = log.findIndex((line) => line.kind === 'meditation.held') + 1;
     const held = fold(log.slice(0, atHold));
     expect([...held.unknown.keys()]).toEqual([]);
     expect(held.held).toEqual({ atTurn: 1, reason: 'operator', unaddressed: ['d2'] });
     const refilled = fold(log);
     expect(refilled.held).toBeUndefined();
-    expect(refilled.eras.find((era) => era.seam)?.seam?.refilledAnyway).toBe(true);
+    expect(refilled.eras.find((era) => era.meditation)?.meditation?.refilledAnyway).toBe(true);
   });
 
   it('folds a tail that kept no turn as its warning’s two sizes, and a tail that kept one as none (#693)', () => {
     const none = fold(logOf('a-v7-seam-whose-tail-kept-no-turn.jsonl'));
     expect([...none.unknown.keys()]).toEqual([]);
-    expect(none.eras.find((era) => era.seam)?.seam?.zeroTurns).toEqual({ newest: 27, budget: 20 });
+    expect(none.eras.find((era) => era.meditation)?.meditation?.zeroTurns).toEqual({ newest: 27, budget: 20 });
     const kept = fold(logOf('a-v7-seam-that-kept-a-tail.jsonl'));
-    expect(kept.eras.find((era) => era.seam)?.seam?.zeroTurns).toBeUndefined();
+    expect(kept.eras.find((era) => era.meditation)?.meditation?.zeroTurns).toBeUndefined();
   });
 
   it('takes the state from the log: an ended session is ended', () => {

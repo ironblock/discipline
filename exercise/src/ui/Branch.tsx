@@ -43,7 +43,7 @@ export function Branch({ node, open: initiallyOpen = false }: { readonly node: F
         stats={[
           // An offboard seat (#615): where it ran, and what reading the trunk cold cost there. A warm fork names none.
           // What triggered it (#620): the turn's end, or a call that warranted it mid-turn.
-          // A seam's audit (#646): what it did to working memory -- kept, updated, removed.
+          // A meditation's audit (#646): what it did to working memory -- kept, updated, removed.
           node.audit && {
             value: <span className="ex-branch__audit">{`kept ${node.audit.kept.length} · updated ${node.audit.updated.length} · removed ${node.audit.removed.length}`}</span>,
             title: [`kept: ${node.audit.kept.join(', ') || 'none'}`, `updated: ${node.audit.updated.join(', ') || 'none'}`, `removed: ${node.audit.removed.join(', ') || 'none'}`].join('\n'),

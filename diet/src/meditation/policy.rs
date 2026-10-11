@@ -1,10 +1,10 @@
-//! What the regimen says about when a seam fires.
+//! What the regimen says about when a meditation fires.
 //!
 //! Every trigger is read from the regimen and is a number or a list. Nothing
 //! here is a judgment. The scripted drive's budget is the byte count of the
-//! working set at which a seam fires. A served session's budget is trunk
+//! working set at which a meditation fires. A served session's budget is trunk
 //! tokens as a fraction of the substrate's serving context
-//! ([`SEAM_AT_CONTEXT_FRACTION`]): prefill cost scales with the trunk, which
+//! ([`MEDITATION_AT_CONTEXT_FRACTION`]): prefill cost scales with the trunk, which
 //! is the premise's unit, and the threshold in tokens is reported with the
 //! policy so a reader need not do the arithmetic.
 //!
@@ -20,48 +20,48 @@ use crate::formats::regimen::{Regimen, Value};
 
 use super::phase::PhaseGraph;
 
-/// The keys a regimen may carry for the seam controller.
+/// The keys a regimen may carry for the meditation controller.
 ///
 /// Written out so a misspelling in a regimen is a key nobody reads rather
 /// than a trigger nobody notices is missing. Nothing checks for unknown keys:
 /// a regimen carries far more than this module's business.
-pub const SEAM_EVERY_TURNS: &str = "seam_every_turns";
-/// The byte count at which the working set fires a seam.
-pub const SEAM_AT_WORKING_SET_BYTES: &str = "seam_at_working_set_bytes";
+pub const MEDITATION_EVERY_TURNS: &str = "meditation_every_turns";
+/// The byte count at which the working set fires a meditation.
+pub const MEDITATION_AT_WORKING_SET_BYTES: &str = "meditation_at_working_set_bytes";
 /// The fraction of the serving context the trunk may reach before a served
-/// session seams, written as a decimal in (0, 1].
-pub const SEAM_AT_CONTEXT_FRACTION: &str = "seam_at_context_fraction";
+/// session meditations, written as a decimal in (0, 1].
+pub const MEDITATION_AT_CONTEXT_FRACTION: &str = "meditation_at_context_fraction";
 
 /// The compaction depth (#552): how many estimated tokens of the old
-/// trunk's most recent whole turns a served seam keeps after the refill.
+/// trunk's most recent whole turns a served meditation keeps after the refill.
 /// Absent or 0 is the total refill (#505).
-pub const SEAM_TAIL_TOKENS: &str = "seam_tail_tokens";
-/// What a served seam's refill carries of the tool outputs it compacts away
+pub const MEDITATION_TAIL_TOKENS: &str = "meditation_tail_tokens";
+/// What a served meditation's refill carries of the tool outputs it compacts away
 /// (#553): `evict` (the default), `reference`, `salient` or `keep`, read
 /// leniently -- any other value is unset.
-pub const SEAM_TOOL_OUTPUTS: &str = "seam_tool_outputs";
-/// The automatic seam (#617): on unless the regimen says `"off"`. Before
+pub const MEDITATION_TOOL_OUTPUTS: &str = "meditation_tool_outputs";
+/// The automatic meditation (#617): on unless the regimen says `"off"`. Before
 /// every trunk request a served session that keeps working memory and knows
 /// its window refills the trunk when the prompt would leave less than
 /// [`WINDOW_RESERVE`] (or the output cap, if more) of the window.
-pub const SEAM_WINDOW: &str = "seam_window";
-/// The room the automatic seam keeps for a request's output (#617):
+pub const MEDITATION_WINDOW: &str = "meditation_window";
+/// The room the automatic meditation keeps for a request's output (#617):
 /// `OpenCode` 2's `DEFAULT_BUFFER`, or the output cap when that is larger
 /// (`oc:packages/core/src/session/compaction.ts:12,236-240`).
 pub const WINDOW_RESERVE: u64 = 20_000;
-/// A seam's audit (#504): `"on"` (or `true`) puts the dogma's pinned audit
+/// A meditation's audit (#504): `"on"` (or `true`) puts the dogma's pinned audit
 /// ask over working memory before the refill and folds its answer; off by
 /// default.
-pub const SEAM_AUDIT: &str = "seam_audit";
-/// A seam's pre-warm (#504): `"on"` (or `true`) sends the refilled trunk
+pub const MEDITATION_AUDIT: &str = "meditation_audit";
+/// A meditation's pre-warm (#504): `"on"` (or `true`) sends the refilled trunk
 /// once, with an output cap of one, so the next ask finds it cached; off by
-/// default, and never after a `window` seam, whose request warms it.
-pub const SEAM_WARM: &str = "seam_warm";
-/// Whether a seam refills over an operator change no audit addressed
+/// default, and never after a `window` meditation, whose request warms it.
+pub const MEDITATION_WARM: &str = "meditation_warm";
+/// Whether a meditation refills over an operator change no audit addressed
 /// (#150): `"carry"`, the default, refills and carries the change to the
-/// next seam; `"refuse"` re-asks the reconciling audit once over the
-/// changes left, then holds the seam for the operator. `"refuse"` needs
-/// [`SEAM_AUDIT`] on: only an audit addresses a change.
+/// next meditation; `"refuse"` re-asks the reconciling audit once over the
+/// changes left, then holds the meditation for the operator. `"refuse"` needs
+/// [`MEDITATION_AUDIT`] on: only an audit addresses a change.
 pub const RECONCILE_GATE: &str = "reconcile_gate";
 
 /// Whether `regimen` turns `key` on: `"on"` or `true`.
@@ -73,7 +73,7 @@ fn on(regimen: &Regimen, key: &str) -> bool {
     }
 }
 
-/// The render budget (#565): estimated tokens the seam's render may run to.
+/// The render budget (#565): estimated tokens the meditation's render may run to.
 /// Read leniently: absent, or anything but a positive integer, is no budget.
 pub const RENDER_BUDGET_TOKENS: &str = "render_budget_tokens";
 
@@ -85,18 +85,18 @@ pub const PHASES: &str = "phases";
 /// The table of allowed transitions, one array per phase.
 pub const PHASE_TRANSITIONS: &str = "phase_transitions";
 
-/// When this session's seams fire.
+/// When this session's meditations fire.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Policy {
-    /// A seam every N turns, if a cadence is declared.
+    /// A meditation every N turns, if a cadence is declared.
     pub every_turns: Option<u32>,
-    /// A seam when the working set reaches this many bytes, if declared.
+    /// A meditation when the working set reaches this many bytes, if declared.
     pub at_working_set_bytes: Option<u64>,
     /// The phase graph, which may be empty.
     pub phases: PhaseGraph,
 }
 
-/// Why a regimen does not describe a seam policy.
+/// Why a regimen does not describe a meditation policy.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PolicyError {
     /// A key that must hold a whole number holds something else.
@@ -139,7 +139,7 @@ pub enum PolicyError {
     /// [`RECONCILE_GATE`] holds a word other than `carry` or `refuse`.
     NotAGate,
     /// [`RECONCILE_GATE`] is `refuse` with the audit off: nothing could
-    /// address a change, so every seam with one would hold.
+    /// address a change, so every meditation with one would hold.
     GateWithoutAudit,
 }
 
@@ -175,13 +175,13 @@ impl fmt::Display for PolicyError {
             }
             Self::NoServingContext => write!(
                 f,
-                "`{SEAM_AT_CONTEXT_FRACTION}` is declared and the substrate's \
+                "`{MEDITATION_AT_CONTEXT_FRACTION}` is declared and the substrate's \
                  `serving_context` is not in the registry, so it names no token count"
             ),
             Self::NotServed(key) => write!(
                 f,
                 "a served session does not read `{key}`; its triggers are \
-                 `{SEAM_EVERY_TURNS}` and `{SEAM_AT_CONTEXT_FRACTION}`"
+                 `{MEDITATION_EVERY_TURNS}` and `{MEDITATION_AT_CONTEXT_FRACTION}`"
             ),
             Self::NotAGate => write!(
                 f,
@@ -189,8 +189,8 @@ impl fmt::Display for PolicyError {
             ),
             Self::GateWithoutAudit => write!(
                 f,
-                "`{RECONCILE_GATE} = \"refuse\"` needs `{SEAM_AUDIT}` on: only the \
-                 audit addresses an operator change, so every seam with one would hold"
+                "`{RECONCILE_GATE} = \"refuse\"` needs `{MEDITATION_AUDIT}` on: only the \
+                 audit addresses an operator change, so every meditation with one would hold"
             ),
         }
     }
@@ -198,13 +198,13 @@ impl fmt::Display for PolicyError {
 
 impl Error for PolicyError {}
 
-/// [`SEAM_TOOL_OUTPUTS`] read, leniently: a state's word, or `evict`.
+/// [`MEDITATION_TOOL_OUTPUTS`] read, leniently: a state's word, or `evict`.
 #[must_use]
-pub fn seam_tool_outputs(regimen: &Regimen) -> crate::formats::log::SeamToolOutputs {
-    use crate::formats::log::SeamToolOutputs;
-    match regimen.get(SEAM_TOOL_OUTPUTS) {
-        Some(Value::String(word)) => SeamToolOutputs::from_tag(word).unwrap_or_default(),
-        _ => SeamToolOutputs::default(),
+pub fn meditation_tool_outputs(regimen: &Regimen) -> crate::formats::log::MeditationToolOutputs {
+    use crate::formats::log::MeditationToolOutputs;
+    match regimen.get(MEDITATION_TOOL_OUTPUTS) {
+        Some(Value::String(word)) => MeditationToolOutputs::from_tag(word).unwrap_or_default(),
+        _ => MeditationToolOutputs::default(),
     }
 }
 
@@ -217,7 +217,7 @@ impl Policy {
     /// count, or a transition naming a phase that was never declared.
     pub fn from_regimen(regimen: &Regimen) -> Result<Self, PolicyError> {
         let every_turns = Self::from_regimen_cadence(regimen)?;
-        let at_working_set_bytes = positive(regimen, SEAM_AT_WORKING_SET_BYTES)?;
+        let at_working_set_bytes = positive(regimen, MEDITATION_AT_WORKING_SET_BYTES)?;
         Ok(Self {
             every_turns,
             at_working_set_bytes,
@@ -265,25 +265,25 @@ pub fn phase_graph(regimen: &Regimen) -> Result<PhaseGraph, PolicyError> {
 }
 
 impl Policy {
-    /// The cadence `regimen` declares under [`SEAM_EVERY_TURNS`], which the
+    /// The cadence `regimen` declares under [`MEDITATION_EVERY_TURNS`], which the
     /// scripted and the served policy read alike.
     fn from_regimen_cadence(regimen: &Regimen) -> Result<Option<u32>, PolicyError> {
-        Ok(match positive(regimen, SEAM_EVERY_TURNS)? {
+        Ok(match positive(regimen, MEDITATION_EVERY_TURNS)? {
             // The comment here used to say the cast was safe because
             // `positive` had refused anything that did not fit. It had not:
             // `positive` refuses non-positive numbers and the regimen carries
-            // an `i64`, so `seam_every_turns = 5000000000` clamped silently to
+            // an `i64`, so `meditation_every_turns = 5000000000` clamped silently to
             // `u32::MAX` -- a declared cadence turning into a different,
             // effectively-never one with no error anywhere.
             Some(count) => Some(u32::try_from(count).map_err(|_| PolicyError::DoesNotFit {
-                key: SEAM_EVERY_TURNS,
+                key: MEDITATION_EVERY_TURNS,
                 value: count,
             })?),
             None => None,
         })
     }
 
-    /// Whether anything in this policy can fire a seam.
+    /// Whether anything in this policy can fire a meditation.
     ///
     /// A controller under a policy that declares nothing never renders, which
     /// is a legal session and a surprising one; a caller that wants to know
@@ -294,48 +294,48 @@ impl Policy {
     }
 }
 
-/// When a served session's derived seams fire: after an operator turn
+/// When a served session's derived meditations fire: after an operator turn
 /// returns the session to awaiting, a cadence of operator turns since the
-/// last seam, or the trunk reaching a token count. The operator's own
+/// last meditation, or the trunk reaching a token count. The operator's own
 /// declaration is not here: it is a command, always available.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Served {
-    /// A seam once this many operator turns have settled since the last.
+    /// A meditation once this many operator turns have settled since the last.
     pub every_turns: Option<u32>,
-    /// A seam once the trunk holds this many tokens:
-    /// [`SEAM_AT_CONTEXT_FRACTION`] of the serving context, rounded down.
+    /// A meditation once the trunk holds this many tokens:
+    /// [`MEDITATION_AT_CONTEXT_FRACTION`] of the serving context, rounded down.
     pub at_trunk_tokens: Option<u64>,
-    /// The compaction depth: estimated tokens of recent whole turns a seam
-    /// keeps after the refill ([`SEAM_TAIL_TOKENS`]); 0, the total refill.
+    /// The compaction depth: estimated tokens of recent whole turns a meditation
+    /// keeps after the refill ([`MEDITATION_TAIL_TOKENS`]); 0, the total refill.
     pub tail_tokens: u64,
-    /// What a seam carries of the tool outputs it compacts away
-    /// ([`SEAM_TOOL_OUTPUTS`]).
-    pub outputs: crate::formats::log::SeamToolOutputs,
+    /// What a meditation carries of the tool outputs it compacts away
+    /// ([`MEDITATION_TOOL_OUTPUTS`]).
+    pub outputs: crate::formats::log::MeditationToolOutputs,
     /// The render's budget ([`RENDER_BUDGET_TOKENS`], #565), when declared.
     pub render_budget: Option<super::render::Budget>,
-    /// Whether the regimen turned the automatic seam off ([`SEAM_WINDOW`],
+    /// Whether the regimen turned the automatic meditation off ([`MEDITATION_WINDOW`],
     /// #617): on by default, as Pi and `OpenCode` 2 both have it.
     pub window_off: bool,
-    /// Whether a seam puts the dogma's audit ask to the model before its
-    /// refill ([`SEAM_AUDIT`], #504).
+    /// Whether a meditation puts the dogma's audit ask to the model before its
+    /// refill ([`MEDITATION_AUDIT`], #504).
     pub audit: bool,
-    /// Whether a seam sends its refilled trunk once to warm the cache
-    /// ([`SEAM_WARM`], #504).
+    /// Whether a meditation sends its refilled trunk once to warm the cache
+    /// ([`MEDITATION_WARM`], #504).
     pub warm: bool,
-    /// Whether a seam refills over an unaddressed operator change
+    /// Whether a meditation refills over an unaddressed operator change
     /// ([`RECONCILE_GATE`], #150).
     pub reconcile_gate: ReconcileGate,
 }
 
-/// What a seam does about an operator change no audit addressed
+/// What a meditation does about an operator change no audit addressed
 /// ([`RECONCILE_GATE`], #150).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ReconcileGate {
-    /// Refill, and carry the change to the next seam: the default.
+    /// Refill, and carry the change to the next meditation: the default.
     #[default]
     Carry,
     /// Re-ask the reconciling audit once over what is left, then hold the
-    /// seam for the operator.
+    /// meditation for the operator.
     Refuse,
 }
 
@@ -370,15 +370,15 @@ impl Served {
         serving_context: Option<u64>,
     ) -> Result<Self, PolicyError> {
         // The phase graph is read beside this, by `phase_graph` (#563).
-        if regimen.get(SEAM_AT_WORKING_SET_BYTES).is_some() {
-            return Err(PolicyError::NotServed(SEAM_AT_WORKING_SET_BYTES));
+        if regimen.get(MEDITATION_AT_WORKING_SET_BYTES).is_some() {
+            return Err(PolicyError::NotServed(MEDITATION_AT_WORKING_SET_BYTES));
         }
         let every_turns = Policy::from_regimen_cadence(regimen)?;
-        let at_trunk_tokens = match regimen.get(SEAM_AT_CONTEXT_FRACTION) {
+        let at_trunk_tokens = match regimen.get(MEDITATION_AT_CONTEXT_FRACTION) {
             None => None,
             Some(value) => {
-                let fraction =
-                    fraction(value).ok_or(PolicyError::NotAFraction(SEAM_AT_CONTEXT_FRACTION))?;
+                let fraction = fraction(value)
+                    .ok_or(PolicyError::NotAFraction(MEDITATION_AT_CONTEXT_FRACTION))?;
                 let window = serving_context.ok_or(PolicyError::NoServingContext)?;
                 // An f64 holds every serving context exactly (they are far
                 // below 2^53), and the product is floored, so the threshold
@@ -392,13 +392,13 @@ impl Served {
                 Some(tokens.max(1))
             }
         };
-        let tail_tokens = match regimen.get(SEAM_TAIL_TOKENS) {
+        let tail_tokens = match regimen.get(MEDITATION_TAIL_TOKENS) {
             None => 0,
             Some(Value::Integer(count)) if *count >= 0 => count.unsigned_abs(),
             Some(Value::Integer(_)) => {
-                return Err(PolicyError::NotPositive(SEAM_TAIL_TOKENS));
+                return Err(PolicyError::NotPositive(MEDITATION_TAIL_TOKENS));
             }
-            Some(_) => return Err(PolicyError::NotAnInteger(SEAM_TAIL_TOKENS)),
+            Some(_) => return Err(PolicyError::NotAnInteger(MEDITATION_TAIL_TOKENS)),
         };
         let reconcile_gate = match regimen.get(RECONCILE_GATE) {
             None => ReconcileGate::Carry,
@@ -406,7 +406,7 @@ impl Served {
             Some(Value::String(word)) if word == "refuse" => ReconcileGate::Refuse,
             Some(_) => return Err(PolicyError::NotAGate),
         };
-        if reconcile_gate == ReconcileGate::Refuse && !on(regimen, SEAM_AUDIT) {
+        if reconcile_gate == ReconcileGate::Refuse && !on(regimen, MEDITATION_AUDIT) {
             return Err(PolicyError::GateWithoutAudit);
         }
         Ok(Self {
@@ -414,33 +414,36 @@ impl Served {
             every_turns,
             at_trunk_tokens,
             tail_tokens,
-            outputs: seam_tool_outputs(regimen),
+            outputs: meditation_tool_outputs(regimen),
             render_budget: render_budget(regimen),
-            audit: on(regimen, SEAM_AUDIT),
-            warm: on(regimen, SEAM_WARM),
-            window_off: matches!(regimen.get(SEAM_WINDOW), Some(Value::String(word)) if word == "off")
-                || matches!(regimen.get(SEAM_WINDOW), Some(Value::Boolean(false))),
+            audit: on(regimen, MEDITATION_AUDIT),
+            warm: on(regimen, MEDITATION_WARM),
+            window_off: matches!(regimen.get(MEDITATION_WINDOW), Some(Value::String(word)) if word == "off")
+                || matches!(regimen.get(MEDITATION_WINDOW), Some(Value::Boolean(false))),
         })
     }
 
-    /// Whether anything in this policy can fire a derived seam.
+    /// Whether anything in this policy can fire a derived meditation.
     #[must_use]
     pub fn declares_a_trigger(&self) -> bool {
         self.every_turns.is_some() || self.at_trunk_tokens.is_some()
     }
 
     /// The trigger due, if any: the budget first, as the scripted
-    /// controller ranks it. `since_seam` counts operator turns settled since
-    /// the last seam, or since the session opened; `trunk_tokens` is the
+    /// controller ranks it. `since_meditation` counts operator turns settled since
+    /// the last meditation, or since the session opened; `trunk_tokens` is the
     /// trunk as the latest trunk call measured it.
     #[must_use]
-    pub fn due(&self, since_seam: u32, trunk_tokens: Option<u64>) -> Option<super::Reason> {
+    pub fn due(&self, since_meditation: u32, trunk_tokens: Option<u64>) -> Option<super::Reason> {
         if let (Some(limit), Some(tokens)) = (self.at_trunk_tokens, trunk_tokens)
             && tokens >= limit
         {
             return Some(super::Reason::Budget);
         }
-        if self.every_turns.is_some_and(|every| since_seam >= every) {
+        if self
+            .every_turns
+            .is_some_and(|every| since_meditation >= every)
+        {
             return Some(super::Reason::Cadence);
         }
         None
@@ -495,7 +498,7 @@ fn names(regimen: &Regimen, key: &'static str) -> Result<Option<Vec<String>>, Po
 mod tests {
     use super::*;
     use crate::formats::regimen;
-    use crate::seam::Reason;
+    use crate::meditation::Reason;
 
     fn served(text: &str, window: Option<u64>) -> Result<Served, PolicyError> {
         Served::from_regimen(&regimen::parse(text).expect("a regimen"), window)
@@ -513,7 +516,7 @@ mod tests {
             Ok(ReconcileGate::Carry)
         );
         assert_eq!(
-            gate("seam_audit = \"on\"\nreconcile_gate = \"refuse\"\n"),
+            gate("meditation_audit = \"on\"\nreconcile_gate = \"refuse\"\n"),
             Ok(ReconcileGate::Refuse)
         );
         assert_eq!(
@@ -521,7 +524,7 @@ mod tests {
             Err(PolicyError::GateWithoutAudit)
         );
         assert_eq!(
-            gate("seam_audit = \"on\"\nreconcile_gate = \"hold\"\n"),
+            gate("meditation_audit = \"on\"\nreconcile_gate = \"hold\"\n"),
             Err(PolicyError::NotAGate)
         );
     }
@@ -529,18 +532,18 @@ mod tests {
     /// The compaction depth (#552): absent is 0, the total refill; a
     /// whole number of tokens otherwise, 0 included; anything else refused.
     #[test]
-    fn the_seam_tail_is_a_whole_number_of_tokens_defaulting_to_none() {
+    fn the_meditation_tail_is_a_whole_number_of_tokens_defaulting_to_none() {
         assert_eq!(served("", None).map(|s| s.tail_tokens), Ok(0));
         assert_eq!(
-            served("seam_tail_tokens = 0\n", None).map(|s| s.tail_tokens),
+            served("meditation_tail_tokens = 0\n", None).map(|s| s.tail_tokens),
             Ok(0)
         );
         assert_eq!(
-            served("seam_tail_tokens = 8000\n", None).map(|s| s.tail_tokens),
+            served("meditation_tail_tokens = 8000\n", None).map(|s| s.tail_tokens),
             Ok(8000)
         );
-        assert!(served("seam_tail_tokens = -1\n", None).is_err());
-        assert!(served("seam_tail_tokens = \"lots\"\n", None).is_err());
+        assert!(served("meditation_tail_tokens = -1\n", None).is_err());
+        assert!(served("meditation_tail_tokens = \"lots\"\n", None).is_err());
     }
 
     #[test]
@@ -548,7 +551,7 @@ mod tests {
         assert_eq!(served("", Some(160_000)), Ok(Served::default()));
         assert_eq!(
             served(
-                "seam_every_turns = 4\nseam_at_context_fraction = 0.6\n",
+                "meditation_every_turns = 4\nmeditation_at_context_fraction = 0.6\n",
                 Some(160_000)
             ),
             Ok(Served {
@@ -556,7 +559,7 @@ mod tests {
                 every_turns: Some(4),
                 at_trunk_tokens: Some(96_000),
                 tail_tokens: 0,
-                outputs: crate::formats::log::SeamToolOutputs::Evict,
+                outputs: crate::formats::log::MeditationToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -564,13 +567,13 @@ mod tests {
             })
         );
         assert_eq!(
-            served("seam_at_context_fraction = 1\n", Some(8192)),
+            served("meditation_at_context_fraction = 1\n", Some(8192)),
             Ok(Served {
                 reconcile_gate: ReconcileGate::Carry,
                 every_turns: None,
                 at_trunk_tokens: Some(8192),
                 tail_tokens: 0,
-                outputs: crate::formats::log::SeamToolOutputs::Evict,
+                outputs: crate::formats::log::MeditationToolOutputs::Evict,
                 render_budget: None,
                 window_off: false,
                 warm: false,
@@ -579,22 +582,25 @@ mod tests {
         );
         for bad in ["0.0", "1.5", "-0.2", "\"half\""] {
             assert_eq!(
-                served(&format!("seam_at_context_fraction = {bad}\n"), Some(8192)),
-                Err(PolicyError::NotAFraction(SEAM_AT_CONTEXT_FRACTION)),
+                served(
+                    &format!("meditation_at_context_fraction = {bad}\n"),
+                    Some(8192)
+                ),
+                Err(PolicyError::NotAFraction(MEDITATION_AT_CONTEXT_FRACTION)),
                 "{bad}"
             );
         }
         assert_eq!(
-            served("seam_at_context_fraction = 0.5\n", None),
+            served("meditation_at_context_fraction = 0.5\n", None),
             Err(PolicyError::NoServingContext)
         );
         assert_eq!(
-            served("seam_every_turns = 0\n", None),
-            Err(PolicyError::NotPositive(SEAM_EVERY_TURNS))
+            served("meditation_every_turns = 0\n", None),
+            Err(PolicyError::NotPositive(MEDITATION_EVERY_TURNS))
         );
         assert_eq!(
-            served("seam_at_working_set_bytes = 4096\n", None),
-            Err(PolicyError::NotServed(SEAM_AT_WORKING_SET_BYTES))
+            served("meditation_at_working_set_bytes = 4096\n", None),
+            Err(PolicyError::NotServed(MEDITATION_AT_WORKING_SET_BYTES))
         );
         // #563: a served session reads its phase graph (`phase_graph`).
         assert!(served("phases = [\"plan\", \"build\"]\n", None).is_ok());
@@ -607,7 +613,7 @@ mod tests {
             every_turns: Some(3),
             at_trunk_tokens: Some(1000),
             tail_tokens: 0,
-            outputs: crate::formats::log::SeamToolOutputs::Evict,
+            outputs: crate::formats::log::MeditationToolOutputs::Evict,
             render_budget: None,
             window_off: false,
             warm: false,

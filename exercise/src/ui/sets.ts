@@ -10,7 +10,7 @@
 
 import type { CSSProperties } from 'react';
 
-import type { ApprovalScope, FailReason, ForkLane, ForkOutcome, PatchOp, SeamReason, SettleReason, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
+import type { ApprovalScope, FailReason, ForkLane, ForkOutcome, PatchOp, MeditationReason, SettleReason, Tool, ToolOutcome, ToolRefusal } from '../drive/log.ts';
 import type { Stop } from '../session/fold.ts';
 import type { Refusal } from '../drive/transport.ts';
 
@@ -152,9 +152,9 @@ export function opOf(op: PatchOp): Op {
   return entry ? { ...entry, known: true } : { glyph: '·', label: op, level: 'quiet', known: false };
 }
 
-// ------------------------------------------------------------------ seams, stops, settlements
+// ------------------------------------------------------------------ meditations, stops, settlements
 
-export const seamReasonOf = registry<SeamReason>({
+export const meditationReasonOf = registry<MeditationReason>({
   operator: { label: 'declared by you', level: 'quiet' },
   phase: { label: 'phase', level: 'quiet' },
   cadence: { label: 'cadence', level: 'quiet' },
@@ -200,14 +200,14 @@ export const failOf = registry<FailReason>({
 export const refusalOf = registry<Refusal>({
   busy: { label: 'not taken: something is still running', level: 'warn' },
   ended: { label: 'not taken: the session has ended', level: 'quiet' },
-  'nothing-to-seam': { label: 'nothing to refill yet: no turn has settled, or working memory holds nothing', level: 'quiet' },
+  'nothing-to-meditate': { label: 'nothing to refill yet: no turn has settled, or working memory holds nothing', level: 'quiet' },
   'nothing-to-cancel': { label: 'nothing is running', level: 'quiet' },
   'off-script': { label: 'the canned script expects something else next', level: 'quiet' },
   recording: { label: 'a recording: it plays, and takes no commands', level: 'quiet' },
   // diet's own (log v0's Refusal), and the transport's.
   'in-flight': { label: 'not taken: something is still running', level: 'warn' },
   'nothing-in-flight': { label: 'nothing is running', level: 'quiet' },
-  'seam-not-built': { label: 'not taken: the drive cannot refill yet', level: 'quiet' },
+  'meditation-not-built': { label: 'not taken: the drive cannot refill yet', level: 'quiet' },
   stale: { label: 'not taken: that turn is over', level: 'quiet' },
   unreachable: { label: 'not taken: the drive cannot be reached', level: 'bad' },
   // An attachment's (`POST /files`), and an ask naming one the drive was never sent.
@@ -225,9 +225,9 @@ export const refusalOf = registry<Refusal>({
   'no-proposal': { label: 'not taken: no phase proposal waits on a ruling', level: 'quiet' },
   'nothing-running': { label: 'not taken: no command is running to move', level: 'quiet' },
   // The reconcile gate's (#150, #698).
-  'seam-held': { label: 'not taken: the seam is held until your changes are addressed -- edit, flag, refill again, or refill anyway', level: 'warn' },
-  'nothing-held': { label: 'not taken: no seam is held', level: 'quiet' },
-  // A seam's phase the graph would not take (#563).
+  'meditation-held': { label: 'not taken: the meditation is held until your changes are addressed -- edit, flag, refill again, or refill anyway', level: 'warn' },
+  'nothing-held': { label: 'not taken: no meditation is held', level: 'quiet' },
+  // A meditation's phase the graph would not take (#563).
   'no-phase-graph': { label: 'not taken: this session declares no phases', level: 'quiet' },
   'not-a-phase': { label: 'not taken: that is not one of the session’s phases', level: 'warn' },
   'already-in-phase': { label: 'not taken: the session is already in that phase', level: 'quiet' },

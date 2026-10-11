@@ -84,23 +84,23 @@
 //! declares 0 to 3 and carries `approval`, `cwd`, `files`, `denylist` or
 //! `declined` is refused the same way. v4 is closed with `files`.
 //!
-//! v6 (#493) adds the `seam` kind: the operator declared a seam, and the
+//! v6 (#493) adds the `meditation` kind: the operator declared a meditation, and the
 //! trunk was refilled from working memory -- the session's head with the
 //! working object rendered after it, and no turn of the old trunk carried
 //! (a total compaction, the maintainer's intent on #493). It carries the turn
-//! it follows (`at_turn`), why it fired (`reason`, a [`SeamReason`]), the
+//! it follows (`at_turn`), why it fired (`reason`, a [`MeditationReason`]), the
 //! digests of the trunk's head before and after (`prefix_hash_before`,
 //! `prefix_hash_after`), the frame the render was built with and the render
 //! itself (`frame`, `render`), and what the refill carried (`carried_entries`,
 //! `carried_turns`), so a later strategy that carries a tail is told apart
 //! from this one. There is no ratification in v6: the audit's answer grammar
-//! is unwritten. Whole-log rules: a seam follows the latest turn,
+//! is unwritten. Whole-log rules: a meditation follows the latest turn,
 //! settled, while the state is `awaiting` and no fork is unsettled; a fork of
-//! a turn at or before a seam is refused, since its warm tail is gone.
-//! `seam-not-built` stays readable, and no v6 writer writes it; v6 adds the
-//! refusal `nothing-to-seam`, for a seam declared before any turn settled or
+//! a turn at or before a meditation is refused, since its warm tail is gone.
+//! `meditation-not-built` stays readable, and no v6 writer writes it; v6 adds the
+//! refusal `nothing-to-meditate`, for a meditation declared before any turn settled or
 //! over empty working memory. A log that
-//! declares 0 to 5 and carries a `seam` line is refused the same way.
+//! declares 0 to 5 and carries a `meditation` line is refused the same way.
 //!
 //! v7 (#509, the duty-of-care ruling of 2026-10-07) replaces the substrate
 //! claim's `engine_build` and `engine_identity` with `served`: each field of
@@ -119,17 +119,17 @@
 //! than refused. And v7 adds the [`ApprovalScope`] `off` and a
 //! `session.start`'s `approvals_off`, `true` or absent: the approval lever's
 //! `none`, under which no gate decided a call and nothing prompted. A v7
-//! `seam` may carry `tail_tokens`, the compaction depth it ran at, and
+//! `meditation` may carry `tail_tokens`, the compaction depth it ran at, and
 //! `carried_tokens`, the estimated tokens of the whole turns it kept after
 //! the refill (#552); absent, the total refill, and `carried_turns` 0. A
-//! v7 `seam` may carry `tool_outputs`, the seam's tool-output state (#553),
+//! v7 `meditation` may carry `tool_outputs`, the meditation's tool-output state (#553),
 //! and, when it carried any, `outputs` -- the section of the refill after
 //! the render, as sent -- with `carried_outputs`, the outputs it carried,
 //! and `carried_output_bytes`, the section's bytes; absent, `evict`. A
-//! v7 `seam` may carry `placement`, where the refill put the render (#597):
+//! v7 `meditation` may carry `placement`, where the refill put the render (#597):
 //! `message`, a user message after the head, which is never changed;
-//! absent, `system`, appended to the head's system message, as every seam
-//! before #597 did. A v7 `seam` may carry `background`, the list of each
+//! absent, `system`, appended to the head's system message, as every meditation
+//! before #597 did. A v7 `meditation` may carry `background`, the list of each
 //! background command still running (#614), as sent after the summary in
 //! the refill's message: present exactly when one was running.
 //!
@@ -221,7 +221,7 @@ vocabulary! {
         /// One entry a fork's answer patched into working memory (v5, #374).
         Patch => "patch",
         /// The trunk refilled from working memory (v6, #493).
-        Seam => "seam",
+        Meditation => "meditation",
         /// Forks' patches delivered at the tail of a trunk request (v7, the
         /// fork delivery lever).
         Delivered => "delivered",
@@ -229,12 +229,12 @@ vocabulary! {
         Recalled => "recalled",
         /// The operator flagged a working-memory entry (v7, #150).
         Flag => "flag",
-        /// A seam held for the operator: an operator change still
+        /// A meditation held for the operator: an operator change still
         /// unaddressed under `reconcile_gate = "refuse"` (v7, #150).
-        SeamHeld => "seam.held",
+        MeditationHeld => "meditation.held",
         /// A model's patch refused: its target is the operator's (v7, #150).
         PatchRefused => "patch.refused",
-        /// A tool result the model pruned, replaced at a later seam (v7,
+        /// A tool result the model pruned, replaced at a later meditation (v7,
         /// #612).
         Pruned => "pruned",
         /// The operator's ruling on the model's phase proposal (v7, #124).
@@ -331,8 +331,8 @@ vocabulary! {
     /// The fork delivery lever's state (v7): how a fork's patches reach the
     /// trunk.
     ForkDelivery {
-        /// At the next seam's render only: today's behaviour, the default.
-        Seam => "seam",
+        /// At the next meditation's render only: today's behaviour, the default.
+        Meditation => "meditation",
         /// As a note at the tail of the next trunk request, framed as advice.
         Advisory => "advisory",
         /// The same, framed as an instruction.
@@ -341,9 +341,9 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// Where a seam's refill put the render (v7, #597).
+    /// Where a meditation's refill put the render (v7, #597).
     RenderPlacement {
-        /// Appended to the head's system message: every seam before #597.
+        /// Appended to the head's system message: every meditation before #597.
         System => "system",
         /// A user message after the head, which stays as the session sent it.
         Message => "message",
@@ -351,9 +351,9 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// What a seam's refill carries of the tool outputs it compacts away
+    /// What a meditation's refill carries of the tool outputs it compacts away
     /// (v7, #553): those in the turns before the kept tail.
-    SeamToolOutputs {
+    MeditationToolOutputs {
         /// Nothing: today's behaviour, the default.
         Evict => "evict",
         /// A line per output naming its tool, arguments, size and sha256,
@@ -366,7 +366,7 @@ vocabulary! {
     }
 }
 
-impl Default for SeamToolOutputs {
+impl Default for MeditationToolOutputs {
     /// `evict`: today's behaviour.
     fn default() -> Self {
         Self::Evict
@@ -383,7 +383,7 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// How a fork's patches reach the trunk before a seam (v7): the fork
+    /// How a fork's patches reach the trunk before a meditation (v7): the fork
     /// delivery lever's two mid-turn states, each a (b′) framing.
     Framing {
         /// "may be affected ... If it no longer holds, say so; otherwise
@@ -395,11 +395,11 @@ vocabulary! {
 }
 
 vocabulary! {
-    /// Why a seam fired (v6, #493): `seam::Reason`'s words. `serve` writes
+    /// Why a meditation fired (v6, #493): `meditation::Reason`'s words. `serve` writes
     /// `operator`, and `cadence` and `budget` when the regimen declares them
     /// (#520); `phase` is read so that a session that fires it needs no new
     /// version.
-    SeamReason {
+    MeditationReason {
         /// The operator declared it.
         Operator => "operator",
         /// The phase graph ratified a transition.
@@ -410,7 +410,7 @@ vocabulary! {
         /// The declared cadence came round.
         Cadence => "cadence",
         /// The next trunk request's prompt would not have fit the context
-        /// window with room for its output (v7, #617): the automatic seam,
+        /// window with room for its output (v7, #617): the automatic meditation,
         /// checked before every trunk request, between a turn's steps too.
         Window => "window",
         /// The model pruned a tool result, applied as its turn settled (v7,
@@ -424,8 +424,8 @@ vocabulary! {
     GapEnd {
         /// An ask was sent.
         Ask => "ask",
-        /// A seam was declared.
-        Seam => "seam",
+        /// A meditation was declared.
+        Meditation => "meditation",
         /// A stop was sent.
         Cancel => "cancel",
         /// The session ended.
@@ -454,8 +454,8 @@ vocabulary! {
         Ask => "ask",
         /// A stop.
         Cancel => "cancel",
-        /// A seam.
-        DeclareSeam => "declare-seam",
+        /// A meditation.
+        DeclareMeditation => "declare-meditation",
         /// The end.
         End => "end",
         /// Open a tangent (v7, #22).
@@ -470,7 +470,7 @@ vocabulary! {
         EditEntry => "edit-entry",
         /// The operator flagged a working-memory entry (v7, #150).
         FlagEntry => "flag-entry",
-        /// The operator refilled a held seam anyway (v7, #150's gate).
+        /// The operator refilled a held meditation anyway (v7, #150's gate).
         RefillAnyway => "refill-anyway",
     }
 }
@@ -484,23 +484,23 @@ vocabulary! {
         Ended => "ended",
         /// The turn named has no call in flight.
         NothingInFlight => "nothing-in-flight",
-        /// Seams are not built yet. Readable; no v6 writer writes it.
-        SeamNotBuilt => "seam-not-built",
+        /// Meditations are not built yet. Readable; no v6 writer writes it.
+        MeditationNotBuilt => "meditation-not-built",
         /// Nothing to refill from: no turn has settled, or working memory
         /// holds no entry (v6).
-        NothingToSeam => "nothing-to-seam",
-        /// A seam asked to move to a phase under no phase graph (v7, #563).
+        NothingToMeditate => "nothing-to-meditate",
+        /// A meditation asked to move to a phase under no phase graph (v7, #563).
         NoPhaseGraph => "no-phase-graph",
-        /// A seam asked to move to a phase the graph does not declare (v7).
+        /// A meditation asked to move to a phase the graph does not declare (v7).
         NotAPhase => "not-a-phase",
-        /// A seam asked to move to the phase the session is in (v7).
+        /// A meditation asked to move to the phase the session is in (v7).
         AlreadyInPhase => "already-in-phase",
-        /// A seam asked for a move the graph does not allow from the current
+        /// A meditation asked for a move the graph does not allow from the current
         /// phase (v7).
         NoPhaseEdge => "no-phase-edge",
         /// A stop named a turn older than the latest.
         Stale => "stale",
-        /// A seam, or a second tangent, while a tangent is open (v7, #22).
+        /// A meditation, or a second tangent, while a tangent is open (v7, #22).
         TangentOpen => "tangent-open",
         /// A close with no tangent open (v7, #22).
         NoTangent => "no-tangent",
@@ -521,9 +521,9 @@ vocabulary! {
         NotLive => "not-live",
         /// An edit with no content, or a flag with no note (v7, #150).
         Empty => "empty",
-        /// An ask while a seam is held for the operator (v7, #150's gate).
-        SeamHeld => "seam-held",
-        /// A refill-anyway with no seam held (v7, #150's gate).
+        /// An ask while a meditation is held for the operator (v7, #150's gate).
+        MeditationHeld => "meditation-held",
+        /// A refill-anyway with no meditation held (v7, #150's gate).
         NothingHeld => "nothing-held",
     }
 }
@@ -536,7 +536,7 @@ vocabulary! {
         /// A fork's single call off the trunk's warm tail, never appended
         /// to it (v5, #374).
         Interview => "interview",
-        /// A seam's audit (v7, #504): a fork's call, put the dogma's audit
+        /// A meditation's audit (v7, #504): a fork's call, put the dogma's audit
         /// ask over working memory before the refill.
         Audit => "audit",
     }
@@ -550,9 +550,9 @@ vocabulary! {
         Read => "read",
         /// The settled turn's ask was marked a scoping question.
         Scoping => "scoping",
-        /// A seam (v7, #504): its audit, on the `audit` lane. Never a
+        /// A meditation (v7, #504): its audit, on the `audit` lane. Never a
         /// regimen's interview warrant.
-        Seam => "seam",
+        Meditation => "meditation",
     }
 }
 
@@ -874,7 +874,7 @@ pub struct Unsent {
     pub budget_tokens: u64,
 }
 
-/// One of the operator's changes a seam carried (v7, #150): the entry, and
+/// One of the operator's changes a meditation carried (v7, #150): the entry, and
 /// `edit` or `flag`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OperatorChange {
@@ -910,7 +910,7 @@ pub struct NoteLine {
     pub template: String,
 }
 
-/// A move between two phases of a phase graph (v7, #563): a seam's move, or
+/// A move between two phases of a phase graph (v7, #563): a meditation's move, or
 /// one of the graph's allowed transitions.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PhaseMove {
@@ -1198,7 +1198,7 @@ pub enum Event {
         /// the page's own follow-to-bottom). Zero when an input event came
         /// within [`PRESENCE_WINDOW_MS`] before the settling.
         notice: u64,
-        /// From the end of `notice` to the first keystroke or seam click.
+        /// From the end of `notice` to the first keystroke or meditation click.
         read: u64,
         /// From the first keystroke to the accepted send or declare.
         compose: u64,
@@ -1315,12 +1315,12 @@ pub enum Event {
         /// `may-displace-trunk-cache` when it is sent to the trunk's own
         /// server with a prompt that is not the trunk's prefix.
         hazard: Option<String>,
-        /// The `seq` of the seam whose refilled trunk it is cut from (v7): a
-        /// seam's audit at a seam declared with no turn since the last one,
+        /// The `seq` of the meditation whose refilled trunk it is cut from (v7): a
+        /// meditation's audit at a meditation declared with no turn since the last one,
         /// which reconciles the operator's changes made after that refill.
-        /// It names the latest seam; absent, the fork is cut from its turn's
+        /// It names the latest meditation; absent, the fork is cut from its turn's
         /// warm trunk.
-        after_seam: Option<u64>,
+        after_meditation: Option<u64>,
     },
     /// How a fork ended (v5, #374).
     ForkSettled {
@@ -1375,7 +1375,7 @@ pub enum Event {
         lines: Vec<NoteLine>,
     },
     /// The operator flagged an entry (v7, #150): a note on it, kept until a
-    /// seam addresses it. The entry is unchanged.
+    /// meditation addresses it. The entry is unchanged.
     Flag {
         /// The latest turn when it was flagged.
         turn: u32,
@@ -1384,15 +1384,15 @@ pub enum Event {
         /// The operator's note.
         note: String,
     },
-    /// A seam held for the operator (v7, #150's gate): under
+    /// A meditation held for the operator (v7, #150's gate): under
     /// `reconcile_gate = "refuse"` an operator change was still unaddressed
     /// after the reconciling audit and its one re-ask, so the trunk was not
-    /// refilled. The operator edits and seams again, or refills anyway.
-    SeamHeld {
-        /// The latest turn, settled, which the seam follows.
+    /// refilled. The operator edits and meditations again, or refills anyway.
+    MeditationHeld {
+        /// The latest turn, settled, which the meditation follows.
         at_turn: u32,
-        /// What fired the seam.
-        reason: SeamReason,
+        /// What fired the meditation.
+        reason: MeditationReason,
         /// The entries whose changes no answer addressed.
         unaddressed: Vec<String>,
     },
@@ -1455,12 +1455,12 @@ pub enum Event {
         text: String,
     },
     /// The operator's ruling on the model's pending phase proposal (v7,
-    /// #124): `seam`, a seam that moves to `to`; `continue`, the phase moved
+    /// #124): `meditation`, a meditation that moves to `to`; `continue`, the phase moved
     /// to `to` with the trunk kept; `stay`, declined.
     PhaseRuled {
         /// The id of the `propose_phase_transition` call it rules on.
         call: String,
-        /// `seam`, `continue` or `stay`.
+        /// `meditation`, `continue` or `stay`.
         choice: String,
         /// The phase the session was in; absent before any.
         from: Option<String>,
@@ -1468,7 +1468,7 @@ pub enum Event {
         to: String,
     },
     /// A tool result the model pruned (v7, #612), logged when the tool
-    /// answered: a later seam carries `text` in its place.
+    /// answered: a later meditation carries `text` in its place.
     Pruned {
         /// The turn the prune was called in.
         turn: u32,
@@ -1476,10 +1476,10 @@ pub enum Event {
         call: String,
         /// The sha256 of that result's whole, as saved.
         sha256: String,
-        /// The bytes of the result the trunk carried, which the seam
+        /// The bytes of the result the trunk carried, which the meditation
         /// removes.
         bytes: u64,
-        /// The reference line the seam carries in its place (#596).
+        /// The reference line the meditation carries in its place (#596).
         text: String,
     },
     /// A tangent opened (v7, #22): its id, the turn it forks at, and how
@@ -1565,18 +1565,18 @@ pub enum Event {
         text: String,
     },
     /// The trunk refilled from working memory (v6, #493).
-    Seam {
-        /// The latest turn, which the seam follows settled -- or, for a
-        /// `window` seam (v7, #617), guards in flight.
+    Meditation {
+        /// The latest turn, which the meditation follows settled -- or, for a
+        /// `window` meditation (v7, #617), guards in flight.
         at_turn: u32,
         /// Why it fired.
-        reason: SeamReason,
+        reason: MeditationReason,
         /// The `head_sha256` a trunk request on the trunk before the refill
         /// would carry; `prefix_hash_after`'s is the next trunk request's.
         prefix_hash_before: String,
         /// The same, after.
         prefix_hash_after: String,
-        /// The frame the render was built with (`seam::render::FRAME_VERSION`).
+        /// The frame the render was built with (`meditation::render::FRAME_VERSION`).
         frame: String,
         /// The working object, rendered: what the refilled head carries after
         /// the session's own.
@@ -1585,7 +1585,7 @@ pub enum Event {
         carried_entries: u64,
         /// How many turns of the old trunk the refill carried.
         carried_turns: u64,
-        /// The compaction depth the seam ran at (v7, #552): the estimated
+        /// The compaction depth the meditation ran at (v7, #552): the estimated
         /// tokens of recent whole turns it could keep. Absent is 0, the
         /// total refill.
         tail_tokens: Option<u64>,
@@ -1598,7 +1598,7 @@ pub enum Event {
         phase: Option<PhaseMove>,
         /// What it carried of the tool outputs it compacted away (v7,
         /// #553). Absent is `evict`.
-        tool_outputs: Option<SeamToolOutputs>,
+        tool_outputs: Option<MeditationToolOutputs>,
         /// The section of the refill after the render carrying them, as
         /// sent (v7, #553): present exactly when it carried any.
         outputs: Option<String>,
@@ -1612,44 +1612,44 @@ pub enum Event {
         background: Option<String>,
         /// Where the refill put the render (v7, #597). Absent is `system`.
         placement: Option<RenderPlacement>,
-        /// The render's budget and what it did (v7, #565), on a seam whose
+        /// The render's budget and what it did (v7, #565), on a meditation whose
         /// regimen declares one.
         render_budget: Option<RenderBudget>,
-        /// The prompt that fired it and the window, on a `window` seam (v7,
+        /// The prompt that fired it and the window, on a `window` meditation (v7,
         /// #617): `prompt_tokens` and `window`, both or neither.
-        fired: Option<SeamFired>,
+        fired: Option<MeditationFired>,
         /// The pre-warm's timings (v7, #504): the refilled trunk sent once
         /// with an output cap of one, so the next ask finds its prefix
         /// cached. Absent when none was sent, or it was cancelled or failed.
         warm: Option<Timings>,
-        /// The calls whose results the model pruned that this seam replaced
+        /// The calls whose results the model pruned that this meditation replaced
         /// with their `pruned` lines' text (v7, #612).
         pruned: Option<Vec<String>>,
-        /// The operator's edits and flags this seam carried (v7, #150).
+        /// The operator's edits and flags this meditation carried (v7, #150).
         operator_changes: Option<Vec<OperatorChange>>,
         /// Of those, the entries the model's answer did not address (v7,
-        /// #150): carried to the next seam.
+        /// #150): carried to the next meditation.
         unaddressed: Option<Vec<String>>,
         /// The newest turn's estimated tokens, when a tail was asked for
         /// (`tail_tokens` above 0) and kept no turn (v7, #693): what did not
         /// fit, for the operator's warning.
         newest_turn_tokens: Option<u64>,
-        /// The operator refilled this seam over the changes it was held for
+        /// The operator refilled this meditation over the changes it was held for
         /// (v7, #150's gate): `true`, or absent.
         refilled_anyway: Option<bool>,
     },
 }
 
-/// What fired a `window` seam (v7, #617).
+/// What fired a `window` meditation (v7, #617).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SeamFired {
+pub struct MeditationFired {
     /// The next trunk request's prompt, in tokens, as serve sized it (#588).
     pub prompt_tokens: u64,
     /// The engine's context window, in tokens.
     pub window: u64,
 }
 
-/// A seam's render budget and what it did (v7, #565): `render_budget_tokens`,
+/// A meditation's render budget and what it did (v7, #565): `render_budget_tokens`,
 /// `render_over_budget`, `render_tokens` and `render_reduced`, together or
 /// not at all; and `render_fits`, whether it fit.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2208,11 +2208,11 @@ fn gap_once(
     Ok(())
 }
 
-/// A `seam` (v6, #493): after the latest turn, settled, while the session
+/// A `meditation` (v6, #493): after the latest turn, settled, while the session
 /// awaits and no fork is unsettled.
-fn seam_at(
+fn meditation_at(
     at_turn: u32,
-    reason: SeamReason,
+    reason: MeditationReason,
     turns: u32,
     settled: &BTreeSet<u32>,
     state: State,
@@ -2220,23 +2220,23 @@ fn seam_at(
 ) -> Result<(), String> {
     if at_turn != turns {
         return Err(format!(
-            "a seam at turn {at_turn} where the latest is {turns}: a seam follows the latest turn"
+            "a meditation at turn {at_turn} where the latest is {turns}: a meditation follows the latest turn"
         ));
     }
-    // The automatic seam (v7, #617) is checked before every trunk request,
+    // The automatic meditation (v7, #617) is checked before every trunk request,
     // so it may refill under the turn whose next request it makes fit; that
     // turn's own exchange rides after the refill, as it rode after the trunk.
-    if reason == SeamReason::Window && state == State::Turn && !settled.contains(&turns) {
+    if reason == MeditationReason::Window && state == State::Turn && !settled.contains(&turns) {
         return Ok(());
     }
     if turns > 0 && !settled.contains(&turns) {
         return Err(format!(
-            "a seam at turn {turns}, which has not settled: a seam never refills under a turn"
+            "a meditation at turn {turns}, which has not settled: a meditation never refills under a turn"
         ));
     }
     if state != State::Awaiting {
         return Err(format!(
-            "a seam while the state is `{}`: a seam is declared while the session awaits",
+            "a meditation while the state is `{}`: a meditation is declared while the session awaits",
             state.tag()
         ));
     }
@@ -2246,7 +2246,7 @@ fn seam_at(
         .find(|fork| !forks.settled.contains_key(fork))
     {
         return Err(format!(
-            "a seam while fork {fork} is unsettled: the fork is cut from the trunk the seam replaces"
+            "a meditation while fork {fork} is unsettled: the fork is cut from the trunk the meditation replaces"
         ));
     }
     Ok(())
@@ -2263,12 +2263,12 @@ struct Forks {
     of_turn: BTreeMap<u64, u32>,
     /// Each settled fork's `seq`, to how it ended.
     settled: BTreeMap<u64, ForkOutcome>,
-    /// The turn the latest seam followed (v6, #493): a fork of it, or of any
-    /// turn before it, forks a warm tail the seam replaced.
-    seamed: Option<u32>,
-    /// The latest seam's `seq`: what an audit cut from its refill names
-    /// (v7, `after_seam`).
-    last_seam: Option<u64>,
+    /// The turn the latest meditation followed (v6, #493): a fork of it, or of any
+    /// turn before it, forks a warm tail the meditation replaced.
+    meditated: Option<u32>,
+    /// The latest meditation's `seq`: what an audit cut from its refill names
+    /// (v7, `after_meditation`).
+    last_meditation: Option<u64>,
 }
 
 impl Forks {
@@ -2281,18 +2281,18 @@ impl Forks {
         &mut self,
         seq: u64,
         (lane, of_turn, at, triggered): (Lane, u32, u64, bool),
-        after_seam: Option<u64>,
+        after_meditation: Option<u64>,
         turns: u32,
         trunk: &BTreeMap<u32, u64>,
     ) -> Result<(), String> {
         if lane == Lane::Trunk {
             return Err(format!(
-                "a fork on the `{}` lane: a fork's call is made on `interview`, or a seam's \
+                "a fork on the `{}` lane: a fork's call is made on `interview`, or a meditation's \
                  audit on `audit`",
                 lane.tag()
             ));
         }
-        // A seam's audit (v7, #504) follows whatever forks the gap ran, once
+        // A meditation's audit (v7, #504) follows whatever forks the gap ran, once
         // they settled: it is one more call in the gap, never a second
         // interview.
         let triggered = triggered || lane == Lane::Audit;
@@ -2307,19 +2307,19 @@ impl Forks {
                 "a fork at seq {at}, which is not turn {of_turn}'s answered trunk `request`"
             ));
         }
-        // A seam's audit cut from the latest seam's refill (v7): a seam
+        // A meditation's audit cut from the latest meditation's refill (v7): a meditation
         // declared again with no turn between, to reconcile the operator's
-        // changes since that refill. It names that seam.
-        if let Some(seam) = after_seam {
-            if lane != Lane::Audit || self.last_seam != Some(seam) {
+        // changes since that refill. It names that meditation.
+        if let Some(meditation) = after_meditation {
+            if lane != Lane::Audit || self.last_meditation != Some(meditation) {
                 return Err(format!(
-                    "a fork `after_seam` {seam}: only a seam's audit is cut from a refill, \
-                     and it names the latest seam"
+                    "a fork `after_meditation` {meditation}: only a meditation's audit is cut from a refill, \
+                     and it names the latest meditation"
                 ));
             }
-        } else if self.seamed.is_some_and(|seamed| of_turn <= seamed) {
+        } else if self.meditated.is_some_and(|meditated| of_turn <= meditated) {
             return Err(format!(
-                "a fork of turn {of_turn} after a seam that followed it: the seam replaced the \
+                "a fork of turn {of_turn} after a meditation that followed it: the meditation replaced the \
                  trunk the fork would be cut from"
             ));
         }
@@ -2747,13 +2747,13 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
                 of_turn,
                 at: forked_at,
                 trigger,
-                after_seam,
+                after_meditation,
                 ..
             } => forks
                 .fork(
                     line.seq,
                     (*lane, *of_turn, *forked_at, trigger.is_some()),
-                    *after_seam,
+                    *after_meditation,
                     turns,
                     &trunk,
                 )
@@ -2765,13 +2765,13 @@ fn check(lines: &[Line]) -> Result<(), LogError> {
             Event::Patch {
                 fork: Some(fork), ..
             } => forks.patch(*fork).map_err(|why| at(index, why))?,
-            Event::Seam {
+            Event::Meditation {
                 at_turn, reason, ..
             } => {
-                seam_at(*at_turn, *reason, turns, &settled, state, &forks)
+                meditation_at(*at_turn, *reason, turns, &settled, state, &forks)
                     .map_err(|why| at(index, why))?;
-                forks.seamed = Some(*at_turn);
-                forks.last_seam = Some(line.seq);
+                forks.meditated = Some(*at_turn);
+                forks.last_meditation = Some(line.seq);
             }
             Event::Capture { call, .. } => {
                 captured.insert(call.clone());
@@ -3186,7 +3186,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             },
             ask: fields.optional_string("ask")?,
             hazard: fields.optional_string("hazard")?,
-            after_seam: fields.optional_count("after_seam")?,
+            after_meditation: fields.optional_count("after_meditation")?,
         },
         Kind::ForkSettled => Event::ForkSettled {
             fork: fields.count("fork")?,
@@ -3305,10 +3305,10 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
         Kind::PhaseRuled => Event::PhaseRuled {
             call: fields.string("call")?,
             choice: match fields.string("choice")?.as_str() {
-                choice @ ("seam" | "continue" | "stay") => choice.to_owned(),
+                choice @ ("meditation" | "continue" | "stay") => choice.to_owned(),
                 other => {
                     return Err(format!(
-                        "a phase ruling's `choice` is `seam`, `continue` or `stay`, not `{other}`"
+                        "a phase ruling's `choice` is `meditation`, `continue` or `stay`, not `{other}`"
                     ));
                 }
             },
@@ -3327,14 +3327,15 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             entry: fields.string("entry")?,
             note: fields.string("note")?,
         },
-        Kind::SeamHeld => Event::SeamHeld {
+        Kind::MeditationHeld => Event::MeditationHeld {
             at_turn: fields.turn("at_turn")?,
-            reason: fields.tag("reason", SeamReason::from_tag)?,
+            reason: fields.tag("reason", MeditationReason::from_tag)?,
             unaddressed: fields
                 .optional_strings("unaddressed")?
                 .filter(|left| !left.is_empty())
                 .ok_or_else(|| {
-                    "a `seam.held` names the entries it was held over: a non-empty list".to_owned()
+                    "a `meditation.held` names the entries it was held over: a non-empty list"
+                        .to_owned()
                 })?,
         },
         Kind::PatchRefused => Event::PatchRefused {
@@ -3356,9 +3357,9 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
             text: fields.string("text")?,
             lines: fields.delivered_lines("lines")?,
         },
-        Kind::Seam => Event::Seam {
+        Kind::Meditation => Event::Meditation {
             at_turn: fields.turn("at_turn")?,
-            reason: fields.tag("reason", SeamReason::from_tag)?,
+            reason: fields.tag("reason", MeditationReason::from_tag)?,
             prefix_hash_before: fields.digest("prefix_hash_before")?,
             prefix_hash_after: fields.digest("prefix_hash_after")?,
             frame: fields.string("frame")?,
@@ -3371,7 +3372,7 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 None => None,
                 Some(_) => Some(fields.phase_move("phase")?),
             },
-            tool_outputs: fields.optional_tag("tool_outputs", SeamToolOutputs::from_tag)?,
+            tool_outputs: fields.optional_tag("tool_outputs", MeditationToolOutputs::from_tag)?,
             outputs: fields.optional_string("outputs")?,
             carried_outputs: fields.optional_count("carried_outputs")?,
             carried_output_bytes: fields.optional_count("carried_output_bytes")?,
@@ -3400,22 +3401,22 @@ fn from_object(object: &BTreeMap<String, Value>) -> Result<Line, String> {
                 Some(_) => Some(fields.timings("warm")?),
             },
             fired: {
-                let reason = fields.tag("reason", SeamReason::from_tag)?;
+                let reason = fields.tag("reason", MeditationReason::from_tag)?;
                 match (
                     fields.optional_count("prompt_tokens")?,
                     fields.optional_count("window")?,
                 ) {
-                    (None, None) if reason != SeamReason::Window => None,
-                    (Some(prompt_tokens), Some(window)) if reason == SeamReason::Window => {
-                        Some(SeamFired {
+                    (None, None) if reason != MeditationReason::Window => None,
+                    (Some(prompt_tokens), Some(window)) if reason == MeditationReason::Window => {
+                        Some(MeditationFired {
                             prompt_tokens,
                             window,
                         })
                     }
                     _ => {
                         return Err(format!(
-                            "a seam whose reason is `{}` carries {}: a `window` seam names the \
-                             prompt that fired it and the window, both, and no other seam does",
+                            "a meditation whose reason is `{}` carries {}: a `window` meditation names the \
+                             prompt that fired it and the window, both, and no other meditation does",
                             reason.tag(),
                             match (
                                 object.contains_key("prompt_tokens"),
@@ -3854,8 +3855,8 @@ pub enum Tags {
     ForkOutcome,
     /// [`PatchOp`] (v5).
     PatchOp,
-    /// [`SeamReason`] (v6).
-    SeamReason,
+    /// [`MeditationReason`] (v6).
+    MeditationReason,
     /// [`RecallState`] (v7).
     RecallState,
     /// [`Framing`] (v7).
@@ -3864,8 +3865,8 @@ pub enum Tags {
     ForkDelivery,
     /// [`ToolOutputState`] (v7).
     ToolOutputState,
-    /// [`SeamToolOutputs`] (v7).
-    SeamToolOutputs,
+    /// [`MeditationToolOutputs`] (v7).
+    MeditationToolOutputs,
     /// [`RenderPlacement`] (v7).
     RenderPlacement,
     /// [`BackgroundStatus`] (v7).
@@ -3894,12 +3895,12 @@ impl Tags {
         Self::Warrant,
         Self::ForkOutcome,
         Self::PatchOp,
-        Self::SeamReason,
+        Self::MeditationReason,
         Self::Framing,
         Self::RecallState,
         Self::ForkDelivery,
         Self::ToolOutputState,
-        Self::SeamToolOutputs,
+        Self::MeditationToolOutputs,
         Self::RenderPlacement,
         Self::BackgroundStatus,
     ];
@@ -3927,12 +3928,12 @@ impl Tags {
             Self::Warrant => "Warrant",
             Self::ForkOutcome => "ForkOutcome",
             Self::PatchOp => "PatchOp",
-            Self::SeamReason => "SeamReason",
+            Self::MeditationReason => "MeditationReason",
             Self::Framing => "Framing",
             Self::RecallState => "RecallState",
             Self::ForkDelivery => "ForkDelivery",
             Self::ToolOutputState => "ToolOutputState",
-            Self::SeamToolOutputs => "SeamToolOutputs",
+            Self::MeditationToolOutputs => "MeditationToolOutputs",
             Self::RenderPlacement => "RenderPlacement",
             Self::BackgroundStatus => "BackgroundStatus",
         }
@@ -3964,12 +3965,14 @@ impl Tags {
             Self::Warrant => of(Warrant::ALL, Warrant::tag),
             Self::ForkOutcome => of(ForkOutcome::ALL, ForkOutcome::tag),
             Self::PatchOp => of(PatchOp::ALL, PatchOp::tag),
-            Self::SeamReason => of(SeamReason::ALL, SeamReason::tag),
+            Self::MeditationReason => of(MeditationReason::ALL, MeditationReason::tag),
             Self::Framing => of(Framing::ALL, Framing::tag),
             Self::RecallState => of(RecallState::ALL, RecallState::tag),
             Self::ForkDelivery => of(ForkDelivery::ALL, ForkDelivery::tag),
             Self::ToolOutputState => of(ToolOutputState::ALL, ToolOutputState::tag),
-            Self::SeamToolOutputs => of(SeamToolOutputs::ALL, SeamToolOutputs::tag),
+            Self::MeditationToolOutputs => {
+                of(MeditationToolOutputs::ALL, MeditationToolOutputs::tag)
+            }
             Self::RenderPlacement => of(RenderPlacement::ALL, RenderPlacement::tag),
             Self::BackgroundStatus => of(BackgroundStatus::ALL, BackgroundStatus::tag),
         }
@@ -4011,10 +4014,10 @@ pub enum Holds {
     /// A `recalled` line's `items` (v7): a non-empty list of objects of the
     /// keys [`RECALLED_ITEM`] declares.
     RecalledItems,
-    /// A seam's `operator_changes` (v7, #150): a non-empty list of objects
+    /// A meditation's `operator_changes` (v7, #150): a non-empty list of objects
     /// of the keys [`OPERATOR_CHANGE`] declares.
     OperatorChanges,
-    /// A seam's `phase` (v7): an object of [`PHASE_MOVE`]'s keys.
+    /// A meditation's `phase` (v7): an object of [`PHASE_MOVE`]'s keys.
     PhaseMove,
     /// A `session.start`'s `phase_transitions` (v7): a list of such objects.
     PhaseMoves,
@@ -4180,7 +4183,7 @@ pub const TEMPLATE_KWARGS: &[Field] = &[
     may_v7("preserve_thinking", Holds::Flag),
 ];
 
-/// The keys of each of a seam's `operator_changes`. Arrived in v7.
+/// The keys of each of a meditation's `operator_changes`. Arrived in v7.
 pub const OPERATOR_CHANGE: &[Field] =
     &[must_v7("entry", Holds::Text), must_v7("kind", Holds::Text)];
 
@@ -4348,11 +4351,11 @@ pub fn introduced(kind: Kind) -> i64 {
         Kind::Progress => 1,
         Kind::ToolCall => 3,
         Kind::Fork | Kind::ForkSettled | Kind::Patch => 5,
-        Kind::Seam => 6,
+        Kind::Meditation => 6,
         Kind::Delivered
         | Kind::Recalled
         | Kind::Flag
-        | Kind::SeamHeld
+        | Kind::MeditationHeld
         | Kind::PatchRefused
         | Kind::Pruned
         | Kind::PhaseRuled
@@ -4382,17 +4385,19 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
         return 5;
     }
     if (tags == Tags::Lane && Lane::from_tag(tag) == Some(Lane::Audit))
-        || (tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Seam))
+        || (tags == Tags::Warrant && Warrant::from_tag(tag) == Some(Warrant::Meditation))
     {
         return 7;
     }
     if tags == Tags::ForkOutcome && ForkOutcome::from_tag(tag) == Some(ForkOutcome::Refused) {
         return 7;
     }
-    if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::NothingToSeam) {
+    if tags == Tags::Refusal && Refusal::from_tag(tag) == Some(Refusal::NothingToMeditate) {
         return 6;
     }
-    if tags == Tags::SeamReason && SeamReason::from_tag(tag) == Some(SeamReason::Window) {
+    if tags == Tags::MeditationReason
+        && MeditationReason::from_tag(tag) == Some(MeditationReason::Window)
+    {
         return 7;
     }
     let phase_refusal = tags == Tags::Refusal
@@ -4420,7 +4425,7 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
                     | Refusal::UnknownEntry
                     | Refusal::NotLive
                     | Refusal::Empty
-                    | Refusal::SeamHeld
+                    | Refusal::MeditationHeld
                     | Refusal::NothingHeld
             )
         });
@@ -4445,7 +4450,9 @@ pub fn tag_introduced(tags: Tags, tag: &str) -> i64 {
     if tags == Tags::ApprovalScope && ApprovalScope::from_tag(tag) == Some(ApprovalScope::Off) {
         return 7;
     }
-    if tags == Tags::SeamReason && SeamReason::from_tag(tag) == Some(SeamReason::Prune) {
+    if tags == Tags::MeditationReason
+        && MeditationReason::from_tag(tag) == Some(MeditationReason::Prune)
+    {
         return 7;
     }
     let capped =
@@ -4661,7 +4668,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("model", Text),
                 may_v7("ask", Text),
                 may_v7("hazard", Text),
-                may_v7("after_seam", Count),
+                may_v7("after_meditation", Count),
             ];
             F
         }
@@ -4739,10 +4746,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
-        Kind::Seam => {
+        Kind::Meditation => {
             const F: &[Field] = &[
                 must_v6("at_turn", Count),
-                must_v6("reason", Tag(Tags::SeamReason)),
+                must_v6("reason", Tag(Tags::MeditationReason)),
                 must_v6("prefix_hash_before", Holds::Digest),
                 must_v6("prefix_hash_after", Holds::Digest),
                 must_v6("frame", Text),
@@ -4752,7 +4759,7 @@ pub fn schema(kind: Kind) -> &'static [Field] {
                 may_v7("tail_tokens", Count),
                 may_v7("carried_tokens", Count),
                 may_v7("phase", Holds::PhaseMove),
-                may_v7("tool_outputs", Tag(Tags::SeamToolOutputs)),
+                may_v7("tool_outputs", Tag(Tags::MeditationToolOutputs)),
                 may_v7("outputs", Text),
                 may_v7("carried_outputs", Count),
                 may_v7("carried_output_bytes", Count),
@@ -4818,10 +4825,10 @@ pub fn schema(kind: Kind) -> &'static [Field] {
             ];
             F
         }
-        Kind::SeamHeld => {
+        Kind::MeditationHeld => {
             const F: &[Field] = &[
                 must_v7("at_turn", Count),
-                must_v7("reason", Tag(Tags::SeamReason)),
+                must_v7("reason", Tag(Tags::MeditationReason)),
                 must_v7("unaddressed", Holds::Strings),
             ];
             F
@@ -5584,7 +5591,7 @@ fn to_value(line: &Line) -> Value {
             seat,
             ask,
             hazard,
-            after_seam,
+            after_meditation,
         } => {
             put("lane", text(lane.tag()));
             put("of_turn", count(u64::from(*of_turn)));
@@ -5610,8 +5617,8 @@ fn to_value(line: &Line) -> Value {
             if let Some(hazard) = hazard {
                 put("hazard", text(hazard));
             }
-            if let Some(seam) = after_seam {
-                put("after_seam", count(*seam));
+            if let Some(meditation) = after_meditation {
+                put("after_meditation", count(*meditation));
             }
             Kind::Fork
         }
@@ -5751,7 +5758,7 @@ fn to_value(line: &Line) -> Value {
             put("rolled_back", count(*rolled_back));
             Kind::TangentClose
         }
-        Event::Seam {
+        Event::Meditation {
             at_turn,
             reason,
             prefix_hash_before,
@@ -5863,7 +5870,7 @@ fn to_value(line: &Line) -> Value {
             if let Some(anyway) = refilled_anyway {
                 put("refilled_anyway", Value::Boolean(*anyway));
             }
-            Kind::Seam
+            Kind::Meditation
         }
         Event::Delivered {
             turn,
@@ -5954,7 +5961,7 @@ fn to_value(line: &Line) -> Value {
             put("note", text(note));
             Kind::Flag
         }
-        Event::SeamHeld {
+        Event::MeditationHeld {
             at_turn,
             reason,
             unaddressed,
@@ -5965,7 +5972,7 @@ fn to_value(line: &Line) -> Value {
                 "unaddressed",
                 Value::Array(unaddressed.iter().map(|entry| text(entry)).collect()),
             );
-            Kind::SeamHeld
+            Kind::MeditationHeld
         }
         Event::PatchRefused {
             fork,
@@ -6662,7 +6669,7 @@ impl Fields<'_> {
         Ok(kwargs)
     }
 
-    /// A seam's `phase` (v7, #563).
+    /// A meditation's `phase` (v7, #563).
     fn phase_move(&self, key: &str) -> Result<PhaseMove, String> {
         Fields(self.object(key, PHASE_MOVE)?)
             .phase_move_of()
@@ -7104,7 +7111,7 @@ mod tests {
                 to: State::Awaiting,
             },
             Event::Fork {
-                after_seam: None,
+                after_meditation: None,
                 lane: Lane::Interview,
                 of_turn: 5,
                 at: request,
@@ -7220,7 +7227,7 @@ mod tests {
             },
             Event::PhaseRuled {
                 call: "call-p".to_owned(),
-                choice: "seam".to_owned(),
+                choice: "meditation".to_owned(),
                 from: Some("plan".to_owned()),
                 to: "build".to_owned(),
             },
@@ -7717,7 +7724,8 @@ mod tests {
                         || (tags == Tags::PatchOp && why.contains("`supersedes`"))
                         || (tags == Tags::ForkOutcome
                             && why.contains("exactly when it settled `refused`"))
-                        || (tags == Tags::SeamReason && why.contains("a `window` seam names"))
+                        || (tags == Tags::MeditationReason
+                            && why.contains("a `window` meditation names"))
                         || (tags == Tags::FailReason
                             && why.contains("carries a context overflow's sizes"))
                         || (tags == Tags::ToolOutputState
@@ -8427,7 +8435,7 @@ mod tests {
             tags(Kind::ALL.iter().map(|it| it.tag()).collect()),
             "session.start ask settlement request refused delta stop.asked response \
              cancelled request.failed turn.settled idle.gap progress tool_call fork \
-             fork.settled patch seam delivered recalled flag seam.held patch.refused pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
+             fork.settled patch meditation delivered recalled flag meditation.held patch.refused pruned phase.ruled tangent.open tangent.close capture reminded background.ended notice timeout.near fork.skipped"
         );
         assert_eq!(
             tags(FailReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -8435,8 +8443,8 @@ mod tests {
         );
         assert_eq!(
             tags(Refusal::ALL.iter().map(|it| it.tag()).collect()),
-            "in-flight ended nothing-in-flight seam-not-built nothing-to-seam no-phase-graph not-a-phase \
-             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty seam-held nothing-held"
+            "in-flight ended nothing-in-flight meditation-not-built nothing-to-meditate no-phase-graph not-a-phase \
+             already-in-phase no-phase-edge stale tangent-open no-tangent bad-tangent not-the-scope nothing-running no-proposal unknown-entry not-live empty meditation-held nothing-held"
         );
         assert_eq!(
             tags(SettleReason::ALL.iter().map(|it| it.tag()).collect()),
@@ -8464,7 +8472,7 @@ mod tests {
         );
         assert_eq!(
             tags(Warrant::ALL.iter().map(|it| it.tag()).collect()),
-            "read scoping seam"
+            "read scoping meditation"
         );
         assert_eq!(
             tags(ForkOutcome::ALL.iter().map(|it| it.tag()).collect()),
@@ -8475,7 +8483,7 @@ mod tests {
             "add supersede resolve retire park"
         );
         assert_eq!(
-            tags(SeamReason::ALL.iter().map(|it| it.tag()).collect()),
+            tags(MeditationReason::ALL.iter().map(|it| it.tag()).collect()),
             "operator phase budget cadence window prune"
         );
     }

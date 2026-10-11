@@ -829,7 +829,7 @@ impl Lane {
             | Event::Response { .. }
             | Event::Fork { .. }
             | Event::Capture { .. }
-            | Event::Seam { .. }
+            | Event::Meditation { .. }
             | Event::Rejected { .. }
             | Event::Claim { .. }
             | Event::Comparison { .. }

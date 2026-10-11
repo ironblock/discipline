@@ -724,7 +724,7 @@ impl Ask {
     }
 
     /// [`Ask::render`] in ask set `set` (#595), with `record`, the working
-    /// record's live entries as the seam's render writes them (`<id>\t<entry>`
+    /// record's live entries as the meditation's render writes them (`<id>\t<entry>`
     /// lines), for a template that shows it: its `{record}` line is dropped
     /// whole when the record is empty or not given.
     #[must_use]
@@ -1040,7 +1040,7 @@ impl Router {
             | Event::Response { .. }
             | Event::Fork { .. }
             | Event::Capture { .. }
-            | Event::Seam { .. }
+            | Event::Meditation { .. }
             | Event::Rejected { .. }
             | Event::Claim { .. }
             | Event::Comparison { .. }

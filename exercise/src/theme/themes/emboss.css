@@ -3,7 +3,7 @@
  * and what is in the prefix is RAISED out of it: square-edged slabs, the
  * highlight on the lit corner and the shadow off the other, light sweeping
  * across each face. What is being written lifts higher; stat chips are
- * pressed into the slab; the eras before a seam lie flat. Everything is
+ * pressed into the slab; the eras before a meditation lie flat. Everything is
  * the page's own material -- a role tints it, it is never a colour laid on
  * it -- so a slab and the page it rises from are one fill.
  */
@@ -11,8 +11,8 @@
   --radius: 0px;
   --relief-evicted: 0 0 0 transparent;
   --evicted-opacity: 0.5;
-  --seam-thickness: 7px;
-  --seam-line: 0 solid;
+  --meditation-thickness: 7px;
+  --meditation-line: 0 solid;
 }
 
 /* In either mode (and as specific as a mode's own block, over the palettes): one material. */
@@ -48,7 +48,7 @@
   --relief-well: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.07);
   --relief-control: 3px 3px 7px rgb(0 0 0 / 0.55), -2px -2px 6px rgb(255 255 255 / 0.05), inset 1px 1px 0 rgb(255 255 255 / 0.06);
   --control-rim: transparent;
-  --seam-groove: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.05);
+  --meditation-groove: inset 2px 2px 4px rgb(0 0 0 / 0.6), inset -1px -1px 3px rgb(255 255 255 / 0.05);
   --sweep: linear-gradient(135deg, rgb(255 255 255 / 0.05), rgb(255 255 255 / 0) 40%, rgb(0 0 0 / 0) 60%, rgb(0 0 0 / 0.2));
 }
 
@@ -69,7 +69,7 @@
   --relief-well: inset 2px 2px 4px rgb(40 52 72 / 0.18), inset -1px -1px 3px rgb(255 255 255 / 0.9);
   --relief-control: 3px 3px 7px rgb(40 52 72 / 0.18), -2px -2px 6px rgb(255 255 255 / 0.9), inset 1px 1px 0 rgb(255 255 255 / 0.7);
   --control-rim: transparent;
-  --seam-groove: inset 2px 2px 4px rgb(40 52 72 / 0.16), inset -1px -1px 3px rgb(255 255 255 / 0.85);
+  --meditation-groove: inset 2px 2px 4px rgb(40 52 72 / 0.16), inset -1px -1px 3px rgb(255 255 255 / 0.85);
   --sweep: linear-gradient(135deg, rgb(255 255 255 / 0.45), rgb(255 255 255 / 0) 40%, rgb(40 52 72 / 0) 60%, rgb(40 52 72 / 0.06));
   --chrome-bg: rgb(231 234 239 / 0.88);
 }

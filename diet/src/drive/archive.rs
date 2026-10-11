@@ -1,7 +1,7 @@
-//! Archive recall (#566): what left the trunk at a seam, kept in memory, and
+//! Archive recall (#566): what left the trunk at a meditation, kept in memory, and
 //! the lever that recalls it.
 //!
-//! **The archive** is one in-memory index per session. A seam adds every
+//! **The archive** is one in-memory index per session. A meditation adds every
 //! message its refill dropped from the trunk -- the operator's asks, the
 //! model's answers and the tool results it was shown -- and every working
 //! memory entry that is no longer live (voided, resolved, retired, parked).
@@ -16,10 +16,10 @@
 //! `core/client.ts:4589-4600`), and that is the shape `literal` takes here.
 //! Any other value -- `embedding` among them, which is parked out of v0.1.0
 //! -- reads as `off`, and the start row names the value it fell back from.
-//! The embedding seam stays where it is (`capture::sense::Embedder`),
+//! The embedding meditation stays where it is (`capture::sense::Embedder`),
 //! unwired.
 //!
-//! **When it fires:** at each ask once a seam has archived something. The
+//! **When it fires:** at each ask once a meditation has archived something. The
 //! ask is the query; the [`TOP`] best items go as one note after the ask, in
 //! Qwen Code's "Relevant memory" shape (`memory/recall.ts:452-478`) wrapped
 //! as its system reminder (`core/environmentContext.ts:25-26,116-117`). The
@@ -88,7 +88,7 @@ impl Recall {
 /// One archived item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Item {
-    /// What names it: `seam-<turn>/message-<n>` for a dropped message,
+    /// What names it: `meditation-<turn>/message-<n>` for a dropped message,
     /// `entry/<id>` for a working-memory entry.
     pub key: String,
     /// What it is, in a few words: the note's heading.
@@ -133,7 +133,7 @@ impl Archive {
     /// after a definition keyword (`def`, `fn`, `class`, ...), the item a
     /// question about that name most wants; then how often the anchors
     /// occur in it; then recency. Recency first among equals let newer
-    /// mentions crowd out an older archive's definition (seam smoke run 3:
+    /// mentions crowd out an older archive's definition (meditation smoke run 3:
     /// turn 3's `def heading_slug` lost to newer items holding the same
     /// two anchors).
     ///
@@ -287,7 +287,7 @@ pub struct Found<'a> {
 /// items. A text past [`MAX_BODY_CHARS`] is cut to a window of that many
 /// characters around its first match -- a quarter of it before, so the
 /// match keeps its lead-in -- each elided end marked `[…]`. Cut from the
-/// start, the match could fall outside what was sent (seam smoke run 2:
+/// start, the match could fall outside what was sent (meditation smoke run 2:
 /// the matched definition was cut off, and the model rightly said it could
 /// not confirm it existed).
 #[must_use]
@@ -415,7 +415,7 @@ mod tests {
         assert_eq!(note(&[]), "");
     }
 
-    /// #566, seam smoke run 2: a match past the first [`MAX_BODY_CHARS`]
+    /// #566, meditation smoke run 2: a match past the first [`MAX_BODY_CHARS`]
     /// characters is in the note -- a window around it, a quarter before,
     /// both elided ends marked -- not cut off with the rest.
     #[test]
@@ -459,7 +459,7 @@ mod tests {
         assert_eq!(kept[..lead].chars().count(), MAX_BODY_CHARS / 4);
     }
 
-    /// #566, seam smoke run 3: among items holding the same anchors, the
+    /// #566, meditation smoke run 3: among items holding the same anchors, the
     /// one that defines the asked name comes first however old it is; then
     /// the one where the anchors occur most; recency only after both.
     #[test]
@@ -500,7 +500,7 @@ mod tests {
         );
     }
 
-    /// #566, seam smoke run 3: the note centres on the region holding the
+    /// #566, meditation smoke run 3: the note centres on the region holding the
     /// most of the asked anchors, a definition among equals -- not on the
     /// first mention of any of them.
     #[test]

@@ -75,7 +75,7 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
                     {/* Written by the trunk's own lane, not a fork (#627): self-capture today. */}
                     {e.lane !== undefined ? <span className="ex-memory__lane" title="written by the trunk's own lane, not by a fork">{e.lane}</span> : null}
                   </span>
-                  {/* The operator's flag (#150), kept until a seam addresses it; and the model's writes refused over their entry. */}
+                  {/* The operator's flag (#150), kept until a meditation addresses it; and the model's writes refused over their entry. */}
                   {e.flag !== undefined ? <span className="ex-memory__flag">flag · {e.flag}</span> : null}
                   {e.refusedWrites && e.refusedWrites.length > 0 ? (
                     <span className="ex-memory__refused" title="the model tried to change your entry, and was refused">
@@ -94,7 +94,7 @@ export function Memory({ entries, seenThrough = -1, onSeen, act }: MemoryProps) 
 
 /**
  * The operator's hand on one live entry (#150): rewrite it -- it supersedes, and the model may not overwrite it -- or
- * flag it with a note a seam will address. Each answer the drive refuses is said in place.
+ * flag it with a note a meditation will address. Each answer the drive refuses is said in place.
  */
 function EntryActions({ id, text, act }: { readonly id: string; readonly text: string; readonly act: (command: Command) => Promise<Ack> }) {
   const [mode, setMode] = useState<'none' | 'edit' | 'flag'>('none');
@@ -135,7 +135,7 @@ function EntryActions({ id, text, act }: { readonly id: string; readonly text: s
           <button type="button" data-action="edit" title="rewrite this entry: yours supersedes it, and the model may not overwrite it" onClick={() => (setDraft(text), setMode('edit'))}>
             edit
           </button>
-          <button type="button" data-action="flag" title="flag this entry with a note: the next seam addresses it" onClick={() => setMode('flag')}>
+          <button type="button" data-action="flag" title="flag this entry with a note: the next meditation addresses it" onClick={() => setMode('flag')}>
             flag
           </button>
         </>

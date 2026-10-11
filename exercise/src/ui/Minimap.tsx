@@ -6,7 +6,7 @@ import { laneStyle } from './sets.ts';
 import './minimap.css';
 
 interface Mark {
-  readonly kind: 'trunk' | 'lane' | 'seam';
+  readonly kind: 'trunk' | 'lane' | 'meditation';
   readonly top: number;
   readonly height: number;
   readonly tone?: string;
@@ -154,8 +154,8 @@ function measure(stage: HTMLElement): Measured {
     const alarm = el.getAttribute('data-alarm') ?? undefined;
     marks.push({ kind: 'trunk', ...span(el), tone, ...(alarm ? { alarm } : {}), live: el.classList.contains('ex-block--live') });
   }
-  // A refill is a line across, at the seam itself (not the padding above it).
-  for (const el of stage.querySelectorAll('.ex-era__seam .ex-seam')) marks.push({ kind: 'seam', top: span(el).top + span(el).height / 2, height: 0, live: false });
+  // A refill is a line across, at the meditation itself (not the padding above it).
+  for (const el of stage.querySelectorAll('.ex-era__meditation .ex-meditation')) marks.push({ kind: 'meditation', top: span(el).top + span(el).height / 2, height: 0, live: false });
   for (const el of stage.querySelectorAll('.ex-branchcell')) {
     // Open, a side call is a block; condensed, a bar -- which says its lane, alarm and liveness the same way, bar the class.
     const bar = el.querySelector('.ex-block, .ex-bar');

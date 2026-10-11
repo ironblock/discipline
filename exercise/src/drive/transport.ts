@@ -33,8 +33,8 @@ export type Command =
     }
   /** Stop whatever is in flight, the trunk's call or a fork's. */
   | { readonly kind: 'cancel' }
-  /** Declare a seam: ratify, render, refill -- to the phase named, where the drive declares phases; `diet`'s does not yet. */
-  | { readonly kind: 'seam'; readonly to?: string }
+  /** Declare a meditation: ratify, render, refill -- to the phase named, where the drive declares phases; `diet`'s does not yet. */
+  | { readonly kind: 'meditation'; readonly to?: string }
   /** End the session: nothing more is asked of it (#289). */
   | { readonly kind: 'end' }
   /** Open a tangent (#608): what the session learns until it closes is ruled on then, and the trunk returns to here. */
@@ -43,19 +43,19 @@ export type Command =
   | { readonly kind: 'close-tangent'; readonly dispositions: Readonly<Record<string, Disposition>> }
   /** The operator rewrites a live working-memory entry (#150, #655): it supersedes, and the model may not overwrite it. */
   | { readonly kind: 'edit-entry'; readonly id: string; readonly content: string }
-  /** The operator flags a live entry with a note (#150, #655), kept until a seam addresses it. */
+  /** The operator flags a live entry with a note (#150, #655), kept until a meditation addresses it. */
   | { readonly kind: 'flag-entry'; readonly id: string; readonly note: string }
-  /** The operator's ruling on the model's phase proposal (#124, #651): refill now, move without a seam, or stay. */
+  /** The operator's ruling on the model's phase proposal (#124, #651): refill now, move without a meditation, or stay. */
   | { readonly kind: 'ratify-phase'; readonly call: string; readonly choice: PhaseChoice }
   /** Move the running foreground command to the background (#614): it keeps running, and the turn goes on. */
   | { readonly kind: 'background' }
-  /** Refill a seam held for the operator over its unaddressed changes (#150's gate, #698). */
+  /** Refill a meditation held for the operator over its unaddressed changes (#150's gate, #698). */
   | { readonly kind: 'refill-anyway' }
   /** The operator's answer to the call waiting on them (#389): `call` is its id as the model streamed it. */
   | { readonly kind: 'approve'; readonly call: string; readonly scope: Decision };
 
 /** How the operator rules on a proposed phase move (#651). */
-export type PhaseChoice = 'seam' | 'continue' | 'stay';
+export type PhaseChoice = 'meditation' | 'continue' | 'stay';
 
 /** What a tangent's close does with one of its entries (#608): keeps it live, retires it, or parks it as the tangent's. */
 export type Disposition = 'keep' | 'drop' | 'park';
@@ -98,18 +98,18 @@ export type Refusal = Open<
   | 'busy'
   /** The session has ended. */
   | 'ended'
-  /** There is nothing to seam: no turn has settled, or working memory holds no live entry. */
-  | 'nothing-to-seam'
+  /** There is nothing to meditation: no turn has settled, or working memory holds no live entry. */
+  | 'nothing-to-meditate'
   /** Nothing is in flight. */
   | 'nothing-to-cancel'
   /** Canned transport only: the script expects a different command next. */
   | 'off-script'
   /** A recording plays; it takes no commands. */
   | 'recording'
-  /** `diet`'s own (log v0 `Refusal`): a turn or a capture is in flight; the turn named has nothing in flight; seams are not built yet (read in an older log; v6 writes `nothing-to-seam` instead); a stop named an older turn. */
+  /** `diet`'s own (log v0 `Refusal`): a turn or a capture is in flight; the turn named has nothing in flight; meditations are not built yet (read in an older log; v6 writes `nothing-to-meditate` instead); a stop named an older turn. */
   | 'in-flight'
   | 'nothing-in-flight'
-  | 'seam-not-built'
+  | 'meditation-not-built'
   | 'stale'
   /** An answer to a prompt when none waits (#389); one naming another call than the one waiting is `stale`. */
   | 'nothing-waiting'
@@ -134,8 +134,8 @@ export type Refusal = Open<
   | 'empty'
   | 'unknown-entry'
   | 'not-live'
-  /** `diet`'s gate (#150, #698): a seam is held for the operator, so asks wait; a refill-anyway with no seam held. */
-  | 'seam-held'
+  /** `diet`'s gate (#150, #698): a meditation is held for the operator, so asks wait; a refill-anyway with no meditation held. */
+  | 'meditation-held'
   | 'nothing-held'
 >;
 

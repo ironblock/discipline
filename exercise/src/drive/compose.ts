@@ -125,10 +125,10 @@ export function compose(script: Script): Unplaced[] {
     if (part.kind === 'refill') {
       const r = side({ ...part.ratify, lane: 'ratify' }, last, now + part.after, turn);
       const warm = timings(tokensOf(part.render), 0, 1, RATES.trunkDecode);
-      const seamAt = r + 1200;
+      const meditationAt = r + 1200;
       out.push({
-        kind: 'seam',
-        t: seamAt,
+        kind: 'meditation',
+        t: meditationAt,
         id: `s/${next('s')}`,
         at_turn: turn,
         reason: 'operator',
@@ -139,7 +139,7 @@ export function compose(script: Script): Unplaced[] {
         warm,
       });
       context = tokensOf(part.render);
-      now = seamAt + took(warm);
+      now = meditationAt + took(warm);
       continue;
     }
     turn += 1;

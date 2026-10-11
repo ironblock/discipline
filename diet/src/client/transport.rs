@@ -176,7 +176,7 @@ impl Error for TransportFailure {}
 
 /// Something that can put a body in front of a server and get one back.
 ///
-/// A trait so that a replay can stand where a socket stands. The seam
+/// A trait so that a replay can stand where a socket stands. The meditation
 /// controller and the integration lane drive the same client; only this
 /// changes.
 pub trait Transport {

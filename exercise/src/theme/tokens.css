@@ -26,7 +26,7 @@
    * tool at work, a clean exit; AMBER wants attention; RED is a fault. What
    * the curtain hides has the colours a rack never has: VIOLET, diet asking
    * (the system prompt it renders, its interviews, what they land in
-   * memory); MAGENTA, diet deciding (ratify, the seam); CYAN, diet reading
+   * memory); MAGENTA, diet deciding (ratify, the meditation); CYAN, diet reading
    * (the extraction lane). In the dark a fill is the lamp seen through a
    * slab and an ink the lamp lifted toward white; in the light (light.css) a
    * fill is the lamp as a tint on white and an ink the lamp darkened.
@@ -43,7 +43,7 @@
   --lamp-interview: var(--lamp-diet-asks);
   --lamp-ratify: var(--lamp-diet-decides);
   --lamp-extraction: var(--lamp-diet-reads);
-  /* A seam's audit (#646): its own lamp, apart from the forks that ask, decide and read. */
+  /* A meditation's audit (#646): its own lamp, apart from the forks that ask, decide and read. */
   --lamp-diet-audits: #e8a33d;
   --lamp-audit: var(--lamp-diet-audits);
 
@@ -89,7 +89,7 @@
   --warn: color-mix(in oklab, var(--lamp-attention) 80%, white);
   --bad: color-mix(in oklab, var(--lamp-fault) 80%, white);
   --fresh: color-mix(in oklab, var(--lamp-diet-asks) 65%, white);
-  --seam: color-mix(in oklab, var(--lamp-diet-decides) 70%, white);
+  --meditation: color-mix(in oklab, var(--lamp-diet-decides) 70%, white);
   --gap: #e5a06b;
   /* Focus is yours. */
   --focus: var(--ink-user);
@@ -121,7 +121,7 @@
    * Surfaces: how each kind of thing sits on the page. Every default is
    * neutral, so a theme that sets none of them looks like the mockup.
    * RELIEF is a box-shadow list (never `none`: it is composed with glows).
-   *   in the prefix · being written · evicted at a seam · beside it (lanes)
+   *   in the prefix · being written · evicted at a meditation · beside it (lanes)
    *   · a panel (memory, composer) · a well (stat chip) · a control
    * GLASS is a layer over a surface: an overlay image, a backdrop filter,
    * a rim. LIGHT is emitted: a glow's reach, its strength per surface at
@@ -162,7 +162,7 @@
   --glow-lane-live: 0%;
   --glow-panel: 0%;
   --glow-panel-live: 0%;
-  --glow-seam: 0%;
+  --glow-meditation: 0%;
   --light-lane: 0%;
   --light-lane-live: 0%;
   --light-panel: 0%;
@@ -196,7 +196,7 @@
   --field: none;
   /* Optional, falling back to the colour tokens when a theme leaves them unset:
    *   --glass-rim (→ --rule)  --control-rim (→ --rule)  --chrome-bg (→ --page)
-   *   --seam-thickness (→ 0)  --seam-line (→ 1px solid)  --seam-groove (→ none)
+   *   --meditation-thickness (→ 0)  --meditation-line (→ 1px solid)  --meditation-groove (→ none)
    *   --composer-fade (→ a fade to --page under the composer)
    *   --stat-chip, --stat-relief (→ --chip, --relief-well: how a footer number sits)
    *   --lanehead-bg (→ --chrome-bg: behind the sticky slot labels)

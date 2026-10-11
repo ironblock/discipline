@@ -99,7 +99,7 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
   and its exit.
 - **Behind the curtain**, each server slot other than the trunk's is a
   column. An interview sits level with the trunk message it came from, in
-  the slot that served it, with the patches it landed, cabled to it. A seam
+  the slot that served it, with the patches it landed, cabled to it. A meditation
   is drawn across every column, as the one deliberate prefill event.
   Condensed, each side call is a bar that keeps its place and grows as it
   writes. Narrow, the curtain draws no more than the row has room for:
@@ -133,8 +133,8 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
 | --- | --- |
 | `src/drive/log.ts` | The session's log as the surface reads it: `diet/formats/log` (v0 through v3), its types **generated** from the format (the repository's `diet/formats/log/log.ts`, #144) and imported. On top of them, what the surface draws that the log does not say yet is marked AHEAD, each tagged with the step of #117 that will add it. Log v3's tool call -- the `tool_call` line and the delta's `tool_call` piece -- is generated like the rest (#297), and drawn (#300). `log.test.ts` folds every one of `diet`'s valid logs. A node's id is the `seq` of the line it began at. |
 | `src/drive/script.ts`, `place.ts` | The authored shape the specimen, the kitchen sink and the recorded sessions are written in -- labels (`q/2`, `i/1`) where the log has `seq` references -- and the step that places a script in the log. A script's `tool.begin`/`tool.end` are placed as log v3's call, served-shaped: the calls' fragments before their response, each `tool_call` line at the call's end (`place.ts` says what that cannot carry). Only the log is folded; stories find nodes by label through `idOf`. |
-| `src/drive/projection.ts`, `projections.ts` | **Every placed session, read by `diet`'s own log reader** (#300, ruled 5974717646): the repository's `exercise` check writes each one's PROJECTION (`scripts/export-projections.mjs`) and runs `diet check-log` on it. The projection takes out what the format does not have yet -- side lanes, forks, patches, seams, and the AHEAD keys -- declared in one list that only shrinks: an entry the format's generated types carry fails the typecheck. |
-| `src/drive/transport.ts` | The drive interface: subscribe to the session's log; send an ask, cancel, declare a seam. |
+| `src/drive/projection.ts`, `projections.ts` | **Every placed session, read by `diet`'s own log reader** (#300, ruled 5974717646): the repository's `exercise` check writes each one's PROJECTION (`scripts/export-projections.mjs`) and runs `diet check-log` on it. The projection takes out what the format does not have yet -- side lanes, forks, patches, meditations, and the AHEAD keys -- declared in one list that only shrinks: an entry the format's generated types carry fails the typecheck. |
+| `src/drive/transport.ts` | The drive interface: subscribe to the session's log; send an ask, cancel, declare a meditation. |
 | `src/drive/http.ts` | The transport against `diet`'s served session: `/events` as server-sent events, `/commands` as JSON. A closed stream asks, once, what it was answered with (finding 17, #117): 410 rebuilds from a new session's first line, anything else is shown to the author with its reason. |
 | `src/drive/specimen.ts` | **Authored, not recorded.** One session walking the definition of done, as a script. Deleted when a recorded session replaces it. |
 | `src/drive/canned.ts` | A transport that plays the specimen with real timing, and `snapshot()`, the same session stopped at any moment. |
@@ -150,7 +150,7 @@ CI runs the same thing as the repository's `exercise` check (`./verify.sh --only
 Theme tokens (`src/theme/tokens.css`) are named for kinds of text and
 meanings, never for faces or hues; several resolve to the same value on
 purpose. Surfaces bind to tokens that say how a thing sits -- relief (in
-the prefix, being written, evicted at a seam, beside it), glass, light,
+the prefix, being written, evicted at a meditation, beside it), glass, light,
 texture, the live field -- and every default is neutral.
 
 A look is a **theme** and a **mode**. `tokens.css` is the dark palette and

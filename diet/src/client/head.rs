@@ -33,7 +33,7 @@
 //! plainly rather than left for a reader to work out from which tests exist:
 //!
 //! * **Row 1, the date that moved.** The mechanism runs end to end --
-//!   `drive::tests::the_seams_own_render_is_recorded_as_a_prefix_change_naming_the_lines`
+//!   `drive::tests::the_meditations_own_render_is_recorded_as_a_prefix_change_naming_the_lines`
 //!   drives three real turns and the record carries a `prefix.changed` at
 //!   `q/3` with reason `text` and a diff naming the lines. The DATE
 //!   specifically cannot be driven here, because design point 4's own lint

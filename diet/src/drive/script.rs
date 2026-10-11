@@ -2,7 +2,7 @@
 //!
 //! A drive is scripted so that the *machinery* can be exercised without a
 //! model. #23's whole argument is that iterating on routers, reconcilers and
-//! seams does not need a capable substrate -- it needs a protocol-compliant
+//! meditations does not need a capable substrate -- it needs a protocol-compliant
 //! one -- and the floor below that is a substrate whose every answer is
 //! written down in advance. What a script cannot do is decide anything: the
 //! turns it declares are put to whatever is serving, and what comes back is
@@ -36,10 +36,10 @@ pub struct Turn {
     pub fork: Option<String>,
     /// Whether the operator declares a boundary before this turn settles.
     ///
-    /// The operator's own declaration is the highest-precedence seam trigger,
-    /// so a script that wants a seam at a KNOWN turn sets this rather than
+    /// The operator's own declaration is the highest-precedence meditation trigger,
+    /// so a script that wants a meditation at a KNOWN turn sets this rather than
     /// tuning a cadence until one happens to fall where it wanted. A drive
-    /// whose seam lands somewhere the script did not choose is a drive whose
+    /// whose meditation lands somewhere the script did not choose is a drive whose
     /// record proves less than it looks like it does.
     pub boundary: bool,
     /// A phase the operator proposes before this turn settles.

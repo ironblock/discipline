@@ -102,14 +102,14 @@ fn the_drive_writes_a_record_a_second_process_accepts() {
     // The canned drive is deterministic, so these are the run's real numbers
     // and not a shape check.
     assert!(out.contains("\"ok\":true"), "{out}");
-    // Twenty-five, and the twenty-fifth is #79's: the seam re-renders the
+    // Twenty-five, and the twenty-fifth is #79's: the meditation re-renders the
     // working set into the system prompt at turn two, so turn three's head
     // is not turn two's and a `prefix.changed` row says so. It was
     // twenty-four before that row existed.
     assert!(out.contains("\"events\":25"), "twenty-five rows: {out}");
     assert!(
-        out.contains("\"seams\":1"),
-        "one seam, where the script declared it: {out}"
+        out.contains("\"meditations\":1"),
+        "one meditation, where the script declared it: {out}"
     );
     assert!(
         out.contains("\"audits_unread\":1"),

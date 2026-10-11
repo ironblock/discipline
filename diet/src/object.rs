@@ -31,7 +31,7 @@
 //! collector, and this module implements the patch's semantics once a verdict
 //! exists. So does rendering the object into a prompt. The object is never in
 //! the prompt as the source of truth; the prompt is a render of it, produced
-//! once at a seam.
+//! once at a meditation.
 //!
 //! [`tangent`] builds one operation on top of these semantics: ending an
 //! exploratory branch, which is prefix rollback plus a disposition over the
@@ -1212,7 +1212,7 @@ mod tests {
         let mut before = object.dump_lines();
         for (turn, patch) in patches.iter().enumerate() {
             let applied = object.apply(patch).expect("the patch applies");
-            // Every render at the seam carries the same regime. The version
+            // Every render at the meditation carries the same regime. The version
             // moves; nothing else in the header may.
             let header = object.dump().lines().next().map(str::to_owned);
             assert!(

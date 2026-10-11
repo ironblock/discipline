@@ -1,4 +1,4 @@
-//! The tools-route audit sets: the words a seam's audit asks in when the
+//! The tools-route audit sets: the words a meditation's audit asks in when the
 //! session's forks answer through the self-capture tools (#610), so the
 //! audit is answered through them too.
 //!

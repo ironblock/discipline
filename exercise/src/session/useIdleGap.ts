@@ -85,7 +85,7 @@ export function useIdleGap(session: Session): IdleGapCarrier {
     };
     const onClick = (e: MouseEvent) => {
       present();
-      if (e.target instanceof HTMLElement && e.target.closest('.ex-composer__seam')) meter.current?.composing(performance.now());
+      if (e.target instanceof HTMLElement && e.target.closest('.ex-composer__meditation')) meter.current?.composing(performance.now());
     };
     // Text that arrives with no keystroke -- pasted from a menu, dropped, dictated -- is composing too (#289).
     const onInput = (e: Event) => {

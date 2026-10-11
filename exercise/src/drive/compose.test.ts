@@ -52,7 +52,7 @@ describe('a composed session', () => {
   });
 
   it('gives every event of a kind its own id', () => {
-    for (const kind of ['request', 'response', 'tool.begin', 'fork', 'patch', 'seam']) {
+    for (const kind of ['request', 'response', 'tool.begin', 'fork', 'patch', 'meditation']) {
       const ids = of(kind).map((e) => e['id']);
       expect(new Set(ids).size).toBe(ids.length);
     }

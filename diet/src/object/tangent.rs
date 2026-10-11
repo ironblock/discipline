@@ -42,7 +42,7 @@
 //! fact that stopped mattering from one that never belonged here.
 //!
 //! Out of scope, and named so nobody has to work it out: **who chooses**.
-//! The disposition map is the seam. An agent nominating and a person
+//! The disposition map is the meditation. An agent nominating and a person
 //! ratifying are the same machinery with a different chooser -- which is
 //! what makes that comparison nearly free -- so this module takes the map
 //! and asks nothing about where it came from. Turning a written verdict into

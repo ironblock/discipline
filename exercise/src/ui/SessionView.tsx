@@ -22,7 +22,7 @@ import { wiringOf } from './prefs.ts';
 import { usePrefs } from './Prefs.tsx';
 import { AssistantMessage, SystemMessage, TurnEnd, UserMessage } from './Message.tsx';
 import { Receipt } from './Receipt.tsx';
-import { Seam } from './Seam.tsx';
+import { Meditation } from './Meditation.tsx';
 import { SessionHeader } from './SessionHeader.tsx';
 import { laneStyle } from './sets.ts';
 import { ClockContext, HotEntriesContext, SurfaceContext, TargetContext } from './surface.tsx';
@@ -98,8 +98,8 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
   // Where the trunk ends and each slot's gutter lies, in the stage's coordinates: for cables routed as a harness.
   const [columns, setColumns] = useState<Columns>();
   const [height, setHeight] = useState(0);
-  const seams = useRef(new Map<number, HTMLElement>());
-  const [seamPad, setSeamPad] = useState<ReadonlyMap<number, number>>(new Map());
+  const meditations = useRef(new Map<number, HTMLElement>());
+  const [meditationPad, setMeditationPad] = useState<ReadonlyMap<number, number>>(new Map());
   // What the person has acknowledged in working memory: a log position, local to this view.
   const [seenThrough, setSeenThrough] = useState(-1);
   const lastEra = session.eras.length - 1;
@@ -300,7 +300,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
     sides.sort((x, y) => (order.get(x.at) ?? 0) - (order.get(y.at) ?? 0));
     const spots = place(sides, trunk, session.now, gap);
     const next = new Map<string, Placement>();
-    // The lowest branch bottom per era, for the seam that closes it.
+    // The lowest branch bottom per era, for the meditation that closes it.
     const eraBottom = new Map<number, number>();
     let bottom = 0;
     for (const side of sides) {
@@ -316,10 +316,10 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
       eraBottom.set(era, Math.max(eraBottom.get(era) ?? 0, spot.top + side.height));
       bottom = Math.max(bottom, spot.top + side.height + gap);
     }
-    // A seam is a barrier: the refill happens after every side call before it
+    // A meditation is a barrier: the refill happens after every side call before it
     // has finished, so it is drawn below all of them, and only it moves the trunk.
     const pads = new Map<number, number>();
-    for (const [era, el] of seams.current) {
+    for (const [era, el] of meditations.current) {
       // The wrapper's own top does not move with its padding: the pad is inside it.
       const natural = el.getBoundingClientRect().top - base;
       let before = 0;
@@ -339,7 +339,7 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
     }
     setColumns((prev) => (prev && sameColumns(prev, { trunkRight, gutters }) ? prev : { trunkRight, gutters }));
     setHeight((prev) => (prev === bottom ? prev : bottom));
-    setSeamPad((prev) => (sameNumbers(prev, pads) ? prev : pads));
+    setMeditationPad((prev) => (sameNumbers(prev, pads) ? prev : pads));
     // `lanes`, `laneBranches` and `gap` are derived from `session` and `surface`.
   }, [session, curtain, condensed]);
 
@@ -453,9 +453,9 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
     if (el) anchors.current.set(id, el);
     else anchors.current.delete(id);
   };
-  const seamRef = (era: number) => (el: HTMLElement | null) => {
-    if (el) seams.current.set(era, el);
-    else seams.current.delete(era);
+  const meditationRef = (era: number) => (el: HTMLElement | null) => {
+    if (el) meditations.current.set(era, el);
+    else meditations.current.delete(era);
   };
   const cellRef = (id: string) => (el: HTMLElement | null) => {
     if (el) cells.current.set(id, el);
@@ -487,12 +487,12 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
           if (!e.currentTarget.contains(e.relatedTarget)) focusAt(null);
         }}
       >
-        {prefs.memoryLines === 'on' ? <Links wires={wires} hot={hot} {...(wiring ? { wiring } : {})} revision={[session, placed, seamPad, drawer, drawerOpen, condensed]} /> : null}
+        {prefs.memoryLines === 'on' ? <Links wires={wires} hot={hot} {...(wiring ? { wiring } : {})} revision={[session, placed, meditationPad, drawer, drawerOpen, condensed]} /> : null}
         {/* As wide as the row must be for working memory to sit beside it (session.css, --need). */}
         <div className="ex-session__need" ref={need} aria-hidden="true" />
         <div className="ex-session__need" data-for="whole" ref={needWhole} aria-hidden="true" />
         <div className="ex-session__need" data-for="bars" ref={needBars} aria-hidden="true" />
-        {minimap ? <Minimap stage={stage} revision={[session, placed, seamPad, curtain]} curtain={curtain} /> : null}
+        {minimap ? <Minimap stage={stage} revision={[session, placed, meditationPad, curtain]} curtain={curtain} /> : null}
         <div className="ex-session__header">
           <SessionHeader session={session} link={link} {...(linkWhy !== undefined ? { linkWhy } : {})} surface={surface} room={room} {...(onSurface ? { onSurface } : {})} />
         </div>
@@ -521,13 +521,13 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
               <div className="ex-trunk">
                 {session.eras.map((era) => (
                   <section className="ex-era" key={era.index} data-era={era.index}>
-                    {era.seam ? (
+                    {era.meditation ? (
                       <div
-                        className="ex-era__seam"
-                        ref={seamRef(era.index)}
-                        style={curtain ? { paddingTop: seamPad.get(era.index) ?? 0 } : undefined}
+                        className="ex-era__meditation"
+                        ref={meditationRef(era.index)}
+                        style={curtain ? { paddingTop: meditationPad.get(era.index) ?? 0 } : undefined}
                       >
-                        <Seam node={era.seam} />
+                        <Meditation node={era.meditation} />
                       </div>
                     ) : null}
                     <SystemMessage node={era.system} />
@@ -633,15 +633,15 @@ export function SessionView({ session, link = 'live', linkWhy, surface, onSurfac
                 foreground={session.eras.at(-1)?.nodes.some((n) => n.kind === 'tool' && n.running && n.tool === 'bash') ?? false}
                 // That command near its timeout (#613): the move asks itself.
                 {...(session.proposal ? { proposal: session.proposal } : {})}
-                // A seam held for the operator (#150's gate): what its reconcile left unaddressed, with each entry's text.
+                // A meditation held for the operator (#150's gate): what its reconcile left unaddressed, with each entry's text.
                 {...(session.held
                   ? { held: { unaddressed: session.held.unaddressed.map((id) => ({ id, text: session.memory.find((m) => m.id === id)?.text ?? id })) } }
                   : {})}
-                // Nothing to seam (#685), as serve decides it: no turn has settled, or working memory holds no live entry.
+                // Nothing to meditation (#685), as serve decides it: no turn has settled, or working memory holds no live entry.
                 {...(session.lastSettled === undefined
-                  ? { noSeam: 'no turn has settled yet' }
+                  ? { noMeditation: 'no turn has settled yet' }
                   : !session.memory.some((m) => m.state === 'live')
-                    ? { noSeam: 'working memory holds nothing yet' }
+                    ? { noMeditation: 'working memory holds nothing yet' }
                     : {})}
                 nearTimeout={session.eras.at(-1)?.nodes.some((n) => n.kind === 'tool' && n.running && n.tool === 'bash' && n.nearTimeout !== undefined) ?? false}
                 {...composer}
@@ -723,7 +723,7 @@ function BranchCell({
   readonly branch: Folded<BranchNode>;
   readonly placement: Placement | undefined;
   readonly cellRef: (el: HTMLElement | null) => void;
-  /** Its trunk node was evicted at a later seam. */
+  /** Its trunk node was evicted at a later meditation. */
   readonly evicted: boolean;
   /** Drawn as a bar that keeps its place (the curtain's `condensed`). */
   readonly condensed: boolean;
