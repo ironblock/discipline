@@ -800,8 +800,8 @@ export const ServedOperatorEdits: Story = {
       await expect(found).not.toBeNull();
       return found!;
     });
-    // The meditation emptied the flag, as diet empties its pending flags (#733); its account below still names it.
-    await expect(entry.querySelector('.ex-memory__flag')).toBeNull();
+    // The meditation left the flag unaddressed, so it stays pending to the next one (#749).
+    await expect(entry.querySelector('.ex-memory__flag')?.textContent).toBe('flag · is one team enough?');
     await expect(entry.querySelector('.ex-memory__refused')?.textContent).toBe('refused: retire by self-capture, supersede by fork 7');
     const meditation = canvasElement.querySelector<HTMLElement>('.ex-meditation');
     await expect(meditation?.querySelector('.ex-meditation__operator')?.textContent).toBe('operator: edit d2, flag d2 · unaddressed: d2');

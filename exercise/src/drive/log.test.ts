@@ -61,13 +61,11 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
   it("carries the operator's edit and flag onto working memory (v7, #150)", () => {
     const file = 'a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl';
     const lines = logOf(file);
-    // The flag stands until the next meditation, which empties diet's pending flags (#733).
-    const beforeMeditation = fold(lines.slice(0, lines.findIndex((line) => line.kind === 'meditation'))).memory;
-    expect(beforeMeditation.find((entry) => entry.id === 'd2')?.flag).toBe('is one team enough?');
     const memory = fold(lines).memory;
     const edited = memory.find((entry) => entry.id === 'd2');
     expect(edited?.lane).toBe('operator');
-    expect(edited?.flag).toBeUndefined();
+    // Its meditation left the flag unaddressed, so it stays pending to the next one (#749).
+    expect(edited?.flag).toBe('is one team enough?');
     expect(memory.find((entry) => entry.id === 'd1')?.state).toBe('superseded');
   });
 
@@ -319,10 +317,10 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
     const session = fold(logOf('a-v7-operator-edit-and-flag-carried-by-a-seam.jsonl'));
     expect([...session.unknown.keys()]).toEqual([]);
     const d2 = session.memory.find((e) => e.id === 'd2');
-    // The meditation empties the flag (diet's pending flags, #733); its account names it among the changes it carried.
+    // The meditation left the flag unaddressed, so it stays pending to the next one (#749).
     expect([d2?.lane, d2?.flag, d2?.refusedWrites]).toEqual([
       'operator',
-      undefined,
+      'is one team enough?',
       [
         { op: 'retire', by: 'self-capture' },
         { op: 'supersede', by: 'fork 7' },
@@ -374,6 +372,13 @@ describe("diet's valid v0 logs, as the surface reads them", () => {
       answer: '1. KEEP\n2. KEEP\n3. KEEP',
       after: three,
     });
+  });
+
+  it('keeps a flag its meditation left unaddressed, as diet keeps the change pending to the next one (#749)', () => {
+    const session = fold(logOf('a-v8-meditation-held-for-the-operator-then-refilled-anyway.jsonl'));
+    const meditation = session.eras.find((era) => era.meditation)?.meditation;
+    expect(meditation?.unaddressed).toEqual(['d2']);
+    expect(session.memory.find((entry) => entry.id === 'd2')?.flag).toBe('is one team enough?');
   });
 
   it('takes the state from the log: an ended session is ended', () => {
