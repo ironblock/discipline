@@ -117,6 +117,22 @@ DIET_DRIVE=http://127.0.0.1:7801 DIET_DRIVE_AUTH_FILE=<the file given to --auth-
 
 Without it the page says the drive asks for credentials (401).
 
+## One process: `serve` serves the page
+
+Step 2's dev server is for working on the surface. To drive with `serve` alone, and no Node at run time, build the surface's bundle once and let `serve` serve it on its own origin (#716):
+
+```
+npx --yes pnpm@11.20.0 -C exercise install
+npx --yes pnpm@11.20.0 -C exercise gate
+npx --yes pnpm@11.20.0 -C exercise build:drive
+```
+
+Then start `serve` as in step 1, naming the bundle with `--ui exercise/dist/app`. Its first line names the page as `page`, `http://127.0.0.1:7801/?drive`. A release archive or a native app ships that directory as `ui/` beside the binary, where `serve` finds it with no flag. Open it in the browser, or through the tunnel from another machine (**Three roles**). Forward `serve`'s port in place of 5173: `ssh -L 7801:localhost:7801 <harness host>`.
+
+The page and the session share one origin, so there is no proxy and no `--allow-origin`. Under `--auth-file`, the page asks for the credential as every route does. The browser prompts once, with the auth file's user and password, and sends them with the page's own calls.
+
+Rebuild the bundle after the surface changes. Building it needs Node; serving it does not.
+
 ## Ending
 
 Send `end`: `{"kind":"end"}` posted to `serve`'s `/commands`. `serve` then:

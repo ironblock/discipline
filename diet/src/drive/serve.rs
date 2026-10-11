@@ -166,6 +166,11 @@ pub struct Config {
     /// What an ask's named PNGs are checked against and copied to (#372).
     /// The default has no read scope, and attaches nothing.
     pub attaching: Attaching,
+    /// The surface's built bundle, served on this origin beside the session's
+    /// routes (#716): `GET /` is its `index.html`, and any other `GET` no
+    /// route answers is a file under it. The page then drives the session
+    /// same-origin, with no proxy. `None` serves no page.
+    pub ui: Option<std::path::PathBuf>,
 }
 
 /// A Basic credential, `user:password` (D10). Only a digest of what a client
@@ -244,6 +249,7 @@ impl Default for Config {
             allowed_origins: Vec::new(),
             credential: None,
             attaching: Attaching::default(),
+            ui: None,
         }
     }
 }
@@ -506,6 +512,12 @@ impl<S: Streaming + 'static> Serving<S> {
                 .allowed_origins
                 .iter()
                 .any(|allowed| allowed == origin)
+                // The page this server served (#716): its own origin, the
+                // `Host` it was reached at -- checked above.
+                || (self.config.ui.is_some()
+                    && request
+                        .header("host")
+                        .is_some_and(|host| origin == format!("http://{host}")))
         });
         if !host_allowed || !origin_allowed {
             return respond(&mut stream, 403, &empty());
@@ -520,9 +532,10 @@ impl<S: Streaming + 'static> Serving<S> {
                 && (*path == request.path
                     || (path.ends_with('/') && request.path.starts_with(path)))
         });
-        match route {
-            Some((_, _, handler)) => handler(self, &mut stream, &request),
-            None => respond(&mut stream, 404, &empty()),
+        match (route, self.config.ui.as_deref()) {
+            (Some((_, _, handler)), _) => handler(self, &mut stream, &request),
+            (None, Some(ui)) if request.method == "GET" => page(&mut stream, ui, &request.path),
+            (None, _) => respond(&mut stream, 404, &empty()),
         }
         let _ = stream.shutdown(Shutdown::Both);
     }
@@ -1242,11 +1255,57 @@ fn respond_no_content(stream: &mut TcpStream) {
     let _ = stream.shutdown(Shutdown::Write);
 }
 
+/// `GET path` from the surface's bundle at `ui` (#716): `/` is its
+/// `index.html`, any other path the file it names under `ui`, by its
+/// extension's media type. A path that is not plain names under `ui` -- an
+/// empty, `.` or `..` segment, a backslash, or one that resolves outside it
+/// -- and a file that is not there are `404`.
+fn page(stream: &mut TcpStream, ui: &std::path::Path, path: &str) {
+    let named = path.strip_prefix('/').unwrap_or(path);
+    let named = if named.is_empty() {
+        "index.html"
+    } else {
+        named
+    };
+    let plain = !named.contains('\\')
+        && named
+            .split('/')
+            .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
+    let file = plain
+        .then(|| ui.join(named))
+        .and_then(|file| file.canonicalize().ok())
+        .filter(|file| {
+            ui.canonicalize()
+                .is_ok_and(|root| file.starts_with(root) && file.is_file())
+        });
+    let Some(bytes) = file.as_ref().and_then(|file| std::fs::read(file).ok()) else {
+        return respond(stream, 404, &empty());
+    };
+    let media_type = match file
+        .as_ref()
+        .and_then(|file| file.extension())
+        .and_then(|extension| extension.to_str())
+    {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js" | "mjs") => "text/javascript; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("json" | "map") => "application/json",
+        Some("wasm") => "application/wasm",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        Some("woff2") => "font/woff2",
+        Some("txt") => "text/plain; charset=utf-8",
+        _ => "application/octet-stream",
+    };
+    respond_bytes(stream, media_type, &bytes);
+}
+
 /// `200` with `bytes` as `media_type`.
 fn respond_bytes(stream: &mut TcpStream, media_type: &str, bytes: &[u8]) {
     let head = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: {media_type}\r\nContent-Length: {}\r\n\
-         Cache-Control: no-cache\r\nConnection: close\r\n\r\n",
+         Cache-Control: no-cache\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
         bytes.len()
     );
     let _ = stream.write_all(head.as_bytes());
@@ -1684,6 +1743,100 @@ mod tests {
         ] {
             assert_eq!(base64(plain.as_bytes()), encoded, "{plain:?}");
         }
+    }
+
+    /// #716: with the surface's bundle, `GET /` is its page and `GET` of a
+    /// file under it is that file, typed; a path that leaves it is `404`;
+    /// and the page drives the session from serve's own origin, with no
+    /// `--allow-origin` -- which, without the bundle, is refused. Under a
+    /// credential the page asks for it as every route does, so a browser
+    /// prompts once and sends it with the page's own calls.
+    #[test]
+    fn the_surfaces_bundle_is_served_on_its_own_origin_and_drives_the_session() {
+        let root = std::env::temp_dir().join(format!(
+            "diet-ui-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |since| since.as_nanos())
+        ));
+        let ui = root.join("ui");
+        std::fs::create_dir_all(ui.join("assets")).expect("the bundle");
+        std::fs::write(ui.join("index.html"), "<html>the page</html>").expect("a page");
+        std::fs::write(ui.join("assets/app.js"), "export {};").expect("a script");
+        std::fs::write(root.join("secret.txt"), "not served").expect("a file beside it");
+        let get = |server: &Server, path: &str, extra: &str| {
+            Client::send(
+                server,
+                &format!(
+                    "GET {path} HTTP/1.1\r\nHost: {}\r\n{extra}\r\n",
+                    host(server)
+                ),
+            )
+            .reply()
+        };
+        let ask = r#"{"kind":"ask","text":"hi"}"#;
+        let post = |server: &Server, extra: &str| {
+            Client::send(
+                server,
+                &format!(
+                    "POST /commands HTTP/1.1\r\nHost: {0}\r\nOrigin: http://{0}\r\n\
+                     Content-Type: application/json\r\nContent-Length: {1}\r\n{extra}\r\n{ask}",
+                    host(server),
+                    ask.len()
+                ),
+            )
+            .reply()
+        };
+
+        let config = Config {
+            ui: Some(ui.clone()),
+            ..quick()
+        };
+        let (session, server) = serve(Canned::new([deltas(&["ok"])]), config);
+        let page = get(&server, "/", "");
+        assert_eq!(status(&page), 200, "{page}");
+        assert!(
+            page.contains("Content-Type: text/html; charset=utf-8\r\n"),
+            "{page}"
+        );
+        assert!(page.ends_with("<html>the page</html>"), "{page}");
+        let script = get(&server, "/assets/app.js", "");
+        assert!(
+            script.contains("Content-Type: text/javascript; charset=utf-8\r\n"),
+            "{script}"
+        );
+        for outside in ["/../secret.txt", "/assets/../../secret.txt", "/nowhere.js"] {
+            assert_eq!(status(&get(&server, outside, "")), 404, "{outside}");
+        }
+        let driven = post(&server, "");
+        assert_eq!(status(&driven), 200, "{driven}");
+        wait_until(&session, "the turn", settled);
+        assert_eq!(asked(&session), 1);
+
+        // Without the bundle: no page, and its origin drives nothing.
+        let (bare, server) = serve(Canned::new([deltas(&["ok"])]), quick());
+        assert_eq!(status(&get(&server, "/", "")), 404);
+        assert_eq!(status(&post(&server, "")), 403);
+        assert_eq!(asked(&bare), 0);
+
+        // Under a credential, the page asks for it as every route does.
+        let config = Config {
+            ui: Some(ui),
+            credential: Credential::basic("author:s3cret"),
+            ..quick()
+        };
+        let (_, server) = serve(Canned::new([deltas(&["ok"])]), config);
+        let challenged = get(&server, "/", "");
+        assert_eq!(status(&challenged), 401, "{challenged}");
+        assert!(challenged.contains("WWW-Authenticate: Basic realm=\"diet\""));
+        let admitted = get(
+            &server,
+            "/",
+            &format!("Authorization: Basic {}\r\n", base64(b"author:s3cret")),
+        );
+        assert_eq!(status(&admitted), 200, "{admitted}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
