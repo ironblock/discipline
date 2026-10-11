@@ -95,6 +95,10 @@ fn serve_usage() -> String {
     out.push_str("commands. <FILE> is the trunk's system message. The first line on\n");
     out.push_str("stdout is JSON naming the address it listens on and when it opened.\n");
     out.push_str("--allow-origin admits a page's origin (a development proxy's).\n");
+    out.push_str("--ui DIR serves the surface's built bundle on serve's own origin, the page\n");
+    out.push_str("at /?drive driving the session with no proxy; unnamed, a ui directory\n");
+    out.push_str("beside this binary is served when there is one. The first line names it\n");
+    out.push_str("as `page`.\n");
     out.push_str("--key-file names a file holding the endpoint's key, sent as a bearer\n");
     out.push_str("credential; it is never taken as an argument.\n");
     out.push_str("--auth-file names a file holding user:password; every request must then\n");
@@ -165,6 +169,8 @@ struct ServeArgs {
     worktree: Option<String>,
     /// `--seat-endpoint`, `--seat-model` and `--seat-key-file` (#570).
     seat: SeatArgs,
+    /// `--ui`, the surface's built bundle to serve (#716).
+    ui: Option<String>,
 }
 
 /// Where an offboard extraction seat is reached, as `serve`'s flags say.
@@ -204,6 +210,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
     let mut max_output_tokens = None;
     let mut worktree = None;
     let mut seat = SeatArgs::default();
+    let mut ui = None;
     let mut given = args.iter();
     while let Some(flag) = given.next() {
         let value = given.next()?;
@@ -242,6 +249,9 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
             true
         } else if flag == "--listen" {
             value.parse().map(|given| listen = given).is_ok()
+        } else if flag == "--ui" {
+            ui = Some(value.clone());
+            true
         } else if flag == "--allow-origin" {
             let origin = is_an_origin(value);
             if origin {
@@ -282,6 +292,7 @@ fn serve_args(args: &[String]) -> Option<ServeArgs> {
         max_output_tokens,
         worktree,
         seat,
+        ui,
     })
 }
 
@@ -309,13 +320,20 @@ fn serve(args: &[String]) -> ExitCode {
         max_output_tokens,
         worktree,
         seat,
+        ui,
     }) = serve_args(args)
     else {
         eprint!("{}", serve_usage());
         return ExitCode::from(EXIT_USAGE);
     };
-    let endpoint = match Endpoint::parse(&endpoint) {
-        Ok(endpoint) => chat_endpoint(endpoint),
+    // The surface's bundle (#716): `--ui`, else a `ui` directory beside the
+    // binary, as a release archive or a native shell ships it; else none.
+    let ui = match page_bundle(ui.as_deref()) {
+        Ok(ui) => ui,
+        Err(why) => return fail(EXIT_INPUT, &why),
+    };
+    let (endpoint, written) = match Endpoint::parse(&endpoint) {
+        Ok(endpoint) => (chat_endpoint(endpoint.clone()), endpoint),
         Err(why) => return fail(EXIT_INPUT, &format!("{endpoint} is not an endpoint: {why}")),
     };
     let system = match std::fs::read_to_string(&head) {
@@ -480,6 +498,27 @@ fn serve(args: &[String]) -> ExitCode {
             .recording
             .as_ref()
             .map(|dir| std::fs::canonicalize(dir).unwrap_or_else(|_| dir.clone()));
+        // Serve writes the recording unconfined (#735): never where the
+        // model's own commands can write, or a symlink they plant there
+        // steers serve's write outside the sandbox.
+        if let Some(writable) = tools
+            .recording
+            .as_deref()
+            .and_then(|recording| writable_holding(tools, recording))
+        {
+            return fail(
+                EXIT_INPUT,
+                &format!(
+                    "the recording's directory {} lies in {writable}, where the model's commands \
+                     write: name --log (or --record) outside it",
+                    tools
+                        .recording
+                        .as_deref()
+                        .unwrap_or(std::path::Path::new(""))
+                        .display()
+                ),
+            );
+        }
     }
     let credential = match auth_file.as_deref().map(credential_from).transpose() {
         Ok(credential) => credential,
@@ -488,6 +527,14 @@ fn serve(args: &[String]) -> ExitCode {
     let listen = match listen_on(listen, credential.is_some()) {
         Ok(listen) => listen,
         Err(refused) => return refused,
+    };
+    // A base URL on a hosted Messages API reaches its messages path (#731).
+    let endpoint = match hosted
+        .as_ref()
+        .and_then(|identity| identity.dialect.as_deref())
+    {
+        Some(dialect) => completed(written, Some(dialect)),
+        None => endpoint,
     };
     let trunk_endpoint = endpoint.clone();
     let mut transport = HttpStream::new(endpoint);
@@ -683,10 +730,12 @@ fn serve(args: &[String]) -> ExitCode {
     // Where the projection reads an attached file back from (#372): the
     // directory its copy was kept in.
     let recording = attaching.recording.clone();
+    let page = ui.is_some();
     let config = Config {
         attaching,
         allowed_origins,
         credential,
+        ui,
         ..Config::default()
     };
     let running = match started(
@@ -706,7 +755,7 @@ fn serve(args: &[String]) -> ExitCode {
     println!(
         "{}",
         announcement(
-            &running.server.addr().to_string(),
+            (&running.server.addr().to_string(), page),
             opened,
             substrate.map(|id| (id, registry_sha256.as_str())),
             engine
@@ -957,8 +1006,11 @@ fn offboard_seat(
              say where and as what"
         ));
     };
+    let seat_speaks = diet::drive::registry::identity(diet::drive::registry::REGISTRY, id)
+        .ok()
+        .and_then(|identity| identity.dialect);
     let endpoint = match Endpoint::parse(&endpoint) {
-        Ok(endpoint) => chat_endpoint(endpoint),
+        Ok(endpoint) => completed(endpoint, seat_speaks.as_deref()),
         Err(why) => return Err(format!("{endpoint} is not an endpoint: {why}")),
     };
     tls_only_for_an_api(&endpoint, Some(id))?;
@@ -1149,6 +1201,16 @@ fn serving_interview(
                 session::CAPTURE_MODALITY
             ));
         }
+    } else if asks.modality == diet::dogma::asks::Modality::Tools {
+        // The dual (#730): a set whose asks have a fork call the record
+        // tools, on the fields route, where every such call is discarded.
+        return Err(format!(
+            "{path} declares the ask set `{}`, whose asks have a fork answer through the \
+             record tools, without `{}` = \"tools\": on the fields route every fork's \
+             call would be discarded",
+            asks.name,
+            session::CAPTURE_MODALITY
+        ));
     }
     Ok(
         (!rules.is_empty() || self_capture.is_some()).then(|| Interview {
@@ -1523,7 +1585,19 @@ fn started_writers(
                     .map_err(|why| emptied.named(format!("{product} cannot be removed: {why}")))?;
                 emptied.push(format!("the previous product at {product}"));
             }
-            Ok::<_, String>((held || stale || stale_product, (regime, (path, file))))
+            // An earlier session's refused projection (#658), as its sidecar
+            // and product are (#731): never beside this session's record.
+            let refused = format!("{path}.refused.jsonl");
+            let stale_refused = std::path::Path::new(&refused).exists();
+            if stale_refused {
+                std::fs::remove_file(&refused)
+                    .map_err(|why| emptied.named(format!("{refused} cannot be removed: {why}")))?;
+                emptied.push(format!("the previous refused projection at {refused}"));
+            }
+            Ok::<_, String>((
+                held || stale || stale_product || stale_refused,
+                (regime, (path, file)),
+            ))
         })
         .transpose()?;
     let log_held = log
@@ -1725,6 +1799,23 @@ fn chat_endpoint(mut endpoint: Endpoint) -> Endpoint {
 /// The path [`chat_endpoint`] completes a base URL to.
 const CHAT_COMPLETIONS: &str = "/v1/chat/completions";
 
+/// The path a hosted Messages API's base URL is completed to (#731).
+const MESSAGES: &str = "/v1/messages";
+
+/// `endpoint` completed for the server's `dialect` (#731): a base URL (no
+/// path, or `/v1`) on an `anthropic-messages` entry to [`MESSAGES`], any
+/// other to [`CHAT_COMPLETIONS`] as [`chat_endpoint`] does; a written path
+/// as it is.
+fn completed(mut endpoint: Endpoint, dialect: Option<&str>) -> Endpoint {
+    if dialect == Some("anthropic-messages")
+        && matches!(endpoint.path.as_str(), "/" | "/v1" | "/v1/")
+    {
+        MESSAGES.clone_into(&mut endpoint.path);
+        return endpoint;
+    }
+    chat_endpoint(endpoint)
+}
+
 /// The address `serve` may listen on: `listen`, refused when it is a
 /// wildcard, or off loopback with no credential (fail-closed, I7). A usage
 /// refusal, so it is made before anything touches the network.
@@ -1876,7 +1967,7 @@ fn confirmations(
 }
 
 fn announcement(
-    listening: &str,
+    (listening, page): (&str, bool),
     opened: u64,
     substrate: Option<(&str, &str)>,
     engine: Option<(&diet::drive::engine::Passed, Warmed)>,
@@ -1891,6 +1982,13 @@ fn announcement(
             Value::Integer(i64::try_from(opened).unwrap_or(i64::MAX)),
         ),
     ]);
+    // Where the served page drives the session (#716).
+    if page {
+        fields.insert(
+            "page".to_owned(),
+            Value::String(format!("http://{listening}/?drive")),
+        );
+    }
     if let Some((substrate, registry_sha256)) = substrate {
         fields.insert("substrate".to_owned(), Value::String(substrate.to_owned()));
         // Which registry answered (#204): its text's digest, for a reader
@@ -1969,6 +2067,53 @@ fn registered_regime(
             )
         })
         .map_err(|why| format!("{path}: {why}"))
+}
+
+/// The path the model's commands may write that holds `recording` (#735):
+/// the worktree, or a `sandbox_writable` directory, each as it resolves.
+fn writable_holding(
+    tools: &diet::drive::tool_loop::Tools,
+    recording: &std::path::Path,
+) -> Option<String> {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let resolved = |path: &str| {
+        let path = match (path.strip_prefix("~/"), home.as_ref()) {
+            (Some(rest), Some(home)) => home.join(rest),
+            _ => std::path::PathBuf::from(path),
+        };
+        std::fs::canonicalize(&path).unwrap_or(path)
+    };
+    std::iter::once(tools.worktree.to_string_lossy().into_owned())
+        .chain(tools.policy.writable.iter().cloned())
+        .find(|path| recording.starts_with(resolved(path)))
+}
+
+/// The surface's built bundle to serve (#716): `named`, which must hold an
+/// `index.html`; else, unnamed, a `ui` directory beside this binary that
+/// holds one; else none.
+///
+/// # Errors
+///
+/// A named directory with no `index.html`.
+fn page_bundle(named: Option<&str>) -> Result<Option<std::path::PathBuf>, String> {
+    let holds_a_page = |dir: &std::path::Path| dir.join("index.html").is_file();
+    match named {
+        Some(dir) => {
+            let dir = std::path::PathBuf::from(dir);
+            if holds_a_page(&dir) {
+                Ok(Some(dir))
+            } else {
+                Err(format!(
+                    "--ui {} holds no index.html: name the surface's built bundle",
+                    dir.display()
+                ))
+            }
+        }
+        None => Ok(std::env::current_exe()
+            .ok()
+            .and_then(|exe| exe.parent().map(|dir| dir.join("ui")))
+            .filter(|dir| holds_a_page(dir))),
+    }
 }
 
 /// The endpoint's key, from a FILE: an argument is readable by anyone who

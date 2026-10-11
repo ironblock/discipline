@@ -78,12 +78,18 @@ const replayPayload: Plugin = {
 // not pictures.
 export default defineConfig(({ mode }) => ({
   plugins: [react(), ...(mode === 'replay' ? [replayPayload] : [])],
-  ...(mode === 'replay' ? { base: './' } : {}),
+  // The replay and the app build both resolve every asset and route against the page, never the origin root (#716):
+  // the app is served by `serve`, by Vite, or inside a Tauri webview, under whatever path that gives it.
+  ...(mode === 'replay' || mode === 'app' ? { base: './' } : {}),
   build: {
     // Off: Vite 8 hands the modulepreload polyfill to Rolldown, whose injected
     // text calls `fetch(`, which the Pages table forbids (#32, N1).
     modulePreload: { polyfill: false },
     ...(mode === 'replay' ? { outDir: path.join(dirname, '../_site/replay'), emptyOutDir: true, rollupOptions: { input: path.join(dirname, 'replay.html') } } : {}),
+    // The surface `serve` serves (#716): index.html and its assets, every path relative, in `exercise/dist/app`
+    // (ignored, and the same whatever cargo's profile). `serve --ui exercise/dist/app` serves it; a release archive or
+    // the Tauri app ships that directory as `ui/` beside the binary.
+    ...(mode === 'app' ? { outDir: path.join(dirname, 'dist/app'), emptyOutDir: true } : {}),
   },
   ...(proxied ? { server: { proxy: proxied } } : {}),
   test: {

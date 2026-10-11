@@ -383,6 +383,92 @@ pub fn kept_whole(
     Ok(file)
 }
 
+/// One part of an output kept whole from pieces (#734): bytes held in
+/// memory, or a file -- a spilled stream -- read as it is copied.
+#[derive(Debug, Clone, Copy)]
+pub enum Part<'a> {
+    /// Bytes in memory.
+    Bytes(&'a [u8]),
+    /// A file's whole.
+    File(&'a Path),
+}
+
+/// [`kept_whole`], of an output whose whole is `parts` in order -- a
+/// spilled one (#734), never held in memory at once: copied into the
+/// recording through a partial file while its digest is taken, then
+/// renamed to it.
+///
+/// # Errors
+///
+/// The copy's [`Check::CopyConflict`] or [`Check::CopyFailed`].
+pub fn kept_whole_from(
+    recording: &Path,
+    parts: &[Part<'_>],
+    media_type: &str,
+) -> Result<RecordedFile, (Check, String)> {
+    use sha2::Digest as _;
+    use std::io::Write as _;
+    let dir = recording.join(FILES);
+    let failed = |why: std::io::Error| (Check::CopyFailed, format!("{}: {why}", dir.display()));
+    own_dir(recording, FILES).map_err(failed)?;
+    let partial = dir.join(format!(
+        ".whole.partial-{}-{}",
+        std::process::id(),
+        PARTIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let copied = (|| -> std::io::Result<(String, u64)> {
+        let mut out = std::io::BufWriter::new(created_new(&partial)?);
+        let mut hash = sha2::Sha256::new();
+        let mut bytes = 0_u64;
+        let mut chunk = vec![0_u8; 64 * 1024];
+        for part in parts {
+            match part {
+                Part::Bytes(held) => {
+                    hash.update(held);
+                    out.write_all(held)?;
+                    bytes += u64::try_from(held.len()).unwrap_or(u64::MAX);
+                }
+                Part::File(path) => {
+                    use std::io::Read as _;
+                    let mut file = std::fs::File::open(path)?;
+                    loop {
+                        let read = file.read(&mut chunk)?;
+                        if read == 0 {
+                            break;
+                        }
+                        hash.update(&chunk[..read]);
+                        out.write_all(&chunk[..read])?;
+                        bytes += u64::try_from(read).unwrap_or(u64::MAX);
+                    }
+                }
+            }
+        }
+        out.flush()?;
+        Ok((crate::digest::hex(hash.finalize().into()), bytes))
+    })();
+    let (sha256, bytes) = copied.map_err(|why| {
+        let _ = std::fs::remove_file(&partial);
+        failed(why)
+    })?;
+    let file = RecordedFile {
+        path: format!("{FILES}/{sha256}"),
+        sha256,
+        media_type: media_type.to_owned(),
+        bytes,
+    };
+    let at = recording.join(&file.path);
+    // Already kept: the same digest names the same bytes.
+    if at.exists() {
+        let _ = std::fs::remove_file(&partial);
+        return Ok(file);
+    }
+    std::fs::rename(&partial, &at).map_err(|why| {
+        let _ = std::fs::remove_file(&partial);
+        failed(why)
+    })?;
+    Ok(file)
+}
+
 /// The reference a line would carry for `bytes` of `media_type`, kept or
 /// not: what [`crate::client::attach`] checks an image's bytes against.
 #[must_use]
@@ -569,6 +655,52 @@ fn bounded(stream: impl Read + Send + 'static, limit: u64) -> mpsc::Receiver<Vec
     received
 }
 
+/// `parent/sub`, a directory serve writes into unconfined, made if absent
+/// (#735). Refused when `parent` or `parent/sub` is a symlink, or `sub` is
+/// not a directory: where the recording lies in a path a sandboxed command
+/// can write, a symlink planted there would steer serve's own write outside
+/// the sandbox.
+///
+/// # Errors
+///
+/// That refusal, or the directory's making failed.
+pub fn own_dir(parent: &Path, sub: &str) -> std::io::Result<std::path::PathBuf> {
+    let refused = |path: &Path| {
+        std::io::Error::other(format!(
+            "{} is a symlink or not a directory: serve writes nothing through it",
+            path.display()
+        ))
+    };
+    let linked = |path: &Path| {
+        std::fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+    };
+    if linked(parent) {
+        return Err(refused(parent));
+    }
+    let dir = parent.join(sub);
+    match std::fs::symlink_metadata(&dir) {
+        Ok(meta) if meta.file_type().is_symlink() || !meta.is_dir() => Err(refused(&dir)),
+        Ok(_) => Ok(dir),
+        Err(why) if why.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(&dir)?;
+            if linked(&dir) {
+                return Err(refused(&dir));
+            }
+            Ok(dir)
+        }
+        Err(why) => Err(why),
+    }
+}
+
+/// A file made at `path` that was not there, a symlink included (#735): a
+/// name planted before serve wrote it is refused, not followed.
+fn created_new(path: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+}
+
 /// How many temporary copies this process has begun: each [`kept`] call's
 /// own temporary name, so two threads keeping the same digest at once never
 /// rename one file out from under the other (#514's review).
@@ -616,14 +748,15 @@ fn kept(recording: &Path, file: &RecordedFile, bytes: &[u8]) -> Result<(), (Chec
         Err(why) if why.kind() == std::io::ErrorKind::NotFound => {}
         Err(why) => return Err(failed(why)),
     }
-    std::fs::create_dir_all(recording.join(FILES)).map_err(failed)?;
+    own_dir(recording, FILES).map_err(failed)?;
     let partial = recording.join(FILES).join(format!(
         ".{}.partial-{}-{}",
         file.sha256,
         std::process::id(),
         PARTIALS.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
     ));
-    std::fs::write(&partial, bytes)
+    created_new(&partial)
+        .and_then(|mut out| std::io::Write::write_all(&mut out, bytes))
         .and_then(|()| std::fs::rename(&partial, &at))
         .map_err(|why| {
             let _ = std::fs::remove_file(&partial);

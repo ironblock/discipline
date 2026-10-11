@@ -58,6 +58,8 @@ struct Served {
     log: Option<(String, bool)>,
     /// Where `--record` writes, and whether naming it emptied anything.
     record: Option<(String, bool)>,
+    /// Where the served page drives the session, under `--ui` (#716).
+    page: Option<String>,
     /// Every later line it writes on stdout.
     said: std::sync::mpsc::Receiver<String>,
     _head: HeadFile,
@@ -133,6 +135,7 @@ fn start_with(endpoint: &str, extra: &[&str], env: &[(&str, &str)]) -> Served {
         engine_build: announced["engine_build"].as_str().map(str::to_owned),
         engine_identity: announced["engine_identity"].as_str().map(str::to_owned),
         budget_tokens_unsent: announced["budget_tokens_unsent"].as_u64(),
+        page: announced["page"].as_str().map(str::to_owned),
         log: announced["log"]
             .as_str()
             .zip(announced["log_truncated"].as_bool())
@@ -390,6 +393,14 @@ fn run_briefly(endpoint: &str, extra: &[&str]) -> (Option<i32>, String) {
         let _ = stdout.read_to_string(&mut said);
     }
     (code, said)
+}
+
+/// Whether `sandbox-exec` is on `PATH`, where serve looks for it.
+fn sandbox_runner_on_path() -> bool {
+    std::env::var_os("PATH").is_some_and(|path| {
+        std::env::split_paths(&path)
+            .any(|dir| dir.join(diet::isolation::seatbelt::RUNNER).is_file())
+    })
 }
 
 /// A file holding `text`, removed when dropped. Named by this process and a
@@ -945,6 +956,39 @@ fn a_drive_server_starts_on_a_prebuilt_engine_by_its_literal() {
     );
 }
 
+/// #716: `--ui DIR` serves the surface's built bundle on serve's own
+/// origin, and the first line names the page; a directory holding no
+/// `index.html` is refused before anything binds.
+#[test]
+fn a_drive_server_serves_the_surfaces_bundle_with_ui() {
+    let bundle = Dir::new("ui-bundle");
+    std::fs::write(bundle.0.join("index.html"), "<html>the page</html>").expect("a page");
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let served = start(&stub.url(), &["--ui", &bundle.path()]);
+    assert_eq!(
+        served.page.as_deref(),
+        Some(format!("http://{}/?drive", served.listening).as_str())
+    );
+    let mut page = std::net::TcpStream::connect(&served.listening).expect("connects");
+    page.write_all(
+        format!(
+            "GET / HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            served.listening
+        )
+        .as_bytes(),
+    )
+    .expect("asked");
+    let mut reply = String::new();
+    page.read_to_string(&mut reply).expect("answered");
+    assert!(reply.starts_with("HTTP/1.1 200 "), "{reply}");
+    assert!(reply.ends_with("<html>the page</html>"), "{reply}");
+
+    let empty = Dir::new("ui-empty");
+    let (code, said) = run_briefly(&stub.url(), &["--ui", &empty.path()]);
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("holds no index.html"), "{said}");
+}
+
 /// What `TabbyAPI`'s `GET /v1/model` answered for the 3.8 line's config r2,
 /// as the r2 window captured it (Track 4's committed record), with
 /// `cache_size` as given: the active template's name and text among it.
@@ -1031,7 +1075,10 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
 
 /// #718: BEGIN's start, as shipped -- `diet/drive/floor.toml` against a
 /// server answering as the floor does (config r2's captured `/v1/model`, and
-/// a warm reply) -- starts with no refusal, naming today's floor.
+/// a warm reply), with BEGIN's empty worktree and auth file -- starts with no
+/// refusal, naming today's floor; and (#721) with the product on: the model's
+/// commands under the sandbox with approvals off, the gated fork on a read
+/// or a scoping ask in ask set t2 through the record tools, self-capture on.
 #[test]
 fn begins_floor_regimen_starts_against_the_floors_tabbyapi() {
     let floor = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("drive/floor.toml");
@@ -1039,7 +1086,42 @@ fn begins_floor_regimen_starts_against_the_floors_tabbyapi() {
     let stub = Stub::serving(vec![tabby_model_card(163_840), warm()]).expect("loopback");
     let log_file = file_holding("log", "");
     let logged = log_file.0.to_string_lossy().into_owned();
-    let served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
+    let tree = Dir::new("begin-worktree");
+    let auth = file_holding("auth", "driver:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let args = [
+        "--regimen",
+        &path,
+        "--log",
+        &logged,
+        "--worktree",
+        &tree.path(),
+        "--auth-file",
+        &auth_path,
+    ];
+    // The floor reads everywhere under the sandbox (`sandbox_reads = "all"`),
+    // which is built for Seatbelt alone: elsewhere serve refuses it, and so
+    // does a Mac without `sandbox-exec`. Each refusal is asserted where it
+    // applies; the start on a Mac with Seatbelt.
+    if !cfg!(target_os = "macos") {
+        let (code, said) = run_briefly(&stub.url(), &args);
+        assert!(code.is_some_and(|code| code != 0), "{code:?}: {said}");
+        assert!(said.contains("is not built for"), "{said}");
+        return;
+    }
+    if !sandbox_runner_on_path() && std::env::var_os("DIET_REQUIRE_SANDBOX").is_none() {
+        let (code, said) = run_briefly(&stub.url(), &args);
+        assert!(code.is_some_and(|code| code != 0), "{code:?}: {said}");
+        assert!(
+            said.contains(&format!(
+                "`{}` is not on this host",
+                diet::isolation::seatbelt::RUNNER
+            )),
+            "{said}"
+        );
+        return;
+    }
+    let served = start(&stub.url(), &args);
     assert_eq!(
         served.substrate.as_deref(),
         Some("accel24-tabbyapi-exl3-qwen38-27b-3p00")
@@ -1047,6 +1129,28 @@ fn begins_floor_regimen_starts_against_the_floors_tabbyapi() {
     assert_eq!(
         served.engine_identity.as_deref(),
         Some("declared (the engine not asked)")
+    );
+    let levers = &first_logged_line(&log_file.0)["levers"];
+    for (lever, word) in [
+        ("isolation", "sandbox"),
+        ("approval", "none"),
+        ("tool_surface", "bash"),
+        ("fork_warrant", "one-per-gap-gated:read+scoping"),
+        ("capture_modality", "tools"),
+    ] {
+        assert_eq!(levers[lever], word, "{lever}: {levers}");
+    }
+    assert!(
+        levers["fork_asks"]
+            .as_str()
+            .is_some_and(|set| set.starts_with("t2:")),
+        "{levers}"
+    );
+    assert!(
+        levers["self_capture"]
+            .as_str()
+            .is_some_and(|state| state.starts_with("on:")),
+        "{levers}"
     );
 }
 
@@ -2234,6 +2338,40 @@ fn a_drive_server_that_runs_commands_demands_a_credential_no_command_can_read() 
         said.contains("--auth-file") && said.contains("lies in"),
         "{said}"
     );
+    assert!(stub.received().is_empty(), "no request reached the server");
+}
+
+/// #735: serve writes the recording unconfined, so it refuses one where the
+/// model's commands can write -- here `--log` inside `--worktree` -- before
+/// anything binds or reaches the server.
+#[test]
+fn a_drive_server_refuses_a_recording_inside_the_worktree() {
+    let tree = Dir::new("recording-in-tree");
+    let stub = Stub::serving(Vec::new()).expect("loopback");
+    let regimen = commands_regimen(
+        "allowed_commands = []\n",
+        "isolation = \"none\"",
+        "[limits]\nmax_steps = 4\n",
+    );
+    let path = regimen.0.to_string_lossy().into_owned();
+    let auth = file_holding("auth", "author:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let log = tree.0.join("session.log").to_string_lossy().into_owned();
+    let (code, said) = run_briefly(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+            "--log",
+            &log,
+        ],
+    );
+    assert_eq!(code, Some(1), "{said}");
+    assert!(said.contains("where the model's commands write"), "{said}");
     assert!(stub.received().is_empty(), "no request reached the server");
 }
 
@@ -3889,4 +4027,70 @@ fn a_drive_server_on_a_hosted_api_entry_asks_the_cache_for_the_lifetimes_declare
     let (code, said) = run_briefly(&stub.url(), &["--regimen", &path, "--key-file", &key_path]);
     assert_eq!(code, Some(1), "{said}");
     assert!(said.contains("cache_ttl"), "{said}");
+}
+
+/// REVIEW: an earlier session's kept-but-refused rows (#658's
+/// `FILE.refused.jsonl`) are an earlier session's output beside this one's
+/// record, as the sidecar and product are.
+#[test]
+fn review_a_drive_server_removes_an_earlier_refused_projection_when_it_starts() {
+    let stub =
+        Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info()).expect("loopback");
+    let record = file_holding("record", "");
+    let path = record.0.to_string_lossy().into_owned();
+    let refused = PathBuf::from(format!("{path}.refused.jsonl"));
+    std::fs::write(&refused, "an earlier session's refused rows\n").expect("written");
+    let served = start(&stub.url(), &["--regimen", &dev_loop(), "--record", &path]);
+    let still_there = refused.exists();
+    let _ = std::fs::remove_file(&refused);
+    drop(served);
+    assert!(
+        !still_there,
+        "the earlier session's {path}.refused.jsonl is still beside this session's record"
+    );
+}
+
+// REVIEW (net): a base-URL endpoint on a Messages-API entry should reach /v1/messages.
+#[test]
+fn review_net_a_hosted_base_url_is_completed_to_its_messages_path() {
+    let stub = Stub::serving(vec![Act::Raw(HOSTED_ANSWER.to_vec())]).expect("loopback");
+    let regimen = hosted_regimen();
+    let path = regimen.0.to_string_lossy().into_owned();
+    let key = file_holding("key", "sk-rehearsal\n");
+    let key_path = key.0.to_string_lossy().into_owned();
+    let base = format!("http://{}/v1", stub.address());
+    let served = start(&base, &["--regimen", &path, "--key-file", &key_path]);
+    let address = served.listening.clone();
+    let reply = post(&address, &address, r#"{"kind":"ask","text":"hello?"}"#);
+    assert_eq!(status(&reply), 200, "{reply}");
+    let _ = exchange(
+        &address,
+        &format!("GET /events?from=0 HTTP/1.1\r\nHost: {address}\r\n\r\n"),
+        |read| read.contains("turn.settled"),
+    );
+    let _ = post(&address, &address, r#"{"kind":"end"}"#);
+    let heads = stub.heads();
+    let first = heads[0].lines().next().unwrap_or_default().to_owned();
+    assert!(
+        first.starts_with("POST /v1/messages "),
+        "request line: {first}"
+    );
+}
+
+#[test]
+fn review_a_drive_server_refuses_a_tools_ask_set_on_the_fields_route() {
+    // #625 refuses `tools` with a fields set. The dual: a set written for
+    // the record tools (t1, t2 primes the system prompt for them) on the
+    // fields route, where a fork's tool call is discarded `unparseable`.
+    for set in ["t1", "t2"] {
+        let top = format!(
+            "interview_warrant = [\"scoping\"]\nself_capture = true\nfork_asks = \"{set}\"\n"
+        );
+        let regimen = dev_loop_sampling(&top, "seed = 7\n");
+        let stub = Stub::serving_with_props(Vec::new(), &diet::drive::canned::build_info())
+            .expect("loopback");
+        let (code, said) = run_briefly(&stub.url(), &["--regimen", &regimen.0.to_string_lossy()]);
+        eprintln!("{set}: exit {code:?}");
+        assert_ne!(code, None, "{set} on the fields route listened: {said}");
+    }
 }

@@ -120,7 +120,7 @@ function posting(log: string): Web {
   return {
     ...serving(log),
     fetch: async (url, init) => {
-      if (String(url).endsWith('/commands') && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
+      if (/(^|\/)commands$/.test(String(url)) && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
       return new Response('{}', { status: 200 });
     },
   };
@@ -800,6 +800,7 @@ export const ServedOperatorEdits: Story = {
       await expect(found).not.toBeNull();
       return found!;
     });
+    // The meditation left the flag unaddressed, so it stays pending to the next one (#749).
     await expect(entry.querySelector('.ex-memory__flag')?.textContent).toBe('flag · is one team enough?');
     await expect(entry.querySelector('.ex-memory__refused')?.textContent).toBe('refused: retire by self-capture, supersede by fork 7');
     const meditation = canvasElement.querySelector<HTMLElement>('.ex-meditation');
@@ -912,6 +913,15 @@ export const ServedNoCommands: Story = {
     });
     await expect(lever.textContent).toBe('approvals no commands');
     await expect(canvasElement.querySelector('.ex-hint')?.textContent).toBe('Your turn. Ask for something, and the answer lands here.');
+  },
+};
+
+/** `?drive=<url>` or `<meta name="diet-drive">` (#733): a page talking to a drive it was pointed at says which. */
+export const ServedNamedDrive: Story = {
+  name: '?drive: a named drive is named on the page',
+  args: { drive: true, base: 'http://127.0.0.1:7802/', web: serving(answeredTurn) },
+  play: async ({ canvasElement }) => {
+    await waitFor(async () => expect(canvasElement.textContent).toContain("driving: diet's session at http://127.0.0.1:7802/, over HTTP"));
   },
 };
 

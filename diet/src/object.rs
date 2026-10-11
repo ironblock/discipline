@@ -500,13 +500,18 @@ impl WorkingObject {
         self.entries.get(&self.canonical(id)?)
     }
 
-    /// Whether the operator wrote the entry `id` names, as its latest
-    /// provenance says (#150): such an entry changes only by the operator.
+    /// Whether the operator wrote the entry `id` names (#150): any of its
+    /// provenances is the operator's. Such an entry changes only by the
+    /// operator; a model restating its text adds a provenance and takes
+    /// nothing (#729).
     #[must_use]
     pub fn by_operator(&self, id: &EntryId) -> bool {
-        self.entry(id)
-            .and_then(|entry| entry.provenances.last())
-            .is_some_and(|provenance| provenance.lane == OPERATOR)
+        self.entry(id).is_some_and(|entry| {
+            entry
+                .provenances
+                .iter()
+                .any(|provenance| provenance.lane == OPERATOR)
+        })
     }
 
     /// The entry `id` names, resolving an alias to the entry that holds its
@@ -886,18 +891,31 @@ impl WorkingObject {
 
     #[must_use]
     pub fn dump_lines(&self) -> BTreeMap<EntryId, String> {
+        self.dump_values()
+            .into_iter()
+            .map(|(id, value)| {
+                let mut line = String::new();
+                json::render(&value, &mut line);
+                (id, line)
+            })
+            .collect()
+    }
+
+    /// Each entry as the dump writes it, in id order, before it is
+    /// rendered: what `GET /memory` answers (#756), so the dump and the
+    /// route are one serialization.
+    #[must_use]
+    pub fn dump_values(&self) -> Vec<(EntryId, Value)> {
         self.entries
             .values()
             .map(|entry| {
-                let mut line = String::new();
                 let aliases: Vec<&EntryId> = self
                     .aliases
                     .iter()
                     .filter(|(_, held)| *held == &entry.id)
                     .map(|(alias, _)| alias)
                     .collect();
-                json::render(&entry_value(entry, &aliases), &mut line);
-                (entry.id.clone(), line)
+                (entry.id.clone(), entry_value(entry, &aliases))
             })
             .collect()
     }

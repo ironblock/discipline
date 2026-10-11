@@ -632,3 +632,31 @@ fn adapters_a_replay_joins_the_sidechains_found_beside_its_log() {
         "and counts the models across the main log and its sidechains: {census}"
     );
 }
+
+#[test]
+fn adapters_a_replay_with_sidechains_digests_every_transcript_it_read() {
+    // #736: the record's `source_digest` names what it was built from -- the
+    // log and the sidechains beside it -- so the same log replayed with and
+    // without them is not one source under one digest.
+    let (code, out, err) = run(&[
+        "--adapter",
+        "claude-code",
+        "--regimen",
+        &regimen().to_string_lossy(),
+        "--source-available",
+        "committed",
+        &fixture("a-session-that-delegated").to_string_lossy(),
+    ]);
+    assert_eq!(code, 0, "{err}");
+    let log = std::fs::read(fixture("a-session-that-delegated")).expect("the log");
+    let main_only = diet::digest::sha256_hex(&log);
+    let digest = out
+        .split("\"source_digest\":\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').next())
+        .expect("a source digest in the record");
+    assert_ne!(
+        digest, main_only,
+        "the digest covers the sidechains, not the main log alone"
+    );
+}
