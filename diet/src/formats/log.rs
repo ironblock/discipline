@@ -6884,6 +6884,51 @@ mod tests {
         );
     }
 
+    /// #737: a v7 log's levers name the boundary as v7 did -- `seam_audit`,
+    /// `seam_trigger`, `seam_warm`, `+seam:` in the tool-output disposition --
+    /// and read under v8's names, project back in v7's, and a v8 log naming a
+    /// lever the old way is refused.
+    #[test]
+    fn a_logs_levers_are_read_in_its_versions_spelling() {
+        let v7 = include_str!("../../../runs/2026-10-10-levers-run-a-agent-driven/session.log");
+        let lines = super::parse(v7).expect("the run's log reads");
+        let Event::SessionStart {
+            levers: Some(levers),
+            ..
+        } = &lines[0].event
+        else {
+            panic!("a start with levers");
+        };
+        assert_eq!(
+            levers.get("meditation_audit").map(String::as_str),
+            Some("on")
+        );
+        assert!(levers.contains_key("meditation_trigger"));
+        assert!(levers.contains_key("meditation_warm"));
+        assert!(
+            levers.keys().all(|lever| !lever.contains("seam")),
+            "{levers:?}"
+        );
+        assert!(
+            levers["tool_output_disposition"].ends_with("+meditation:reference"),
+            "{levers:?}"
+        );
+        let mut projected = String::new();
+        json::render(&super::project(v7).expect("it projects"), &mut projected);
+        assert!(
+            projected.contains(r#""seam_audit":"on""#),
+            "projected in v7's spelling"
+        );
+        assert!(projected.contains("+seam:reference"));
+        assert!(!projected.contains("meditation_audit"));
+        let start = v7.lines().next().expect("a start line");
+        let v8_old = start.replacen(r#""version":7"#, r#""version":8"#, 1);
+        assert!(
+            super::line(&v8_old).is_err(),
+            "v8 names no lever `seam_audit`"
+        );
+    }
+
     /// #737: a line read alone has no session line to declare its version,
     /// so [`super::line`] reads a v7 line's words as v8's -- a `fork` whose
     /// `why` is `seam` reads as one whose `why` is `meditation` -- rather than

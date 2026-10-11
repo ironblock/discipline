@@ -6068,6 +6068,48 @@ mod tests {
         .expect("the fixture")
     }
 
+    /// #737: a record's start levers name the boundary as its version does:
+    /// a version 1 record's `seam_audit` reads as `meditation_audit` and is
+    /// written back as it was; a version 2 record naming it the old way is
+    /// refused.
+    #[test]
+    fn a_records_levers_are_read_in_its_versions_spelling() {
+        let v1 = v1_record().replacen(
+            r#""record":"start","#,
+            r#""record":"start","levers":{"seam_audit":"on","tool_output_disposition":"keep+seam:keep"},"#,
+            1,
+        );
+        let read = parse(&v1).expect("a version 1 start with old lever names");
+        let Some(Event::Start {
+            levers: Some(levers),
+            ..
+        }) = read.events.first()
+        else {
+            panic!("a start with levers");
+        };
+        assert_eq!(
+            levers.get("meditation_audit").map(String::as_str),
+            Some("on")
+        );
+        assert_eq!(
+            levers.get("tool_output_disposition").map(String::as_str),
+            Some("keep+meditation:keep")
+        );
+        let written = render(&read);
+        assert!(written.contains(r#""seam_audit":"on""#), "{written}");
+        assert!(written.contains("keep+seam:keep"), "{written}");
+        let v2_old = v1.replacen(
+            r#""record":"start","#,
+            r#""record":"start","version":2,"#,
+            1,
+        );
+        let v2_old = v2_old.replace(r#""record":"seam""#, r#""record":"meditation""#);
+        assert!(
+            parse(&v2_old).is_err(),
+            "version 2 names no lever `seam_audit`"
+        );
+    }
+
     /// #583: a record whose start names no version is version 1 and spells
     /// the boundary `seam`; one spelling it `meditation` is refused, and one
     /// declaring version 2 spells it `meditation` and refuses `seam`.

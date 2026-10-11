@@ -84,6 +84,104 @@ fn positions(
     })
 }
 
+/// The levers whose names held the boundary's word, old and new (#737).
+const LEVER_NAMES: &[(&str, &str)] = &[
+    ("seam_trigger", "meditation_trigger"),
+    ("seam_audit", "meditation_audit"),
+    ("seam_warm", "meditation_warm"),
+];
+
+/// The lever words that held it: a lever's whole word, or a part of one.
+const LEVER_WORDS: &[(&str, &str, &str)] = &[
+    ("fork_delivery", "seam", "meditation"),
+    ("tool_output_disposition", "+seam:", "+meditation:"),
+];
+
+/// Whether `word`, the lever `lever`'s state, holds `part` as its spelling
+/// does: the whole word for `fork_delivery`, a part of it otherwise.
+fn holds(lever: &str, word: &str, part: &str) -> bool {
+    if lever == "fork_delivery" {
+        word == part
+    } else {
+        word.contains(part)
+    }
+}
+
+/// The `levers` of a start row or line, in the spelling `old` (true) or
+/// current (false), refusing the other one when `strict`: a lever map is
+/// read in its version's spelling like any other position (#737). `what`
+/// names the version for a refusal.
+fn levers_in(
+    levers: &mut BTreeMap<String, Value>,
+    from_old: bool,
+    strict: Option<&str>,
+) -> Result<(), String> {
+    for (old, new) in LEVER_NAMES {
+        let (from, to) = if from_old { (old, new) } else { (new, old) };
+        if let Some(what) = strict
+            && levers.contains_key(*to)
+        {
+            return Err(format!("its levers name `{to}`, which {what}"));
+        }
+        if let Some(value) = levers.remove(*from) {
+            levers.insert((*to).to_owned(), value);
+        }
+    }
+    for (lever, old, new) in LEVER_WORDS {
+        let (from, to) = if from_old { (old, new) } else { (new, old) };
+        if let Some(Value::String(word)) = levers.get_mut(*lever) {
+            if let Some(what) = strict
+                && holds(lever, word, to)
+            {
+                return Err(format!("its lever `{lever}` is `{word}`, which {what}"));
+            }
+            if holds(lever, word, from) {
+                *word = word.replace(from, to);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A start's `levers`, read from a version spelling the old way or not
+/// (#737): respelled to the current words when `old`, each refusing the
+/// other version's form.
+fn levers_to_current(
+    object: &mut BTreeMap<String, Value>,
+    old: bool,
+    version: &str,
+) -> Result<(), String> {
+    let Some(Value::Object(levers)) = object.get_mut("levers") else {
+        return Ok(());
+    };
+    if old {
+        levers_in(
+            levers,
+            true,
+            Some(&format!(
+                "is the later spelling: {version} says the earlier"
+            )),
+        )
+    } else {
+        // In the current spelling already: refuse an old form, change nothing.
+        let mut probe = levers.clone();
+        levers_in(
+            &mut probe,
+            false,
+            Some(&format!(
+                "is the earlier spelling: {version} says the later"
+            )),
+        )
+    }
+}
+
+/// A start's `levers`, written back in the old spelling (#737).
+fn levers_to_declared(object: &mut BTreeMap<String, Value>) {
+    if let Some(Value::Object(levers)) = object.get_mut("levers") {
+        let _ = levers_in(levers, false, None);
+    }
+}
+
 /// `object`, a line of a log declaring `declared`, in the current spelling.
 ///
 /// # Errors
@@ -92,6 +190,13 @@ fn positions(
 /// earlier, v7's in one declaring v8 or later.
 pub fn to_current(object: &mut BTreeMap<String, Value>, declared: i64) -> Result<(), String> {
     let kind = current_kind(object).map(str::to_owned);
+    if kind.as_deref() == Some("session.start") {
+        levers_to_current(
+            object,
+            declared < RESPELLED_IN,
+            &format!("a v{declared} log"),
+        )?;
+    }
     for (on, old, new) in LOG_KEYS {
         if kind.as_deref() != Some(*on) {
             continue;
@@ -161,6 +266,9 @@ pub fn to_current_either(object: &mut BTreeMap<String, Value>) {
 pub fn to_declared(object: &mut BTreeMap<String, Value>, declared: i64) {
     if declared >= RESPELLED_IN {
         return;
+    }
+    if current_kind(object) == Some("session.start") {
+        levers_to_declared(object);
     }
     let kind = current_kind(object).map(str::to_owned);
     for (on, old, new) in LOG_KEYS {
@@ -239,6 +347,13 @@ fn record_positions(
 ///
 /// A word in the other version's spelling.
 pub fn record_to_current(row: &mut BTreeMap<String, Value>, declared: i64) -> Result<(), String> {
+    if matches!(row.get("record"), Some(Value::String(kind)) if kind == "start") {
+        levers_to_current(
+            row,
+            declared < RECORD_RESPELLED_IN,
+            &format!("a version {declared} record"),
+        )?;
+    }
     let mut respelled = Vec::new();
     for (key, word, old, new) in record_positions(row) {
         if declared < RECORD_RESPELLED_IN {
@@ -267,6 +382,9 @@ pub fn record_to_current(row: &mut BTreeMap<String, Value>, declared: i64) -> Re
 pub fn record_to_declared(row: &mut BTreeMap<String, Value>, declared: i64) {
     if declared >= RECORD_RESPELLED_IN {
         return;
+    }
+    if matches!(row.get("record"), Some(Value::String(kind)) if kind == "start") {
+        levers_to_declared(row);
     }
     let back: Vec<(&str, &str)> = record_positions(row)
         .filter(|(_, word, _, new)| word == new)
