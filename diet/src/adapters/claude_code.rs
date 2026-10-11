@@ -493,16 +493,12 @@ fn spawning_call(spawns: &[Spawn], side: &Sidechain) -> Option<usize> {
     let candidates: Vec<usize> = (0..spawns.len()).filter(|at| names(&spawns[*at])).collect();
     started
         .and_then(|started| {
-            candidates
-                .iter()
-                .copied()
-                .filter(|at| {
-                    spawns[*at]
-                        .called
-                        .as_ref()
-                        .is_some_and(|called| *called <= started)
-                })
-                .last()
+            candidates.iter().copied().rev().find(|at| {
+                spawns[*at]
+                    .called
+                    .as_ref()
+                    .is_some_and(|called| *called <= started)
+            })
         })
         .or_else(|| candidates.first().copied())
 }
