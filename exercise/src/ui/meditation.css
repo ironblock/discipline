@@ -90,3 +90,37 @@
 .ex-meditation__zero {
   color: var(--warn);
 }
+
+/* A meditation's reconcile, the interstitial (#150, DoD 4): before, the operator's changes, the answer, after -- one row. */
+.ex-meditation:has(.ex-meditation__reconcile) {
+  flex-wrap: wrap;
+}
+
+.ex-meditation__reconcile {
+  flex: 1 0 100%;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.5rem 1rem;
+  color: var(--ink);
+}
+
+.ex-meditation__part ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font: var(--size-tool) / 1.4 var(--font-memory);
+  overflow-wrap: anywhere;
+}
+
+.ex-meditation__part pre {
+  margin: 0;
+  font: var(--size-tool) / 1.4 var(--font-tool);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ex-meditation__part-label,
+.ex-meditation__part-none {
+  display: block;
+  color: var(--ink-muted);
+}
