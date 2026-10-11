@@ -73,6 +73,18 @@ Every row's evidence is approved (the maintainer, 2026-10-10: "approve all, proc
 
 **Corrected 2026-10-11.** An adversarial review of the evidence found three rows that did not show what they said: fork asks, interview routing and cadence, and the reconcile gate. Each was reworded to what its log shows (the maintainer approved the rewording, 2026-10-11), and all three were then shown by [`levers-run-c`](../runs/2026-10-11-levers-run-c-agent-driven), driven after the tag on #744's and #748's fixes (the maintainer approved the evidence, 2026-10-11). Pruning, cache lifetime and subagent remain not shown, as deferred.
 
+**v0.2.1** (2026-10-11): the fixes from an adversarial review of the work merged since 2026-10-08:
+- the review's ten issues, #728 to #737;
+- #748, the maintainer's ruling that an operator's change is addressed only when the model acted on it;
+- #749, the surface's follow-up to #748;
+- the evidence above, corrected and re-shown (#747, #750, #755).
+
+It also carries what merged after v0.2.0's tag:
+- BEGIN on today's floor, with the product on (#720, #722, #723);
+- serve serving the page on its own origin (#716);
+- sidechains as lanes in the Claude Code adapter (#708);
+- a capture row's count (#443).
+
 ## v0.3.0 — the hosted API live
 
 The hosted API kind driven live (#555, #556): the first paid calls, the cache lifetime lever, and the per-fork cache-read share, on Haiku 5.5 (the nearest to the 27B floor) and Sonnet 5.5 (the maintainer, 2026-10-10). Every live call needs the maintainer's approval.
