@@ -110,7 +110,8 @@ export class HttpTransport implements DriveTransport {
   #epoch = 0;
 
   constructor(base = '', web: Web = { EventSource: globalThis.EventSource, fetch: globalThis.fetch.bind(globalThis) }) {
-    this.#base = base.replace(/\/$/, '');
+    // Routes join under a named drive's base, or stay relative to the page when none is named (#716): never root-absolute.
+    this.#base = base === '' || base.endsWith('/') ? base : `${base}/`;
     this.#web = web;
   }
 
@@ -126,7 +127,7 @@ export class HttpTransport implements DriveTransport {
     if (!/^[0-9a-f]{64}$/.test(sha256)) return { kind: 'not-found' };
     let reply: Response;
     try {
-      reply = await this.#web.fetch(`${this.#base}/files/${sha256}`);
+      reply = await this.#web.fetch(`${this.#base}files/${sha256}`);
     } catch {
       return { kind: 'unreachable', why: whyClosed(undefined) };
     }
@@ -139,7 +140,7 @@ export class HttpTransport implements DriveTransport {
   async upload(bytes: Uint8Array): Promise<Uploaded> {
     let reply: Response;
     try {
-      reply = await this.#web.fetch(`${this.#base}/files`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: bytes as Uint8Array<ArrayBuffer> });
+      reply = await this.#web.fetch(`${this.#base}files`, { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: bytes as Uint8Array<ArrayBuffer> });
     } catch {
       return { ok: false, refused: 'unreachable' };
     }
@@ -171,7 +172,7 @@ export class HttpTransport implements DriveTransport {
    */
   async dispatch(command: Command, extras?: { readonly idle_gap?: IdleGapBody }): Promise<Ack> {
     if (command.kind === 'approve') {
-      const { ack } = await this.#post({ call: command.call, scope: command.scope }, '/approve');
+      const { ack } = await this.#post({ call: command.call, scope: command.scope }, 'approve');
       if (ack.ok && this.#prompt?.id === command.call) this.#setPrompt(undefined);
       return ack;
     }
@@ -184,7 +185,7 @@ export class HttpTransport implements DriveTransport {
   }
 
   /** One post, and what it came to: its status (0 when nothing answered), and the ack. */
-  async #post(body: Readonly<Record<string, unknown>>, route = '/commands'): Promise<{ readonly status: number; readonly ack: Ack; readonly unattachable?: true }> {
+  async #post(body: Readonly<Record<string, unknown>>, route = 'commands'): Promise<{ readonly status: number; readonly ack: Ack; readonly unattachable?: true }> {
     let reply: Response;
     try {
       reply = await this.#web.fetch(`${this.#base}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
@@ -247,7 +248,7 @@ export class HttpTransport implements DriveTransport {
   }
 
   #connect(): void {
-    const source = new this.#web.EventSource(`${this.#base}/events?from=${this.#log.length}`);
+    const source = new this.#web.EventSource(`${this.#base}events?from=${this.#log.length}`);
     this.#source = source;
     source.onopen = () => this.#setLink('live');
     // A source this transport has let go of -- closed, or replaced while a probe was out -- is not heard.
@@ -342,7 +343,7 @@ export class HttpTransport implements DriveTransport {
     let status: number | undefined;
     const abort = new AbortController();
     try {
-      const reply = await this.#web.fetch(`${this.#base}/events?from=${this.#log.length}`, {
+      const reply = await this.#web.fetch(`${this.#base}events?from=${this.#log.length}`, {
         headers: this.#lastId ? { 'Last-Event-ID': this.#lastId } : {},
         signal: abort.signal,
       });

@@ -120,7 +120,7 @@ function posting(log: string): Web {
   return {
     ...serving(log),
     fetch: async (url, init) => {
-      if (String(url).endsWith('/commands') && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
+      if (/(^|\/)commands$/.test(String(url)) && typeof init?.body === 'string') posted.push(JSON.parse(init.body));
       return new Response('{}', { status: 200 });
     },
   };

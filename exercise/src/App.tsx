@@ -33,18 +33,21 @@ export function App({
   speed = 1,
   recording,
   drive = false,
+  base = '',
   web,
   script = SPECIMEN,
 }: {
   readonly speed?: number;
   readonly recording?: SessionName;
   readonly drive?: boolean;
+  /** Where the drive's routes join (#716): '' for relative to the page, or a named drive's base URL (`drive/base.ts`). */
+  readonly base?: string;
   readonly web?: Web;
   readonly script?: readonly Beat[];
 }) {
   const transport = useMemo(
-    () => (drive ? new HttpTransport('', web) : recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(script, { speed })),
-    [speed, recording, drive, web, script],
+    () => (drive ? new HttpTransport(base, web) : recording ? new ReplayTransport(SESSIONS[recording], { speed }) : new CannedTransport(script, { speed })),
+    [speed, recording, drive, base, web, script],
   );
   useEffect(() => () => transport.close(), [transport]);
   const session = useSession(transport);
