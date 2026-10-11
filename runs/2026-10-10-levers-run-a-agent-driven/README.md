@@ -14,7 +14,7 @@
 
 ## Setup
 
-- **Build:** develop `22da91a43e4a1fe8bd4bf55ebf2fcb2b9dd7a2a6`.
+- **Build:** develop `22da91a493ff56c751896bd7d3eefa4351c91c47`.
 - **Floor:** `accel24-tabbyapi-exl3-qwen38-27b-3p00`, config r2. Serve declared the engine and reported it warmed. Its registry entry's `serving_context` is 163,840 tokens.
 - **Regimen:** `regimen.toml` here. It is seam smoke run 2's, plus:
   - `seam_at_context_fraction = 0.12`, a budget seam at about 19,661 tokens;
@@ -75,18 +75,18 @@ All eight turns settled `final`.
 - the pre-warm on both seams;
 - literal recall (4 times);
 - the self-capture reminder;
-- the self-recorded skip (turn 7).
+- the self-recorded skip (turn 6).
 
 ## What broke
 
 1. **The AGENTS.md sign-off leaks into fork answers, and the v4 grammar records it as an entry.**
    - Turn 2's fork answer ended with the sign-off. The grammar added `interview-t2-2` as "supersede: NONE … -- checked against AGENTS.md".
-   - Turn 8's added `interview-t7-2-2` the same way.
+   - Turn 7's added `interview-t7-2-2` the same way.
    - An instruction meant for the operator-facing answer applies to the fork too, and the grammar reads what follows its last field as entries.
 2. **The tail kept nothing at the budget seam.** Seam 2804 says `tail_tokens: 2000` but `carried_turns: 0`. The newest whole turn (the `seq 1 6000` one) was larger than 2,000 tokens, and the tail keeps whole turns only. It worked at seam 4039, after a small turn.
 3. **The render stayed over its budget after reducing:** 131 and 137 tokens against 120, after one and two reductions.
 4. **The v4 SUPERSEDE grammar split one multi-line supersede into three entries** (`interview-t7-2`, `-2-1`, `-2-2`), as in seam smoke run 1.
-5. **Advisory delivery needs a fork that runs.** With the self-recorded skip on, the first scope change (turn 7) skipped its fork. The operator had to ask the model not to record anything itself before a fork ran and superseded.
+5. **Advisory delivery needs a fork that runs.** With the self-recorded skip on, the first scope change (turn 6) skipped its fork. The operator had to ask the model not to record anything itself before a fork ran and superseded.
 
 **Counts:** 8 asks, 42 requests, 45 tool calls, 3 forks (2 interview, 1 audit), 1 fork skipped, 14 patches, 7 captures (3 recorded, 3 judged, 1 refused), 1 reminder, 4 recalls, 2 seams, 2 deliveries.
 
