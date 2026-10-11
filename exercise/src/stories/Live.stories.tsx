@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, userEvent, waitFor } from 'storybook/test';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
 
 import capped from '../../../diet/drive/fixtures/a-capped-turn.jsonl?raw';
 import toolCallFailed from '../../../diet/formats/log/fixtures/valid/a-v3-tool-call-failed-under-policy.jsonl?raw';
@@ -925,6 +925,52 @@ export const ServedNamedDrive: Story = {
   },
 };
 
+/** `?drive` (#759): an operator by keyboard or an agent -- each action named with its target, Return submits, the edit
+ * field opens on the entry's text, all of it selected, so typing replaces it. */
+export const ServedOperableByName: Story = {
+  name: '?drive: memory actions are named with their entry, and Return submits them',
+  args: { drive: true, web: posting(operatorEdits) },
+  play: async ({ canvasElement }) => {
+    const page = within(canvasElement);
+    const entry = await waitFor(async () => {
+      const found = canvasElement.querySelector<HTMLElement>('.ex-memory__entry[data-state="live"]');
+      await expect(found).not.toBeNull();
+      return found!;
+    });
+    const id = entry.id.replace('memory/', '');
+    // One query, one control, however long the list.
+    await userEvent.click(page.getByRole('button', { name: `Edit ${id}` }));
+    const field = page.getByRole('textbox', { name: `Edit ${id}` }) as HTMLInputElement;
+    await expect(field.tagName).toBe('INPUT');
+    await expect(document.activeElement).toBe(field);
+    await expect([field.selectionStart, field.selectionEnd]).toEqual([0, field.value.length]);
+    await userEvent.keyboard('a tracker for two teams');
+    posted.length = 0;
+    await userEvent.keyboard('{Enter}');
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'edit-entry', id, content: 'a tracker for two teams' }]));
+    await userEvent.click(page.getByRole('button', { name: `Flag ${id}` }));
+    await userEvent.type(page.getByRole('textbox', { name: `Flag ${id}` }), 'check with the team');
+    posted.length = 0;
+    await userEvent.keyboard('{Enter}');
+    await waitFor(async () => expect(posted).toEqual([{ kind: 'flag-entry', id, note: 'check with the team' }]));
+  },
+};
+
+/** `?drive` (#759): Return sends the ask, Shift+Return breaks the line. */
+export const ServedReturnSends: Story = {
+  name: '?drive: Return sends the ask, Shift+Return breaks the line',
+  args: { drive: true, web: posting(operatorEdits) },
+  play: async ({ canvasElement }) => {
+    const input = await within(canvasElement).findByRole('textbox', { name: 'your ask' });
+    await userEvent.click(input);
+    await userEvent.keyboard('first line{Shift>}{Enter}{/Shift}second line');
+    await expect((input as HTMLTextAreaElement).value).toBe('first line\nsecond line');
+    posted.length = 0;
+    await userEvent.keyboard('{Enter}');
+    await waitFor(async () => expect(posted).toMatchObject([{ kind: 'ask', text: 'first line\nsecond line' }]));
+  },
+};
+
 /** `?drive` (#150): a live entry's edit and flag actions post the operator's commands. */
 export const ServedEditAndFlag: Story = {
   name: '?drive: edit and flag a working-memory entry',
@@ -937,14 +983,14 @@ export const ServedEditAndFlag: Story = {
     });
     const id = entry.id.replace('memory/', '');
     await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="edit"]')!);
-    const field = entry.querySelector<HTMLTextAreaElement>('textarea[aria-label^="edit"]')!;
+    const field = entry.querySelector<HTMLInputElement>('input[aria-label^="Edit"]')!;
     await userEvent.clear(field);
     await userEvent.type(field, 'a tracker for two teams');
     posted.length = 0;
     await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="save"]')!);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'edit-entry', id, content: 'a tracker for two teams' }]));
     await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="flag"]')!);
-    await userEvent.type(entry.querySelector<HTMLInputElement>('input[aria-label^="flag"]')!, 'check with the team');
+    await userEvent.type(entry.querySelector<HTMLInputElement>('input[aria-label^="Flag"]')!, 'check with the team');
     posted.length = 0;
     await userEvent.click(entry.querySelector<HTMLButtonElement>('button[data-action="send-flag"]')!);
     await waitFor(async () => expect(posted).toEqual([{ kind: 'flag-entry', id, note: 'check with the team' }]));
