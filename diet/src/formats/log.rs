@@ -1639,8 +1639,11 @@ pub enum Event {
         /// `REMOVE` (a dup among them), never its `KEEP`; an edited note by
         /// its `KEEP`, since an `UPDATE` or `REMOVE` over it is refused. On
         /// the tools route a flagged note is addressed when an audit patch
-        /// supersedes, retires or resolves it; an edited note unless a patch
-        /// over it was refused. An unparseable answer addresses nothing.
+        /// supersedes, retires, resolves or parks it; an edited note unless a
+        /// patch over it was refused. An unparseable answer addresses nothing.
+        /// A note the operator both edited and flagged is never addressed by
+        /// the model, by design: only the operator acts on the operator's
+        /// text, so under `refuse` it holds until the operator refills anyway.
         unaddressed: Option<Vec<String>>,
         /// The newest turn's estimated tokens, when a tail was asked for
         /// (`tail_tokens` above 0) and kept no turn (v7, #693): what did not

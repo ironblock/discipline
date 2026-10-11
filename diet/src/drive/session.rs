@@ -6986,26 +6986,12 @@ fn audited<S: Streaming>(shared: &Shared<S>, fired: AuditFired) {
 
 /// The marked entries an audit acted on (#748, log v8), added to the ones
 /// this meditation addressed: a flag is addressed when one of the audit's
-/// patches `lines` superseded, retired or resolved its entry -- on the
+/// patches `lines` superseded, retired, resolved or parked its entry -- on the
 /// lines route an `UPDATE` or a `REMOVE`, never a `KEEP` -- and an edit
 /// unless a patch over it was refused -- on the lines route its `KEEP`.
 /// An entry is addressed when each of its changes is.
 fn acted_on(state: &mut State, marked: &[String], lines: &[Event]) {
-    let settled = |entry: &str| {
-        lines.iter().any(|line| match line {
-            Event::Patched {
-                op: log::PatchOp::Supersede,
-                supersedes: Some(voids),
-                ..
-            } => voids == entry,
-            Event::Patched {
-                op: log::PatchOp::Retire | log::PatchOp::Resolve,
-                entry: patched,
-                ..
-            } => patched.id == entry,
-            _ => false,
-        })
-    };
+    let settled = |entry: &str| settles(lines, entry);
     let refused = |entry: &str| {
         lines
             .iter()
@@ -7027,6 +7013,24 @@ fn acted_on(state: &mut State, marked: &[String], lines: &[Event]) {
             state.operator_addressed.push(entry.clone());
         }
     }
+}
+
+/// Whether one of `lines` took `entry` out of live memory (#748): a patch
+/// that superseded, retired, resolved or parked it.
+fn settles(lines: &[Event], entry: &str) -> bool {
+    lines.iter().any(|line| match line {
+        Event::Patched {
+            op: log::PatchOp::Supersede,
+            supersedes: Some(voids),
+            ..
+        } => voids == entry,
+        Event::Patched {
+            op: log::PatchOp::Retire | log::PatchOp::Resolve | log::PatchOp::Park,
+            entry: patched,
+            ..
+        } => patched.id == entry,
+        _ => false,
+    })
 }
 
 /// An audit's answer `text`, folded (#504): its lines, which must number
@@ -14742,6 +14746,34 @@ pub(in crate::drive) mod tests {
                 &serde_json::json!({ "entry": entry, "verdict": "done" }).to_string(),
             ),
         ]
+    }
+
+    /// #748, Dispatch's ruling: a park takes the entry out of live memory
+    /// as a retire does, so it settles a flag; an add names no entry and
+    /// does not.
+    #[test]
+    fn v8_a_park_settles_a_flag_as_a_retire_does() {
+        let line = |op, id: &str| Event::Patched {
+            fork: Some(1),
+            lane: None,
+            op,
+            entry: log::PatchEntry {
+                id: id.to_owned(),
+                text: "a note".to_owned(),
+                category: None,
+            },
+            supersedes: None,
+            tangent: None,
+        };
+        for op in [
+            log::PatchOp::Park,
+            log::PatchOp::Retire,
+            log::PatchOp::Resolve,
+        ] {
+            assert!(settles(&[line(op, "e-1")], "e-1"), "{op:?}");
+            assert!(!settles(&[line(op, "e-2")], "e-1"), "{op:?}");
+        }
+        assert!(!settles(&[line(log::PatchOp::Add, "e-1")], "e-1"));
     }
 
     const CARRY: crate::meditation::policy::ReconcileGate =
