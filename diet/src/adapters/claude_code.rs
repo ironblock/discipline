@@ -399,11 +399,7 @@ impl ClaudeCode {
         let spawns = std::mem::take(&mut run.spawns);
         let mut joined = vec![false; spawns.len()];
         for side in &found.sidechains {
-            let spawned = spawns.iter().position(|spawn| match &side.run_id {
-                Some(run_id) => spawn.run_id.as_ref() == Some(run_id),
-                None => spawn.agent_id.as_ref() == Some(&side.agent_id),
-            });
-            let Some(at) = spawned else {
+            let Some(at) = spawning_call(&spawns, side) else {
                 run.census.sidechains_add("transcripts naming no call", 1);
                 continue;
             };
@@ -446,6 +442,41 @@ struct Spawn {
     agent_id: Option<String>,
     /// The workflow run its result names, for a `Workflow` call.
     run_id: Option<String>,
+    /// When the call was made, as its row's timestamp (#736).
+    called: Option<String>,
+}
+
+/// The call `side` joins (#736): of the calls naming its run (or agent),
+/// the latest made at or before the sidechain's first row -- a resumed run
+/// reuses its `runId`, and the resume's agents start after the resume --
+/// else the first.
+fn spawning_call(spawns: &[Spawn], side: &Sidechain) -> Option<usize> {
+    let names = |spawn: &Spawn| match &side.run_id {
+        Some(run_id) => spawn.run_id.as_ref() == Some(run_id),
+        None => spawn.agent_id.as_ref() == Some(&side.agent_id),
+    };
+    let started = side.text.lines().find_map(|line| {
+        serde_json::from_str::<serde_json::Value>(line)
+            .ok()?
+            .get("timestamp")?
+            .as_str()
+            .map(str::to_owned)
+    });
+    let candidates: Vec<usize> = (0..spawns.len()).filter(|at| names(&spawns[*at])).collect();
+    started
+        .and_then(|started| {
+            candidates
+                .iter()
+                .copied()
+                .filter(|at| {
+                    spawns[*at]
+                        .called
+                        .as_ref()
+                        .is_some_and(|called| *called <= started)
+                })
+                .last()
+        })
+        .or_else(|| candidates.first().copied())
 }
 
 /// The side lane a walk is reading (#708): its name, and how many asks it
@@ -599,6 +630,8 @@ struct Run {
     compacted: (u32, u32),
     /// The delegated runs the main log's calls spawned (#708).
     spawns: Vec<Spawn>,
+    /// Each call's id -> the timestamp of the row that made it (#736).
+    called_at: BTreeMap<String, String>,
     /// The side lane this walk reads, when it reads a sidechain (#708).
     side: Option<Side>,
 }
@@ -616,6 +649,7 @@ impl Run {
             awaiting: BTreeMap::new(),
             compacted: (0, 0),
             spawns: Vec::new(),
+            called_at: BTreeMap::new(),
             side: None,
         }
     }
@@ -660,7 +694,10 @@ impl Run {
         else {
             return;
         };
-        let Some(Event::ToolCall { tool, at_turn, .. }) = self.events.get(*at) else {
+        let Some(Event::ToolCall {
+            id, tool, at_turn, ..
+        }) = self.events.get(*at)
+        else {
             return;
         };
         if !SPAWNING.contains(&tool.as_str()) {
@@ -671,10 +708,12 @@ impl Run {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_owned)
         };
+        let called = self.called_at.get(id).cloned();
         self.spawns.push(Spawn {
             turn: *at_turn,
             agent_id: named("agentId"),
             run_id: named("runId"),
+            called,
         });
     }
 
@@ -997,7 +1036,17 @@ impl Run {
                     };
                     spoke.push_str(text);
                 }
-                Some(Block::ToolUse) => self.tool_use(at_row, block)?,
+                Some(Block::ToolUse) => {
+                    // When it was called, for a delegated run's agents to
+                    // join the call that started them (#736).
+                    if let (Some(id), Some(at)) = (
+                        block.get("id").and_then(serde_json::Value::as_str),
+                        row.get("timestamp").and_then(serde_json::Value::as_str),
+                    ) {
+                        self.called_at.insert(id.to_owned(), at.to_owned());
+                    }
+                    self.tool_use(at_row, block)?;
+                }
                 // An answer in the row that asks. The mapping joins answers
                 // from `user` rows, so this is content with no home.
                 Some(known @ Block::ToolResult) => {
@@ -1497,7 +1546,8 @@ mod tests {
     const A_SUBSTRATE: &str = "claude-code";
 
     use super::{
-        Block, ClaudeCode, Found, MAPS, PREFILL_ASSUMED, Row, native_tool, sidechains_beside,
+        Block, ClaudeCode, Found, MAPS, PREFILL_ASSUMED, Row, Sidechain, native_tool,
+        sidechains_beside,
     };
     use crate::adapters::{Adapter, Drift};
     use crate::formats::record::{CompactionSource, Event};
@@ -2785,6 +2835,63 @@ mod tests {
             .count();
         assert_eq!(asks, 1, "the meta row is no second ask");
         assert_eq!(adapted.census.sidechains.get("turns"), Some(&2));
+    }
+
+    /// #736: a resumed workflow run reuses its `runId`: each of its agents
+    /// joins the latest call naming that run made at or before the agent's
+    /// first row -- the resume's agents fork at the resume's turn -- and the
+    /// resume is a call with a transcript.
+    #[test]
+    fn a_resumed_workflow_runs_agents_join_the_call_that_resumed_it() {
+        let (log, mut found) = delegated();
+        let resume = [
+            r#"{"type":"user","message":{"role":"user","content":"resume the lexing"},"uuid":"u5","parentUuid":"a4","sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:10:00Z"}"#,
+            r#"{"type":"assistant","message":{"model":"model-one","role":"assistant","content":[{"type":"tool_use","id":"call-r","name":"Workflow","input":{"resumeFromRunId":"wf_1"}}],"usage":{"input_tokens":5,"cache_creation_input_tokens":0,"cache_read_input_tokens":3000,"output_tokens":20}},"uuid":"a5","parentUuid":"u5","sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:10:01Z"}"#,
+            r#"{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-r","content":"resumed"}]},"toolUseResult":{"runId":"wf_1","status":"completed"},"uuid":"u6","parentUuid":"a5","sessionId":"s","version":"2.0.0","timestamp":"2026-01-01T00:12:00Z"}"#,
+        ];
+        let log = format!("{log}{}\n", resume.join("\n"));
+        let later = found
+            .sidechains
+            .iter()
+            .find(|side| side.agent_id == "y1")
+            .expect("the run's first agent")
+            .text
+            .replace("y1", "y2")
+            .replace("2026-01-01T00:00:00Z", "2026-01-01T00:11:00Z");
+        found.sidechains.push(Sidechain {
+            agent_id: "y2".to_owned(),
+            run_id: Some("wf_1".to_owned()),
+            agent_type: None,
+            text: later,
+        });
+        let adapted = ClaudeCode
+            .adapt_with(&log, &found, A_SUBSTRATE)
+            .expect("it adapts");
+        let forks: Vec<(String, u32)> = adapted
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                Event::Fork { lane, of_turn, .. } if lane.starts_with("sidechain/wf_1/") => {
+                    Some((lane.clone(), *of_turn))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            forks,
+            [
+                ("sidechain/wf_1/y1".to_owned(), 1),
+                ("sidechain/wf_1/y2".to_owned(), 2)
+            ]
+        );
+        assert_eq!(
+            adapted
+                .census
+                .sidechains
+                .get("spawning calls with no transcript"),
+            Some(&1),
+            "the failed call only; the resume has its agent"
+        );
     }
 
     /// #500: a repeat whose content differs from the row it repeats is
