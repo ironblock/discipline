@@ -1031,7 +1031,10 @@ fn a_drive_server_confirms_a_declared_engines_model_settings_and_draft() {
 
 /// #718: BEGIN's start, as shipped -- `diet/drive/floor.toml` against a
 /// server answering as the floor does (config r2's captured `/v1/model`, and
-/// a warm reply) -- starts with no refusal, naming today's floor.
+/// a warm reply), with BEGIN's empty worktree and auth file -- starts with no
+/// refusal, naming today's floor; and (#721) with the product on: the model's
+/// commands under the sandbox with approvals off, the gated fork on a read
+/// or a scoping ask in ask set t2 through the record tools, self-capture on.
 #[test]
 fn begins_floor_regimen_starts_against_the_floors_tabbyapi() {
     let floor = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("drive/floor.toml");
@@ -1039,7 +1042,22 @@ fn begins_floor_regimen_starts_against_the_floors_tabbyapi() {
     let stub = Stub::serving(vec![tabby_model_card(163_840), warm()]).expect("loopback");
     let log_file = file_holding("log", "");
     let logged = log_file.0.to_string_lossy().into_owned();
-    let served = start(&stub.url(), &["--regimen", &path, "--log", &logged]);
+    let tree = Dir::new("begin-worktree");
+    let auth = file_holding("auth", "driver:s3cret\n");
+    let auth_path = auth.0.to_string_lossy().into_owned();
+    let served = start(
+        &stub.url(),
+        &[
+            "--regimen",
+            &path,
+            "--log",
+            &logged,
+            "--worktree",
+            &tree.path(),
+            "--auth-file",
+            &auth_path,
+        ],
+    );
     assert_eq!(
         served.substrate.as_deref(),
         Some("accel24-tabbyapi-exl3-qwen38-27b-3p00")
@@ -1047,6 +1065,28 @@ fn begins_floor_regimen_starts_against_the_floors_tabbyapi() {
     assert_eq!(
         served.engine_identity.as_deref(),
         Some("declared (the engine not asked)")
+    );
+    let levers = &first_logged_line(&log_file.0)["levers"];
+    for (lever, word) in [
+        ("isolation", "sandbox"),
+        ("approval", "none"),
+        ("tool_surface", "bash"),
+        ("fork_warrant", "one-per-gap-gated:read+scoping"),
+        ("capture_modality", "tools"),
+    ] {
+        assert_eq!(levers[lever], word, "{lever}: {levers}");
+    }
+    assert!(
+        levers["fork_asks"]
+            .as_str()
+            .is_some_and(|set| set.starts_with("t2:")),
+        "{levers}"
+    );
+    assert!(
+        levers["self_capture"]
+            .as_str()
+            .is_some_and(|state| state.starts_with("on:")),
+        "{levers}"
     );
 }
 

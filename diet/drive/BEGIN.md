@@ -36,8 +36,15 @@ Only the surface's own tests (`npx --yes pnpm@11.20.0 -C exercise verify`) also 
 
 - **The endpoint:** the model server's URL. A base URL (no path, or `/v1`) is completed to `/v1/chat/completions`. It goes on the command line, never in a file.
 - **The key**, when the model server asks for one: a file holding it, named with `--key-file`. It is sent as a bearer credential, never taken as an argument, and never written to the log or the record.
+- **The worktree:** an empty directory, named absolutely with `--worktree`, where the model's commands run and write. It is the code the model works on, so it lives on the harness host (**Three roles**), outside this checkout.
+- **The auth file:** a file holding `user:password`, named with `--auth-file`. A regimen that runs commands makes `serve` ask every request for it, and the surface presents it for the page. Keep it outside the checkout, where no commit can take it and the model's sandbox never reads it (it joins the session's secrets).
 - **The head:** the trunk's system message, a file you name with `--head`. [`heads/floor.md`](heads/floor.md) is a worked example: the head the 2026-10-03 rehearsal ran with. Edit it, or bring your own. The log carries the head the session ran with, and each request's `head_sha256`, so a recording cites whatever ran.
-- **The regimen:** [`floor.toml`](floor.toml) binds the session to the maintainer's floor, the 3.8 line's config r2 (#497): substrate `accel24-tabbyapi-exl3-qwen38-27b-3p00`, Qwen3.8 27B as EXL3 on TabbyAPI. Its reasoning is `xhigh` and its sampler the registry's card for the line. Every other lever is at its default.
+- **The regimen:** [`floor.toml`](floor.toml) binds the session to the maintainer's floor, the 3.8 line's config r2 (#497): substrate `accel24-tabbyapi-exl3-qwen38-27b-3p00`, Qwen3.8 27B as EXL3 on TabbyAPI. Its reasoning is `xhigh` and its sampler the registry's card for the line. It turns the product on, so a first drive shows a tool call, a fork and a meditation (#721):
+    - **the model's commands:** `bash`, run in your worktree under the OS's sandbox (Seatbelt on macOS), with approvals off as T1 runs them;
+    - **interview forks:** one per gap, on a read or a scoping-marked ask, answering through the record tools in ask set `t2`;
+    - **self-capture:** the model records what it learns as it goes.
+
+    Every other lever is at its default.
   - **What `serve` confirms at start** is what the substrate's registry entry declares, and what the server reports of it (#509):
     - TabbyAPI reports no build, so the floor's engine is declared by its entry, not asked.
     - `serve` reads `GET /v1/model` and refuses to start if the server reports a model, context, cache, batch, chunk, vision setting or chat-template digest other than the entry declares.
@@ -49,10 +56,12 @@ Only the surface's own tests (`npx --yes pnpm@11.20.0 -C exercise verify`) also 
 
 ## 1. Start `serve`
 
-Name the endpoint for this shell, the model server's URL (**What you bring**):
+Name the endpoint for this shell, the model server's URL (**What you bring**). Make the worktree, empty, and the auth file, both outside the checkout; here, under your home directory:
 
 ```
 export DIET_ENDPOINT=<the model server's URL>
+mkdir -p ~/drives/first && test -z "$(ls -A ~/drives/first)"
+mkdir -p ~/.config/discipline && (umask 077 && printf 'driver:%s\n' "$(openssl rand -hex 16)" > ~/.config/discipline/drive.auth)
 ```
 
 From the repository root:
@@ -62,6 +71,7 @@ cargo build -p discipline-diet --bin diet-drive
 target/debug/diet-drive serve --endpoint "$DIET_ENDPOINT" --key-file <a file holding the key> \
     --model Qwen3.8-27B-exl3-3.00bpw-img1024 \
     --head diet/drive/heads/floor.md --regimen diet/drive/floor.toml \
+    --worktree ~/drives/first --auth-file ~/.config/discipline/drive.auth \
     --port 7801 --allow-origin http://localhost:5173 \
     --log session.log --record session.record.jsonl
 ```
@@ -102,20 +112,20 @@ From the repository root, once per checkout, install the surface's dependencies,
 ```
 npx --yes pnpm@11.20.0 -C exercise install
 npx --yes pnpm@11.20.0 -C exercise gate
-DIET_DRIVE=http://127.0.0.1:7801 npx --yes pnpm@11.20.0 -C exercise dev
+DIET_DRIVE=http://127.0.0.1:7801 DIET_DRIVE_AUTH_FILE=~/.config/discipline/drive.auth npx --yes pnpm@11.20.0 -C exercise dev
 ```
 
 `gate` builds `diet`'s shell gate to wasm (`exercise/src/gate/wasm/`), which every page imports; it needs the wasm32 target and the pinned `wasm-bindgen` CLI (**What you need**). Run it once per checkout, and again after `diet/wasm` changes. Without it the page shows Vite's error that `./wasm/diet_wasm.js` cannot be resolved.
 
 Open `http://localhost:5173/?drive` in the browser. From another machine, open it through the tunnel (**Three roles**). The surface's dev server proxies `/events`, `/commands`, `/approve` and `/files` to `serve` (`exercise/vite.config.ts`), so the browser reaches `serve` only through the surface, and both stay on loopback.
 
-**A regimen that runs the model's commands** makes `serve` require `--auth-file FILE` (`user:password`). The page cannot answer that credential itself, so name the same file to the surface and its proxy presents it:
+**The auth file goes to the surface too.** `floor.toml` runs the model's commands, so `serve` requires `--auth-file` (`user:password`) on every request. The page cannot answer that credential itself, so `DIET_DRIVE_AUTH_FILE` names the same file to the surface, and its proxy presents it. Without it the page says the drive asks for credentials (401).
 
-```
-DIET_DRIVE=http://127.0.0.1:7801 DIET_DRIVE_AUTH_FILE=<the file given to --auth-file> npx --yes pnpm@11.20.0 -C exercise dev
-```
+**A first drive** shows the product end to end:
 
-Without it the page says the drive asks for credentials (401).
+- **A tool call:** ask the model to list the files in its directory. Its `bash` call runs in the worktree under the sandbox, and the answer comes back.
+- **An interview fork:** mark an ask as scoping in the page, or have the model read a file. When the turn settles, one fork asks it what it decided, and the patch it records lands in working memory.
+- **A meditation:** declare one from the page, or post `{"kind":"declare-meditation"}` to `/commands`. Working memory replaces the conversation, and the next ask runs on the refill.
 
 ## Ending
 
